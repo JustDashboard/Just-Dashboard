@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
-import type { EgressView } from "@/lib/network-egress"
+import type { EgressView } from "@/lib/network/egress"
 import type { NetworkLink } from "@/lib/types"
 
 /**

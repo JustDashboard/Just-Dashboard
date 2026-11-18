@@ -32,7 +32,8 @@ import { HubPicture } from "@/components/hub-link/hub-picture"
 import { SignInPanel } from "@/components/hub-link/sign-in-panel"
 import { HubActivity, HubLinkActions, HubNotices } from "@/components/hub-link/status-panel"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -80,7 +81,7 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 export default function HubLinkPage() {
   const hub = useHubLink()
   const { status } = hub
-  const { refresh: refreshAuth } = useAuth()
+  const { status: auth, refresh: refreshAuth, can } = useAuth()
   const shell = useShellHub()
   const params = useSearchParams()
   // Null follows the link the person arrived by; typing takes over from it.
@@ -108,7 +109,19 @@ export default function HubLinkPage() {
   }, [state, name, refreshAuth, shell])
 
   if (!status) {
-    return <PageState eyebrow="Settings" title="Hub" error={hub.error} />
+    // A linked server's line ends in its verbs for an administrator, and the session already says
+    // whether it is linked, so the loading line keeps their row on a phone and the page does not
+    // move when the status lands (D11).
+    const verbs = can("system.admin") && Boolean(auth?.hub?.linked)
+    return (
+      <PageState
+        title="Hub"
+        error={hub.error}
+        skeleton={
+          <IdentityHeader loading logo={<HubTile />} state menu={verbs ? false : undefined} />
+        }
+      />
+    )
   }
 
   const admin = status.admin
@@ -131,18 +144,11 @@ export default function HubLinkPage() {
   const testOrigin = atTestOrigin(url, admin?.testOrigin)
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Settings" title="Hub" />
+    <Page rise>
+      <PageContext title="Hub" />
 
-      <HostIdentity
-        logo={
-          <span
-            aria-hidden
-            className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-sunken"
-          >
-            <LogoGlyph className="h-5 w-auto text-brand" />
-          </span>
-        }
+      <IdentityHeader
+        logo={<HubTile />}
         title={
           // Only a hub this server is connected to, or asking to be, is a destination; an idle
           // link's address may now answer on a machine this server refused.
@@ -172,7 +178,7 @@ export default function HubLinkPage() {
             label={pending ? <TextShimmer>{reading.label}</TextShimmer> : reading.label}
           />
         }
-        facts={<Facts status={status} />}
+        facts={hubFacts(status)}
         command={
           linked && admin ? (
             <HubLinkActions
@@ -338,32 +344,19 @@ const BLOCK = "py-8 first:pt-4 last:pb-2"
  * a report: before that the fleet is empty because nothing is known yet, not because the hub holds
  * none.
  */
-function Facts({ status }: { status: HubLinkStatus }) {
+function hubFacts(status: HubLinkStatus) {
   if (!status.enabled) return null
   const link = status.state === "linked" ? status.admin?.link : undefined
   if (status.state === "linked") {
     return (
       <>
-        {status.hubName && <span className="truncate">{hubLabel(status.hubName)}</span>}
-        {status.scope && (
-          <>
-            <FactDot />
-            <span>{scopeName(status.scope)} scope</span>
-          </>
-        )}
-        {status.lastHeartbeatAt && (
-          <>
-            <FactDot />
-            <span>{serverCount(status.fleet?.length ?? 0)}</span>
-          </>
-        )}
+        {status.hubName && <Fact className="truncate">{hubLabel(status.hubName)}</Fact>}
+        {status.scope && <Fact>{scopeName(status.scope)} scope</Fact>}
+        {status.lastHeartbeatAt && <Fact>{serverCount(status.fleet?.length ?? 0)}</Fact>}
         {link && (
-          <>
-            <FactDot />
-            <span>
-              connected {relativeTime(link.linkedAt)} by {linkedByWords(link.linkedBy)}
-            </span>
-          </>
+          <Fact>
+            connected {relativeTime(link.linkedAt)} by {linkedByWords(link.linkedBy)}
+          </Fact>
         )}
       </>
     )
@@ -373,6 +366,18 @@ function Facts({ status }: { status: HubLinkStatus }) {
   return (
     <span>
       this server <span className="font-mono text-foreground">{fingerprint}</span>
+    </span>
+  )
+}
+
+/** The hub's own mark on the line's tile: the product's glyph, since the hub is Just Hub. */
+function HubTile() {
+  return (
+    <span
+      aria-hidden
+      className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-sunken"
+    >
+      <LogoGlyph className="h-5 w-auto text-brand" />
     </span>
   )
 }

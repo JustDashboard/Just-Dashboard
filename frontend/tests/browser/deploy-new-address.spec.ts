@@ -5,7 +5,7 @@ import { TEMPLATES } from "./database-fleet-fixture"
 test("hostname and HTTPS edits preserve visitor password protection", async ({ page }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
   await page.getByRole("switch", { name: "Ask visitors for a password" }).click()
   await page.getByRole("textbox", { name: "User name" }).fill("reviewer")
@@ -35,7 +35,7 @@ test("hostname and HTTPS edits preserve visitor password protection", async ({ p
 test("turning off public publishing removes every hostname", async ({ page }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
   await page.getByRole("button", { name: "Add another hostname" }).click()
   await page.getByRole("textbox", { name: "Also answers to 2" }).fill("alias.example.com")
@@ -65,7 +65,7 @@ test("closing the database sheet ignores its delayed connection response", async
     await json(route, { url: "postgres://user:secret@db/app", reference: "${{database.9}}" })
   })
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "variables")
   await page.getByRole("button", { name: "Add database", exact: true }).click()
   await page.getByRole("button", { name: "Use existing", exact: true }).click()

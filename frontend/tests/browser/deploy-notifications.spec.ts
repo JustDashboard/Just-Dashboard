@@ -222,10 +222,11 @@ test("each channel says how its last message went, and its sheet reads every att
   await expect(messages.nth(2).getByText("Failed", { exact: true })).toBeVisible()
   await expect(messages.nth(3)).toContainText("Test message")
 
-  // The picture is a picture, not a second list of the same channels.
-  const picture = page.getByRole("group", { name: "Where deployment events go" })
-  await expect(picture).toBeVisible()
-  await expect(picture.getByRole("listitem")).toHaveCount(0)
+  // The picture is the siblings' WireFlow: the channels it reaches are its
+  // end column, and the cards below are the list of them.
+  const picture = page.locator("[data-slot=wire-flow]")
+  await expect(picture.getByRole("region", { name: "Where deployment events go" })).toBeVisible()
+  await expect(picture.getByRole("region", { name: "Projects that report here" })).toBeVisible()
 
   const cards = page.getByRole("list", { name: "Notification channels" }).getByRole("listitem")
   await expect(cards).toHaveCount(2)
@@ -246,7 +247,7 @@ test("each channel says how its last message went, and its sheet reads every att
   await expect(pings.getByRole("button", { name: "Send test", exact: true })).toBeDisabled()
 
   await page.getByRole("button", { name: "Open Status hook" }).click()
-  const sheet = page.getByRole("dialog", { name: "Deliveries · Status hook" })
+  const sheet = page.getByRole("dialog", { name: "Status hook · history" })
   // One given up on; the one with a retry ahead is counted as retrying.
   await expect(sheet.getByText("1 failed", { exact: false })).toBeVisible()
   await expect(sheet.getByText("1 retrying", { exact: false })).toBeVisible()

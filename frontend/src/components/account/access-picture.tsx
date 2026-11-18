@@ -1,27 +1,22 @@
 "use client"
 
-import { useRef, type RefObject } from "react"
-import Link from "next/link"
 import { Key } from "@/components/icons"
 import { describeClient, networkOf } from "@/lib/clients"
 import { relativeTime } from "@/lib/format"
 import type { ApiToken, DashboardUser, SessionInfo } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { useNow } from "@/components/deploy/vocabulary"
+import { WirePlaceholder } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
+import { useNow } from "@/hooks/use-now"
 import { activeNow, keyLine, sessionLine, usableKeys, type Line } from "@/components/account/access"
 import {
   AccountWireMark,
   KeyWireMark,
   SessionState,
   SessionWireMark,
-  WireMore,
   keyHint,
 } from "@/components/account/marks"
 import { ROLE_NAME } from "@/components/account/capabilities"
-import { displayNameOf } from "@/components/account/user-avatar"
+import { displayNameOf } from "@/components/user-avatar"
 
 /** How many marks each side of the picture draws before it counts the rest. */
 const SHOWN = 4
@@ -36,16 +31,15 @@ const SHOWN = 4
  * many of each and never which. Here a wire is a reading: it pulses while the
  * session is open or the key was called today, goes amber where a password
  * alone let a session in or a key is about to stop, and is dashed for a
- * session still owing its code and a key nothing has ever used. The same
- * picture the deployment pages and Configuration draw, so a reader who has
- * understood one of them has understood this one.
+ * session still owing its code and a key nothing has ever used.
  *
- * Wide, the three balance across the page the way Notifications' fan-out
- * does, every node drawn at Configuration's scale — a full-size tile with a
- * word over its name and a line of detail under it — because that is the
- * picture the reader already knows how to read. On a phone the two lists
- * already name everything, so the picture shrinks to the marks, the lines
- * running down through the account.
+ * It is a `WireFlow`, the picture Notifications and Configuration draw, so it
+ * reads, loads and shrinks as they do. Wide, each side's heading is the way to
+ * its page. On a phone the two lists already name everything, so the picture
+ * is its marks, the lines running down through the account, and the
+ * account's name stands beside its face where no line crosses it (they ran
+ * through it when the picture drew its own phone layout). While the sessions
+ * are read it stands at its loaded shape: pass no `sessions`.
  */
 export function AccessPicture({
   user,
@@ -55,17 +49,16 @@ export function AccessPicture({
 }: {
   user: DashboardUser
   required: boolean
-  sessions: SessionInfo[]
+  /** Undefined while they are read: the picture waits at its loaded shape. */
+  sessions?: SessionInfo[]
   /** Undefined while they could not be read: the side is left off rather than drawn empty. */
   keys?: ApiToken[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
   const now = useNow(15_000)
-  const container = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
+  const loading = sessions === undefined
 
   // This device first, then whatever is open now, then the most recently seen.
-  const ordered = [...sessions].sort(
+  const ordered = [...(sessions ?? [])].sort(
     (a, b) =>
       Number(b.current) - Number(a.current) ||
       Number(activeNow(b, now)) - Number(activeNow(a, now)) ||
@@ -74,111 +67,52 @@ export function AccessPicture({
   const usable = usableKeys(keys ?? [], now).sort((a, b) =>
     (b.lastUsedAt ?? "").localeCompare(a.lastUsedAt ?? ""),
   )
-  const shownSessions = ordered.slice(0, SHOWN)
-  const shownKeys = usable.slice(0, SHOWN)
-  const size = wide ? "lg" : "md"
   const name = displayNameOf(user)
 
-  const left = (
-    <>
-      {shownSessions.map((session) => (
-        <Spoke
-          key={session.id}
-          containerRef={container}
-          hubRef={hub}
-          side="in"
-          compact={!wide}
-          line={sessionLine(session, now)}
-          mark={<SessionWireMark userAgent={session.userAgent} size={size} />}
-          eyebrow={<SessionState session={session} now={now} />}
-          title={describeClient(session.userAgent)}
-          hint={
-            <>
-              {networkOf(session.ip).label} ·{" "}
-              <span className="numeric font-mono">{session.ip}</span>
-            </>
-          }
-          label={`${describeClient(session.userAgent)}, ${sessionHint(session, now)}`}
-        />
-      ))}
-      {ordered.length > SHOWN && (
-        <Spoke
-          containerRef={container}
-          hubRef={hub}
-          side="in"
-          compact={!wide}
-          line={{ still: true, tone: "default" }}
-          mark={
-            <WireMore
-              count={ordered.length - SHOWN}
-              href="/account/sessions"
-              label={`${ordered.length - SHOWN} more sessions`}
-              size={size}
-            />
-          }
-          title={<span className="font-normal text-muted-foreground">more sessions</span>}
-        />
-      )}
-    </>
-  )
+  const signedIn: WireFlowNode[] = ordered.map((session) => ({
+    id: `session:${session.id}`,
+    mark: (size) => <SessionWireMark userAgent={session.userAgent} size={size} />,
+    eyebrow: <SessionState session={session} now={now} />,
+    title: describeClient(session.userAgent),
+    hint: (
+      <>
+        {networkOf(session.ip).label} · <span className="numeric font-mono">{session.ip}</span>
+      </>
+    ),
+    name: `${describeClient(session.userAgent)}, ${sessionHint(session, now)}`,
+    line: wire(sessionLine(session, now)),
+  }))
 
-  const right = (
-    <>
-      {shownKeys.map((token) => (
-        <Spoke
-          key={token.id}
-          containerRef={container}
-          hubRef={hub}
-          side="out"
-          compact={!wide}
-          line={keyLine(token, now)}
-          mark={<KeyWireMark name={token.name} size={size} />}
-          eyebrow={ROLE_NAME[token.role]}
-          title={<span className="font-mono">{token.name}</span>}
-          hint={keyHint(token)}
-          label={`Key ${token.name}, ${ROLE_NAME[token.role]}, ${keyHint(token)}`}
-        />
-      ))}
-      {usable.length > SHOWN && (
-        <Spoke
-          containerRef={container}
-          hubRef={hub}
-          side="out"
-          compact={!wide}
-          line={{ still: true, tone: "default" }}
-          mark={
-            <WireMore
-              count={usable.length - SHOWN}
-              href="/account/keys"
-              label={`${usable.length - SHOWN} more keys`}
-              size={size}
-            />
-          }
-          title={<span className="font-normal text-muted-foreground">more keys</span>}
-        />
-      )}
-      {keys?.length === 0 && (
-        <Spoke
-          containerRef={container}
-          hubRef={hub}
-          side="out"
-          compact={!wide}
-          line={{ still: true, dashed: true, tone: "default" }}
-          mark={
-            <Link
-              href="/account/keys"
-              aria-label="Make an API key"
-              className="rounded-full focus-ring"
-            >
-              <WirePlaceholder size={size} fallback={Key} />
-            </Link>
-          }
-          title={<span className="font-normal text-muted-foreground">No API keys</span>}
-          hint="a script signs in with one"
-        />
-      )}
-    </>
-  )
+  const keyring: WireFlowNode[] =
+    usable.length > 0
+      ? usable.map((token) => ({
+          id: `key:${token.id}`,
+          mark: (size) => <KeyWireMark name={token.name} size={size} />,
+          eyebrow: ROLE_NAME[token.role],
+          title: <span className="font-mono">{token.name}</span>,
+          hint: keyHint(token),
+          name: `Key ${token.name}, ${ROLE_NAME[token.role]}, ${keyHint(token)}`,
+          line: wire(keyLine(token, now)),
+        }))
+      : keys
+        ? [
+            {
+              id: "key:none",
+              mark: (size) => <WirePlaceholder size={size} fallback={Key} />,
+              title: (
+                <span className="font-normal text-muted-foreground">
+                  {keys.length === 0 ? "No API keys" : "No keys in use"}
+                </span>
+              ),
+              hint: "a script signs in with one",
+              name: "No API keys",
+              href: "/account/keys",
+              label: "Make an API key",
+              placeholder: true,
+              line: { state: "idle" },
+            },
+          ]
+        : []
 
   const guard = user.totpEnabled
     ? "two-factor on"
@@ -187,163 +121,49 @@ export function AccessPicture({
       : "password only"
 
   return (
-    <div ref={container} className="relative w-full py-4">
-      {wide ? (
-        <div className="relative grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.45fr)_auto_minmax(3rem,0.45fr)_minmax(0,1fr)] items-center pb-8">
-          <div role="group" aria-label="Signed in" className="flex flex-col items-end gap-6">
-            <Lane href="/account/sessions" count={sessions.length} noun="session" align="end" />
-            {left}
-          </div>
-          <div aria-hidden />
-          <WireNode
-            nodeRef={hub}
-            align="center"
-            mark={<AccountWireMark user={user} />}
-            eyebrow="You"
-            title={name}
-            hint={
-              <span className={user.totpEnabled ? "text-success" : "text-warning"}>{guard}</span>
-            }
-          />
-          <div aria-hidden />
-          <div role="group" aria-label="API keys" className="flex flex-col gap-6">
-            {keys && <Lane href="/account/keys" count={usable.length} noun="key" align="start" />}
-            {right}
-          </div>
-        </div>
-      ) : (
-        // The words over the marks, so the lines run down over nothing but
-        // the page's own ground.
-        <div className="relative flex flex-col items-center text-center">
-          <Lane href="/account/sessions" count={sessions.length} noun="session" align="center" />
-          <div
-            role="group"
-            aria-label="Signed in"
-            className="mt-3 flex flex-wrap justify-center gap-4"
-          >
-            {left}
-          </div>
-          <div ref={hub} className="relative z-10 mt-10 flex">
-            <AccountWireMark user={user} />
-          </div>
-          <p className="mt-2 text-body font-medium">{name}</p>
-          <p className={cn("text-hint", user.totpEnabled ? "text-success" : "text-warning")}>
-            {guard}
-          </p>
-          <div
-            role="group"
-            aria-label="API keys"
-            className="mt-8 flex flex-wrap justify-center gap-4"
-          >
-            {right}
-          </div>
-          {keys && (
-            <Lane
-              href="/account/keys"
-              count={usable.length}
-              noun="key"
-              align="center"
-              className="mt-3"
-            />
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-/** The head of one side of the picture: what it counts, as the way to its page. */
-function Lane({
-  href,
-  count,
-  noun,
-  align,
-  className,
-}: {
-  href: string
-  count: number
-  noun: string
-  align: "start" | "end" | "center"
-  className?: string
-}) {
-  return (
-    <Link
-      href={href}
-      className={cn(
-        "eyebrow rounded-sm focus-ring transition-colors hover:text-foreground",
-        align === "end" && "self-end",
-        className,
-      )}
-    >
-      <span className="numeric">{count}</span> {count === 1 ? noun : `${noun}s`} →
-    </Link>
-  )
-}
-
-/**
- * One thing on one side of the account, with its wire. A session's pulse runs
- * into the account, a key's out of it: a key is the account, acting somewhere
- * else.
- */
-function Spoke({
-  containerRef,
-  hubRef,
-  side,
-  compact,
-  line,
-  mark,
-  eyebrow,
-  title,
-  hint,
-  label,
-}: {
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  side: "in" | "out"
-  compact: boolean
-  line: Line
-  mark: React.ReactNode
-  eyebrow?: React.ReactNode
-  title: React.ReactNode
-  hint?: React.ReactNode
-  label?: string
-}) {
-  const node = useRef<HTMLDivElement>(null)
-  const beam = (
-    <AnimatedBeam
-      containerRef={containerRef}
-      fromRef={side === "in" ? node : hubRef}
-      toRef={side === "in" ? hubRef : node}
-      shape={compact ? "arc" : "s"}
-      still={line.still}
-      dashed={line.dashed}
-      tone={line.tone}
-      duration={2.4}
+    <WireFlow
+      phone="marks"
+      loading={loading}
+      start={{
+        title: "Sessions",
+        count: sessions?.length,
+        href: "/account/sessions",
+        heading: "always",
+        nodes: signedIn,
+        max: SHOWN,
+        more: { href: "/account/sessions", words: (hidden) => `${hidden} more sessions` },
+        loadingRows: 3,
+      }}
+      hub={{
+        mark: <AccountWireMark user={user} />,
+        eyebrow: "You",
+        title: name,
+        hint: <span className={user.totpEnabled ? "text-success" : "text-warning"}>{guard}</span>,
+        // The account is known before its sessions are: its name waits as itself.
+        loadingLines: { title: name, hint: 1 },
+      }}
+      end={{
+        title: "API keys",
+        count: keys ? usable.length : undefined,
+        href: keys ? "/account/keys" : undefined,
+        heading: keys ? "always" : "narrow",
+        nodes: keyring,
+        max: SHOWN,
+        more: { href: "/account/keys", words: (hidden) => `${hidden} more keys` },
+        loadingRows: 2,
+      }}
     />
   )
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={node} className="relative z-10 flex">
-          {mark}
-        </div>
-        {label && <span className="sr-only">{label}</span>}
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={node}
-        align={side === "in" ? "end" : "start"}
-        mark={mark}
-        eyebrow={eyebrow}
-        title={title}
-        hint={hint}
-      />
-    </div>
-  )
+}
+
+/** A session's or a key's line as a wire's state: amber where it should not be relied on. */
+function wire(line: Line): WireLine {
+  return {
+    state: line.tone === "warning" ? "warning" : "up",
+    moving: !line.still,
+    dashed: line.dashed,
+    duration: 2.4,
+  }
 }
 
 export function sessionHint(session: SessionInfo, now: number) {

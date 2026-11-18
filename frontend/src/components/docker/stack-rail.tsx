@@ -5,14 +5,14 @@ import { Layers } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, percent, plural } from "@/lib/format"
 import type { ComposeStack, Container, ContainerStats } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
-import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
+import { Rail, RailFigures, RailLine, RailName, RailRow, railInk } from "@/components/rail"
 import {
   STACK_FILTER_KEYS,
   stackLines,
@@ -32,6 +32,20 @@ const BUCKET_WORDS: Record<StackBucket, string> = {
 }
 
 /**
+ * The stacks, at the list's cadence. Shared by its key, so the rail reads the
+ * same answer, and the same failure, as the hook that orders it, with one
+ * request between them.
+ */
+function useStacks() {
+  return usePoll(
+    (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
+    15_000,
+    [],
+    { key: "/docker/stacks/" },
+  )
+}
+
+/**
  * The Stacks list, read for the rail beside one stack: the search and the
  * state chip the list was left on (they are its session's), the stacks at the
  * list's cadence and their sums from the containers socket.
@@ -40,10 +54,7 @@ export function useStackRail() {
   const [query, setQuery] = useSessionState(STACK_FILTER_KEYS.query, "")
   const [remembered, setState] = useSessionState(STACK_FILTER_KEYS.state, "")
   const state = (BUCKETS.has(remembered) ? remembered : "") as StackBucket | ""
-  const list = usePoll(
-    (signal) => get<ComposeStack[]>("/docker/stacks/", undefined, signal),
-    15_000,
-  )
+  const list = useStacks()
   const [containers, setContainers] = useState<Container[]>([])
   const [stats, setStats] = useState<Record<string, ContainerStats>>({})
   const onMessage = useCallback((envelope: Envelope) => {
@@ -68,9 +79,10 @@ export function useStackRail() {
     (line) => line.stack.name,
     JSON.stringify([query, state]),
   )
+  // A list that failed says so in the column, not in its caption.
   const caption = !list.data
     ? list.error
-      ? "The stacks could not be read"
+      ? undefined
       : "Reading the stacks…"
     : state || query.trim()
       ? `${matching.length} of ${lines.length}${state ? ` · ${BUCKET_WORDS[state]}` : ""}`
@@ -80,6 +92,7 @@ export function useStackRail() {
     rows: inspection.rows,
     bindings: inspection.bindings,
     loading: list.loading && !list.data,
+    error: list.data ? undefined : list.error,
     refresh: list.refresh,
     query,
     setQuery,
@@ -96,14 +109,17 @@ export function useStackRail() {
  * in the logo's corner, its name, how much of it is up and, while it runs,
  * what its containers take together; the one on screen is filled.
  *
- * The column itself is the one every Docker item's page has (`item-rail.tsx`);
- * this file is where the list comes from, and the stack's row.
+ * The column is the shared `Rail`; this file is where the list comes from,
+ * and the stack's row. A list that could not be read says so in place of the
+ * rows, with a way to ask again, rather than "No stack matches."
  */
 export function StackRail({
   rows,
   current,
   currentRow,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   filtered,
@@ -118,30 +134,36 @@ export function StackRail({
   /** The stack on screen, drawn first when the list does not hold it. */
   currentRow?: StackLine
   loading: boolean
+  /** The list's failure; read from the shared list when the page does not pass it. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   filtered: boolean
   onClearFilters: () => void
-  caption: string
-  onOpen: (name: string) => void
+  caption?: string
+  onOpen?: (name: string) => void
   bindings: React.HTMLAttributes<HTMLElement>
   className?: string
 }) {
+  const list = useStacks()
+  const tab = useSearchParams().get("tab")
   return (
-    <DockerRail
+    <Rail
       slot="stack-rail"
       label="Stacks"
-      search={{ label: "Search the stacks", placeholder: "Stack, service or image" }}
+      search={{ placeholder: "Stack, service or image", query, onQuery }}
       rows={rows}
       keyOf={(line) => line.stack.name}
       current={(line) => line.stack.name === current}
       pinned={currentRow}
-      row={(line, on) => <RailRow line={line} current={on} onOpen={onOpen} />}
+      row={(line, on) => (
+        <StackRow line={line} current={on} href={stackHref(line.stack.name, tab)} onOpen={onOpen} />
+      )}
       loading={loading}
-      loadingRows={6}
+      error={error ?? (list.data ? undefined : list.error)}
+      onRetry={onRetry ?? list.refresh}
       empty="No stack matches."
-      query={query}
-      onQuery={onQuery}
       filtered={filtered}
       onClearFilters={onClearFilters}
       caption={caption}
@@ -151,25 +173,34 @@ export function StackRail({
   )
 }
 
-function RailRow({
+/** A stack's page, on the view the one on screen is showing. */
+function stackHref(name: string, tab: string | null) {
+  const path = `/docker/stacks/${encodeURIComponent(name)}`
+  return tab ? `${path}?tab=${encodeURIComponent(tab)}` : path
+}
+
+function StackRow({
   line,
   current,
+  href,
   onOpen,
 }: {
   line: StackLine
   current: boolean
-  onOpen: (name: string) => void
+  href: string
+  onOpen?: (name: string) => void
 }) {
   const { stack } = line
   const words = stateWords(line)
   const tone = stackTone(stack.state)
   return (
-    <DockerRailRow
+    <RailRow
       item={`stack:${stack.name}`}
       name={stack.name}
       title={stack.workingDir || undefined}
       current={current}
-      onOpen={() => onOpen(stack.name)}
+      href={href}
+      onOpen={onOpen && (() => onOpen(stack.name))}
       mark={
         <ProductLogo
           id={stackProducts(stack)[0]}
@@ -182,36 +213,18 @@ function RailRow({
       end={
         stack.running > 0 &&
         line.measured && (
-          <span className="flex shrink-0 flex-col items-end">
-            <span className="numeric font-mono text-hint text-muted-foreground">
-              {percent(line.cpu)}
-            </span>
-            <span className="numeric font-mono text-micro text-muted-foreground">
-              {line.memory ? bytes(line.memory) : "—"}
-            </span>
-          </span>
+          <RailFigures top={percent(line.cpu)} bottom={line.memory ? bytes(line.memory) : "—"} />
         )
       }
     >
-      <span className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}>
-        {stack.name}
-      </span>
-      <span
-        className={cn(
-          "numeric block truncate text-hint",
-          words.unhealthy > 0
-            ? "text-destructive"
-            : tone === "warning"
-              ? "text-warning"
-              : "text-muted-foreground",
-        )}
-      >
+      <RailName current={current}>{stack.name}</RailName>
+      <RailLine className="numeric" ink={railInk(words.unhealthy > 0 ? "danger" : tone)}>
         {words.unhealthy > 0
           ? `${words.short} · ${words.unhealthy} unhealthy`
           : stack.state === "running" || !stack.deployed
             ? words.short
             : `${stackLabel(stack.state).toLowerCase()} · ${words.short}`}
-      </span>
-    </DockerRailRow>
+      </RailLine>
+    </RailRow>
   )
 }

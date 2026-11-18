@@ -14,7 +14,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -37,7 +38,7 @@ function Request({ label, rule }: { label: string; rule: Record<string, unknown>
   return (
     <section aria-label={label} className="space-y-1.5">
       <p className="text-xs font-medium">{label}</p>
-      <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-hint">
+      <dl className="grid grid-cols-start-main gap-x-4 gap-y-1 text-hint">
         {Object.entries(rule).map(([key, value]) => (
           <div key={key} className="contents">
             <dt className="text-muted-foreground">{key}</dt>
@@ -356,14 +357,15 @@ export function FirewallPlanTray({
                 {change.op === "delete" ? "remove" : "add"}
               </Tag>
               <span className="min-w-0 flex-1 font-mono text-xs break-all">{change.label}</span>
-              <Button
+              <IconAction
                 size="icon-xs"
                 variant="ghost"
-                aria-label={`Unstage ${change.label}`}
+                className="[&_svg:not([class*='size-'])]:size-3"
+                label={`Unstage ${change.label}`}
                 onClick={() => onUnstage(index)}
               >
                 <Trash aria-hidden />
-              </Button>
+              </IconAction>
             </li>
           ))}
         </ol>

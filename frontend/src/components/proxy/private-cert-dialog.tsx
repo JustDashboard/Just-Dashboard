@@ -7,6 +7,7 @@ import {
   FileText,
   Globe,
   LockClosed,
+  Plus,
   ShieldCheck,
   Warning,
 } from "@/components/icons"
@@ -38,6 +39,10 @@ export type PrivateKind = "local-ca" | "self-signed"
  * The page's one command, split: Let's Encrypt on its face, every other way to
  * get a certificate behind the chevron. Without certbot there is no face, and
  * the menu is the command.
+ *
+ * Each half carries an icon, so on a phone, where the identity line draws a
+ * command as its icon alone, both halves are icons with their names as the
+ * tip: the face its plus, the menu its chevron. From `sm` the words return.
  */
 export function IssueCommand({
   onLetsEncrypt,
@@ -73,9 +78,10 @@ export function IssueCommand({
       <VerbMenu
         verbs={verbs}
         trigger={
-          <Button size="sm">
+          <Button size="sm" aria-label="New certificate">
+            <Plus className="size-3.5 sm:hidden" />
             New certificate
-            <ChevronDown className="size-3.5" />
+            <ChevronDown className="size-3.5 max-sm:hidden" />
           </Button>
         }
       />
@@ -85,6 +91,7 @@ export function IssueCommand({
     // The two halves are one command, parted by a hairline of the page.
     <div className="flex items-center gap-px">
       <Button size="sm" className="rounded-r-none" onClick={onLetsEncrypt}>
+        <Plus className="size-3.5" />
         Issue certificate
       </Button>
       <VerbMenu

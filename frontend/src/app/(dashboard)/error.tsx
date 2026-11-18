@@ -41,7 +41,7 @@ export default function DashboardError({
   return (
     <Page>
       <PageContext eyebrow="Error" title="This page stopped rendering" />
-      <Panel>
+      <Panel framed>
         <PanelHeader
           title="Something in this page threw"
           actions={

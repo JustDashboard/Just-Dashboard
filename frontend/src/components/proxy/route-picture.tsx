@@ -3,7 +3,6 @@
 import Link from "next/link"
 import { createRef, useMemo, useRef, useState, type RefObject } from "react"
 import {
-  ArrowRight,
   Box,
   CornerUpRight,
   FileText,
@@ -16,10 +15,15 @@ import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { WireLane } from "@/components/wire/wire-lane"
+import { MoreTile, WireMarks } from "@/components/wire/wire-marks"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { compactCount } from "@/lib/format"
+import { ProjectFavicon } from "@/components/project-mark"
 import { sitePath } from "@/components/proxy/site-verbs"
-import { compactCount, errorRateTone, share } from "@/components/proxy/site-traffic"
+import { errorRateTone, share } from "@/components/proxy/site-traffic"
 import { upstreamLabel, upstreamTone } from "@/components/proxy/upstream-health"
 import {
   CARRIES_PER_HOUR,
@@ -56,18 +60,25 @@ const KIND_GLYPH = { files: FolderOpen, redirect: CornerUpRight, config: FileTex
  * Pointing at a domain steps back every wire but its own and lights the
  * application it reaches; pointing at an application lights its domains.
  *
- * On the page's own ground, with no frame or dot grid. Three lanes from `lg`;
- * below, the lanes stack, the wires are not drawn and each domain says in
- * words what it reaches.
+ * On the page's own ground, with no frame or dot grid. Three lanes from `lg`.
+ * On a phone it is the one phone form (`WireMarks`): the domains' locks,
+ * the engine named, the applications' marks and the wires between them; the
+ * Routes list under it names each one.
+ *
+ * `only` draws the routes of some domains alone, and what they reach: Sites
+ * opening on the picture of its own routes.
  */
 export function RoutePicture({
-  map,
+  map: whole,
+  only,
   engine,
   engineMark,
   engineTone,
   engineHint,
 }: {
   map: RouteMap
+  /** The domains to draw; every one the map holds when left out. */
+  only?: (domain: MapDomain) => boolean
   /** The engine's name as the identity line gives it. */
   engine: string
   engineMark?: string
@@ -78,7 +89,9 @@ export function RoutePicture({
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
-  const apps = useMemo(() => new Map(map.apps.map((a) => [a.id, a])), [map.apps])
+  const held = useMotionHeld()
+  const wide = useBreakpoint("lg")
+  const map = useMemo(() => narrowed(whole, only), [whole, only])
 
   const edges: Edge[] = []
   for (const domain of map.domains) {
@@ -136,12 +149,78 @@ export function RoutePicture({
   const domainPort = 20
   const appPort = 26
 
+  const hubMark = (
+    <span className="relative flex">
+      <WireMark tone="logo" size="lg">
+        {engineMark && hasProductLogo(engineMark) ? (
+          <ProductGlyph id={engineMark} />
+        ) : (
+          <Globe aria-hidden />
+        )}
+      </WireMark>
+      <StatusDot tone={engineTone} corner="lg" />
+    </span>
+  )
+
+  if (!wide)
+    return (
+      <WireMarks
+        data-slot="route-picture"
+        className="animate-rise"
+        tiers={[
+          {
+            title: "Domains",
+            nodes: [
+              ...map.domains.map((domain) => ({
+                id: `d:${domain.id}`,
+                mark: <DomainMark domain={domain} size="sm" />,
+                name: domain.label,
+                href: sitePath(domain.id),
+              })),
+              ...(map.hidden > 0
+                ? [
+                    {
+                      id: "d:more",
+                      mark: <MoreTile count={map.hidden} />,
+                      name: `${map.hidden} more on Sites`,
+                      href: "/proxy/sites",
+                      round: true,
+                      anonymous: true,
+                    },
+                  ]
+                : []),
+            ],
+          },
+          { id: "hub", mark: hubMark, eyebrow: "Reverse proxy", title: engine, hint: engineHint },
+          {
+            title: "Applications",
+            nodes: map.apps.map((app) => ({
+              id: `a:${app.id}`,
+              mark: <AppMark app={app} size="sm" />,
+              name: app.name,
+              href: app.container
+                ? `/docker/containers/${encodeURIComponent(app.container)}`
+                : undefined,
+            })),
+          },
+        ]}
+        wires={edges.map((edge) => ({
+          from: edge.from,
+          to: edge.to,
+          still: edge.carries === undefined || held,
+          dashed: edge.dashed,
+          tone: edge.tone,
+          duration: requestPulse(edge.carries ?? 0),
+        }))}
+      />
+    )
+
   return (
     // Wide, the lanes' headings and the engine's words hang outside their
     // boxes so every mark sits on one line; each column is padded the same
     // above and below to hold them, and the bottom padding holds what the
     // engine's words run past the row.
-    <div data-slot="route-picture" className="relative animate-rise pt-4 pb-10 lg:pb-6">
+    <div data-slot="route-picture" className="relative animate-rise pt-4 pb-6">
       <div ref={container} className="relative">
         {edges.map((edge, index) => {
           const into = edge.to === "hub"
@@ -157,29 +236,25 @@ export function RoutePicture({
               shape="s"
               startXOffset={into ? domainPort : 30}
               endXOffset={into ? -30 : -appPort}
-              still={edge.carries === undefined}
+              still={edge.carries === undefined || held}
               dashed={edge.dashed}
               tone={edge.tone}
               duration={requestPulse(edge.carries ?? 0)}
               delay={(index % 6) * 0.35}
-              className={cn("transition-opacity max-lg:hidden", !wireLit(edge) && "opacity-15")}
+              className={cn("transition-opacity", !wireLit(edge) && "opacity-15")}
             />
           )
         })}
 
         <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(2.5rem,6vw,6rem)_minmax(0,0.7fr)_clamp(2.5rem,6vw,6rem)_minmax(0,1fr)] lg:items-center">
-          <Lane title="Domains" count={map.total} className="lg:text-right">
+          <WireLane title="Domains" count={map.total} align="end" float>
             {map.domains.map((domain) => (
               <li
                 key={domain.id}
                 {...watch(`d:${domain.id}`)}
                 className={cn("min-w-0 transition-opacity", !lit(`d:${domain.id}`) && "opacity-40")}
               >
-                <DomainNode
-                  domain={domain}
-                  apps={domain.apps.map((id) => apps.get(id)).filter((a) => a !== undefined)}
-                  nodeRef={refs.get(`d:${domain.id}`)}
-                />
+                <DomainNode domain={domain} nodeRef={refs.get(`d:${domain.id}`)} />
               </li>
             ))}
             {map.hidden > 0 && (
@@ -205,7 +280,7 @@ export function RoutePicture({
                 />
               </li>
             )}
-          </Lane>
+          </WireLane>
 
           <div aria-hidden className="max-lg:hidden" />
 
@@ -213,20 +288,7 @@ export function RoutePicture({
             <WireNode
               nodeRef={hub}
               align="center"
-              mark={
-                <span className="relative flex">
-                  <WireMark tone="logo" size="lg">
-                    {engineMark && hasProductLogo(engineMark) ? (
-                      <ProductGlyph id={engineMark} />
-                    ) : (
-                      <Globe aria-hidden />
-                    )}
-                  </WireMark>
-                  <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-                    <StatusDot tone={engineTone} className="size-2" />
-                  </span>
-                </span>
-              }
+              mark={hubMark}
               eyebrow="Reverse proxy"
               title={engine}
               hint={engineHint}
@@ -235,7 +297,7 @@ export function RoutePicture({
 
           <div aria-hidden className="max-lg:hidden" />
 
-          <Lane title="Applications" count={map.apps.length}>
+          <WireLane title="Applications" count={map.apps.length} float>
             {map.apps.map((app) => (
               <li
                 key={app.id}
@@ -245,7 +307,7 @@ export function RoutePicture({
                 <AppNode app={app} nodeRef={refs.get(`a:${app.id}`)} />
               </li>
             ))}
-          </Lane>
+          </WireLane>
         </div>
       </div>
     </div>
@@ -255,11 +317,9 @@ export function RoutePicture({
 /** A domain: its lock, its name, and what its last hour was. */
 function DomainNode({
   domain,
-  apps,
   nodeRef,
 }: {
   domain: MapDomain
-  apps: MapApp[]
   nodeRef?: RefObject<HTMLSpanElement | null>
 }) {
   const hour = domain.traffic
@@ -269,9 +329,7 @@ function DomainNode({
       align="end"
       mark={
         <span ref={nodeRef} className="flex">
-          <WireMark tone={domain.tls ? "success" : "warning"} size="md">
-            {domain.tls ? <LockClosed aria-hidden /> : <LockOpen aria-hidden />}
-          </WireMark>
+          <DomainMark domain={domain} size="md" />
         </span>
       }
       title={
@@ -317,13 +375,6 @@ function DomainNode({
               )}
             </>
           )}
-          {/* Below `lg` there are no wires, so the line says where it goes. */}
-          {apps.length > 0 && (
-            <span className="inline-flex min-w-0 items-center gap-1 lg:hidden">
-              <ArrowRight aria-hidden className="size-3 shrink-0" />
-              <span className="truncate">{apps.map((a) => a.name).join(", ")}</span>
-            </span>
-          )}
         </span>
       }
     />
@@ -332,29 +383,12 @@ function DomainNode({
 
 /** What answers behind the engine, as itself, with its state in the tile's corner. */
 function AppNode({ app, nodeRef }: { app: MapApp; nodeRef?: RefObject<HTMLSpanElement | null> }) {
-  const Glyph = KIND_GLYPH[app.kind]
   const tone: DotTone | undefined = app.state ? upstreamTone(app.state) : undefined
   return (
     <WireNode
       mark={
-        <span ref={nodeRef} className="relative flex">
-          <WireMark tone="logo" size="md">
-            <ProjectFavicon
-              projectId={app.projectId}
-              fallback={
-                hasProductLogo(app.product) ? (
-                  <ProductGlyph id={app.product} />
-                ) : (
-                  <Glyph aria-hidden />
-                )
-              }
-            />
-          </WireMark>
-          {tone && (
-            <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-              <StatusDot tone={tone} />
-            </span>
-          )}
+        <span ref={nodeRef} className="flex">
+          <AppMark app={app} size="md" />
         </span>
       }
       title={
@@ -395,35 +429,43 @@ function AppNode({ app, nodeRef }: { app: MapApp; nodeRef?: RefObject<HTMLSpanEl
   )
 }
 
-function Lane({
-  title,
-  count,
-  className,
-  children,
-}: {
-  title: string
-  count: number
-  className?: string
-  children: React.ReactNode
-}) {
+/** A domain's lock: green and closed where it is served over TLS, amber and open where not. */
+function DomainMark({ domain, size }: { domain: MapDomain; size: "md" | "sm" }) {
   return (
-    // Wide, the heading hangs above the list rather than sharing its box: in
-    // the box it pushed the marks half its height below the engine's, and
-    // every wire bent to meet them.
-    <div className="min-w-0 self-stretch lg:flex lg:flex-col lg:justify-center lg:py-8">
-      <div className="lg:relative">
-        <p className={cn("eyebrow mb-4 lg:absolute lg:inset-x-0 lg:bottom-full", className)}>
-          {title}
-          {count > 0 && (
-            <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-              {count}
-            </span>
-          )}
-        </p>
-        <ol className="flex flex-col gap-4" aria-label={title}>
-          {children}
-        </ol>
-      </div>
-    </div>
+    <WireMark tone={domain.tls ? "success" : "warning"} size={size}>
+      {domain.tls ? <LockClosed aria-hidden /> : <LockOpen aria-hidden />}
+    </WireMark>
   )
+}
+
+/** What answers behind the engine, as itself, with the upstream check's state in the corner. */
+function AppMark({ app, size }: { app: MapApp; size: "md" | "sm" }) {
+  const Glyph = KIND_GLYPH[app.kind]
+  const tone: DotTone | undefined = app.state ? upstreamTone(app.state) : undefined
+  return (
+    <span className="relative flex">
+      <WireMark tone="logo" size={size}>
+        <ProjectFavicon
+          projectId={app.projectId}
+          fallback={
+            hasProductLogo(app.product) ? <ProductGlyph id={app.product} /> : <Glyph aria-hidden />
+          }
+        />
+      </WireMark>
+      {tone && <StatusDot tone={tone} corner={size === "md" ? "md" : "sm"} />}
+    </span>
+  )
+}
+
+/** The map with only the domains `only` keeps, and the applications they reach. */
+function narrowed(map: RouteMap, only?: (domain: MapDomain) => boolean): RouteMap {
+  if (!only) return map
+  const domains = map.domains.filter(only)
+  const kept = new Set(domains.flatMap((domain) => domain.apps))
+  return {
+    domains,
+    apps: map.apps.filter((app) => kept.has(app.id)),
+    hidden: 0,
+    total: domains.length,
+  }
 }

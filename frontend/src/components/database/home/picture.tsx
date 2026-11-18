@@ -6,9 +6,10 @@ import { Archive, Plus, type Icon } from "@/components/icons"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { DbTopoEdge, DbTopoNode, DbTopology } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useBreakpoint } from "@/lib/breakpoints"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { useNow } from "@/hooks/use-now"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { Status, StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { describeEdge, edgeRank } from "@/components/database/fleet/fleet"
@@ -21,18 +22,17 @@ import {
   consumerWord,
 } from "@/components/database/fleet/wiring"
 import { EngineGlyph } from "@/components/database/kit"
-import {
-  Block,
-  BlockLink,
-  CardsSkeleton,
-  CouldNotRead,
-  staleOf,
-} from "@/components/database/home/blocks"
+import { Block } from "@/components/database/home/blocks"
 import { copyTone } from "@/components/database/home/holdings"
 import { read } from "@/components/database/home/read"
 import type { DbBackups } from "@/components/database/home/types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { DATABASES_MAP_HREF } from "@/components/database/shell/routes"
+import { staleOf } from "@/components/database/kit/read"
+import { ErrorState } from "@/components/state"
+import { SectionLink } from "@/components/section-link"
+import { Bone } from "@/components/bone"
+import { Skeleton } from "@/components/ui/skeleton"
 
 /** One thing the database holds, as the right lane draws it: a schema, a keyspace, a collection. */
 export type Holding = {
@@ -54,7 +54,7 @@ const SHOWN = 5
 
 /**
  * How the database is used, drawn as three lanes in the wiring vocabulary the
- * rest of the product speaks (`deploy/wire`, the fleet's map, a project's
+ * rest of the product speaks (`components/wire/wire`, the fleet's map, a project's
  * Runtime): what reads it on the left, the database in the middle, and on
  * the right what it holds and where its copies go.
  *
@@ -105,6 +105,9 @@ export function HomePicture({
   const running = status.state === "running"
 
   const container = useRef<HTMLDivElement>(null)
+  // Stacked on a phone the database is one more row of its lanes, at their
+  // size, so its words start where theirs do rather than 12px further in.
+  const hubSize = useBreakpoint("lg") ? "lg" : "md"
   const [focus, setFocus] = useState<string | null>(null)
   const shownReaders = readers.slice(0, SHOWN)
   const shownHoldings = (holdings ?? []).slice(0, SHOWN)
@@ -148,16 +151,17 @@ export function HomePicture({
       actions={
         <>
           <WiringLegend className="mr-2 max-xl:hidden" />
-          <BlockLink href={DATABASES_MAP_HREF}>Map</BlockLink>
+          <SectionLink href={DATABASES_MAP_HREF}>Map</SectionLink>
         </>
       }
     >
       {topology.error && !topology.data ? (
-        <CouldNotRead what="what uses it" error={topology.error} onRetry={topology.refresh} />
-      ) : !topology.data ? (
-        <CardsSkeleton count={2} />
+        <ErrorState what="what uses it" error={topology.error} onRetry={topology.refresh} />
       ) : (
-        <div className="relative animate-rise py-4">
+        // While the readers are read the picture is already its own shape:
+        // the database and what it holds where they will stay, and grey
+        // readers in their lane, so nothing moves when the read lands.
+        <div className="relative py-4" aria-busy={!topology.data || undefined}>
           <div ref={container} className="relative">
             {shownReaders.map(({ node, edge }, index) => {
               const from = refFor(`r:${node.id}`)
@@ -225,7 +229,9 @@ export function HomePicture({
 
             <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,1fr)_clamp(3rem,7vw,7rem)_minmax(0,11rem)_clamp(3rem,7vw,7rem)_minmax(0,1fr)] lg:items-center">
               <Lane title="Read by" count={readers.length} className="lg:text-right">
-                {readers.length === 0 ? (
+                {!topology.data ? (
+                  <WaitingNodes align="end" />
+                ) : readers.length === 0 ? (
                   <li>
                     <WireNode
                       align="end"
@@ -305,16 +311,15 @@ export function HomePicture({
                   align="center"
                   mark={
                     <span ref={refFor("db")} className="relative flex">
-                      <WireMark tone="logo" size="lg">
+                      <WireMark tone="logo" size={hubSize}>
                         <EngineGlyph engine={engine} />
                       </WireMark>
-                      <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-                        <StatusDot
-                          state={
-                            running ? "running" : status.state === "broken" ? "failed" : "stopped"
-                          }
-                        />
-                      </span>
+                      <StatusDot
+                        corner={hubSize}
+                        state={
+                          running ? "running" : status.state === "broken" ? "failed" : "stopped"
+                        }
+                      />
                     </span>
                   }
                   eyebrow={summary?.version ?? engine.label}
@@ -492,6 +497,37 @@ export function pulseFor(sessions: number): number {
   return Math.max(1.2, 3 - Math.log2(sessions + 1) * 0.5)
 }
 
+/**
+ * Nodes that have not been read, in a lane of a picture that is waiting: a
+ * grey tile where the mark will be and grey lines where the words will be,
+ * each line at the height its words will give it, so the lane is the height
+ * it will be. Performance's picture waits with them too.
+ */
+export function WaitingNodes({
+  rows = 2,
+  align = "start",
+}: {
+  rows?: number
+  align?: "start" | "end"
+}) {
+  return Array.from({ length: rows }, (_, index) => (
+    <li key={index} aria-hidden className="min-w-0">
+      <WireNode
+        align={align}
+        mark={<Skeleton className="size-11 rounded-xl" />}
+        eyebrow={<WaitingLine className="w-16" />}
+        title={<WaitingLine className={index % 2 ? "w-24" : "w-32"} />}
+        hint={<WaitingLine className={index % 2 ? "w-36" : "w-28"} />}
+      />
+    </li>
+  ))
+}
+
+/** A grey bar where a line of words will be, inline so the line keeps the height its words give it. */
+export function WaitingLine({ className }: { className?: string }) {
+  return <Bone className={className} />
+}
+
 /** One lane of a picture: its name and count over its nodes. Performance's picture draws its lanes with it too. */
 export function Lane({
   title,
@@ -509,9 +545,7 @@ export function Lane({
       <p className={cn("eyebrow mb-4", className)}>
         {title}
         {count !== undefined && count > 0 && (
-          <span className="numeric ml-1.5 font-medium tracking-normal text-muted-foreground/70">
-            {count}
-          </span>
+          <span className="numeric ml-1.5 font-medium tracking-normal text-faint">{count}</span>
         )}
       </p>
       <ol className="flex flex-col gap-5" aria-label={title}>

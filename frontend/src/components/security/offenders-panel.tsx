@@ -12,7 +12,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { EmptyNote, ErrorState } from "@/components/state"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { Sparkline } from "@/components/sparkline"
 import { VerbActions } from "@/components/verbs"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
 

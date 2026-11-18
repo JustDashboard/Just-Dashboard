@@ -1,9 +1,8 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowLeft, Plus } from "@/components/icons"
+import { Plus } from "@/components/icons"
 import { del, errorMessage, post } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -11,16 +10,19 @@ import type { DbConnection, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow, FlowHeader, FlowSteps } from "@/components/flow"
+import { FlowHeader, FlowSteps } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { FormNote } from "@/components/form"
 import { Page } from "@/components/page"
+import { useTabTitle } from "@/components/shell/tab-title"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { sectionHref } from "@/components/database/engine"
 import { read } from "@/components/database/home/read"
-import { EngineMark, ProtectedTag } from "@/components/database/kit"
+import { EngineMark } from "@/components/database/kit"
 import { CutoverDialog } from "@/components/database/import/cutover"
 import {
   EMPTY_SOURCE,
@@ -74,7 +76,7 @@ const NO_PLAN: Plan = {
  * none named the page opens on the one that is still going.
  */
 export function OnlineImport() {
-  const { id, conn, engine, readOnly, status, param, select, href, goto } = useDatabase()
+  const { id, conn, engine, readOnly, status, param, select, goto, href } = useDatabase()
   const { refresh: refreshConnections } = useDatabases()
   const { can } = useAuth()
   const router = useRouter()
@@ -327,15 +329,6 @@ export function OnlineImport() {
     select({ import: "new", job: null })
   }
 
-  const eyebrow = (
-    <Link
-      href={href("backups")}
-      className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-    >
-      <ArrowLeft className="size-3" /> {conn.name}
-    </Link>
-  )
-
   // Where the sequence is: the draft's own state while there is no import, the
   // server's once there is.
   const mode: DbImportMode = shown?.mode ?? (form === "replication" ? plan.mode : "stream")
@@ -363,17 +356,17 @@ export function OnlineImport() {
       : "Where is the database coming from?"
 
   return (
-    <Page register="flow" className="animate-rise">
+    <Page rise register="flow">
+      <ImportTitle />
       {/* One centred column for the question, the steps and what they ask, so the
           spine is exactly as wide as the panel under it. */}
       <div className="mx-auto flex w-full max-w-4xl min-w-0 flex-col gap-6 md:gap-8">
+        {/* A flow opens on its question with the way back to the database
+            above it, as adding one does; the eyebrow says where in the
+            sequence this is. */}
         <FlowHeader
-          eyebrow={
-            <span className="inline-flex items-center gap-2">
-              {eyebrow}
-              {readOnly && <ProtectedTag />}
-            </span>
-          }
+          back={{ href: href("home"), label: conn.name }}
+          eyebrow={step >= steps.length ? "Done" : `Step ${step + 1} of ${steps.length}`}
           question={question}
           steps={<FlowSteps steps={steps} current={step} />}
           actions={
@@ -521,4 +514,15 @@ export function OnlineImport() {
       {dialog}
     </Page>
   )
+}
+
+/**
+ * Names the tab as its siblings are named ("shop · Import"). Import draws its
+ * own `h1`, the question, so it does not take `SectionFrame`'s, which would
+ * be a second one; it takes only the name.
+ */
+function ImportTitle() {
+  const { conn, engine } = useDatabase()
+  useTabTitle(conn.name, engine.section("import")?.title ?? "Import")
+  return null
 }

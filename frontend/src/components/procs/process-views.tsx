@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, duration, percent, plural } from "@/lib/format"
-import { dockerSource, journalSource, pm2Source } from "@/lib/log-sources"
+import { dockerSource, journalSource, pm2Source } from "@/lib/log/sources"
 import type {
   ContainerDetail,
   PM2Process,
@@ -29,7 +29,9 @@ import type { ConfirmFn } from "@/components/docker/shared"
 import { EnvironmentTable } from "@/components/docker/container-tables"
 import { useContainerControl, useContainerVerbs } from "@/components/docker/container-actions"
 import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
-import { Detail, DetailList, SearchInput, Section } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { SearchInput } from "@/components/search-input"
+import { Section } from "@/components/section"
 import { Panel, PanelHeader, PanelToolbar } from "@/components/panel"
 import {
   ProductGlyph,
@@ -39,8 +41,9 @@ import {
   unitProduct,
 } from "@/components/product-logo"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { VerbBar } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -114,7 +117,12 @@ export function useOwner(row: ProcessRow | undefined) {
     [manager, name, pid],
     { enabled: wanted },
   )
-  return { owner: wanted ? (read.data ?? undefined) : undefined, refresh: read.refresh }
+  return {
+    owner: wanted ? (read.data ?? undefined) : undefined,
+    // Still asking: the PM2 app a process belongs to is known only once read.
+    pending: wanted && read.data === undefined && !read.error,
+    refresh: read.refresh,
+  }
 }
 
 /** The supervisor's log as a source the service logs pane reads. */
@@ -153,8 +161,18 @@ export function ownerLogSources(row: ProcessRow, owner: Owner | undefined): Serv
   return []
 }
 
-export function ProcessLogs({ row, owner }: { row: ProcessRow; owner: Owner | undefined }) {
+export function ProcessLogs({
+  row,
+  owner,
+  pending,
+}: {
+  row: ProcessRow
+  owner: Owner | undefined
+  /** The owner is still being read: a PM2 app's log is found through it. */
+  pending?: boolean
+}) {
   const sources = useMemo(() => ownerLogSources(row, owner), [row, owner])
+  if (sources.length === 0 && pending) return <LoadingRows />
   if (sources.length === 0) {
     return (
       <EmptyState
@@ -694,7 +712,7 @@ export function ProcessFiles({ inspect }: { inspect?: ProcessInspect }) {
           title={
             <>
               Libraries it loaded
-              <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+              <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                 {inspect.libraries.length}
               </span>
             </>

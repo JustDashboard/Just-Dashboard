@@ -6,11 +6,11 @@ import { errorMessage } from "@/lib/api"
 import { duration, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Group, Well } from "@/components/panel"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { EngineMark } from "@/components/database/kit"
@@ -222,7 +222,7 @@ export function BulkDialog({
               : "Nothing changes until the keys are counted."}
           </FormNote>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Close
+            Cancel
           </Button>
           {ready ? (
             <Button variant={action === "persist" ? "default" : "destructive"} onClick={ask}>
@@ -234,27 +234,27 @@ export function BulkDialog({
               disabled={glob === "" || (action === "expire" && !ttl?.ok)}
               onClick={() => void run(false)}
             >
-              Count the keys
+              Count
             </Button>
           )}
         </>
       }
     >
       <div className="space-y-4">
-        <div className="flex min-w-0 items-center gap-3">
-          <EngineMark engine={engine} size="sm" />
-          <div className="min-w-0 space-y-0.5">
-            <p className="truncate text-body font-medium">{conn.name}</p>
-            <FormFacts>
+        <DialogSubject
+          mark={<EngineMark engine={engine} size="sm" />}
+          name={conn.name}
+          facts={
+            <>
               <FormFact label="Database">db{db}</FormFact>
               {server.data && (
                 <FormFact label="Holds">
                   {plural(server.data.keyspace.find((space) => space.db === db)?.keys ?? 0, "key")}
                 </FormFact>
               )}
-            </FormFacts>
-          </div>
-        </div>
+            </>
+          }
+        />
 
         <Field
           label="Pattern"
@@ -273,11 +273,7 @@ export function BulkDialog({
         </Field>
 
         <Field label="Only keys of type">
-          <ChipStrip
-            role="group"
-            aria-label="Only keys of type"
-            className="max-sm:mx-0 max-sm:px-0"
-          >
+          <ChipStrip role="group" aria-label="Only keys of type" bleed={false}>
             <FilterChip selected={!type} onClick={() => setType("")}>
               Any type
             </FilterChip>

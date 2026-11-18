@@ -4,10 +4,10 @@ import { ArrowDown, ArrowUp, Play } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { bytes, percent, rate } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { useNow } from "@/components/deploy/vocabulary"
-import { HUE } from "@/components/overview/readings"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { RowLink } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { HUE } from "@/components/live-figure"
+import { Sparkline } from "@/components/sparkline"
+import { RowLink } from "@/components/row-link"
 import { ProductLogo, containerProduct, imageProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -86,7 +86,7 @@ export function ServiceRows({ rows, wide, roomy, ...rest }: ServiceRowsProps) {
     )
   }
   return (
-    <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+    <Table className="table-fixed" containerClassName="max-h-rail">
       <TableHeader className={stickyTableHeader}>
         <TableRow>
           <TableHead>Service</TableHead>
@@ -334,7 +334,7 @@ function ServiceState({ reading, busy }: { reading: ServiceReading; busy?: strin
 
 /** Nothing to read: a service that is not running, or whose first frame is on its way. */
 function Unread() {
-  return <p className="text-right font-mono text-muted-foreground/60">—</p>
+  return <p className="text-right font-mono text-faint">—</p>
 }
 
 /**
@@ -434,7 +434,7 @@ function Ports({ reading, className }: { reading: ServiceReading; className?: st
       all.findIndex((q) => q.publicPort === p.publicPort && q.type === p.type) === index,
   )
   if (published.length === 0) {
-    return className ? null : <span className="text-hint text-muted-foreground/60">—</span>
+    return className ? null : <span className="text-hint text-faint">—</span>
   }
   return (
     <span className={cn("flex flex-wrap gap-1", className)}>

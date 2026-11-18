@@ -1,15 +1,14 @@
 "use client"
 
 import { useCallback } from "react"
-import Link from "next/link"
 import { plural } from "@/lib/format"
 import type { DeploymentSharedVariable, DeploymentSummary } from "@/lib/types"
 import { Code, LockClosed, Plus } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, hasProductLogo, variableProduct } from "@/components/product-logo"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { projectNode, projectNodeId, useFleet } from "@/components/deploy/section-picture"
 import { SharedVariables } from "@/components/deploy/shared-variables"
 import {
@@ -27,14 +26,7 @@ export function SharedVariablesPage() {
   const fleet = useFleet()
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Shared variables"
-      />
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Shared variables" />
       <SharedVariables
         scope={{ kind: "server" }}
         frame={({ count, variables, failed, actions, body }) => (

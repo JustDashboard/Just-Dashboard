@@ -6,7 +6,7 @@ import { notify } from "@/lib/toast"
 import { get } from "@/lib/api"
 import type { GitRepo } from "@/lib/types"
 import { RunConsole, useRunConsole } from "@/components/docker/run-console"
-import { Hint } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -122,11 +122,11 @@ export function BuildDialog({
               </option>
             ))}
           </datalist>
-          <Hint>
+          <FormNote>
             The repositories the git panel knows about are suggested here. The build sees this whole
             directory, so a large one with node_modules in it is a slow build — a .dockerignore is
             what fixes that.
-          </Hint>
+          </FormNote>
         </div>
 
         <div className="grid gap-3 sm:grid-cols-2">

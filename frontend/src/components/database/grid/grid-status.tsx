@@ -2,6 +2,7 @@
 
 import { PaneFooter } from "@/components/panel"
 import type { ChangeCounts } from "./change-set"
+import { CHANGE_STATE } from "./legend"
 import { describeAggregate, describeStatus, type GridStatus } from "./status"
 
 /**
@@ -47,21 +48,24 @@ export function GridStatusBar({
         {counts && counts.total > 0 && (
           <span className="flex items-center gap-2 font-mono whitespace-nowrap">
             {counts.inserts > 0 && (
-              <span className="text-(--git-added)">
-                +{counts.inserts}
-                <span className="sr-only"> new</span>
+              <span className={CHANGE_STATE.inserted.hue}>
+                {CHANGE_STATE.inserted.sign}
+                {counts.inserts}
+                <span className="sr-only"> {CHANGE_STATE.inserted.short}</span>
               </span>
             )}
             {counts.updates > 0 && (
-              <span className="text-(--git-modified)">
-                ~{counts.updates}
-                <span className="sr-only"> edited</span>
+              <span className={CHANGE_STATE.updated.hue}>
+                {CHANGE_STATE.updated.sign}
+                {counts.updates}
+                <span className="sr-only"> {CHANGE_STATE.updated.short}</span>
               </span>
             )}
             {counts.deletes > 0 && (
-              <span className="text-(--git-deleted)">
-                −{counts.deletes}
-                <span className="sr-only"> to delete</span>
+              <span className={CHANGE_STATE.deleted.hue}>
+                {CHANGE_STATE.deleted.sign}
+                {counts.deletes}
+                <span className="sr-only"> {CHANGE_STATE.deleted.short}</span>
               </span>
             )}
           </span>

@@ -2,15 +2,7 @@
 
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
-import {
-  useCallback,
-  useEffect,
-  useId,
-  useImperativeHandle,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useImperativeHandle, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import {
   CloudUpload,
@@ -24,6 +16,7 @@ import {
   Wrench,
 } from "@/components/icons"
 import { ApiError, post } from "@/lib/api"
+import { copyPending } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
@@ -32,13 +25,14 @@ import type { PollState } from "@/hooks/use-poll"
 import { Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
-import { ResizeHandle } from "@/components/resize-handle"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import type { Verb } from "@/components/verbs"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -65,7 +59,13 @@ import {
 import { SqlReview } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
-import { HeadVerbs, useHeadMenu } from "@/components/database/workbench/chrome"
+import {
+  HeadVerbs,
+  ObjectHead,
+  WorkbenchSide,
+  useHeadMenu,
+} from "@/components/database/workbench/chrome"
+import { clamp } from "@/components/database/workbench/side-model"
 import { EXPORT_FORMATS, EXPORT_ROWS, EXPORT_ROWS_MAX } from "@/components/database/data/export"
 import { FilterBar } from "@/components/database/data/filter-bar"
 import { focusAfterDialog } from "@/components/database/data/focus"
@@ -99,10 +99,10 @@ import {
   DEFAULT_PAGE_SIZE,
   PAGE_SIZES,
   gridSort,
-  grouped,
   type TableView,
   type ViewState,
 } from "@/components/database/data/view"
+import { grouped } from "@/lib/format"
 
 const VIEWS: { key: TableView; label: string }[] = [
   { key: "data", label: "Data" },
@@ -111,8 +111,6 @@ const VIEWS: { key: TableView; label: string }[] = [
 ]
 const NO_ERRORS: Record<string, string> = {}
 const NO_VERBS: Verb[] = []
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 /** What the page above can ask of the open table. */
 export interface TableWorkbenchHandle {
@@ -518,11 +516,7 @@ export function TableWorkbench({
       try {
         // The clipboard is promised the text inside the gesture; a write made
         // after the request came back is one Safari refuses.
-        await navigator.clipboard.write([
-          new ClipboardItem({
-            "text/plain": text.then((sql) => new Blob([sql], { type: "text/plain" })),
-          }),
-        ])
+        await copyPending(text)
         notify.success(rows.length === 1 ? "Copied 1 INSERT" : `Copied ${rows.length} INSERTs`)
       } catch {
         try {
@@ -719,84 +713,29 @@ export function TableWorkbench({
         ],
   )
 
-  const tabsId = useId()
-  const tabs = useRef<HTMLDivElement>(null)
-  // A tab list is one stop of the keyboard: the arrows move along it, and the
-  // view follows the focus.
-  const onTabKey = (event: React.KeyboardEvent) => {
-    const at = VIEWS.findIndex((entry) => entry.key === view.view)
-    const to =
-      event.key === "ArrowRight"
-        ? (at + 1) % VIEWS.length
-        : event.key === "ArrowLeft"
-          ? (at + VIEWS.length - 1) % VIEWS.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? VIEWS.length - 1
-              : -1
-    if (to < 0) return
-    event.preventDefault()
-    setView({ view: VIEWS[to].key })
-    tabs.current?.querySelector<HTMLElement>(`[data-view="${VIEWS[to].key}"]`)?.focus()
-  }
-
   const strip = (
     // The strip lays itself out by its own width, not the window's: the rail
     // and the row panel beside it decide how much of the window it has. With
     // room it is one line, and the name gives way — down to a floor, never to
-    // nothing — before anything else does. Without, the commands take a
-    // second line under the name and the views.
-    <div className="@container shrink-0 border-b border-hairline bg-surface-header">
-      {/* 40px with its hairline, as the rail's head beside it is: tabs of a
-          full 40 over the rule put this one a pixel below the rail's. */}
-      <div className="flex min-h-[39px] items-stretch px-1.5 @max-[34rem]:flex-wrap">
-        <div className="flex min-w-0 items-center gap-1.5 py-1 pr-2 @max-[34rem]:max-w-[calc(100%-13.5rem)]">
-          <KindGlyph kind={kind} />
-          <h2
-            className="flex min-w-0 items-baseline font-mono text-body font-medium"
-            title={schema ? `${schema}.${table}` : table}
-          >
-            {schema && (
-              // The schema is also the rail's heading; the name is only here.
-              <span className="shrink-0 text-muted-foreground @max-3xl:hidden">{schema}.</span>
-            )}
-            <span className="min-w-[6ch] truncate">{table}</span>
-          </h2>
-          {kind !== "table" && <Tag className="shrink-0">{word}</Tag>}
-        </div>
-        {!missing && (
-          // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself
-          <div
-            ref={tabs}
-            role="tablist"
-            aria-label="View of the table"
-            className="flex shrink-0 items-stretch"
-            onKeyDown={onTabKey}
-          >
-            {VIEWS.map((entry) => {
-              const selected = view.view === entry.key
-              return (
-                <button
-                  key={entry.key}
-                  type="button"
-                  role="tab"
-                  id={`${tabsId}-${entry.key}`}
-                  data-view={entry.key}
-                  aria-selected={selected}
-                  aria-controls={selected ? `${tabsId}-panel` : undefined}
-                  tabIndex={selected ? 0 : -1}
-                  className={cn(tabClasses(selected, "h-[39px]"), "max-sm:px-2")}
-                  onClick={() => setView({ view: entry.key })}
-                >
-                  {entry.label}
-                </button>
-              )
-            })}
-          </div>
-        )}
-      </div>
-    </div>
+    // nothing — before anything else does. Without, the views take a second
+    // line under the name.
+    <ObjectHead
+      mark={<KindGlyph kind={kind} />}
+      prefix={schema || undefined}
+      name={table}
+      kind={kind !== "table" ? <Tag>{word}</Tag> : undefined}
+      identityClassName="@max-stack/object:max-w-[calc(100%-13.5rem)]"
+      views={
+        !missing && (
+          <ViewTabList
+            label="View of the table"
+            value={view.view}
+            views={VIEWS}
+            className="border-b-0 [&_[role=tab]]:max-sm:px-2"
+          />
+        )
+      }
+    />
   )
 
   let body: React.ReactNode
@@ -1065,44 +1004,34 @@ export function TableWorkbench({
   return (
     <>
       <HeadVerbs>{commands}</HeadVerbs>
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+      <Tabs
+        value={view.view}
+        onValueChange={(next) => setView({ view: next as TableView })}
+        className="flex min-h-0 min-w-0 flex-1 flex-col gap-0"
+      >
         {strip}
         {missing ? (
           body
         ) : (
-          <div
-            role="tabpanel"
-            id={`${tabsId}-panel`}
-            aria-labelledby={`${tabsId}-${view.view}`}
-            className="flex min-h-0 min-w-0 flex-1 flex-col"
-          >
+          <TabsContent value={view.view} className="flex min-h-0 min-w-0 flex-col">
             {body}
-          </div>
+          </TabsContent>
         )}
-      </div>
+      </Tabs>
 
       {inspectorShown && (
-        <div
-          style={{ "--jd-data-inspector": `${panel.width}px` } as React.CSSProperties}
-          className={cn(
-            "flex min-h-0 flex-col border-hairline bg-card",
-            panel.over
-              ? "absolute inset-0 z-30"
-              : "relative w-(--jd-data-inspector) shrink-0 border-l",
-          )}
+        <WorkbenchSide
+          side="right"
+          label="Row panel width"
+          column={{
+            beside: !panel.over,
+            width: panel.width,
+            min: INSPECTOR.min,
+            max: panel.max,
+            setWidth: (px, commit) => panel.setWidth(clamp(px, INSPECTOR.min, panel.max), commit),
+            reset: panel.resetWidth,
+          }}
         >
-          {!panel.over && (
-            <ResizeHandle
-              side="right"
-              label="Row panel width"
-              value={panel.width}
-              min={INSPECTOR.min}
-              max={panel.max}
-              onChange={(px, commit) => panel.setWidth(clamp(px, INSPECTOR.min, panel.max), commit)}
-              onReset={panel.resetWidth}
-              className="absolute inset-y-0 -left-1 z-20"
-            />
-          )}
           <RowInspector
             schema={schema}
             table={table}
@@ -1123,7 +1052,7 @@ export function TableWorkbench({
             onMove={(index) => (grid.current ? grid.current.revealRow(index) : setActiveRow(index))}
             onClose={() => setInspecting(false)}
           />
-        </div>
+        </WorkbenchSide>
       )}
 
       <SqlReview

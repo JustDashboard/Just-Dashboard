@@ -10,7 +10,7 @@
 # committed, staged, unstaged and untracked alike — and runs:
 #
 #   - Prettier and ESLint on the changed frontend files, `tsc --noEmit`, and
-#     `bun test src` (under a second); ESLint on the whole tree when the rules
+#     `bun test src scripts` (under a second); ESLint on the whole tree when the rules
 #     or the dependencies changed (package.json, bun.lock, tsconfig.json, the
 #     ESLint configuration);
 #   - `go build ./...` and `go vet` on the changed packages, then the tests
@@ -33,6 +33,11 @@
 #     deploy/, .env.example and the Dockerfiles. A test names a file by its
 #     last component, as it must to run or read it, and a changed test runs
 #     as itself;
+#   - for a changed page under docs/internal/frontend, `scripts/doc-names.py`,
+#     which looks up the names it writes in backticks and fails on a miss in a
+#     line the change wrote, and the frontend's doc checks
+#     (`src/docs-catalogue.test.js`), which a change to globals.css runs too
+#     since the token page is printed from it;
 #   - for a change under sdk/, the deployment API clients' own checks: `tsc`
 #     and `bun test` in sdk/typescript, `go vet` and `go test` in sdk/go
 #     (its own module, which the backend's packages do not reach);
@@ -277,6 +282,22 @@ if [ "${#script_tests[@]}" -gt 0 ]; then
 	mapfile -t script_tests < <(printf '%s\n' "${script_tests[@]}" | sort -u)
 fi
 
+# The UI docs a change reaches. A page's backticked names are looked up by
+# scripts/doc-names.py; the catalogue, the names and the token page are what
+# src/docs-catalogue.test.js checks, so it runs for a page or for the
+# stylesheet the token page is printed from, even when no script changed.
+frontend_docs=()
+doc_tests=
+for f in "${changed[@]}"; do
+	case $f in
+	docs/internal/frontend/*.md)
+		doc_tests=1
+		[ -e "$f" ] && frontend_docs+=("$f")
+		;;
+	frontend/src/app/globals.css) doc_tests=1 ;;
+	esac
+done
+
 # The packages a change to go.mod reaches, as ./paths: every one (./...) when
 # the go or toolchain line moved, and otherwise those whose imports, followed
 # all the way down, enter a module whose version line changed. A bumped
@@ -396,6 +417,9 @@ if [ -n "${JD_TEST_CHANGED_PLAN:-}" ]; then
 	fi
 	printf '\n'
 	echo "Browser specs: ${specs[*]:-}"
+	# Only when there are some, so a plan for a change elsewhere reads as before.
+	if [ "${#frontend_docs[@]}" -gt 0 ]; then echo "Doc names: ${frontend_docs[*]}"; fi
+	if [ -n "$doc_tests" ]; then echo "Doc checks: src/docs-catalogue.test.js"; fi
 	exit 0
 fi
 
@@ -407,6 +431,10 @@ if [ "${#script_tests[@]}" -gt 0 ]; then
 	for t in "${script_tests[@]}"; do
 		python3 "$t"
 	done
+fi
+if [ "${#frontend_docs[@]}" -gt 0 ]; then
+	echo "Doc names: ${frontend_docs[*]}"
+	python3 scripts/doc-names.py --since "$fork" "${frontend_docs[@]}"
 fi
 
 # The type-check keeps what it learnt about each file, by the file's contents,
@@ -440,8 +468,10 @@ if [ "${#lintable[@]}" -gt 0 ] || [ -n "$lint_all" ]; then
 			bunx eslint "${lintable[@]}"
 		fi
 		typecheck
-		bun test src
+		bun test src scripts
 	)
+elif [ -n "$doc_tests" ]; then
+	(cd frontend && bun test src/docs-catalogue.test.js)
 fi
 
 sdk_go=

@@ -3,12 +3,13 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { drainBoardSaves } from "@/lib/board-save"
+import { drainBoardSaves } from "@/lib/board/save"
 import { createEditorDraftStore } from "@/lib/editor-drafts"
 import {
   CaptureUpdateAction,
   convertToExcalidrawElements,
   Excalidraw,
+  getCommonBounds,
   hashElementsVersion,
   isLinearElement,
   reconcileElements,
@@ -45,7 +46,9 @@ import { IconAction } from "@/components/icon-action"
 import { Page } from "@/components/page"
 import { PaneHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { WorkbenchHeader } from "@/components/workbench-header"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -53,10 +56,12 @@ import { Modal } from "@/components/modal"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { sectionHref } from "@/components/database/engine"
 import { ApiError, del, get, put } from "@/lib/api"
-import { dashboardResource, embeddable } from "@/lib/board-embeds"
+import { dashboardResource, embeddable } from "@/lib/board/embeds"
 import { EXCALIDRAW_ASSETS } from "@/lib/vendored"
-import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board-files"
-import type { Board, BoardSaved, BoardScene } from "@/lib/boards"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
+import { arrowOf, panned } from "@/components/map/canvas-keys"
+import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board/files"
+import type { Board, BoardSaved, BoardScene } from "@/lib/board/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -67,7 +72,7 @@ import { LiveCard, LiveCardProvider } from "@/components/boards/live-card"
 import { useBoardFiles } from "@/components/boards/use-board-files"
 import { useBoardLibrary } from "@/components/boards/use-board-library"
 import { useBoardLive } from "@/components/boards/use-board-live"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { ProjectFavicon } from "@/components/project-mark"
 
 type SaveState = "saved" | "pending" | "saving" | "error" | "unnamed" | "conflict" | "missing"
 
@@ -194,7 +199,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     (error instanceof ApiError && (error.code === "board_not_found" || error.status === 404))
   if (absent)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <h1 className="sr-only">Drawing</h1>
         <EmptyState
           mark={<ProductLogo id="excalidraw" size="lg" />}
@@ -213,7 +218,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     )
   if (error)
     return (
-      <Page className="animate-rise">
+      <Page rise>
         <h1 className="sr-only">Drawing</h1>
         {/* Reading a drawing changes nothing, so it is always worth asking again. */}
         <ErrorState
@@ -235,12 +240,63 @@ export default function BoardWorkspace({ id }: { id: number }) {
     )
   if (!board)
     return (
-      <Page fill className="max-w-none p-2 lg:p-3">
+      <Page fill="workspace">
         <h1 className="sr-only">Drawing</h1>
         <LoadingPanel />
       </Page>
     )
   return <LoadedBoard key={board.id} board={board} />
+}
+
+/**
+ * The arrows on a drawing with nothing selected slide it (T10), as they do
+ * the map and a database's diagram. Excalidraw moves a selection with them
+ * itself (1px, 5px with Shift) and has nothing for them otherwise: it slides
+ * by Page Up and Page Down alone. So this answers only where Excalidraw did
+ * not — no selection, no text being written, no dialog or menu of its own
+ * open — and the drawing is never slid out of sight.
+ */
+function slideScene(api: ExcalidrawImperativeAPI | null, event: React.KeyboardEvent) {
+  const direction = arrowOf(event)
+  if (!api || !direction || isTypingTarget(event.target)) return
+  // Excalidraw's confirmations (Reset the canvas, the overwrite on Open) are
+  // dialogs its app state does not name, and a key pressed in one still
+  // comes up through here.
+  if ((event.target as Element).closest?.(OWNER_SELECTOR)) return
+  const state = api.getAppState()
+  if (
+    Object.values(state.selectedElementIds).some(Boolean) ||
+    state.editingTextElement ||
+    state.newElement ||
+    state.openDialog ||
+    state.openMenu ||
+    state.openPopup
+  )
+    return
+  event.preventDefault()
+  const zoom = state.zoom.value
+  const elements = api.getSceneElements()
+  const fence =
+    elements.length > 0
+      ? (() => {
+          const [minX, minY, maxX, maxY] = getCommonBounds(elements)
+          return {
+            bounds: { x: minX, y: minY, width: maxX - minX, height: maxY - minY },
+            size: { width: state.width, height: state.height },
+          }
+        })()
+      : undefined
+  // Excalidraw draws a scene point at (point + scroll) × zoom.
+  const next = panned(
+    { x: state.scrollX * zoom, y: state.scrollY * zoom, zoom },
+    direction,
+    event.shiftKey,
+    fence,
+  )
+  api.updateScene({
+    appState: { scrollX: next.x / zoom, scrollY: next.y / zoom },
+    captureUpdate: CaptureUpdateAction.NEVER,
+  })
 }
 
 function LoadedBoard({ board }: { board: Board }) {
@@ -640,9 +696,7 @@ function LoadedBoard({ board }: { board: Board }) {
   const said = SAVE_WORDS[saveState]
 
   return (
-    <Page fill className="max-w-none gap-0 p-0 lg:px-3 lg:py-3">
-      {/* A workbench draws no page header, so its name is said, not drawn. */}
-      <h1 className="sr-only">Drawing: {name.trim() || board.name}</h1>
+    <Page fill="workspace">
       <div
         data-slot="drawing-workspace"
         className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
@@ -650,12 +704,11 @@ function LoadedBoard({ board }: { board: Board }) {
         {/* Two rows on a phone, on purpose: back, the name and the verbs, then
             the save state under the name. Wrapped wherever the next control
             ran out of room, the status landed between the buttons. */}
-        <PaneHeader className="grid min-h-12 grid-cols-[auto_minmax(0,1fr)_auto] gap-x-1.5 gap-y-0 px-2 py-1.5 sm:flex">
-          <IconAction label="Back to Excalidraw" onClick={() => void go("/excalidraw")}>
-            <ArrowLeft />
-          </IconAction>
-          <span className="flex min-w-0 items-center gap-1.5">
-            <ProductLogo id="excalidraw" size="sm" className="max-sm:hidden" />
+        <WorkbenchHeader
+          back={{ label: "Back to Excalidraw", onClick: () => void go("/excalidraw") }}
+          heading={`Drawing: ${name.trim() || board.name}`}
+          mark={<ProductLogo id="excalidraw" size="sm" className="max-sm:hidden" />}
+          name={
             <Input
               aria-label="Drawing name"
               value={name}
@@ -670,36 +723,38 @@ function LoadedBoard({ board }: { board: Board }) {
               // As wide as the name, so the save state stands beside it
               // rather than a field's width away.
               className={cn(
-                "[field-sizing:content] h-8 w-auto max-w-full min-w-24 border-transparent bg-transparent px-2 text-body font-semibold shadow-none sm:max-w-80",
+                "-ml-2 [field-sizing:content] h-8 w-auto max-w-full min-w-24 border-transparent bg-transparent px-2 text-body font-semibold shadow-none sm:max-w-80",
                 // A name that cannot be edited is a name, not a field.
                 canWrite ? "hover:border-input" : "dark:bg-transparent",
               )}
             />
-          </span>
-          {/* As tall as the button a failed save puts in it, so the bar is
-              one height whatever the state says. */}
-          <span className="flex min-w-0 items-center gap-x-3 max-sm:order-last max-sm:col-span-3 max-sm:h-6 max-sm:pl-10 sm:mr-auto sm:pl-1">
-            <span role="status" className="flex min-w-0">
-              <Status tone={said.tone} label={said.label} className="min-w-0 font-normal" />
+          }
+          // As tall as the button a failed save puts in it, so the strip is
+          // one height whatever the state says.
+          state={
+            <span className="flex h-6 min-w-0 items-center gap-x-3">
+              <span role="status" className="flex min-w-0">
+                <Status tone={said.tone} label={said.label} className="min-w-0 font-normal" />
+              </span>
+              {saveState === "error" && canWrite && (
+                <Button variant="outline" size="xs" onClick={() => void flush()}>
+                  Try again
+                </Button>
+              )}
+              {live.peers.length > 0 && (
+                <Status
+                  tone="running"
+                  live
+                  label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
+                  className="min-w-0 font-normal text-muted-foreground"
+                />
+              )}
             </span>
-            {saveState === "error" && canWrite && (
-              <Button variant="outline" size="xs" onClick={() => void flush()}>
-                Try again
-              </Button>
-            )}
-            {live.peers.length > 0 && (
-              <Status
-                tone="running"
-                live
-                label={`Live with ${listOf(live.peers.map((p) => p.name || p.user))}`}
-                className="min-w-0 font-normal text-muted-foreground"
-              />
-            )}
-          </span>
-          <span className="flex shrink-0 items-center gap-1.5">
-            {/* Nothing added to a drawing another tab changed could be saved,
-                so until it is read again the one verb is to read it again. */}
-            {saveState === "conflict" ? (
+          }
+          command={
+            // Nothing added to a drawing another tab changed could be saved,
+            // so until it is read again the one verb is to read it again.
+            saveState === "conflict" ? (
               <Button size="sm" onClick={() => window.location.reload()}>
                 <RefreshClockwise />
                 Reload
@@ -717,12 +772,16 @@ function LoadedBoard({ board }: { board: Board }) {
                   <span className="sm:hidden">Add</span>
                 </Button>
               )
-            )}
-            <VerbMenu label="Drawing actions" verbs={verbs} />
-          </span>
-        </PaneHeader>
+            )
+          }
+          menu={<VerbMenu label="Drawing actions" verbs={verbs} />}
+        />
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
-          <div className="min-h-0 min-w-0 flex-1" aria-label={`${name} drawing canvas`}>
+          <div
+            className="min-h-0 min-w-0 flex-1"
+            aria-label={`${name} drawing canvas`}
+            onKeyDown={(event) => slideScene(apiRef.current, event)}
+          >
             <LiveCardProvider open={(href) => void go(href)}>
               <Excalidraw
                 initialData={
@@ -774,7 +833,7 @@ function LoadedBoard({ board }: { board: Board }) {
             // canvas's place, since a 320px panel left a strip of canvas no
             // finger could draw on.
             <aside
-              className="absolute inset-0 z-10 flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
+              className="absolute inset-0 z-raised flex min-h-0 flex-col border-hairline bg-card sm:relative sm:inset-auto sm:w-80 sm:shrink-0 sm:border-l"
               aria-label="Server items"
             >
               <PaneHeader className="h-10 py-0 pl-3">
@@ -805,9 +864,7 @@ function LoadedBoard({ board }: { board: Board }) {
                 </section>
                 <section>
                   <h3 className="eyebrow px-2 pt-1 pb-1.5">Deployments</h3>
-                  {projects.length === 0 && (
-                    <p className="px-2 text-hint text-muted-foreground">No projects yet</p>
-                  )}
+                  {projects.length === 0 && <EmptyNote dense>No projects yet.</EmptyNote>}
                   {projects.map((project) => (
                     <ResourceButton
                       key={project.id}

@@ -22,7 +22,7 @@ import { ShellWords } from "@/components/deploy/run-evidence"
 import { FailureWords } from "@/components/hub-link/status-panel"
 import { Field, InfoTip } from "@/components/form"
 import { Meter } from "@/components/meter"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { Notice } from "@/components/state"
@@ -195,11 +195,9 @@ export function ConnectPanel({
         </InfoTip>
       </p>
       {refusal && (
-        <div role="alert">
-          <Notice tone="danger" icon={Warning} title="Could not connect">
-            <FailureWords {...refusal} summary="What this server said" />
-          </Notice>
-        </div>
+        <Notice tone="danger" live="alert" icon={Warning} title="Could not connect">
+          <FailureWords {...refusal} summary="What this server said" />
+        </Notice>
       )}
     </Section>
   )

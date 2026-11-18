@@ -3,7 +3,7 @@
 import { useState } from "react"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
-import type { DiagnosticRequest, DiagnosticResult, WakeDevice } from "@/lib/network-diagnostics"
+import type { DiagnosticRequest, DiagnosticResult, WakeDevice } from "@/lib/network/diagnostics"
 import type { ToolDef } from "./tool-defs"
 import { portProblem, toolReady, verifyProblem } from "./tool-input"
 

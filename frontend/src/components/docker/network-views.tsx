@@ -15,22 +15,22 @@ import { membersKnown, ownerConsequence } from "@/lib/docker-networks"
 import { calendarDate, rate } from "@/lib/format"
 import type { Container, DockerNetwork, NetworkDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { DimActions, IconAction } from "@/components/icon-action"
-import { LogoGlyph } from "@/components/logo"
-import { Detail, DetailList } from "@/components/page"
+import { DashboardMark } from "@/components/logo"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelHeader } from "@/components/panel"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { LiveBytes } from "@/components/overview/readings"
-import { WireMark } from "@/components/deploy/wire"
+import { TileTrend } from "@/components/sparkline"
+import { LiveBytes } from "@/components/live-figure"
+import { WireMark } from "@/components/wire/wire"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { RX, TX } from "@/components/network/rate-pair"
 import type { NetworkRate } from "@/components/docker/network-band"
 import type { ContainerTraffic } from "@/components/docker/network-members"
@@ -364,9 +364,7 @@ function MemberRow({
       verb={`Open ${member.name}`}
       leading={
         member.dashboard ? (
-          <span className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background">
-            <LogoGlyph small className="h-4 text-brand" />
-          </span>
+          <DashboardMark />
         ) : (
           <ProductLogo id={container ? containerProduct(container) : "docker"} size="sm" />
         )
@@ -389,7 +387,7 @@ function MemberRow({
             .filter(Boolean)
             .join(" · ")}
         >
-          <span className="shrink-0 font-mono text-foreground/80">
+          <span className="shrink-0 font-mono text-foreground">
             {address ?? (running ? "no address" : "holds no address")}
           </span>
           {second && <span className="shrink-0 font-mono @max-lg:hidden">{second}</span>}
@@ -478,7 +476,7 @@ function MemberRow({
             "\u00a0"
           ) : (
             <>
-              answers to <span className="font-mono text-foreground/80">{names.join(", ")}</span>
+              answers to <span className="font-mono text-foreground">{names.join(", ")}</span>
             </>
           )}
         </p>

@@ -4,7 +4,7 @@
 
 The live frontend can pause scheduled inventory reads and holds row order while a process has focus,
 using PID plus creation time as identity. Keyboard inspection and place restoration use the shared
-[workspace controller](../frontend/workspace-interactions.md); explicit refresh and changed filters
+[workspace controller](../frontend/patterns/keyboard-and-place.md); explicit refresh and changed filters
 still read while paused. Signal and priority route guards remain the contracts below.
 
 A server without systemd answers every systemd route `503 not_installed` (`mapProcsError`): a missing

@@ -12,19 +12,22 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { ChoiceList } from "@/components/flow"
-import { FactDot } from "@/components/metrics/host-identity"
-import { StreamState } from "@/components/overview/readings"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { ChoiceList } from "@/components/choice-row"
+import { Fact } from "@/components/fact-line"
+import { StreamState } from "@/components/live-figure"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Workspace } from "@/components/workspace/workspace"
 import { cn } from "@/lib/utils"
 import { DockerIdentity } from "@/components/docker/docker-identity"
-import { ExplainIcon, Field, Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
+import { Field } from "@/components/form"
 import { StackBand } from "@/components/docker/stack-band"
 import { StackChoiceRow } from "@/components/docker/stack-row"
 import {
@@ -254,10 +257,11 @@ export function StacksTab() {
         return false
       }}
     >
-      <Page className="animate-rise">
+      <Page rise>
         {header}
 
         <DockerIdentity
+          page="Stacks"
           version={engine.data?.serverVersion}
           host={host ?? undefined}
           state={
@@ -275,18 +279,16 @@ export function StacksTab() {
               <span>No stacks deployed</span>
             ) : (
               <>
-                <span className="numeric">
+                <Fact className="numeric">
                   {deployed} of {plural(stacks.length, "stack")} deployed
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   {running} of {plural(services, "service")} running
-                </span>
+                </Fact>
                 {published > 0 && (
-                  <span className="contents max-sm:hidden">
-                    <FactDot />
-                    <span className="numeric">{plural(published, "port")} published</span>
-                  </span>
+                  <Fact className="numeric max-sm:hidden">
+                    {plural(published, "port")} published
+                  </Fact>
                 )}
               </>
             )
@@ -319,9 +321,9 @@ export function StacksTab() {
             title="No compose stacks found"
             description={
               <>
-                A <Term name="stack">stack</Term> is a directory with a compose file in it. The
-                dashboard finds them by the labels compose puts on the containers it creates, and by
-                looking under the configured compose directories.
+                A <Definition name="stack">stack</Definition> is a directory with a compose file in
+                it. The dashboard finds them by the labels compose puts on the containers it
+                creates, and by looking under the configured compose directories.
               </>
             }
             action={createButton}
@@ -332,10 +334,10 @@ export function StacksTab() {
               title={
                 <span className="inline-flex items-center gap-1.5">
                   Stacks
-                  <span className="numeric ml-0.5 text-body font-normal text-muted-foreground">
+                  <span className="numeric ml-0.5 text-body leading-none font-normal text-muted-foreground">
                     {filtered ? `${visible.length} of ${stacks.length}` : stacks.length}
                   </span>
-                  <ExplainIcon name="stack" />
+                  <Definition name="stack" />
                 </span>
               }
               actions={<StreamState connection={socket.state} />}
@@ -492,7 +494,6 @@ function NewStackDialog({
         <Field
           label="Name"
           htmlFor="stack-name"
-          required
           hint="Lower-case letters, digits, dashes and underscores. Compose uses it to name the containers and the network it creates."
         >
           <Input
@@ -500,6 +501,7 @@ function NewStackDialog({
             value={name}
             spellCheck={false}
             placeholder="my-app"
+            required
             onChange={(e) => setName(e.target.value)}
           />
         </Field>

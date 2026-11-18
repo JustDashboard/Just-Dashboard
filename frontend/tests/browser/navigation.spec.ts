@@ -69,7 +69,7 @@ test("the account menu supports keyboard navigation and returns focus on Escape"
   await mockShell(page)
   await page.goto("/account")
 
-  const trigger = page.getByRole("button", { name: "Account menu for Operator" })
+  const trigger = page.getByRole("button", { name: "Operator, admin, account menu" })
   await trigger.focus()
   await trigger.press("Enter")
   const menu = page.getByRole("menu", { name: "Account", exact: true })
@@ -105,7 +105,7 @@ test("the account menu keeps role visibility, two-factor state and sign out", as
     await json(route, {})
   })
   await page.goto("/account")
-  await page.getByRole("button", { name: "Account menu for Operator" }).click()
+  await page.getByRole("button", { name: "Operator, readonly, account menu" }).click()
   const menu = page.getByRole("menu", { name: "Account", exact: true })
   await expect(menu.getByRole("menuitem", { name: "Users", exact: true })).toHaveCount(0)
   await expect(menu.getByRole("menuitem", { name: "Security 2FA off" })).toBeVisible()
@@ -128,7 +128,7 @@ test("uploaded account pictures stay circular in the button and menu", async ({ 
   await page.goto("/account")
   // The modal menu hides its trigger from assistive technology while it is open.
   const trigger = page.getByRole("button", {
-    name: "Account menu for Operator",
+    name: "Operator, admin, account menu",
     includeHidden: true,
   })
   await trigger.click()
@@ -186,7 +186,7 @@ for (const layout of ["expanded", "mobile"] as const) {
       await page.getByRole("button", { name: "Toggle the sidebar", exact: true }).click()
     }
     const trigger = page.getByRole("button", {
-      name: "Account menu for Operator",
+      name: "Operator, admin, account menu",
       includeHidden: true,
     })
     const face = trigger.locator('[data-slot="user-avatar"]')
@@ -412,7 +412,7 @@ const ITEM_PAGES: [path: string, row: string][] = [
   ["/security/intrusion/jails/sshd", "Intrusion"],
   ["/network/dns/services/unbound", "DNS"],
   ["/proxy/sites/app.example.com", "Sites"],
-  ["/databases/3/access/app", "Control center"],
+  ["/databases/3/access/app", "Databases"],
 ]
 
 test("an item's page lights the row it was opened from, and only that row", async ({ page }) => {

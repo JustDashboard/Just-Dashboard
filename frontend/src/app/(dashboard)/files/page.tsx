@@ -12,7 +12,6 @@ import {
   ArrowUp,
   Check,
   ChevronDown,
-  ChevronUp,
   Clipboard,
   CloudUpload,
   Cross,
@@ -57,13 +56,14 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { FileEditorSheet } from "@/components/files/file-editor"
 import {
   defaultFolderColour,
+  FileIcon,
   folderColourOf,
   FolderColourProvider,
   FolderIcon,
   FolderSwatch,
   validFolderColour,
   type FolderColour,
-} from "@/components/files/file-icon"
+} from "@/components/file-icon"
 import { FolderColourMenu } from "@/components/files/folder-colour"
 import { COLUMN, FileRow } from "@/components/files/file-row"
 import { DiskRoom } from "@/components/files/disk-room"
@@ -124,13 +124,16 @@ import {
 import { startPathDrag, useDropTarget, type DropMode } from "@/components/files/dnd"
 import { ResizeHandle } from "@/components/resize-handle"
 import { IconAction } from "@/components/icon-action"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { Input } from "@/components/ui/input"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import {
+  ROW_NAME,
+  SortHead,
   stickyTableHeader,
   Table,
   TableBody,
@@ -218,6 +221,12 @@ export default function FilesPage() {
   const [showSidebar, setShowSidebar] = useViewState("files.sidebar", true)
   const [showInspector, setShowInspector] = useViewState("files.inspector", true)
   const [sort, setSort] = useViewState<Sort>("files.sort", { key: "name", dir: "asc" })
+  // A column's head: the first press orders by it from the top, the next turns it round.
+  const sortBy = (key: SortKey) => ({
+    active: sort.key === key,
+    descending: sort.key === key && sort.dir === "desc",
+    onSort: () => setSort({ key, dir: sort.key === key && sort.dir === "asc" ? "desc" : "asc" }),
+  })
   // Where you have just been. Kept in the browser rather than on the server:
   // unlike a starred folder, which is a fact about the machine, this is a
   // property of the last ten minutes at this screen.
@@ -803,11 +812,14 @@ export default function FilesPage() {
     confirm({
       title: entry.isDir ? "Delete folder" : "Delete file",
       confirmLabel: "Delete",
+      // What it acts on, drawn as itself; the button carries the danger, not the sentence.
+      subject: {
+        mark: <FileIcon entry={entry} className="size-6" />,
+        name: entry.name,
+        facts: <span className="font-mono break-all">{entry.path}</span>,
+      },
       description: (
-        <p className="text-destructive">
-          <b>{entry.path}</b> is deleted permanently
-          {entry.isDir ? ", along with everything inside it." : "."}
-        </p>
+        <p>It is deleted permanently{entry.isDir ? ", along with everything inside it." : "."}</p>
       ),
       action: async () => {
         await del("/files/delete", {
@@ -828,7 +840,7 @@ export default function FilesPage() {
       confirmLabel: "Delete all",
       workingLabel: "Deleting selected files…",
       description: (
-        <p className="text-destructive">
+        <p>
           {plural(targets.length, "selected item")} {targets.length === 1 ? "is" : "are"} deleted
           permanently
           {dirs.length > 0 ? ", folders and everything inside them included." : "."}
@@ -1521,7 +1533,7 @@ export default function FilesPage() {
   })
 
   return (
-    <Page fill data-files-workspace className="gap-2 p-0 md:px-0 md:py-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" data-files-workspace className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
@@ -1579,6 +1591,8 @@ export default function FilesPage() {
                 current={path ?? "/"}
                 onPick={navigate}
               >
+                {/* PlacesMenu hands this to its DropdownMenuTrigger asChild. */}
+                {/* eslint-disable-next-line retired-apis/retired */}
                 <Button size="icon-sm" variant="outline" aria-label="Places">
                   <Location className="size-3.5" />
                 </Button>
@@ -1801,7 +1815,7 @@ export default function FilesPage() {
                   max={RAIL.max}
                   onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, RAIL.max), commit)}
                   onReset={resetRailWidth}
-                  className="absolute inset-y-0 -right-1 z-20 max-lg:hidden"
+                  className="absolute inset-y-0 -right-1 z-sticky max-lg:hidden"
                 />
               </div>
             )}
@@ -1814,7 +1828,7 @@ export default function FilesPage() {
             >
               <div
                 data-file-actions
-                className="pointer-events-none absolute inset-x-2 bottom-12 z-20 flex justify-center"
+                className="pointer-events-none absolute inset-x-2 bottom-12 z-sticky flex justify-center"
               >
                 <AnimatePresence initial={false} mode="wait">
                   {selected.size > 0 ? (
@@ -1904,7 +1918,7 @@ export default function FilesPage() {
                   {...dropZone.handlers}
                 >
                   {dropZone.over && (
-                    <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center bg-wash-brand">
+                    <div className="pointer-events-none absolute inset-0 z-raised flex items-center justify-center bg-wash-brand">
                       <span className="rounded-lg border border-dashed border-rule-brand bg-card px-4 py-2 text-body font-medium">
                         Drop to upload to {truncateMiddle(path ?? "/", 40)}
                       </span>
@@ -1961,42 +1975,20 @@ export default function FilesPage() {
                                 }
                               />
                             </TableHead>
-                            <SortHead
-                              label="Name"
-                              k="name"
-                              sort={sort}
-                              setSort={setSort}
-                              className="w-full"
-                            />
-                            <SortHead
-                              label="Size"
-                              k="size"
-                              sort={sort}
-                              setSort={setSort}
-                              align="right"
-                            />
+                            <SortHead label="Name" {...sortBy("name")} className="w-full" />
+                            <SortHead label="Size" {...sortBy("size")} align="right" />
                             <SortHead
                               label="Modified"
-                              k="modified"
-                              sort={sort}
-                              setSort={setSort}
+                              {...sortBy("modified")}
                               className={COLUMN.modified}
                             />
-                            <SortHead
-                              label="Owner"
-                              k="owner"
-                              sort={sort}
-                              setSort={setSort}
-                              className={COLUMN.owner}
-                            />
+                            <SortHead label="Owner" {...sortBy("owner")} className={COLUMN.owner} />
                             <SortHead
                               label="Mode"
-                              k="mode"
-                              sort={sort}
-                              setSort={setSort}
+                              {...sortBy("mode")}
                               className={cn("w-20", COLUMN.mode)}
                             />
-                            <TableHead className="w-px" />
+                            <TableHead label="Actions" className="w-px" />
                           </TableRow>
                         </TableHeader>
                         <TableBody>
@@ -2004,10 +1996,17 @@ export default function FilesPage() {
                             <TableRow className="select-none" onActivate={() => navigate(parent)}>
                               <TableCell />
                               <TableCell colSpan={6}>
-                                <span className="flex items-center gap-2 text-body text-muted-foreground">
-                                  <ArrowUp className="size-3.5" />
+                                {/* The row's one control, so the keyboard reaches it by
+                                    name, and the row is no second stop beside it. */}
+                                <button
+                                  type="button"
+                                  {...ROW_NAME}
+                                  onClick={() => navigate(parent)}
+                                  className="flex items-center gap-2 rounded-sm text-body text-muted-foreground focus-ring hover:text-foreground"
+                                >
+                                  <ArrowUp aria-hidden className="size-3.5" />
                                   Parent folder
-                                </span>
+                                </button>
                               </TableCell>
                             </TableRow>
                           )}
@@ -2038,7 +2037,7 @@ export default function FilesPage() {
                     <div
                       data-file-marquee
                       aria-hidden
-                      className="pointer-events-none absolute z-10 rounded-sm border border-rule-brand bg-wash-brand"
+                      className="pointer-events-none absolute z-raised rounded-sm border border-rule-brand bg-wash-brand"
                       style={{
                         left: marquee.box.left,
                         top: marquee.box.top,
@@ -2100,7 +2099,7 @@ export default function FilesPage() {
                     setInspectorWidth(clamp(px, INSPECTOR.min, INSPECTOR.max), commit)
                   }
                   onReset={resetInspectorWidth}
-                  className="absolute inset-y-0 -left-1 z-20 max-lg:hidden"
+                  className="absolute inset-y-0 -left-1 z-sticky max-lg:hidden"
                 />
                 <PreviewPanel
                   entry={activeEntry}
@@ -2299,44 +2298,6 @@ function ArrangeMenu({
         )}
       </DropdownMenuContent>
     </DropdownMenu>
-  )
-}
-
-function SortHead({
-  label,
-  k,
-  sort,
-  setSort,
-  align,
-  className,
-}: {
-  label: string
-  k: SortKey
-  sort: Sort
-  setSort: (s: Sort) => void
-  align?: "right"
-  className?: string
-}) {
-  const active = sort.key === k
-  return (
-    <TableHead className={cn(align === "right" && "text-right", className)}>
-      <button
-        className={cn(
-          "inline-flex items-center gap-1 hover:text-foreground",
-          active && "text-foreground",
-          align === "right" && "flex-row-reverse",
-        )}
-        onClick={() => setSort({ key: k, dir: active && sort.dir === "asc" ? "desc" : "asc" })}
-      >
-        {label}
-        {active &&
-          (sort.dir === "asc" ? (
-            <ChevronUp className="size-3" />
-          ) : (
-            <ChevronDown className="size-3" />
-          ))}
-      </button>
-    </TableHead>
   )
 }
 

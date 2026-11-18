@@ -3,8 +3,6 @@
 import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDoubleDown,
-  ChevronLeft,
-  ChevronRight,
   CloudUpload,
   Copy,
   Download,
@@ -19,29 +17,22 @@ import {
   Trash,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { FormFact, FormFacts } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { PaneFooter } from "@/components/panel"
 import { EmptyState } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { grouped } from "@/components/database/data/view"
 import { useGridLayout } from "@/components/database/grid"
+import { PageControls } from "@/components/database/data/foot"
+import { readableDuration } from "@/components/database/data/view"
 import { EngineMark } from "@/components/database/kit"
 import {
   cloneDocument,
@@ -74,7 +65,7 @@ import {
   useListed,
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
-import { Stopped, useElapsed, useStoppable } from "@/components/database/mongo/in-flight"
+import { Stopped, useSecondsRunning, useStoppable } from "@/components/database/kit/in-flight"
 import {
   CollectionKindTag,
   CollectionMark,
@@ -104,13 +95,10 @@ import {
 import { mergeFilter } from "@/components/database/mongo/shell"
 import { ImportDialog } from "@/components/database/mongo/transfer"
 import type { MongoDoc, MongoFindResult } from "@/components/database/mongo/types"
-import {
-  MongoWorkbench,
-  WorkbenchHead,
-  type Workbench,
-} from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
-import { HeadVerbs, useHeadMenu } from "@/components/database/workbench/chrome"
+import { MongoWorkbench, type Workbench } from "@/components/database/mongo/workbench"
+import { ReadError } from "@/components/database/kit/read-error"
+import { HeadVerbs, ObjectHead, useHeadMenu } from "@/components/database/workbench/chrome"
+import { Sweep } from "@/components/loading"
 
 /** The documents before they land: a few of them, each a short run of fields. */
 function DocumentsSkeleton() {
@@ -169,7 +157,6 @@ function Documents({
   mongo,
   catalog,
   collection: info,
-  leading,
   confirm,
   exportCollection,
   exporting,
@@ -239,7 +226,7 @@ function Documents({
     0,
     [id, identity],
   )
-  const seconds = useElapsed(poll.loading)
+  const seconds = useSecondsRunning(poll.loading)
   // The page on screen is kept under the one being read, so turning a page
   // sweeps over the old documents instead of collapsing to a skeleton.
   const [kept, setKept] = useState<MongoFindResult>()
@@ -533,7 +520,7 @@ function Documents({
     <>
       {result && (
         <span className="numeric text-hint whitespace-nowrap text-muted-foreground max-lg:hidden">
-          {result.durationMs.toLocaleString("en-US")} ms
+          {readableDuration(`${result.durationMs}ms`)}
         </span>
       )}
       {result?.truncated && (
@@ -550,46 +537,17 @@ function Documents({
       >
         {words}
       </span>
-      <Select
-        value={String(pageSize)}
-        onValueChange={(next) => {
-          setSize(Number(next))
+      <PageControls
+        pageSize={pageSize}
+        sizes={PAGE_SIZES}
+        sizeLabel="Documents a page"
+        onPageSize={(next) => {
+          setSize(next)
           select({ page: null })
         }}
-      >
-        <SelectTrigger
-          size="sm"
-          aria-label="Documents a page"
-          className="h-7 gap-1 px-2 text-xs data-[size=sm]:h-7 sm:data-[size=sm]:h-7"
-        >
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent position="popper" align="end">
-          {PAGE_SIZES.map((option) => (
-            <SelectItem key={option} value={String(option)} className="text-xs">
-              {option} a page
-            </SelectItem>
-          ))}
-        </SelectContent>
-      </Select>
-      <div className="flex items-center">
-        <IconAction
-          label="Previous page"
-          className="size-7"
-          disabled={window_.page === 0}
-          onClick={() => turn(window_.page - 1)}
-        >
-          <ChevronLeft />
-        </IconAction>
-        <IconAction
-          label="Next page"
-          className="size-7"
-          disabled={!hasNext}
-          onClick={() => turn(window_.page + 1)}
-        >
-          <ChevronRight />
-        </IconAction>
-      </div>
+        onPrevious={window_.page === 0 ? undefined : () => turn(window_.page - 1)}
+        onNext={hasNext ? () => turn(window_.page + 1) : undefined}
+      />
     </>
   )
 
@@ -602,26 +560,27 @@ function Documents({
 
   return (
     <div data-slot="mongo-documents" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <WorkbenchHead leading={leading}>
-        <h2 className="flex min-w-0 items-center gap-1.5">
-          <CollectionMark kind={kind} />
-          <span className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
-            {collection}
+      <ObjectHead
+        mark={<CollectionMark kind={kind} />}
+        name={collection}
+        // What it holds stands beside its name from `md`, on the head's one
+        // line, and is the rail's row to say below that. As a second line
+        // under the name it made the head taller than the rail's head beside
+        // it, whose hairline it continues, and a row taller on a phone.
+        kind={
+          <span className="flex items-center gap-2">
+            <CollectionKindTag kind={kind} />
+            {info && (info.type === "view" || info.statsKnown) && (
+              <span className="numeric text-hint text-muted-foreground max-md:hidden">
+                {info.type === "view"
+                  ? `on ${info.viewOn}`
+                  : `${plural(info.count, "document")} · ${bytes(info.size)}`}
+              </span>
+            )}
           </span>
-        </h2>
-        <CollectionKindTag kind={kind} />
-        {info && (
-          <span className="numeric min-w-0 truncate text-hint text-muted-foreground max-md:hidden">
-            {info.type === "view"
-              ? `on ${info.viewOn}`
-              : info.statsKnown
-                ? `${grouped(info.count)} ${info.count === 1 ? "document" : "documents"} · ${bytes(info.size)}`
-                : ""}
-          </span>
-        )}
-        <span className="min-w-0 flex-1" />
-        <VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />
-      </WorkbenchHead>
+        }
+        verbs={<VerbMenu verbs={pageVerbs} label={`More actions for ${collection}`} />}
+      />
       {/* The collection's commands, in the frame's head; reading again is a
           word in its menu. */}
       <HeadVerbs>
@@ -721,7 +680,7 @@ function Documents({
             data-slot="mongo-unsent"
             className="ml-auto flex min-h-9 min-w-0 flex-wrap items-center gap-x-1.5"
           >
-            <p className="text-hint text-(--git-modified)">
+            <p className="text-hint text-git-modified">
               Unsent edits on{" "}
               {stagedIds.length === 1 ? "one document" : `${stagedIds.length} documents`}
               {elsewhere.length > 0 &&
@@ -770,14 +729,7 @@ function Documents({
 
       {/* The sweep over a page that is being replaced: the old documents stay under it. */}
       <div className="relative min-h-0 flex-1">
-        {poll.loading && result && (
-          <div
-            aria-hidden
-            className="absolute inset-x-0 top-0 z-10 h-0.5 overflow-hidden bg-meter-track"
-          >
-            <div className="h-full w-1/3 animate-sweep bg-brand" />
-          </div>
-        )}
+        {poll.loading && result && <Sweep className="absolute inset-x-0 top-0 z-raised h-0.5" />}
         {view === "table" && result && !empty ? (
           <div className="absolute inset-0 flex min-h-0 min-w-0 flex-col">
             <TableView

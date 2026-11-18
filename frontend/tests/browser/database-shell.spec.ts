@@ -130,7 +130,7 @@ test("an address that names no database says so and opens no other", async ({ pa
     )
     await expect(strip(page)).toHaveCount(0)
     // The rail stays on the section: no pages of a database that is not there.
-    expect(await railPages(page), path).toEqual(["Control center", "Map", "Add a database"])
+    expect(await railPages(page), path).toEqual(["Databases", "Map", "Add a database"])
     expect(where(page)).toBe(path)
   }
 })
@@ -249,6 +249,46 @@ test("two changes to the address made by one press both land", async ({ page }) 
   )
 })
 
+test("on a phone a server's log is the screen's width, its views on a bar at the foot", async ({
+  page,
+}) => {
+  const journal = "journal:postgresql@17-main.service"
+  await mockDatabases(page, {
+    logSources: {
+      sources: [
+        {
+          id: journal,
+          label: "postgresql@17-main.service",
+          kind: "journal",
+          lens: "postgres",
+          rotated: false,
+          primary: true,
+        },
+      ],
+    },
+  })
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/databases/1/logs")
+  const bar = page.getByRole("navigation", { name: "Log views" })
+  await expect(bar.getByRole("button")).toHaveText([
+    "Live",
+    "History",
+    "Insights",
+    "Queries",
+    "Runs",
+  ])
+  const foot = (await bar.boundingBox())!
+  expect([foot.x, foot.width, Math.round(foot.y + foot.height)]).toEqual([0, 390, 844])
+  // The strip's own views give way to the bar, and the pane draws no frame.
+  await expect(page.getByRole("navigation", { name: "Log mode" })).toBeHidden()
+  await bar.getByRole("button", { name: "History" }).click()
+  await expect(page).toHaveURL(/view=search/)
+  await expect(bar.getByRole("button", { name: "History" })).toHaveAttribute("aria-current", "page")
+  await bar.getByRole("button", { name: "Queries" }).click()
+  await expect(page).toHaveURL(/view=queries/)
+  await expect(bar.getByRole("button", { name: "Queries" })).toHaveAttribute("aria-current", "page")
+})
+
 test("the switcher groups by engine, reads a stopped server as stopped and keeps the place on the one already open", async ({
   page,
 }) => {
@@ -333,7 +373,7 @@ test("a password asked for is not shown once the popover it was asked in has clo
   // Asked for and waited for, it is shown — and quoted so a shell reads none of it.
   await show.click()
   await expect(string).toContainText("s3cret")
-  await page.getByRole("button", { name: "psql", exact: true }).click()
+  await page.getByRole("radio", { name: "psql", exact: true }).click()
   await expect(string).toHaveText(
     "psql 'postgres://app:s3cret@127.0.0.1:5432/shop_main?sslmode=disable'",
   )
@@ -501,7 +541,6 @@ const UNDER_THE_HEADER = [
   "/databases/1/logs",
   "/databases/1/access",
   "/databases/1/backups",
-  "/databases/1/import",
   "/databases/1/alerts",
   "/databases/1/settings",
   "/databases/1/settings/network",
@@ -573,6 +612,21 @@ test("a workbench heads itself, and the shell draws no header over it", async ({
   await expect(header(page)).toHaveCount(1)
   await expect(line(page)).toContainText("Redis 7.4.1")
   await expect(line(page).getByRole("link", { name: "Browse keys" })).toBeVisible()
+})
+
+test("a flow opens on its own question and the way back, with no header over it", async ({
+  page,
+}) => {
+  await mockDatabases(page, LABELLED)
+  await page.goto("/databases/1/import")
+  await expect(page.getByRole("heading", { level: 1 })).toHaveText(
+    "Where is the database coming from?",
+  )
+  await expect(header(page)).toHaveCount(0)
+  await expect(strip(page)).toHaveCount(0)
+  const flow = page.locator("[data-slot=flow-header]")
+  await expect(flow.getByRole("link", { name: "shop" })).toHaveAttribute("href", "/databases/1")
+  await expect(flow).toContainText("Step 1 of 4")
 })
 
 test("the page of one item keeps the one-line strip over its own line", async ({ page }) => {
@@ -678,15 +732,17 @@ test("the pages held to the window under the header end at its foot", async ({ p
           .locator("[data-slot=database-pages]")
           .evaluate((el) => el.scrollHeight - el.clientHeight),
       ).toBeLessThanOrEqual(1)
-      // Its frame's edges are the header's: the page's own gutters, not a workbench's.
+      // Its frame's edges are the header's: the page's own gutters, not a
+      // workbench's. Below `lg` Logs is the screen's width, as a project's
+      // Logs is, with its views on a bar at the foot.
       const gutter = await surface.evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
       const lead = await header(page).evaluate((el) => parseFloat(getComputedStyle(el).paddingLeft))
-      expect(gutter, `${path} at ${width}`).toBe(lead)
+      expect(gutter, `${path} at ${width}`).toBe(path.endsWith("/logs") && width < 1024 ? 0 : lead)
     }
   }
 })
 
-test("on a narrow line the commands stand under the facts, and a long name is read whole", async ({
+test("on a narrow line the commands stand under the facts, on a phone beside the name, and a long name is read whole", async ({
   page,
 }) => {
   await mockDatabases(page, {
@@ -705,9 +761,27 @@ test("on a narrow line the commands stand under the facts, and a long name is re
     ).toBe(true)
     const open = (await line(page).getByRole("link", { name: "Open data" }).boundingBox())!
     const facts = (await line(page).getByText("PostgreSQL 16.4").boundingBox())!
-    expect(open.y, `the command is under the facts at ${width}`).toBeGreaterThan(
-      facts.y + facts.height - 1,
-    )
+    if (width === 390) {
+      // A phone's line is one row over one line of facts: the command is on
+      // the name's row, level with it and at its right, above the facts.
+      const named = (await name.boundingBox())!
+      const middle = (box: { y: number; height: number }) => box.y + box.height / 2
+      expect(
+        Math.abs(middle(open) - middle(named)),
+        `the command is level with the name at ${width}`,
+      ).toBeLessThanOrEqual(2)
+      expect(open.x, `the command is right of the name at ${width}`).toBeGreaterThanOrEqual(
+        named.x + named.width - 1,
+      )
+      expect(
+        open.y + open.height,
+        `the command is above the facts at ${width}`,
+      ).toBeLessThanOrEqual(facts.y + 1)
+    } else {
+      expect(open.y, `the command is under the facts at ${width}`).toBeGreaterThan(
+        facts.y + facts.height - 1,
+      )
+    }
     expect(await stripOverlaps(page)).toEqual([])
   }
   // With the room, the commands stand at the line's end, level with the name.

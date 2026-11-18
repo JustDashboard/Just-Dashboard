@@ -4,11 +4,12 @@ import { useState } from "react"
 import { Copy, Download, Layers, Pencil, RefreshClockwise, Trash } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { bytes, duration } from "@/lib/format"
+import { bytes, duration, grouped } from "@/lib/format"
+import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact, InfoTip } from "@/components/form"
-import { Metric, MetricStrip } from "@/components/page"
+import { Fact as LineFact, FactLine } from "@/components/fact-line"
 import { EmptyState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -28,9 +29,10 @@ import { StringEditor } from "@/components/database/redis/keys/string-editor"
 import { TtlFact } from "@/components/database/redis/keys/ttl-editor"
 import { ZsetEditor } from "@/components/database/redis/keys/zset-editor"
 import { lastRead, noteRead, ownEcho } from "@/components/database/redis/own-reads"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisBytes, RedisKeyMeta, RedisMetaFact } from "@/components/database/redis/types"
 import type { Redis } from "@/components/database/redis/use-redis"
+import { ObjectHead } from "@/components/database/workbench/chrome"
 
 /** What every type's editor is handed: the key, what is known of it, and how to say it changed. */
 export type KeyEditorProps = {
@@ -68,7 +70,6 @@ type ReadMeta = RedisKeyMeta & {
 export function KeyPane({
   redis,
   name,
-  leading,
   confirm,
   onRail,
   onOpen,
@@ -76,8 +77,6 @@ export function KeyPane({
 }: {
   redis: Redis
   name: RedisBytes
-  /** The control that brings the rail back, when it is hidden. */
-  leading?: React.ReactNode
   confirm: (request: ConfirmRequest) => void
   /** The keys changed: the rail should read them again. */
   onRail: () => void
@@ -216,7 +215,7 @@ export function KeyPane({
 
   if (gone) {
     return (
-      <Blank leading={leading}>
+      <Blank>
         <EmptyState
           mark={<EngineMark engine={engine} />}
           className="border-0"
@@ -238,7 +237,7 @@ export function KeyPane({
   }
   if (meta.error && !read) {
     return (
-      <Blank leading={leading}>
+      <Blank>
         <ReadError error={meta.error} onRetry={meta.refresh} className="m-4" />
       </Blank>
     )
@@ -256,88 +255,103 @@ export function KeyPane({
 
   return (
     <div data-slot="redis-key" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="shrink-0 space-y-2.5 border-b border-hairline px-3 py-2.5">
-        <div className="flex min-w-0 items-center gap-2">
-          {leading}
-          {read ? (
-            <KindMark type={read.type} className="size-4" />
+      <ObjectHead
+        mark={
+          read ? <KindMark type={read.type} className="size-4" /> : <Skeleton className="size-4" />
+        }
+        name={label || "(empty name)"}
+        title={label}
+        kind={
+          (read || isBinary(name)) && (
+            <span className="flex items-center gap-1.5">
+              {read && <KindTag type={read.type} />}
+              {isBinary(name) && <Tag>binary name</Tag>}
+            </span>
+          )
+        }
+        verbs={<VerbActions verbs={verbs} menuLabel={`More actions for ${label}`} />}
+        facts={
+          read ? (
+            // The key as one sentence under its name, as a table's facts are
+            // under its: "expires in 2h · 1,200 fields · 48 KB in memory ·
+            // listpack". The expiry is still the fact that is pressed to change it.
+            <p
+              key="facts"
+              data-slot="facts-line"
+              className="min-w-0 animate-rise text-body text-muted-foreground"
+            >
+              <FactLine>
+                <LineFact title="Expiry">
+                  <span className="text-foreground">
+                    <TtlFact
+                      target={target}
+                      name={name}
+                      pttl={read.pttl}
+                      readAt={read.readAt}
+                      editable={canWrite}
+                      onChanged={meta.refresh}
+                    />
+                  </span>
+                </LineFact>
+                {sizeOf(read.type, read.length) && (
+                  <LineFact title="Holds">
+                    <span className="numeric text-foreground">
+                      {read.type === "string" ? bytes(read.length) : sizeOf(read.type, read.length)}
+                    </span>
+                  </LineFact>
+                )}
+                {keyFact({
+                  label: "Memory",
+                  fact: "memory",
+                  meta: read,
+                  value: read.memory === undefined ? undefined : bytes(read.memory),
+                  tail: "in memory",
+                })}
+                {keyFact({
+                  label: "Encoding",
+                  fact: "encoding",
+                  meta: read,
+                  value: read.encoding,
+                  mono: true,
+                })}
+                {read.frequency !== undefined ? (
+                  <LineFact title="Access frequency">
+                    access frequency{" "}
+                    <span className="numeric text-foreground">{grouped(read.frequency)}</span>
+                  </LineFact>
+                ) : (
+                  keyFact({
+                    label: "Idle when opened",
+                    fact: "idleSeconds",
+                    lead: "idle when opened",
+                    meta: echoed
+                      ? {
+                          ...read,
+                          idleSeconds: undefined,
+                          unavailable: {
+                            idleSeconds:
+                              "This page had read the key itself just before opening it — the key list reads each key it shows — and a read resets the server's idle clock.",
+                          },
+                        }
+                      : (opened ?? read),
+                    value:
+                      echoed || opened?.idleSeconds === undefined
+                        ? undefined
+                        : duration(opened.idleSeconds),
+                    tip: "How long nothing had read or written the key when this page opened it.",
+                  })
+                )}
+              </FactLine>
+            </p>
           ) : (
-            <Skeleton className="size-4" />
-          )}
-          <h2 title={label} className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
-            {label || <span className="text-muted-foreground">(empty name)</span>}
-          </h2>
-          {read && <KindTag type={read.type} />}
-          {isBinary(name) && <Tag>binary name</Tag>}
-          <span className="min-w-0 flex-1" />
-          <VerbActions verbs={verbs} menuLabel={`More actions for ${label}`} />
-        </div>
-        {read ? (
-          <MetricStrip key="facts" className="animate-rise">
-            <Metric
-              label="Expires"
-              value={
-                <TtlFact
-                  target={target}
-                  name={name}
-                  pttl={read.pttl}
-                  readAt={read.readAt}
-                  editable={canWrite}
-                  onChanged={meta.refresh}
-                />
-              }
-            />
-            {sizeOf(read.type, read.length) && (
-              <Metric
-                label="Holds"
-                value={read.type === "string" ? bytes(read.length) : sizeOf(read.type, read.length)}
-              />
-            )}
-            <Fact
-              label="Memory"
-              fact="memory"
-              meta={read}
-              value={read.memory === undefined ? undefined : bytes(read.memory)}
-            />
-            <Fact label="Encoding" fact="encoding" meta={read} value={read.encoding} mono />
-            {read.frequency !== undefined ? (
-              <Metric label="Access frequency" value={read.frequency.toLocaleString()} />
-            ) : (
-              <Fact
-                label="Idle when opened"
-                fact="idleSeconds"
-                meta={
-                  echoed
-                    ? {
-                        ...read,
-                        idleSeconds: undefined,
-                        unavailable: {
-                          idleSeconds:
-                            "This page had read the key itself just before opening it — the key list reads each key it shows — and a read resets the server's idle clock.",
-                        },
-                      }
-                    : (opened ?? read)
-                }
-                value={
-                  echoed || opened?.idleSeconds === undefined
-                    ? undefined
-                    : duration(opened.idleSeconds)
-                }
-                tip="How long nothing had read or written the key when this page opened it."
-              />
-            )}
-          </MetricStrip>
-        ) : (
-          <div className="flex gap-6" aria-hidden>
-            {[16, 14, 14, 20].map((width, i) => (
-              <div key={i} className="space-y-1.5">
-                <Skeleton className="h-2.5 w-12" />
-                <Skeleton className="h-4" style={{ width: `${width * 4}px` }} />
-              </div>
-            ))}
-          </div>
-        )}
-      </div>
+            <div className="flex h-5 items-center gap-3" aria-hidden>
+              {[16, 14, 14, 20].map((width, i) => (
+                <Skeleton key={i} className="h-3.5" style={{ width: `${width * 4}px` }} />
+              ))}
+            </div>
+          )
+        }
+      />
 
       {meta.error && read && (
         <p
@@ -410,23 +424,29 @@ export function KeyPane({
   )
 }
 
-/** The pane with nothing of a key to show: the rail's toggle, and what stands in the key's place. */
-function Blank({ leading, children }: { leading?: React.ReactNode; children: React.ReactNode }) {
+/** The pane with nothing of a key to show: what stands in the key's place. */
+function Blank({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-      {leading && <div className="flex h-9 shrink-0 items-center px-2">{leading}</div>}
       <div className="flex min-h-0 flex-1 flex-col justify-center">{children}</div>
     </div>
   )
 }
 
 /** A fact the server may not have: its value, or a dash with the server's reason behind it. */
-function Fact({
+/**
+ * One fact of the key's line that the server may not have answered: the
+ * reading, or a dash with why it is not known. Called rather than rendered,
+ * so `FactLine` sees the fact itself among its children and gives it its dot.
+ */
+function keyFact({
   label,
   fact,
   meta,
   value,
   mono,
+  lead,
+  tail,
   tip,
 }: {
   label: string
@@ -434,30 +454,33 @@ function Fact({
   meta: RedisKeyMeta
   value: string | undefined
   mono?: boolean
-  /** What the figure is a reading of, where its name does not say it all. */
+  /** Words before the reading: "idle when opened 38m". */
+  lead?: string
+  /** Words after it: "48 KB in memory". */
+  tail?: string
+  /** What the figure is a reading of, where its words do not say it all. */
   tip?: string
 }) {
   const why = meta.unavailable?.[fact]
   if (value === undefined && !why) return null
   return (
-    <Metric
-      label={label}
-      value={
-        value !== undefined ? (
-          tip ? (
-            <span className="flex items-center gap-1">
-              {value}
-              <InfoTip label={`About ${label.toLowerCase()}`}>{tip}</InfoTip>
-            </span>
-          ) : (
-            <span className={mono ? "font-mono text-xs" : undefined}>{value}</span>
-          )
-        ) : (
-          <span className="flex items-center gap-1 text-muted-foreground">
-            —<InfoTip label={`Why ${label.toLowerCase()} is not known`}>{why}</InfoTip>
+    <LineFact key={fact} title={label}>
+      <span className="inline-flex items-center gap-1">
+        {(lead || (value === undefined && !tail)) && <span>{lead ?? label.toLowerCase()}</span>}
+        {value !== undefined ? (
+          <span className={cn("text-foreground", mono ? "font-mono text-xs" : "numeric")}>
+            {value}
           </span>
-        )
-      }
-    />
+        ) : (
+          <span>{tail ? `${label.toLowerCase()} —` : "—"}</span>
+        )}
+        {value !== undefined && tail && <span>{tail}</span>}
+        {value !== undefined ? (
+          tip && <InfoTip label={`About ${label.toLowerCase()}`}>{tip}</InfoTip>
+        ) : (
+          <InfoTip label={`Why ${label.toLowerCase()} is not known`}>{why}</InfoTip>
+        )}
+      </span>
+    </LineFact>
   )
 }

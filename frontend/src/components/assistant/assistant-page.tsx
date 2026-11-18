@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   Archive,
   ArrowRight,
@@ -33,17 +34,17 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentSummary } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { Page, PageContext } from "@/components/page"
 import { tabClasses } from "@/components/tabs"
 import { ProductLogo } from "@/components/product-logo"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { FormSections, InfoTip } from "@/components/form"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { FactDot, HostFact } from "@/components/metrics/host-identity"
+import { SettingSection } from "@/components/settings/setting-card"
 import { Button } from "@/components/ui/button"
 import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { ModelPicker } from "@/components/assistant/model-picker"
@@ -232,10 +233,15 @@ export function AssistantPage() {
       className={cn(chatting ? "gap-0 pt-0 pb-0 md:gap-0 md:pt-0 md:pb-0" : "pt-0 md:pt-0")}
     >
       <PageContext title="Assistant" />
+      {/* While chatting on a phone, the bar at the foot holds Settings with
+          the chat's own panes: two strips both saying Chat picked one thing. */}
       <nav
         aria-label="The assistant's views"
         data-slot="assistant-tabs"
-        className="flex shrink-0 items-end gap-1 border-b border-hairline pt-2 md:pt-3"
+        className={cn(
+          "flex shrink-0 items-end gap-1 border-b border-hairline pt-2 md:pt-3",
+          chatting && "max-lg:hidden",
+        )}
       >
         {can("service.control") && (
           <Link
@@ -336,6 +342,7 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
     <AgentWorkspace
       session={session}
       product={product}
+      onSettings={() => router.replace("/assistant?view=settings")}
       chat={
         <AgentChat
           key={session.key}
@@ -346,7 +353,6 @@ function ServerChat({ settings }: { settings: ReturnType<typeof useAssistantSett
               ? `Ask about ${session.transcript.about.title}`
               : "Ask anything about this server"
           }
-          description="It can read the whole server — containers, deployments, services, logs, certificates and the firewall — and change what you ask it to, as you and under your role."
           placeholder={
             session.transcript.about
               ? `Ask about ${session.transcript.about.title}…`
@@ -439,22 +445,16 @@ function AssistantSettingsView({
             title="Model"
             state={
               view.configured ? (
-                <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                  <HostFact product={assistantProduct(view)}>
-                    {provider?.label ?? view.provider}
-                  </HostFact>
-                  <FactDot />
-                  <span className="font-mono text-foreground">{view.model}</span>
+                <FactLine>
+                  <Fact product={assistantProduct(view)}>{provider?.label ?? view.provider}</Fact>
+                  <Fact className="font-mono text-foreground">{view.model}</Fact>
                   {view.updatedBy && (
-                    <>
-                      <FactDot />
-                      <span>
-                        set up by {view.updatedBy}
-                        {view.updatedAt && ` on ${calendarDate(view.updatedAt)}`}
-                      </span>
-                    </>
+                    <Fact>
+                      set up by {view.updatedBy}
+                      {view.updatedAt && ` on ${calendarDate(view.updatedAt)}`}
+                    </Fact>
                   )}
-                </span>
+                </FactLine>
               ) : (
                 <span className="font-medium text-foreground">The assistant is off</span>
               )

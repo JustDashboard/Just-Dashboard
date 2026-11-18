@@ -41,6 +41,6 @@ function FormerAddress() {
     // Replaced, not pushed: the old address should not be what Back returns to.
     if (target) router.replace(target)
   }, [router, target])
-  if (target) return <PageState eyebrow="Apps" title="Databases" />
+  if (target) return <PageState title="Databases" />
   return <DatabaseNotFound />
 }

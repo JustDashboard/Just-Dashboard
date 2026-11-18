@@ -1,6 +1,6 @@
 "use client"
 
-import { bytes, plural, relativeTime } from "@/lib/format"
+import { bytes, compactCount, plural, relativeTime } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { BarReading } from "@/components/bar-reading"
@@ -13,13 +13,11 @@ import {
   shares,
   type BackupStanding,
 } from "@/components/database/fleet/band"
-import { sessionsWord } from "@/components/database/fleet/fleet-card"
+import { nounFor, sessionNouns } from "@/components/database/fleet/fleet"
 import { EngineGlyph } from "@/components/database/kit"
 
 /** How many databases a block names; the rest are counted at its strip's end. */
 const SHOWN = 5
-
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 /**
  * The fleet read three ways under the identity line, each block a question
@@ -190,7 +188,7 @@ function SessionsBlock({
       }
       parts={read.top.map(({ entry, value }) => {
         const engine = engineOf(entry)
-        const word = sessionsWord(engine).toLowerCase()
+        const word = nounFor(value, sessionNouns(engine.kind))
         // The readers drawn as their products; a reader nothing names (another
         // machine, this server's processes) has no mark.
         const marks = (feeds.get(entry.id)?.products ?? []).filter(hasProductLogo)
@@ -208,7 +206,7 @@ function SessionsBlock({
           ),
           figure: (
             <>
-              {compact.format(value)}
+              {compactCount(value)}
               <span className="ml-1 font-normal text-muted-foreground">{word}</span>
             </>
           ),

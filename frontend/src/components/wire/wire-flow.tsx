@@ -1,0 +1,645 @@
+"use client"
+
+import Link from "next/link"
+import { createRef, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
+import { cn } from "@/lib/utils"
+import { WireNode } from "@/components/wire/wire"
+import { WireLaneTitle } from "@/components/wire/wire-lane"
+import { useMotionHeld } from "@/components/wire/use-motion-held"
+import { MoreTile, WireMarks } from "@/components/wire/wire-marks"
+import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { Skeleton } from "@/components/ui/skeleton"
+import {
+  PORT,
+  beamOf,
+  fitColumn,
+  flowTemplate,
+  isLit,
+  loadingRows,
+  staggerOf,
+  waitingLines,
+  type WaitingHint,
+  type WireLine,
+} from "@/components/wire/wire-flow-model"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { Bone } from "@/components/bone"
+
+export type { WaitingHint, WireLine, WireState } from "@/components/wire/wire-flow-model"
+
+type MarkSize = "lg" | "md" | "sm"
+/** A mark, or one drawn at the size it is given: `md` wide, `sm` in the phone's rows. */
+type Drawn = React.ReactNode | ((size: MarkSize) => React.ReactNode)
+
+export type WireFlowNode = {
+  id: string
+  /** A `WireMark`, `WirePlaceholder` or a thing's own tile. */
+  mark: Drawn
+  eyebrow?: React.ReactNode
+  title?: React.ReactNode
+  hint?: React.ReactNode
+  /** The node in words, where `title` is drawn: the link's name and the phone's caption. */
+  name?: string
+  /** The mark is a link to here. */
+  href?: string
+  /** The mark is a button that does this. */
+  onPress?: () => void
+  /** The link's or button's accessible name, when it is not `name`. */
+  label?: string
+  /** The line between this node and the hub. */
+  line?: WireLine
+  /**
+   * A dashed ring where a thing would go: its focus ring is round, and it does
+   * not take part in pointing (it has no flows to light).
+   */
+  placeholder?: boolean
+}
+
+/**
+ * The shape a node waits in, for a column or a hub whose nodes are not a
+ * grey tile beside three lines. A picture is one height loading and loaded
+ * only if a waiting node holds the lines its words will: a node with no
+ * eyebrow waits a line short, one with two lines of detail a line long, and
+ * pages drew grey nodes of their own to get it right. What is known before
+ * the read (this server's mark, a column's fixed eyebrow, the hub's name) is
+ * drawn as itself rather than as a grey bar.
+ */
+export type WireFlowWaiting = {
+  /** The mark, where it is known before the read. A grey tile otherwise. */
+  mark?: Drawn
+  /**
+   * The eyebrow's line: grey by default, the words where they are known
+   * before the read, `false` for a node that has no eyebrow.
+   */
+  eyebrow?: boolean | React.ReactNode
+  /** The name, where it is known before the read. A grey line otherwise. */
+  title?: React.ReactNode
+  /** The lines of detail under the name: one by default. */
+  hint?: WaitingHint
+  /** What stands under the lines at one size whatever is read: a sparkline's box. */
+  foot?: React.ReactNode
+}
+
+export type WireFlowColumn = {
+  /** The column's name: its landmark's label and its heading. */
+  title: string
+  nodes: WireFlowNode[]
+  /** A count beside the heading, where the column is a part of something larger. */
+  count?: number
+  /**
+   * The page that lists the column, which its heading then opens, on a phone
+   * too: an account's sessions and keys.
+   */
+  href?: string
+  /**
+   * Where the heading is drawn: `narrow` only where the columns stack (the
+   * wide picture says it by position), `always` hung above the column wide too.
+   */
+  heading?: "narrow" | "always"
+  /** More than this many and the rest are one "N more" node. */
+  max?: number
+  /** The "N more" node: where it goes and what it says. */
+  more?: { href?: string; onPress?: () => void; words?: (hidden: number) => string }
+  /** Said in place of the column when it has no nodes. */
+  empty?: React.ReactNode
+  /** Rows the column holds while loading; by default `max` and its "more", or three. */
+  loadingRows?: number
+  /**
+   * The shape of those rows, one for all or one for each by its place. By
+   * default a grey tile beside an eyebrow, a name and one line of detail.
+   */
+  loadingLines?: WireFlowWaiting | ((row: number) => WireFlowWaiting)
+}
+
+export type WireFlowHub = {
+  mark: Drawn
+  eyebrow?: React.ReactNode
+  title?: React.ReactNode
+  hint?: React.ReactNode
+  /**
+   * On the hub's cell. The picture keeps room under itself for the hub's
+   * words (`useHubRoom`), so this is for a picture that holds its height open
+   * around the mark: a volume's, for three rows a side.
+   */
+  className?: string
+  /**
+   * The lines under the hub's mark while loading. Given, a phone's rows of
+   * marks draw them too; by default the hub waits on a name and one line
+   * wide and on its name alone down a phone, whose rows of marks then stand
+   * a line higher than they will for every line of detail the hub has.
+   */
+  loadingLines?: Pick<WireFlowWaiting, "title" | "hint" | "foot">
+}
+
+/**
+ * Things on the left, one hub in the middle, things on the right, and the
+ * lines between them, from data — the picture six Network pages, the
+ * deployment section's Notifications, Backups and the proxy each drew by hand
+ * on `components/wire/wire` (design-system §2). A node is a mark with an eyebrow, a
+ * name and a line of detail; its line to the hub is its state (`WireLine`),
+ * drawn by `ui/animated-beam`, which holds the line still under reduced
+ * motion. Pointing at a node steps every other node and line back, keeping
+ * what `related` says travels with it.
+ *
+ On a phone it takes the one phone form every picture takes
+ * (`docs/internal/frontend/patterns/pictures-on-a-phone.md`):
+ *
+ * - `marks`: the picture shrinks to its marks (`WireMarks`): a row of the
+ *   start column's marks, the hub with its words under it, and a row of the
+ *   end column's, the lines running down between them. For a picture whose
+ *   nodes the page names again in a list — Notifications, Backups, the
+ *   proxy's alerts — where the words would be said twice.
+ * - `stack` (the default, for now): the columns stack under their headings
+ *   with every word kept, the hub at the lanes' size, and the lines not
+ *   drawn. Only for a picture that is the only place its nodes are named —
+ *   the Network overview, the gateway — since there the picture is the list.
+ *
+ * `loading` draws the picture's final shape — the hub, and grey rows where
+ * the nodes will be — so nothing under it moves when the data lands. A column
+ * says how many rows with `loadingRows` and what a row holds with
+ * `loadingLines`, the hub what stands under its mark with its own
+ * `loadingLines` (`WireFlowWaiting`).
+ */
+export function WireFlow({
+  start,
+  hub,
+  end,
+  size = "md",
+  phone = "stack",
+  hubShare = 0.8,
+  related,
+  loading = false,
+  className,
+}: {
+  start: WireFlowColumn
+  hub: WireFlowHub
+  end: WireFlowColumn
+  /** The size of the nodes' marks, wide. The phone's `marks` rows draw them `sm`. */
+  size?: Exclude<MarkSize, "lg">
+  phone?: "stack" | "marks"
+  /** The hub column's share of the width against one for each side. */
+  hubShare?: number
+  /** What lights with a pointed node besides itself. */
+  related?: (focus: string, id: string) => boolean
+  loading?: boolean
+  className?: string
+}) {
+  const wide = useBreakpoint("lg")
+  const container = useRef<HTMLDivElement>(null)
+  const hubRef = useRef<HTMLDivElement>(null)
+  const [focus, setFocus] = useState<string | null>(null)
+  const compact = phone === "marks" && !wide
+  // A hidden tab or paused motion draws every line still, as reduced motion does.
+  const held = useMotionHeld()
+
+  const left = useMemo(() => laid(start, "start", loading), [start, loading])
+  const right = useMemo(() => laid(end, "end", loading), [end, loading])
+  const all = [...left, ...right]
+  const ids = all.map((n) => n.id).join("\n")
+  const refs = useMemo(() => {
+    const map = new Map<string, RefObject<HTMLDivElement | null>>()
+    for (const id of ids.split("\n")) if (id) map.set(id, createRef<HTMLDivElement>())
+    return map
+  }, [ids])
+
+  const lit = (id: string) => isLit(focus, id, related)
+  const watch = (node: Laid) =>
+    node.placeholder || node.more || loading
+      ? {}
+      : {
+          onPointerEnter: () => setFocus(node.id),
+          onPointerLeave: () => setFocus((held) => (held === node.id ? null : held)),
+          onFocus: () => setFocus(node.id),
+          onBlur: () => setFocus((held) => (held === node.id ? null : held)),
+        }
+  const port = PORT[size]
+  const root = useRef<HTMLDivElement>(null)
+  const room = useHubRoom(root, hubRef)
+  const hubWaits = hub.loadingLines && waitingDetail(hub.loadingLines, HUB_WIDTHS)
+
+  const beams = all.map((node, index) => {
+    const ref = refs.get(node.id)
+    if (!ref) return null
+    const into = node.side === "start"
+    const beam = beamOf(loading ? { state: "up" } : node.line)
+    return (
+      <AnimatedBeam
+        key={node.id}
+        containerRef={container}
+        fromRef={into ? ref : hubRef}
+        toRef={into ? hubRef : ref}
+        // A wire leaves a mark level from its edge and arrives level at the
+        // other.
+        shape="s"
+        startXOffset={port}
+        endXOffset={-port}
+        reverse={node.line?.reverse}
+        still={beam.still || held}
+        dashed={beam.dashed}
+        tone={beam.tone}
+        duration={node.line?.duration}
+        delay={node.line?.delay ?? staggerOf(index)}
+        className={cn(
+          "transition-opacity",
+          phone === "stack" && "max-lg:hidden",
+          !lit(node.id) && "opacity-15",
+        )}
+      />
+    )
+  })
+
+  if (compact) {
+    // The phone's one form (`WireMarks`): the start's marks, the hub with its
+    // words, the end's marks, and the lines running down between them.
+    const row = (column: WireFlowColumn, nodes: Laid[], heading: "above" | "below") => ({
+      title: column.title,
+      count: column.count,
+      href: column.href,
+      heading: column.href ? heading : undefined,
+      nodes: nodes.map((node) => ({
+        id: node.id,
+        mark: node.waiting
+          ? waitingMark(typeof node.waiting === "object" ? node.waiting : undefined, "sm")
+          : draw(node.mark, "sm"),
+        name: node.name,
+        href: node.waiting ? undefined : node.href,
+        onPress: node.waiting ? undefined : node.onPress,
+        label: node.label ?? node.name ?? (typeof node.title === "string" ? node.title : undefined),
+        round: node.placeholder || node.more,
+        anonymous: node.more,
+      })),
+    })
+    return (
+      <WireMarks
+        data-slot="wire-flow"
+        data-loading={loading || undefined}
+        aria-busy={loading || undefined}
+        className={className}
+        tiers={[
+          row(start, left, "above"),
+          {
+            id: HUB,
+            mark: draw(hub.mark, "lg"),
+            eyebrow: hub.eyebrow,
+            title: loading
+              ? (hub.loadingLines?.title ?? <WaitingWords className="w-32" />)
+              : hub.title,
+            hint: loading ? hubWaits : hub.hint,
+          },
+          row(end, right, "below"),
+        ]}
+        wires={all.map((node, index) => {
+          const beam = beamOf(loading ? { state: "up" } : node.line)
+          return {
+            from: node.side === "start" ? node.id : HUB,
+            to: node.side === "start" ? HUB : node.id,
+            reverse: node.line?.reverse,
+            still: beam.still,
+            dashed: beam.dashed,
+            tone: beam.tone,
+            duration: node.line?.duration,
+            delay: node.line?.delay ?? staggerOf(index),
+          }
+        })}
+      />
+    )
+  }
+
+  return (
+    <div
+      ref={root}
+      data-slot="wire-flow"
+      data-loading={loading || undefined}
+      aria-busy={loading || undefined}
+      className={cn("relative py-4", className)}
+    >
+      <div ref={container} className="relative">
+        {beams}
+        <div
+          className="relative grid gap-y-8 lg:grid-cols-[var(--wire-flow-columns)] lg:items-center"
+          style={{ "--wire-flow-columns": flowTemplate(hubShare) } as React.CSSProperties}
+        >
+          <Column column={start} side="start" bare={left.length === 0}>
+            {left.map((node) => (
+              <Item
+                key={node.id}
+                node={node}
+                nodeRef={refs.get(node.id)}
+                size={size}
+                dim={!node.placeholder && !lit(node.id)}
+                loading={loading}
+                {...watch(node)}
+              />
+            ))}
+          </Column>
+
+          <div aria-hidden className="max-lg:hidden" />
+
+          <div className={cn("flex min-w-0 justify-center", hub.className)}>
+            <WireNode
+              nodeRef={hubRef}
+              align="center"
+              // Stacked, the hub is one more row of its lanes, at their size, so
+              // its words start where theirs do.
+              mark={draw(hub.mark, wide ? "lg" : size)}
+              eyebrow={hub.eyebrow}
+              title={
+                loading ? (hub.loadingLines?.title ?? <WaitingWords className="w-28" />) : hub.title
+              }
+              hint={
+                !loading ? (
+                  hub.hint
+                ) : hub.loadingLines ? (
+                  hubWaits
+                ) : (
+                  <WaitingWords className="w-36" />
+                )
+              }
+            />
+          </div>
+
+          <div aria-hidden className="max-lg:hidden" />
+
+          <Column column={end} side="end" bare={right.length === 0}>
+            {right.map((node) => (
+              <Item
+                key={node.id}
+                node={node}
+                nodeRef={refs.get(node.id)}
+                size={size}
+                dim={!node.placeholder && !lit(node.id)}
+                loading={loading}
+                {...watch(node)}
+              />
+            ))}
+          </Column>
+        </div>
+        {/* Inside the lines' own box, not beside it: a page may lay the
+            picture out as a grid or a centred column, where a second child
+            would take a share of the room. */}
+        <div ref={room} data-slot="wire-hub-room" aria-hidden />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * Room under the picture for the hub's words.
+ *
+ * Wide, they hang under the hub's mark out of the flow (`WireNode`'s
+ * `align="center"`), so every mark sits on one line; they take no room, and
+ * in a picture whose columns are shorter than the hub and its lines they ran
+ * into whatever stood under it. Pages padded their own hub by a guess at how
+ * tall its words were. The picture keeps the room itself now: whatever of
+ * the words reaches past its own box is measured and held open under it, so
+ * a picture that already has the room (tall columns, a frame of its own) is
+ * exactly what it was, and one that has not ends where its words do.
+ *
+ * Measured before the browser paints, and again when the words or the
+ * picture change size, so nothing is seen to move. Stacked, the words are in
+ * the flow and there is nothing to hold.
+ */
+function useHubRoom(root: RefObject<HTMLDivElement | null>, hub: RefObject<HTMLDivElement | null>) {
+  const room = useRef<HTMLDivElement>(null)
+  useLayoutEffect(() => {
+    const box = root.current
+    const held = room.current
+    const words = hub.current?.nextElementSibling
+    if (!box || !held || !(words instanceof HTMLElement)) return
+    const measure = () => {
+      const hung = getComputedStyle(words).position === "absolute"
+      // The box without the room already held under it. Whole pixels up, so a
+      // fraction of one does not set the two observers on each other.
+      const foot = box.getBoundingClientRect().bottom - held.offsetHeight
+      const over = hung ? Math.ceil(words.getBoundingClientRect().bottom - foot) : 0
+      const height = over > 0 ? `${over}px` : ""
+      if (held.style.height !== height) held.style.height = height
+    }
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(words)
+    observer.observe(box)
+    return () => observer.disconnect()
+  })
+  return room
+}
+
+type Laid = WireFlowNode & {
+  side: "start" | "end"
+  more?: boolean
+  /** A row drawn while loading, and the shape its column gave it. */
+  waiting?: WireFlowWaiting | true
+}
+
+/** A column's nodes as drawn: what fits, its "N more", or grey rows while loading. */
+function laid(column: WireFlowColumn, side: "start" | "end", loading: boolean): Laid[] {
+  if (loading)
+    return Array.from({ length: loadingRows(column) }, (_, i) => ({
+      id: `${side}:loading:${i}`,
+      side,
+      mark: null,
+      waiting:
+        (typeof column.loadingLines === "function"
+          ? column.loadingLines(i)
+          : column.loadingLines) ?? true,
+    }))
+  const { shown, hidden } = fitColumn(column.nodes, column.max)
+  const nodes: Laid[] = shown.map((node) => ({ ...node, side }))
+  if (hidden > 0) {
+    const words = column.more?.words?.(hidden) ?? `${hidden} more`
+    nodes.push({
+      id: `${side}:more`,
+      side,
+      more: true,
+      mark: (size) => <MoreTile count={hidden} size={size} />,
+      title: <span className="font-normal text-muted-foreground">{words}</span>,
+      name: words,
+      href: column.more?.href,
+      onPress: column.more?.onPress,
+    })
+  }
+  return nodes
+}
+
+function draw(mark: Drawn, size: MarkSize) {
+  return typeof mark === "function" ? mark(size) : mark
+}
+
+/** The column's landmark, its heading, and its list or what it says when empty. */
+function Column({
+  column,
+  side,
+  bare,
+  children,
+}: {
+  column: WireFlowColumn
+  side: "start" | "end"
+  /** Nothing to draw: the column says `empty` instead. */
+  bare: boolean
+  children: React.ReactNode
+}) {
+  const always = column.heading === "always"
+  const heading = (
+    <WireLaneTitle
+      title={column.title}
+      count={column.count}
+      href={column.href}
+      className={cn("mb-4", always ? "lg:absolute lg:inset-x-0 lg:bottom-full" : "lg:hidden")}
+    />
+  )
+  const body =
+    bare && column.empty ? (
+      <p className="text-body text-muted-foreground">{column.empty}</p>
+    ) : (
+      <ol className="flex flex-col gap-5">{children}</ol>
+    )
+  return (
+    <section
+      aria-label={column.title}
+      className={cn("min-w-0", side === "start" && "lg:text-right")}
+    >
+      {/* Hung above the list wide rather than sharing its box: in the box it
+          pushed the marks below the hub's, and every wire bent to meet them. */}
+      <div className={cn(always && "lg:relative")}>
+        {heading}
+        {body}
+      </div>
+    </section>
+  )
+}
+
+function Item({
+  node,
+  nodeRef,
+  size,
+  dim,
+  loading,
+  ...handlers
+}: {
+  node: Laid
+  nodeRef?: RefObject<HTMLDivElement | null>
+  size: MarkSize
+  dim: boolean
+  loading: boolean
+} & React.HTMLAttributes<HTMLLIElement>) {
+  const align = node.side === "start" ? "end" : "start"
+  if (loading) {
+    const shape = typeof node.waiting === "object" ? node.waiting : undefined
+    return (
+      <li className="min-w-0" aria-hidden>
+        <WireNode
+          nodeRef={nodeRef}
+          align={align}
+          mark={waitingMark(shape, size)}
+          eyebrow={
+            shape?.eyebrow === false ? undefined : shape?.eyebrow === undefined ||
+              shape.eyebrow === true ? (
+              <WaitingWords className="w-16" />
+            ) : (
+              shape.eyebrow
+            )
+          }
+          title={shape?.title ?? <WaitingWords className="w-28" />}
+          hint={shape ? waitingDetail(shape, NODE_WIDTHS) : <WaitingWords className="w-20" />}
+        />
+      </li>
+    )
+  }
+  return (
+    <li
+      {...handlers}
+      data-node={node.more ? undefined : node.id}
+      data-dim={dim ? "" : undefined}
+      className={cn("min-w-0 transition-opacity", dim && "opacity-40")}
+    >
+      <WireNode
+        nodeRef={nodeRef}
+        align={align}
+        mark={<Pressable node={node}>{draw(node.mark, size)}</Pressable>}
+        eyebrow={node.eyebrow}
+        title={node.title}
+        hint={node.hint}
+      />
+    </li>
+  )
+}
+
+const SKELETON_SIZE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
+
+/** How long each waiting line of detail is drawn, by its place: no two alike. */
+const NODE_WIDTHS = ["w-24", "w-20", "w-16"]
+const HUB_WIDTHS = ["w-32", "w-24", "w-28"]
+
+/** The hub's id among the phone's marks. */
+const HUB = "hub"
+
+/** A waiting row's mark: the one its column knows before the read, or a grey tile. */
+function waitingMark(shape: WireFlowWaiting | undefined, size: MarkSize) {
+  return shape?.mark !== undefined ? (
+    draw(shape.mark, size)
+  ) : (
+    <Skeleton className={cn("rounded-xl", SKELETON_SIZE[size])} />
+  )
+}
+
+/**
+ * A waiting node's lines of detail and what stands under them, each line a
+ * block as a drawn node's lines are; nothing at all for a node that has
+ * neither, so its name is not followed by an empty line.
+ */
+function waitingDetail(shape: WireFlowWaiting, widths: string[]) {
+  const lines = waitingLines(shape.hint)
+  if (lines.length === 0 && !shape.foot) return undefined
+  return (
+    <>
+      {lines.map((where, i) => (
+        <span
+          key={i}
+          className={cn(
+            "block",
+            where === "wide" && "max-lg:hidden",
+            where === "narrow" && "lg:hidden",
+          )}
+        >
+          <WaitingWords className={widths[i % widths.length]} />
+        </span>
+      ))}
+      {shape.foot}
+    </>
+  )
+}
+
+/**
+ * A grey bar where a line of words will be. It is an inline box shorter than
+ * the line it stands in, set on the line's middle, so the line keeps exactly
+ * the height its words will give it: a block-level `Skeleton` with margins
+ * made a waiting node 11px taller than a loaded one, and a picture with a
+ * dozen nodes shrank when its data landed. A `span`, because two of the three
+ * lines it stands in are paragraphs.
+ */
+function WaitingWords({ className }: { className?: string }) {
+  return <Bone className={className} />
+}
+
+/** A node's mark as the link or button it is, or as itself. */
+function Pressable({ node, children }: { node: Laid; children: React.ReactNode }) {
+  const label = node.label ?? node.name ?? (typeof node.title === "string" ? node.title : undefined)
+  const shape = node.placeholder || node.more ? "rounded-full" : "rounded-xl"
+  if (node.onPress)
+    return (
+      <button
+        type="button"
+        onClick={node.onPress}
+        aria-label={label}
+        className={cn(shape, "focus-ring")}
+      >
+        {children}
+      </button>
+    )
+  if (node.href)
+    return (
+      <Link href={node.href} aria-label={label} className={cn(shape, "focus-ring")}>
+        {children}
+      </Link>
+    )
+  return <>{children}</>
+}

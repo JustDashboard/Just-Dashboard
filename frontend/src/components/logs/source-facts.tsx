@@ -1,7 +1,7 @@
-import { Fragment } from "react"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import type { LogSource } from "@/lib/types"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { ProductLogos, imageProducts } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -83,17 +83,14 @@ export function SourceIdentity({
   const hasSize = source.size !== undefined && source.size > 0
   const facts = journal ? journalFacts(journal) : sourceFacts(source, hasSize)
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise pb-4"
       mark={source.product}
       logo={stack ? <ProductLogos ids={imageProducts(stack)} size="md" /> : undefined}
       fallback={kindIcon(source.kind)}
       title={source.label}
       facts={facts.map((fact, i) => (
-        <Fragment key={i}>
-          {i > 0 && <FactDot />}
-          {fact}
-        </Fragment>
+        <Fact key={i}>{fact}</Fact>
       ))}
       aside={aside}
     />

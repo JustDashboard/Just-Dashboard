@@ -8,7 +8,7 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FormFact, FormFacts, FormNote, FormSection, OptionRow } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
@@ -105,7 +105,7 @@ export function AssistantSettingsSheet({
       onOpenChange={(next) => !next && onClose()}
       title={settings?.configured ? "Assistant settings" : "Set up the assistant"}
       description="Choose the model provider the dashboard's assistant asks"
-      width="md"
+      size="md"
       footer={
         <>
           <FormNote className="mr-auto">Saved once the provider answers a check.</FormNote>

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { Bug, DesktopDevice, Globe, Terminal, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, clock, plural } from "@/lib/format"
+import { bytes, clock, percent as formatPercent, plural, sharePercent } from "@/lib/format"
 import type { RequestEntry, RequestFacet, RequestSummary } from "@/lib/types"
 import { agentProduct, networkOf, refererProduct } from "@/lib/clients"
 import { latencyWords } from "@/lib/latency-words"
@@ -11,7 +11,9 @@ import { latency, latencyTone, statusClass, type StatusClass } from "@/lib/reque
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { DimActions } from "@/components/icon-action"
 import { ProductGlyph } from "@/components/product-logo"
-import { RankList, SplitBar, percent } from "@/components/rank-list"
+import { RankList, SplitBar } from "@/components/rank-list"
+import { Fact, FactLine } from "@/components/fact-line"
+import { PanelHeader } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -370,7 +372,7 @@ export function TrafficFacets({
                   color: FAMILY_HUE[statusClass(Number(s.value))],
                 }))}
                 label={summary.statuses
-                  .map((s) => `${percent(ofTotal(s.count))} answered ${s.value}`)
+                  .map((s) => `${sharePercent(ofTotal(s.count))} answered ${s.value}`)
                   .join(", ")}
               />
             )}
@@ -448,12 +450,7 @@ export function Facet({
   return (
     <BlurFade delay={index * 0.04} className="min-w-0">
       <section className="min-w-0">
-        <div className="mb-3 flex items-baseline justify-between gap-3 border-b border-hairline pb-2">
-          <h3 className="text-body font-semibold text-foreground">{title}</h3>
-          {reading && (
-            <span className="numeric truncate text-hint text-muted-foreground">{reading}</span>
-          )}
-        </div>
+        <PanelHeader plain level={3} title={title} count={reading} className="mb-3" />
         {children}
       </section>
     </BlurFade>
@@ -486,11 +483,10 @@ function StatusReading({ summary }: { summary: RequestSummary }) {
   const failing = summary.errorRate * 100
   const refused = summary.clientErrorRate * 100
   return (
-    <>
-      <span className={cn(failing > 0 && "text-destructive")}>{failing.toFixed(1)}% 5xx</span>
-      <span className="text-muted-foreground/50"> · </span>
-      <span className={cn(refused > 0 && "text-warning")}>{refused.toFixed(1)}% 4xx</span>
-    </>
+    <FactLine nowrap>
+      <Fact className={cn(failing > 0 && "text-destructive")}>{formatPercent(failing)} 5xx</Fact>
+      <Fact className={cn(refused > 0 && "text-warning")}>{formatPercent(refused)} 4xx</Fact>
+    </FactLine>
   )
 }
 
@@ -597,8 +593,7 @@ function Scanners({
         </span>
       }
     >
-      <p>Addresses that asked for paths only scripts ask for, and were refused.</p>
-      <div className="mt-3 grid gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
+      <div className="grid gap-x-8 gap-y-4 lg:grid-cols-[minmax(0,2fr)_minmax(0,1fr)]">
         <div className="min-w-0">
           <p className="pb-1 text-hint text-muted-foreground">Addresses, by probes</p>
           <RankList

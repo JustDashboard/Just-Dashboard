@@ -5,8 +5,8 @@ import { Globe, LockClosed, LockOpen, Servers, Terminal } from "@/components/ico
 import type { DNSView } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowHub, type WireFlowNode } from "@/components/wire-flow"
+import { WireHost, WireMark, WireNode } from "@/components/wire/wire"
+import { WireFlow, type WireFlowHub, type WireFlowNode } from "@/components/wire/wire-flow"
 import {
   MOST_UPSTREAMS,
   identify,
@@ -181,7 +181,7 @@ export function ResolverChain({
               {!identity.bare || tlsName ? (
                 <span className="font-mono">
                   {address}
-                  {tlsName && <span className="text-muted-foreground/70">#{tlsName}</span>}
+                  {tlsName && <span className="text-faint">#{tlsName}</span>}
                 </span>
               ) : (
                 origin(up)

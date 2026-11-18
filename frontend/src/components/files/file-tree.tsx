@@ -16,7 +16,7 @@ import { del, downloadUrl, get, post } from "@/lib/api"
 import { truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { describeChange, gitLetter, gitStyle, gitTone } from "@/lib/git-status"
-import { FileIcon } from "@/components/files/file-icon"
+import { FileIcon } from "@/components/file-icon"
 import type { FileEntry, FileListing, GitFileChange } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { Button } from "@/components/ui/button"
@@ -28,7 +28,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { RowActions } from "@/components/icon-action"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
@@ -550,7 +550,9 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
           ) : dirHasChanges ? (
             <Tooltip>
               <TooltipTrigger asChild>
-                <span className="ml-auto size-1.5 shrink-0 rounded-full bg-(--git-modified)" />
+                {/* Git's modified hue, named by the tooltip: not a state tone. */}
+                {/* eslint-disable-next-line retired-apis/retired */}
+                <span className="ml-auto size-1.5 shrink-0 rounded-full bg-git-modified" />
               </TooltipTrigger>
               <TooltipContent>Contains changes</TooltipContent>
             </Tooltip>

@@ -1,22 +1,22 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ClockRewind, Copy, EyeOff, Filter, MoreHorizontal } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { timestamp, truncateMiddle } from "@/lib/format"
+import { grouped, plural, timestamp, truncateMiddle } from "@/lib/format"
 import type { LogLine, LogSearchResult } from "@/lib/types"
 import type { LogFields } from "@/components/logs/types"
-import { LEVEL_LABEL, hideField, onlyField, type LogLevel } from "@/lib/log-filter"
-import { fieldOf, isFilterable } from "@/lib/log-fields"
-import { eventMeta, lensFor } from "@/lib/log-lenses"
-import { useLogView } from "@/lib/log-view"
+import { LEVEL_LABEL, hideField, onlyField, type LogLevel } from "@/lib/log/filter"
+import { fieldOf, isFilterable } from "@/lib/log/fields"
+import { eventMeta, lensFor } from "@/lib/log/lenses"
+import { useLogView } from "@/lib/log/view"
 import { copyText } from "@/lib/clipboard"
 import { EVENT_WORD, LEVEL_WORD, laneStyle } from "@/components/logs/log-text"
 import { FieldValue } from "@/components/logs/field-value"
 import { LogRow, eventColumnFor } from "@/components/logs/log-console"
-import { FactDot } from "@/components/metrics/host-identity"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Well } from "@/components/panel"
 import { IconAction } from "@/components/icon-action"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -104,35 +104,31 @@ export function LineDetail({
 
   return (
     <div className="animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem] text-xs">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline pb-2">
-        <span
-          className={cn(
-            "text-body font-medium",
-            title ? !plain && EVENT_WORD[meta?.tone ?? "default"] : !plain && LEVEL_WORD[level],
-          )}
-        >
-          {title ?? `${LEVEL_LABEL[level] ?? "other"} line`}
-        </span>
-        {at && (
-          <>
-            <FactDot />
-            <span className="numeric text-muted-foreground">{timestamp(at)}</span>
-          </>
-        )}
-        {line.source && (
-          <>
-            <FactDot />
+      <div className="flex items-center gap-x-2 border-b border-hairline pb-2">
+        <FactLine className="flex-1">
+          <Fact>
             <span
+              className={cn(
+                "text-body font-medium",
+                title ? !plain && EVENT_WORD[meta?.tone ?? "default"] : !plain && LEVEL_WORD[level],
+              )}
+            >
+              {title ?? `${LEVEL_LABEL[level] ?? "other"} line`}
+            </span>
+          </Fact>
+          {at && <Fact className="numeric text-muted-foreground">{timestamp(at)}</Fact>}
+          {line.source && (
+            <Fact
               className="truncate font-medium"
               style={plain ? undefined : laneStyle(line.source)}
             >
               {line.source}
-            </span>
-          </>
-        )}
+            </Fact>
+          )}
+        </FactLine>
         {line.no !== undefined && (
-          <span className="numeric ml-auto text-muted-foreground">
-            line {line.no.toLocaleString()}
+          <span className="numeric shrink-0 text-muted-foreground">
+            line {grouped(line.no)}
             {line.file && ` of ${line.file}`}
           </span>
         )}
@@ -366,11 +362,7 @@ function LinesAround({
     <div className="mt-3 animate-rise">
       <div className="mb-1.5 flex items-center gap-2 text-hint text-muted-foreground">
         <span className="eyebrow">Lines around this</span>
-        {state.lines && (
-          <span className="numeric">
-            {state.lines.length.toLocaleString()} {state.lines.length === 1 ? "line" : "lines"}
-          </span>
-        )}
+        {state.lines && <span className="numeric">{plural(state.lines.length, "line")}</span>}
         {onMore && state.lines && (
           <Button size="xs" variant="ghost" className="ml-auto h-6" onClick={onMore}>
             More

@@ -3,7 +3,7 @@
 import { duration } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
-import { ProjectMarkOf } from "@/components/deploy/project-mark"
+import { ProjectMarkOf } from "@/components/project-mark"
 import { Status, type DotTone } from "@/components/status-dot"
 import { KEYCAP, Keycaps } from "./keycaps"
 import { KINDS, ResultMark } from "./marks"

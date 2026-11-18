@@ -7,14 +7,10 @@ import { errorMessage, get, post, put } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkBridgeView, NetworkLink, NetworkMasterPreview } from "@/lib/types"
 import { ConfirmDialog, type ConfirmRequest } from "@/components/confirm-dialog"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Field, FieldRow, FormNote, FormSections } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Notice } from "@/components/state"
 import { Input } from "@/components/ui/input"
 import {

@@ -4,10 +4,10 @@ import { useMemo, useState } from "react"
 import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { LogSearchResult, StackDetail } from "@/lib/types"
-import { stackSource } from "@/lib/log-sources"
+import { stackSource } from "@/lib/log/sources"
 import { usePoll } from "@/hooks/use-poll"
 import { containerEventsView } from "@/components/docker/container-events"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { Sparkline } from "@/components/sparkline"
 import { ServiceLogs, type LogAsk, type ServiceLogSource } from "@/components/logs/service-logs"
 import { StatusDot } from "@/components/status-dot"
 import { ServiceLabel } from "@/components/docker/stack-diff"
@@ -145,7 +145,7 @@ export function StackLogs({
         storageKey={`docker.stack.${stack.name}.logs`}
         views={views}
         ask={ask}
-        readings
+        readings="lines"
         className="min-h-0 flex-1"
         paneClassName="min-h-[30rem]"
       />

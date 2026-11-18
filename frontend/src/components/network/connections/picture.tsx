@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { Servers } from "@/components/icons"
@@ -10,9 +11,9 @@ import { useViewState } from "@/lib/view-state"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
 import { portsHref } from "@/components/proxy/ports-list"
-import { WireHost, WireMark } from "@/components/deploy/wire"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireHost, WireMark } from "@/components/wire/wire"
+import { Sparkline } from "@/components/sparkline"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import {
   PLACES,
   beat,
@@ -20,8 +21,6 @@ import {
   type Place,
   type Program,
 } from "@/components/network/connections/model"
-
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`
 
 /** The programs drawn before the rest fold into "N more programs". */
 const PROGRAMS = 5
@@ -222,7 +221,7 @@ function programNode(program: Program, onProgram: (name: string) => void): WireF
           <span key={p}>
             {i > 0 && <span className="text-muted-foreground">, </span>}
             <span className="text-muted-foreground">:</span>
-            <span className="text-[var(--tag-pink)]">{p}</span>
+            <span className="text-tag-pink">{p}</span>
           </span>
         ))}
         {program.ports.length > 4 && (

@@ -6,14 +6,13 @@ import { cn } from "@/lib/utils"
 import { ApiError, get } from "@/lib/api"
 import { minuteSpan } from "@/lib/format"
 import type { LogLine, LogSource } from "@/lib/types"
-import { EMPTY_FILTER, filterEquals, resolveRange } from "@/lib/log-filter"
-import { STACK_LENS, lensFor, withLensDefaults, type LogLens } from "@/lib/log-lenses"
+import { EMPTY_FILTER, filterEquals, resolveRange } from "@/lib/log/filter"
+import { STACK_LENS, lensFor, withLensDefaults, type LogLens } from "@/lib/log/lenses"
 import { useSessionState } from "@/lib/view-state"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import type { Tone } from "@/components/tone"
 import type { Verb } from "@/components/verbs"
 import { usePoll } from "@/hooks/use-poll"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ExportDialog } from "@/components/logs/export-dialog"
 import {
   LensReadings,
@@ -25,7 +24,8 @@ import { askOf, emptiedFile, withAsk, type LogAsk } from "@/components/logs/logs
 import { SourceFacts } from "@/components/logs/source-facts"
 import { Pane } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { EmptyState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Select,
   SelectContent,
@@ -33,6 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export type { LogAsk }
 
@@ -119,12 +120,13 @@ export type ServiceLogsProps = {
    */
   onLeaveWindow?(): void
   /**
-   * The lens's readings: as tiles above the pane (`true`) for a page with no
-   * figures of its own, from `sm` up — on a phone they were the whole first
-   * screen; or as the figures on the lens row's chips (`"chips"`) where the
-   * section draws no tiles.
+   * The lens's readings: as reading lines above the pane (`"lines"`) for a
+   * page with no figures of its own, from `sm` up — on a phone they were the
+   * whole first screen; or as the figures on the lens row's chips
+   * (`"chips"`) where the section draws no lines of its own. `true` is the
+   * old name of `"lines"`, from when they were a row of tiles.
    */
-  readings?: boolean | "chips"
+  readings?: "lines" | "chips" | boolean
   /**
    * The lens's readings where the page draws them in a grid of its own: a
    * quick view one of them answers then carries no second count of its own.
@@ -155,8 +157,33 @@ export type ServiceLogsProps = {
   flush?: boolean
   /** The column the readings and the pane stand in. */
   className?: string
-  /** The pane's own size — its height, or the floor it fills the column from. */
+  /**
+   * The pane's height, by where it stands (`LOG_PANE_SIZE`): `section` at a
+   * page's foot, `sheet` among other blocks or in a sheet, `fill` the page's
+   * own column. Absent, the pane is as tall as the column makes it.
+   */
+  size?: LogPaneSize
+  /** @deprecated use `size`: the fifteen hand-typed heights this took are three now. */
   paneClassName?: string
+}
+
+/** Where a service's log stands, which is what decides its height. */
+export type LogPaneSize = "section" | "sheet" | "fill"
+
+/**
+ * The three heights a service's log takes, named once. They were fifteen
+ * `paneClassName` strings — 75vh, 70vh, 60vh, 30rem, 26rem — each a guess at
+ * the same question, and the vh ones moved with a phone's browser chrome.
+ */
+export const LOG_PANE_SIZE: Record<LogPaneSize, string> = {
+  // The workbench well (`--height-workbench`): tall enough to work in, never
+  // taller than the screen, in svh so a phone's toolbars do not resize it.
+  section: "h-workbench min-h-80",
+  // Shorter, so what stands under it on a detail page or in a sheet is
+  // still in reach.
+  sheet: "h-[min(70svh,36rem)] min-h-80",
+  // The column's own height, from a floor a log is still readable at.
+  fill: "min-h-80",
 }
 
 const DEFAULT_RANGE: LogTimeRange = "24h"
@@ -235,7 +262,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const sheet = props.layout === "sheet"
   const modes = props.modes ?? ALL_MODES
   const opening = props.initialRange ?? DEFAULT_RANGE
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const [storedPicked, setPicked] = useKept(storageKey, "source", "")
   const [storedMode, setMode] = useKept<LogMode>(storageKey, "mode", modes[0])
@@ -456,7 +483,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
     setHanded((h) => ({ ...h, archives: true }))
   }
 
-  const asTiles = props.readings === true && wide && !sheet
+  const asTiles = (props.readings === "lines" || props.readings === true) && wide && !sheet
   const asChips = props.readings === "chips" && !sheet
   const readings = useLensReadings(sourceId, lens, {
     forcedLens: forced,
@@ -531,12 +558,22 @@ export function ServiceLogs(props: ServiceLogsProps) {
 
   // The pane's own height, where the page gives one, is its height: a flex
   // basis of zero made it whatever the column was, or the whole log tall.
-  const paneClass = cn("min-h-0 flex-auto", props.paneClassName)
+  const paneClass = cn(
+    "min-h-0 flex-auto",
+    props.size && LOG_PANE_SIZE[props.size],
+    props.paneClassName,
+  )
+  // A pane that fills takes the column's height, so its own column must too.
+  const column = cn(
+    "flex min-h-0 min-w-0 flex-col",
+    props.size === "fill" && "flex-1",
+    props.className,
+  )
 
   if (!source) {
     if (!missing) return null
     return (
-      <div className={cn("flex min-h-0 min-w-0 flex-col", props.className)}>
+      <div className={column}>
         <Pane flush={props.flush} className={paneClass}>
           <div className="flex min-h-10 shrink-0 items-center border-b border-hairline px-2">
             {picker}
@@ -558,7 +595,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
 
   if (refused) {
     return (
-      <div className={cn("flex min-h-0 min-w-0 flex-col", props.className)}>
+      <div className={column}>
         <Pane flush={props.flush} className={paneClass}>
           <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline px-2">
             {!picker && product && <ProductGlyph id={product} />}
@@ -611,7 +648,7 @@ export function ServiceLogs(props: ServiceLogsProps) {
   const exportable = !sheet && (!view || view.filtered)
 
   return (
-    <div className={cn("flex min-h-0 min-w-0 flex-col gap-4", props.className)}>
+    <div className={cn(column, "gap-4")}>
       {asTiles && readings.tiles.length > 0 && (
         <LensReadings readings={readings} filter={shown} onFilterChange={setFilter} />
       )}

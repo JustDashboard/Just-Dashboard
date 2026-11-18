@@ -11,12 +11,12 @@ Bun only. Keep `bun.lock`; never add `package-lock.json` or `yarn.lock`.
 | Path | What it is |
 | --- | --- |
 | `src/app/` | Routes. `(dashboard)/` is the signed-in shell, one directory per sidebar section; `login/`, `welcome/` and `hub/enter/` sit outside it |
-| `src/components/` | One directory per section (`components/<area>/`), `ui/` for the low-level controls, and the shared primitives at the top level. `nav.ts` is the sidebar's source |
-| `src/lib/` | The API client (`api.ts`), the API's types (`types.ts`) and pure logic, each with its `*.test.js` beside it |
+| `src/components/` | One directory per section (`components/<area>/`), `ui/` for the low-level controls, `shell/` for the sidebar, the command palette and the tab title (`shell/nav.ts` is the sidebar's source), `settings/` and `wire/` for the settings kit and the wiring marks, and the other shared components at the top level, each in a file named after it |
+| `src/lib/` | The API client (`api.ts`), the API's types (`types.ts`) and pure logic, each with its `*.test.js` beside it. What belongs to one domain is in its folder (`network/`, `log/`, `metrics/`, `terminal/`, `board/`, `tls/`, `proxy/`) |
 | `src/hooks/` | Polling, sockets, authentication and other shared state |
 | `src/proxy.ts` | The request proxy: the CSP nonce and policy, and the trailing-slash rule |
 | `tests/browser/` | Playwright specs (`<area>-*.spec.ts`) and the mocked APIs they run against (`*-fixture.ts`, `fixtures/`) |
-| `scripts/` | Build helpers (`sync-monaco.mjs`, `sync-excalidraw.mjs`), the standalone server `bun run start` uses, and the recording scripts |
+| `scripts/` | Build helpers (`sync-monaco.mjs`, `sync-excalidraw.mjs`), the standalone server `bun run start` uses, the recording scripts, and `move-files.ts`, which moves files and exports to where `moves.json` says and rewrites every import, test path and doc mention of them (`bun scripts/move-files.ts --dry-run` lists what it would change) |
 | `eslint-rules/` | The design system's lint rules, turned on in `eslint.config.mjs` |
 | `public/` | Static files: the product logos, and the Monaco and Excalidraw files the sync scripts copy in |
 | `Dockerfile` | The frontend image |
@@ -30,6 +30,7 @@ repository root.
 bun install && bun dev               # :3000, proxies /api to 127.0.0.1:8080
 bun run lint && bun run build
 bun test src                         # the unit tests over src/lib and src/components
+bun test scripts                     # the move script's own tests
 bun run start --hostname 127.0.0.1 --port 43117   # the built server the browser specs open
 bunx playwright test tests/browser/docker-ui.spec.ts
 ```
@@ -42,9 +43,11 @@ source change, or the specs test the old build. The whole browser suite is never
 - [`../AGENTS.md`](../AGENTS.md): the workflow, the required checks and the code style.
 - [`../docs/internal/reference/finding-things.md`](../docs/internal/reference/finding-things.md):
   the route, components, handler and spec that belong to a given page.
+- [`../docs/internal/frontend/standard.md`](../docs/internal/frontend/standard.md): the operator's
+  decisions for the frontend, and what holds each one.
 - [`../docs/internal/frontend/design-system.md`](../docs/internal/frontend/design-system.md): the
   design system's rules, and the passes a page redesign runs.
-- [`../docs/internal/frontend/shell-design.md`](../docs/internal/frontend/shell-design.md),
-  [`feature-map.md`](../docs/internal/frontend/feature-map.md) and
-  [`data-theming.md`](../docs/internal/frontend/data-theming.md): the shell, each route area, and
-  the API and socket clients.
+- [`../docs/internal/frontend/shell.md`](../docs/internal/frontend/shell.md),
+  [`features/README.md`](../docs/internal/frontend/features/README.md) and
+  [`patterns/data-flow.md`](../docs/internal/frontend/patterns/data-flow.md): the shell, each route
+  area, and the API and socket clients.

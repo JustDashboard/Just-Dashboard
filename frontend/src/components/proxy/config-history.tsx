@@ -14,20 +14,14 @@ import type {
   ProxyValidation,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceRow } from "@/components/flow"
-import { DiffView } from "@/components/files/diff-view"
-import { unifiedDiff } from "@/components/files/diff"
+import { ChoiceRow } from "@/components/choice-row"
+import { DiffView } from "@/components/diff-view"
+import { unifiedDiff } from "@/lib/diff"
 import { Modal } from "@/components/modal"
 import { Pane, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import {
-  EmptyNote,
-  EmptyState,
-  ErrorState,
-  LoadingPanel,
-  LoadingRows,
-  Notice,
-} from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingPanel, LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
@@ -219,7 +213,8 @@ function HistoryBody({
             <Row
               key={revision.id}
               onClick={() => setPicked(revision.id)}
-              className={cn("px-3 py-2", revision.id === selected && "bg-accent")}
+              current={revision.id === selected}
+              className="px-3 py-2"
               title={actionLabel(revision)}
               subtitle={`${revision.actor ? `${revision.actor} · ` : ""}${when(revision)}${
                 revision.existed ? ` · ${bytes(revision.size)}` : ""
@@ -445,7 +440,7 @@ function RestoreDialog({
         <RevisionDiff
           diff={diff}
           empty="The file on disk already holds this revision."
-          className="h-[45vh]"
+          className="h-[45svh]"
         />
         {refused && (
           <div className="space-y-2">

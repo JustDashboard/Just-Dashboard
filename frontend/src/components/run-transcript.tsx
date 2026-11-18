@@ -2,18 +2,19 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Copy, Download } from "@/components/icons"
+import { gutterCh } from "@/components/code"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
-import { SearchInput } from "@/components/page"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { SearchInput } from "@/components/search-input"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { IconAction } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
 import { TranscriptRow, useTranscriptDrip } from "@/components/transcript-line"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { getText } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics-export"
 import { extendTranscript, isTrimmed, transcriptLines } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
+import { saveText } from "@/lib/download"
 
 /**
  * A restart's or an upgrade's transcript, read line by line.
@@ -109,11 +110,13 @@ export function RunTranscript({
     if (follow && body.current) body.current.scrollTop = body.current.scrollHeight
   }, [visible, follow])
 
+  // As wide as the last number, so a short run's lines start nearer the edge.
+  const gutter = gutterCh(lines.at(-1)?.number ?? 0)
   const trimmed = isTrimmed(display)
   const plain = () => lines.map((line) => line.text).join("\n")
 
   return (
-    <Pane className={cn("relative h-[min(70vh,44rem)] min-h-72", className)}>
+    <Pane className={cn("relative h-[min(70svh,44rem)] min-h-72", className)}>
       {live && <BorderBeam size={96} duration={7} />}
       <PaneHeader className="flex-wrap gap-2 py-2">
         <span className="text-xs font-medium">{label}</span>
@@ -164,7 +167,7 @@ export function RunTranscript({
             label="Download the transcript"
             disabled={!lines.length}
             onClick={() =>
-              downloadText(
+              saveText(
                 `${label.toLowerCase().replace(/\s+/g, "-")}.log`,
                 `${plain()}\n`,
                 "text/plain",
@@ -200,6 +203,7 @@ export function RunTranscript({
                 needle={needle}
                 arrived={line.number > arrivedFrom}
                 loading={line.kind === "trimmed" && stale}
+                gutter={gutter}
               />
             ))}
           </ol>

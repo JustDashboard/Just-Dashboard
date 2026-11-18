@@ -28,6 +28,14 @@ type Options = {
   action?: { label: string; onClick: () => void }
 }
 
+/**
+ * The failures on screen, by what they say. A failure stays until dismissed,
+ * so the same one raised again (a second press on a dead button, a poll that
+ * keeps failing) would otherwise pile up copies of one sentence. The earlier
+ * copy leaves and the new one arrives, which also says it happened again.
+ */
+const standing = new Map<string, string | number>()
+
 /** What a failure says under a toast's title: the error's message, as a sentence. */
 export function failureReason(cause: unknown): string {
   return asSentence(errorMessage(cause))
@@ -53,7 +61,13 @@ export const notify = {
    * unwrapping is the part that kept being done differently. An error message
    * can be long — a `pg_dump` refusal names two versions and two Debian build
    * strings — so these stay up until dismissed rather than sliding away while
-   * somebody is still reading.
+   * somebody is still reading. That holds for a failure with no reason too:
+   * "Not connected" explains why a press did nothing, and a reader who looked
+   * away for four seconds was left with a button that silently does not work.
+   * The toaster draws a close button on every toast, and a caller that knows
+   * its failure is passing gives a `duration`. Only failures wait: a toast
+   * stands over whatever is in the corner under it, so a success keeps
+   * sonner's own short life.
    *
    * The reason is the API's message, which is worded to sit inside other text:
    * "not found", "too many requests, slow down". Under a title it stands
@@ -62,11 +76,21 @@ export const notify = {
    */
   error(title: string, cause?: unknown, options?: Options) {
     const description = cause === undefined ? options?.description : failureReason(cause)
-    return sonner.error(title, {
+    const said = `${title}\n${description ?? ""}`
+    const earlier = standing.get(said)
+    if (earlier !== undefined) sonner.dismiss(earlier)
+    const forget = () => {
+      if (standing.get(said) === id) standing.delete(said)
+    }
+    const id = sonner.error(title, {
       ...options,
       description,
-      duration: options?.duration ?? (description ? 12_000 : undefined),
+      duration: options?.duration ?? Infinity,
+      onDismiss: forget,
+      onAutoClose: forget,
     })
+    standing.set(said, id)
+    return id
   },
 
   /** A toast that becomes a result. Returns sonner's id so it can be updated. */

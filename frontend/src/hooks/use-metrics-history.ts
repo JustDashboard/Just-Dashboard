@@ -13,7 +13,7 @@ import {
   windowRefreshMs,
   type MetricsWindow,
   type RangeKey,
-} from "@/lib/metrics-range"
+} from "@/lib/metrics/range"
 import type { MetricEvent, MetricsHistory, StorageHistory } from "@/lib/types"
 
 function useMetricsRefresh(refresh: () => void) {

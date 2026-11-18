@@ -198,6 +198,9 @@ for (const width of [1280, 390]) {
     const loaded = await line.boundingBox()
     expect(loaded!.y).toBe(loading!.y)
     expect(loaded!.x).toBe(loading!.x)
+    // The loading line keeps a place for the state and the verbs the loaded
+    // one has, so nothing under it moves when the site lands, on a phone too.
+    expect(loaded!.height).toBeCloseTo(loading!.height, 0)
     // The rail is a wide screen's; on a phone the page is the one pane.
     await expect(page.getByRole("navigation", { name: "Sites", exact: true })).toHaveCount(
       width === 390 ? 0 : 1,

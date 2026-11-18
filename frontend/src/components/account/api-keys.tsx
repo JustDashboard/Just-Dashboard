@@ -21,16 +21,18 @@ import type { ApiToken, DashboardUser, DbConnection, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormNote, InfoTip } from "@/components/form"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { SearchInput, Section } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { Section } from "@/components/section"
 import { ProductLogo } from "@/components/product-logo"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -56,12 +58,13 @@ import {
   type KeyOrder,
 } from "@/components/account/key-list"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { ShellWords } from "@/components/deploy/run-evidence"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
-import { ROLE_HUE, ROLE_LADDER, ROLE_NAME } from "@/components/account/capabilities"
+import { ROLE_LADDER } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_NAME, RoleTag } from "@/components/account/role"
 import { DAY, expired, expiringSoon, usableKeys } from "@/components/account/access"
 import { KeyMap } from "@/components/account/key-map"
 import {
@@ -71,10 +74,10 @@ import {
   grantsOf,
   grantsWithin,
 } from "@/components/database/fleet/mcp-server"
-import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { UserAvatar, displayNameOf } from "@/components/user-avatar"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
-import { Segments } from "@/components/deploy/settings/segments"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { Segments } from "@/components/segments"
+import { ProjectMark } from "@/components/project-mark"
 import { useProjects } from "@/hooks/use-projects"
 import {
   CLI_DOWNLOAD,
@@ -88,6 +91,7 @@ import {
   deployReach,
   jdLogin,
 } from "@/components/account/deploy-keys"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export function useApiKeys() {
   return usePoll((signal) => get<ApiToken[]>("/tokens/", undefined, signal), 30000)
@@ -191,11 +195,11 @@ function KeyRow({
   owner?: DashboardUser
   verbs: Verb[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const usage = token.lastUsedAt ? `used ${relativeTime(token.lastUsedAt)}` : "never used"
   // A key narrowed to one job says the job, where the role beneath it would
   // read as the key being able to do everything that role can.
-  const can = scopeWords(token) ?? token.role
+  const job = scopeWords(token)
   const spent = token.revoked || expired(token, now)
   const readings = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-1">
@@ -205,8 +209,8 @@ function KeyRow({
       >
         {usage}
       </span>
-      <span className="flex w-24">
-        <Tag style={{ color: ROLE_HUE[token.role] }}>{can}</Tag>
+      <span className="flex w-32">
+        {job ? <Tag hue={ROLE_HUE[token.role]}>{job}</Tag> : <RoleTag role={token.role} />}
       </span>
       <span
         className="flex w-44"
@@ -325,11 +329,17 @@ function KeysIdentity({
 }) {
   if (!usable) {
     return (
-      <HostIdentity
+      <IdentityHeader
         fallback={Key}
         title="API keys"
-        state={<Status tone="unknown" label={<TextShimmer>reading</TextShimmer>} />}
-        facts={<span>keys that call this dashboard without a browser</span>}
+        // Reading is said among the facts, not as a state: the loaded line
+        // has no state, and on a phone a state is a row of its own.
+        facts={
+          <Fact>
+            <TextShimmer>reading</TextShimmer>
+          </Fact>
+        }
+        command={command}
       />
     )
   }
@@ -344,38 +354,33 @@ function KeysIdentity({
     ? Math.max(0, Math.floor((Date.parse(expiring[0].expiresAt) - now) / DAY))
     : 0
   return (
-    <HostIdentity
+    <IdentityHeader
       fallback={Key}
       title={usable.length > 0 ? plural(usable.length, "key") : "API keys"}
       state={usable.length === 0 ? <Status tone="unknown" label="none in use" /> : undefined}
       facts={
+        // What needs doing first, so a phone's one line of facts shows it: the
+        // keys about to stop, then the roles, then the ones already spent.
         <>
-          {roles.map(({ role, count }, index) => (
-            <span key={role} className="contents">
-              {index > 0 && <FactDot />}
-              <span className="numeric">
-                {count}{" "}
-                <span style={{ color: ROLE_HUE[role] }}>{ROLE_NAME[role].toLowerCase()}</span>
-              </span>
-            </span>
-          ))}
           {expiring.length > 0 && (
-            <>
-              <FactDot />
+            <Fact>
               <Status
                 tone="warning"
+                // On the line's top, as a product fact's glyph is: on its
+                // baseline the dot's box grew the line a pixel.
+                className="align-top"
                 label={`${expiring.length} expiring ${days === 0 ? "today" : `in ${plural(days, "day")}`}`}
               />
-            </>
+            </Fact>
           )}
-          {Boolean(spent) && (
-            <>
-              {usable.length > 0 && <FactDot />}
-              <span className="numeric">{spent} revoked or expired</span>
-            </>
-          )}
+          {roles.map(({ role, count }) => (
+            <Fact key={role} className="numeric">
+              {count} <span style={{ color: ROLE_HUE[role] }}>{ROLE_NAME[role].toLowerCase()}</span>
+            </Fact>
+          ))}
+          {Boolean(spent) && <Fact className="numeric">{spent} revoked or expired</Fact>}
           {usable.length === 0 && !spent && (
-            <span>keys that call this dashboard without a browser</span>
+            <Fact>keys that call this dashboard without a browser</Fact>
           )}
         </>
       }
@@ -405,10 +410,20 @@ export function ApiKeysView({
   const { data, error, loading, refresh } = keys
   // The line, the picture and the list stand where they will, so the page does
   // not jump when the keys land.
+  // The loading line carries the command it will have, held still, so on a
+  // phone it is the loaded line's height and nothing under it moves (D11).
   if (loading && !data)
     return (
       <>
-        <KeysIdentity now={now} />
+        <KeysIdentity
+          now={now}
+          command={
+            <Button size="sm" disabled>
+              <Plus className="size-4" />
+              New key
+            </Button>
+          }
+        />
         <Skeleton className="h-80 rounded-xl" />
         <LoadingRows rows={3} />
       </>

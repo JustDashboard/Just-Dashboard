@@ -2,30 +2,29 @@
 
 import { useState } from "react"
 import { useSessionState } from "@/lib/view-state"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Archive, ArrowLeft, MagnifyingGlass, Trash } from "@/components/icons"
+import { Archive, MagnifyingGlass, Trash } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type { ArchivedDeployment } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { FormFact } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput, SearchInputSkeleton } from "@/components/search-input"
 import { Panel, PanelBody, PanelToolbar } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
 import { WorkloadMark, projectProduct, sourceProduct } from "@/components/deploy/vocabulary"
 import { purgeRequest } from "@/components/deploy/project-verbs"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Deployments that have been taken out of the active fleet but keep their
@@ -51,7 +50,7 @@ export function ArchivedProjects() {
   const { confirm, dialog } = useConfirm()
   // Chosen once, because each reading is found by its text and a hidden twin
   // is a second answer.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [query, setQuery] = useSessionState("deploy.archived.query", "")
   const [restoringId, setRestoringId] = useState<number>()
   const result = usePoll(
@@ -136,8 +135,8 @@ export function ArchivedProjects() {
   )
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow={BACK} title="Archived" />
+    <Page rise>
+      <PageContext back={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
           <SearchInput
@@ -228,26 +227,11 @@ export function ArchivedProjects() {
   )
 }
 
-const BACK = (
-  <Link
-    href="/deploy"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Deployments
-  </Link>
-)
+const BACK = { href: "/deploy", label: "Deployments" }
 
 /** Three rows in the archive's shape, before its first answer. */
 function ArchivedRows() {
-  return (
-    <ChoiceList aria-hidden>
-      {[0, 1, 2].map((index) => (
-        <li key={index}>
-          <Skeleton className="h-14 rounded-xl" />
-        </li>
-      ))}
-    </ChoiceList>
-  )
+  return <ChoiceListSkeleton rows={3} lines={2} />
 }
 
 /**
@@ -258,10 +242,10 @@ function ArchivedRows() {
 export function ArchivedSkeleton() {
   return (
     <Page>
-      <PageContext eyebrow={BACK} title="Archived" />
+      <PageContext back={BACK} title="Archived" />
       <Panel plain>
         <PanelToolbar>
-          <Skeleton aria-hidden className="h-10 w-full rounded-md sm:h-8 sm:w-72" />
+          <SearchInputSkeleton />
         </PanelToolbar>
         <PanelBody flush className="pt-3">
           <ArchivedRows />

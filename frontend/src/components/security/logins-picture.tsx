@@ -7,11 +7,11 @@ import { plural, relativeTime } from "@/lib/format"
 import type { AttackSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useNow } from "@/hooks/use-now"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import {
   attackingNow,
   attemptsWords,

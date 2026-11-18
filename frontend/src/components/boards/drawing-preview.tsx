@@ -2,7 +2,7 @@
 
 import { memo, useId } from "react"
 import { motion, useReducedMotion } from "motion/react"
-import type { BoardPreview, DrawingElement } from "@/lib/boards"
+import type { BoardPreview, DrawingElement } from "@/lib/board/boards"
 import {
   arrowhead,
   extentOf,

@@ -6,7 +6,6 @@ import {
   Bell,
   Box,
   Check,
-  Copy,
   Crosshair,
   Database,
   Gauge,
@@ -23,12 +22,21 @@ import {
   Terminal,
   type Icon,
 } from "@/components/icons"
-import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
-import { copyText } from "@/lib/clipboard"
+import { bytes, plural, relativeTime, shortDigest, shortSha, timestamp } from "@/lib/format"
+import {
+  CODE,
+  CodeBlock,
+  CodeLines,
+  Digest,
+  DockerfilePieces,
+  JsonCode,
+  ShellWords,
+  dockerfileLines,
+} from "@/components/code"
 import { tokenClass } from "@/components/logs/log-text"
 import { cn } from "@/lib/utils"
 import type { DeploymentStep, DeploymentSummary } from "@/lib/types"
-import { GroupRule } from "@/components/flow"
+import { GroupRule } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AuthorMark, ShortSha } from "@/components/git/marks"
@@ -263,7 +271,9 @@ export function stepSummary(step: DeploymentStep): string | undefined {
   switch (step.key) {
     case "resolve_source": {
       const revision = text(evidence.revision)
-      return revision ? `${text(evidence.kind) ?? "source"} at ${shortHash(revision)}` : undefined
+      return revision
+        ? `${text(evidence.kind) ?? "source"} at ${revision.startsWith("sha256:") ? shortDigest(revision) : shortSha(revision)}`
+        : undefined
     }
     case "acquire_source": {
       const commit = isRecord(evidence.commit) ? evidence.commit : undefined
@@ -345,10 +355,6 @@ export function stepSummary(step: DeploymentStep): string | undefined {
     default:
       return undefined
   }
-}
-
-function shortHash(value: string) {
-  return value.replace(/^sha256:/, "").slice(0, 7)
 }
 
 /**
@@ -555,25 +561,6 @@ function CommitValue({ commit }: { commit: Json }) {
   )
 }
 
-/** A digest cut to what tells two apart, the whole of it on hover and a press away. */
-function Digest({ value, label }: { value: string; label: string }) {
-  const [algorithm, hash] = value.includes(":") ? value.split(":", 2) : ["", value]
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1 font-mono text-xs" title={value}>
-      {algorithm && <span className="text-muted-foreground/60">{algorithm}:</span>}
-      <span className={tokenClass("id")}>{hash.slice(0, 12)}</span>
-      <button
-        type="button"
-        aria-label={`Copy ${label.toLowerCase()}`}
-        onClick={() => void copyText(value, `${label} copied`)}
-        className="flex size-5 items-center justify-center rounded-sm text-muted-foreground focus-ring hover:bg-accent hover:text-foreground"
-      >
-        <Copy className="size-3" />
-      </button>
-    </span>
-  )
-}
-
 /**
  * A list of records, drawn by what its items carry: an image by its
  * reference, a check by its outcome, anything else as a record of its own.
@@ -685,6 +672,7 @@ function CheckRow({ check }: { check: Json }) {
 function TextBlock({ name, value }: { name: string; value: string }) {
   const dockerfile = /dockerfile/i.test(name)
   const lines = value.replace(/\n$/, "").split("\n")
+  const pieces = dockerfile ? dockerfileLines(value) : undefined
   return (
     <CodeBlock
       title={dockerfile ? "Dockerfile" : factLabel(name)}
@@ -692,16 +680,14 @@ function TextBlock({ name, value }: { name: string; value: string }) {
       copy={value}
       lines={lines.length}
     >
-      {lines.map((line, index) => (
-        <span key={index} className="flex">
-          <span className="numeric w-8 shrink-0 pr-3 text-right text-muted-foreground/40 select-none">
-            {index + 1}
-          </span>
-          <span className="min-w-0 wrap-anywhere whitespace-pre-wrap">
-            {dockerfile ? <DockerfileLine line={line} /> : line}
-          </span>
-        </span>
-      ))}
+      <CodeLines
+        lines={lines}
+        render={
+          pieces
+            ? (_line, index) => <DockerfilePieces pieces={pieces[index]?.pieces ?? []} />
+            : undefined
+        }
+      />
     </CodeBlock>
   )
 }
@@ -746,233 +732,5 @@ function quote(word: string) {
   return /[\s"'$`\\]/.test(word) ? `'${word.replaceAll("'", "'\\''")}'` : word
 }
 
-const SHELL_WORD = /"(?:[^"\\]|\\.)*"|'[^']*'|&&|\|\||[|;]|\S+/g
-
-/**
- * A command as it was typed — a build or start command, a check's request —
- * coloured the way `CommandBlock` colours one the engine ran, inline in a line
- * that reads a plan back. The words are the reader's own, so nothing is quoted
- * again: the program after each `&&`, `|` or `;`, a flag, a path, a quoted
- * word and a variable each take their hue, and an assignment in front of the
- * program keeps its name and its value apart.
- */
-export function ShellWords({ command, className }: { command: string; className?: string }) {
-  const out: React.ReactNode[] = []
-  let at = 0
-  let program = true
-  for (const match of command.matchAll(SHELL_WORD)) {
-    const index = match.index ?? 0
-    if (index > at) out.push(command.slice(at, index))
-    const word = match[0]
-    const operator = word === "&&" || word === "||" || word === "|" || word === ";"
-    const assignment: boolean = program && /^[A-Za-z_][A-Za-z0-9_]*=/.test(word)
-    out.push(
-      assignment ? (
-        <span key={index}>
-          <span className={CODE.key}>{word.slice(0, word.indexOf("="))}</span>
-          <span className={CODE.punct}>=</span>
-          <span className={CODE.string}>{word.slice(word.indexOf("=") + 1)}</span>
-        </span>
-      ) : (
-        <span
-          key={index}
-          className={
-            operator
-              ? CODE.punct
-              : program
-                ? CODE.program
-                : /^["']/.test(word)
-                  ? CODE.string
-                  : word.startsWith("-")
-                    ? CODE.flag
-                    : word.startsWith("$")
-                      ? CODE.variable
-                      : PATH.test(word) || word === "."
-                        ? CODE.path
-                        : /^\d+$/.test(word)
-                          ? CODE.number
-                          : undefined
-          }
-        >
-          {word}
-        </span>
-      ),
-    )
-    program = operator || assignment
-    at = index + word.length
-  }
-  if (at < command.length) out.push(command.slice(at))
-  return <code className={cn("font-mono", className)}>{out}</code>
-}
-
-/**
- * The hues a code block draws in: the `--tag-*` rung the log console's tokens
- * sit on, so no kind outshouts another, and none of the status hues — a
- * string is not a success. Keys and keywords take the blues and the violet,
- * values the green and the pink, paths the cyan the console gives a path,
- * and the punctuation steps back.
- */
-export const CODE = {
-  key: "text-[var(--tag-blue)]",
-  keyword: "font-semibold text-[var(--tag-violet)]",
-  literal: "text-[var(--tag-violet)]",
-  string: "text-[var(--tag-green)]",
-  number: "text-[var(--tag-pink)]",
-  variable: "text-[var(--tag-pink)]",
-  path: "text-[var(--tag-cyan)]",
-  flag: "text-[var(--tag-cyan)]",
-  digest: "text-[var(--tag-slate)]",
-  comment: "text-muted-foreground/70 italic",
-  punct: "text-muted-foreground/60",
-  program: "font-semibold text-foreground",
-}
-
-const JSON_TOKEN =
-  /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+(?:\.\d+)?(?:[eE][+-]?\d+)?)|\b(true|false|null)\b|([{}[\],])/g
-
-/** A record as JSON, laid out two spaces a level and coloured by what each token is. */
-export function JsonCode({ value }: { value: unknown }) {
-  const source = JSON.stringify(value, null, 2) ?? ""
-  const out: React.ReactNode[] = []
-  let at = 0
-  for (const match of source.matchAll(JSON_TOKEN)) {
-    const index = match.index ?? 0
-    if (index > at) out.push(source.slice(at, index))
-    const [whole, string, colon, number, literal] = match
-    if (string !== undefined && colon !== undefined) {
-      out.push(
-        <span key={index} className={CODE.key}>
-          {string}
-        </span>,
-        <span key={`${index}:`} className={CODE.punct}>
-          {colon}
-        </span>,
-      )
-    } else if (string !== undefined) {
-      const inner = string.slice(1, -1)
-      out.push(
-        <span
-          key={index}
-          className={
-            PATH.test(inner) || URL_TEXT.test(inner)
-              ? CODE.path
-              : DIGEST.test(inner) || HEX.test(inner)
-                ? CODE.digest
-                : CODE.string
-          }
-        >
-          {string}
-        </span>,
-      )
-    } else if (number !== undefined) {
-      out.push(
-        <span key={index} className={CODE.number}>
-          {number}
-        </span>,
-      )
-    } else if (literal !== undefined) {
-      out.push(
-        <span key={index} className={CODE.literal}>
-          {literal}
-        </span>,
-      )
-    } else {
-      out.push(
-        <span key={index} className={CODE.punct}>
-          {whole}
-        </span>,
-      )
-    }
-    at = index + whole.length
-  }
-  if (at < source.length) out.push(source.slice(at))
-  return <span className="whitespace-pre">{out}</span>
-}
-
-const DOCKER_WORD = /^(\s*)([A-Za-z]+)(\s|$)/
-const DOCKER_PIECES = /(--[\w-]+(?:=\S*)?)|("(?:[^"\\]|\\.)*")|(\$\{?\w+\}?)|(\bAS\b)|(\S+)/g
-
-/** A Dockerfile line: its instruction, its flags, its variables and its quoted words. */
-function DockerfileLine({ line }: { line: string }) {
-  if (/^\s*#/.test(line)) return <span className={CODE.comment}>{line}</span>
-  const head = DOCKER_WORD.exec(line)
-  if (!head) return <>{line}</>
-  const from = head[2].toUpperCase() === "FROM"
-  const rest = line.slice(head[0].length - head[3].length)
-  const pieces: React.ReactNode[] = []
-  let at = 0
-  let first = true
-  for (const match of rest.matchAll(DOCKER_PIECES)) {
-    const index = match.index ?? 0
-    if (index > at) pieces.push(rest.slice(at, index))
-    const [whole, flag, quoted, variable, as] = match
-    const className = flag
-      ? CODE.flag
-      : quoted
-        ? CODE.string
-        : variable
-          ? CODE.variable
-          : as
-            ? CODE.keyword
-            : from && first
-              ? CODE.string
-              : PATH.test(whole)
-                ? CODE.path
-                : undefined
-    if (!flag) first = false
-    pieces.push(
-      <span key={index} className={className}>
-        {whole}
-      </span>,
-    )
-    at = index + whole.length
-  }
-  if (at < rest.length) pieces.push(rest.slice(at))
-  return (
-    <>
-      {head[1]}
-      <span className={CODE.keyword}>{head[2]}</span>
-      {pieces}
-    </>
-  )
-}
-
-/**
- * Text kept as the engine kept it, in a recessed block with its name, its
- * length and a copy. A `Well`'s ground with a caption strip, so a Dockerfile
- * and the record around it read as one thing and its name.
- */
-export function CodeBlock({
-  title,
-  mark,
-  copy,
-  lines,
-  children,
-}: {
-  title: string
-  mark?: React.ReactNode
-  copy: string
-  lines?: number
-  children: React.ReactNode
-}) {
-  return (
-    <figure className="min-w-0 overflow-hidden rounded-lg border border-hairline bg-surface-sunken">
-      <figcaption className="flex min-h-8 min-w-0 items-center gap-2 border-b border-hairline px-3 py-1 text-hint text-muted-foreground">
-        {mark}
-        <span className="truncate font-medium text-foreground">{title}</span>
-        {lines !== undefined && <span className="numeric">{plural(lines, "line")}</span>}
-        <button
-          type="button"
-          aria-label={`Copy ${title.toLowerCase()}`}
-          onClick={() => void copyText(copy, `${title} copied`)}
-          className="ml-auto flex size-6 items-center justify-center rounded-sm text-muted-foreground focus-ring hover:bg-accent hover:text-foreground"
-        >
-          <Copy className="size-3.5" />
-        </button>
-      </figcaption>
-      <pre className="max-h-96 overflow-auto p-3 font-mono text-xs leading-relaxed">
-        <code>{children}</code>
-      </pre>
-    </figure>
-  )
-}
+/** @deprecated import from `@/components/code` */
+export { CODE, ShellWords }

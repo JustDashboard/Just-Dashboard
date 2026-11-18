@@ -1,32 +1,31 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
+import { useParams, useRouter } from "next/navigation"
 import {
   egressDraftFromGroup,
   egressSimulationReading,
   type EgressDraft,
   type EgressGroup,
   type EgressView,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import type { PollState } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
-import { ArrowLeft, ChevronDown, ChevronUp, Lifebuoy } from "@/components/icons"
-import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext } from "@/components/page"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { Fact } from "@/components/fact-line"
+import { Lifebuoy } from "@/components/icons"
+import { DetailPage, useDetailTab, type Step } from "@/components/detail-page"
+import { IdentityHeader } from "@/components/identity-header"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import type { NetworkLink } from "@/lib/types"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { EgressDecisions } from "@/components/network/egress/egress-decisions"
@@ -42,24 +41,16 @@ import {
   EGRESS_TABS,
   egressCarrying,
   egressHref,
-  egressNameOf,
   egressSibling,
   egressSimulationFact,
   findEgressGroup,
   type EgressTab,
 } from "@/components/network/egress/reading"
 import { useEgressLinks, useEgressView } from "@/components/network/egress/use-egress"
+import { decodeSegment } from "@/lib/route-params"
 
-const BACK = (
-  <Link
-    href="/network/egress"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Egress groups
-  </Link>
-)
-
-type Step = { disabled: boolean; run: () => void }
+// One inset under the strip on every Network detail page.
+const VIEW_PANE = "pt-6"
 
 /**
  * One egress group, as a place of its own.
@@ -80,22 +71,9 @@ type Step = { disabled: boolean; run: () => void }
  */
 export function EgressGroupPage() {
   const params = useParams<{ name: string }>()
-  const search = useSearchParams()
   const router = useRouter()
-  const name = egressNameOf(params.name)
-  const requested = search.get("tab") ?? "members"
-  const [chosen, setChosen] = useState(requested)
-  const tab: EgressTab = (EGRESS_TABS as readonly string[]).includes(chosen)
-    ? (chosen as EgressTab)
-    : "members"
-  const setTab = useCallback((next: string) => {
-    setChosen(next)
-    // Replaced rather than pushed: the view is not a place Back should step through.
-    const url = new URL(window.location.href)
-    if (next === "members") url.searchParams.delete("tab")
-    else url.searchParams.set("tab", next)
-    window.history.replaceState(null, "", `${url.pathname}${url.search}`)
-  }, [])
+  const name = decodeSegment(params.name)
+  const [tab, setTab] = useDetailTab(EGRESS_TABS)
 
   const read = useEgressView()
   const links = useEgressLinks(true)
@@ -110,6 +88,8 @@ export function EgressGroupPage() {
     if (group && count !== undefined && known !== count)
       setMembers((held) => ({ ...held, [group.name.toLowerCase()]: count }))
   }, [group, count, known, setMembers])
+  // A simulation the line started runs on the Simulation view.
+  const [simulating, setSimulating] = useState(false)
   const go = (target?: EgressGroup) => target && router.push(egressHref(target.name, tab))
   const at = group ? groups.indexOf(group) : -1
   const previous: Step = {
@@ -120,130 +100,123 @@ export function EgressGroupPage() {
     disabled: groups.length === 0 || at === groups.length - 1,
     run: () => go(egressSibling(groups, name, 1)),
   }
+  const view = read.data
 
   return (
-    <Workspace
+    <DetailPage
       name="Egress group"
+      what="group"
       stateKey="network.egress.group"
       refresh={read.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous group",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next group",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list stays
-          put while the group scrolls; narrower, the page scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <EgressRail
-            className="hidden w-72 shrink-0 xl:flex"
-            groups={groups}
-            current={group?.id}
+      steps={{ previous, next }}
+      rail={
+        <EgressRail
+          groups={groups}
+          current={group?.id}
+          tab={tab}
+          loading={!read.data && !read.error}
+          error={!read.data ? read.error : undefined}
+          onRetry={read.refresh}
+        />
+      }
+      back={{ href: "/network/egress", label: "Egress groups" }}
+      title={group?.name ?? (name || "Egress group")}
+      identity={
+        group && view ? (
+          <GroupIdentity
+            key={group.id}
+            group={group}
+            view={view}
+            read={read}
+            links={links.data ?? []}
             tab={tab}
-            loading={!read.data && !read.error}
-            failed={!read.data && Boolean(read.error)}
+            onSimulating={setSimulating}
           />
-          <div className="flex min-w-0 flex-1 flex-col gap-5 xl:min-h-0 xl:overflow-y-auto xl:pr-1">
-            <PageContext
-              eyebrow={BACK}
-              title={group?.name ?? (name || "Egress group")}
-              actions={
-                <span className="flex items-center">
-                  <IconAction
-                    label="Previous group"
-                    disabled={previous.disabled}
-                    onClick={previous.run}
-                  >
-                    <ChevronUp />
-                  </IconAction>
-                  <IconAction label="Next group" disabled={next.disabled} onClick={next.run}>
-                    <ChevronDown />
-                  </IconAction>
-                  <span className="max-sm:hidden">
-                    <WorkspaceHelp compact />
-                  </span>
-                </span>
-              }
-            />
-            {group && read.data ? (
-              <GroupMain
-                key={group.id}
-                group={group}
-                view={read.data}
-                read={read}
-                links={links.data ?? []}
-                tab={tab}
-                setTab={setTab}
-              />
-            ) : read.data ? (
-              <EmptyState
-                icon={Lifebuoy}
-                title={`No egress group named ${name || "that"}`}
-                description="It may have been removed or renamed."
-                action={
-                  <Button size="sm" variant="outline" asChild>
-                    <Link href="/network/egress">Egress groups</Link>
-                  </Button>
-                }
-              />
-            ) : read.error ? (
-              <ErrorState error={read.error} onRetry={read.refresh} />
-            ) : (
-              <Loading name={name} members={members[name.toLowerCase()]} />
-            )}
-          </div>
-        </div>
-      </Page>
-    </Workspace>
+        ) : (
+          !view && !read.error && <LoadingIdentity name={name} />
+        )
+      }
+    >
+      {group && view ? (
+        <GroupViews
+          key={group.id}
+          group={group}
+          view={view}
+          read={read}
+          links={links.data ?? []}
+          tab={tab}
+          setTab={setTab}
+          running={simulating ? view.running : undefined}
+        />
+      ) : view ? (
+        <EmptyState
+          icon={Lifebuoy}
+          title={`No egress group named ${name || "that"}`}
+          description="It may have been removed or renamed."
+          action={
+            <Button size="sm" variant="outline" asChild>
+              <Link href="/network/egress">Egress groups</Link>
+            </Button>
+          }
+        />
+      ) : read.error ? (
+        <ErrorState error={read.error} onRetry={read.refresh} />
+      ) : (
+        <Loading members={members[name.toLowerCase()]} />
+      )}
+    </DetailPage>
   )
 }
 
-/** The page's final shape before the read lands: the line, the picture and the strip. */
-function Loading({ name, members }: { name: string; members?: number }) {
+/** The line before the read lands, with the verbs' place held. */
+function LoadingIdentity({ name }: { name: string }) {
   return (
-    <>
-      <HostIdentity
-        slot="egress-group-header"
-        fallback={Lifebuoy}
-        title={name}
-        state={<Status tone="unknown" label="Reading" />}
-        facts={<TextShimmer>Reading the group…</TextShimmer>}
-      />
-      <EgressPicture links={[]} expected={members} />
-      <div className="h-10 border-b border-hairline" />
-      <LoadingRows rows={3} />
-    </>
+    <IdentityHeader
+      slot="egress-group-header"
+      fallback={Lifebuoy}
+      title={name}
+      state={<Status tone="unknown" label="Reading" />}
+      // The verbs' place, so on a phone the line holds the row they land on.
+      menu={false}
+      facts={<TextShimmer>Reading the group…</TextShimmer>}
+    />
   )
 }
 
-function GroupMain({
+/** The views' final shape before the read lands: the strip, then the picture that opens Members. */
+function Loading({ members }: { members?: number }) {
+  return (
+    <div className="flex min-w-0 flex-col">
+      {/* A tab's height over the strip's hairline, as the strip is built. */}
+      <div className="border-b border-hairline">
+        <div className="h-10" />
+      </div>
+      <div className={cn(VIEW_PANE, "flex min-w-0 flex-col gap-6")}>
+        <EgressPicture links={[]} expected={members} />
+        <LoadingRows rows={3} />
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The group's line, with Run simulation as its one command and every other
+ * verb in the `⋯`, and the edit form those verbs open.
+ */
+function GroupIdentity({
   group,
   view,
   read,
   links,
   tab,
-  setTab,
+  onSimulating,
 }: {
   group: EgressGroup
   view: EgressView
   read: PollState<EgressView>
   links: NetworkLink[]
   tab: EgressTab
-  setTab: (tab: string) => void
+  onSimulating: (simulating: boolean) => void
 }) {
   const router = useRouter()
   const [form, setForm] = useState<{ draft: EgressDraft; key: number }>()
@@ -254,13 +227,16 @@ function GroupMain({
     onEdit: (g) => setForm({ draft: egressDraftFromGroup(g), key: Date.now() }),
     onRemoved: () => router.push("/network/egress"),
   })
+  useEffect(() => {
+    onSimulating(simulating)
+    return () => onSimulating(false)
+  }, [simulating, onSimulating])
   const carrying = egressCarrying(group)
   const sim = egressSimulationReading(group.lastSimulation, group.fingerprint)
-  const running = simulating ? view.running : undefined
 
   return (
     <>
-      <HostIdentity
+      <IdentityHeader
         label={`About ${group.name}`}
         slot="egress-group-header"
         logo={<EgressMark group={group} size="lg" />}
@@ -296,75 +272,20 @@ function GroupMain({
         menu={verbs.length > 0 && <VerbMenu verbs={verbs} label="Group actions" />}
         facts={
           <>
-            {group.enabled && (
-              <>
-                <span>{group.automation ? "automatic" : "switches by hand"}</span>
-                <FactDot />
-              </>
-            )}
-            <span className={cn(sim.tone === "danger" && "text-destructive")} title={sim.label}>
-              {egressSimulationFact(group.lastSimulation, group.fingerprint)}
-            </span>
+            {group.enabled && <Fact>{group.automation ? "automatic" : "switches by hand"}</Fact>}
+            <Fact>
+              <span className={cn(sim.tone === "danger" && "text-destructive")} title={sim.label}>
+                {egressSimulationFact(group.lastSimulation, group.fingerprint)}
+              </span>
+            </Fact>
             {group.runtime?.status === "verified" && (
-              <>
-                <FactDot />
-                <span className="text-success" title={group.runtime.route}>
-                  route verified
-                </span>
-              </>
+              <Fact className="text-success" title={group.runtime.route}>
+                route verified
+              </Fact>
             )}
           </>
         }
       />
-      <NetworkReadWarning
-        error={read.error}
-        refresh={read.refresh}
-        lastSuccess={read.lastSuccess}
-        reading="egress readings"
-      />
-      {!view.persistent && <MemoryOnly />}
-      {group.runtime && group.runtime.status !== "verified" && (
-        <Notice tone="danger" title="The kernel does not hold the decided route">
-          {group.runtime.status === "drift"
-            ? `Missing: ${group.runtime.missing?.join(", ")}.`
-            : group.runtime.error}
-        </Notice>
-      )}
-
-      <EgressPicture group={group} links={links} />
-
-      <Tabs value={tab} onValueChange={setTab} className="gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of ${group.name}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {(
-            [
-              { key: "members", label: "Members", count: group.members.length },
-              { key: "decisions", label: "Decisions", count: group.events.length },
-              { key: "simulation", label: "Simulation" },
-            ] as { key: EgressTab; label: string; count?: number }[]
-          ).map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(tab === view.key, "h-10")}
-            >
-              {view.label}
-              {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
-        <TabsContent value="members" className="pt-5">
-          <EgressMembers group={group} />
-        </TabsContent>
-        <TabsContent value="decisions" className="pt-3">
-          <EgressDecisions group={group} />
-        </TabsContent>
-        <TabsContent value="simulation" className="pt-5">
-          <EgressSimulationPanel group={group} running={running} />
-        </TabsContent>
-      </Tabs>
       {dialog}
       {form && (
         <EgressGroupForm
@@ -381,6 +302,71 @@ function GroupMain({
           }}
         />
       )}
+    </>
+  )
+}
+
+/**
+ * The strip directly under the line and the view on screen. The picture of
+ * what the group does is the top of Members, as a device's picture is the
+ * top of its Traffic: it belongs to the group, not to the three views.
+ */
+function GroupViews({
+  group,
+  view,
+  read,
+  links,
+  tab,
+  setTab,
+  running,
+}: {
+  group: EgressGroup
+  view: EgressView
+  read: PollState<EgressView>
+  links: NetworkLink[]
+  tab: EgressTab
+  setTab: (tab: string) => void
+  running: EgressView["running"] | undefined
+}) {
+  return (
+    <>
+      <NetworkReadWarning
+        error={read.error}
+        refresh={read.refresh}
+        lastSuccess={read.lastSuccess}
+        reading="egress readings"
+      />
+      {!view.persistent && <MemoryOnly />}
+      {group.runtime && group.runtime.status !== "verified" && (
+        <Notice tone="danger" title="The kernel does not hold the decided route">
+          {group.runtime.status === "drift"
+            ? `Missing: ${group.runtime.missing?.join(", ")}.`
+            : group.runtime.error}
+        </Notice>
+      )}
+      <Tabs value={tab} onValueChange={setTab} className="gap-0">
+        <ViewTabList
+          label={`Views of ${group.name}`}
+          views={[
+            { key: "members", label: "Members", count: group.members.length },
+            { key: "decisions", label: "Decisions", count: group.events.length },
+            { key: "simulation", label: "Simulation" },
+          ]}
+          value={tab}
+          sticky
+          className="max-xl:static"
+        />
+        <TabsContent value="members" className={cn(VIEW_PANE, "flex min-w-0 flex-col gap-6")}>
+          <EgressPicture group={group} links={links} />
+          <EgressMembers group={group} />
+        </TabsContent>
+        <TabsContent value="decisions" className={VIEW_PANE}>
+          <EgressDecisions group={group} />
+        </TabsContent>
+        <TabsContent value="simulation" className={VIEW_PANE}>
+          <EgressSimulationPanel group={group} running={running} />
+        </TabsContent>
+      </Tabs>
     </>
   )
 }

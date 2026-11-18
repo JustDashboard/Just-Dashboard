@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { admin, json, mockNetwork, type Mutation } from "./network-fixture"
 import { risen } from "./risen"
-import type { EgressGroup, EgressView } from "../../src/lib/network-egress"
+import type { EgressGroup, EgressView } from "../../src/lib/network/egress"
 
 /**
  * Egress groups against a mocked API: the list as one card a group, and a
@@ -628,7 +628,8 @@ test.describe("a group's page", () => {
     await expect(b.getByText("carrying", { exact: true })).toBeVisible()
     await expect(b.getByText("19.8 ms")).toBeVisible()
     await expect(b.getByRole("img", { name: "12 of 12 recent samples good" })).toBeVisible()
-    await expect(page.getByText(/Every member's device is up/)).toBeVisible()
+    // Readiness with nothing in the way is no footer: the table already says each is up.
+    await expect(page.getByText(/Every member's device is up/)).toHaveCount(0)
     await expect(page.getByRole("list", { name: "What each member is bound to" })).toContainText(
       "via 198.51.100.1 on eth1 · tier 2 · mark 0x200/0x7f00 · table 7702 · from 198.51.100.20",
     )
@@ -976,7 +977,10 @@ test.describe("a group's page", () => {
       json(route, { error: { code: "unavailable", message: "netlink is not answering" } }, 503),
     )
     await page.goto("/network/egress/providers")
-    await expect(page.getByText("netlink is not answering")).toBeVisible()
+    // The rail says its own failure in place of its rows; the body says the group's.
+    await expect(
+      page.getByText("netlink is not answering").filter({ visible: true }).last(),
+    ).toBeVisible()
     await expect(page.getByRole("link", { name: "Egress groups" }).first()).toBeVisible()
     await expect(page.getByText("Reading the group")).toHaveCount(0)
   })

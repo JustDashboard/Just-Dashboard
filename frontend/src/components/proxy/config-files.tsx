@@ -5,14 +5,14 @@ import { FileText, Warning } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import type { ProxyConfigEntry, ProxyConfigFiles } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
-import { SearchInput, Toolbar } from "@/components/page"
-import { ChoiceRow, GroupRule } from "@/components/flow"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { SearchInput } from "@/components/search-input"
+import { ListToolbar } from "@/components/toolbar"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { ProxyGrid } from "@/components/proxy/route-path"
 import { openableFile } from "@/components/proxy/engine-lifecycle"
 import {
   editorPath,
@@ -35,6 +35,11 @@ const FILTERS: FileFilter[] = ["all", "read", "unread", "managed", "hand"]
  * whether the dashboard wrote it, and opening it in the config editor. A
  * password file is named and never opened; a link opens the file it points
  * at, and one that points outside the directory or at nothing opens nothing.
+ *
+ * One column of rows, as every other list in the area: a two-column grid of
+ * cards left half a row empty under every folder of one or three files, and
+ * a file that opens nothing says so at its end rather than wearing the card
+ * of one that does.
  */
 export function ConfigFilesView({
   tree,
@@ -97,22 +102,26 @@ export function ConfigFilesView({
         />
       ) : (
         <>
-          <Toolbar>
-            <SearchInput
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="File or folder"
-              aria-label="Search files"
-            />
-            <ChipStrip>
-              {FILTERS.filter((key) => key === "all" || counts[key] > 0).map((key) => (
-                <FilterChip key={key} selected={active === key} onClick={() => setFilter(key)}>
-                  {FILTER_LABEL[key]}
-                  <ChipCount>{counts[key]}</ChipCount>
-                </FilterChip>
-              ))}
-            </ChipStrip>
-          </Toolbar>
+          <ListToolbar
+            search={
+              <SearchInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="File or folder"
+                aria-label="Search files"
+              />
+            }
+            chips={
+              <ChipStrip>
+                {FILTERS.filter((key) => key === "all" || counts[key] > 0).map((key) => (
+                  <FilterChip key={key} selected={active === key} onClick={() => setFilter(key)}>
+                    {FILTER_LABEL[key]}
+                    <ChipCount>{counts[key]}</ChipCount>
+                  </FilterChip>
+                ))}
+              </ChipStrip>
+            }
+          />
 
           {groups.length === 0 ? (
             <EmptyNote>No files match.</EmptyNote>
@@ -126,7 +135,7 @@ export function ConfigFilesView({
                     count={group.entries.length}
                     detail={group.folder ? undefined : tree.root}
                   />
-                  <ProxyGrid className="gap-2" aria-label={`Files in ${where}`}>
+                  <ChoiceList aria-label={`Files in ${where}`}>
                     {group.entries.map((entry) => (
                       <FileRow
                         key={entry.path}
@@ -137,7 +146,7 @@ export function ConfigFilesView({
                         onOpen={onOpen}
                       />
                     ))}
-                  </ProxyGrid>
+                  </ChoiceList>
                 </section>
               )
             })
@@ -187,6 +196,13 @@ function FileRow({
             </Tag>
           ))}
           {state && <Status tone={state.tone} label={state.label} />}
+          {/* An inert row says it is: a password file is never opened here,
+              and a link to outside the directory or to nothing opens nothing. */}
+          {!open && (
+            <span className="text-hint text-muted-foreground">
+              {entry.protected ? "hidden" : "not opened here"}
+            </span>
+          )}
         </>
       }
     />

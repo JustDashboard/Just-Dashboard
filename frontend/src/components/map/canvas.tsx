@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import {
   ReactFlow,
   useReactFlow,
-  useStore,
   useStoreApi,
   type Edge,
   type Node,
@@ -20,17 +19,15 @@ import {
   FullscreenClose,
   Information,
   Layers,
-  Minus,
-  Plus,
-  RotateCounterClockwise,
   ServerMap,
   SidebarRightClose,
   SidebarRightOpen,
   Warning,
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
+import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useBelow } from "@/lib/breakpoints"
 import { isArranged, type MapDocument, type Point } from "@/lib/server-map"
 import {
   FRAME,
@@ -43,9 +40,13 @@ import {
   type System,
   type SystemNode,
 } from "@/lib/server-systems"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
+import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
+import { CanvasZoom, CanvasZoomWord, FLOAT } from "@/components/canvas-zoom"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"
 import { MapInspector, UnreadNotices } from "@/components/map/inspector"
@@ -78,17 +79,6 @@ const UNREAD_ROOM = 96
 const FIT_PADDING = 0.06
 /** A system flown to fills the canvas, but a small one is not blown up past its own size. */
 const FLY = { padding: 0.04, maxZoom: 1 }
-
-/**
- * Where the map is nothing but the map: below the width the rail and the
- * inspector fit beside a canvas, there is no chrome at all. A tap on a box or
- * a system's head offers one way on, to its page.
- */
-const BARE = "(max-width: 1023px)"
-
-/** The ground of a control that floats on the canvas. */
-const FLOAT =
-  "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
 
 const clampZoom = (z: number) => Math.min(ZOOM.max, Math.max(ZOOM.min, z))
 
@@ -169,8 +159,7 @@ export function MapCanvas({
   initialSystem?: string
   /**
    * On a phone, the rail and the inspector as panes with a bar at the foot to
-   * reach them. Without it a phone has the canvas alone, as the server map
-   * decided for itself.
+   * reach them. Without it a phone has the canvas alone. Both maps ask for it.
    */
   panes?: boolean
 }) {
@@ -178,7 +167,10 @@ export function MapCanvas({
   const router = useRouter()
   const canvasRef = useRef<HTMLDivElement>(null)
   const store = useStoreApi()
-  const bare = useMediaQuery(BARE)
+  // Where the map is nothing but the map: below the width the rail and the
+  // inspector fit beside a canvas, there is no chrome at all. A tap on a box or
+  // a system's head offers one way on, to its page.
+  const bare = useBelow("lg")
 
   const placed = useMemo(() => layoutAtlas(systems), [systems])
 
@@ -253,7 +245,7 @@ export function MapCanvas({
 
   const flyTo = useCallback(
     (id: string, duration = 450) => {
-      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration })
+      void flow.fitView({ ...FLY, nodes: [{ id: `frame:${id}` }], duration: motionMs(duration) })
     },
     [flow],
   )
@@ -262,7 +254,7 @@ export function MapCanvas({
     setChosen(null)
     setKinds(null)
     update({ focus: undefined })
-    void flow.fitView({ padding: 0.06, duration: 450 })
+    void flow.fitView({ padding: 0.06, duration: motionMs(450) })
   }, [flow, update])
   const focusOn = useCallback(
     (id: string, fly = true) => {
@@ -283,7 +275,7 @@ export function MapCanvas({
       void flow.fitView({
         nodes: ids.map((n) => ({ id: n })),
         padding: 0.25,
-        duration: 400,
+        duration: motionMs(400),
         maxZoom: 1.1,
       })
     },
@@ -303,19 +295,16 @@ export function MapCanvas({
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const target = e.target as HTMLElement | null
-      if (
-        target?.closest?.("input, textarea, select, [contenteditable], [role=dialog], [role=menu]")
-      )
-        return
+      if (isTypingTarget(target) || target?.closest?.(OWNER_SELECTOR)) return
       const zoom = zoomKey(e)
       if (zoom) {
         e.preventDefault()
-        if (zoom === "in") void flow.zoomIn({ duration: 150 })
-        else if (zoom === "out") void flow.zoomOut({ duration: 150 })
-        else void flow.zoomTo(1, { duration: 150 })
+        if (zoom === "in") void flow.zoomIn({ duration: motionMs(150) })
+        else if (zoom === "out") void flow.zoomOut({ duration: motionMs(150) })
+        else void flow.zoomTo(1, { duration: motionMs(150) })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit1") {
         e.preventDefault()
-        void flow.fitView({ padding: 0.06, duration: 300 })
+        void flow.fitView({ padding: 0.06, duration: motionMs(300) })
       } else if (e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey && e.code === "Digit2") {
         e.preventDefault()
         const { chosen: id, focus: system } = chosenRef.current
@@ -675,26 +664,113 @@ export function MapCanvas({
       void flow.fitView({
         nodes: ids.map((id) => ({ id })),
         padding: 0.12,
-        duration: 400,
+        duration: motionMs(400),
         maxZoom: 1,
       })
     },
     [placed, flow],
   )
 
+  /**
+   * The system's frame Enter picked, which the arrows then move; a box is
+   * picked into `chosen`, as a click picks it. The diagram's rule, so one
+   * pattern is drawn one way (17 Nov): walking onto a box or a frame picks
+   * nothing, and until Enter does the arrows slide the canvas. The keyboard
+   * leaving the frame, a press of the pointer or Escape lets it go.
+   */
+  const framePickedRef = useRef<string | null>(null)
+  const noteKeyed = (e: React.FocusEvent) => {
+    const on = (e.target as HTMLElement).closest<HTMLElement>(".react-flow__node")
+    if (on?.dataset.id !== framePickedRef.current) framePickedRef.current = null
+  }
+
+  /**
+   * The arrows, while the keyboard is on the canvas (T10): what is picked
+   * moves by a step, kept as a drag keeps it — the chosen box, or the frame
+   * Enter picked — and with nothing picked the picture slides, as on the
+   * diagram. A phone only looks, so there it always slides.
+   */
+  const arrowKey = (e: React.KeyboardEvent) => {
+    const direction = arrowOf(e)
+    const canvas = canvasRef.current
+    const target = e.target as HTMLElement
+    if (!direction || !canvas || !canvas.contains(target)) return false
+    // The canvas itself or the picture on it: not the controls floating over it.
+    if (target !== canvas && !target.closest(".react-flow")) return false
+    e.preventDefault()
+    const shift = e.shiftKey
+    const subject = [framePickedRef.current, chosen].find(
+      (id) => id && (seats.has(id) || (id.startsWith("frame:") && bySystem.has(id.slice(6)))),
+    )
+    if (!bare && subject?.startsWith("frame:")) {
+      const sid = subject.slice("frame:".length)
+      const p = bySystem.get(sid)!
+      update((d) => ({
+        ...d,
+        frames: { ...d.frames, [sid]: moved(d.frames[sid] ?? atlasCorner(p), direction, shift) },
+      }))
+    } else if (!bare && subject) {
+      const seat = seats.get(subject)!
+      const n = settled.get(seat.system.id)?.nodes.find((node) => node.id === subject)
+      if (!n) return true
+      update((d) => ({
+        ...d,
+        positions: {
+          ...d.positions,
+          [subject]: moved(d.positions[subject] ?? { x: n.x, y: n.y }, direction, shift),
+        },
+      }))
+    } else {
+      const all = flow.getNodes()
+      const next = panned(
+        flow.getViewport(),
+        direction,
+        shift,
+        all.length > 0
+          ? {
+              bounds: flow.getNodesBounds(all),
+              size: { width: canvas.clientWidth, height: canvas.clientHeight },
+            }
+          : undefined,
+      )
+      void flow.setViewport(next)
+      // Where the reader left the canvas, as a slide by the pointer is kept.
+      if (!bare && restored.current) update({ viewport: next })
+    }
+    return true
+  }
+
   const onKey = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement
-    if (target.closest("input, textarea, [role=menu], [role=dialog]")) return
+    if (isTypingTarget(target) || target.closest(OWNER_SELECTOR)) return
+    if (arrowKey(e)) return
+    const keyedBox = target.closest<HTMLElement>(".react-flow__node")?.dataset.id
     if (e.key === "f") {
       if (focus) flyTo(focus)
-      else void flow.fitView({ padding: 0.06, duration: 300 })
+      else void flow.fitView({ padding: 0.06, duration: motionMs(300) })
     } else if (e.key === "i") {
       setInspectorOpen((open) => !open)
+    } else if (e.key === "Enter" && keyedBox && keyedBox !== chosen && seats.has(keyedBox)) {
+      // A box the keyboard is on is chosen by Enter, as a click chooses it;
+      // Enter again opens it.
+      choose(keyedBox)
+    } else if (e.key === "Enter" && keyedBox?.startsWith("frame:") && !bare) {
+      // A system's frame is picked for the arrows to carry.
+      framePickedRef.current = keyedBox
     } else if (e.key === "Enter" && chosenNode) {
       router.push(chosenNode.item.href)
     } else if (e.key === "Escape") {
+      // A choice is cleared first; with none, the press goes on to the full
+      // screen, which leaves (`useFullscreen`).
+      if (chosen || kinds || framePickedRef.current) e.preventDefault()
+      framePickedRef.current = null
       setChosen(null)
       setKinds(null)
+      // React Flow lets go of a box by blurring it, which sent the keyboard
+      // to the page: it stays on the canvas, where the arrows still slide.
+      if (target.closest(".react-flow__node")) {
+        canvasRef.current?.querySelector<HTMLElement>(".react-flow")?.focus({ preventScroll: true })
+      }
     }
   }
 
@@ -733,6 +809,10 @@ export function MapCanvas({
         <div
           ref={canvasRef}
           data-slot="server-map"
+          onFocus={noteKeyed}
+          onPointerDownCapture={() => {
+            framePickedRef.current = null
+          }}
           onPointerDown={bare ? undefined : carry}
           className="group/map relative min-h-0 min-w-0"
         >
@@ -789,15 +869,20 @@ export function MapCanvas({
               selectionKeyCode={null}
               multiSelectionKeyCode={null}
               aria-label={board.label}
+              // A stop of its own, so the arrows reach it: a click on open
+              // ground puts the keyboard here, and Tab does.
+              tabIndex={0}
+              className="focus-ring-inset"
             />
           )}
           {systems.length > 0 && !bare && (
-            <ZoomButtons
+            <CanvasZoom
               onFit={() =>
-                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: 300 })
+                focus ? flyTo(focus) : void flow.fitView({ padding: 0.06, duration: motionMs(300) })
               }
-              onAll={showAll}
+              extra={<CanvasZoomWord onClick={showAll}>All</CanvasZoomWord>}
               onTidy={isArranged(doc) ? tidy : undefined}
+              tidyLabel="Tidy up: put every system and every box back where the map puts it"
             />
           )}
           {!bare && (
@@ -881,7 +966,7 @@ export function MapCanvas({
           <div
             data-slot="map-pane"
             data-pane="systems"
-            className="absolute inset-0 z-10 flex flex-col bg-background [&>nav]:flex-1 [&>nav]:border-r-0"
+            className="absolute inset-0 z-raised flex flex-col bg-background [&>nav]:flex-1 [&>nav]:border-r-0"
           >
             <SystemRail board={board} systems={systems} focus={focus} onFocus={look} />
           </div>
@@ -890,7 +975,7 @@ export function MapCanvas({
           <div
             data-slot="map-pane"
             data-pane="about"
-            className="absolute inset-0 z-10 flex flex-col bg-background [&>aside]:flex-1 [&>aside]:border-l-0"
+            className="absolute inset-0 z-raised flex flex-col bg-background [&>aside]:flex-1 [&>aside]:border-l-0"
           >
             <MapInspector
               board={board}
@@ -935,76 +1020,21 @@ export function MapCanvas({
   )
 }
 
-function ZoomButtons({
-  onFit,
-  onAll,
-  onTidy,
-}: {
-  onFit: () => void
-  onAll: () => void
-  /** Only while something has been moved: with nothing to put back it would be noise. */
-  onTidy?: () => void
-}) {
-  const flow = useReactFlow()
-  const percent = useStore((s) => Math.round(s.transform[2] * 100))
-  return (
-    <div className={cn(FLOAT, "bottom-3 left-3")}>
-      <IconAction
-        label="Zoom out"
-        className="size-7"
-        onClick={() => void flow.zoomOut({ duration: 150 })}
-      >
-        <Minus />
-      </IconAction>
-      <Button
-        size="xs"
-        variant="ghost"
-        title="Back to the real size (Ctrl 0)"
-        className="numeric h-7 min-w-12 px-1.5 text-hint"
-        onClick={() => void flow.zoomTo(1, { duration: 150 })}
-      >
-        {percent}%
-      </Button>
-      <IconAction
-        label="Zoom in"
-        className="size-7"
-        onClick={() => void flow.zoomIn({ duration: 150 })}
-      >
-        <Plus />
-      </IconAction>
-      <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onFit}>
-        Fit
-      </Button>
-      <Button size="xs" variant="ghost" className="h-7 px-2 text-hint" onClick={onAll}>
-        All
-      </Button>
-      {onTidy && (
-        <IconAction
-          label="Tidy up: put every system and every box back where the map puts it"
-          className="size-7"
-          onClick={onTidy}
-        >
-          <RotateCounterClockwise />
-        </IconAction>
-      )}
-    </div>
-  )
-}
-
 /** A server with nothing the map draws yet: the way to put the first thing on it. */
 function EmptyMap() {
   return (
     <div className="flex h-full items-center justify-center p-8">
-      <div className="max-w-sm text-center">
-        <p className="text-title font-semibold">Nothing to draw yet</p>
-        <p className="mt-1.5 text-body text-muted-foreground">
-          A deployment, a Compose stack or a container shows up here as its own diagram, wired to
-          its domains, databases, volumes and backups.
-        </p>
-        <Button size="sm" asChild className="mt-4">
-          <Link href="/deploy/new">Deploy a project</Link>
-        </Button>
-      </div>
+      <EmptyState
+        icon={ServerMap}
+        title="Nothing to draw yet"
+        description="A deployment, a Compose stack or a container shows up here as its own diagram, wired to its domains, databases, volumes and backups."
+        action={
+          <Button size="sm" asChild>
+            <Link href="/deploy/new">Deploy a project</Link>
+          </Button>
+        }
+        className="max-w-md"
+      />
     </div>
   )
 }

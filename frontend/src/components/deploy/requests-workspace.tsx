@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   Bug,
   ChevronDown,
@@ -36,11 +37,11 @@ import { useSocket, type Envelope, type SocketState } from "@/hooks/use-socket"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { FactDot } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -789,7 +790,7 @@ function RequestFilterBar({
           onClick={() => onLiveChange(!live)}
           title="Follow new requests as they arrive, on top of this window"
           className={cn(
-            "h-8 shrink-0 gap-2 px-2.5 font-normal max-sm:h-10",
+            "shrink-0 gap-2 px-2.5 font-normal",
             live && "border-border-strong bg-accent",
           )}
         >
@@ -801,7 +802,7 @@ function RequestFilterBar({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 shrink-0 px-2.5 font-normal max-sm:h-10 max-sm:px-3"
+            className="shrink-0 px-2.5 font-normal max-sm:px-3"
             asChild
           >
             <a
@@ -820,7 +821,7 @@ function RequestFilterBar({
             variant="outline"
             disabled
             aria-label="Export"
-            className="h-8 shrink-0 px-2.5 font-normal max-sm:h-10 max-sm:px-3"
+            className="shrink-0 px-2.5 font-normal max-sm:px-3"
           >
             <Download className="size-3.5 text-muted-foreground" />
             <span className="text-body max-sm:hidden">Export</span>
@@ -870,7 +871,7 @@ function TookFilter({
           aria-pressed={banded}
           title="Only requests that took between two durations"
           className={cn(
-            "h-8 shrink-0 gap-1.5 px-2.5 font-normal max-sm:h-10",
+            "shrink-0 gap-1.5 px-2.5 font-normal",
             banded && "border-border-strong bg-accent",
           )}
         >
@@ -990,23 +991,18 @@ function WindowNotes({
   const spread = data.summary.latency
   if (percentiles && spread) {
     notes.push(
-      <span key="p" className="numeric flex items-center gap-2 whitespace-nowrap max-sm:basis-full">
+      <FactLine key="p" nowrap className="numeric whitespace-nowrap max-sm:basis-full">
         {(["p50", "p95", "p99"] as const).map((name, i) => (
-          <span key={name} className="flex items-center gap-2" title={latencyTerm(name)}>
-            {i > 0 && <FactDot />}
-            <span>
-              {i === 0 ? "Half inside" : LATENCY_SHARE[name]}{" "}
-              <span
-                className={cn(
-                  latencyTone(spread[name]) === "warning" && "font-medium text-warning",
-                )}
-              >
-                {latency(spread[name])}
-              </span>
+          <Fact key={name} title={latencyTerm(name)}>
+            {i === 0 ? "Half inside" : LATENCY_SHARE[name]}{" "}
+            <span
+              className={cn(latencyTone(spread[name]) === "warning" && "font-medium text-warning")}
+            >
+              {latency(spread[name])}
             </span>
-          </span>
+          </Fact>
         ))}
-      </span>,
+      </FactLine>,
     )
   }
   if (notes.length === 0) return null

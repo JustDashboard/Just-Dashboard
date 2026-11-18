@@ -1,7 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { ErrorState, LoadingPanel } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import {
   Table,
   TableBody,
@@ -19,7 +20,7 @@ import {
   historyKeys,
   readDiagnosticHistory,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
+} from "@/lib/network/diagnostics"
 import { NetworkReadWarning } from "./read-warning"
 
 /**

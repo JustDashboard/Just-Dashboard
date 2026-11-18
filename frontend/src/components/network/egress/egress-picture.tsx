@@ -1,12 +1,12 @@
 "use client"
 
 import { relativeTime } from "@/lib/format"
-import { egressPolicySummary, type EgressGroup, type EgressMemberView } from "@/lib/network-egress"
+import { egressPolicySummary, type EgressGroup, type EgressMemberView } from "@/lib/network/egress"
 import type { NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Filter, Globe, Lifebuoy } from "@/components/icons"
-import { WireMark } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireMark } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { MemberGlyph, TONE_TEXT } from "@/components/network/egress/marks"
 import {
   egressMemberLine,

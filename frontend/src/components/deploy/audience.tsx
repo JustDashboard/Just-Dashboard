@@ -2,15 +2,15 @@
 
 import { ArrowRight, DesktopDevice, Globe, PhoneDevice, TabletDevice } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { plural, relativeTime, sharePercent, timestamp } from "@/lib/format"
 import type { RequestAudience, RequestFacet, RequestSummary, RequestVisitor } from "@/lib/types"
 import { agentProduct, networkOf, parseAgent, refererProduct, systemProduct } from "@/lib/clients"
 import { hueFor, LANES } from "@/lib/hue"
 import { BadgedLogo, NETWORK_GLYPH } from "@/components/client-mark"
 import { Meter } from "@/components/meter"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/sparkline"
 import { ProductGlyph } from "@/components/product-logo"
-import { RankList, SplitBar, percent } from "@/components/rank-list"
+import { RankList, SplitBar } from "@/components/rank-list"
 import { StatButton, StatGrid, StatTile, TileBand as Band } from "@/components/stat-tile"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { Address, RequestPath } from "@/components/deploy/request-marks"
@@ -342,7 +342,7 @@ function Breakdown({
             color: drawn.color ?? "var(--tag-slate)",
           }))}
           label={rows
-            .map(({ facet, drawn }) => `${percent(facet.count / total)} ${drawn.label}`)
+            .map(({ facet, drawn }) => `${sharePercent(facet.count / total)} ${drawn.label}`)
             .join(", ")}
         />
       )}
@@ -353,7 +353,7 @@ function Breakdown({
           mark: drawn.mark,
           mono: false,
           label: drawn.label,
-          value: total ? percent(facet.count / total) : facet.count.toLocaleString(),
+          value: total ? sharePercent(facet.count / total) : facet.count.toLocaleString(),
           hint: plural(facet.count, "person", "people"),
         }))}
         emptyLabel="Not recorded."
@@ -389,7 +389,7 @@ function VisitorRow({
       onClick={() => onFilterClient(visitor.client)}
       aria-label={`Show every request from ${visitor.client}`}
       title={`First seen ${timestamp(visitor.first)} · last seen ${timestamp(visitor.last)}`}
-      className="grid w-full min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1 rounded-sm px-2 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover lg:grid-cols-[auto_minmax(12rem,16rem)_minmax(0,1fr)_auto]"
+      className="grid w-full min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-1 rounded-sm px-2 py-2 text-left focus-ring-inset transition-colors hover:bg-row-hover lg:grid-cols-[auto_minmax(12rem,16rem)_minmax(0,1fr)_auto]"
     >
       <BadgedLogo
         id={agent?.product ?? agent?.osProduct}
@@ -405,7 +405,7 @@ function VisitorRow({
             <>
               <device.glyph className="size-3 shrink-0" style={{ color: device.color }} />
               <span className="shrink-0">{device.label}</span>
-              <span aria-hidden className="text-muted-foreground/50">
+              <span aria-hidden className="text-faint">
                 ·
               </span>
             </>

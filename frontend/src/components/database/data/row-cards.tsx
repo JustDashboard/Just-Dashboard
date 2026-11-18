@@ -1,14 +1,14 @@
 "use client"
 
-import { Fragment, useMemo } from "react"
+import { useMemo } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ChevronRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter, PaneHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tag } from "@/components/tag"
-import { isDefault, type EditValue } from "@/components/database/grid"
+import { CHANGE_STATE, isDefault, type EditValue } from "@/components/database/grid"
 import { ValueText } from "@/components/database/kit/value-text"
 import {
   drawnRows,
@@ -16,29 +16,11 @@ import {
   type InspectedCell,
   type InspectedRow,
   type RowSource,
-  type RowState,
 } from "@/components/database/data/rows"
-import { grouped } from "@/components/database/data/view"
+import { grouped } from "@/lib/format"
 
-/** The same three words and hues the row panel and the grid's gutter use. */
-const STATE_WORD: Record<RowState, string> = {
-  inserted: "new",
-  updated: "edited",
-  deleted: "to delete",
-  clean: "",
-}
-const STATE_HUE: Record<RowState, string> = {
-  inserted: "text-(--git-added)",
-  updated: "text-(--git-modified)",
-  deleted: "text-(--git-deleted)",
-  clean: "",
-}
-const STATE_EDGE: Record<RowState, string> = {
-  inserted: "border-l-(--git-added)",
-  updated: "border-l-(--git-modified)",
-  deleted: "border-l-(--git-deleted)",
-  clean: "border-l-transparent",
-}
+/** A clean row's edge: the same width as a changed one's, so the cards line up. */
+const CLEAN_EDGE = "border-l-transparent"
 
 /** How many of a row's first columns make its title. */
 const TITLE_COLUMNS = 2
@@ -192,20 +174,17 @@ function RowCard({
         // One height in every state, and off-screen cards cost nothing: a
         // page can be a thousand of them.
         "flex h-[52px] w-full items-center gap-2 border-b border-l-2 border-hairline pr-2 pl-2.5 text-left focus-ring-inset [contain-intrinsic-size:auto_52px] [content-visibility:auto] hover:bg-row-hover",
-        STATE_EDGE[row.state],
+        row.state === "clean" ? CLEAN_EDGE : CHANGE_STATE[row.state].edge,
         active && "bg-row-hover",
       )}
     >
       <span className="min-w-0 flex-1">
-        <span
-          className={cn(
-            "flex min-w-0 items-center gap-1.5",
-            row.state === "deleted" && "line-through decoration-(--git-deleted)",
-          )}
+        <FactLine
+          nowrap
+          className={cn(row.state === "deleted" && "line-through decoration-git-deleted")}
         >
           {title.map((cell, index) => (
-            <Fragment key={cell.column.key}>
-              {index > 0 && <FactDot />}
+            <Fact key={cell.column.key}>
               <CardValue
                 cell={cell}
                 className={cn(
@@ -213,32 +192,33 @@ function RowCard({
                   index === 0 ? "shrink-0 font-medium" : "min-w-0",
                 )}
               />
-            </Fragment>
+            </Fact>
           ))}
-        </span>
+        </FactLine>
         {refusal ? (
           <span role="alert" className="block truncate text-hint text-destructive" title={refusal}>
             {refusal}
           </span>
         ) : (
-          <span className="flex min-w-0 items-center gap-1.5 overflow-hidden font-mono text-hint whitespace-nowrap text-muted-foreground">
+          <FactLine nowrap className="font-mono text-hint text-muted-foreground">
             {rest.length === 0 ? (
               <span>{number !== null ? `row ${grouped(number)}` : "not yet stored"}</span>
             ) : (
-              rest.map((cell, index) => (
-                <Fragment key={cell.column.key}>
-                  {index > 0 && <FactDot />}
-                  <span className="shrink-0">{cell.column.name}</span>
-                  <CardValue cell={cell} className="shrink-0 text-hint" />
-                </Fragment>
+              rest.map((cell) => (
+                <Fact key={cell.column.key}>
+                  <span className="inline-flex max-w-full min-w-0 items-center gap-x-1.5 align-top">
+                    <span className="shrink-0">{cell.column.name}</span>
+                    <CardValue cell={cell} className="shrink-0 text-hint" />
+                  </span>
+                </Fact>
               ))
             )}
-          </span>
+          </FactLine>
         )}
       </span>
       {row.state !== "clean" && (
-        <span className={cn("shrink-0 font-mono text-hint", STATE_HUE[row.state])}>
-          {STATE_WORD[row.state]}
+        <span className={cn("shrink-0 font-mono text-hint", CHANGE_STATE[row.state].hue)}>
+          {CHANGE_STATE[row.state].short}
         </span>
       )}
       <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />
@@ -250,16 +230,14 @@ function RowCard({
 function CardValue({ cell, className }: { cell: InspectedCell; className?: string }) {
   const value: EditValue | undefined = cell.value
   if (value === undefined || isDefault(value)) {
-    return (
-      <span className={cn("font-mono text-muted-foreground/60 italic", className)}>default</span>
-    )
+    return <span className={cn("font-mono text-faint italic", className)}>default</span>
   }
   return (
     <ValueText
       value={value}
       type={cell.column.typeName}
       clamp={48}
-      className={cn(cell.edited && "text-(--git-modified)", className)}
+      className={cn(cell.edited && "text-git-modified", className)}
     />
   )
 }

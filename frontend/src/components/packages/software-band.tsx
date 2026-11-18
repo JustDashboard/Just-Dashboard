@@ -2,7 +2,7 @@
 
 import { BarReading } from "@/components/bar-reading"
 import { ArrowCircleUp, ShieldOff } from "@/components/icons"
-import { HUE, LiveBytes } from "@/components/overview/readings"
+import { HUE, LiveBytes } from "@/components/live-figure"
 import { PackageMark, VersionTo } from "@/components/packages/marks"
 import { softwareGroups } from "@/components/packages/inventory"
 import { Status } from "@/components/status-dot"

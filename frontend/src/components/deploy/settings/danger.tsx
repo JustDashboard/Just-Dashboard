@@ -39,20 +39,23 @@ import type {
   DeploymentSchedule,
   DeploymentTrigger,
 } from "@/lib/types"
-import { GroupRule } from "@/components/flow"
+import { GroupRule } from "@/components/choice-row"
 import { FormFact, FormFacts, FormNote } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
-import { Panel, Well } from "@/components/panel"
+import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, imageProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
+import { DangerRow, DangerRows } from "@/components/settings/danger-row"
+import { SettingSection } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { useConfiguration } from "@/components/deploy/settings/use-configuration"
 import { humanize, projectState, sourceProduct } from "@/components/deploy/vocabulary"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { useProject } from "@/components/deploy/project-context"
 import { archiveRequest, purgeRequest, useProjectVerbs } from "@/components/deploy/project-verbs"
 
@@ -135,7 +138,7 @@ function DangerZone({ configuration }: { configuration: DeploymentEnvironmentCon
           Your role cannot stop, archive or delete this deployment.
         </EmptyNote>
       ) : (
-        <Panel className="divide-y divide-hairline border-rule-danger">{rows}</Panel>
+        <DangerRows>{rows}</DangerRows>
       )}
     </SettingSection>
   )
@@ -180,54 +183,6 @@ function Lifecycle({ archived }: { archived: boolean }) {
         </li>
       ))}
     </ol>
-  )
-}
-
-/**
- * One act: its name, what it costs, what it touches, and its button beside
- * them. With no button it is an act that cannot be taken yet, and its title
- * goes quiet.
- *
- * Three ranks, one step apart on the ladder: the act at 14, its consequence
- * at 12, the data at 11. The consequence was at the data's 11 and muted, so
- * the line a reader most needs before pressing was the hardest one to read.
- *
- * The act's own block is keyed on its name and on whether it can be taken,
- * so Stop turning into Start, or a held act getting its button when the
- * deployment is archived, arrives (§11) rather than being repainted. Only
- * that block: `children` carries the confirmation, which must outlive it.
- */
-function DangerRow({
-  title,
-  sentence,
-  facts,
-  action,
-  children,
-}: {
-  title: string
-  sentence?: React.ReactNode
-  facts?: React.ReactNode
-  action?: React.ReactNode
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 px-5 py-4">
-      <div
-        key={`${title}-${action ? "open" : "held"}`}
-        className="grid min-w-0 animate-rise gap-x-8 gap-y-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center"
-      >
-        <div className="min-w-0 space-y-1">
-          {/* Under the section's own "Danger zone" heading, not beside it. */}
-          <h4 className={cn("text-sm font-medium", !action && "text-muted-foreground")}>{title}</h4>
-          {sentence && (
-            <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">{sentence}</p>
-          )}
-          {facts && <div className="space-y-0.5 pt-1">{facts}</div>}
-        </div>
-        {action && <div className="flex max-sm:[&>*]:w-full">{action}</div>}
-      </div>
-      {children}
-    </div>
   )
 }
 

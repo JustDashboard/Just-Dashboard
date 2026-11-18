@@ -1,6 +1,6 @@
 "use client"
 
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
@@ -9,7 +9,7 @@ import { LogoGlyph } from "@/components/logo"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { duration } from "@/lib/format"
-import { driftReading, systemdInstant, type DriftReport } from "@/lib/network-drift"
+import { driftReading, systemdInstant, type DriftReport } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { ShortDigest } from "@/components/network/drift/marks"
 
@@ -170,7 +170,7 @@ export function DriftBoot({ boot }: { boot: DriftReport["boot"] }) {
               </section>
               <section aria-label="Execution evidence" className="space-y-2">
                 <p className="text-xs font-medium">Execution evidence</p>
-                <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-hint">
+                <dl className="grid grid-cols-start-main gap-x-4 gap-y-1.5 text-hint">
                   <dt className="text-muted-foreground">Current boot</dt>
                   <dd>
                     <ShortDigest value={activation.bootId} />

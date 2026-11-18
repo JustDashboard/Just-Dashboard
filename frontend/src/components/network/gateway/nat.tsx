@@ -9,7 +9,7 @@ import { cn } from "@/lib/utils"
 import { Linked } from "@/components/icons"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { flowOf } from "@/components/network/gateway/evidence"
 import {
   EntryEvidence,
@@ -44,7 +44,7 @@ import {
   type NATRequest,
 } from "@/components/network/gateway/reading"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Every NAT entry as a lit card: the network and where it leaves over how,
@@ -70,7 +70,7 @@ export function NATList({
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [busy, setBusy] = useState<number>()
   const label = (n: GatewayNAT) => `${n.source} out through ${n.interface}`
   const toggle = (n: GatewayNAT, enabled: boolean) => {

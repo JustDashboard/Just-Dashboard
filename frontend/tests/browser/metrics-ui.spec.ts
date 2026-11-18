@@ -90,7 +90,7 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
 
   // One section per resource, in the order a reader asks about them.
   const sections = await page
-    .locator("[data-slot=page] > section > div:first-child h2")
+    .locator("[data-slot=page] > section > [data-slot=panel-header] h2")
     .evaluateAll((heads) => heads.map((h) => h.textContent))
   expect(sections).toEqual(["Resources", "Processor", "Memory", "Network", "Storage", "Saturation"])
 
@@ -185,10 +185,11 @@ test("each resource reads what it is now beside what it did", async ({ page }) =
     panel("Temperatures").locator("li", { hasText: "k10temp_Tctl" }).locator("img[src$='amd.svg']"),
   ).toBeVisible()
 
-  // An interface's row draws its in and out against the busiest one.
-  await expect(
-    panel("Interfaces").getByRole("img", { name: "2.3 MB/s in, 420.0 KB/s out" }),
-  ).toBeVisible()
+  // An interface's row says its in and out in words, with no bar that grows
+  // from row to row down the list (HST-22).
+  const iface = panel("Interfaces").getByRole("listitem").filter({ hasText: "2.3 MB/s" }).first()
+  await expect(iface).toContainText("420.0 KB/s")
+  await expect(panel("Interfaces").getByRole("img", { name: /in, .* out$/ })).toHaveCount(0)
 })
 
 test("an incident is the signals that came together, and pins or zooms the charts", async ({

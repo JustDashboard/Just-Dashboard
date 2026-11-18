@@ -84,15 +84,17 @@ export function useProcessControl(onChanged?: () => void) {
 }
 
 /**
- * Every verb this operator may use on this process, in the order they are
- * wanted: look at it, ask it to stop, make it stop, freeze it, then the ways
- * of carrying its identity somewhere else.
+ * Every verb this operator may use on this process: look at it, freeze it or
+ * signal it, the ways of carrying its identity somewhere else, and last,
+ * under a hairline and in the destructive ink, the ways of ending it —
+ * Terminate, Kill, and both with its children — each of which asks first.
  *
- * Nothing here is inline in a table row. A process table is not a list of
- * things one restarts every morning — the daily verb is *reading* it — and a
- * red stop glyph beside every one of four hundred rows is four hundred
- * invitations to end something by mis-click. The process's page draws the
- * first two as named buttons, where the width exists for the word.
+ * Nothing that ends a process is inline, on a table row or on its page. A
+ * process table is not a list of things one restarts every morning — the
+ * daily verb is *reading* it — and a red stop glyph beside every one of four
+ * hundred rows is four hundred invitations to end something by mis-click. On
+ * the page, no destructive verb takes the identity line's command (the
+ * operator's rule of 16 Nov): Terminate and Kill are behind its `⋯`.
  */
 export type SignalFn = (
   process: ProcessRow,
@@ -128,6 +130,8 @@ export function useProcessVerbs({
 
   return useMemo(() => {
     const verbs: Verb[] = []
+    // The ways of ending it, drawn last in every menu.
+    const ending: Verb[] = []
     // Inline only on the process's page, where the width exists for the
     // word; a row in the table keeps every verb behind its menu.
     const inline = !onInspect
@@ -161,12 +165,12 @@ export function useProcessVerbs({
     }
 
     if (can("destructive") && !unreachable) {
-      verbs.push({
+      ending.push({
         key: "term",
         progressive: "Terminating",
         label: "Terminate",
         icon: StopCircle,
-        inline,
+        danger: true,
         run: () =>
           confirm({
             title: "Terminate process",
@@ -189,12 +193,11 @@ export function useProcessVerbs({
             action: (phrase) => signal(process, "SIGTERM", "Terminating", phrase),
           }),
       })
-      verbs.push({
+      ending.push({
         key: "kill",
         progressive: "Killing",
         label: "Kill",
         icon: Stop,
-        inline,
         danger: true,
         run: () =>
           confirm({
@@ -213,12 +216,13 @@ export function useProcessVerbs({
       if (children > 0) {
         const below =
           children === 1 ? "the process it started" : `the ${children} processes it started`
-        verbs.push({
+        ending.push({
           key: "term-tree",
           group: "With its children",
           progressive: "Terminating",
           label: "Terminate with its children",
           icon: StopCircle,
+          danger: true,
           run: () =>
             confirm({
               title: "Terminate with its children",
@@ -232,7 +236,7 @@ export function useProcessVerbs({
               action: (phrase) => signal(process, "SIGTERM", "Terminating", phrase, true),
             }),
         })
-        verbs.push({
+        ending.push({
           key: "kill-tree",
           group: "With its children",
           progressive: "Killing",
@@ -355,7 +359,7 @@ export function useProcessVerbs({
         run: () => void copyText(process.cmdline, "Command line copied"),
       })
     }
-    return verbs
+    return [...verbs, ...ending]
   }, [process, can, confirm, signal, onInspect, onOpen, router, children])
 }
 

@@ -546,7 +546,7 @@ const reading = (page: Page, name: string) =>
 
 const names = (scope: ReturnType<typeof block>) =>
   scope
-    .locator("[data-slot=rank-list] button")
+    .locator("[data-slot=rank-row] > :is(a, button)")
     .evaluateAll((rows) => rows.map((row) => row.getAttribute("aria-label")))
 const where = (page: Page) => new URL(page.url()).pathname + new URL(page.url()).search
 const menu = (page: Page, name = "shop") =>
@@ -689,7 +689,9 @@ test("every view of saved activity is a line of words with its window, and the r
   await expect(reading(page, "Cache")).toContainText("99.0% hit rate")
   // The footnote under the charts is gone; how the record is kept is on the title's line.
   await expect(activity).not.toContainText(/Recorded activity over/)
-  await expect(activity.getByText("kept for 7 days")).toHaveAttribute(
+  // The record's words are Performance's, and they stay at every width.
+  await expect(activity.locator("[data-slot=history-fact]")).toContainText("kept for 7 days")
+  await expect(activity.locator("[data-slot=history-fact]")).toHaveAttribute(
     "title",
     "Collected every 30 seconds, including while this page is closed.",
   )
@@ -874,9 +876,13 @@ test("the busiest statements are shapes on one line, and the largest tables are 
   await expect
     .poll(() => names(busiest))
     .toEqual([
-      "SELECT * FROM orders WHERE customer_id = $1 — 60% of runtime. Open Performance",
-      "UPDATE carts SET total = $1 WHERE id = $2 — 20% of runtime. Open Performance",
+      "SELECT * FROM orders WHERE customer_id = $1 — 60% of runtime. Open the statement",
+      "UPDATE carts SET total = $1 WHERE id = $2 — 20% of runtime. Open the statement",
     ])
+  // A row opens the statement's own page, as the Queries view's rows do.
+  await expect(
+    busiest.getByRole("link", { name: /^SELECT \* FROM orders WHERE customer_id/ }),
+  ).toHaveAttribute("href", /^\/databases\/1\/performance\/statements\//)
   await expect(busiest.getByRole("link", { name: "Performance" })).toHaveAttribute(
     "href",
     "/databases/1/performance?view=statements",
@@ -1018,7 +1024,7 @@ test("statement statistics that are off say how to turn them on, to the role tha
   await visit(page, "/databases/1")
 
   const busiest = block(page, "Busiest statements")
-  await expect(busiest).toContainText("This server is not counting its statements.")
+  await expect(busiest).toContainText("This server is not counting its statements")
   await expect(busiest).toContainText("the extension has to be created in this database")
   await busiest.getByRole("button", { name: "Turn on statement statistics" }).click()
   await expect(busiest).toContainText("SELECT * FROM orders")
@@ -1093,7 +1099,7 @@ test("statistics that cannot be read are dashes, never zeros, with the way to tr
   await expect(block(page, "Activity")).toContainText("permission denied")
 
   await page
-    .getByRole("status")
+    .getByRole("alert")
     .filter({ hasText: "the server's statistics" })
     .getByRole("button", { name: "Try again" })
     .click()
@@ -1914,11 +1920,17 @@ async function identityHolds(page: Page, what: string) {
   if (facts.lines > 1) {
     expect(facts.width, `the facts have room on ${what}`).toBeGreaterThan(280)
   }
-  // No dot stands between two facts, so none is left hanging where a line of them ends.
-  expect(
-    await line.evaluate((identity) => identity.lastElementChild!.textContent ?? ""),
-    `a separator in the facts on ${what}`,
-  ).not.toContain("·")
+  // The facts are a FactLine: each dot is drawn in the gap before its fact and
+  // clipped where a fact starts a line, so none is left hanging where a line
+  // ends. No other dot is written into the facts.
+  const run = await line.evaluate((identity) => {
+    const facts = identity.lastElementChild!
+    const copy = facts.cloneNode(true) as HTMLElement
+    for (const dot of copy.querySelectorAll("[data-slot=fact] > [aria-hidden]")) dot.remove()
+    return { lined: facts.querySelector("[data-slot=fact-line]") !== null, text: copy.textContent }
+  })
+  expect(run.lined, `the facts are a FactLine on ${what}`).toBe(true)
+  expect(run.text, `a separator in the facts on ${what}`).not.toContain("·")
 }
 
 for (const [label, viewport] of [

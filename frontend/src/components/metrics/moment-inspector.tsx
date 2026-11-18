@@ -8,7 +8,7 @@ import {
   subscribeCrosshair,
   pinCrosshair,
   unpinCrosshair,
-} from "@/lib/metrics-crosshair"
+} from "@/lib/metrics/crosshair"
 import { timestamp } from "@/lib/format"
 import { Button } from "@/components/ui/button"
 
@@ -36,7 +36,7 @@ export function MomentInspector({ samples }: { samples: { ts: number }[] }) {
   return (
     <div
       data-slot="moment-inspector"
-      className="sticky top-0 z-20 -my-3 flex min-w-0 flex-wrap items-center gap-2 border-b border-hairline bg-background py-3"
+      className="sticky top-0 z-sticky -my-3 flex min-w-0 flex-wrap items-center gap-2 border-b border-hairline bg-background py-3"
     >
       <span role="status" className="numeric text-hint">
         Pinned {timestamp(new Date(moment.ts).toISOString())}

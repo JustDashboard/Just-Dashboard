@@ -103,10 +103,16 @@ test("the opening stands where it will before the day and the trail are read", a
   }
 })
 
+// Today's ten span the nine hours before now. Before 09:00 UTC some of them
+// fall on yesterday and a day heading lands inside the run, so the page's
+// clock and the fixture's both stand at this afternoon.
+const AFTERNOON = Date.parse(`${new Date().toISOString().slice(0, 10)}T15:00:00Z`)
+
 for (const width of [1280, 390]) {
   test(`a row is one height whatever it carries, at ${width}`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1400 })
-    await mockAudit(page)
+    await page.clock.setFixedTime(AFTERNOON)
+    await mockAudit(page, { entries: trail(AFTERNOON) })
     await page.goto("/audit")
     await expect(rows(page)).toHaveCount(12)
     await risen(page)

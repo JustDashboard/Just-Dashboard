@@ -3,14 +3,14 @@
 import Link from "next/link"
 import { Trash } from "@/components/icons"
 import { plural, relativeTime, timestamp } from "@/lib/format"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { cn } from "@/lib/utils"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { EmptyState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -26,8 +26,9 @@ import { bytesLabel } from "@/components/database/redis/bytes"
 import { micros } from "@/components/database/redis/performance/samples"
 import { argsAfterCommand } from "@/components/database/redis/performance/slowlog-line"
 import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The commands the server found slow, newest first.
@@ -44,7 +45,7 @@ export function SlowlogView({ redis }: { redis: Redis }) {
   const arrived = useArrivals(log.data?.entries.map((entry) => String(entry.id)) ?? [])
   // On a phone the client's address gives its column to the command, which
   // is what the row is about; the address stays on the command's tooltip.
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
 
   if (log.error && !log.data) return <ReadError error={log.error} onRetry={log.refresh} />
   if (!log.data) return <LoadingPanel plain rows={6} />

@@ -3,7 +3,8 @@
 import type { Role } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle } from "@/components/choice-card"
-import { ROLE_MARK, ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_MARK, ROLE_NAME } from "@/components/account/role"
 
 const ROLES: Role[] = ["admin", "limited", "readonly"]
 
@@ -45,7 +46,7 @@ export function RoleChoice({
                 className={cn("size-4 shrink-0", selected ? "text-brand" : "text-muted-foreground")}
               />
               <span className="flex min-w-0 flex-col">
-                <ChoiceCardTitle>{role}</ChoiceCardTitle>
+                <ChoiceCardTitle>{ROLE_NAME[role]}</ChoiceCardTitle>
                 <ChoiceCardHint>{ROLE_SUMMARY[role]}</ChoiceCardHint>
               </span>
             </ChoiceCard>

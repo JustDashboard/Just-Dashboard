@@ -72,7 +72,7 @@ test("replacement keeps the old key until the new secret is copied and revocatio
   const editor = page.getByRole("dialog", { name: "Replace API key" })
   await expect(editor.getByLabel("Name", { exact: true })).toHaveValue("github-actions")
   await expect(editor).toContainText("keeps working until you revoke it")
-  await expect(editor.getByRole("button", { name: /^admin/ })).toHaveCount(0)
+  await expect(editor.getByRole("button", { name: /^Administrator/ })).toHaveCount(0)
   await editor.getByRole("button", { name: "Create replacement" }).click()
   const secret = page.getByRole("dialog", { name: "Your new key" })
   await expect(secret).toContainText("vpsd_synthetic_key_101")
@@ -265,7 +265,7 @@ test("an administrator makes a deploy key for chosen deployments and is shown ho
   await dialog.getByLabel("Name", { exact: true }).fill("ci-shop")
   await dialog.getByRole("button", { name: /^Deploy key/ }).click()
   // The role cards give way to what the key reaches, and what it never does.
-  await expect(dialog.getByRole("button", { name: /^admin/ })).toHaveCount(0)
+  await expect(dialog.getByRole("button", { name: /^Administrator/ })).toHaveCount(0)
   await expect(dialog.getByRole("region", { name: /It can.t/ })).toContainText("never a value")
   await expect(dialog.getByRole("region", { name: /It can.t/ })).toContainText("credentials")
   await expect(dialog).toContainText("change only in the dashboard")
@@ -323,7 +323,7 @@ test("only an administrator is offered a deploy key", async ({ page }) => {
   await page.goto("/account/keys")
   await page.getByRole("button", { name: "New key" }).click()
   const dialog = page.getByRole("dialog", { name: "New API key" })
-  await expect(dialog.getByRole("button", { name: /^limited/ })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: /^Limited/ })).toBeVisible()
   await expect(dialog.getByRole("button", { name: /^Deploy key/ })).toHaveCount(0)
   await expect(dialog).not.toContainText("jd")
 })
@@ -351,7 +351,7 @@ test("replacing a deploy key makes another deploy key for the same deployments",
   const editor = page.getByRole("dialog", { name: "Replace API key" })
   await expect(editor).toContainText("Reaches the same deployments")
   await expect(editor.getByRole("button", { name: /^Deploy key/ })).toHaveCount(0)
-  await expect(editor.getByRole("button", { name: /^admin/ })).toHaveCount(0)
+  await expect(editor.getByRole("button", { name: /^Administrator/ })).toHaveCount(0)
   await editor.getByRole("button", { name: "Create replacement" }).click()
   await expect
     .poll(() => calls[0])
@@ -419,7 +419,7 @@ test("pending creation cannot close or submit twice", async ({ page }) => {
   await page.getByLabel("Name", { exact: true }).fill("pending key")
   await page.getByRole("button", { name: "Create key", exact: true }).click()
   await expect(page.getByRole("button", { name: "Create key", exact: true })).toBeDisabled()
-  await expect(page.getByRole("dialog").getByRole("button", { name: /^admin/ })).toBeDisabled()
+  await expect(page.getByRole("dialog").getByRole("button", { name: /^Administrator/ })).toBeDisabled()
   await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog", { name: "New API key" })).toBeVisible()
   release()
@@ -670,6 +670,34 @@ test("the keys page stands where it will while the keys are read, and says so wh
   await risen(page)
   expect((await line.boundingBox())!.y).toBe(waiting!.y)
   expect(Math.round((await line.boundingBox())!.height)).toBe(Math.round(waiting!.height))
+})
+
+test("on a phone the keys line is as tall while the keys are read as once they land", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockKeys(page)
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/tokens/", async (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    await held
+    return route.fallback()
+  })
+  await page.goto("/account/keys")
+  const line = page.locator("[data-slot=host-identity]")
+  await expect(line).toContainText("reading")
+  await risen(page)
+  const waiting = (await line.boundingBox())!
+  // The loading line holds the command's place with the command itself, held still.
+  await expect(line.getByRole("button", { name: "New key" })).toBeDisabled()
+  release()
+  await expect(rows(page)).toHaveCount(4)
+  await risen(page)
+  await expect(line.getByRole("button", { name: "New key" })).toBeEnabled()
+  const loaded = (await line.boundingBox())!
+  expect(loaded.y).toBe(waiting.y)
+  expect(Math.round(loaded.height)).toBe(Math.round(waiting.height))
 })
 
 test("with no key at all the line says so and the one New key is the empty state's", async ({

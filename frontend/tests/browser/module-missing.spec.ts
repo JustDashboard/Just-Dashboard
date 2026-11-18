@@ -77,6 +77,9 @@ async function mockShell(page: Page, shell: Shell = {}) {
 const state = (page: Page) => page.locator("[data-slot=empty-state]")
 /** The screen for a thing that is not there (`MissingThing`): Docker's, here. */
 const missing = (page: Page) => page.locator("[data-slot=missing-thing]")
+/** An install hand-off: drawn as `MissingThing` too, with the install as its step. */
+const handoff = (page: Page) =>
+  page.locator("[data-slot=missing-thing]").filter({ hasText: "is not installed" })
 
 /** The block is inside the page's column and does not push it sideways. */
 async function expectHeld(page: Page, width: number, block = state(page)) {
@@ -371,10 +374,10 @@ for (const width of [1280, 390]) {
       )
     })
     await page.goto("/git")
-    await expect(state(page)).toContainText("git is not installed on this host")
-    await expectHeld(page, width)
+    await expect(handoff(page)).toContainText("git is not installed on this host")
+    await expectHeld(page, width, handoff(page))
     await page.screenshot({ path: testInfo.outputPath(`git-missing-${width}.png`) })
-    await state(page).getByRole("button", { name: "Install git" }).click()
+    await handoff(page).getByRole("button", { name: "Install git" }).click()
     await expect
       .poll(() => posts.find((post) => post.path === "/packages/install")?.body)
       .toEqual({
@@ -397,8 +400,8 @@ test("a reader is told who can install git, with nothing to press", async ({ pag
     },
   })
   await page.goto("/git")
-  await expect(state(page)).toContainText("An administrator can install git")
-  await expect(state(page).getByRole("button", { name: "Install git" })).toHaveCount(0)
+  await expect(handoff(page)).toContainText("An administrator can install git")
+  await expect(handoff(page).getByRole("button", { name: "Install git" })).toHaveCount(0)
 })
 
 const withoutTailscale = {
@@ -413,8 +416,11 @@ const withoutTailscale = {
     peers: [],
   },
 }
+// The install in place and the pointer elsewhere are both a `MissingThing`.
 const tailscaleBlock = (page: Page) =>
-  page.locator("[data-slot=empty-state]").filter({ hasText: "Tailscale is not installed" })
+  page
+    .locator("[data-slot=empty-state], [data-slot=missing-thing]")
+    .filter({ hasText: "Tailscale is not installed" })
 
 test("Tailscale is installed in place where the package manager carries it", async ({ page }) => {
   const mutations: { method: string; path: string; body: unknown }[] = []
@@ -477,13 +483,13 @@ test("a server without PM2 names the command and opens the terminal it is typed 
     routes: { "/pm2/": (route) => json(route, { available: false, processes: null }) },
   })
   await page.goto("/processes/pm2")
-  await expect(state(page)).toContainText("PM2 is not installed")
-  await expect(state(page)).toContainText("npm install -g pm2")
-  await expect(state(page).getByRole("link", { name: "Open a terminal" })).toHaveAttribute(
+  await expect(missing(page)).toContainText("PM2 is not installed")
+  await expect(missing(page)).toContainText("npm install -g pm2")
+  await expect(missing(page).getByRole("link", { name: "Open a terminal" })).toHaveAttribute(
     "href",
     "/terminal",
   )
-  await expectHeld(page, 390)
+  await expectHeld(page, 390, missing(page))
 })
 
 test("an account without the terminal is not sent to one", async ({ page }) => {
@@ -492,6 +498,6 @@ test("an account without the terminal is not sent to one", async ({ page }) => {
     routes: { "/pm2/": (route) => json(route, { available: false, processes: null }) },
   })
   await page.goto("/processes/pm2")
-  await expect(state(page)).toContainText("PM2 is not installed")
-  await expect(state(page).getByRole("link", { name: "Open a terminal" })).toHaveCount(0)
+  await expect(missing(page)).toContainText("PM2 is not installed")
+  await expect(missing(page).getByRole("link", { name: "Open a terminal" })).toHaveCount(0)
 })

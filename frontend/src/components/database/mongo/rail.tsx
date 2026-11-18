@@ -1,35 +1,23 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useMemo, useState } from "react"
-import Link from "next/link"
-import {
-  ChevronDown,
-  ChevronRight,
-  MoreHorizontal,
-  Plus,
-  RefreshClockwise,
-  SidebarLeftClose,
-} from "@/components/icons"
-import { bytes } from "@/lib/format"
-import { cn } from "@/lib/utils"
-import { IconAction, rowReveal } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
-import { EmptyNote } from "@/components/state"
-import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { Skeleton } from "@/components/ui/skeleton"
-import { VerbMenu, type Verb } from "@/components/verbs"
-import { compactCount, grouped } from "@/components/database/data/view"
-import { nameHue } from "@/components/database/home/kinds"
+import { Plus, RefreshClockwise } from "@/components/icons"
+import { bytes, compactCount, grouped } from "@/lib/format"
+import { IconAction } from "@/components/icon-action"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { Stale } from "@/components/stale"
+import type { Verb } from "@/components/verbs"
 import type { SectionId } from "@/components/database/engine"
+import { ContainerPicker } from "@/components/database/kit/container-picker"
+import {
+  RAIL_ACTION,
+  RailFind,
+  RailGroupHead,
+  RailHead,
+  RailNoMatch,
+  RailRow,
+  RailSkeleton,
+} from "@/components/database/workbench/rail"
 import {
   COLLECTION_KINDS,
   CollectionMark,
@@ -38,10 +26,6 @@ import {
 } from "@/components/database/mongo/kinds"
 import type { MongoCollection, MongoDatabase } from "@/components/database/mongo/types"
 import type { Catalog, Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
-
-/** Past this many databases the picker grows a box to find one in. */
-const SEARCH_FROM = 12
 
 /** The groups the rail lists, in order, with the word each run is headed by. */
 const GROUPS: { kind: CollectionKind; plural: string }[] = [
@@ -73,7 +57,6 @@ export function CollectionRail({
   verbsFor,
   unsent,
   onNew,
-  onHide,
 }: {
   mongo: Mongo
   catalog: Catalog
@@ -83,7 +66,6 @@ export function CollectionRail({
   unsent: (collection: string) => number
   /** Opens "New collection"; absent where the role, the engine or the connection cannot. */
   onNew?: () => void
-  onHide: () => void
 }) {
   const { engine, href, database, collection: current } = mongo
   const { collections } = catalog
@@ -127,43 +109,28 @@ export function CollectionRail({
       aria-label={`${engine.nouns.objects} of this ${engine.nouns.container}`}
       className="flex min-h-0 min-w-0 flex-1 flex-col"
     >
-      <div className="flex h-10 shrink-0 items-center gap-1 border-b border-hairline bg-surface-header pr-1.5 pl-2">
+      <RailHead>
         <DatabasePicker mongo={mongo} catalog={catalog} section={section} />
         {onNew && (
-          <IconAction
-            label={`New ${engine.nouns.object}`}
-            className="size-7 max-sm:size-8"
-            onClick={onNew}
-          >
+          <IconAction label={`New ${engine.nouns.object}`} className={RAIL_ACTION} onClick={onNew}>
             <Plus />
           </IconAction>
         )}
         <IconAction
           label={`Read the ${engine.nouns.objects} again`}
-          className="size-7 max-sm:size-8"
+          className={RAIL_ACTION}
           onClick={catalog.refresh}
         >
           <RefreshClockwise />
         </IconAction>
-        <IconAction
-          label={`Hide the ${engine.nouns.objects}`}
-          aria-pressed
-          className="size-7 max-sm:size-8"
-          onClick={onHide}
-        >
-          <SidebarLeftClose />
-        </IconAction>
-      </div>
-      <div className="shrink-0 border-b border-hairline p-1.5">
-        <SearchInput
-          dense
-          value={query}
-          placeholder={`Find a ${engine.nouns.object}`}
-          aria-label={`Find a ${engine.nouns.object}`}
-          containerClassName="sm:w-full"
-          onChange={(event) => setQuery(event.target.value)}
-        />
-      </div>
+      </RailHead>
+      <Stale
+        form="strip"
+        error={data ? collections.error : undefined}
+        subject={`the ${engine.nouns.objects}`}
+        onRetry={collections.refresh}
+      />
+      <RailFind value={query} onChange={setQuery} placeholder={`Find a ${engine.nouns.object}`} />
 
       <div className="min-h-0 flex-1 overflow-y-auto px-1.5 pb-2">
         {!database ? (
@@ -171,32 +138,29 @@ export function CollectionRail({
             The connection names no {engine.nouns.container}. Choose one above.
           </EmptyNote>
         ) : !data && collections.error ? (
-          <ReadError error={collections.error} onRetry={collections.refresh} className="m-1" />
+          <ErrorState
+            retryable
+            error={collections.error}
+            onRetry={collections.refresh}
+            className="m-1"
+          />
         ) : !data ? (
-          <RailSkeleton />
+          <RailSkeleton groups={2} />
         ) : data.collections.length === 0 ? (
           // The pane beside this says it, with the way to make the first one.
           <EmptyNote className="px-2 py-6">
             No {engine.nouns.objects} in {database} yet.
           </EmptyNote>
         ) : matched === 0 ? (
-          <div className="px-2 py-6 text-center">
-            <p className="text-body text-muted-foreground">Nothing here is called that.</p>
-            <Button size="xs" variant="ghost" className="mt-2" onClick={() => setQuery("")}>
-              Clear the search
-            </Button>
-          </div>
+          <RailNoMatch onClear={() => setQuery("")} />
         ) : (
           <>
             {groups.map((group) => (
-              <section key={group.kind} aria-label={group.plural} className="pt-2">
-                <h3 className="eyebrow flex items-center gap-1.5 px-2 pb-1">
-                  {group.plural}
-                  <span className="numeric">{grouped(group.entries.length)}</span>
-                </h3>
+              <section key={group.kind} aria-label={group.plural} className="pt-1.5">
+                <RailGroupHead label={group.plural} count={grouped(group.entries.length)} />
                 <ul>
                   {group.entries.map((entry) => (
-                    <RailRow
+                    <CollectionRow
                       key={entry.name}
                       entry={entry}
                       current={entry.name === current}
@@ -209,27 +173,17 @@ export function CollectionRail({
               </section>
             ))}
             {system.length > 0 && (
-              <section aria-label="The server's own collections" className="pt-2">
-                <h3>
-                  <button
-                    type="button"
-                    aria-expanded={showSystem}
-                    onClick={() => setSystemOpen(!showSystem)}
-                    className="eyebrow flex w-full items-center gap-1 rounded-sm px-1.5 pb-1 focus-ring hover:text-foreground"
-                  >
-                    {showSystem ? (
-                      <ChevronDown className="size-3" />
-                    ) : (
-                      <ChevronRight className="size-3" />
-                    )}
-                    The server&rsquo;s own
-                    <span className="numeric">{grouped(system.length)}</span>
-                  </button>
-                </h3>
+              <section aria-label="The server's own collections" className="pt-1.5">
+                <RailGroupHead
+                  label="The server’s own"
+                  count={grouped(system.length)}
+                  open={showSystem}
+                  onToggle={() => setSystemOpen(!showSystem)}
+                />
                 {showSystem && (
                   <ul>
                     {system.map((entry) => (
-                      <RailRow
+                      <CollectionRow
                         key={entry.name}
                         entry={entry}
                         current={entry.name === current}
@@ -260,7 +214,7 @@ export function CollectionRail({
   )
 }
 
-function RailRow({
+function CollectionRow({
   entry,
   current,
   href,
@@ -275,83 +229,38 @@ function RailRow({
 }) {
   const kind = collectionKind(entry)
   return (
-    <li
-      data-current={current || undefined}
-      className={cn(
-        "group flex h-7 items-center rounded-md transition-colors max-sm:h-9",
-        current ? "bg-accent" : "hover:bg-row-hover",
-      )}
-    >
-      <Link
-        href={href}
-        aria-current={current ? "page" : undefined}
-        title={
-          entry.type === "view"
-            ? `A view on ${entry.viewOn}`
-            : entry.statsKnown
-              ? `${grouped(entry.count)} documents · ${bytes(entry.size)} of data`
-              : COLLECTION_KINDS[kind].label
-        }
-        className="flex h-full min-w-0 flex-1 items-center gap-1.5 rounded-md pr-1 pl-2 focus-ring-inset"
-      >
-        <CollectionMark kind={kind} />
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
-        {unsent > 0 && (
-          <span
-            data-slot="mongo-unsent-mark"
-            title={`Unsent edits on ${unsent === 1 ? "one document" : `${unsent} documents`}`}
-            className="flex shrink-0 items-center"
-          >
-            <span aria-hidden className="size-1.5 rounded-full bg-(--git-modified)" />
-            <span className="sr-only">, unsent edits</span>
-          </span>
-        )}
-        {entry.statsKnown ? (
-          <>
-            <span className="numeric shrink-0 text-hint text-muted-foreground">
-              {compactCount(entry.count)}
-            </span>
-            <span className="numeric w-14 shrink-0 text-right text-hint text-muted-foreground/70">
-              {bytes(entry.size, 0)}
-            </span>
-          </>
-        ) : (
-          entry.type === "view" && (
-            <span className="shrink-0 text-hint text-muted-foreground/70">view</span>
-          )
-        )}
-      </Link>
-      {verbs.length > 0 && (
-        <VerbMenu
-          verbs={verbs}
-          label={`Actions for ${entry.name}`}
-          trigger={
-            <Button
-              size="icon-xs"
-              variant="ghost"
-              aria-label={`Actions for ${entry.name}`}
-              className={cn("mr-0.5 shrink-0 max-sm:size-8", rowReveal())}
-            >
-              <MoreHorizontal className="size-3.5" />
-            </Button>
-          }
-        />
-      )}
-    </li>
-  )
-}
-
-function RailSkeleton() {
-  return (
-    <div aria-hidden className="space-y-1.5 px-2 pt-3">
-      <Skeleton className="h-2.5 w-20" />
-      {[72, 56, 64, 48, 60].map((width, index) => (
-        <div key={index} className="flex h-7 items-center gap-2">
-          <Skeleton className="size-3.5 rounded-sm" />
-          <Skeleton className="h-3" style={{ width: `${width}%` }} />
-        </div>
-      ))}
-    </div>
+    <RailRow
+      href={href}
+      current={current}
+      title={
+        entry.type === "view"
+          ? `A view on ${entry.viewOn}`
+          : entry.statsKnown
+            ? `${grouped(entry.count)} documents · ${bytes(entry.size)} of data`
+            : COLLECTION_KINDS[kind].label
+      }
+      mark={<CollectionMark kind={kind} />}
+      name={entry.name}
+      // Staged and unsent, in the words the tables' rail uses for the same.
+      staged={{
+        count: unsent,
+        slot: "mongo-unsent-mark",
+        label: "documents with unsent edits",
+        title: `Unsent edits on ${unsent === 1 ? "one document" : `${unsent} documents`}`,
+      }}
+      figures={
+        entry.statsKnown
+          ? [
+              { key: "count", text: compactCount(entry.count) },
+              { key: "size", text: bytes(entry.size, 0), quiet: true, className: "w-14" },
+            ]
+          : entry.type === "view"
+            ? [{ key: "view", text: "view", quiet: true }]
+            : []
+      }
+      verbs={verbs}
+      menuLabel={`Actions for ${entry.name}`}
+    />
   )
 }
 
@@ -370,8 +279,6 @@ function DatabasePicker({
   section: SectionId
 }) {
   const { engine, href, database, conn } = mongo
-  const [query, setQuery] = useState("")
-  const needle = query.trim().toLowerCase()
   const all = catalog.databases.data ?? []
   // The open database is listed even before it holds anything: an empty
   // database does not exist for the server until it has a collection.
@@ -379,75 +286,34 @@ function DatabasePicker({
     database && !all.some((entry) => entry.name === database)
       ? [...all, { ...EMPTY_DATABASE, name: database }]
       : all
-  const shown = listed.filter((entry) => !needle || entry.name.toLowerCase().includes(needle))
   return (
-    <DropdownMenu onOpenChange={(open) => !open && setQuery("")}>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`${engine.nouns.container}: ${database || "none chosen"}`}
-          className="h-7 min-w-0 flex-1 justify-start gap-1.5 px-1.5"
-        >
-          <DatabaseMark name={database} />
-          <span className="min-w-0 truncate font-mono text-xs">{database || "Choose one"}</span>
-          <ChevronDown className="ml-auto size-3 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-72">
-        {listed.length > SEARCH_FROM && (
-          <div className="p-1 pb-2">
-            <Input
-              value={query}
-              placeholder={`Find a ${engine.nouns.container}`}
-              aria-label={`Find a ${engine.nouns.container}`}
-              className="h-7 sm:h-7"
-              onChange={(event) => setQuery(event.target.value)}
-              // The menu reads typed letters as type-ahead; in the box they are text.
-              onKeyDown={(event) => event.key !== "Escape" && event.stopPropagation()}
-            />
-          </div>
-        )}
-        <div className="max-h-72 overflow-y-auto">
-          {catalog.databases.error && !catalog.databases.data && (
-            <p className="px-2 py-2 text-hint text-muted-foreground">
-              The server&rsquo;s {engine.nouns.containers} could not be listed:{" "}
-              {catalog.databases.error.message}
-            </p>
-          )}
-          {shown.map((entry) => (
-            <DropdownMenuItem
-              key={entry.name}
-              asChild
-              className={cn(entry.name === database && "bg-accent")}
-            >
-              <Link href={href(section, { db: entry.name, collection: null })}>
-                <DatabaseMark name={entry.name} />
-                <MenuItemText
-                  hint={
-                    <span className="numeric text-hint text-muted-foreground">
-                      {entry.name === conn.database ? "connects here · " : ""}
-                      {entry.statsKnown
-                        ? `${grouped(entry.collections)} · ${bytes(entry.dataSize, 0)}`
-                        : "not measured"}
-                    </span>
-                  }
-                >
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{entry.name}</span>
-                </MenuItemText>
-              </Link>
-            </DropdownMenuItem>
-          ))}
-          {shown.length === 0 && !catalog.databases.error && (
-            <p className="px-2 py-3 text-center text-hint text-muted-foreground">
-              {catalog.databases.data
-                ? `No ${engine.nouns.container} is called that`
-                : `Reading the ${engine.nouns.containers}…`}
-            </p>
-          )}
-        </div>
-      </DropdownMenuContent>
-    </DropdownMenu>
+    <ContainerPicker
+      items={listed.map((entry) => ({
+        name: entry.name,
+        figure: [
+          entry.name === conn.database ? "connects here" : null,
+          entry.statsKnown
+            ? `${grouped(entry.collections)} · ${bytes(entry.dataSize, 0)}`
+            : "not measured",
+        ]
+          .filter(Boolean)
+          .join(" · "),
+      }))}
+      current={database}
+      noun={engine.nouns.container}
+      nouns={engine.nouns.containers}
+      blank="Choose one"
+      label="none chosen"
+      hrefOf={(name) => href(section, { db: name, collection: null })}
+      state={
+        catalog.databases.error && !catalog.databases.data
+          ? "failed"
+          : !catalog.databases.data
+            ? "reading"
+            : undefined
+      }
+      error={catalog.databases.error?.message}
+    />
   )
 }
 
@@ -464,15 +330,4 @@ const EMPTY_DATABASE: MongoDatabase = {
   sizeOnDisk: 0,
   empty: true,
   statsKnown: true,
-}
-
-/** A database's own colour, stable for its name, as a small square before it. */
-export function DatabaseMark({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-sm"
-      style={{ background: name ? nameHue(name) : "var(--muted-foreground)" }}
-    />
-  )
 }

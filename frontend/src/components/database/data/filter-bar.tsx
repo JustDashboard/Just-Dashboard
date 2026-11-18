@@ -1,11 +1,12 @@
 "use client"
 
 import { useId, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { ArrowDown, ArrowUp, Cross, Filter as FilterIcon, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field } from "@/components/form"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
@@ -92,7 +93,7 @@ export function FilterBar({
           operators={operators}
           onApply={(filter) => onFiltersChange([...filters, filter])}
         >
-          <Button type="button" size="xs" variant="outline" className="shrink-0 max-sm:h-8">
+          <Button type="button" size="xs" variant="outline" className="shrink-0">
             <FilterIcon />
             {filters.length === 0 ? "Filter" : "Add filter"}
           </Button>
@@ -161,21 +162,21 @@ export function FilterBar({
                   type="button"
                   size="xs"
                   variant="ghost"
-                  className="shrink-0 text-muted-foreground max-sm:h-8"
+                  className="shrink-0 text-muted-foreground"
                 >
                   <ArrowUp />
                   Sort
                 </Button>
               ) : (
-                <Button
+                <IconAction
                   type="button"
                   size="icon-xs"
                   variant="ghost"
-                  aria-label="Then sort by another column"
-                  className="shrink-0 text-muted-foreground max-sm:size-8"
+                  label="Then sort by another column"
+                  className="shrink-0 text-muted-foreground max-sm:size-8 [&_svg:not([class*='size-'])]:size-3"
                 >
                   <Plus />
-                </Button>
+                </IconAction>
               )}
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="max-h-72 w-56">

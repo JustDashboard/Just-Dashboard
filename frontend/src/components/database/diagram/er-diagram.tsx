@@ -43,22 +43,26 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { plural } from "@/lib/format"
+import { grouped, plural } from "@/lib/format"
+import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
+import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
+import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { FormFact } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { PaneHeader } from "@/components/panel"
 import { PaneBar } from "@/components/phone-panes"
-import { EmptyState } from "@/components/state"
+import { Stale } from "@/components/stale"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -76,25 +80,23 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useCatalog } from "@/components/database/data/use-table"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { EngineMark } from "@/components/database/kit"
+import { ContainerPicker } from "@/components/database/kit/container-picker"
 import { tableParams } from "@/components/database/schema/address"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import { selectStatement } from "@/components/database/schema/select"
 import { useSettledAddress } from "@/components/database/schema/use-settled-address"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { HeadVerbs, WorkbenchFrame, useHeadMenu } from "@/components/database/workbench/chrome"
 import {
   CanvasHolds,
-  DiagramSchemaPicker,
   FIT,
   FIT_PADDING,
-  FLOAT,
   Legend,
   NoteDialog,
   Saved,
-  ZoomBar,
 } from "@/components/database/diagram/chrome"
+import { CanvasZoom, FLOAT } from "@/components/canvas-zoom"
 import {
   DIAGRAM_COLORS,
   isArranged,
@@ -102,9 +104,9 @@ import {
   type DiagramColor,
   type DiagramDocument,
 } from "@/components/database/diagram/document"
+import { saveText } from "@/lib/download"
 import {
   downloadPng,
-  downloadText,
   renderSvg,
   toDbml,
   toJson,
@@ -128,6 +130,7 @@ import {
   type DbGraphTable,
   type DbSchemaGraph,
 } from "@/components/database/diagram/types"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const nodeTypes = { table: TableNode }
 const edgeTypes = { relation: RelationEdge }
@@ -145,6 +148,8 @@ const READABLE = 0.7
 /** The picture never opens larger than this, however few tables it holds. */
 const ARRIVE_AT_MOST = 1.15
 const ZOOM = { min: 0.08, max: 2.5 }
+/** The grid a table snaps to, when the layout snaps: by a drag and by the arrows. */
+const GRID = 16
 
 /** How many tables the address asks for; 0 is the server's own default. */
 function readLimit(raw: string): number {
@@ -201,8 +206,10 @@ export function ErDiagram() {
   // The list of schemas to choose from; the catalogue is the route that has it.
   const catalog = useCatalog(id, schema)
   const memory = useDiagramMemory({ connId: id, schema, canSave: can("service.control") })
-  const [fullscreen, setFullscreen] = useState(false)
-  const [immersive, setImmersive] = useState(false)
+  // Full screen: the browser's own where it is offered, and an overlay where
+  // it is refused; Escape leaves the overlay once the canvas has nothing
+  // transient left to clear (its own handler takes the press first).
+  const screen = useFullscreen(root)
 
   // A document written when a table was its bare name is re-keyed once the
   // picture says which table each name was.
@@ -215,37 +222,23 @@ export function ErDiagram() {
     if (graph && doc?.legacy) update(() => migrateDocument(doc, graph.tables))
   }, [graph, doc, update])
 
-  // Fullscreen: the browser's own where it is offered, and a fixed overlay
-  // where it is refused (an iframe, a browser that asks and is told no) — the
-  // operator asked for the whole window and gets it either way.
-  const toggleFullscreen = useCallback(() => {
-    if (fullscreen || immersive) {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
-      setImmersive(false)
-      setFullscreen(false)
-      return
-    }
-    const el = root.current
-    if (el?.requestFullscreen) {
-      el.requestFullscreen().then(
-        () => setFullscreen(true),
-        () => setImmersive(true),
-      )
-    } else {
-      setImmersive(true)
-    }
-  }, [fullscreen, immersive])
-  useEffect(() => {
-    const onChange = () => {
-      setFullscreen(document.fullscreenElement === root.current && root.current !== null)
-      if (!document.fullscreenElement) setImmersive(false)
-    }
-    document.addEventListener("fullscreenchange", onChange)
-    return () => document.removeEventListener("fullscreenchange", onChange)
-  }, [])
-
   const picker = engine.can("schemas") ? (
-    <DiagramSchemaPicker schemas={catalog.data?.schemas} current={schema} />
+    <ContainerPicker
+      items={catalog.data?.schemas.map((entry) => ({
+        name: entry.name,
+        system: entry.system,
+        figure: entry.tables >= 0 ? grouped(entry.tables) : undefined,
+      }))}
+      current={schema}
+      noun={engine.nouns.container}
+      nouns={engine.nouns.containers}
+      hrefOf={(name) => href("diagram", { schema: name, limit: null, every: null })}
+      every={{
+        label: `Every ${engine.nouns.container}`,
+        href: href("diagram", { every: "1", limit: null }),
+      }}
+      fill={false}
+    />
   ) : null
   const ready = graph && doc && !doc.legacy && graph.tables.length > 0
   const canCreate =
@@ -257,7 +250,7 @@ export function ErDiagram() {
       data-slot="diagram"
       className={cn(
         "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-        immersive && "fixed inset-0 z-50 p-3",
+        screen.immersive && "fixed inset-0 z-immersive p-3",
       )}
     >
       {/* Framed: a canvas is a working region with its own scroll (§2), under
@@ -279,9 +272,9 @@ export function ErDiagram() {
                 reset={memory.reset}
                 picker={picker}
                 refresh={read.refresh}
-                full={fullscreen || immersive}
-                onFullscreen={toggleFullscreen}
-                onLeaveImmersive={() => setImmersive(false)}
+                stale={read.error}
+                full={screen.full}
+                onFullscreen={screen.toggle}
               />
             </ReactFlowProvider>
           ) : (
@@ -289,7 +282,7 @@ export function ErDiagram() {
               <PaneHeader className="h-10">{picker}</PaneHeader>
               {read.error && !graph ? (
                 <div className="p-4">
-                  <ReadFailed error={read.error} onRetry={read.refresh} />
+                  <ErrorState retryable error={read.error} onRetry={read.refresh} />
                 </div>
               ) : !graph || !doc || doc.legacy ? (
                 <>
@@ -383,9 +376,9 @@ function Canvas({
   reset,
   picker,
   refresh,
+  stale,
   full,
   onFullscreen,
-  onLeaveImmersive,
 }: {
   root: React.RefObject<HTMLDivElement | null>
   graph: DbSchemaGraph
@@ -396,14 +389,15 @@ function Canvas({
   reset: () => Promise<void>
   picker: React.ReactNode
   refresh: () => void
+  /** The read after the one drawn failed: the picture is the last reading. */
+  stale?: Error
   full: boolean
   onFullscreen: () => void
-  onLeaveImmersive: () => void
 }) {
   const { conn, engine, select, href, goto } = useDatabase()
   const flow = useReactFlow()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn((dialog.props as { request: unknown }).request !== null)
+  useSurfaceFocusReturn((dialog.props as { request: unknown }).request !== null)
   const searchRef = useRef<HTMLInputElement>(null)
   const [focus, setFocus] = useState<string | null>(null)
   const [pickedEdge, setPickedEdge] = useState<string | null>(null)
@@ -417,7 +411,7 @@ function Canvas({
   // reader who wants it beside the canvas all the time pins it. On a narrow
   // window it would take the lower half of a canvas that has none to spare:
   // there it opens only when asked for, and is closed on every arrival.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const [pinned, setPinned] = useViewState("databases.diagram.inspector", false)
   const [askedFor, setAskedFor] = useState(false)
   const [closedOn, setClosedOn] = useState<string | null>(null)
@@ -480,7 +474,7 @@ function Canvas({
       if (nodes.length === 0 || !box || box.width === 0) return
       // "Fit to view" is the reader asking for everything, however small.
       const padding = FIT_PADDING
-      if (all) return void flow.fitView({ padding, duration })
+      if (all) return void flow.fitView({ padding, duration: motionMs(duration) })
       const zoomFor = (part: Node[]) =>
         getViewportForBounds(
           flow.getNodesBounds(part),
@@ -510,7 +504,7 @@ function Canvas({
       void flow.fitView({
         nodes: target.length === nodes.length ? undefined : target.map((n) => ({ id: n.id })),
         padding,
-        duration,
+        duration: motionMs(duration),
         minZoom: READABLE,
         maxZoom: ARRIVE_AT_MOST,
       })
@@ -575,7 +569,12 @@ function Canvas({
 
   const panTo = useCallback(
     (table: string) => {
-      void flow.fitView({ nodes: [{ id: table }], padding: 0.6, duration: 300, maxZoom: 1.2 })
+      void flow.fitView({
+        nodes: [{ id: table }],
+        padding: 0.6,
+        duration: motionMs(300),
+        maxZoom: 1.2,
+      })
     },
     [flow],
   )
@@ -723,15 +722,21 @@ function Canvas({
   // is in the diagram: on `window` they fired from anywhere on the page.
   const onKey = (e: React.KeyboardEvent) => {
     const target = e.target as HTMLElement
-    const typing =
-      target.tagName === "INPUT" ||
-      target.tagName === "TEXTAREA" ||
-      target.isContentEditable ||
-      target.closest("[role=dialog],[role=menu]") !== null
+    // The product's one guard (`lib/keys`), as the map's keys use.
+    const typing = isTypingTarget(target) || target.closest(OWNER_SELECTOR) !== null
     if (e.key === "Escape") {
       if (typing) return
-      if (focus || pickedEdge) focusTable(null)
-      else onLeaveImmersive()
+      // A focused table is cleared first; with nothing to clear, the press
+      // goes on to the full screen, which leaves (`useFullscreen`).
+      if (focus || pickedEdge) {
+        e.preventDefault()
+        focusTable(null)
+      }
+      // React Flow lets go of a table by blurring it, which sent the keyboard
+      // to the page: it stays on the canvas, where the arrows still slide.
+      if (target.closest(".react-flow__node")) {
+        canvas.current?.querySelector<HTMLElement>(".react-flow")?.focus({ preventScroll: true })
+      }
       return
     }
     // A whiteboard's zoom keys, as on the server's map: Ctrl or ⌘ with + and
@@ -739,9 +744,9 @@ function Canvas({
     const zoom = typing ? null : zoomKey(e)
     if (zoom) {
       e.preventDefault()
-      if (zoom === "in") void flow.zoomIn({ duration: 150 })
-      else if (zoom === "out") void flow.zoomOut({ duration: 150 })
-      else void flow.zoomTo(1, { duration: 150 })
+      if (zoom === "in") void flow.zoomIn({ duration: motionMs(150) })
+      else if (zoom === "out") void flow.zoomOut({ duration: motionMs(150) })
+      else void flow.zoomTo(1, { duration: motionMs(150) })
       return
     }
     if (typing || e.metaKey || e.ctrlKey || e.altKey) return
@@ -751,6 +756,47 @@ function Canvas({
       searchRef.current?.focus()
     } else if (e.key === "i") toggleInspector()
     else if (e.key === "h" && focus) hide([focus])
+  }
+
+  // The arrows, while the keyboard is on the canvas (T10). Heard before React
+  // Flow's own, which moves a selection 5px and keeps nothing: here the
+  // chosen tables — the selection, else the focused table — move by a step,
+  // onto the grid where it snaps, and are kept as a drag keeps them. With
+  // none chosen, or the layout locked, the picture slides.
+  const onArrow = (e: React.KeyboardEvent) => {
+    const direction = arrowOf(e)
+    const box = canvas.current
+    const target = e.target as HTMLElement
+    if (!direction || !box || isTypingTarget(target) || target.closest(OWNER_SELECTOR)) return
+    if (!target.closest(".react-flow")) return
+    e.preventDefault()
+    e.stopPropagation()
+    const all = flow.getNodes()
+    const picked = all.filter((n) => n.selected)
+    const chosen = picked.length > 0 ? picked : all.filter((n) => n.id === focus)
+    if (!doc.locked && chosen.length > 0) {
+      const grid = doc.snap ? GRID : undefined
+      const next = new Map(
+        chosen.map((n) => [n.id, moved(n.position, direction, e.shiftKey, { grid })]),
+      )
+      setNodes((ns) => ns.map((n) => (next.has(n.id) ? { ...n, position: next.get(n.id)! } : n)))
+      update((d) => ({ ...d, positions: { ...snapshotPositions(), ...Object.fromEntries(next) } }))
+      return
+    }
+    const view = panned(
+      flow.getViewport(),
+      direction,
+      e.shiftKey,
+      all.length > 0
+        ? {
+            bounds: flow.getNodesBounds(all),
+            size: { width: box.clientWidth, height: box.clientHeight },
+          }
+        : undefined,
+    )
+    void flow.setViewport(view)
+    // Where the operator left the viewport, as a slide by the pointer is kept.
+    if (restored.current) update({ viewport: view })
   }
 
   // Which way the layout runs is a word in the head's menu: it was one of
@@ -832,10 +878,10 @@ function Canvas({
       "-",
     )
     try {
-      if (kind === "mermaid") downloadText(`${base}.mmd`, toMermaid(graph, hidden), "text/plain")
+      if (kind === "mermaid") saveText(`${base}.mmd`, toMermaid(graph, hidden), "text/plain")
       else if (kind === "dbml")
-        downloadText(`${base}.dbml`, toDbml(graph, hidden, doc.notes), "text/plain")
-      else if (kind === "json") downloadText(`${base}.json`, toJson(graph, doc), "application/json")
+        saveText(`${base}.dbml`, toDbml(graph, hidden, doc.notes), "text/plain")
+      else if (kind === "json") saveText(`${base}.json`, toJson(graph, doc), "application/json")
       else {
         const svg = renderSvg({
           graph,
@@ -846,7 +892,7 @@ function Canvas({
           notes: doc.notes,
           title: `${conn.name}${graph.schema ? ` · ${graph.schema}` : ""}`,
         })
-        if (kind === "svg") downloadText(`${base}.svg`, svg, "image/svg+xml")
+        if (kind === "svg") saveText(`${base}.svg`, svg, "image/svg+xml")
         else await downloadPng(`${base}.png`, svg)
       }
     } catch (err) {
@@ -952,6 +998,7 @@ function Canvas({
         />
         <span className="flex-1" />
 
+        <Stale error={stale} />
         <Saved status={status} updatedAt={updatedAt} arranged={isArranged(doc)} />
 
         {hiddenHere.length > 0 && (
@@ -1093,7 +1140,11 @@ function Canvas({
           inspector ? "grid-cols-1 lg:grid-cols-[minmax(0,1fr)_18rem]" : "grid-cols-1",
         )}
       >
-        <div ref={canvas} className={cn("relative min-h-0 min-w-0", inspector && "max-lg:hidden")}>
+        <div
+          ref={canvas}
+          onKeyDownCapture={onArrow}
+          className={cn("relative min-h-0 min-w-0", inspector && "max-lg:hidden")}
+        >
           <ReactFlow
             nodes={shown}
             edges={shownEdges}
@@ -1133,10 +1184,13 @@ function Canvas({
             // A large schema is mostly off screen: what is not seen is not drawn.
             onlyRenderVisibleElements
             snapToGrid={doc.snap}
-            snapGrid={[16, 16]}
+            snapGrid={[GRID, GRID]}
             deleteKeyCode={null}
             aria-label={`Diagram of ${graph.schema || conn.name}`}
-            className="[&_.react-flow\_\_handle]:!border-0"
+            // A stop of its own, so the arrows reach it: a click on open
+            // ground puts the keyboard here, and Tab does.
+            tabIndex={0}
+            className="focus-ring-inset [&_.react-flow\_\_handle]:!border-0"
           >
             {doc.grid && (
               <Background
@@ -1178,7 +1232,12 @@ function Canvas({
               {full ? <FullscreenClose /> : <Fullscreen />}
             </IconAction>
           </div>
-          <ZoomBar onFit={() => fitPicture(FIT.duration, true)} onTidy={tidy} />
+          <CanvasZoom
+            slot="diagram-zoom"
+            onFit={() => fitPicture(FIT.duration, true)}
+            onTidy={tidy}
+            tidyLabel="Tidy: lay every table out again"
+          />
           <Legend schemas={qualified ? schemas : undefined} />
         </div>
 

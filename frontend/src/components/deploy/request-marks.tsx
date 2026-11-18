@@ -7,7 +7,6 @@ import { CLASS_TEXT, CLASS_TONE, methodEmphasis, statusClass, statusWord } from 
 import type { SocketState } from "@/hooks/use-socket"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { tokenClass } from "@/components/logs/log-text"
-import { FactDot } from "@/components/metrics/host-identity"
 import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 
@@ -49,11 +48,7 @@ export function RequestPath({
     <span className={cn("min-w-0 truncate font-mono", className)}>
       <span className={plain ? undefined : tokenClass("path")}>{path}</span>
       {query &&
-        (plain ? (
-          <span className="text-muted-foreground/60">?{query}</span>
-        ) : (
-          <QueryText query={query} />
-        ))}
+        (plain ? <span className="text-faint">?{query}</span> : <QueryText query={query} />)}
     </span>
   )
 }
@@ -198,7 +193,7 @@ export function ClientCell({
         ) : network?.product ? (
           <ProductGlyph id={network.product} />
         ) : Place ? (
-          <Place className="size-3.5 text-muted-foreground/60" />
+          <Place className="size-3.5 text-faint" />
         ) : null}
       </span>
       {agent && network?.product && <ProductGlyph id={network.product} />}
@@ -207,7 +202,7 @@ export function ClientCell({
       ) : ip ? (
         <Address ip={ip} plain={plain} />
       ) : (
-        <span className="text-muted-foreground/60">—</span>
+        <span className="text-faint">—</span>
       )}
     </span>
   )
@@ -236,7 +231,7 @@ export function Address({
     <span
       className={cn(
         "numeric truncate font-mono",
-        networkOf(ip).kind === "server" || plain ? "text-muted-foreground/60" : tokenClass("ip"),
+        networkOf(ip).kind === "server" || plain ? "text-faint" : tokenClass("ip"),
         className,
       )}
     >
@@ -286,8 +281,8 @@ export function LiveDot({ state }: { state: SocketState }) {
  */
 export function WrapDot() {
   return (
-    <span aria-hidden className="max-sm:hidden">
-      <FactDot />
+    <span aria-hidden className="text-faint max-sm:hidden">
+      ·
     </span>
   )
 }

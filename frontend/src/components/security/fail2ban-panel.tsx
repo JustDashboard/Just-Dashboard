@@ -2,6 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { Fact } from "@/components/fact-line"
 import {
   Crosshair,
   LockClosed,
@@ -12,21 +13,20 @@ import {
   Warning,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { lensFor } from "@/lib/log-lenses"
+import { lensFor } from "@/lib/log/lenses"
 import { notify } from "@/lib/toast"
 import type { SystemdUnitDetail } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useLensReadings } from "@/components/logs/lens-readings"
-import { FactDot } from "@/components/metrics/host-identity"
-import { InstallHandoff } from "@/components/network/install"
+import { InstallHandoff } from "@/components/install-handoff"
 import { ProductLogos } from "@/components/product-logo"
 import { ReadingLines } from "@/components/reading-line"
 import { EngineHead, EngineWaiting } from "@/components/security/engine-head"
 import { FAIL2BAN_LOG } from "@/components/security/host-logs"
 import { fail2banFault, type Fail2banStatus } from "@/components/security/intrusion-model"
 import { JailsPanel } from "@/components/security/jail-panel"
-import { LensReadingLine, type ReadingLook } from "@/components/security/lens-reading-line"
+import { LensReadingLine, type ReadingLook } from "@/components/logs/lens-reading-line"
 import {
   HostLogSection,
   useAddressLineVerbs,
@@ -157,17 +157,15 @@ export function Fail2banPanel({
         state={<Status tone="running" label="running" />}
         facts={
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {jails.length === 1 ? "1 jail" : `${jails.length} jails`}
-            </span>
-            <FactDot />
-            <span className="numeric">
+            </Fact>
+            <Fact className="numeric">
               {watched === 1 ? "1 log watched" : `${watched} logs watched`}
-            </span>
-            <FactDot />
-            <span className="numeric">
+            </Fact>
+            <Fact className="numeric">
               {bansTotal.toLocaleString()} {bansTotal === 1 ? "ban" : "bans"} since it last started
-            </span>
+            </Fact>
           </>
         }
       />

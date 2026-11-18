@@ -1,12 +1,11 @@
 "use client"
 
 import { useMemo } from "react"
-import { Box } from "@/components/icons"
 import { clock } from "@/lib/format"
-import { dockerSource, stackSource } from "@/lib/log-sources"
+import { dockerSource, stackSource } from "@/lib/log/sources"
 import type { DeploymentRuntimeServices, DeploymentSourceKind } from "@/lib/types"
 import { ServiceLogs, type LogWindow, type ServiceLogSource } from "@/components/logs/service-logs"
-import { EmptyState } from "@/components/state"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
 import { serviceProduct } from "@/components/deploy/service-product"
 import {
   PROXY_SERVICE,
@@ -146,10 +145,9 @@ export function ProjectOutput({
   if (services.length === 0) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <EmptyState
-          icon={Box}
+        <ProjectEmpty
           title="No container to read"
-          description={
+          reason={
             runtime?.status === "unavailable" && runtime.reason
               ? runtime.reason
               : "This deployment runs no container right now. What a release prints appears here once one starts — its build transcript is under Builds."

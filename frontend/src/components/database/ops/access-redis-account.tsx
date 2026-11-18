@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { SettingForm, SettingSection } from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingForm, SettingSection } from "@/components/settings/setting-card"
 import { FormSections } from "@/components/form"
 import { Trash } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { Detail, DetailList } from "@/components/detail-list"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -21,7 +23,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { errorMessage, put } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
 import { useAccessFilter } from "@/components/database/ops/access-filter"
@@ -47,7 +48,7 @@ import {
   type AccountView,
 } from "@/components/database/ops/account-frame"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
 
 const SHOW_WORDS: Record<AclShow, string> = {
@@ -61,7 +62,7 @@ const SHOW_WORDS: Record<AclShow, string> = {
 function passwordWords(user: RedisACLUser): string {
   if (user.noPassword) return "accepts any password"
   if (user.passwords === 0) return "no password set, so nothing signs in as it"
-  return user.passwords === 1 ? "1 password set" : `${user.passwords} passwords set`
+  return `${plural(user.passwords, "password")} set`
 }
 
 /**
@@ -83,7 +84,7 @@ export function RedisAccount({ name }: { name: string }) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const filter = useAccessFilter(id)
   const show = filter.show as AclShow
@@ -121,6 +122,8 @@ export function RedisAccount({ name }: { name: string }) {
       tone: one.enabled && one.noPassword ? ("warning" as const) : undefined,
     })),
     loading: acl.loading && !down,
+    error: acl.data ? undefined : acl.error,
+    onRetry: acl.refresh,
     caption: down
       ? "The server is not running"
       : acl.data
@@ -160,7 +163,7 @@ export function RedisAccount({ name }: { name: string }) {
   const mark = <AccountMark name={name} />
   const title = <AccountName name={name} className="text-title" />
   const identity = user ? (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${user.name}`}
       slot="account-identity"
       className="animate-rise border-b-0 pb-0"
@@ -180,11 +183,10 @@ export function RedisAccount({ name }: { name: string }) {
       }
       facts={
         <AccountFacts>
-          <span className="min-w-0 truncate font-mono text-foreground" title={aclSummary(user)}>
+          <Fact className="min-w-0 truncate font-mono text-foreground" title={aclSummary(user)}>
             {aclSummary(user)}
-          </span>
-          <FactDot />
-          <span className="numeric shrink-0">{passwordWords(user)}</span>
+          </Fact>
+          <Fact className="numeric shrink-0">{passwordWords(user)}</Fact>
         </AccountFacts>
       }
       menu={
@@ -192,7 +194,7 @@ export function RedisAccount({ name }: { name: string }) {
       }
     />
   ) : (
-    <HostIdentity
+    <IdentityHeader
       slot="account-identity"
       className="border-b-0 pb-0"
       logo={mark}
@@ -231,7 +233,7 @@ export function RedisAccount({ name }: { name: string }) {
               <ServerDown what="Its users" />
             ) : !acl.data ? (
               acl.error ? (
-                <CouldNotRead what="the user" error={acl.error} onRetry={acl.refresh} />
+                <ErrorState what="the user" error={acl.error} onRetry={acl.refresh} />
               ) : (
                 <Panel plain aria-hidden>
                   <PanelHeader title="Rule" />
@@ -263,7 +265,7 @@ export function RedisAccount({ name }: { name: string }) {
               ) : acl.data ? (
                 gone
               ) : acl.error ? (
-                <CouldNotRead what="the user" error={acl.error} onRetry={acl.refresh} />
+                <ErrorState what="the user" error={acl.error} onRetry={acl.refresh} />
               ) : null}
             </AccountPane>
           )}
@@ -277,20 +279,17 @@ export function RedisAccount({ name }: { name: string }) {
 /** One part of a rule on its line: what it is, then each rule as the server writes it. */
 function RulePart({ label, rules, none }: { label: string; rules: string[]; none: string }) {
   return (
-    <div className="flex min-h-11 min-w-0 items-center gap-4 py-2">
-      <dt className="w-24 shrink-0 text-body font-medium">{label}</dt>
-      <dd className="flex min-w-0 flex-1 flex-wrap gap-x-3 gap-y-1">
-        {rules.length === 0 ? (
-          <span className="text-body text-muted-foreground">{none}</span>
-        ) : (
-          rules.map((rule, index) => (
-            <code key={`${rule}:${index}`} className="font-mono text-xs">
-              {rule}
-            </code>
-          ))
-        )}
-      </dd>
-    </div>
+    <Detail label={label} className="flex flex-wrap gap-x-3 gap-y-1">
+      {rules.length === 0 ? (
+        <span className="text-muted-foreground">{none}</span>
+      ) : (
+        rules.map((rule, index) => (
+          <code key={`${rule}:${index}`} className="font-mono text-xs">
+            {rule}
+          </code>
+        ))
+      )}
+    </Detail>
   )
 }
 
@@ -306,11 +305,11 @@ function RuleReading({ user }: { user: RedisACLUser }) {
         >
           {user.rule || "no rule"}
         </Well>
-        <dl className="divide-y divide-hairline">
+        <DetailList ruled size="body">
           <RulePart label="Commands" rules={user.commands ?? []} none="none" />
           <RulePart label="Keys" rules={user.keys ?? []} none="none" />
           <RulePart label="Channels" rules={user.channels ?? []} none="none" />
-        </dl>
+        </DetailList>
       </PanelBody>
     </Panel>
   )

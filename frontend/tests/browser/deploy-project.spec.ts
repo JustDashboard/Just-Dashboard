@@ -399,7 +399,9 @@ for (const viewport of [
     await page.setViewportSize(viewport)
     await mockProject(page)
     await page.goto("/deploy/7")
-    const failures = page.getByRole("heading", { name: "Why releases failed" }).locator("../..")
+    const failures = page
+      .getByRole("heading", { name: "Why releases failed" })
+      .locator("xpath=ancestor::header[1]/..")
     await expect(failures.locator("[data-slot=bar-list]")).toHaveCount(0)
     const rows = failures.locator("[data-slot=rank-row]")
     await expect(rows).toHaveCount(2)
@@ -469,7 +471,9 @@ test("a window nothing succeeded in draws no release time, and a lone cause no b
 
   // One cause is every failure, so it is named with its count and still
   // narrows the list — a full bar beside nothing compared nothing.
-  const failures = page.getByRole("heading", { name: "Why releases failed" }).locator("../..")
+  const failures = page
+    .getByRole("heading", { name: "Why releases failed" })
+    .locator("xpath=ancestor::header[1]/..")
   await expect(failures.locator("[data-slot=bar-list]")).toHaveCount(0)
   const cause = failures.getByRole("button", { name: "Show the failed deployments" })
   await expect(cause).toHaveText(/Build failed\s*×2/)

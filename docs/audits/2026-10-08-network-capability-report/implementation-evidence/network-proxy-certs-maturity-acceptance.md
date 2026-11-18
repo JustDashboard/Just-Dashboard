@@ -5,7 +5,7 @@ This records the proxy and certificates package of the feature-by-feature maturi
 documented in [the Proxy guide](../../../internal/backend/proxy.md#proxy), [the
 connection investigator](../../../internal/backend/network-investigator.md#native-streams-on-the-path)
 and [watched probes](../../../internal/backend/network-diagnostics.md#watched-probes); the pages that
-show them are named in the [feature map](../../../internal/frontend/feature-map.md). It changes no
+show them are named in the [feature map](../../../internal/frontend/features/README.md). It changes no
 ledger status; the proposed status per row is listed at the end for the ledger owner.
 
 Raw logs are kept beside this record in

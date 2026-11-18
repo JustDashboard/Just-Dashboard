@@ -20,16 +20,17 @@ import {
   Minus,
   Pencil,
   Users,
-  type Icon,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { downloadUrl, get } from "@/lib/api"
-import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, grouped, plural, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileChecksum, FileEntry, FilePreview, FileUsage } from "@/lib/types"
 import { Button } from "@/components/ui/button"
-import { Well } from "@/components/panel"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { PaneSection, Well } from "@/components/panel"
+import { Detail, DetailList } from "@/components/detail-list"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { IconAction } from "@/components/icon-action"
 import { RankList } from "@/components/rank-list"
 import {
@@ -38,7 +39,7 @@ import {
   kindOfEntry,
   useFolderColour,
   type FolderColour,
-} from "@/components/files/file-icon"
+} from "@/components/file-icon"
 import { FolderColourSwatches } from "@/components/files/folder-colour"
 import { copyText } from "@/lib/clipboard"
 import { baseOf, parentOf, rawUrl } from "@/components/files/media"
@@ -379,26 +380,8 @@ function Verbs({
   )
 }
 
-/** One group of the inspector: an eyebrow, an optional control at its end, and its body. */
-function Section({
-  title,
-  aside,
-  children,
-}: {
-  title: string
-  aside?: React.ReactNode
-  children: React.ReactNode
-}) {
-  return (
-    <section className="space-y-2.5 border-b border-hairline px-4 py-3.5 last:border-b-0">
-      <div className="flex min-h-6 items-center justify-between gap-2">
-        <h3 className="eyebrow">{title}</h3>
-        {aside}
-      </div>
-      {children}
-    </section>
-  )
-}
+/** One group of the inspector: the pane's shared section, as the map's and a remote session's. */
+const Section = PaneSection
 
 /** What is inside: the head of a text, the pages of a PDF, an archive's entries, a folder's. */
 function Contents({
@@ -555,65 +538,47 @@ function DirectoryContents({
 function Details({ entry, preview }: { entry: FileEntry; preview: FilePreview }) {
   return (
     <Section title="Details">
-      <dl className="space-y-2.5">
-        <Fact icon={Clock} label="Modified">
+      <DetailList size="body" className="gap-y-2.5">
+        <Detail icon={Clock} label="Modified" className="numeric">
           {relativeTime(preview.modified)}
           <span className="block text-hint text-muted-foreground">
             {timestamp(preview.modified)}
           </span>
-        </Fact>
+        </Detail>
         {preview.kind !== "dir" && (
-          <Fact icon={Box} label="Size">
+          <Detail icon={Box} label="Size" className="numeric">
             {bytes(preview.size)}
             {preview.size >= 1024 && (
               <span className="block text-hint text-muted-foreground">
-                {preview.size.toLocaleString()} bytes
+                {grouped(preview.size)} bytes
               </span>
             )}
-          </Fact>
+          </Detail>
         )}
         {preview.kind === "text" && preview.lines !== undefined && !preview.truncated && (
-          <Fact icon={ListOrdered} label="Lines">
-            {preview.lines.toLocaleString()}
-          </Fact>
+          <Detail icon={ListOrdered} label="Lines" className="numeric">
+            {grouped(preview.lines)}
+          </Detail>
         )}
         {preview.language && preview.language !== "plaintext" && (
-          <Fact icon={CodeBracket} label="Language">
+          <Detail icon={CodeBracket} label="Language" className="numeric">
             <span className="capitalize">{preview.language}</span>
-          </Fact>
+          </Detail>
         )}
-        <Fact icon={Users} label="Owner">
+        <Detail icon={Users} label="Owner" className="numeric">
           {preview.owner ?? entry.owner}
           <span className="block text-hint text-muted-foreground">
             group {preview.group ?? entry.group}
           </span>
-        </Fact>
+        </Detail>
         {preview.isSymlink && (
-          <Fact icon={Linked} label="Links to">
+          <Detail icon={Linked} label="Links to" className="numeric">
             <span className="font-mono text-xs break-all">{preview.symlinkTarget}</span>
             {preview.linkBroken && <span className="ml-1 text-destructive">broken</span>}
-          </Fact>
+          </Detail>
         )}
-      </dl>
+      </DetailList>
     </Section>
-  )
-}
-
-function Fact({
-  icon: Glyph,
-  label,
-  children,
-}: {
-  icon: Icon
-  label: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className="grid grid-cols-[1rem_5.5rem_minmax(0,1fr)] items-start gap-x-2 text-body">
-      <Glyph aria-hidden className="mt-0.5 size-3.5 text-muted-foreground" />
-      <dt className="text-muted-foreground">{label}</dt>
-      <dd className="numeric min-w-0">{children}</dd>
-    </div>
   )
 }
 

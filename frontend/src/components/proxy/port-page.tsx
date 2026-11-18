@@ -1,29 +1,30 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useMemo } from "react"
 import Link from "next/link"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Router } from "@/components/icons"
+import { useParams, useRouter } from "next/navigation"
+import { ArrowUpRight, Router } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural, timestamp } from "@/lib/format"
 import type { PortsFirewall, PortsMeta, SeenListener } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput } from "@/components/page"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { DetailPage, siblingSteps, useDetailTab, type Step } from "@/components/detail-page"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { StatusDot } from "@/components/status-dot"
+import { ViewTabList } from "@/components/tabs"
+import { VERDICT_TONE } from "@/components/tone"
 import { Tag } from "@/components/tag"
-import { VerbBar } from "@/components/verbs"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { processHref } from "@/components/procs/process-facts"
 import {
   findPort,
@@ -35,6 +36,9 @@ import {
   portHref,
   PORTS_VIEW_KEYS,
   socketClients,
+  dangerousService,
+  networkWords,
+  reachVerdict,
   socketPids,
   type Socket,
 } from "@/components/proxy/ports"
@@ -56,18 +60,12 @@ import { PortPath } from "@/components/proxy/port-path"
 import { socketMenuLabel, useSocketVerbs } from "@/components/proxy/port-verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
 import type { Reading } from "@/components/proxy/freshness"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["reach", "owner", "clients", "history"] as const
 type Tab = (typeof TABS)[number]
 
-const BACK = (
-  <Link
-    href="/proxy/ports"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Ports
-  </Link>
-)
+const BACK = { href: "/proxy/ports", label: "Ports" }
 
 /**
  * One listening port, as a place of its own (`/proxy/ports/tcp-443`).
@@ -75,11 +73,12 @@ const BACK = (
  * It was a side sheet over the list until 0.8.7: the owner, the reach, the
  * firewall, the clients, the proof from outside and the identify form in a
  * sheet's width, over a list nobody could read behind it, and no history at
- * all. So a port is a destination with a way back, built the way a process
- * is (`procs/process-page.tsx`): the identity line — the owner as its
- * product, the port and who holds it, where it answers as the state — with
- * the socket's verbs above it, and its views as the underlined strip under
- * it: Reach (the path to it drawn, then why), Owner, Clients, History.
+ * all. So a port is a destination on the detail frame every item page shares
+ * (`DetailPage`): the way back with the arrows, the identity line — the
+ * owner as its product, the port and who holds it, where it answers as the
+ * state, the socket's verbs at its end (`IdentityVerbs`) — and its views as
+ * the underlined strip under it: Reach (the path to it drawn, then why),
+ * Owner, Clients, History.
  *
  * What the sheet did well, the list beside the thing being read, is the rail
  * from `xl`: the list's own search, reach, protocol and sort, so the next
@@ -91,26 +90,9 @@ const BACK = (
  */
 export function PortPage() {
   const params = useParams<{ port: string }>()
-  const search = useSearchParams()
   const router = useRouter()
-  const key = useMemo(() => parsePortKey(decodeURIComponent(params.port ?? "")), [params.port])
-  const requested = search.get("tab")
-  const [remembered, remember] = useViewState<string>("proxy.port.tab", "reach")
-  const [chosen, setChosen] = useState<string>(requested ?? remembered)
-  const tab: Tab = (TABS as readonly string[]).includes(chosen) ? (chosen as Tab) : "reach"
-  const setTab = useCallback(
-    (next: string) => {
-      setChosen(next)
-      remember(next)
-      // The address says which view, so a link to a port's clients opens on
-      // them; replaced rather than pushed, because a view is not a place.
-      const url = new URL(window.location.href)
-      if (next === "reach") url.searchParams.delete("tab")
-      else url.searchParams.set("tab", next)
-      window.history.replaceState(null, "", `${url.pathname}${url.search}`)
-    },
-    [remember],
-  )
+  const key = useMemo(() => parsePortKey(decodeSegment(params.port)), [params.port])
+  const [tab, setTab] = useDetailTab(TABS, { remember: "proxy.port.tab" })
 
   // The section's own read of the list, which the list page draws from too.
   const shared = useProxy().reads.ports
@@ -118,79 +100,37 @@ export function PortPage() {
   const all = useMemo(() => foldDualStack(reading?.value ?? []), [reading])
   const socket = key ? findPort(all, key) : undefined
   const rail = useRail(all)
-  const open = useCallback(
-    (next: Socket) => router.push(portHref(next, all, tab)),
-    [router, all, tab],
-  )
-  const at = socket ? rail.rows.indexOf(socket) : -1
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? rail.rows[at + direction] : rail.rows[direction > 0 ? 0 : -1]
-    if (next) open(next)
-  }
-  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
-  const next = {
-    disabled: rail.rows.length === 0 || at >= rail.rows.length - 1,
-    run: () => adjacent(1),
-  }
+  const hrefFor = useCallback((next: Socket) => portHref(next, all, tab), [all, tab])
+  const steps = siblingSteps(rail.rows, socket, (next) => router.push(hrefFor(next)))
 
   return (
-    <Workspace
-      name="Port"
-      stateKey="proxy.port.page"
-      refresh={shared.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous port",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next port",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <PortRail
-            className="hidden w-72 shrink-0 xl:flex"
-            rows={rail.rows}
-            all={all}
-            current={socket}
-            loading={!reading}
-            query={rail.query}
-            onQuery={rail.setQuery}
-            filtered={rail.filtered}
-            onClearFilters={rail.clearFilters}
-            listedAt={reading?.at ?? 0}
-            onOpen={open}
-          />
-          <PortMain
-            key={key ? `${key.protocol}-${key.port}-${key.address ?? ""}` : "none"}
-            portKey={key}
-            socket={socket}
-            loading={!reading}
-            error={reading ? undefined : shared.error}
-            listedAt={reading?.at ?? 0}
-            onRetry={shared.refresh}
-            tab={tab}
-            setTab={setTab}
-            previous={previous}
-            next={next}
-          />
-        </div>
-      </Page>
-    </Workspace>
+    <PortMain
+      key={key ? `${key.protocol}-${key.port}-${key.address ?? ""}` : "none"}
+      portKey={key}
+      socket={socket}
+      loading={!reading}
+      error={reading ? undefined : shared.error}
+      listedAt={reading?.at ?? 0}
+      onRetry={shared.refresh}
+      tab={tab}
+      setTab={setTab}
+      steps={steps}
+      rail={
+        <PortRail
+          rows={rail.rows}
+          all={all}
+          current={socket}
+          loading={!reading}
+          error={reading ? undefined : shared.error}
+          onRetry={shared.refresh}
+          query={rail.query}
+          onQuery={rail.setQuery}
+          filtered={rail.filtered}
+          onClearFilters={rail.clearFilters}
+          hrefFor={hrefFor}
+        />
+      }
+    />
   )
 }
 
@@ -233,7 +173,21 @@ function useRail(all: Socket[]) {
   }
 }
 
-type Step = { disabled: boolean; run: () => void }
+/**
+ * The socket's verbs on its identity line, by the one rule (`IdentityVerbs`):
+ * the first inline verb (the owner's page, or the process) as the command and
+ * the rest behind `⋯`, named for the endpoint as a row's menu is. A socket
+ * with no inline verb (a reader's) keeps only the menu.
+ */
+function lineVerbs(socket: Socket, verbs: Verb[]) {
+  const name = socketMenuLabel(socket).replace(/^Actions for /, "")
+  if (!verbs.some((verb) => verb.inline))
+    return {
+      command: undefined,
+      menu: verbs.length > 0 && <VerbMenu verbs={verbs} label={`More actions for ${name}`} />,
+    }
+  return IdentityVerbs({ verbs, name })
+}
 
 function PortMain({
   portKey,
@@ -244,8 +198,8 @@ function PortMain({
   onRetry,
   tab,
   setTab,
-  previous,
-  next,
+  steps,
+  rail,
 }: {
   portKey: ReturnType<typeof parsePortKey>
   socket: Socket | undefined
@@ -255,8 +209,8 @@ function PortMain({
   onRetry: () => void
   tab: Tab
   setTab: (tab: string) => void
-  previous: Step
-  next: Step
+  steps: { previous: Step; next: Step }
+  rail: React.ReactNode
 }) {
   const { can } = useAuth()
   const admin = can("system.admin")
@@ -274,83 +228,93 @@ function PortMain({
     onDone: proxy.reads.ports.refresh,
   })
   const name = portKey ? `${portKey.port}/${portKey.protocol}` : "Port"
-  const steps = (
-    <span className="flex items-center">
-      <IconAction label="Previous port" disabled={previous.disabled} onClick={previous.run}>
-        <ChevronUp />
-      </IconAction>
-      <IconAction label="Next port" disabled={next.disabled} onClick={next.run}>
-        <ChevronDown />
-      </IconAction>
-      <span className="max-sm:hidden">
-        <WorkspaceHelp compact />
-      </span>
-    </span>
+
+  // The frame every detail page has (D9): the way back with the arrows, the
+  // rail from `xl`, and the identity line held still over the views.
+  const frame = (title: string, identity: React.ReactNode, body: React.ReactNode) => (
+    <DetailPage
+      name="Port"
+      what="port"
+      stateKey="proxy.port.page"
+      refresh={onRetry}
+      steps={steps}
+      rail={rail}
+      back={BACK}
+      title={title}
+      identity={identity}
+    >
+      {body}
+      {dialog}
+    </DetailPage>
   )
 
   if (!portKey) {
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title="Port" />
-        <EmptyState
-          icon={Router}
-          title="That is not a port"
-          description="A port's page is named by its protocol and number, such as tcp-443."
-          action={
-            <Button size="sm" variant="outline" asChild>
-              <Link href="/proxy/ports">All ports</Link>
-            </Button>
-          }
-        />
-      </div>
+    return frame(
+      "Port",
+      undefined,
+      <EmptyState
+        icon={Router}
+        title="That is not a port"
+        description="A port's page is named by its protocol and number, such as tcp-443."
+        action={
+          <Button size="sm" variant="outline" asChild>
+            <Link href="/proxy/ports">All ports</Link>
+          </Button>
+        }
+      />,
     )
   }
 
   if (!socket) {
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={steps} />
-        <HostIdentity
-          className="animate-rise"
-          fallback={Router}
-          title={<PortTitle port={portKey.port} protocol={portKey.protocol} />}
-          facts={
-            loading ? (
-              <TextShimmer>Reading the sockets…</TextShimmer>
-            ) : error ? (
-              <span>couldn&apos;t read the sockets</span>
-            ) : (
-              <span>
-                {portKey.address ? (
-                  <span className="font-mono">{portKey.address}</span>
-                ) : (
-                  "any address"
-                )}
-              </span>
-            )
-          }
-          aside={!loading && !error && <span className="text-body font-medium">not listening</span>}
-        />
-        {loading ? (
-          <LoadingRows />
-        ) : error ? (
-          <ErrorState error={error} onRetry={onRetry} />
-        ) : (
-          <>
-            <EmptyState
-              icon={Router}
-              title="Nothing listens there now"
-              description={`No socket in the last listing is ${portKey.protocol.toUpperCase()} port ${portKey.port}${portKey.address ? ` on ${portKey.address}` : ""}. Its changes are below.`}
-              action={
-                <Button size="sm" variant="outline" asChild>
-                  <Link href="/proxy/ports">All ports</Link>
-                </Button>
-              }
-            />
-            <PortChanges port={portKey} />
-          </>
-        )}
-      </div>
+    // While the list is read the line keeps a place for its state and its
+    // verbs, as the loaded line has them, so it is as tall as that line.
+    return frame(
+      name,
+      <IdentityHeader
+        loading={loading}
+        className="border-b-0 pb-0"
+        fallback={Router}
+        title={<PortTitle port={portKey.port} protocol={portKey.protocol} />}
+        state={
+          loading ? (
+            true
+          ) : error ? (
+            <span className="text-xs text-destructive">not read</span>
+          ) : (
+            <span className="text-xs font-medium">not listening</span>
+          )
+        }
+        command={loading ? true : undefined}
+        menu={loading ? false : undefined}
+        facts={
+          loading ? (
+            <TextShimmer>Reading the sockets…</TextShimmer>
+          ) : error ? (
+            <Fact>couldn&apos;t read the sockets</Fact>
+          ) : (
+            <Fact mono={Boolean(portKey.address)}>{portKey.address ?? "any address"}</Fact>
+          )
+        }
+      />,
+      loading ? (
+        <LoadingRows />
+      ) : error ? (
+        <ErrorState error={error} onRetry={onRetry} />
+      ) : (
+        <>
+          <EmptyState
+            icon={Router}
+            title="Nothing listens there now"
+            description={`No socket in the last listing is ${portKey.protocol.toUpperCase()} port ${portKey.port}${portKey.address ? ` on ${portKey.address}` : ""}. Its changes are below.`}
+            action={
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/proxy/ports">All ports</Link>
+              </Button>
+            }
+          />
+          <PortChanges port={portKey} />
+        </>
+      ),
     )
   }
 
@@ -362,59 +326,30 @@ function PortMain({
     { key: "history", label: "History" },
   ]
 
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext
-          eyebrow={BACK}
-          title={`${name} ${ownerTitle(socket)}`}
-          actions={
-            <>
-              <VerbBar verbs={verbsFor(socket)} menuLabel={socketMenuLabel(socket)} />
-              {steps}
-            </>
-          }
-        />
-        <PortIdentity socket={socket} listedAt={listedAt} />
-      </div>
+  return frame(
+    `${name} ${ownerTitle(socket)}`,
+    <PortIdentity socket={socket} listedAt={listedAt} {...lineVerbs(socket, verbsFor(socket))} />,
+    <Tabs value={tab} onValueChange={setTab} className="gap-0">
+      <ViewTabList label={`Views of port ${socket.port}`} value={tab} views={views} sticky />
 
-      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of port ${socket.port}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {views.map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(tab === view.key, "h-10")}
-            >
-              {view.label}
-              {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
-
-        <TabsContent value="reach" className="min-h-0 flex-1 space-y-8 pt-6 xl:overflow-y-auto">
-          {tab === "reach" && (
-            <>
-              <PortPath socket={socket} />
-              <PortReach socket={socket} admin={admin} />
-            </>
-          )}
-        </TabsContent>
-        <TabsContent value="owner" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
-          {tab === "owner" && <PortOwner socket={socket} />}
-        </TabsContent>
-        <TabsContent value="clients" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
-          {tab === "clients" && <PortClients socket={socket} />}
-        </TabsContent>
-        <TabsContent value="history" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
-          {tab === "history" && <PortChanges port={socket} />}
-        </TabsContent>
-      </Tabs>
-      {dialog}
-    </div>
+      <TabsContent value="reach" className="space-y-8 pt-6">
+        {tab === "reach" && (
+          <>
+            <PortPath socket={socket} />
+            <PortReach socket={socket} admin={admin} />
+          </>
+        )}
+      </TabsContent>
+      <TabsContent value="owner" className="pt-6">
+        {tab === "owner" && <PortOwner socket={socket} />}
+      </TabsContent>
+      <TabsContent value="clients" className="pt-6">
+        {tab === "clients" && <PortClients socket={socket} />}
+      </TabsContent>
+      <TabsContent value="history" className="pt-6">
+        {tab === "history" && <PortChanges port={socket} />}
+      </TabsContent>
+    </Tabs>,
   )
 }
 
@@ -429,21 +364,31 @@ function PortTitle({ port, protocol }: { port: number; protocol: string }) {
 
 /**
  * The line the page opens on: the owner as its product, the port and who
- * holds it, then the facts a port is opened to check — where it is bound,
- * the account and process, how the owner runs (a link to its page), what the
- * proxy does with it and when it was first seen — and where it answers at
- * the line's end, coloured as the list colours it.
+ * holds it with where it answers beside it, coloured as the list colours it,
+ * the socket's verbs at the end, then the facts a port is opened to check —
+ * where it is bound, the account and process, how the owner runs (a link to
+ * its page), what the proxy does with it and when it was first seen.
  */
-function PortIdentity({ socket, listedAt }: { socket: Socket; listedAt: number }) {
+function PortIdentity({
+  socket,
+  listedAt,
+  command,
+  menu,
+}: {
+  socket: Socket
+  listedAt: number
+  command?: React.ReactNode
+  menu?: React.ReactNode
+}) {
   const pids = socketPids(socket)
   const label = ownerLabel(socket)
   const link = ownerLinks(socket)[0]
   const proxy = proxyWords(socket)
   const seen = firstSeen(socket)
   return (
-    <HostIdentity
-      className="animate-rise border-b-0 pb-0"
-      logo={<ProcessMark listener={socket} className="size-12 rounded-xl [&_img]:size-7" />}
+    <IdentityHeader
+      className="border-b-0 pb-0"
+      logo={<ProcessMark listener={socket} className="size-10 rounded-lg [&_img]:size-6" />}
       title={
         <span className="inline-flex min-w-0 items-baseline gap-2">
           <PortTitle port={socket.port} protocol={socket.protocol} />
@@ -452,37 +397,31 @@ function PortIdentity({ socket, listedAt }: { socket: Socket; listedAt: number }
           <NewMark socket={socket} now={listedAt} />
         </span>
       }
+      state={<ReachWord socket={socket} className="max-w-full" />}
+      command={command}
+      menu={menu}
       facts={
         <>
-          <span className="font-mono">{addressLine(socket)}</span>
-          {socket.source !== "docker-nat" && (
-            <>
-              <FactDot />
-              <span className="font-mono">{socket.user || "unknown user"}</span>
-              {pids.length > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric">
-                    {pids.length > 1 ? "PIDs " : "PID "}
-                    {pids.map((pid, i) => (
-                      <span key={pid}>
-                        {i > 0 && ", "}
-                        <Link
-                          href={processHref(pid)}
-                          className="rounded-sm text-foreground focus-ring hover:underline"
-                        >
-                          {pid}
-                        </Link>
-                      </span>
-                    ))}
-                  </span>
-                </>
-              )}
-            </>
+          <Fact mono>{addressLine(socket)}</Fact>
+          {socket.source !== "docker-nat" && <Fact mono>{socket.user || "unknown user"}</Fact>}
+          {socket.source !== "docker-nat" && pids.length > 0 && (
+            <Fact className="numeric">
+              {pids.length > 1 ? "PIDs " : "PID "}
+              {pids.map((pid, i) => (
+                <span key={pid}>
+                  {i > 0 && ", "}
+                  <Link
+                    href={processHref(pid)}
+                    className="rounded-sm text-foreground focus-ring hover:underline"
+                  >
+                    {pid}
+                  </Link>
+                </span>
+              ))}
+            </Fact>
           )}
           {label && (
-            <>
-              <FactDot />
+            <Fact>
               {link ? (
                 <Link
                   href={link.href}
@@ -492,174 +431,122 @@ function PortIdentity({ socket, listedAt }: { socket: Socket; listedAt: number }
                   <ArrowUpRight aria-hidden className="size-3 shrink-0" />
                 </Link>
               ) : (
-                <span className="truncate">{label}</span>
+                label
               )}
-            </>
+            </Fact>
           )}
-          {proxy && (
-            <>
-              <FactDot />
-              <span>{proxy}</span>
-            </>
-          )}
+          {proxy && <Fact>{proxy}</Fact>}
           {seen && (
-            <>
-              <FactDot />
-              <span title={timestamp(seen)}>
-                {isNew(socket, listedAt)
-                  ? "first seen today"
-                  : `listening since ${timestamp(seen)}`}
-              </span>
-            </>
+            <Fact title={timestamp(seen)}>
+              {isNew(socket, listedAt) ? "first seen today" : `listening since ${timestamp(seen)}`}
+            </Fact>
           )}
         </>
       }
-      aside={<ReachWord socket={socket} className="text-body" />}
     />
   )
 }
 
 /**
- * The list, folded into a column beside the port it opened: the same search,
- * reach, protocol and sort, so the next port is one press away. Each row is
- * the owner as its product, the port and protocol, the owner's name and where
- * it answers; the one on screen is filled.
+ * The list, folded into a column beside the port it opened (`Rail`): the
+ * same search, reach, protocol and sort, so the next port is one press away.
+ * Each row is the owner as its product with where it answers as the dot in
+ * its corner, the port, protocol and owner, and where it answers in words.
+ * The words keep the muted ink on every row: in the danger ink they failed
+ * contrast on the filled row (PGP-20), and the dot already carries the tone.
  */
 function PortRail({
   rows,
   all,
   current,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   filtered,
   onClearFilters,
-  listedAt,
-  onOpen,
-  className,
+  hrefFor,
 }: {
   rows: Socket[]
   all: Socket[]
   current: Socket | undefined
   loading: boolean
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   filtered: boolean
   onClearFilters: () => void
-  listedAt: number
-  onOpen: (socket: Socket) => void
-  className?: string
+  hrefFor: (socket: Socket) => string
 }) {
-  const listed = current !== undefined && rows.includes(current)
-  const pinned = !listed ? current : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // The port on screen is kept in view: opened from a link or by Alt+↓ past
-  // the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current])
   const caption =
     rows.length === all.length
       ? plural(all.length, "socket")
       : `${rows.length} of ${plural(all.length, "socket")}`
   return (
-    <nav
-      aria-label="Ports"
-      data-slot="port-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Port, process, user or address"
-          aria-label="Search the ports"
-          containerClassName="sm:w-full"
-        />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{loading ? "Reading the sockets…" : caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Ports to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {pinned && <RailRow socket={pinned} current listedAt={listedAt} onOpen={onOpen} />}
-        {pinned && rows.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {rows.map((row) => (
-          <RailRow
-            key={`${row.protocol}-${row.family}-${row.address}-${row.port}`}
-            socket={row}
-            current={row === current}
-            listedAt={listedAt}
-            onOpen={onOpen}
-          />
-        ))}
-        {loading && rows.length === 0 && <LoadingRows rows={8} />}
-        {!loading && rows.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No socket matches.</li>
-        )}
-      </ol>
-    </nav>
+    <Rail
+      slot="port-rail"
+      label="Ports"
+      search={{
+        label: "Search the ports",
+        placeholder: "Port, process, user or address",
+        query,
+        onQuery,
+      }}
+      caption={loading ? "Reading the sockets…" : error ? undefined : caption}
+      rows={rows}
+      keyOf={railKey}
+      current={(socket) => socket === current}
+      pinned={current}
+      row={(socket, on) => <PortRailRow socket={socket} current={on} href={hrefFor(socket)} />}
+      loading={loading}
+      loadingRows={8}
+      error={error}
+      onRetry={onRetry}
+      empty="No socket matches."
+      filtered={filtered}
+      onClearFilters={onClearFilters}
+    />
   )
 }
 
-function RailRow({
+function railKey(socket: Socket) {
+  return `${socket.protocol}-${socket.family}-${socket.address}-${socket.port}`
+}
+
+function PortRailRow({
   socket,
   current,
-  onOpen,
+  href,
 }: {
   socket: Socket
   current: boolean
-  listedAt: number
-  onOpen: (socket: Socket) => void
+  href: string
 }) {
+  const verdict = reachVerdict(socket)
+  const service = dangerousService(socket)
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        data-workspace-item={`${socket.protocol}-${socket.address}-${socket.port}`}
-        data-workspace-name={`${socket.port} ${ownerTitle(socket)}`}
-        aria-current={current ? "page" : undefined}
-        aria-label={`${socket.port}/${socket.protocol}, ${ownerTitle(socket)}`}
-        onClick={() => onOpen(socket)}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <ProcessMark listener={socket} className="size-7 rounded-md [&_img]:size-4" />
-        <span className="min-w-0 flex-1">
-          <span className="flex min-w-0 items-baseline gap-1.5">
-            <span
-              className={cn(
-                "numeric shrink-0 font-mono text-body",
-                current ? "font-semibold" : "font-medium",
-              )}
-            >
-              {socket.port}
-            </span>
-            <span className="shrink-0 text-micro text-muted-foreground uppercase">
-              {socket.protocol}
-            </span>
-            <span className="truncate text-body">{ownerTitle(socket)}</span>
-          </span>
-          <ReachWord socket={socket} className="max-w-full [&_.font-mono]:hidden" />
-        </span>
-      </button>
-    </li>
+    <RailRow
+      item={`${socket.protocol}-${socket.address}-${socket.port}`}
+      name={`${socket.port} ${ownerTitle(socket)}`}
+      label={`${socket.port}/${socket.protocol}, ${ownerTitle(socket)}`}
+      current={current}
+      href={href}
+      mark={<ProcessMark listener={socket} className="size-7 rounded-md [&_img]:size-4" />}
+      dot={verdict ? <StatusDot tone={VERDICT_TONE[verdict]} className="size-1.5" /> : null}
+    >
+      <RailName current={current}>
+        <span className="numeric font-mono">{socket.port}</span>{" "}
+        <span className="text-micro font-normal text-muted-foreground uppercase">
+          {socket.protocol}
+        </span>{" "}
+        {ownerTitle(socket)}
+      </RailName>
+      <RailLine>
+        {service ? `${service} · ` : ""}
+        {networkWords(socket)}
+      </RailLine>
+    </RailRow>
   )
 }

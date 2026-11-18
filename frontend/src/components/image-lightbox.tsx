@@ -1,10 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Dialog as DialogPrimitive } from "radix-ui"
-import { ChevronLeft, ChevronRight, Cross, Download, External } from "@/components/icons"
-import { Spinner } from "@/components/state"
-import { Button } from "@/components/ui/button"
+import { IconAction } from "@/components/icon-action"
+import { ChevronLeft, ChevronRight, Download, External } from "@/components/icons"
+import { Spinner } from "@/components/loading"
+import { STAGE_CONTROL, StageModal } from "@/components/modal"
 import { cn } from "@/lib/utils"
 
 /** One picture the lightbox can show. */
@@ -26,15 +26,14 @@ export interface LightboxImage {
   download?: string
 }
 
-const STRIP_BUTTON = "text-white hover:bg-white/10 hover:text-white"
-
 /**
  * A picture as large as the window allows, over a dark ground: a screenshot in a
  * 56-pixel tile, or a 400-pixel column, is a thumbnail of what was meant. Arrows
  * (the keys, the buttons, or a swipe) walk the rest; a click on a picture larger
  * than the window shows it pixel for pixel, panned, and another click fits it
  * again. Escape, the cross or the ground closes it, and focus goes back to the
- * picture that opened it.
+ * picture that opened it. The dialog itself is `StageModal`'s, so this file
+ * draws only the picture and its walk.
  *
  * It opens with the small copy the page already drew, at the size the picture
  * will take, and the picture fades in over it as it arrives, so nothing jumps.
@@ -80,150 +79,107 @@ export function ImageLightbox({
   // A swipe on a touch screen walks them too, and is not a press on the ground.
   const swipe = useRef<{ x: number; y: number } | null>(null)
   const swiped = useRef(false)
-  // What had focus when it opened, the thumbnail pressed, has it back after: the
-  // dialog has no trigger of its own to return to.
-  const opener = useRef<HTMLElement | null>(null)
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={(next) => !next && onClose()}>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay
-          data-slot="lightbox-overlay"
-          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm duration-200 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
-        />
-        <DialogPrimitive.Content
-          data-slot="lightbox"
-          aria-describedby={undefined}
-          onKeyDown={onKeyDown}
-          onOpenAutoFocus={() => {
-            opener.current =
-              document.activeElement instanceof HTMLElement ? document.activeElement : null
-          }}
-          onCloseAutoFocus={(event) => {
-            const back = opener.current
-            opener.current = null
-            if (back?.isConnected) {
-              event.preventDefault()
-              back.focus({ preventScroll: true })
-            }
-          }}
-          className="group/lightbox fixed inset-0 z-50 flex flex-col duration-200 outline-none data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:animate-in data-[state=open]:fade-in-0"
-        >
-          <div className="flex h-12 shrink-0 items-center gap-2 px-3 text-white">
-            <DialogPrimitive.Title className="min-w-0 flex-1 truncate text-body">
-              {current?.alt || "Image"}
-            </DialogPrimitive.Title>
-            {many && (
-              <span data-slot="lightbox-count" className="numeric shrink-0 text-hint text-white/70">
-                {index + 1} of {images.length}
-              </span>
-            )}
-            {current?.download && (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                asChild
-                className={STRIP_BUTTON}
-                title="Download"
-              >
-                <a href={current.src} download={current.download} aria-label="Download">
-                  <Download className="size-4" />
-                </a>
-              </Button>
-            )}
-            {current?.original && (
-              <Button
-                size="icon-sm"
-                variant="ghost"
-                asChild
-                className={STRIP_BUTTON}
-                title="Open the original"
-              >
-                <a
-                  href={current.original}
-                  target="_blank"
-                  rel="noreferrer noopener"
-                  aria-label="Open the original"
-                >
-                  <External className="size-4" />
-                </a>
-              </Button>
-            )}
-            <DialogPrimitive.Close asChild>
-              <Button
-                type="button"
-                size="icon-sm"
-                variant="ghost"
-                aria-label="Close"
-                title="Close (Esc)"
-                className={STRIP_BUTTON}
-              >
-                <Cross className="size-4" />
-              </Button>
-            </DialogPrimitive.Close>
-          </div>
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- swipes, and a press on the ground beside the picture: the arrow keys and Escape do the same */}
-          <div
-            className="relative min-h-0 flex-1"
-            onPointerDown={(event) => {
-              if (event.pointerType === "touch")
-                swipe.current = { x: event.clientX, y: event.clientY }
-            }}
-            onPointerUp={(event) => {
-              const from = swipe.current
-              swipe.current = null
-              if (!from) return
-              const dx = event.clientX - from.x
-              if (Math.abs(dx) > 56 && Math.abs(dx) > 2 * Math.abs(event.clientY - from.y)) {
-                swiped.current = true
-                step(dx < 0 ? 1 : -1)
-              }
-            }}
-            onPointerCancel={() => (swipe.current = null)}
-            onClick={(event) => {
-              // The dark ground round the picture closes it, as a press outside a
-              // dialog does.
-              if (swiped.current) {
-                swiped.current = false
-                return
-              }
-              const target = event.target as HTMLElement
-              if (!target.closest("img, button, a, [data-slot='lightbox-note']")) onClose()
-            }}
-          >
-            {current && index !== undefined && (
-              <Picture key={`${index}:${current.src}`} image={current} missingNote={missingNote} />
-            )}
-            {many && (
-              <>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  aria-label="Previous image"
-                  disabled={index === 0}
-                  onClick={() => step(-1)}
-                  className="absolute top-1/2 left-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0"
-                >
-                  <ChevronLeft className="size-5" />
-                </Button>
-                <Button
-                  type="button"
-                  size="icon"
-                  variant="ghost"
-                  aria-label="Next image"
-                  disabled={index === images.length - 1}
-                  onClick={() => step(1)}
-                  className="absolute top-1/2 right-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0"
-                >
-                  <ChevronRight className="size-5" />
-                </Button>
-              </>
-            )}
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <StageModal
+      open={open}
+      onOpenChange={(next) => !next && onClose()}
+      slot="lightbox"
+      onKeyDown={onKeyDown}
+      className="group/lightbox"
+      title={current?.alt || "Image"}
+      actions={
+        <>
+          {many && (
+            <span data-slot="lightbox-count" className="numeric shrink-0 text-hint text-white/70">
+              {index + 1} of {images.length}
+            </span>
+          )}
+          {current?.download && (
+            <a
+              href={current.src}
+              download={current.download}
+              aria-label="Download"
+              title="Download"
+              className={STAGE_CONTROL}
+            >
+              <Download />
+            </a>
+          )}
+          {current?.original && (
+            <a
+              href={current.original}
+              target="_blank"
+              rel="noreferrer noopener"
+              aria-label="Open the original"
+              title="Open the original"
+              className={STAGE_CONTROL}
+            >
+              <External />
+            </a>
+          )}
+        </>
+      }
+    >
+      {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- swipes, and a press on the ground beside the picture: the arrow keys and Escape do the same */}
+      <div
+        className="relative min-h-0 flex-1"
+        onPointerDown={(event) => {
+          if (event.pointerType === "touch") swipe.current = { x: event.clientX, y: event.clientY }
+        }}
+        onPointerUp={(event) => {
+          const from = swipe.current
+          swipe.current = null
+          if (!from) return
+          const dx = event.clientX - from.x
+          if (Math.abs(dx) > 56 && Math.abs(dx) > 2 * Math.abs(event.clientY - from.y)) {
+            swiped.current = true
+            step(dx < 0 ? 1 : -1)
+          }
+        }}
+        onPointerCancel={() => (swipe.current = null)}
+        onClick={(event) => {
+          // The dark ground round the picture closes it, as a press outside a
+          // dialog does.
+          if (swiped.current) {
+            swiped.current = false
+            return
+          }
+          const target = event.target as HTMLElement
+          if (!target.closest("img, button, a, [data-slot='lightbox-note']")) onClose()
+        }}
+      >
+        {current && index !== undefined && (
+          <Picture key={`${index}:${current.src}`} image={current} missingNote={missingNote} />
+        )}
+        {many && (
+          <>
+            <IconAction
+              type="button"
+              size="icon"
+              variant="ghost"
+              label="Previous image"
+              disabled={index === 0}
+              onClick={() => step(-1)}
+              className="absolute top-1/2 left-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0 [&_svg:not([class*='size-'])]:size-4"
+            >
+              <ChevronLeft className="size-5" />
+            </IconAction>
+            <IconAction
+              type="button"
+              size="icon"
+              variant="ghost"
+              label="Next image"
+              disabled={index === images.length - 1}
+              onClick={() => step(1)}
+              className="absolute top-1/2 right-2 -translate-y-1/2 bg-black/50 text-white hover:bg-black/70 hover:text-white disabled:opacity-0 [&_svg:not([class*='size-'])]:size-4"
+            >
+              <ChevronRight className="size-5" />
+            </IconAction>
+          </>
+        )}
+      </div>
+    </StageModal>
   )
 }
 

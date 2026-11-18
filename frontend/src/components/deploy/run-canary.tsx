@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { get, post } from "@/lib/api"
 import { percent, relativeTime } from "@/lib/format"
 import { latencyHead, latencyTerm } from "@/lib/latency-words"
@@ -53,7 +53,7 @@ export function RunCanary({
     [base, active],
   )
   const canary = read.data?.canary
-  const now = useNow(active)
+  const now = useNow(1000, active)
   if (!canary || canary.runId !== runId) return null
   return <CanaryPanel canary={canary} base={base} now={now} onChange={read.refresh} />
 }
@@ -228,15 +228,4 @@ function ReadingRow({
       </td>
     </tr>
   )
-}
-
-/** The time, ticking each second while a window counts down. */
-function useNow(ticking: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!ticking) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [ticking])
-  return now
 }

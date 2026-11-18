@@ -4,16 +4,16 @@ import { createRef, useMemo, useRef, type RefObject } from "react"
 import { FileText, FolderOpen } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ProductGlyph } from "@/components/product-logo"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import {
   MAIN_NODE,
   relativePath,
   type IncludeFolder,
   type IncludeMap,
 } from "@/components/proxy/config-tree"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Tone = "logo" | "warning" | "danger"
 
@@ -67,7 +67,7 @@ export function ConfigPicture({
   onFolder: (folder: string) => void
   onOpenMain: () => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const hub = useRef<HTMLDivElement>(null)
   const keys = map.reached.map((node) => node.folder).join("\n")

@@ -5,8 +5,8 @@ import { networkOf } from "@/lib/clients"
 import type { FirewallStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo, portProduct } from "@/components/product-logo"
-import { WireMark } from "@/components/deploy/wire"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
+import { WireMark } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { firewallProduct, limitedKeys } from "@/components/network/firewall-words"
 import {
   deniedSources,
@@ -266,7 +266,7 @@ function OpeningName({ opening }: { opening: Opening }) {
       {opening.port ? (
         <span className="numeric shrink-0 font-mono font-normal">
           <span className="text-muted-foreground">:</span>
-          <span className="text-[var(--tag-pink)]">{opening.port}</span>
+          <span className="text-tag-pink">{opening.port}</span>
           {opening.protocol && <span className="text-muted-foreground">/{opening.protocol}</span>}
         </span>
       ) : (

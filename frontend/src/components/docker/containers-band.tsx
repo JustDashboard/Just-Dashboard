@@ -3,7 +3,7 @@
 import { Box } from "@/components/icons"
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { timeAt } from "@/components/bar-reading-model"
-import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
+import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { ProductGlyph, containerProduct, imageProduct } from "@/components/product-logo"
 import { DOT_COLOR, Status, type DotTone } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -13,7 +13,7 @@ import { spanWords, type EventEntry } from "@/lib/docker-events"
 import { bytes, percent, plural } from "@/lib/format"
 import type { Container, ContainerStats, DockerEvent, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { exitWords } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
 
 /** How many containers each block names; the rest of the host is one muted span. */
 const SHOWN = 5

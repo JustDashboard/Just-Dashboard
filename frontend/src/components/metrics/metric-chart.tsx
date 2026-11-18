@@ -31,7 +31,7 @@ import {
   pinCrosshair,
   unpinCrosshair,
   subscribeCrosshair,
-} from "@/lib/metrics-crosshair"
+} from "@/lib/metrics/crosshair"
 import type { MouseHandlerDataParam } from "recharts"
 import type { MetricEvent } from "@/lib/types"
 import { useNearViewport } from "@/hooks/use-near-viewport"
@@ -577,7 +577,7 @@ function SyncedCrosshair({
   return (
     <div
       aria-hidden
-      className="pointer-events-none absolute z-10 w-px bg-foreground/25"
+      className="pointer-events-none absolute z-raised w-px bg-foreground/25"
       style={{
         left: plot.left + fraction * plot.width,
         top: plot.top,
@@ -706,7 +706,7 @@ function MetricTooltip({
             <div key={s.key} className="flex items-center gap-2 text-hint">
               <span
                 aria-hidden
-                className="size-2 shrink-0 rounded-[2px]"
+                className="size-2 shrink-0 rounded-xs"
                 style={{ background: s.color }}
               />
               <span className="flex-1 truncate text-muted-foreground">{s.label}</span>
@@ -799,7 +799,7 @@ function PinnedReading({
   return (
     <div
       data-pinned-reading
-      className="pointer-events-none absolute top-2 right-2 z-10 max-w-[85%] rounded-md border border-hairline bg-popover p-2 text-hint shadow-sm"
+      className="pointer-events-none absolute top-2 right-2 z-raised max-w-[85%] rounded-md border border-hairline bg-popover p-2 text-hint shadow-sm"
     >
       <p className="numeric text-muted-foreground">{timestamp(new Date(row.ts).toISOString())}</p>
       {series

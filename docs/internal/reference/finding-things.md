@@ -28,7 +28,7 @@ the route every other feature takes.
 
 | Layer | File | What is there |
 | --- | --- | --- |
-| Sidebar entry | `frontend/src/components/nav.ts` | `NAV`, group "Protection": `{ title: "Backups", href: "/backups" }`. `SECTION_KEYS` in `frontend/src/lib/sidebar-sections.ts` is what lets an account hide it |
+| Sidebar entry | `frontend/src/components/shell/nav.ts` | `NAV`, group "Protection": `{ title: "Backups", href: "/backups" }`. `SECTION_KEYS` in `frontend/src/lib/sidebar-sections.ts` is what lets an account hide it |
 | Page route | `frontend/src/app/(dashboard)/backups/page.tsx` | The list page; `[job]/page.tsx` beside it is one job. A page file holds state, polling and composition |
 | Components | `frontend/src/components/backups/` | `job-form.tsx`, `job-card.tsx`, `import-dialog.tsx`; pure logic as `import-model.ts` with `import-model.test.js` beside it |
 | Types | `frontend/src/lib/types.ts` | `BackupJob`, `BackupResourceReport`: the API's shapes, written by hand |
@@ -56,14 +56,14 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | Components | `components/<section>/`, named as the route's first segment | `/` → `overview/`, `processes` → `procs/`, `databases` → `database/`, `excalidraw` → `boards/`, `dashboard` → `update/`, `config/`, `account-link/`, `hub-link/` |
 | Shared UI | `components/ui/` for low-level controls; single files at the top of `components/` for primitives (`panel.tsx`, `page.tsx`, `state.tsx`) | `components/workspace/` is shared page behaviour, not a section |
 | Logic | `lib/<area>.ts` or `lib/<area>-<topic>.ts`, its test beside it as `.test.js` | Many areas have none and keep pure logic beside their components. Database modules are `lib/db-*.ts` and `lib/database-*.ts` |
-| Types | The API's types are in `lib/types.ts`, one file | Some areas keep theirs beside the code: `lib/network-investigator-types.ts`, and `types.ts` files under `components/database/` and `components/logs/` |
+| Types | The API's types are in `lib/types.ts`, one file | Some areas keep theirs beside the code: `lib/network/investigator-types.ts`, and `types.ts` files under `components/database/` and `components/logs/` |
 | API path | The first segment under `/api/v1` is the section | See the path column of the next table: Processes, Security, Proxy and System users each use several |
 | Handlers | `api/handlers_<area>*.go`; `mount<Area>Routes` is at the top of `handlers_<area>.go` | Databases are `handlers_db*.go`. Code that is not a handler drops the prefix: `database_*.go`, `deployment_*.go`, `boards_*.go`, `backup_*.go`, `map_*.go` |
 | Package | One package per feature under `backend/internal/` | Named for the mechanism, not the page: Security is `netsec`, Packages is `updates`, System users is `linuxusers`. Excalidraw and the Map have no package; they live in `api/` |
 | Go tests | `<file>_test.go` beside `<file>.go` | `*_live_test.go` needs a real engine or host and skips unless its environment variable is set; [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) has the variables and the exceptions |
 | Browser specs | `<area>-<topic>.spec.ts`; most sections have an `<area>-ui.spec.ts` for the page as a whole | `system-ui.spec.ts` is the Audit log (beside `audit-ui.spec.ts`), `dashboard-ui.spec.ts` is Settings, `services-ui.spec.ts`, `stacks-ui.spec.ts` and `container-page.spec.ts` are pages of Processes and Docker |
 | Fixtures | `<area>-fixture.ts` beside the specs: one area's mocked API | `host-fixture.ts` and `workbench-fixture.ts` are shared; the proxy's tables are in `fixtures/proxy/` |
-| Documents | A backend feature: a guide in [`../backend/`](../backend/README.md). A deployment topic: one in [`../deployments/`](../deployments/README.md). A page's UI: [`feature-map.md`](../frontend/feature-map.md) | Several features share one backend guide; the table below names it |
+| Documents | A backend feature: a guide in [`../backend/`](../backend/README.md). A deployment topic: one in [`../deployments/`](../deployments/README.md). A page's UI: [`../frontend/features/`](../frontend/features/README.md) | Several features share one backend guide; the table below names it |
 
 ### File groups inside `api`
 
@@ -150,13 +150,13 @@ thing they hold.
 
 ## From a sidebar page to its code
 
-The rows follow `NAV` in `frontend/src/components/nav.ts`, group by group. "Path" is the first
+The rows follow `NAV` in `frontend/src/components/shell/nav.ts`, group by group. "Path" is the first
 segment under `/api/v1`.
 
 | Page | `app/` | `components/` | Path → `api/` files | Packages | Specs | Document |
 | --- | --- | --- | --- | --- | --- | --- |
 | **Server** | | | | | | |
-| Overview | `page.tsx` | `overview/` | `/system` → `handlers_system.go`; `/dashboard/health` → `handlers_self.go`; and one read from most sections | `sysinfo`, `metrics`, `storehealth` | `overview-ui.spec.ts` | [`feature-map.md`](../frontend/feature-map.md) |
+| Overview | `page.tsx` | `overview/` | `/system` → `handlers_system.go`; `/dashboard/health` → `handlers_self.go`; and one read from most sections | `sysinfo`, `metrics`, `storehealth` | `overview-ui.spec.ts` | [`../frontend/features/`](../frontend/features/README.md) |
 | Map | `map/` | `map/` | `/map` → `handlers_map.go`, `map_*.go` | none: lives in `api/` | `server-map.spec.ts` | [`server-map.md`](../server-map.md) |
 | Assistant | `assistant/` | `assistant/` | `/assistant` → `handlers_assistant*.go` | `assistant` | `assistant.spec.ts`, `assistant-settings.spec.ts` | [`operator.md`](../deployments/operator.md) |
 | Metrics | `metrics/` | `metrics/` | `/system` → `handlers_system.go`, `handlers_capacity.go` | `metrics`, `sysinfo` | `metrics-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |
@@ -169,7 +169,7 @@ segment under `/api/v1`.
 | Docker | `docker/` | `docker/` | `/docker` → `handlers_docker*.go`, `docker_*.go` | `dockerx`, `imagescan` | `docker-*.spec.ts`, `stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Workspace** | | | | | | |
 | Excalidraw | `excalidraw/` | `boards/` | `/boards` → `handlers_boards.go`, `boards_*.go` | none: lives in `api/` | `boards-ui.spec.ts` | [`boards.md`](../boards.md) |
-| Terminal | `terminal/` | `terminal/` | `/terminal` → `handlers_terminal*.go` | `term`, `ptyhold` | `terminal-*.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md), [`features-terminal.md`](../frontend/features-terminal.md) |
+| Terminal | `terminal/` | `terminal/` | `/terminal` → `handlers_terminal*.go` | `term`, `ptyhold` | `terminal-*.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md), [`../frontend/features/`](../frontend/features/README.md) |
 | Files | `files/` | `files/` | `/files` → `handlers_files*.go` | `files`, `safepath`, `contentguard` | `files-ui.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | Git | `git/` | `git/` | `/git` → `handlers_git*.go`, `handlers_github*.go` | `gitx`, `ghx`, `forgex` | `git-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md), [`git-workspace-expansion.md`](../backend/git-workspace-expansion.md) |
 | Remote Desktop | `remote-desktop/` | `remote-desktop/` | `/remote-desktop` → `handlers_remote_desktop*.go` | `remotedesk` | `remote-desktop.spec.ts` | [`remote-desktop.md`](../backend/remote-desktop.md) |
@@ -193,8 +193,8 @@ segment under `/api/v1`.
 | Profile, Security, Sessions, Workspace, Users | `account/` | `account/` | `/account`, `/auth`, `/dashboard-users` → mounted in `routes.go`; `handlers_auth.go`, `handlers_account.go`, `handlers_passkeys.go` | `auth` | `account-ui.spec.ts`, `account-passkeys.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
 | API keys | `account/keys/` | `account/` | `/tokens` → mounted in `routes.go`; `handlers_auth.go`, `handlers_tokens.go`, `handlers_mcp_keys.go`, `deploy_keys.go` | `auth` | `api-keys.spec.ts` | [`invariants.md`](../security/invariants.md) |
 | **Outside the shell** | | | | | | |
-| Sign-in | `frontend/src/app/login/` | the page file itself, with `onboarding/` for the picture beside the form | `/auth` → `handlers_auth.go`, `handlers_passkeys.go` | `auth` | `sign-in.spec.ts`, `auth-recovery.spec.ts` | [`shell-design.md`](../frontend/shell-design.md) |
-| First-run question | `frontend/src/app/welcome/` | `onboarding/` | `/account/workspace` → `handlers_account.go` | `auth` | `onboarding.spec.ts` | [`shell-design.md`](../frontend/shell-design.md) |
+| Sign-in | `frontend/src/app/login/` | the page file itself, with `onboarding/` for the picture beside the form | `/auth` → `handlers_auth.go`, `handlers_passkeys.go` | `auth` | `sign-in.spec.ts`, `auth-recovery.spec.ts` | [`../frontend/shell.md`](../frontend/shell.md) |
+| First-run question | `frontend/src/app/welcome/` | `onboarding/` | `/account/workspace` → `handlers_account.go` | `auth` | `onboarding.spec.ts` | [`../frontend/shell.md`](../frontend/shell.md) |
 
 One database's own pages (`app/databases/[id]/…`) and one project's (`app/deploy/[id]/(project)/…`)
 are not in `NAV`: `components/database/shell/nav-scope.tsx` builds the first from the engine, and
@@ -227,16 +227,27 @@ Each is a checklist. The linked document owns the rule; this only says which fil
    the regenerated description and clients: [`../backend/deploy-api.md`](../backend/deploy-api.md).
 5. Document it in the feature's backend document.
 
-**Add a page.** [`../frontend/shell-design.md`](../frontend/shell-design.md),
-[`../frontend/design-system.md`](../frontend/design-system.md)
+**Add a page.** [`../frontend/README.md`](../frontend/README.md) (build a page in five steps),
+[`../frontend/shell.md`](../frontend/shell.md)
 
 1. Create `app/<section>/<page>/page.tsx` and its panels under `components/<section>/`.
-2. Add it to `NAV` in `components/nav.ts`, with `capability` if the backend restricts it. A new
+2. Add it to `NAV` in `components/shell/nav.ts`, with `capability` if the backend restricts it. A new
    section also goes in `SECTION_KEYS` (`lib/sidebar-sections.ts`).
-3. Decide the page's register first ("16. Two registers" in the design system), then build from
-   the primitives.
+3. Decide the page's shape first ([`../frontend/patterns/registers.md`](../frontend/patterns/registers.md))
+   and open its recipe in [`../frontend/recipes/`](../frontend/recipes/README.md): each has a
+   skeleton. A page is `Page` and `PageContext`, opens on `IdentityHeader` (verbs through
+   `IdentityVerbs`), and is built from `WireFlow` for its picture, `ReadingLine` and
+   `BarReading` for its readings, `Panel plain` with `PanelHeader` for its sections,
+   `ListToolbar` and `ChoiceList` of `ChoiceRow` for its lists, `DetailPage` and `Rail` for an
+   item's page, `SettingsColumn` with `SettingForm` and `SettingSection` for settings,
+   `FlowHeader`, `FlowPanel` and `FlowActions` for a flow, `WorkbenchHeader`, `Pane` and
+   `PaneBar` for a workbench, and `EmptyState`, `ErrorState`, `MissingThing` and the
+   skeletons for its states. The rest is in the catalogue,
+   [`../frontend/components/`](../frontend/components/README.md). The page is held to
+   [`../frontend/standard.md`](../frontend/standard.md) and
+   [`../frontend/patterns/accessibility.md`](../frontend/patterns/accessibility.md).
 4. Add a spec and, if the area has none, a fixture; add its section to
-   [`../frontend/feature-map.md`](../frontend/feature-map.md) and its row to the table above.
+   [`../frontend/features/`](../frontend/features/README.md) and its row to the table above.
 
 **Add a setting.** [`../../guides/configuration.md`](../../guides/configuration.md)
 
@@ -309,9 +320,9 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | Assistant | `backend/internal/assistant/`, `api/handlers_assistant*.go`, `components/assistant/` | [`operator.md`](../deployments/operator.md) |
 | Go test support | `testdata/` in a package; `backend/internal/store/storetest/`, `backend/internal/auth/passkeytest/`, `backend/internal/proxysvc/acmetest/` | [`overview.md`](../overview.md) |
 | Browser fixtures | `frontend/tests/browser/*-fixture.ts`, `frontend/tests/browser/fixtures/` | [`overview.md`](../overview.md) |
-| Design-system lint | `frontend/eslint-rules/design-system.mjs`, turned on in `frontend/eslint.config.mjs`; `design-system.spec.ts` checks the rendered pages | [`design-system.md`](../frontend/design-system.md) |
-| Shell and navigation | `components/app-sidebar.tsx`, `components/nav.ts`, `components/command-palette.tsx`, `app/layout.tsx` | [`shell-design.md`](../frontend/shell-design.md) |
-| Polling and sockets | `hooks/use-poll.ts`, `hooks/use-socket.ts`, `lib/api.ts` | [`data-theming.md`](../frontend/data-theming.md) |
+| Design-system lint | `frontend/eslint-rules/design-system.mjs`, turned on in `frontend/eslint.config.mjs`; `design-system.spec.ts` checks the rendered pages | [`standard.md`](../frontend/standard.md), [`design-system.md`](../frontend/design-system.md) |
+| Shell and navigation | `components/shell/app-sidebar.tsx`, `components/shell/nav.ts`, `components/shell/command-palette.tsx`, `app/layout.tsx` | [`../frontend/shell.md`](../frontend/shell.md) |
+| Polling and sockets | `hooks/use-poll.ts`, `hooks/use-socket.ts`, `lib/api.ts` | [`../frontend/patterns/data-flow.md`](../frontend/patterns/data-flow.md) |
 
 ## Keeping this page true
 

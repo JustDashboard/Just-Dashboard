@@ -139,7 +139,7 @@ export function PolicyEvidence({
         {chains.length > 0 && (
           <dl
             aria-label="Admission chains"
-            className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1.5 text-hint"
+            className="grid grid-cols-start-main gap-x-4 gap-y-1.5 text-hint"
           >
             {chains.map((chain) => (
               <div key={`${chain.family}:${chain.chain}`} className="contents">

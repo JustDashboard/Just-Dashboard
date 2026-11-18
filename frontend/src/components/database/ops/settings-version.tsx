@@ -22,15 +22,14 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { Segments } from "@/components/deploy/settings/segments"
+import { SettingSection } from "@/components/settings/setting-card"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { Segments } from "@/components/segments"
 import { FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
-import { Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph, EngineMark } from "@/components/database/kit"
 import { transferPrefix } from "@/components/database/ops/backups-model"
@@ -363,7 +362,7 @@ function VersionSection({
     >
       {!upgrade ? (
         error ? (
-          <CouldNotRead what="which release it runs" error={error} onRetry={onRetry} />
+          <ErrorState what="which release it runs" error={error} onRetry={onRetry} />
         ) : (
           // The picture's own height, so the read landing moves nothing under it.
           <div className="flex items-center gap-3.5 py-4 lg:justify-center" aria-hidden>
@@ -649,7 +648,7 @@ function UpgradeStep({
       // The step marks are a size under the servers': set down by the difference, the line runs level.
       className="flex min-w-0 items-center gap-3.5 pl-1 lg:flex-col lg:gap-2 lg:pt-1 lg:pl-0"
     >
-      <div ref={nodeRef} className="relative z-10 flex shrink-0">
+      <div ref={nodeRef} className="relative z-raised flex shrink-0">
         <WireMark
           size="sm"
           tone={state === "done" ? "success" : state === "running" ? "brand" : "neutral"}

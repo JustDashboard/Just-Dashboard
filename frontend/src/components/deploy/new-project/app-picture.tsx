@@ -4,7 +4,7 @@ import { useRef } from "react"
 import { GitHubMark } from "@/components/icons"
 import { Status } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 
 /**
  * The GitHub App while it is not connected, as the Credentials page draws it,
@@ -34,7 +34,7 @@ export function GitHubAppPicture({ stage }: { stage: "create" | "install" }) {
       <AnimatedBeam containerRef={container} fromRef={app} toRef={server} still dashed={!created} />
       <div className="flex items-start justify-between gap-4">
         <div className="flex min-w-0 flex-col items-start gap-2.5">
-          <div ref={app} className="relative z-10 flex">
+          <div ref={app} className="relative z-raised flex">
             {created ? (
               <WireMark tone="logo" size="md">
                 <GitHubMark />
@@ -57,7 +57,7 @@ export function GitHubAppPicture({ stage }: { stage: "create" | "install" }) {
           </div>
         </div>
         <div className="flex min-w-0 flex-col items-end gap-2.5 text-right">
-          <div ref={server} className="relative z-10 flex">
+          <div ref={server} className="relative z-raised flex">
             <WireHost size="md" />
           </div>
           <div className="min-w-0">

@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { DEPLOYMENT_NAME, sourceLine, sourceProduct } from "@/components/deploy/vocabulary"
 
 const NAME_ERROR =
@@ -166,15 +166,23 @@ export function DuplicateProjectDialog({
         </Field>
 
         <FieldRow>
-          <CopyList title="Copied" items={COPIED} copied />
-          <CopyList title="Starts fresh" items={FRESH} />
+          <CopiedParts title="Copied" items={COPIED} copied />
+          <CopiedParts title="Starts fresh" items={FRESH} />
         </FieldRow>
       </form>
     </Modal>
   )
 }
 
-function CopyList({ title, items, copied }: { title: string; items: string[]; copied?: boolean }) {
+function CopiedParts({
+  title,
+  items,
+  copied,
+}: {
+  title: string
+  items: string[]
+  copied?: boolean
+}) {
   const Mark = copied ? Check : Minus
   return (
     <section aria-label={title} className="space-y-2">

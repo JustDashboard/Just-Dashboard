@@ -5,14 +5,14 @@ import { del, patch, postForm } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DashboardUser } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Field, FieldRow, InfoTip } from "@/components/form"
-import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { FactDot } from "@/components/metrics/host-identity"
-import { EditedTag } from "@/components/settings-column"
+import { useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
+import { EditedTag } from "@/components/settings/settings-column"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { UserAvatar, displayNameOf } from "@/components/user-avatar"
 
 /** The square the picture is drawn into before upload. */
 const AVATAR_EDGE = 256
@@ -166,23 +166,25 @@ export function ProfileSection({ user }: { user: DashboardUser }) {
       title="Profile"
       status={dirty ? <EditedTag /> : undefined}
       state={
-        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          <span
-            role="img"
-            aria-label={`The rail draws this account as ${displayNameOf(draft)}, ${user.role}`}
-            className="inline-flex min-w-0 items-center gap-1.5"
-          >
-            <UserAvatar key={user.avatarVersion} user={draft} size="xs" />
-            <span className="truncate font-medium text-foreground">{displayNameOf(draft)}</span>
-            <span className="shrink-0 capitalize">{user.role}</span>
-          </span>
-          <span>in the rail</span>
-          <FactDot />
-          <span className="truncate">
-            <span className="font-mono text-[var(--tag-blue)]">@{draft.username}</span> in the audit
-            log
-          </span>
-        </span>
+        <FactLine>
+          <Fact>
+            <span className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-2 align-top">
+              <span
+                role="img"
+                aria-label={`The rail draws this account as ${displayNameOf(draft)}, ${user.role}`}
+                className="inline-flex min-w-0 items-center gap-1.5"
+              >
+                <UserAvatar key={user.avatarVersion} user={draft} size="xs" />
+                <span className="truncate font-medium text-foreground">{displayNameOf(draft)}</span>
+                <span className="shrink-0 capitalize">{user.role}</span>
+              </span>
+              <span>in the rail</span>
+            </span>
+          </Fact>
+          <Fact className="truncate">
+            <span className="font-mono text-tag-blue">@{draft.username}</span> in the audit log
+          </Fact>
+        </FactLine>
       }
     >
       <div className="flex min-w-0 items-center gap-4">

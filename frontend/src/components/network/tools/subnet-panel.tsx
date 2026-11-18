@@ -4,13 +4,13 @@ import Link from "next/link"
 import { useState } from "react"
 import { Field } from "@/components/form"
 import { Play } from "@/components/icons"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { useAuth } from "@/hooks/use-auth"
 import { post } from "@/lib/api"
-import { previewReading, type IPAMPreview } from "@/lib/network-ipam"
+import { previewReading, type IPAMPreview } from "@/lib/network/ipam"
 
 import { calcSubnet, prefixRelation, type SubnetInfo } from "./subnet-math"
 import { ToolEmpty, ToolHead } from "./tool-frame"
@@ -196,8 +196,7 @@ export function SubnetTool() {
               </div>
             ) : (
               <p className="text-hint text-muted-foreground">
-                Checking against shared address planning needs the admin capability; the comparison
-                above stays in this browser.
+                Checking against shared address planning needs an administrator.
               </p>
             )}
           </section>

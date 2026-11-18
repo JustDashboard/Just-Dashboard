@@ -1,5 +1,6 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
@@ -11,14 +12,13 @@ import type { ContainerTraffic, ProcessTraffic } from "@/lib/types"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { HUE, LiveBytes } from "@/components/overview/readings"
+import { HUE, LiveBytes } from "@/components/live-figure"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, imageProduct, processProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { RX, TX } from "@/components/network/rate-pair"
 import { latencyWords } from "@/lib/latency-words"
-import { millis } from "@/lib/network-traffic"
+import { millis } from "@/lib/network/traffic"
 import { containerHref } from "./address"
 import { WINDOW_WORDS, isRange, type RecordedWindow, type TrafficSpan } from "./span"
 import { Button } from "@/components/ui/button"
@@ -151,10 +151,7 @@ export function TrafficWorkloads({
                     peer.bytesKnown === false ? (
                       <span className="text-hint text-muted-foreground">no byte counters</span>
                     ) : (
-                      <span className="numeric flex gap-3 font-mono text-hint">
-                        <span style={{ color: RX }}>↓ {bytes(peer.rxBytes)}</span>
-                        <span style={{ color: TX }}>↑ {bytes(peer.txBytes)}</span>
-                      </span>
+                      <InOut rx={peer.rxBytes} tx={peer.txBytes} unit="bytes" />
                     )
                   }
                 />

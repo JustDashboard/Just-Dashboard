@@ -9,7 +9,8 @@ import {
   packageLogsOutsideRoots,
 } from "@/components/packages/package-logs"
 import { useLogFiles } from "@/components/security/log-section"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 
 /** Where the view's reading is kept for the tab: the list's, and a package's own. */
 const STORAGE_KEY = "packages.log"
@@ -37,7 +38,7 @@ const PER_PACKAGE = ["/var/log/dpkg.log", "/var/log/dnf.rpm.log"]
 export function PackageLogView({
   product,
   about,
-  paneClassName = "h-[min(75vh,40rem)] min-h-80",
+  paneClassName = "h-workbench min-h-80",
 }: {
   product?: string
   about?: string

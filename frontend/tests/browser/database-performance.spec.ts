@@ -1430,8 +1430,9 @@ test("a blocked session names the one it is behind, whole, and each opens the ot
   await expect(blocker).toContainText("Session 12,3301")
   await expect(blocker).toContainText("checkout-api")
   await expect(detailView(page).getByText("Transaction open for")).toBeVisible()
-  // It is idle inside a transaction: there is no statement to cancel.
-  await expect(blocker.getByRole("button", { name: "Terminate session" })).toBeVisible()
+  // It is idle inside a transaction: there is no statement to cancel, and
+  // ending the session is in the menu.
+  await expect(blocker.getByRole("button", { name: "More for session 12,3301" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Cancel statement" })).toHaveCount(0)
   // And from the blocker to the one it holds, on the view that says who waits on whom.
   await tab(page, /^Waits/).click()
@@ -1644,9 +1645,13 @@ test("statements are ranked by their share, ordered by the server, and one opens
     format: "text",
   })
 
+  // Query takes the statement out of the address once it has a tab, so what
+  // is asserted is the tab it opened in, as the schema's Open in Query is.
   await aboutStatement(page).getByRole("button", { name: "Open in Query" }).click()
-  await expect(page).toHaveURL(/\/databases\/1\/query\?/)
-  expect(new URL(page.url()).searchParams.get("sql")).toBe("SELECT count(*) FROM order_items")
+  await expect.poll(() => new URL(page.url()).pathname).toBe("/databases/1/query")
+  await expect(page.locator("[data-slot=sql-editor] .view-lines")).toHaveText(
+    "SELECT count(*) FROM order_items",
+  )
 })
 
 test("statement statistics that are off say how to turn them on, to the role that may", async ({
@@ -1980,7 +1985,7 @@ test("tables show what the engine keeps, flag what is overdue, and run its maint
   ])
   // A vacuum is overdue past the advisor's own line; a table with rows was never analysed.
   const overdue = tables.getByRole("row", { name: /sessions_log/ })
-  await expect(overdue.locator(".text-warning")).toContainText("40K · 67%")
+  await expect(overdue.locator(".text-warning")).toContainText("40k · 67%")
   await expect(
     tables.getByRole("row", { name: /import_staging/ }).locator(".text-warning"),
   ).toHaveText("never")
@@ -2580,12 +2585,16 @@ test("an engine that keeps run times gives the history its percentiles and the r
   await expect(await explained(page, history, "How these figures are made")).toContainText(
     "ClickHouse's query log holds every finished query",
   )
+  // The explanation stays while the pointer rests on its mark (it is hoverable,
+  // WCAG 1.4.13) and sits over the first row, so the pointer leaves it first.
+  await page.mouse.move(0, 0)
+  await expect(page.getByRole("tooltip")).toHaveCount(0)
   await history.getByRole("row").nth(1).click()
   const recorded = detailView(page)
   await expect(recorded.getByText("99 in 100 within", { exact: true }).first()).toBeVisible()
   // The percentiles are said in words on the line of its figures.
   await expect(recorded.locator("[data-slot=figure-line]")).toContainText("99 in 100 inside 487 ms")
-  await expect(recorded).toContainText("40K for each returned")
+  await expect(recorded).toContainText("40k for each returned")
 })
 
 test("a file has no statement history to offer", async ({ page }) => {
@@ -2938,9 +2947,7 @@ test("the queries are named in the engine's words, from the registry and from wh
   await expect(page.getByText("1 statement", { exact: true })).toBeVisible()
   // The engine keeps statement statistics: the third reading is offered.
   await page.getByRole("button", { name: "Top statements" }).click()
-  await expect(region(page, "Top statements").locator("[data-slot=rank-list] button")).toHaveCount(
-    3,
-  )
+  await expect(region(page, "Top statements").locator("[data-slot=rank-row] > a")).toHaveCount(3)
 
   // A list read from the server's own query table is a list of queries.
   await mockOps(page, {
@@ -3430,14 +3437,15 @@ test("a session that ends while its page is open is said to have ended, and offe
   await expect(rail(page, "Sessions").locator("[aria-current=page]")).toContainText("ended")
 })
 
-test("terminating is the page's command where there is nothing to cancel, and in its menu where there is", async ({
-  page,
-}) => {
+test("terminating is in the page's menu, never its command, and asks first", async ({ page }) => {
   const ops = await mockOps(page)
   await visit(page, "/databases/1/performance/sessions/12~2C3301")
-  await about(page, "About session 12,3301")
-    .getByRole("button", { name: "Terminate session" })
-    .click()
+  // Nothing to cancel, and the one verb left is destructive: no command.
+  await expect(
+    page.getByRole("button", { name: /^(Cancel statement|Terminate session)$/ }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "More for session 12,3301" }).click()
+  await page.getByRole("menuitem", { name: "Terminate session" }).click()
   await expect(dialog(page)).toContainText("its open transaction is rolled back")
   await dialog(page).getByRole("button", { name: "Terminate session" }).click()
   await expect
@@ -3583,16 +3591,22 @@ for (const width of [1280, 390]) {
     await visit(page, "/databases/1/performance/tables/public.sessions_log")
     await expect(page.getByText("Reading its figures…")).toBeVisible()
     const tableLine = await topOf(page, line)
+    // The loading line holds a place for the verbs, so at 390 too the views
+    // under it stay where they are when the line is read.
+    const tableStrip = await topOf(page, strip)
     tables.release(null)
     await expect(about(page, "About public.sessions_log")).toContainText("a vacuum is due")
     expect(await topOf(page, line)).toBe(tableLine)
+    expect(await topOf(page, strip)).toBe(tableStrip)
 
     await visit(page, "/databases/1/performance/sessions/52")
     await expect(page.locator(line).getByText("Reading the sessions…")).toBeVisible()
     const sessionLine = await topOf(page, line)
+    const sessionStrip = await topOf(page, strip)
     activity.release(null)
     await expect(about(page, "About session 52")).toContainText("Active")
     expect(await topOf(page, line)).toBe(sessionLine)
+    expect(await topOf(page, strip)).toBe(sessionStrip)
   })
 }
 
@@ -3640,7 +3654,7 @@ test("a top statement on Logs opens the statement's page, not a dialog of its ow
   })
   await visit(page, "/databases/1/logs")
   await page.getByRole("button", { name: "Top statements" }).click()
-  const top = region(page, "Top statements").locator("[data-slot=rank-list] button")
+  const top = region(page, "Top statements").locator("[data-slot=rank-row] > a")
   await expect(top).toHaveCount(3)
   await top.nth(1).click()
   await expect(dialog(page)).toHaveCount(0)

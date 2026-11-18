@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { get } from "@/lib/api"
 import type { NetworkLive, NetworkLivePoint } from "@/lib/types"
-import type { TCPLatency, TCPPoint } from "@/lib/network-traffic"
+import type { TCPLatency, TCPPoint } from "@/lib/network/traffic"
 
 /** The backend keeps fifteen minutes; so does the page. */
 const KEEP = 450

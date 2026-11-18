@@ -2,18 +2,16 @@
 
 import { useMemo } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
-import { ArrowRight, LockClosed, Play, Wrench } from "@/components/icons"
+import { ArrowRight, Play, Wrench } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural, relativeTime, truncateMiddle } from "@/lib/format"
+import { bytes, grouped, plural, relativeTime, truncateMiddle } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { CONTROL } from "@/components/flow"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { useChoicePress } from "@/components/choice-row"
+import { Sparkline } from "@/components/sparkline"
 import { OutcomeStrip } from "@/components/outcome-strip"
 import { ProductGlyphs } from "@/components/product-logo"
-import { Tag } from "@/components/tag"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
@@ -23,7 +21,10 @@ import { VerbMenu } from "@/components/verbs"
 import { sectionHref, type Engine } from "@/components/database/engine"
 import {
   concernLevel,
+  nounFor,
+  objectNouns,
   reachWord,
+  sessionNouns,
   whereWord,
   type BackupReading,
   type Concern,
@@ -35,7 +36,7 @@ import {
   type Snapshot,
 } from "@/components/database/fleet/trend"
 import type { FleetControl } from "@/components/database/fleet/use-fleet-control"
-import { EngineMark, EnvironmentTag } from "@/components/database/kit"
+import { EngineMark, EnvironmentTag, ProtectedTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
 
 /** What a card's reading counts: a key–value store has clients, not sessions. */
@@ -68,11 +69,6 @@ function useSessionsTrend(entry: DbFleetEntry, engine: Engine): number[] {
   )
 }
 
-/** The engine's word for what it holds, as a column or a figure is headed. */
-export function objectsWord(entry: DbFleetEntry) {
-  return entry.objectWord[0].toUpperCase() + entry.objectWord.slice(1)
-}
-
 /**
  * The hue a fact is said in: none while nothing is wrong with it, and the
  * level of the concern it is about once something is — the same level the
@@ -82,24 +78,6 @@ export function factTone(level: Concern["level"] | undefined) {
   if (level === "critical") return "text-destructive"
   if (level === "warning") return "text-warning"
   return undefined
-}
-
-/**
- * A protected connection, where there is room for a mark and not for the
- * word: a card's head, a table's name cell. The word is on the database's own
- * pages; here it is the lock, named for a reader who cannot see it and
- * spelled out to a pointer that rests on it.
- */
-export function ProtectedMark({ className }: { className?: string }) {
-  return (
-    <Tag
-      icon={LockClosed}
-      title="Protected: the dashboard refuses every change to its data or schema"
-      className={className}
-    >
-      <span className="sr-only">protected</span>
-    </Tag>
-  )
 }
 
 /** The two pages of a database the work is done on, in the engine's own words. */
@@ -112,8 +90,11 @@ export function workPages(engine: Engine) {
  *
  * Built on `SpotlightBorder` directly, the way a deployment's card is: it is
  * taller than a row and lays its readings out in lines. The press anywhere
- * opens the database's home, except on a control of its own (`CONTROL`), and
- * the name is the real link a keyboard reaches.
+ * opens the database's home by the rule every card takes (`useChoicePress`):
+ * not on a control of its own, not at the end of a text selection, and in a
+ * new tab with Cmd, Ctrl or Shift. The name is the real link a keyboard
+ * reaches. It is not `OpenCard` yet: that card has no light for a server
+ * being started and draws its name as a button rather than a link.
  *
  * Top to bottom it is what the reader asks of a database in that order: which
  * one and whether it answers; who is connected, as a sentence with its last
@@ -166,8 +147,8 @@ export function FleetCard({
   control: FleetControl
   index: number
 }) {
-  const router = useRouter()
   const href = sectionHref(entry.id)
+  const press = useChoicePress({ href })
   const busy = control.busyWord(entry)
   const status = fleetStatus(entry)
   const down = entry.state === "stopped" || entry.state === "paused"
@@ -185,7 +166,8 @@ export function FleetCard({
     () => (dumps ? dumpStrip(backup?.recent, Boolean(backup?.running)) : []),
     [dumps, backup],
   )
-  const sessions = sessionsWord(engine).toLowerCase()
+  const sessions = sessionNouns(engine.kind)
+  const holds = objectNouns(entry.objectWord)
   const backedUp = backup?.newest
     ? { words: `backed up ${relativeTime(backup.newest)}`, kind: "stale-backup" as const }
     : has("never-backed-up")
@@ -207,16 +189,10 @@ export function FleetCard({
           )}
           {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
           <div
-            onClick={(event) => {
-              // React carries a press inside the open menu up through its
-              // portal to here, though it landed nowhere on the card.
-              const target = event.target as HTMLElement
-              if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
-              router.push(href)
-            }}
+            onClick={press.onClick}
             className="group group/choice flex h-full min-w-0 cursor-pointer flex-col gap-3.5 rounded-xl p-4"
           >
-            <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-1">
+            <div className="grid min-w-0 grid-cols-start-main-end items-center gap-x-3 gap-y-1">
               <EngineMark engine={engine} className={cn("row-span-2", down && "opacity-60")} />
               <Link
                 href={href}
@@ -226,7 +202,7 @@ export function FleetCard({
                 {entry.name}
               </Link>
               <span className="-my-1 -mr-1.5 flex items-center gap-1">
-                {entry.readOnly && <ProtectedMark className="mr-1" />}
+                {entry.readOnly && <ProtectedTag compact className="mr-1" />}
                 <ArrowRight
                   aria-hidden
                   className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
@@ -283,7 +259,7 @@ export function FleetCard({
               <div
                 data-slot="fleet-reading"
                 className={cn(
-                  "grid min-h-12 grid-cols-[minmax(0,1fr)_auto] content-center items-center gap-x-4 gap-y-1",
+                  "grid min-h-12 grid-cols-main-end content-center items-center gap-x-4 gap-y-1",
                   down && "opacity-60",
                 )}
               >
@@ -293,9 +269,9 @@ export function FleetCard({
                       <span className="font-normal text-muted-foreground">No reading</span>
                     ) : (
                       <>
-                        {entry.sessions.toLocaleString()}{" "}
+                        {grouped(entry.sessions)}{" "}
                         <span className="font-normal text-muted-foreground">
-                          {entry.sessions === 1 ? sessions.replace(/s$/, "") : sessions} open
+                          {nounFor(entry.sessions, sessions)} open
                         </span>
                       </>
                     )}
@@ -327,8 +303,7 @@ export function FleetCard({
                   {stored !== undefined && <span className="numeric">{bytes(stored)} stored</span>}
                   {!down && (
                     <span className="numeric min-w-0 truncate">
-                      {entry.objects.toLocaleString()}{" "}
-                      {entry.objects === 1 ? entry.objectWord.replace(/s$/, "") : entry.objectWord}
+                      {plural(entry.objects, holds.one, holds.many)}
                     </span>
                   )}
                 </div>

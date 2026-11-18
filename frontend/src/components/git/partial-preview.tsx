@@ -4,10 +4,11 @@ import { useState } from "react"
 import { errorMessage, get, post } from "@/lib/api"
 import type { GitPartialDiff, GitResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import { PreviewHeader } from "@/components/git/preview-header"
 import type { PreviewContext } from "@/components/git/preview-panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 export function PartialPreview({

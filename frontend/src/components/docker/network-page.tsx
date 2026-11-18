@@ -4,8 +4,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import {
-  ArrowLeft,
   ArrowUpRight,
   ChevronDown,
   ChevronUp,
@@ -27,19 +27,21 @@ import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { ProductLogo } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { linkGlyph } from "@/components/network/marks"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
 import { HueKey, type NetworkRate } from "@/components/docker/network-band"
@@ -70,21 +72,13 @@ import {
   shelfOf,
   type MemberReading,
 } from "@/components/docker/networks"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "members", "configuration"] as const
 type Tab = (typeof TABS)[number]
 
 /** How often the list is read, for the rail and for who is on the network now. */
 const POLL = 10_000
-
-const BACK = (
-  <Link
-    href="/docker/networks"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Networks
-  </Link>
-)
 
 /**
  * One network, as a place of its own.
@@ -110,7 +104,7 @@ const BACK = (
  */
 export function NetworkPage() {
   const params = useParams<{ name: string }>()
-  const key = decode(params.name)
+  const key = decodeSegment(params.name)
   const search = useSearchParams()
   const router = useRouter()
   const requested = search.get("tab")
@@ -240,14 +234,6 @@ export function NetworkPage() {
   )
 }
 
-function decode(value: string) {
-  try {
-    return decodeURIComponent(value)
-  } catch {
-    return value
-  }
-}
-
 type Step = { disabled: boolean; run: () => void }
 
 function NetworkMain({
@@ -359,7 +345,7 @@ function NetworkMain({
 
   const header = (
     <PageContext
-      eyebrow={BACK}
+      back={{ href: "/docker/networks", label: "Networks" }}
       title={network?.name ?? "Network"}
       actions={
         <span className="flex items-center">
@@ -419,7 +405,7 @@ function NetworkMain({
             onRemove={() => setRemoving(network)}
           />
         ) : (
-          <HostIdentity
+          <IdentityHeader
             slot="network-identity"
             className="border-b-0 pb-0"
             mark="docker"
@@ -440,6 +426,8 @@ function NetworkMain({
                 &nbsp;
               </span>
             }
+            // The verbs' place, so on a phone the line holds the row they land on.
+            menu={false}
             facts={<span aria-hidden>&nbsp;</span>}
           />
         )}
@@ -639,7 +627,7 @@ function NetworkIdentity({
   }
 
   return (
-    <HostIdentity
+    <IdentityHeader
       slot="network-identity"
       label={`About ${network.name}`}
       className="animate-rise border-b-0 pb-0"
@@ -667,36 +655,40 @@ function NetworkIdentity({
       }
       facts={
         <>
-          {owner.kind === "compose" && owner.project ? (
-            <Link
-              href={`/docker/stacks/${encodeURIComponent(owner.project)}`}
-              className="inline-flex min-w-0 items-center gap-1 rounded-sm text-foreground focus-ring hover:underline"
-            >
-              <span className="truncate">{owner.label}</span>
-              <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-            </Link>
-          ) : (
-            <span>{owner.label}</span>
-          )}
-          <FactDot />
-          <span>{network.driver === "null" ? "no network" : network.driver}</span>
-          <FactDot />
-          {first ? (
-            <span className="inline-flex items-center gap-1.5" title={network.subnets.join(", ")}>
-              <Cidr cidr={first} className="text-foreground" />
-              {more.length > 0 && <span className="numeric">+{more.length}</span>}
-            </span>
-          ) : (
-            <span>{network.driver === "host" ? "the server's own addresses" : "no subnet"}</span>
-          )}
-          <FactDot />
-          <span className="numeric">
+          <Fact>
+            {owner.kind === "compose" && owner.project ? (
+              <Link
+                href={`/docker/stacks/${encodeURIComponent(owner.project)}`}
+                className="inline-flex min-w-0 items-center gap-1 rounded-sm align-top text-foreground focus-ring hover:underline"
+              >
+                <span className="truncate">{owner.label}</span>
+                <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+              </Link>
+            ) : (
+              <span>{owner.label}</span>
+            )}
+          </Fact>
+          <Fact>{network.driver === "null" ? "no network" : network.driver}</Fact>
+          <Fact>
+            {first ? (
+              <span
+                className="inline-flex items-center gap-1.5 align-top"
+                title={network.subnets.join(", ")}
+              >
+                <Cidr cidr={first} className="text-foreground" />
+                {more.length > 0 && <span className="numeric">+{more.length}</span>}
+              </span>
+            ) : (
+              <span>{network.driver === "host" ? "the server's own addresses" : "no subnet"}</span>
+            )}
+          </Fact>
+          <Fact className="numeric">
             {!membersKnown(network)
               ? "members unread"
               : count === 0
                 ? "nothing attached"
                 : plural(count, "container")}
-          </span>
+          </Fact>
         </>
       }
       command={

@@ -3,10 +3,11 @@
 import { Children, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { ArrowCircleUp, Plus, Puzzle, RotateClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
 import { duration } from "@/lib/format"
-import type { BoardSummary } from "@/lib/boards"
+import type { BoardSummary } from "@/lib/board/boards"
 import type { RdOverview } from "@/lib/remote-desktop"
 import type {
   BackupJob,
@@ -23,21 +24,21 @@ import type {
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type { SectionKey } from "@/lib/sidebar-sections"
 import { type PollState, usePoll } from "@/hooks/use-poll"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useMetricEvents, useMetricsHistory } from "@/hooks/use-metrics-history"
 import { useSelfUpdate } from "@/hooks/use-self-update"
-import type { MetricsWindow } from "@/lib/metrics-range"
-import type { ConnectionState } from "@/lib/metrics-store"
-import { Page, PageContext, Section } from "@/components/page"
+import type { MetricsWindow } from "@/lib/metrics/range"
+import type { ConnectionState } from "@/lib/metrics/store"
+import { Page, PageContext } from "@/components/page"
+import { Section } from "@/components/section"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { lastFleet, readFleet } from "@/components/database/fleet/read"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { DashboardHealthNotice } from "@/components/overview/health-notice"
@@ -45,7 +46,7 @@ import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
 import { ActivityPanel } from "@/components/overview/activity"
 import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
 import { ResourceReadings, ResourceReadingsSkeleton } from "@/components/overview/resources"
-import { SectionLink } from "@/components/overview/section-link"
+import { SectionLink } from "@/components/section-link"
 import {
   DockerRow,
   GitRow,
@@ -71,6 +72,7 @@ import { Bone } from "@/components/bone"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 // A fixed hour, not the metrics page's draggable window: the landing page is a
 // glance, and there is exactly one range control in the product — on /metrics.
@@ -132,7 +134,7 @@ export default function OverviewPage() {
   const cores = ready ? ready.snapshot.cpu.cores || 1 : 0
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title={host?.hostname ?? "Overview"} />
 
       <DashboardHealthNotice />
@@ -144,7 +146,7 @@ export default function OverviewPage() {
           anywhere, a shell on it; what the dashboard can do to itself is
           behind the menu. */}
       {ready ? (
-        <HostIdentity
+        <IdentityHeader
           mark={platformProduct(ready.host.platform)}
           title={<span className="min-w-0 truncate">{platformName(ready.host)}</span>}
           state={
@@ -168,37 +170,31 @@ export default function OverviewPage() {
           menu={verbs.menu.length > 0 && <VerbMenu verbs={verbs.menu} label="Server actions" />}
           facts={
             <>
-              <span className="font-medium text-foreground">{ready.host.hostname}</span>
-              <FactDot />
-              <span className="font-mono">{ready.host.kernelVersion}</span>
-              <FactDot />
-              <HostFact product={cpuProduct(ready.host.cpuModel, ready.host.kernelArch)}>
+              <Fact className="font-medium text-foreground">{ready.host.hostname}</Fact>
+              <Fact className="font-mono">{ready.host.kernelVersion}</Fact>
+              <Fact product={cpuProduct(ready.host.cpuModel, ready.host.kernelArch)}>
                 {ready.host.cpuModel || ready.host.kernelArch}
-              </HostFact>
-              <FactDot />
-              <span className="numeric">{cores} cores</span>
+              </Fact>
+              <Fact className="numeric">{cores} cores</Fact>
               {ready.host.virtualization && (
-                <>
-                  <FactDot />
-                  <HostFact product={virtualizationProduct(ready.host.virtualization)}>
-                    {ready.host.virtualization}
-                  </HostFact>
-                </>
+                <Fact product={virtualizationProduct(ready.host.virtualization)}>
+                  {ready.host.virtualization}
+                </Fact>
               )}
-              <FactDot />
-              <span className="numeric">up {duration(ready.snapshot.uptimeSeconds)}</span>
-              <FactDot />
-              <span className="numeric">
+              <Fact className="numeric">up {duration(ready.snapshot.uptimeSeconds)}</Fact>
+              <Fact className="numeric">
                 {ready.snapshot.procs?.total || ready.host.processes} processes
-              </span>
+              </Fact>
             </>
           }
         />
       ) : (
-        <HostIdentity
+        <IdentityHeader
           logo={<Skeleton className="size-10 rounded-lg" />}
           title={<Bone className="w-56" />}
           state={<Bone className="w-14 text-xs" />}
+          // The verbs' place, so on a phone the line holds the row they land on.
+          menu={false}
           // Two lines of facts on a phone, where the machine's own wrap.
           facts={
             <>
@@ -531,7 +527,7 @@ function DeploymentsSection({
   const { can } = useAuth()
   const admin = can("system.admin")
   const deployments = useMemo(() => sortFleet(fleet.data?.deployments ?? []), [fleet.data])
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const shown = deployments.slice(0, wide ? SHOWN_PROJECTS : SHOWN_PROJECTS_NARROW)
 
   return (

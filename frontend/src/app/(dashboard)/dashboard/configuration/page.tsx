@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { useSessionState } from "@/lib/view-state"
+import { Fact } from "@/components/fact-line"
 import { External, LockOpen, MoreHorizontal, ShieldCheck } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
@@ -18,12 +19,12 @@ import { EndpointText, RequestPath } from "@/components/config/request-path"
 import { RestartProgress } from "@/components/config/restart-progress"
 import { UninstallDialog, UninstallProgress, UninstallRow } from "@/components/config/uninstall"
 import { UsagePingSection } from "@/components/config/usage-ping"
-import { PendingStrip } from "@/components/deploy/settings/pending-strip"
-import { SaveBarProvider, useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { PendingStrip } from "@/components/settings/pending-strip"
+import { SaveBarProvider, useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
 import { Disclosure, Field, FieldRow } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
@@ -34,7 +35,7 @@ import {
   SettingsColumn,
   SwitchRow,
   SwitchRows,
-} from "@/components/settings-column"
+} from "@/components/settings/settings-column"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -49,6 +50,7 @@ import { MenuItemText } from "@/components/ui/menu-item-text"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 /**
  * The dashboard's own configuration: where it listens, how it is trusted, who
@@ -79,7 +81,7 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
  * are rarely pressed on. The restart they start is watched under the path.
  *
  * **The settings** are one centred column of sections, as a project's
- * settings are (`deploy/settings/setting-card.tsx`), the certificate first
+ * settings are (`components/settings/setting-card.tsx`), the certificate first
  * because picking one fills the address, the interface and the allowlist
  * under it. They were two columns across the width, which set two unrelated
  * heads on one line and a helper sentence under every field; the sentences
@@ -251,13 +253,12 @@ function Configuration() {
   if ((loading && !report) || (error && !(removing && report))) {
     return (
       <PageState
-        eyebrow="Settings"
         title="Configuration"
         error={error ?? undefined}
         // The identity line, the path and the column, at about their heights.
         skeleton={
           <>
-            <Skeleton className="h-14 rounded-xl" />
+            <ChoiceListSkeleton rows={1} mark={false} aside={false} />
             <Skeleton className="h-64 rounded-xl" />
             <Skeleton className="mx-auto h-96 w-full max-w-3xl rounded-xl" />
           </>
@@ -352,15 +353,15 @@ function Configuration() {
   const drift = report.drift ?? []
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {dialog}
-      <PageContext eyebrow="Settings" title="Configuration" />
+      <PageContext title="Configuration" />
 
       {/* The install's identity line, laid out as a project's: the address
           it answers at is the name with its state beside it, the checkout it
           runs from and the files that configure it are the facts, and the
           two commands that recreate the stack are its `⋯`. */}
-      <HostIdentity
+      <IdentityHeader
         logo={
           <span
             aria-hidden
@@ -406,28 +407,19 @@ function Configuration() {
         facts={
           report.dir ? (
             <>
-              <HostFact product="docker-compose">
+              <Fact product="docker-compose">
                 <span className="font-mono text-foreground">{report.dir}</span>
-              </HostFact>
+              </Fact>
               {report.compose && (
-                <>
-                  <FactDot />
-                  <span className="font-mono">{within(report.dir, report.compose)}</span>
-                </>
+                <Fact className="font-mono">{within(report.dir, report.compose)}</Fact>
               )}
               {report.envPath && (
-                <>
-                  <FactDot />
-                  <span className="font-mono">{within(report.dir, report.envPath)}</span>
-                </>
+                <Fact className="font-mono">{within(report.dir, report.envPath)}</Fact>
               )}
               {run && !running && (
-                <>
-                  <FactDot />
-                  <span>
-                    restarted {relativeTime(run.finishedAt ?? run.updatedAt)} by {run.actor}
-                  </span>
-                </>
+                <Fact>
+                  restarted {relativeTime(run.finishedAt ?? run.updatedAt)} by {run.actor}
+                </Fact>
               )}
             </>
           ) : (
@@ -487,26 +479,6 @@ function Configuration() {
         </PanelBody>
       </Panel>
 
-      {run && (
-        <Panel plain className="animate-rise">
-          <PanelHeader title={running ? "Restarting" : "Last restart"} />
-          <PanelBody>
-            <RestartProgress
-              run={run}
-              log={report.log}
-              restarting={restarting}
-              onDismiss={
-                admin
-                  ? () => {
-                      dismiss().catch((err) => notify.error("Could not dismiss", errorMessage(err)))
-                    }
-                  : undefined
-              }
-            />
-          </PanelBody>
-        </Panel>
-      )}
-
       {/* One centred column, a section to a row, as a project's settings
           are. The certificate is first because picking one fills the
           address, the interface and the allowlist under it. */}
@@ -556,6 +528,28 @@ function Configuration() {
             )
           }
         >
+          {/* The restart is the column's first section, as a deploy's pending
+              strip is: it ran at the page inset above a centred column, so
+              the page had two left edges. The Stack picture stays the one
+              full-width block. */}
+          {run && (
+            <SettingSection title={running ? "Restarting" : "Last restart"}>
+              <RestartProgress
+                run={run}
+                log={report.log}
+                restarting={restarting}
+                onDismiss={
+                  admin
+                    ? () => {
+                        dismiss().catch((err) =>
+                          notify.error("Could not dismiss", errorMessage(err)),
+                        )
+                      }
+                    : undefined
+                }
+              />
+            </SettingSection>
+          )}
           <SettingSection
             title="Certificate"
             state={<CertificateState report={report} />}
@@ -731,7 +725,7 @@ function Configuration() {
             status={pending(["allowedCidrs", "require2fa"])}
             state={
               <>
-                {cidrs.length} {cidrs.length === 1 ? "network" : "networks"} allowed · two-factor{" "}
+                {plural(cidrs.length, "network")} allowed · two-factor{" "}
                 {draft.require2fa ? "required" : "optional"}
               </>
             }

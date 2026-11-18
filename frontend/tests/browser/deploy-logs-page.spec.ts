@@ -19,6 +19,20 @@ async function top(page: Page, selector: string) {
   return Math.round(box!.y)
 }
 
+/**
+ * What the bars at the window's foot take of it, as the bottom stack
+ * (`components/dock.tsx`) publishes it: a dock rises above this.
+ */
+async function occupied(page: Page) {
+  return page.evaluate(() =>
+    Math.round(
+      Number.parseFloat(
+        document.documentElement.style.getPropertyValue("--bottom-occupied") || "0",
+      ),
+    ),
+  )
+}
+
 /** Holds the request record and the rules until released, so the page is seen waiting. */
 async function held(page: Page) {
   let release = () => {}
@@ -55,8 +69,10 @@ test("no tile opens the page, and the pane is in one place waiting and read", as
     pane: await top(page, '[data-slot="pane"]'),
   }).toEqual(waiting)
   await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
-  // A desk has no bar: the views are the strip at the pane's head.
+  // A desk has no bar: the views are the strip at the pane's head, and the
+  // foot is free for a dock.
   await expect(page.locator('[data-slot="pane-bar"]')).toBeHidden()
+  expect(await occupied(page)).toBe(0)
   await expect(page.locator('[data-slot="hour-line"]')).toHaveCount(0)
 })
 
@@ -93,19 +109,23 @@ test.describe("on a phone", () => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
 
-    const bar = page.getByRole("navigation", { name: "Log view" }).filter({
-      has: page.getByRole("tablist"),
-    })
+    const bar = page
+      .getByRole("navigation", { name: "Log view" })
+      .and(page.locator("[data-slot=pane-bar]"))
     await expect(bar).toBeVisible()
-    await expect(bar.getByRole("tab")).toHaveText(
+    await expect(bar.getByRole("button")).toHaveText(
       ["Requests", "Insights", "Output", "Builds", "Events"].map((name) => new RegExp(name)),
     )
-    await expect(bar.getByRole("tab", { name: "Requests" })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    await expect(bar.getByRole("button", { name: "Requests" })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
-    // The strip a desk picks the view on is not drawn twice.
-    await expect(page.getByRole("button", { name: "Insights", exact: true })).toBeHidden()
+    // The strip a desk picks the view on is not drawn twice: the one Insights
+    // button shown is the bar's own stop.
+    await expect(
+      page.getByRole("button", { name: "Insights", exact: true }).filter({ visible: true }),
+    ).toHaveCount(1)
+    await expect(bar.getByRole("button", { name: "Insights", exact: true })).toBeVisible()
     await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
     // The readings are behind the pane's first line, not stacked over it.
     await expect(page.getByRole("group", { name: "The last hour" })).toHaveCount(0)
@@ -119,6 +139,9 @@ test.describe("on a phone", () => {
     expect(Math.round(pane.y + pane.height)).toBe(PHONE.height)
     const barBox = (await bar.boundingBox())!
     expect(Math.round(barBox.y + barBox.height)).toBe(PHONE.height)
+    // The bar is in the bottom stack, so a dock opened over the page sits
+    // above its stops rather than on them.
+    await expect.poll(() => occupied(page)).toBe(Math.round(barBox.height))
     expect(pane.height).toBeGreaterThan(420)
     expect(
       await page.evaluate(() => {
@@ -131,18 +154,21 @@ test.describe("on a phone", () => {
     ).toBe(true)
 
     // Every view is a stop, and the address says which.
-    await bar.getByRole("tab", { name: "Insights" }).click()
+    await bar.getByRole("button", { name: "Insights" }).click()
     await expect(page.getByText("Pages", { exact: true })).toBeVisible()
     await expect(page).toHaveURL(/view=insights/)
-    await bar.getByRole("tab", { name: "Output" }).click()
+    await bar.getByRole("button", { name: "Output" }).click()
     await expect(page).toHaveURL(/view=output/)
-    await bar.getByRole("tab", { name: "Builds" }).click()
+    await bar.getByRole("button", { name: "Builds" }).click()
     await expect(page).toHaveURL(/view=builds/)
-    await bar.getByRole("tab", { name: "Events" }).click()
+    await bar.getByRole("button", { name: "Events" }).click()
     await expect(page.getByLabel("Filter container events")).toBeVisible()
     await expect(page).toHaveURL(/view=events/)
     // The exit the hour saw is counted on the stop, beside its word.
-    await expect(bar.getByRole("tab", { name: "Events" })).toHaveAttribute("aria-description", "1")
+    await expect(bar.getByRole("button", { name: "Events" })).toHaveAttribute(
+      "aria-description",
+      "1",
+    )
     expect(Math.round((await bar.boundingBox())!.y + barBox.height)).toBe(PHONE.height)
   })
 
@@ -171,8 +197,9 @@ test.describe("on a phone", () => {
       "href",
       "/deploy/7/settings/automation#alerts",
     )
-    // A page a row opened has the bar out of its way.
+    // A page a row opened has the bar out of its way, and out of the stack.
     await expect(page.locator('[data-slot="pane-bar"]')).toHaveCount(0)
+    await expect.poll(() => occupied(page)).toBe(0)
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)

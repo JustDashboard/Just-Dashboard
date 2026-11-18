@@ -4,7 +4,8 @@ import { useState } from "react"
 import { usePoll } from "@/hooks/use-poll"
 import { RankList, type RankItem } from "@/components/rank-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { mongoCollections, previewPipeline } from "@/components/database/mongo/api"
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
 import {
@@ -16,6 +17,7 @@ import {
 } from "@/components/database/mongo/performance/activity"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { micros, perSecond } from "@/components/database/redis/performance/samples"
+import { grouped } from "@/lib/format"
 
 /** How many collections are watched: each is one small read every time. */
 const WATCHED = 8
@@ -23,8 +25,6 @@ const WATCHED = 8
 const EVERY_MS = 10_000
 
 type Reading = Readonly<Record<string, CollectionCounters | null>>
-
-const grouped = (n: number) => n.toLocaleString("en-US")
 
 /**
  * Which collections the server is working on: reads and writes a second,

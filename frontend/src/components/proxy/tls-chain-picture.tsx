@@ -4,11 +4,11 @@ import { createRef, useMemo, useRef, type RefObject } from "react"
 import Link from "next/link"
 import { Connection, Globe, LockClosed, LockOpen, ShieldCheck, type Icon } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import type { ChainKind, ChainNode, ChainTone } from "@/lib/tls-chain"
+import type { ChainKind, ChainNode, ChainTone } from "@/lib/tls/chain"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark } from "@/components/deploy/wire"
+import { WireHost, WireMark } from "@/components/wire/wire"
 import { sitePath } from "@/components/proxy/site-verbs"
 
 const GLYPH: Partial<Record<ChainKind, Icon>> = {
@@ -149,7 +149,7 @@ function ChainStep({
       data-tone={node.tone}
       className="flex min-w-0 items-center gap-3.5 lg:flex-col lg:items-center lg:gap-2.5 lg:text-center"
     >
-      <span ref={markRef} className="relative z-10 flex shrink-0">
+      <span ref={markRef} className="relative z-raised flex shrink-0">
         <StepMark node={node} product={product} />
       </span>
       <div className="min-w-0 flex-1 lg:w-full lg:flex-none">
@@ -161,7 +161,7 @@ function ChainStep({
             // A fixed line, so a name in mono and a dash in the body face
             // stand the same height and a step does not move as it is judged.
             "h-5 truncate text-body leading-5 font-medium",
-            node.mono && "font-mono text-[0.92em]",
+            node.mono && "code-inline",
             node.tone === "neutral" && node.title === "—" && "text-muted-foreground",
           )}
         >

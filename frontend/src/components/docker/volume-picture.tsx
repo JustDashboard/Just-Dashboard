@@ -4,7 +4,7 @@ import { Archive, Box, Database } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import type { BackupJob, VolumeDetail, VolumeUser } from "@/lib/types"
 import { DestinationGlyph, destinations } from "@/components/backups/marks"
-import { WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireMark, WirePlaceholder } from "@/components/wire/wire"
 import {
   VOLUME_HUE,
   holderHue,
@@ -17,7 +17,7 @@ import {
 } from "@/components/docker/volumes"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 
 /**
  * More containers or jobs than this are two and a count. Three rows is what

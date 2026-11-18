@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import {
   ClockRewind,
   Play,
@@ -12,10 +13,11 @@ import {
   Trash,
 } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
-import { tabClasses } from "@/components/tabs"
+import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -33,7 +35,7 @@ import {
   yesterdayUTC,
   type FlowReport,
   type FlowSettings,
-} from "@/lib/network-flows"
+} from "@/lib/network/flows"
 import { FlowsPicture } from "@/components/network/flows/flows-picture"
 import {
   FlowRowReading,
@@ -270,10 +272,24 @@ export function SocketHistoryPage() {
       : []),
   ]
 
+  // The picture of what is sampled and kept opens every view, under the
+  // strip: its nodes are the way between the views, so it is the same in
+  // each, and the strip stands directly under the line.
+  const picture = (
+    <FlowsPicture
+      data={data}
+      day={filters.day}
+      loading={loading}
+      stale={Boolean(read.error)}
+      words={untouched}
+      onJump={jump}
+    />
+  )
+
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="Socket history" />
-      <HostIdentity
+      <IdentityHeader
         fallback={ClockRewind}
         title="Socket history"
         label="About socket history"
@@ -290,12 +306,12 @@ export function SocketHistoryPage() {
         facts={
           <IdentityFacts loading={loading}>
             {!admin ? (
-              <span>needs the admin capability</span>
+              <span>needs an administrator</span>
             ) : !data ? (
               <span>the recorder could not be read</span>
             ) : (
               <>
-                <span>
+                <Fact>
                   {data.recordingSince ? (
                     <>
                       recording since <UTCTime value={data.recordingSince} form="short" />
@@ -303,17 +319,13 @@ export function SocketHistoryPage() {
                   ) : (
                     "recording has not been enabled"
                   )}
-                </span>
-                <FactDot />
-                <span className="numeric">every {data.settings.intervalSeconds}s</span>
-                <FactDot />
-                <span className="numeric">keeps {plural(data.settings.retentionDays, "day")}</span>
-                <FactDot />
-                <span className="numeric">{plural(data.retainedRows, "row")} kept</span>
-                <FactDot />
-                <span>
+                </Fact>
+                <Fact className="numeric">every {data.settings.intervalSeconds}s</Fact>
+                <Fact className="numeric">keeps {plural(data.settings.retentionDays, "day")}</Fact>
+                <Fact className="numeric">{plural(data.retainedRows, "row")} kept</Fact>
+                <Fact>
                   read <UTCTime value={data.checkedAt} form="clock" /> UTC
-                </span>
+                </Fact>
               </>
             )}
           </IdentityFacts>
@@ -322,10 +334,10 @@ export function SocketHistoryPage() {
         menu={admin ? <VerbMenu verbs={menu} label="More recorder actions" /> : undefined}
       />
       {!admin ? (
-        <EmptyState
+        <NeedsAdmin
+          what="Socket history"
           icon={ClockRewind}
-          title="Socket history needs the admin capability"
-          description="Peer and descriptor-owner history can expose private workload connections."
+          why="Peer and descriptor-owner history can expose private workload connections."
         />
       ) : !data && read.error ? (
         <ErrorState error={read.error} onRetry={read.refresh} retryable />
@@ -347,34 +359,18 @@ export function SocketHistoryPage() {
               <p>{data.error}</p>
             </Notice>
           )}
-          <FlowsPicture
-            data={data}
-            day={filters.day}
-            loading={loading}
-            stale={Boolean(read.error)}
-            words={untouched}
-            onJump={jump}
-          />
           <Tabs
             value={view}
             onValueChange={(next) => show(next as FlowViewKey)}
             className="min-w-0 gap-0"
           >
-            <TabsPrimitive.List
-              aria-label="Views of socket history"
-              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-            >
-              {FLOW_VIEWS.map((key) => (
-                <TabsPrimitive.Trigger
-                  key={key}
-                  value={key}
-                  className={tabClasses(view === key, "h-10")}
-                >
-                  {FLOW_VIEW_NAME[key]}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+            <ViewTabList
+              label="Views of socket history"
+              views={FLOW_VIEWS.map((key) => ({ key, label: FLOW_VIEW_NAME[key] }))}
+              value={view}
+            />
             <TabsPrimitive.Content value="hours" className={VIEW}>
+              {picture}
               {untouched ? (
                 <div
                   data-slot="flow-off"
@@ -417,6 +413,7 @@ export function SocketHistoryPage() {
               )}
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="observer" className={VIEW}>
+              {picture}
               {data ? (
                 <KernelObserverPanel
                   observer={data.kernelObserver}
@@ -432,6 +429,7 @@ export function SocketHistoryPage() {
               )}
             </TabsPrimitive.Content>
             <TabsPrimitive.Content value="sample" className={VIEW}>
+              {picture}
               {data ? (
                 <>
                   <FlowsSample cycle={data.lastCycle} />

@@ -2,9 +2,9 @@
 
 import { Box, Database, Layers, RefreshClockwise, Trash, Wrench } from "@/components/icons"
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
-import { LiveBytes } from "@/components/overview/readings"
+import { LiveBytes } from "@/components/live-figure"
 import { ProductGlyphs, imageProducts } from "@/components/product-logo"
-import { Term } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import type { ConfirmFn } from "@/components/docker/shared"
 import {
   FRESHNESS_COLOR,
@@ -14,7 +14,7 @@ import {
   type Freshness,
 } from "@/components/docker/images"
 import { Button } from "@/components/ui/button"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Explain } from "@/components/explain"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useAuth } from "@/hooks/use-auth"
 import {
@@ -223,9 +223,9 @@ function DiskShare({
                 {bytes(usage.images.reclaimable)}.
               </p>
               <p>
-                This is wider than <Term name="dangling">pruning untagged images</Term>: it reaches
-                tagged ones too. Each comes back with a pull, and an image a container uses is never
-                removed. Containers, networks and the build cache are left alone.
+                This is wider than <Definition name="dangling">pruning untagged images</Definition>:
+                it reaches tagged ones too. Each comes back with a pull, and an image a container
+                uses is never removed. Containers, networks and the build cache are left alone.
               </p>
             </>
           ),
@@ -299,7 +299,7 @@ function DiskShare({
                         <p>
                           Removes every image no container is using (
                           {bytes(usage.images.reclaimable)}) and the whole{" "}
-                          <Term name="build cache">build cache</Term> (
+                          <Definition name="build cache">build cache</Definition> (
                           {bytes(usage.buildCache.reclaimable)}), along with stopped containers and
                           unused networks.
                         </p>
@@ -388,6 +388,11 @@ function DiskShare({
  * line's control comes before the strip, so a keyboard moving along the marks
  * never reaches the Reclaim of the kind it has just read. Here focus reads the
  * kind and a press does what that Reclaim does, behind the same confirmation.
+ *
+ * It is a 24px box of its own, the size of the strip's cell, rather than a
+ * layer over the cell: the cell's glyph is scaled, and a layer placed inside
+ * the scaled glyph was the glyph's own box, 16px wide and 2px tall, the target
+ * a thumb had for a prune.
  */
 function KindMark({ kind, onReclaim }: { kind: Kind; onReclaim?: () => void }) {
   const Icon = kind.icon
@@ -397,7 +402,9 @@ function KindMark({ kind, onReclaim }: { kind: Kind; onReclaim?: () => void }) {
       aria-label={onReclaim ? kind.verb : kind.label}
       onClick={onReclaim}
       className={cn(
-        "absolute inset-0 flex items-center justify-center rounded-md pb-0.5 focus-ring-inset",
+        // The cell's own padding is taken back, so the cell stays the 26px
+        // square every strip's cell is.
+        "-mx-1 flex size-6 items-center justify-center rounded-md focus-ring-inset",
         !onReclaim && "cursor-default",
       )}
     >
@@ -409,27 +416,28 @@ function KindMark({ kind, onReclaim }: { kind: Kind; onReclaim?: () => void }) {
 function KindName({ label, definition }: { label: string; definition?: DiskDefinition }) {
   if (!definition) return label
   return (
-    <HoverCard openDelay={200}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          className="cursor-help rounded-sm font-medium underline decoration-muted-foreground/40 decoration-dotted underline-offset-4 focus-ring"
-        >
-          {label}
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 space-y-1 text-xs leading-relaxed">
-        <p className="text-body font-medium">{definition.label}</p>
-        <p className="text-muted-foreground">{definition.measures}</p>
-        {definition.excludes && (
-          <p className="text-muted-foreground">
-            <span className="font-medium">Not counted: </span>
-            {definition.excludes}
-          </p>
-        )}
-        <p className="text-micro text-muted-foreground">Read from {definition.source}.</p>
-      </HoverCardContent>
-    </HoverCard>
+    <Explain
+      face="term"
+      label={`What ${definition.label} counts`}
+      className="font-medium"
+      entry={{
+        title: definition.label,
+        body: (
+          <div className="space-y-1">
+            <p>{definition.measures}</p>
+            {definition.excludes && (
+              <p>
+                <span className="font-medium">Not counted: </span>
+                {definition.excludes}
+              </p>
+            )}
+            <p className="text-micro">Read from {definition.source}.</p>
+          </div>
+        ),
+      }}
+    >
+      {label}
+    </Explain>
   )
 }
 
@@ -480,6 +488,9 @@ function RegistryShare({
   return (
     <BarReading
       title="Registry"
+      // A container, so the strip says each answer in words where it has
+      // the room (PGH-20) and keeps to its dots and counts where it has not.
+      className="@container/reading"
       label="What the registries say"
       list="Registry answers"
       fixed
@@ -544,21 +555,40 @@ function RegistryShare({
   )
 }
 
+/** An answer in the strip's one word, after its count: "2 update", "4 current". */
+const ANSWER_WORD: Record<Freshness, string> = {
+  outdated: "update",
+  current: "current",
+  pinned: "pinned",
+  local: "built here",
+  unknown: "unchecked",
+  unused: "unused",
+  untagged: "untagged",
+}
+
 /**
- * An answer's mark in the strip: its dot in the span's own colour, then how
- * many images gave it. The three muted answers are tints too faint to read
- * at a dot's size, so theirs is ringed.
+ * An answer's mark in the strip: its dot in the span's own colour, how many
+ * images gave it, and the answer in a word where the reading has the room.
+ * A strip of dots and bare counts ("● 2 ● 4 ● 1") left the colour alone to
+ * say which answer was which (PGH-20). The three muted answers are tints too
+ * faint to read at a dot's size, so theirs is ringed.
  */
 function AnswerMark({ state, count }: { state: Freshness; count: number }) {
   const faint = state === "unknown" || state === "unused" || state === "untagged"
   return (
-    <span className="inline-flex items-center gap-1.5">
+    <span className="inline-flex items-center gap-1.5 @sm/reading:mr-1.5">
       <span
         aria-hidden
         className={cn("size-1.5 shrink-0 rounded-full", faint && "ring-1 ring-muted-foreground/50")}
         style={{ background: FRESHNESS_COLOR[state] }}
       />
-      <span className="numeric text-hint font-medium">{count}</span>
+      <span className="numeric text-hint font-medium whitespace-nowrap">
+        {count}
+        <span className="hidden font-normal text-muted-foreground @sm/reading:inline">
+          {" "}
+          {ANSWER_WORD[state]}
+        </span>
+      </span>
     </span>
   )
 }

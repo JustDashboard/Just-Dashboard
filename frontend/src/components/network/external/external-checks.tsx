@@ -23,7 +23,7 @@ import {
   stageReading,
   type ExternalCheck,
   type ExternalVantage,
-} from "@/lib/network-external"
+} from "@/lib/network/external"
 import {
   checkOutcome,
   checkTarget,
@@ -74,18 +74,10 @@ export function ExternalChecks({
   const sourceOf = (check: ExternalCheck) => vantages.find((v) => v.id === check.vantageId)
   const retained = checks.filter((check) => check.result).length
   return (
-    <Panel aria-label="Checks">
+    <Panel framed aria-label="Checks">
       <PanelHeader
-        title={
-          <>
-            Checks
-            {checks.length > 0 && (
-              <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-                {checks.length}
-              </span>
-            )}
-          </>
-        }
+        title="Checks"
+        count={checks.length > 0 ? checks.length : undefined}
         actions={
           onCompare && (
             <Button size="sm" variant="outline" disabled={retained < 2} onClick={onCompare}>

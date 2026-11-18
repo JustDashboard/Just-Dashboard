@@ -145,7 +145,7 @@ async function mock(page: Page, initial: Record<string, unknown>) {
         releases: [],
         history: [],
         breaking: false,
-        check: { enabled: true, checkedAt: iso(now), repo: "wayy/just-dashboard", ref: "main" },
+        check: { enabled: true, checkedAt: iso(now), repo: "operator/just-dashboard", ref: "main" },
         install: { supported: true, dir: "/opt/just-dashboard", dirty: [] },
       })
     }
@@ -199,7 +199,7 @@ function statTiles(page: Page) {
 }
 
 const picture = (page: Page) =>
-  page.getByRole("list", { name: "How this server connects to just-dashboard.com" })
+  page.getByRole("group", { name: "How this server connects to just-dashboard.com" })
 
 function scrollsSideways(page: Page) {
   return page.evaluate(

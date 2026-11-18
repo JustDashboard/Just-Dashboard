@@ -1,13 +1,13 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
-import { answerSystemUsers } from "./system-users-fixture"
+import { answerSystemUsers, mockSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
 import { overview as remoteDesktopOverview } from "./remote-desktop-fixture"
 import { busyMap } from "./server-map-fixture"
 import { risen } from "./risen"
 import { SHIFT_BUDGET, watchShifts } from "./layout-shift"
 import { mockWorkbench } from "./workbench-fixture"
-import { mockProxy } from "./proxy-fixtures"
+import { mockProxy, mockShowcase } from "./proxy-fixtures"
 import { mockIntrusion } from "./security-intrusion-fixture"
 import { mockNetwork } from "./network-fixture"
 import { mockPM2 } from "./pm2-fixture"
@@ -17,6 +17,11 @@ import { IMAGES, mockImages } from "./docker-images-fixture"
 import { mockNetworkPage } from "./docker-network-page-fixture"
 import { mockHost as mockPackages } from "./packages-fixture"
 import { mockDNSServicePage } from "./network-dns-services-fixture"
+import { mockContainerPage, N8N } from "./container-page-fixture"
+import { mockStackDetail } from "./stack-detail-fixture"
+import { mockStacks } from "./stacks-fixture"
+import { mockDockerHost } from "./docker-fixture"
+import { mockSections } from "./deploy-section-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -1011,7 +1016,9 @@ test("faded secondary text keeps 4.5:1 on every ground text is set on", async ({
     "text-muted-foreground/45",
     "text-muted-foreground/40",
   ]
-  const grounds = ["--background", "--card", "--popover", "--muted", "--surface-header"]
+  // The selection ground too: a selected row's faint figures sit on --accent,
+  // which 0.9.0 darkened so they keep 4.5:1 there.
+  const grounds = ["--background", "--card", "--popover", "--muted", "--surface-header", "--accent"]
   const measured = await page.evaluate(
     ({ inks, grounds }) => {
       const contrast = Reflect.get(window, "jdContrast") as (element: Element) => number
@@ -1210,6 +1217,535 @@ for (const [label, viewport] of [
           `${path} moved by ${total.toFixed(3)} with its reads landing ${order}: ${JSON.stringify(moved)}`,
         ).toBeLessThan(SHIFT_BUDGET)
       }
+    })
+  }
+}
+
+/**
+ * On a phone an identity header is one row over one line of facts, and what
+ * does not fit is cut a whole fact at a time. A fact drawn in the warning or
+ * the danger ink is the one that asks for something, so it leads the line
+ * and is never the one cut. One left off a phone on purpose (`max-sm:hidden`,
+ * because the state beside the name says it) is not cut: it is not drawn.
+ * The pages are the ones whose fixtures put such a fact on the line.
+ */
+const TONED_LINES: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/proxy", (page) => mockProxy(page, { included: true })],
+  ["/proxy/certificates", (page) => mockProxy(page, { included: true })],
+  ["/packages", (page) => mockPackages(page)],
+]
+
+const clippedToneFacts = (page: Page) =>
+  page.evaluate(() => {
+    const cut: string[] = []
+    let seen = 0
+    for (const line of document.querySelectorAll<HTMLElement>("[data-layout=project]")) {
+      for (const box of line.querySelectorAll<HTMLElement>("*")) {
+        if (getComputedStyle(box).overflowY !== "clip") continue
+        const edge = box.getBoundingClientRect()
+        for (const fact of box.querySelectorAll<HTMLElement>(
+          "[class*=text-destructive], [class*=text-warning]",
+        )) {
+          if (fact.getClientRects().length === 0) continue
+          seen += 1
+          const at = fact.getBoundingClientRect()
+          if (at.top >= edge.bottom - 1 || at.left >= edge.right - 1)
+            cut.push(fact.textContent?.trim() ?? "")
+        }
+      }
+    }
+    return { seen, cut }
+  })
+
+for (const [path, mock] of TONED_LINES) {
+  test(`${path}'s identity line on a phone cuts no warning or danger fact`, async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mock(page)
+    await page.goto(path)
+    await expect(page.locator("[data-layout=project]").first()).toBeVisible()
+    await page.waitForLoadState("networkidle")
+    const { seen, cut } = await clippedToneFacts(page)
+    // The fixture does put one on the line, or the check proves nothing.
+    expect(seen, `no warning or danger fact on ${path}'s line`).toBeGreaterThan(0)
+    expect(cut).toEqual([])
+  })
+}
+
+/**
+ * The type a field is set in on a touch phone: 16px, or iOS zooms the page in
+ * when the field takes focus and leaves it zoomed. `Input`, `Textarea`, the
+ * select's trigger and `SearchInput` carry the size on a `pointer-coarse`
+ * variant a caller's class cannot undo (MOB-04), so the rule is read off the
+ * fields a person types into on a phone, not off the primitives.
+ */
+const TYPED: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/deploy/7/settings/general", (page) => mockProject(page, { showcase: true })],
+  ["/deploy/7/settings/domains", (page) => mockProject(page, { showcase: true })],
+  ["/system-users/new", (page) => mockSystemUsers(page)],
+  ["/proxy/certificates", (page) => mockProxy(page, { included: true })],
+  ["/databases/1/settings/resources", (page) => mockDatabases(page, LABELLED)],
+  ["/login", mockSignedOut],
+]
+
+/** Nobody is signed in: the sign-in form. */
+async function mockSignedOut(page: Page) {
+  await page.route("**/api/v1/**", (route) =>
+    json(route, { authenticated: false, needsTotp: false, needsEnrollment: false }),
+  )
+}
+
+const FIELDS =
+  "input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=range]), textarea, select, [data-slot=select-trigger]"
+
+test.describe("on a touch phone", () => {
+  test.use({ viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true })
+
+  for (const [path, mock] of TYPED) {
+    test(`every field on ${path} is set at 16px`, async ({ page }) => {
+      await mock(page)
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      const fields = page.locator(FIELDS).filter({ visible: true })
+      await expect(fields.first()).toBeVisible({ timeout: 15_000 })
+      const small = await fields.evaluateAll((all) =>
+        all
+          .filter((field) => parseFloat(getComputedStyle(field).fontSize) < 16)
+          .map((field) => `${getComputedStyle(field).fontSize} ${field.outerHTML.slice(0, 120)}`),
+      )
+      expect(small, `fields under 16px on ${path}, which a phone zooms into`).toEqual([])
+    })
+  }
+})
+
+/**
+ * A button is set in the product's sans whatever it says (PGB-14): the danger
+ * pages' verbs looked set in mono in a capture, and only a browser can say
+ * which face a button computes, so the check reads every one against a word
+ * set in `font-sans`.
+ */
+for (const [path, mock] of [
+  ["/audit", mockShell],
+  ["/deploy/7/settings/danger", (page: Page) => mockProject(page, { showcase: true })],
+] as const) {
+  test(`every button on ${path} is set in the sans`, async ({ page }) => {
+    await mock(page)
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible()
+    const faces = await page.evaluate(() => {
+      const word = document.createElement("span")
+      word.className = "font-sans"
+      document.body.append(word)
+      const sans = getComputedStyle(word).fontFamily
+      word.remove()
+      const buttons = [...document.querySelectorAll<HTMLElement>("[data-slot=button]")].filter(
+        (button) => button.getClientRects().length > 0,
+      )
+      return {
+        count: buttons.length,
+        off: buttons
+          .filter((button) => getComputedStyle(button).fontFamily !== sans)
+          .map(
+            (button) => `${getComputedStyle(button).fontFamily}: ${button.outerHTML.slice(0, 100)}`,
+          ),
+      }
+    })
+    expect(faces.count, `no button on ${path}`).toBeGreaterThan(0)
+    expect(faces.off, `buttons on ${path} in another face`).toEqual([])
+  })
+}
+
+/**
+ * A strip of filters stands clear of the list it filters (PGP-06). On a phone
+ * Certificates drew its Source chips with a negative margin that pulled them
+ * onto the first card; the gap is the page's 12px under a head, at least.
+ */
+test("the certificates' Source strip stands clear of the first card on a phone", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/certificates")
+  const strip = page.locator("[aria-label=Source]").first()
+  const card = page.locator("[data-slot=cert-list] > li").first()
+  await expect(card).toBeVisible()
+  await risen(page)
+  const [above, below] = [await strip.boundingBox(), await card.boundingBox()]
+  expect(below!.y - (above!.y + above!.height)).toBeGreaterThanOrEqual(12)
+})
+
+/**
+ * The identity line (BRIEF, 16 Nov), on every page whose fixture draws one.
+ *
+ *   The brand face marks the expected next step, and a destructive act is
+ *   never that: Terminate, Delete and the like go behind `⋯`, in the
+ *   destructive ink.
+ *
+ *   On a phone the line is one row, so its command is its icon, with its words
+ *   kept as its accessible name and said in a tooltip; the words return from
+ *   `sm` up.
+ *
+ *   `?` closes the line. A row above it holding only `?` pushes the header
+ *   down for one key; it may share a row with a back link, nothing less.
+ *
+ *   The name is what the page is about, so it outranks the section heads
+ *   under it: the identity rung is 16/24 at 600, one above a section head's
+ *   15/22 (`text-title`).
+ *
+ * Text is never faded with opacity either: the three inks are the only
+ * steps, and `--faint` has a floor of 4.5:1 that an opacity can take any text
+ * under. What may carry an opacity with words in it is a control that cannot
+ * be used (WCAG's contrast rule exempts it, and the fade is how the primitives
+ * say so).
+ */
+const IDENTITY_LINES =
+  "[data-layout=project], [data-slot=host-identity], [data-slot=project-header], [data-slot$=-identity]"
+
+const IDENTITY_SURFACES: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/deploy/7", (page) => mockProject(page, { showcase: true })],
+  ["/deploy/7/settings/general", (page) => mockProject(page, { showcase: true })],
+  [`/docker/containers/${N8N}?tab=overview`, (page) => mockContainerPage(page)],
+  ["/docker/stacks/shop", (page) => mockStackDetail(page)],
+  ["/processes/pm2/api", (page) => mockPM2(page)],
+  ["/packages", (page) => mockPackages(page)],
+  ["/packages/nginx", (page) => mockPackages(page)],
+  ["/security/intrusion/jails/sshd", (page) => mockIntrusion(page)],
+  ["/proxy", (page) => mockShowcase(page)],
+  ["/proxy/certificates", (page) => mockProxy(page, { included: true })],
+  ["/network/interfaces/ens3", (page) => mockNetwork(page)],
+  ["/network/dns/services/dns-fixture", (page) => mockDNSServicePage(page)],
+]
+
+const DESTRUCTIVE = /^(terminate|kill|delete|drop|remove|stop|uninstall|revoke|reset)\b/i
+
+function readIdentity(page: Page, lines: string) {
+  return page.evaluate(
+    ({ lines, destructive }) => {
+      const shown = (el: Element) => el.getClientRects().length > 0
+      const named = (el: Element) =>
+        (el.getAttribute("aria-label") ?? el.textContent ?? "").trim().replace(/\s+/g, " ")
+      // The width the words inside a control take on screen; an icon is not a word.
+      const wordWidth = (el: Element) => {
+        let width = 0
+        const walk = document.createTreeWalker(el, NodeFilter.SHOW_TEXT)
+        for (let node = walk.nextNode(); node; node = walk.nextNode()) {
+          if (!node.textContent?.trim() || node.parentElement?.closest("svg, .sr-only")) continue
+          const range = document.createRange()
+          range.selectNodeContents(node)
+          for (const rect of range.getClientRects()) width += rect.width
+        }
+        return width
+      }
+      const pattern = new RegExp(destructive, "i")
+      const found = [...document.querySelectorAll<HTMLElement>(lines)].filter(
+        (line) => shown(line) && !line.parentElement?.closest(lines),
+      )
+      const heads = [...document.querySelectorAll<HTMLElement>("[data-slot=page] h2")].filter(
+        (head) => shown(head) && !head.closest(".sr-only, [role=dialog]"),
+      )
+      const size = (el: Element) => parseFloat(getComputedStyle(el).fontSize)
+      const weight = (el: Element) => Number(getComputedStyle(el).fontWeight)
+      const report = found.map((line) => {
+        const verbs = [
+          ...line.querySelectorAll<HTMLElement>("button[data-size], a[data-size]"),
+        ].filter(shown)
+        const name = [...line.querySelectorAll<HTMLElement>("p")].find(
+          (p) => shown(p) && weight(p) >= 600,
+        )
+        // `?` above the line: the box it stands in, up to the one that holds
+        // the line too, has nothing else to read or press.
+        const lonely = [...document.querySelectorAll<HTMLElement>("button[aria-label$=shortcuts]")]
+          .filter((help) => shown(help) && !line.contains(help))
+          .filter(
+            (help) => help.getBoundingClientRect().bottom <= line.getBoundingClientRect().top + 1,
+          )
+          .filter((help) => {
+            let row: HTMLElement = help
+            while (row.parentElement && !row.parentElement.contains(line)) row = row.parentElement
+            const others = [...row.querySelectorAll("a, button, [role=button]")].filter(
+              (el) => el !== help && shown(el),
+            )
+            const words = (row.innerText ?? "").replace("?", "").trim()
+            return others.length === 0 && words === ""
+          })
+        return {
+          slot: line.dataset.slot ?? "",
+          brandDestructive: verbs
+            .filter((verb) => verb.dataset.variant === "default" && pattern.test(named(verb)))
+            .map(named),
+          wordy: verbs
+            .filter((verb) => wordWidth(verb) > 0.5)
+            .map((verb) => named(verb) || verb.outerHTML.slice(0, 100)),
+          unnamed: verbs
+            .filter((verb) => named(verb) === "")
+            .map((verb) => verb.outerHTML.slice(0, 100)),
+          name: name ? { text: named(name), size: size(name), weight: weight(name) } : null,
+          outranked: name
+            ? heads
+                .filter(
+                  (head) =>
+                    size(head) > size(name) ||
+                    (size(head) === size(name) && weight(head) >= weight(name)),
+                )
+                .map((head) => `${named(head)} ${size(head)}px ${weight(head)}`)
+            : [],
+          lonelyHelp: lonely.length,
+        }
+      })
+      return report
+    },
+    { lines, destructive: DESTRUCTIVE.source },
+  )
+}
+
+/** Elements whose words are faded with opacity at rest, but for a control that cannot be used. */
+function fadedText(page: Page) {
+  return page.evaluate(() => {
+    const out: string[] = []
+    for (const el of document.querySelectorAll<HTMLElement>("body *")) {
+      const opacity = Number(getComputedStyle(el).opacity)
+      if (!(opacity > 0 && opacity < 1) || el.getClientRects().length === 0) continue
+      if (!(el.innerText ?? "").trim()) continue
+      if (el.closest(":disabled, [aria-disabled=true], [data-disabled]")) continue
+      // A block on its way in (`animate-rise`) is mid-fade, which is motion, not an ink.
+      if (el.getAnimations().some((pass) => pass.playState === "running")) continue
+      out.push(`${opacity} ${el.outerHTML.slice(0, 140)}`)
+    }
+    return out
+  })
+}
+
+for (const [label, viewport] of [
+  ["", { width: 1440, height: 900 }],
+  [" on a phone", { width: 390, height: 844 }],
+] as const) {
+  test.describe(`identity lines${label}`, () => {
+    test.use({ viewport, hasTouch: label !== "", isMobile: label !== "" })
+
+    for (const [path, mock] of IDENTITY_SURFACES) {
+      test(`${path} keeps the identity line's rules${label}`, async ({ page }) => {
+        await mock(page)
+        await page.goto(path)
+        await expect(page.locator(IDENTITY_LINES).first()).toBeVisible({ timeout: 15_000 })
+        await page.waitForLoadState("networkidle")
+        await risen(page)
+        const lines = await readIdentity(page, IDENTITY_LINES)
+        expect(lines.length, `no identity line on ${path}`).toBeGreaterThan(0)
+        for (const line of lines) {
+          const where = `${path} (${line.slot})`
+          expect(line.brandDestructive, `a destructive verb in the brand face on ${where}`).toEqual(
+            [],
+          )
+          expect(line.unnamed, `a verb with no name on ${where}`).toEqual([])
+          if (label) expect(line.wordy, `a command showing words on ${where} at 390`).toEqual([])
+          expect(line.lonelyHelp, `a row holding only ? above ${where}`).toBe(0)
+          expect(line.name, `no identity name on ${where}`).not.toBeNull()
+          expect(line.outranked, `section heads at or above the name on ${where}`).toEqual([])
+        }
+        expect(await fadedText(page), `words faded with opacity on ${path}`).toEqual([])
+      })
+    }
+  })
+}
+
+/**
+ * The same on the shell's pages and the deployment pages, where a row's quiet
+ * words live. `FADED_TODAY` is what still fades, with the finding that holds
+ * it (FND-07, which the `ink-opacity` lint closes): an entry must still fade,
+ * so the list is taken down as the fixes land, and every other page must not.
+ */
+const FADED_TODAY: Record<string, string> = {}
+
+test("no page fades its words with opacity", async ({ page }) => {
+  test.setTimeout((SURFACES.length + PROJECT_SURFACES.length) * 10_000)
+  const fading: Record<string, string[]> = {}
+  for (const [paths, mock] of [
+    [SURFACES, mockShell],
+    [PROJECT_SURFACES, (page: Page) => mockProject(page, { showcase: true })],
+  ] as const) {
+    await mock(page)
+    for (const path of paths) {
+      await page.goto(path)
+      await page.waitForLoadState("networkidle")
+      await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+      await risen(page)
+      const faded = await fadedText(page)
+      if (faded.length > 0) fading[path] = faded
+    }
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+  }
+  const fresh = Object.fromEntries(Object.entries(fading).filter(([path]) => !FADED_TODAY[path]))
+  expect(fresh, "words faded with opacity").toEqual({})
+  const clean = Object.keys(FADED_TODAY).filter((path) => !fading[path])
+  expect(clean, "clean now: take these out of FADED_TODAY").toEqual([])
+})
+
+/**
+ * A rail is a list to walk (`components/rail.tsx`): rows, and its search. A
+ * heading inside one put a level in the page's outline that no section
+ * stands under, and split the list a screen reader reads as one.
+ */
+for (const [path, mock] of IDENTITY_SURFACES.slice(2, 8)) {
+  test(`${path}'s rail holds no heading`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mock(page)
+    await page.goto(path)
+    await page.waitForLoadState("networkidle")
+    const rails = page.locator("[data-slot=page] nav").filter({ visible: true })
+    await expect(rails.first()).toBeVisible({ timeout: 15_000 })
+    const inside = await rails.evaluateAll((navs) =>
+      navs.flatMap((nav) =>
+        [...nav.querySelectorAll("h1, h2, h3, h4, h5, h6, [role=heading]")].map(
+          (head) => `${nav.getAttribute("aria-label")}: ${head.textContent?.trim()}`,
+        ),
+      ),
+    )
+    expect(inside, `headings inside a rail on ${path}`).toEqual([])
+  })
+}
+
+/**
+ * A page has its final shape while it loads (D11): a band is a `BarReading`
+ * drawn before its reading lands, and a list's rows are ghosts at the row's
+ * own box (`ChoiceListSkeleton`). The layout-shift budget above lets a page
+ * move by a fiftieth of the window; this is the stricter rule for the two
+ * things the operator watches, read as places, not only as heights. On
+ * `/proxy` a band once kept its height and moved 93px, because the block over
+ * it grew when its reading landed.
+ *
+ * The page's reads are held (the shell's are not, so the frame is drawn)
+ * until the loading page has been measured, then let go at once. `hold`
+ * narrows them where the page waits on one read before it draws its body.
+ *
+ * `today` names what a page still does wrong, at both widths or at one: the
+ * test is expected to fail until the fix lands, and then fails until the line
+ * is taken out. What fails today: on a phone the drains' and secret stores'
+ * ghosts are one line where their rows carry a second band (`band` on
+ * `ChoiceListSkeleton`), and a `WireFlow` drawn as `marks` waits 15px shorter
+ * than it lands, which moves the list under it; Notifications' picture waits
+ * 4px short at a desk. On `/proxy/ports` the picture lands over the list and
+ * moves it down. On `/proxy` the band moves 12px at a desk and 13px on a
+ * phone, because the route picture's stand-in is another height.
+ */
+type Holding = {
+  path: string
+  mock: (page: Page) => Promise<unknown>
+  /** What is read off the page: the first band, or the first row (a ghost standing for one). */
+  part: "band" | "row"
+  hold?: RegExp
+  /** What still fails, at both widths or at one. */
+  today?: string | { desk?: string; phone?: string }
+}
+
+const SHELL_READS =
+  /^\/(auth\/session|system\/(host|metrics)|assistant|network\/changes\/current|files\/places|dashboard\/update|updates\/self)$/
+
+/** Docker's reads but the engine's answer, which the section waits on before it draws. */
+const DOCKER_READS = /^\/docker\/(?!ping)/
+
+const GHOST_ROW = "on a phone a ghost row is one line where its row is two (ChoiceListSkeleton band)"
+const MARKS = "on a phone the picture's marks wait 15px shorter than they land (WireFlow phone=\"marks\")"
+
+const HOLDING: Holding[] = [
+  { path: "/docker", mock: (page) => mockDockerHost(page), part: "band", hold: DOCKER_READS },
+  {
+    path: "/docker/containers",
+    mock: (page) => mockDockerHost(page),
+    part: "band",
+    hold: DOCKER_READS,
+  },
+  { path: "/docker/stacks", mock: (page) => mockStacks(page), part: "band", hold: DOCKER_READS },
+  { path: "/docker/volumes", mock: (page) => mockVolumes(page), part: "band", hold: DOCKER_READS },
+  { path: "/packages", mock: (page) => mockPackages(page), part: "band" },
+  {
+    path: "/proxy",
+    mock: (page) => mockShowcase(page),
+    part: "band",
+    hold: /^\/(proxy\/(vhosts|streams|alerts)|certificates\/|ports)/,
+    today: "the band moves 12 to 13px as the proxy's reads land",
+  },
+  {
+    path: "/deploy/drains",
+    mock: (page) => mockSections(page),
+    part: "row",
+    today: { phone: `${GHOST_ROW}, and ${MARKS}` },
+  },
+  {
+    path: "/deploy/secret-stores",
+    mock: (page) => mockSections(page),
+    part: "row",
+    today: { phone: `${GHOST_ROW}, and ${MARKS}` },
+  },
+  {
+    path: "/deploy/notifications",
+    mock: (page) => mockProject(page, { showcase: true }),
+    part: "row",
+    today: {
+      desk: "the list lands 4px under its ghosts: the picture's waiting rows are a hair short",
+      phone: MARKS,
+    },
+  },
+  {
+    path: "/proxy/ports",
+    mock: (page) => mockProxy(page, { included: true }),
+    part: "row",
+    today: "a block lands over the list and moves it 350 to 440px down",
+  },
+]
+
+/** Holds the page's GET reads (or those `hold` names) until the returned function is called. */
+async function holdReads(page: Page, hold?: RegExp) {
+  let release: () => void = () => {}
+  const gate = new Promise<void>((done) => (release = done))
+  await page.route("**/api/v1/**", async (route) => {
+    const request = route.request()
+    const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "")
+    const held = hold ? hold.test(path) : !SHELL_READS.test(path)
+    if (request.method() !== "GET" || !held) return route.fallback()
+    await gate
+    await route.fallback().catch(() => {})
+  })
+  return release
+}
+
+/** Where the first band, or the first row or the ghost standing for it, is on the page. */
+const placeOf = (page: Page, part: Holding["part"]) =>
+  page.evaluate((part) => {
+    const selector =
+      part === "band"
+        ? "[data-slot=bar-reading]"
+        : "[data-slot=choice-list-skeleton] > li, [data-slot=choice-row]"
+    const el = [...document.querySelectorAll(selector)].find(
+      (node) => node.getClientRects().length > 0,
+    )
+    if (!el) return null
+    const box = el.getBoundingClientRect()
+    return { top: Math.round(box.top + scrollY), height: Math.round(box.height) }
+  }, part)
+
+for (const [label, viewport] of [
+  ["", { width: 1280, height: 800 }],
+  [" on a phone", { width: 390, height: 844 }],
+] as const) {
+  for (const { path, mock, part, hold, today } of HOLDING) {
+    test(`${path}'s first ${part} stands where it lands${label}`, async ({ page }) => {
+      const failing = typeof today === "string" ? today : label ? today?.phone : today?.desk
+      test.fail(Boolean(failing), failing)
+      await page.setViewportSize(viewport)
+      await mock(page)
+      const release = await holdReads(page, hold)
+      await page.goto(path)
+      await expect(page.locator("[data-slot=page]").first()).toBeVisible()
+      await risen(page)
+      const loading = await placeOf(page, part)
+      expect(loading, `${path} draws no ${part} while it loads`).not.toBeNull()
+      release()
+      await expect(page.locator("[data-slot=choice-list-skeleton]")).toHaveCount(0)
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => undefined)
+      await risen(page)
+      expect(await placeOf(page, part), `${path}'s ${part} moved as its reads landed`).toEqual(
+        loading,
+      )
     })
   }
 }

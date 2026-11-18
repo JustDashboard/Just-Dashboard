@@ -255,6 +255,9 @@ test("the row editor submits exact BIGINT digits", async ({ page }) => {
     .getByRole("button", { name: /^Actions for / })
     .click()
   await page.getByRole("menuitem", { name: "Show the row" }).click()
+  // The menu hands focus back to its button once its exit is done. Typing before that and then
+  // pressing Enter presses the button, which opens the menu again instead of submitting the field.
+  await expect(page.getByRole("menu")).toHaveCount(0)
   await field("id").getByRole("textbox").fill("9007199254740993")
   await page.keyboard.press("Enter")
   await field("name").getByRole("textbox").fill("precision")

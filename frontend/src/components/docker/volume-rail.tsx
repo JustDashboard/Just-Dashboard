@@ -1,5 +1,6 @@
 "use client"
 
+import { useSearchParams } from "next/navigation"
 import { Database } from "@/components/icons"
 import { bytes } from "@/lib/format"
 import type { VolumeDetail } from "@/lib/types"
@@ -14,9 +15,10 @@ import {
   splitName,
   standing,
   standingWords,
+  volumeHref,
   volumeProduct,
 } from "@/components/docker/volumes"
-import { DockerRail, DockerRailRow } from "@/components/docker/item-rail"
+import { Rail, RailFigure, RailLine, RailName, RailRow } from "@/components/rail"
 import { ProductLogo } from "@/components/product-logo"
 
 /**
@@ -26,8 +28,7 @@ import { ProductLogo } from "@/components/product-logo"
  * it stands as a dot in the logo's corner, its name, who holds it or what a
  * prune would do to it, and its size; the one on screen is filled.
  *
- * The column itself is the one every Docker item's page has (`item-rail.tsx`);
- * this file is the volume's row.
+ * The column is the shared `Rail`; this file is the volume's row.
  */
 export function VolumeRail({
   volumes,
@@ -54,25 +55,31 @@ export function VolumeRail({
   filtered: boolean
   onClearFilters: () => void
   caption: string
-  onOpen: (name: string) => void
+  /** Opens a volume carrying the page's view; the row's link does the same without it. */
+  onOpen?: (name: string) => void
   className?: string
 }) {
+  const tab = useSearchParams().get("tab") ?? undefined
   return (
-    <DockerRail
+    <Rail
       slot="volume-rail"
       label="Volumes"
-      search={{ label: "Find volumes", placeholder: "Volume, container or path" }}
+      search={{ placeholder: "Volume, container or path", query, onQuery }}
       rows={volumes}
       keyOf={(volume) => volume.name}
       current={(volume) => volume.name === current}
       pinned={currentVolume}
       row={(volume, on) => (
-        <RailRow volume={volume} current={on} productOf={productOf} onOpen={onOpen} />
+        <VolumeRow
+          volume={volume}
+          current={on}
+          productOf={productOf}
+          href={volumeHref(volume.name, tab)}
+          onOpen={onOpen}
+        />
       )}
       loading={loading}
       empty="No volume matches."
-      query={query}
-      onQuery={onQuery}
       filtered={filtered}
       onClearFilters={onClearFilters}
       caption={caption}
@@ -81,16 +88,18 @@ export function VolumeRail({
   )
 }
 
-function RailRow({
+function VolumeRow({
   volume,
   current,
   productOf,
+  href,
   onOpen,
 }: {
   volume: VolumeDetail
   current: boolean
   productOf: Map<string, string>
-  onOpen: (name: string) => void
+  href: string
+  onOpen?: (name: string) => void
 }) {
   const { prefix, rest } = splitName(volume)
   const anonymous = isAnonymous(volume)
@@ -105,12 +114,13 @@ function RailRow({
         : { text: volume.usedBy[0]?.name ?? words.word }
       : { text: words.word, warning: words.warning }
   return (
-    <DockerRailRow
+    <RailRow
       item={volume.name}
       name={volume.name}
       title={volume.name}
       current={current}
-      onOpen={() => onOpen(volume.name)}
+      href={href}
+      onOpen={onOpen && (() => onOpen(volume.name))}
       mark={
         <ProductLogo
           id={volumeProduct(volume, productOf)}
@@ -126,18 +136,12 @@ function RailRow({
         />
       }
       end={
-        <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
+        <RailFigure>
           {size.bytes !== undefined ? bytes(size.bytes) : size.word === "empty" ? "empty" : "—"}
-        </span>
+        </RailFigure>
       }
     >
-      <span
-        className={cn(
-          "block truncate font-mono text-body",
-          current ? "font-semibold" : "font-medium",
-          anonymous && "text-muted-foreground",
-        )}
-      >
+      <RailName current={current} mono className={cn(anonymous && "text-muted-foreground")}>
         {anonymous ? (
           `${shortName(volume)}…`
         ) : (
@@ -146,16 +150,13 @@ function RailRow({
             {rest}
           </>
         )}
-      </span>
-      <span
-        className={cn(
-          "block truncate text-hint",
-          line.warning ? "text-warning" : "text-muted-foreground",
-        )}
+      </RailName>
+      <RailLine
+        ink={line.warning ? "text-warning" : undefined}
         style={line.color ? { color: line.color } : undefined}
       >
         {line.text}
-      </span>
-    </DockerRailRow>
+      </RailLine>
+    </RailRow>
   )
 }

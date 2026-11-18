@@ -2,33 +2,27 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Copy, Eye, Key, Plus, Sparkles, Trash, UserMinus } from "@/components/icons"
+import { Key, Plus, Trash, UserMinus } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, get, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { plural } from "@/lib/format"
 import type { AuthFile } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormSection } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import {
-  InputGroup,
-  InputGroupAddon,
-  InputGroupButton,
-  InputGroupInput,
-  InputGroupToggle,
-} from "@/components/ui/input-group"
+import { SecretField } from "@/components/secret-field"
 import { siteSettingsHref } from "@/components/proxy/site-tabs"
 
 /** Who the login dialog is for: a new login, or a password change for one already there. */
@@ -340,18 +334,6 @@ function AuthFileSheet({
   )
 }
 
-/**
- * 20 characters from 15 random bytes, base64url: 120 bits, well inside bcrypt's
- * 72-byte limit, and nothing in it a shell or a URL would need quoted.
- */
-function generatePassword() {
-  const bytes = new Uint8Array(15)
-  crypto.getRandomValues(bytes)
-  return btoa(String.fromCharCode(...bytes))
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-}
-
 function AuthUserDialog({
   target,
   files,
@@ -366,14 +348,7 @@ function AuthUserDialog({
   const [file, setFile] = useState(target.file)
   const [user, setUser] = useState(target.user)
   const [password, setPassword] = useState("")
-  const [shown, setShown] = useState(false)
   const [busy, setBusy] = useState(false)
-
-  const generate = () => {
-    setPassword(generatePassword())
-    // A generated password nobody can see is one nobody can hand on.
-    setShown(true)
-  }
 
   const submit = async () => {
     setBusy(true)
@@ -441,45 +416,19 @@ function AuthUserDialog({
             </Field>
           </>
         )}
-        <Field
+        {/* Under the field, not behind an ⓘ: the tip would be the dialog's
+            first stop, open on arrival, and take the Escape meant for the
+            dialog. The password is typed here as often as it is made, so it
+            starts hidden. */}
+        <SecretField
+          id="auth-password"
           label={target.change ? "New password" : "Password"}
-          htmlFor="auth-password"
-          // Under the field, not behind an ⓘ: the tip would be the dialog's
-          // first stop, open on arrival, and take the Escape meant for the dialog.
           hint="8 to 72 characters. bcrypt ignores anything past 72."
-        >
-          <InputGroup>
-            <InputGroupInput
-              id="auth-password"
-              type={shown ? "text" : "password"}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              autoComplete="new-password"
-              className={cn(shown && "font-mono")}
-            />
-            <InputGroupAddon align="inline-end" className="gap-0 p-0">
-              <InputGroupToggle
-                icon={Eye}
-                label="Show"
-                aria-label="Show the password"
-                pressed={shown}
-                onPressedChange={setShown}
-              />
-              <InputGroupButton aria-label="Generate a 20-character password" onClick={generate}>
-                <Sparkles className="size-3.5" />
-                <span className="max-sm:hidden">Generate</span>
-              </InputGroupButton>
-              <InputGroupButton
-                aria-label="Copy the password"
-                disabled={!password}
-                onClick={() => void copyText(password, "Password copied")}
-              >
-                <Copy className="size-3.5" />
-                <span className="max-sm:hidden">Copy</span>
-              </InputGroupButton>
-            </InputGroupAddon>
-          </InputGroup>
-        </Field>
+          value={password}
+          onChange={setPassword}
+          shown={false}
+          length={20}
+        />
       </div>
     </Modal>
   )

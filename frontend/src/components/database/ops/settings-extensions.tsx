@@ -5,13 +5,14 @@ import { Plus, Puzzle, Trash } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { GroupRule } from "@/components/flow"
+import { SettingSection } from "@/components/settings/setting-card"
+import { GroupRule } from "@/components/choice-row"
 import { FormNote } from "@/components/form"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows, Notice } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,7 +23,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import {
   CategoryGlyph,
@@ -49,6 +49,7 @@ import {
 import { isDown } from "@/components/database/ops/performance-parts"
 import { usePendingReport } from "@/components/database/ops/settings-pending"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { capitalize } from "@/components/database/kit/figures"
 
 /** A loaded module of a key–value server, from `GET /redis/server`. */
 type ServerModules = { modules: { name: string; version: number }[] }
@@ -92,7 +93,7 @@ function ExtensionRow({
   state?: { text: string; tone?: "warning" }
   action?: React.ReactNode
 }) {
-  const said = about ? about.charAt(0).toUpperCase() + about.slice(1) : undefined
+  const said = about ? capitalize(about) : undefined
   return (
     <li data-extension={name} className="flex h-14 min-w-0 items-center gap-3.5">
       {mark}
@@ -295,7 +296,7 @@ function Extensions() {
         </FormNote>
       ) : !data ? (
         list.error ? (
-          <CouldNotRead what="the extensions" error={list.error} onRetry={list.refresh} />
+          <ErrorState what="the extensions" error={list.error} onRetry={list.refresh} />
         ) : (
           <LoadingRows rows={4} />
         )
@@ -509,7 +510,7 @@ function Modules() {
         </FormNote>
       ) : !modules ? (
         server.error ? (
-          <CouldNotRead what="the modules" error={server.error} onRetry={server.refresh} />
+          <ErrorState what="the modules" error={server.error} onRetry={server.refresh} />
         ) : (
           <LoadingRows rows={2} />
         )

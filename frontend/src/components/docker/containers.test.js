@@ -6,12 +6,12 @@ import {
   matchingContainers,
   STANDALONE,
   exitedWhen,
-  exitWords,
   networkRates,
   oomKilledIds,
   recentEntries,
   sortContainers,
 } from "./containers"
+import { exitWords } from "./words"
 
 const container = (over) => ({
   id: "a".repeat(64),

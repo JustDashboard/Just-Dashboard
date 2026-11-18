@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { Status, StatusDot, type DotTone } from "@/components/status-dot"
@@ -12,8 +12,8 @@ import {
   hasEvidence,
   resultReading,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
-import { runTarget, runTool } from "@/lib/network-runs-view"
+} from "@/lib/network/diagnostics"
+import { runTarget, runTool } from "@/lib/network/runs-view"
 import { cn } from "@/lib/utils"
 import { PathReport } from "./path-report"
 import { ProbeEvidence } from "./tools/probe-evidence"
@@ -83,15 +83,6 @@ export function RunResult({ run }: { run: DiagnosticRun }) {
         <Well className="max-h-48 break-all whitespace-pre-wrap" aria-label="Probe error">
           {run.error}
         </Well>
-      )}
-      {run.scope.limitations.length > 0 && (
-        <ul className="space-y-1" aria-label="Scope limits">
-          {run.scope.limitations.map((line) => (
-            <li key={line} className="text-hint text-muted-foreground">
-              {line}
-            </li>
-          ))}
-        </ul>
       )}
     </div>
   )
@@ -197,6 +188,17 @@ export function RunDetails({ run }: { run: DiagnosticRun }) {
         <Detail label="Outcome source">
           {run.outcomeSource?.replaceAll("_", " ") || "Awaiting outcome"}
         </Detail>
+        {/* What the run could not see is a fact of its record, not a list
+            under its result. */}
+        {run.scope.limitations.length > 0 && (
+          <Detail label="Scope limits">
+            <ul className="space-y-1" aria-label="Scope limits">
+              {run.scope.limitations.map((line) => (
+                <li key={line}>{line}</li>
+              ))}
+            </ul>
+          </Detail>
+        )}
         <Detail label="Run">
           <span className="font-mono break-all">{run.id}</span>
         </Detail>

@@ -47,6 +47,15 @@ function watchScrolls() {
 }
 
 /**
+ * The name of an icon control, for a pointer that rests on it and a keyboard
+ * that lands on it: "Copy", "Remove the route to 10.0.0.0/8". Nothing more.
+ *
+ * A tooltip cannot be opened on a touch screen — a tap closes it — so it never
+ * carries anything a reader needs: an explanation, a reason, a definition is an
+ * `Explain` (`components/explain.tsx`), which opens on a press too. Its content
+ * is hoverable, as Radix has it by default: this wrapper used to turn that
+ * off, so a pointer moving onto the bubble to read it closed it (WCAG 1.4.13).
+ *
  * Radix closes a tooltip when anything around its trigger scrolls, since a
  * tooltip a pointer opened is then no longer under the pointer. A keyboard is
  * another matter: tabbing to a trigger below the fold opens its tooltip and
@@ -55,12 +64,19 @@ function watchScrolls() {
  * comes with a scroll, while the trigger still holds the focus that opened
  * it a moment ago, is that scroll and is not followed. Escape, a blur, a
  * pointer leaving and a scroll the reader makes later close it as before.
+ *
+ * Hoverable only while it is open. Radix keeps a closing bubble mounted for
+ * its fade, and a hoverable one still listens for the pointer leaving its
+ * trigger: a press closed the tip, the pointer moved straight on to the next
+ * control, and the bubble that was fading out marked the pointer as on its way
+ * to it, so the next control's own tip did not open until the pointer moved
+ * again. A closed tip has nothing to move onto, so it keeps no grace area.
  */
 function Tooltip({
-  disableHoverableContent = true,
   open,
   defaultOpen = false,
   onOpenChange,
+  disableHoverableContent,
   ...props
 }: React.ComponentProps<typeof TooltipPrimitive.Root>) {
   const focused = React.useRef<Focused | null>(null)
@@ -89,9 +105,9 @@ function Tooltip({
     <FocusedContext.Provider value={noteFocus}>
       <TooltipPrimitive.Root
         data-slot="tooltip"
-        disableHoverableContent={disableHoverableContent}
         open={open ?? shown}
         onOpenChange={change}
+        disableHoverableContent={disableHoverableContent || !(open ?? shown)}
         {...props}
       />
     </FocusedContext.Provider>
@@ -127,13 +143,13 @@ function TooltipContent({
         data-slot="tooltip-content"
         sideOffset={sideOffset}
         className={cn(
-          "z-50 w-fit origin-(--radix-tooltip-content-transform-origin) animate-in rounded-md bg-foreground px-3 py-1.5 text-xs text-balance text-background fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
+          "z-tooltip w-fit origin-(--radix-tooltip-content-transform-origin) animate-in rounded-md bg-foreground px-3 py-1.5 text-xs text-balance text-background fade-in-0 zoom-in-95 data-[side=bottom]:slide-in-from-top-2 data-[side=left]:slide-in-from-right-2 data-[side=right]:slide-in-from-left-2 data-[side=top]:slide-in-from-bottom-2 data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=closed]:zoom-out-95",
           className,
         )}
         {...props}
       >
         {children}
-        <TooltipPrimitive.Arrow className="z-50 size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-[2px] bg-foreground fill-foreground" />
+        <TooltipPrimitive.Arrow className="z-tooltip size-2.5 translate-y-[calc(-50%_-_2px)] rotate-45 rounded-xs bg-foreground fill-foreground" />
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   )

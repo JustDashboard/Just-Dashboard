@@ -4,8 +4,8 @@ import Link from "next/link"
 import { useEffect, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
-import { WireMark } from "@/components/deploy/wire"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { WireMark } from "@/components/wire/wire"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import {
   Crosshair,
   Download,
@@ -21,10 +21,13 @@ import {
   Wrench,
   type Icon,
 } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { PageContext, SearchInput } from "@/components/page"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { Ago } from "@/components/ago"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -34,28 +37,28 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { del, downloadUrl, get, post } from "@/lib/api"
-import { bytes, plural, timestamp } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import {
   captureFinished,
   captureReading,
   type CaptureDraft,
   type CaptureList,
   type CaptureRun,
-} from "@/lib/network-captures"
+} from "@/lib/network/captures"
 import {
   captureLine,
   captureMatches,
   captureStateWord,
   captureTotals,
-} from "@/lib/network-runs-view"
+} from "@/lib/network/runs-view"
 import type { NetworkLink } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { CaptureCreate } from "./capture-create"
-import { PhoneState, StateTile, interfaceMark } from "./diagnostic-marks"
+import { PhoneState, interfaceMark } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { NetworkReadWarning } from "./read-warning"
 
 /** The list's search, shared with the rail on a capture's page. */
@@ -114,10 +117,9 @@ export function Captures() {
     return (
       <>
         <PageContext title="Packet captures" />
-        <EmptyState
-          icon={Crosshair}
-          title="Packet captures require the admin capability"
-          description="Original packet bytes and private filter tuples are available only to server administrators."
+        <NeedsAdmin
+          what="Packet captures"
+          why="Packet bytes and filter tuples are private to administrators."
         />
       </>
     )
@@ -182,33 +184,22 @@ export function Captures() {
         <Panel plain aria-label="Captures">
           <PanelHeader
             title="Captures"
+            count={list ? runs.length : undefined}
             actions={
-              <span className="flex min-w-0 flex-wrap items-center gap-3">
-                <SearchInput
-                  value={query}
-                  onChange={(event) => setQuery(event.target.value)}
-                  placeholder="Name, interface or address"
-                  aria-label="Search the captures"
-                />
-                <span className="numeric text-hint text-muted-foreground">
-                  {list ? plural(runs.length, "capture") : " "}
-                </span>
-              </span>
+              <SearchInput
+                value={query}
+                onChange={(event) => setQuery(event.target.value)}
+                placeholder="Name, interface or address"
+                aria-label="Search the captures"
+              />
             }
           />
           <PanelBody>
             {!list ? (
-              <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+              <ChoiceListSkeleton rows={3} lines={2} />
             ) : shown.length === 0 ? (
-              <EmptyNote>
-                No capture matches.{" "}
-                <button
-                  type="button"
-                  className="rounded-sm font-medium text-foreground focus-ring hover:underline"
-                  onClick={() => setQuery("")}
-                >
-                  Clear the search
-                </button>
+              <EmptyNote action={{ label: "Clear the search", onClick: () => setQuery("") }}>
+                No capture matches.
               </EmptyNote>
             ) : (
               <ChoiceList aria-label="Packet captures">
@@ -249,8 +240,9 @@ function CapturesIdentity({
 }) {
   const totals = list ? captureTotals(list) : undefined
   return (
-    <HostIdentity
+    <IdentityHeader
       label="About packet captures"
+      loading={!list && !failed}
       fallback={Crosshair}
       title="Packet captures"
       state={
@@ -263,25 +255,22 @@ function CapturesIdentity({
         ) : failed ? (
           <Status tone="unknown" label="Not read" />
         ) : (
-          <TextShimmer className="text-xs">Reading…</TextShimmer>
+          true
         )
       }
       facts={
         list && totals ? (
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {totals.retained} of {list.maxRetained} kept
-            </span>
-            <FactDot />
-            <span className="numeric">{bytes(totals.bytes)} of packet data</span>
-            <FactDot />
-            <span className="numeric">kept {list.retentionHours} hours</span>
-            <FactDot />
-            <span className="numeric">up to {list.maxRunning} at once</span>
+            </Fact>
+            <Fact className="numeric">{bytes(totals.bytes)} of packet data</Fact>
+            <Fact className="numeric">kept {list.retentionHours} hours</Fact>
+            <Fact className="numeric">up to {list.maxRunning} at once</Fact>
           </>
-        ) : (
+        ) : failed ? (
           <span>&nbsp;</span>
-        )
+        ) : undefined
       }
       command={
         <Button size="sm" onClick={onNew}>
@@ -327,7 +316,7 @@ function CaptureRow({
   return (
     <ChoiceRow
       workspaceItem={{ id: run.id, name: run.name }}
-      leading={<StateTile {...interfaceMark(run.request.interface, links)} tone={reading.tone} />}
+      leading={<StateMark {...interfaceMark(run.request.interface, links)} tone={reading.tone} />}
       title={run.name}
       verb={`Open ${run.name}`}
       href={captureHref(run.id)}
@@ -345,12 +334,13 @@ function CaptureRow({
               ? `${plural(run.result.packets, "packet")} · ${bytes(run.result.bytes)}`
               : "—"}
           </span>
-          <time
-            dateTime={run.createdAt}
-            className="numeric w-36 truncate text-right text-hint text-muted-foreground max-lg:hidden"
-          >
-            {timestamp(run.createdAt)}
-          </time>
+          {/* How long ago, as rows say it everywhere; the instant is its title. */}
+          <Ago
+            at={run.createdAt}
+            units={2}
+            live={false}
+            className="w-24 truncate text-right text-hint text-muted-foreground max-lg:hidden"
+          />
           <span className="flex w-28 justify-end max-sm:hidden">
             <Status tone={reading.tone} label={word} />
           </span>
@@ -413,7 +403,7 @@ export function useCaptureActions(
             confirm({
               title: "Delete packet capture",
               subject: {
-                mark: <StateTile glyph={NetworkDevice} tone={captureReading(run).tone} size="sm" />,
+                mark: <StateMark glyph={NetworkDevice} tone={captureReading(run).tone} size="sm" />,
                 name: run.name,
                 facts: <span className="font-mono">{captureLine(run)}</span>,
               },

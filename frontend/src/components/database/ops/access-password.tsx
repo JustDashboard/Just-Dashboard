@@ -12,7 +12,7 @@ import {
   SecretShown,
 } from "@/components/database/ops/access-parts"
 import type { DbRole, DbRoleAltered } from "@/components/database/ops/access-types"
-import { generatePassword } from "@/components/database/connect/rules"
+import { generatePassword } from "@/lib/password"
 import { TaskDialog } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
 

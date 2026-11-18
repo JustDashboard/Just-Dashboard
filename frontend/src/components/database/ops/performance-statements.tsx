@@ -8,12 +8,13 @@ import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { Segments } from "@/components/deploy/settings/segments"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { Segments } from "@/components/segments"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { FormFact, InfoTip } from "@/components/form"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingPanel } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import {
   Table,
@@ -40,14 +41,13 @@ import {
   statementSorts,
 } from "@/components/database/ops/performance-figures"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
-  Stale,
+  RETURNS_FOCUS,
   StatementLine,
-  ViewRead,
   useAsk,
   useReturnFocus,
-  RETURNS_FOCUS,
 } from "@/components/database/ops/performance-parts"
 import { statementsFilterKey } from "@/components/database/ops/performance-lists"
 import { Fig, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
@@ -55,6 +55,7 @@ import { useStatementsSetup } from "@/components/database/ops/statements-setup"
 import { setupStart } from "@/components/database/ops/statements-setup-model"
 import type { DbStatementSort, DbStatements } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
 
 /** How many statements the list asks for, and how many when the reader wants more. The server's cap is 200. */
 const TOP = 50
@@ -211,7 +212,12 @@ export function StatementsView() {
         )}
         {narrow && filterBox}
       </PanelHeader>
-      <ViewRead poll={statements} what="the statements" skeleton={<LoadingPanel plain rows={8} />}>
+      <Read
+        patience
+        poll={statements}
+        what="the statements"
+        skeleton={<LoadingPanel plain rows={8} />}
+      >
         {(answer) =>
           !answer.supported ? (
             <div className="pt-4">
@@ -253,13 +259,13 @@ export function StatementsView() {
                   </Button>
                 )}
               </div>
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {answer.statements.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No {engine.nouns.statement} has been counted yet. The list fills as they run.
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">No statement matches {filter.trim()}.</EmptyNote>
+                  <EmptyNote>No statement matches {filter.trim()}.</EmptyNote>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -335,7 +341,7 @@ export function StatementsView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }

@@ -8,10 +8,10 @@ import {
   readNativeProfile,
   type NativeFamily,
   type NativeProfile,
-} from "@/lib/network-native-profile"
+} from "@/lib/network/native-profile"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { Detail, DetailList } from "@/components/page"
+import { SettingSection } from "@/components/settings/setting-card"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Field, FieldRow, FormSection, InfoTip, OptionRow } from "@/components/form"
 import { Status } from "@/components/status-dot"
 import { NetworkReadWarning } from "@/components/network/read-warning"

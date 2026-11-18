@@ -1,12 +1,14 @@
 "use client"
 
 import { useState } from "react"
+import { ChipCount } from "@/components/chips"
 import { ChevronDown } from "@/components/icons"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { RailNoMatch } from "@/components/database/workbench/rail"
 
 /**
  * Which tables a read covers: all of them, or the ones ticked.
@@ -53,15 +55,19 @@ export function TablePicker({
           className="h-7 shrink-0 gap-1.5 px-2.5 text-xs max-sm:h-10"
           disabled={Boolean(disabledWhy) || loading || names.length === 0}
         >
-          {disabledWhy
-            ? `Every ${engine.nouns.object}`
-            : loading
-              ? `Reading the ${engine.nouns.objects}…`
-              : names.length === 0
-                ? `No ${engine.nouns.objects}`
-                : every
-                  ? `Every ${engine.nouns.object} (${names.length})`
-                  : `${picked.length} of ${names.length} ${engine.nouns.objects}`}
+          {disabledWhy ? (
+            `Every ${engine.nouns.object}`
+          ) : loading ? (
+            `Reading the ${engine.nouns.objects}…`
+          ) : names.length === 0 ? (
+            `No ${engine.nouns.objects}`
+          ) : every ? (
+            <>
+              Every {engine.nouns.object} <ChipCount>{names.length}</ChipCount>
+            </>
+          ) : (
+            `${picked.length} of ${names.length} ${engine.nouns.objects}`
+          )}
           <ChevronDown className="size-3" />
         </Button>
       </PopoverTrigger>
@@ -92,11 +98,7 @@ export function TablePicker({
               </li>
             )
           })}
-          {listed.length === 0 && (
-            <li className="px-2 py-3 text-center text-hint text-muted-foreground">
-              Nothing here is called that.
-            </li>
-          )}
+          {listed.length === 0 && <RailNoMatch as="li" onClear={() => setFind("")} />}
         </ul>
         <div className="flex items-center justify-between gap-2 border-t border-hairline p-1.5">
           <span className="px-1 text-hint text-muted-foreground">

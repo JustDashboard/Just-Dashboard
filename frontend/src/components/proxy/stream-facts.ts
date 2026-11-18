@@ -156,15 +156,18 @@ export function sessionsWords(traffic: Pick<StreamTraffic, "sessions" | "complet
   return `${traffic.sessions.toLocaleString()}${floor} ${traffic.sessions === 1 ? "session" : "sessions"}`
 }
 
-/** How long sessions lasted, in words: half inside 2.4 s, and the rest as its detail. */
+/**
+ * How long sessions lasted, in words: half inside 2.4 s, and as its detail
+ * the bulk and the longest. The 99-in-100 figure was a third clause the
+ * reading's detail could not hold once the readings stood in two columns
+ * beside the rail; between nine in ten and the longest it said least.
+ */
 export function lengthWords(span: StreamTraffic["duration"]): { reading: string; hint: string } {
   return {
     reading: latencyWords("p50", sessionLength(span.p50)),
-    hint: [
-      latencyWords("p90", sessionLength(span.p90)),
-      latencyWords("p99", sessionLength(span.p99)),
-      `longest ${sessionLength(span.max)}`,
-    ].join(" · "),
+    hint: [latencyWords("p90", sessionLength(span.p90)), `longest ${sessionLength(span.max)}`].join(
+      " · ",
+    ),
   }
 }
 

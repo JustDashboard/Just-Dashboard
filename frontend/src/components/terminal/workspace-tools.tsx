@@ -10,13 +10,15 @@ import type { FileContent, GitDetect, GitFileChange, GitStatus } from "@/lib/typ
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { CodeEditor } from "@/components/code-editor"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { FileTree, type ConfirmRequest } from "@/components/files/file-tree"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import { GitTools } from "@/components/terminal/git-tools"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Pane, PaneHeader } from "@/components/panel"
 
 type Overlay = { kind: "file"; path: string } | null
@@ -338,7 +340,7 @@ function InlineFile({
   }
 
   return (
-    <div className="absolute inset-0 z-20 flex flex-col bg-card">
+    <div className="absolute inset-0 z-sticky flex flex-col bg-card">
       <PaneHeader className="gap-2">
         <span className="min-w-0 flex-1 truncate font-mono text-xs" title={path}>
           {path.split("/").pop()}
@@ -431,7 +433,7 @@ function InlineFile({
             foot of the text where the eye already is, and leaves once the
             file on disk matches it again. */}
         {dirty && canWrite && !showDiff && (
-          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-10 flex justify-center px-3">
+          <div className="pointer-events-none absolute inset-x-0 bottom-3 z-raised flex justify-center px-3">
             <div className="pointer-events-auto flex animate-rise items-center gap-1 rounded-lg border border-border-strong bg-popover py-1 pr-1 pl-3 text-popover-foreground shadow-lg">
               <span className="mr-1 text-xs text-muted-foreground">Unsaved changes</span>
               <Button
@@ -487,7 +489,7 @@ function InlineConfirm({ request, onClose }: { request: ConfirmRequest; onClose:
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
   return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center bg-background/70 p-3 backdrop-blur-sm">
+    <div className="absolute inset-0 z-pane flex items-center justify-center bg-background/70 p-3 backdrop-blur-sm">
       <div className="w-full max-w-sm rounded-xl border bg-card p-4 shadow-lg">
         <p className="text-body font-medium">{request.title}</p>
         {request.body && (

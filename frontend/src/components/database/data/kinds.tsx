@@ -18,19 +18,19 @@ export type RowObjectKind = "table" | "view" | "materialized view" | "dictionary
 type KindSpec = { label: string; plural: string; icon: Icon; hue: string }
 
 export const ROW_OBJECT_KINDS: Record<RowObjectKind, KindSpec> = {
-  table: { label: "Table", plural: "Tables", icon: Table, hue: "text-(--tag-blue)" },
-  view: { label: "View", plural: "Views", icon: Eye, hue: "text-(--tag-violet)" },
+  table: { label: "Table", plural: "Tables", icon: Table, hue: "text-tag-blue" },
+  view: { label: "View", plural: "Views", icon: Eye, hue: "text-tag-violet" },
   "materialized view": {
     label: "Materialized view",
     plural: "Materialized views",
     icon: Layers,
-    hue: "text-(--tag-cyan)",
+    hue: "text-tag-cyan",
   },
   dictionary: {
     label: "Dictionary",
     plural: "Dictionaries",
     icon: BookOpen,
-    hue: "text-(--tag-pink)",
+    hue: "text-tag-pink",
   },
 }
 

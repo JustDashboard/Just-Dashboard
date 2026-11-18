@@ -11,8 +11,9 @@ import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { Textarea } from "@/components/ui/textarea"
-import { SearchInput } from "@/components/page"
-import { Notice, Spinner } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { EmptyNote, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -251,9 +252,13 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
                       </li>
                     ))}
                     {visible.length === 0 && (
-                      <li className="px-2.5 py-3 text-center text-hint text-muted-foreground">
-                        Nothing matches.
-                      </li>
+                      <EmptyNote
+                        as="li"
+                        dense
+                        action={{ label: "Clear the search", onClick: () => setQuery("") }}
+                      >
+                        Nothing matches “{query}”.
+                      </EmptyNote>
                     )}
                   </ul>
                 )}

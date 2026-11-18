@@ -4,10 +4,8 @@ import { ChevronDown, Cross } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { FileBookmark, FilePlaces } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
-import { LoadingRows } from "@/components/state"
-import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { rowReveal } from "@/components/icon-action"
+import { LoadingRows } from "@/components/loading"
+import { IconAction } from "@/components/icon-action"
 import {
   PlaceMark,
   placeSections,
@@ -113,23 +111,20 @@ export function FilesSidebar({
                       trailing={
                         canWrite &&
                         row.bookmark && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="icon-xs"
-                                variant="ghost"
-                                className={cn("text-muted-foreground", rowReveal("row"))}
-                                aria-label={`Unstar ${row.name}`}
-                                onClick={(e) => {
-                                  e.stopPropagation()
-                                  onBookmarksChange(bookmarks.filter((b) => b.path !== row.path))
-                                }}
-                              >
-                                <Cross />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Unstar</TooltipContent>
-                          </Tooltip>
+                          <IconAction
+                            size="icon-xs"
+                            label={`Unstar ${row.name}`}
+                            tooltip="Unstar"
+                            className="text-muted-foreground [&_svg:not([class*='size-'])]:size-3"
+                            reveal
+                            revealGroup="row"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              onBookmarksChange(bookmarks.filter((b) => b.path !== row.path))
+                            }}
+                          >
+                            <Cross />
+                          </IconAction>
                         )
                       }
                     />

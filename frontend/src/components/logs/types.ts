@@ -1,8 +1,8 @@
-import type { LogLevel } from "@/lib/log-filter"
+import type { LogLevel } from "@/lib/log/filter"
 
 /**
  * Field predicates, by key: `{ event: ["auth_failed"], client: ["!10.0.0.2"] }`.
- * Each value is one `f=key:value` on the wire, in the grammar `lib/log-filter.ts`
+ * Each value is one `f=key:value` on the wire, in the grammar `lib/log/filter.ts`
  * reads — exact, `!`, `~`, `*`, `>`/`<` — so the values of one key keep their
  * own operators rather than the map pretending they are all "equals".
  */

@@ -12,10 +12,12 @@ import type {
   DeploymentStep,
   DeploymentSummary,
 } from "@/lib/types"
-import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { hasProductLogo } from "@/components/product-logo"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import {
   formatDuration,
@@ -51,7 +53,10 @@ import {
  *
  * It replaced an identity line with a 48px tile, two lines of facts and the
  * duration as a 24px figure at the far end under the verbs — three rows on
- * the right for one reading, and the tallest header in the section.
+ * the right for one reading, and the tallest header in the section. Then it
+ * hand-built the project header's grid as a copy; it is that header now
+ * (`IdentityHeader`), so the state, the verbs and the phone's order are the
+ * project's own, and its facts are a `FactLine`.
  */
 export function RunHeader({
   run,
@@ -125,21 +130,21 @@ export function RunHeader({
   const forge = deployment && git ? sourceProduct(deployment) : undefined
 
   return (
-    <section
-      aria-label={`About deployment #${run.runNumber}`}
-      data-slot="run-identity"
-      className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-2 border-b border-hairline pb-4 sm:gap-y-0.5"
-    >
-      {deployment ? (
-        <ProjectMark deployment={deployment} product={product} className="sm:row-span-2" />
-      ) : (
-        <span aria-hidden className="size-10 rounded-lg border border-hairline sm:row-span-2" />
-      )}
-      <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 max-sm:contents">
-        <p className="flex max-w-full min-w-0 text-title font-semibold tracking-tight max-sm:col-span-2">
-          <span className={cn("truncate", titleIsLiteral && "font-mono text-body")}>{title}</span>
-        </p>
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs max-sm:order-1 max-sm:col-span-3">
+    <IdentityHeader
+      label={`About deployment #${run.runNumber}`}
+      slot="run-identity"
+      logo={
+        deployment ? (
+          <ProjectMark deployment={deployment} product={product} />
+        ) : (
+          <span aria-hidden className="size-10 rounded-lg border border-hairline" />
+        )
+      }
+      title={
+        <span className={cn("truncate", titleIsLiteral && "font-mono text-body")}>{title}</span>
+      }
+      state={
+        <span className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
           <RunStatus state={run.state} operation={run.operation} live />
           {working && (
             <TextShimmer className="font-medium">
@@ -151,92 +156,104 @@ export function RunHeader({
             <span>{unclaimed ? "Queued for" : active ? "Running for" : "Took"}</span>
             <span className="numeric font-medium text-foreground">{formatDuration(seconds)}</span>
           </span>
-        </div>
-      </div>
-      {/* On a phone the verbs take a row of their own under the state they
-          answer: beside the title, "Deploy with current settings" left the
-          title three letters. */}
-      <div className="flex shrink-0 flex-wrap items-center gap-2 max-sm:order-2 max-sm:col-span-3 sm:row-span-2 sm:justify-end">
-        {verbs}
-      </div>
-      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:order-3 sm:col-span-1 sm:col-start-2">
-        <span className="numeric font-medium text-foreground">Deployment #{run.runNumber}</span>
-        {git && title !== branch && <BranchChip branch={branch} className="max-w-48" />}
-        {git
-          ? revision && (
-              <span className="inline-flex items-center gap-1.5">
-                {hasProductLogo(forge) && <ProductGlyph id={forge} />}
-                <ShortSha sha={shortRevision(revision)} />
-              </span>
-            )
-          : kind && revision && <span className="font-mono">{shortIdentity(revision)}</span>}
-        {commit?.author && (
-          <span className="inline-flex min-w-0 items-center gap-1.5">
-            <AuthorMark name={commit.author} />
-            <span className="truncate max-sm:hidden">{commit.author}</span>
-            {commit.authoredAt && (
-              <span className="max-sm:hidden">· {relativeTime(commit.authoredAt)}</span>
-            )}
-          </span>
-        )}
-        <span className="inline-flex min-w-0 items-center gap-1.5">
-          <RunActorMark run={run} remote={deployment?.sourceRemote} size="xs" />
-          <span className="font-medium text-foreground/85">{operationLabel(run.operation)}</span>
-          <span>{runTriggerLine(run)}</span>
         </span>
-        {(environment || deployment) && <span>{environment ?? deployment?.environmentName}</span>}
-        <time dateTime={run.requestedAt} title={relativeTime(run.requestedAt)}>
-          {timestamp(run.requestedAt)}
-        </time>
-        <span className="numeric">{slot}</span>
-        {rollsBackTo !== undefined && (
-          <span className="numeric">rolls back to release #{rollsBackTo}</span>
-        )}
-        {/* Where the image comes from, since a promotion built nothing: the
-            staging release — or for staging, the pull request whose preview
-            built it, at its commit — and the image's own id, which the
-            target runs. */}
-        {promotion && origin && (
-          <span data-slot="run-promotion" className="inline-flex min-w-0 items-center gap-1.5">
-            <Link
-              href={`/deploy/${projectId}/runs/${promotion.runId}`}
-              className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
-              title={origin.approvedBy ? `Approved by ${origin.approvedBy}` : undefined}
-            >
-              {origin.kind === "preview" ? (
-                <>
-                  promoted from {origin.from}
-                  {origin.sha && <span className="font-mono"> ({origin.sha})</span>}
-                </>
-              ) : (
-                <>from {origin.from}</>
-              )}
-            </Link>
-            <span className="truncate font-mono" title={promotion.imageId}>
-              image {shortIdentity(promotion.imageId)}
+      }
+      command={verbs}
+      facts={
+        <>
+          <Fact className="numeric font-medium text-foreground">Deployment #{run.runNumber}</Fact>
+          {git && title !== branch && (
+            <Fact>
+              <BranchChip branch={branch} className="max-w-48" />
+            </Fact>
+          )}
+          {git
+            ? revision && (
+                <Fact product={hasProductLogo(forge) ? forge : undefined}>
+                  <ShortSha sha={shortRevision(revision)} />
+                </Fact>
+              )
+            : kind && revision && <Fact mono>{shortIdentity(revision)}</Fact>}
+          {commit?.author && (
+            <Fact>
+              <span className="inline-flex min-w-0 items-center gap-1.5">
+                <AuthorMark name={commit.author} />
+                <span className="truncate max-sm:hidden">{commit.author}</span>
+              </span>
+            </Fact>
+          )}
+          {commit?.authoredAt && (
+            <Fact className="max-sm:hidden">{relativeTime(commit.authoredAt)}</Fact>
+          )}
+          <Fact>
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <RunActorMark run={run} remote={deployment?.sourceRemote} size="xs" />
+              <span className="font-medium text-foreground">{operationLabel(run.operation)}</span>
+              <span>{runTriggerLine(run)}</span>
             </span>
-          </span>
-        )}
-        {run.retryOfRunId && (
-          <Link
-            href={`/deploy/${projectId}/runs/${run.retryOfRunId}`}
-            className="rounded-sm focus-ring hover:text-foreground hover:underline"
-          >
-            retry of an earlier run
-          </Link>
-        )}
-        {run.supersededBy && (
-          <Link
-            href={`/deploy/${projectId}/runs/${run.supersededBy}`}
-            className="rounded-sm focus-ring hover:text-foreground hover:underline"
-          >
-            superseded by a newer run
-          </Link>
-        )}
-        {changedPaths > 0 && (
-          <span className="numeric">{plural(changedPaths, "path")} changed</span>
-        )}
-      </div>
-    </section>
+          </Fact>
+          {(environment || deployment) && <Fact>{environment ?? deployment?.environmentName}</Fact>}
+          <Fact>
+            <time dateTime={run.requestedAt} title={relativeTime(run.requestedAt)}>
+              {timestamp(run.requestedAt)}
+            </time>
+          </Fact>
+          <Fact className="numeric">{slot}</Fact>
+          {rollsBackTo !== undefined && (
+            <Fact className="numeric">rolls back to release #{rollsBackTo}</Fact>
+          )}
+          {/* Where the image comes from, since a promotion built nothing: the
+              staging release — or for staging, the pull request whose preview
+              built it, at its commit — and the image's own id, which the
+              target runs. */}
+          {promotion && origin && (
+            <Fact>
+              <span data-slot="run-promotion" className="inline-flex min-w-0 items-center gap-1.5">
+                <Link
+                  href={`/deploy/${projectId}/runs/${promotion.runId}`}
+                  className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
+                  title={origin.approvedBy ? `Approved by ${origin.approvedBy}` : undefined}
+                >
+                  {origin.kind === "preview" ? (
+                    <>
+                      promoted from {origin.from}
+                      {origin.sha && <span className="font-mono"> ({origin.sha})</span>}
+                    </>
+                  ) : (
+                    <>from {origin.from}</>
+                  )}
+                </Link>
+                <span className="truncate font-mono" title={promotion.imageId}>
+                  image {shortIdentity(promotion.imageId)}
+                </span>
+              </span>
+            </Fact>
+          )}
+          {run.retryOfRunId && (
+            <Fact>
+              <Link
+                href={`/deploy/${projectId}/runs/${run.retryOfRunId}`}
+                className="rounded-sm focus-ring hover:text-foreground hover:underline"
+              >
+                retry of an earlier run
+              </Link>
+            </Fact>
+          )}
+          {run.supersededBy && (
+            <Fact>
+              <Link
+                href={`/deploy/${projectId}/runs/${run.supersededBy}`}
+                className="rounded-sm focus-ring hover:text-foreground hover:underline"
+              >
+                superseded by a newer run
+              </Link>
+            </Fact>
+          )}
+          {changedPaths > 0 && (
+            <Fact className="numeric">{plural(changedPaths, "path")} changed</Fact>
+          )}
+        </>
+      }
+    />
   )
 }

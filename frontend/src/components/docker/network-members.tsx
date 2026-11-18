@@ -1,8 +1,7 @@
 "use client"
 
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { RowLink } from "@/components/page"
+import { RowLink } from "@/components/row-link"
 import { ProductLogo, containerProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Status } from "@/components/status-dot"
@@ -23,6 +22,7 @@ import type { Container, DockerNetwork, NetworkEndpoint, NetworkLivePoint } from
 import { cn } from "@/lib/utils"
 import { HueKey } from "@/components/docker/network-band"
 import { answersTo, bareAddress, networkHue } from "@/components/docker/networks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export type Placement = { network: DockerNetwork; endpoint?: NetworkEndpoint }
 
@@ -65,7 +65,7 @@ type RowsProps = {
  */
 export function ContainerNetworkRows({ rows, ...rest }: RowsProps & { rows: Container[] }) {
   const arrived = useArrivals(rows.map((c) => c.id))
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   if (!wide) {
     return (
       <ul aria-label="Containers" className="divide-y divide-hairline px-4">
@@ -81,7 +81,7 @@ export function ContainerNetworkRows({ rows, ...rest }: RowsProps & { rows: Cont
     )
   }
   return (
-    <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+    <Table className="table-fixed" containerClassName="max-h-rail">
       <TableHeader className={stickyTableHeader}>
         <TableRow>
           <TableHead>Container</TableHead>

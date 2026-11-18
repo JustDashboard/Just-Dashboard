@@ -12,7 +12,7 @@ import {
   windowQuery,
   windowRefreshMs,
   type ContainerRow,
-} from "@/lib/metrics-range"
+} from "@/lib/metrics/range"
 import type { ContainerHistory } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMetricEvents } from "@/hooks/use-metrics-history"

@@ -4,7 +4,7 @@ import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "
 import { motion, useReducedMotion } from "motion/react"
 import { Cross } from "@/components/icons"
 import { get } from "@/lib/api"
-import { plural, relativeTime, timestamp } from "@/lib/format"
+import { grouped, plural, relativeTime, timestamp } from "@/lib/format"
 import {
   GRAPH_PAD,
   GRAPH_ROW,
@@ -20,7 +20,7 @@ import { usePoll } from "@/hooks/use-poll"
 import type { GitPreview } from "@/components/git/preview-panel"
 import { SourceFork } from "@/components/git/glyphs"
 import { parseRefs, RefTags } from "@/components/git/ref-tags"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import {
   Select,
   SelectContent,
@@ -28,7 +28,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { PaneHeader } from "@/components/panel"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Button } from "@/components/ui/button"
@@ -215,7 +216,7 @@ export function GraphPanel({
   const height = rows.length * GRAPH_ROW
   const edges = useMemo(() => graphEdges(rows, height), [rows, height])
   const total = view.total ?? rows.length
-  const count = (n: number) => n.toLocaleString()
+  const count = (n: number) => grouped(n)
   const noun = (n: number) => (searching ? plural(n, "match", "matches") : plural(n, "commit"))
   const status = view.hasMore
     ? page.loading

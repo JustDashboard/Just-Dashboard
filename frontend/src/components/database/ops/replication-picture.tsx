@@ -4,7 +4,7 @@ import { createRef, useMemo, useRef, type RefObject } from "react"
 import { Archive, Servers } from "@/components/icons"
 import { bytes, duration, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { LegendLine } from "@/components/database/fleet/wiring"
@@ -17,6 +17,7 @@ import type {
   DbReplicationSlot,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { agree } from "@/components/database/kit/figures"
 
 /** How far behind a replica may fall before its line turns amber, in seconds. */
 const LAG_WARNING = 60
@@ -186,9 +187,7 @@ export function ReplicationPicture({ data }: { data: DbReplication }) {
                   <WireMark tone="logo" size="lg">
                     <EngineGlyph engine={engine} />
                   </WireMark>
-                  <span className="absolute -right-0.5 -bottom-0.5 flex size-4 items-center justify-center rounded-full bg-background">
-                    <StatusDot state={running ? "running" : "stopped"} />
-                  </span>
+                  <StatusDot corner="lg" state={running ? "running" : "stopped"} />
                 </span>
               }
               eyebrow={`${ROLE[data.role] ?? data.role} · ${summary?.version ?? engine.label}`}
@@ -282,7 +281,7 @@ export function ReplicationPicture({ data }: { data: DbReplication }) {
       </div>
       {idle > 0 && (
         <p className="sr-only">
-          {plural(idle, "slot")} with no reader {idle === 1 ? "holds" : "hold"} the log back.
+          {plural(idle, "slot")} with no reader {agree(idle, "holds", "hold")} the log back.
         </p>
       )}
     </section>

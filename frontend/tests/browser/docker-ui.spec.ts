@@ -836,8 +836,11 @@ test("the container page can act on the container it is describing", async ({ pa
   await page.getByRole("button", { name: "web", exact: true }).first().click()
 
   await expect(page).toHaveURL(/\/docker\/containers\/1111111111111111$/)
-  await expect(page.getByRole("button", { name: "Stop" })).toBeVisible()
+  // Restart is the line's command, and Stop is behind its ⋯ (PGH-02).
   await expect(page.getByRole("button", { name: "Restart", exact: true })).toBeVisible()
+  await page.getByRole("button", { name: "More actions for web" }).click()
+  await expect(page.getByRole("menuitem", { name: "Stop" })).toBeVisible()
+  await page.keyboard.press("Escape")
   // And the identity is a fact under the title rather than a tag in it.
   await expect(page.getByText("nginx:alpine").first()).toBeVisible()
   // The way back is the eyebrow, where a page's own breadcrumb goes.
@@ -1162,7 +1165,9 @@ test("a container's logs read as what its image writes", async ({ page }) => {
   expect(mocks.sockets.at(-1)?.get("source")).toBe(`docker:${DB}`)
   // Postgres's own questions, one press each, and its readings above the pane.
   await expect(page.getByRole("button", { name: /^Slow\b/ })).toBeVisible()
-  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(5)
+  // Said as reading lines, as Security says the same readings: no tile row (D4).
+  await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
+  await expect(page.locator("[data-slot=reading-line]")).toHaveCount(5)
   await expect(page.getByText("Deadlocks & lock waits")).toBeVisible()
   // A question a tile answers is counted once, by the tile over its hour:
   // its chip carries no second figure from the lines on screen. One no tile
@@ -1564,11 +1569,13 @@ test("a volume's contents are in the volume, not a page away", async ({ page }) 
   await expect(panel.getByRole("button", { name: "postgresql.conf" })).toBeVisible()
   await expect(panel.getByRole("button", { name: "base" })).toBeVisible()
 
-  // The file manager is still one click away, and it is handed the directory.
-  await expect(panel.getByRole("link", { name: "Open in Files" })).toHaveAttribute(
-    "href",
-    "/files?path=%2Fvar%2Flib%2Fdocker%2Fvolumes%2Fapp-data%2F_data",
-  )
+  // The file manager is still one click away, from the volume's line: the
+  // browser under it draws no second way there.
+  await expect(panel.getByRole("link", { name: "Open in Files" })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Open in Files" })).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for app-data" }).click()
+  await expect(page.getByRole("menuitem", { name: "Open in Files" })).toBeVisible()
+  await page.keyboard.press("Escape")
 
   // Postgres' own files, under a running container: reading is safe, and the
   // editor one click below this line is not.

@@ -6,6 +6,9 @@ import { useParams, useRouter } from "next/navigation"
 import {
   ArrowLeft,
   ArrowUpRight,
+  ListUnordered,
+  Logs,
+  Information,
   External,
   Link as LinkGlyph,
   Play,
@@ -32,10 +35,16 @@ import type {
   DeploymentSummary,
 } from "@/lib/types"
 import type { ProjectDetail } from "@/components/deploy/project-context"
-import { Page, PageContext, Section } from "@/components/page"
-import { useTabTitle } from "@/components/tab-title"
-import { ErrorState, LoadingPanel, Notice } from "@/components/state"
-import { StatusDot } from "@/components/status-dot"
+import { Page, PageContext } from "@/components/page"
+import { PaneBar, type PaneStop } from "@/components/phone-panes"
+import { useBelow } from "@/lib/breakpoints"
+import { cn } from "@/lib/utils"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
+import { Section } from "@/components/section"
+import { useTabTitle } from "@/components/shell/tab-title"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
+import { StatusDot, StatusWords } from "@/components/status-dot"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
@@ -53,8 +62,8 @@ import {
   runStopped,
   stepName,
   stepOperation,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunDetails, initialStep } from "@/components/deploy/run-steps"
@@ -104,6 +113,15 @@ import { ReleaseComparisonSheet } from "@/components/deploy/release-comparison-s
  * compare it, roll back to it, pin it — declared once with the Deployments
  * rows' (`run-verbs.tsx`), so the run is not a dead end once it has finished.
  */
+type RunStop = "logs" | "steps" | "step"
+
+/** A phone's three panes: what the run wrote, its steps, and the step picked. */
+const RUN_STOPS: PaneStop<RunStop>[] = [
+  { key: "logs", label: "Logs", icon: <Logs /> },
+  { key: "steps", label: "Steps", icon: <ListUnordered /> },
+  { key: "step", label: "Step", icon: <Information /> },
+]
+
 export function RunPage() {
   const route = useParams<{ id: string; run: string }>()
   const router = useRouter()
@@ -123,6 +141,11 @@ export function RunPage() {
   // of the transcript.
   const [selectedStepId, setSelectedStepId] = useState<number>()
   const [inspectedStepId, setInspectedStepId] = useState<number>()
+  // On a phone the run is one pane at a time, picked on a bar at the foot:
+  // stacked, the build logs were a box 600px tall scrolling inside the page,
+  // with the steps and the picked step's record under it.
+  const phone = useBelow("lg")
+  const [asked, setStop] = useState<RunStop>()
   const [working, setWorking] = useState<
     "cancel" | "retry" | "redeploy" | "start" | "deploy" | "pin"
   >()
@@ -297,7 +320,10 @@ export function RunPage() {
   if (initial.loading && !snapshot) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title={`Deployment #${route.run}`} />
+        <PageContext
+          back={{ href: `/deploy/${route.id}/deployments`, label: "Deployments" }}
+          title={`Deployment #${route.run}`}
+        />
         <LoadingPanel rows={7} plain />
       </Page>
     )
@@ -305,7 +331,10 @@ export function RunPage() {
   if (initial.error || !snapshot) {
     return (
       <Page>
-        <PageContext eyebrow="Deployments" title="Deployment unavailable" />
+        <PageContext
+          back={{ href: `/deploy/${route.id}/deployments`, label: "Deployments" }}
+          title="Deployment unavailable"
+        />
         {initial.error && <ErrorState error={initial.error} />}
         <Button variant="outline" size="sm" asChild className="w-fit">
           <Link href={`/deploy/${projectId}`}>
@@ -453,7 +482,8 @@ export function RunPage() {
   // bringing it into view.
   const showOutput = (stepId: number) => {
     setSelectedStepId(stepId)
-    document.getElementById("build-logs")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    if (phone) setStop("logs")
+    else scrollIntoViewRespectingMotion(document.getElementById("build-logs"))
   }
 
   const showFailure = () => {
@@ -475,7 +505,8 @@ export function RunPage() {
   const showFailedStep = () => {
     if (!failedStep) return
     setInspectedStepId(failedStep.id)
-    document.getElementById("run-details")?.scrollIntoView({ behavior: "smooth", block: "start" })
+    if (phone) setStop("step")
+    else scrollIntoViewRespectingMotion(document.getElementById("run-details"))
   }
 
   // The header's buttons are the run's own verbs; the menu is the release's,
@@ -585,58 +616,11 @@ export function RunPage() {
     </>
   )
 
-  return (
-    <Page className="animate-rise pt-4 md:pt-5">
-      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-50 size-full" />
-      {/* The name is for assistive technology alone (§15): the header is the
-          first thing drawn. */}
-      <PageContext title={`Deployment #${run.runNumber}`} />
-
-      <p className="sr-only" aria-live="polite" aria-atomic="true">
-        Deployment state: {runLabel(run.state, run.operation)}
-        {current
-          ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
-          : ""}
-      </p>
-
-      <RunHeader
-        run={run}
-        release={release}
-        deployment={deployment}
-        environment={forPreview ? (preview ? `PR ${preview.providerRef}` : "Preview") : undefined}
-        product={deployment && projectProduct(deployment)}
-        branch={project.data?.project.branch}
-        steps={attempts}
-        now={clock}
-        // Redeploy, Restart, Stop and Start record the live release as their
-        // target too, which they act on rather than roll back to.
-        rollsBackTo={
-          run.operation === "rollback" && targetReleaseId
-            ? releaseNumbers.get(targetReleaseId)
-            : undefined
-        }
-        promotion={runPromotion(run)}
-        projectId={projectId}
-        verbs={verbs}
-      />
-
-      {legacy ? (
-        <p className="text-body text-muted-foreground">Compatibility pipeline</p>
-      ) : (
-        <div className="flex flex-col gap-3">
-          <ReleasePipeline steps={attempts} operation={stepOperation(run)} now={clock} />
-          {/* The path lights the stage at work; before there is one, this
-              says why nothing has started. */}
-          {active && attempts.length === 0 && (
-            <p role="status" className="text-hint text-muted-foreground">
-              Waiting for a build slot…
-            </p>
-          )}
-        </div>
-      )}
-
+  const stop: RunStop = asked ?? (active ? "logs" : "steps")
+  const outcome = (
+    <>
       {/* A canary is drawn while its step runs and stays as its outcome;
-          a plan without one skips the step and draws nothing. */}
+              a plan without one skips the step and draws nothing. */}
       {!legacy &&
         attempts.some(
           (step) => step.key === "canary" && step.state !== "skipped" && step.state !== "pending",
@@ -680,7 +664,7 @@ export function RunPage() {
       ) : null}
 
       {/* Asked for, never shown unasked: the failure above is the decision,
-          and its own fix stays the command. */}
+              and its own fix stays the command. */}
       {(run.state === "failed" || run.state === "rolled_back") && (
         <RunDiagnosis
           projectId={projectId}
@@ -693,9 +677,9 @@ export function RunPage() {
       )}
 
       {/* project.data is a separate poll from the run snapshot; reading
-          isLiveRelease before it lands would flash "Superseded" for every
-          successful run while the project fetch is still in flight — and a
-          preview's run waits for its preview the same way. */}
+              isLiveRelease before it lands would flash "Superseded" for every
+              successful run while the project fetch is still in flight — and a
+              preview's run waits for its preview the same way. */}
       {run.state === "succeeded" && project.data && (!forPreview || previews.data) && (
         <RunReady
           live={isLiveRelease}
@@ -713,8 +697,8 @@ export function RunPage() {
       )}
 
       {/* A rollback that asked for a side copy of the database links it here,
-          from waiting on this run to ready; the copy is worked with on the
-          Deployments page. */}
+              from waiting on this run to ready; the copy is worked with on the
+              Deployments page. */}
       {run.operation === "rollback" && (
         <RunDataCopies
           projectId={projectId}
@@ -723,54 +707,183 @@ export function RunPage() {
           enabled={!forPreview}
         />
       )}
+    </>
+  )
 
-      <Section
-        title="Build logs"
-        actions={
-          transcript.lines > 0 && (
-            <p className="numeric text-xs text-muted-foreground">
-              {transcript.lines.toLocaleString()} lines
-              {transcript.errors > 0 && (
-                <span className="text-destructive"> · {plural(transcript.errors, "error")}</span>
-              )}
-            </p>
-          )
+  return (
+    <Page
+      rise
+      className={cn(
+        "pt-4 md:pt-5",
+        // Held to the window on a phone, where the run is one pane under its header.
+        "max-lg:h-full max-lg:min-h-0 max-lg:gap-4 max-lg:overflow-hidden max-lg:pb-0 md:max-lg:pb-0",
+      )}
+    >
+      <Confetti ref={confetti} className="pointer-events-none fixed inset-0 z-overlay size-full" />
+      {/* The name is for assistive technology alone (§15): the header is the
+          first thing drawn. */}
+      <PageContext title={`Deployment #${run.runNumber}`} />
+
+      <StatusWords subject="Deployment state">
+        {runLabel(run.state, run.operation)}
+        {current
+          ? `. Current step: ${stepName(current.key, stepOperation(run))}, ${current.state}`
+          : ""}
+      </StatusWords>
+
+      <RunHeader
+        run={run}
+        release={release}
+        deployment={deployment}
+        environment={forPreview ? (preview ? `PR ${preview.providerRef}` : "Preview") : undefined}
+        product={deployment && projectProduct(deployment)}
+        branch={project.data?.project.branch}
+        steps={attempts}
+        now={clock}
+        // Redeploy, Restart, Stop and Start record the live release as their
+        // target too, which they act on rather than roll back to.
+        rollsBackTo={
+          run.operation === "rollback" && targetReleaseId
+            ? releaseNumbers.get(targetReleaseId)
+            : undefined
         }
-      >
-        <div id="build-logs" className="min-w-0 scroll-mt-16">
-          <BuildConsole
-            rows={rows}
-            summary={transcript}
-            capped={stream.capped}
-            steps={attempts}
-            active={active}
-            outcome={run.state}
-            operation={stepOperation(run)}
-            connected={stream.socket === "open"}
-            startedAt={run.claimedAt ?? run.requestedAt}
-            runNumber={run.runNumber}
-            now={clock}
-            selectedStep={selectedStepId}
-            onSelectStep={setSelectedStepId}
-            focusLine={focusLine}
-            deployment={deployment}
-          />
-        </div>
-      </Section>
+        promotion={runPromotion(run)}
+        projectId={projectId}
+        verbs={verbs}
+      />
 
-      {attempts.length > 0 && (
-        <RunDetails
-          projectId={projectId}
-          deployment={deployment}
-          steps={attempts}
-          operation={stepOperation(run)}
-          now={clock}
-          rows={rows}
-          lineCounts={transcript.perStep}
-          selected={inspectedStepId ?? initialStep(attempts)?.id}
-          onSelect={setInspectedStepId}
-          onShowOutput={showOutput}
-        />
+      {legacy ? (
+        <p className="text-body text-muted-foreground">Compatibility pipeline</p>
+      ) : (
+        <div className="flex flex-col gap-3">
+          <ReleasePipeline steps={attempts} operation={stepOperation(run)} now={clock} />
+          {/* The path lights the stage at work; before there is one, this
+              says why nothing has started. */}
+          {active && attempts.length === 0 && (
+            <p role="status" className="text-hint text-muted-foreground">
+              Waiting for a build slot…
+            </p>
+          )}
+        </div>
+      )}
+
+      {phone ? (
+        // The whole height under the header and the release path, and a bar
+        // at its foot: the run's outcome over its steps, its logs, and the
+        // step picked. The page scrolls nowhere; each pane scrolls inside.
+        <div
+          data-slot="run-panes"
+          className="-mx-(--page-inset) flex min-h-0 flex-1 flex-col border-t border-hairline"
+        >
+          {/* The console stays mounted while another stop is read, as a
+              hidden pane does on the other pane pages, so its search, stage
+              and Wrap are where the reader left them on the way back. */}
+          <div
+            id="build-logs"
+            className={cn("flex min-h-0 flex-1 flex-col", stop !== "logs" && "hidden")}
+          >
+            <BuildConsole
+              flush
+              className="min-h-0 flex-1"
+              rows={rows}
+              summary={transcript}
+              capped={stream.capped}
+              steps={attempts}
+              active={active}
+              outcome={run.state}
+              operation={stepOperation(run)}
+              connected={stream.socket === "open"}
+              startedAt={run.claimedAt ?? run.requestedAt}
+              runNumber={run.runNumber}
+              now={clock}
+              selectedStep={selectedStepId}
+              onSelectStep={setSelectedStepId}
+              focusLine={focusLine}
+              deployment={deployment}
+            />
+          </div>
+          {stop !== "logs" && (
+            // One of the two halves of Details, in the pane's own scroll:
+            // the steps, or the record of the one picked, with no head or
+            // frame of the desk's, since the pane is the frame.
+            <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-(--page-inset) py-4">
+              {stop === "steps" && outcome}
+              {attempts.length > 0 && (
+                <RunDetails
+                  projectId={projectId}
+                  deployment={deployment}
+                  steps={attempts}
+                  operation={stepOperation(run)}
+                  now={clock}
+                  rows={rows}
+                  lineCounts={transcript.perStep}
+                  selected={inspectedStepId ?? initialStep(attempts)?.id}
+                  onSelect={(id) => {
+                    setInspectedStepId(id)
+                    setStop("step")
+                  }}
+                  onShowOutput={showOutput}
+                  pane={stop === "step" ? "step" : "steps"}
+                />
+              )}
+            </div>
+          )}
+          <PaneBar label="Deployment" stops={RUN_STOPS} active={stop} onPick={setStop} />
+        </div>
+      ) : (
+        <>
+          {outcome}
+          <Section
+            title="Build logs"
+            actions={
+              transcript.lines > 0 && (
+                <p className="numeric text-xs text-muted-foreground">
+                  {transcript.lines.toLocaleString()} lines
+                  {transcript.errors > 0 && (
+                    <span className="text-destructive">
+                      {" "}
+                      · {plural(transcript.errors, "error")}
+                    </span>
+                  )}
+                </p>
+              )
+            }
+          >
+            <div id="build-logs" className="min-w-0 scroll-mt-16">
+              <BuildConsole
+                rows={rows}
+                summary={transcript}
+                capped={stream.capped}
+                steps={attempts}
+                active={active}
+                outcome={run.state}
+                operation={stepOperation(run)}
+                connected={stream.socket === "open"}
+                startedAt={run.claimedAt ?? run.requestedAt}
+                runNumber={run.runNumber}
+                now={clock}
+                selectedStep={selectedStepId}
+                onSelectStep={setSelectedStepId}
+                focusLine={focusLine}
+                deployment={deployment}
+              />
+            </div>
+          </Section>
+          {attempts.length > 0 && (
+            <RunDetails
+              projectId={projectId}
+              deployment={deployment}
+              steps={attempts}
+              operation={stepOperation(run)}
+              now={clock}
+              rows={rows}
+              lineCounts={transcript.perStep}
+              selected={inspectedStepId ?? initialStep(attempts)?.id}
+              onSelect={setInspectedStepId}
+              onShowOutput={showOutput}
+            />
+          )}
+        </>
       )}
 
       <RollbackDialog

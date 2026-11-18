@@ -1,7 +1,7 @@
 "use client"
 
-import { FormFact, FormFacts, FormNote } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { FormFact, FormNote } from "@/components/form"
+import { DialogSubject, Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
 import { bytesLabel } from "@/components/database/redis/bytes"
 import { KindMark, kindLabel } from "@/components/database/redis/kinds"
@@ -78,16 +78,17 @@ export function MemberDialog({
         }}
       >
         {name !== undefined && (
-          <div className="flex min-w-0 items-center gap-2.5">
-            <KindMark type={type} className="size-4" />
-            <div className="min-w-0 space-y-0.5">
-              <p className="truncate font-mono text-xs font-medium">{bytesLabel(name)}</p>
-              <FormFacts>
+          <DialogSubject
+            mark={<KindMark type={type} className="size-4" />}
+            name={bytesLabel(name)}
+            mono
+            facts={
+              <>
                 <FormFact label="Type">{kindLabel(type)}</FormFact>
                 {db !== undefined && <FormFact label="In">db{db}</FormFact>}
-              </FormFacts>
-            </div>
-          </div>
+              </>
+            }
+          />
         )}
         {children}
         {error && (

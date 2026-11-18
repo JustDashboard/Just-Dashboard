@@ -718,10 +718,12 @@ test("workspace: package links, Back, keyboard movement and local commands prese
   await mockHost(page)
   await page.goto("/packages")
   await expect(page.locator("[data-workspace-item]").first()).toBeVisible()
-  const first = page.locator("[data-workspace-item]").first()
+  // A row's place for the keyboard is its name, the link that opens it; the
+  // row itself is no second stop.
+  const first = page.locator("[data-workspace-item]").first().locator("[data-workspace-primary]")
   await first.focus()
   await page.keyboard.press("ArrowDown")
-  const second = page.locator("[data-workspace-item]").nth(1)
+  const second = page.locator("[data-workspace-item]").nth(1).locator("[data-workspace-primary]")
   await expect(second).toBeFocused()
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(/\/packages\/postgresql-16$/)

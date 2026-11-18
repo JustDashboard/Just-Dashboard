@@ -3,9 +3,8 @@
 import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { DeploymentEngineRun, DeploymentRelease, DeploymentSummary } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { ChoiceRow } from "@/components/flow"
-import { FactDot } from "@/components/metrics/host-identity"
+import { Fact, FactLine } from "@/components/fact-line"
+import { ChoiceRow } from "@/components/choice-row"
 import { Status } from "@/components/status-dot"
 import { ProductGlyph, imageProduct } from "@/components/product-logo"
 import { AuthorMark, BranchChip, ShortSha } from "@/components/git/marks"
@@ -27,8 +26,9 @@ import {
   runTitle,
   runTriggerLine,
   shortRevision,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type RunSource = Pick<
   DeploymentSummary,
@@ -88,7 +88,7 @@ export function RunRow({
   /** The release this run made is the live one. */
   live?: boolean
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const active = isActiveRun(run.state)
   const now = useNow(1000, active)
   const subject = runSubject(run)
@@ -159,18 +159,35 @@ export function RunRow({
       actions={actions}
     >
       {wide ? undefined : (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
-          {state}
-          {failure && <span className="text-destructive">{failure}</span>}
-          <FactDot />
-          <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
-            {duration}
-          </span>
-          <FactDot />
-          <span className="numeric">{when}</span>
-          {stage}
-          {tags}
-        </div>
+        <FactLine className="text-hint text-muted-foreground">
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 align-top">
+              {state}
+              {failure && <span className="text-destructive">{failure}</span>}
+            </span>
+          </Fact>
+          <Fact>
+            <span title={slow ? SLOW : undefined} className={cn("numeric", slow && "text-warning")}>
+              {duration}
+            </span>
+          </Fact>
+          <Fact>
+            <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 align-top">
+              <span className="numeric">{when}</span>
+              {!stage && tags}
+            </span>
+          </Fact>
+          {/* The stage is a fact of its own, so it is what wraps to the second
+              line: in one fact with the age, it took the age down with it. */}
+          {stage && (
+            <Fact>
+              <span className="inline-flex min-w-0 flex-wrap items-center gap-x-2 align-top">
+                {stage}
+                {tags}
+              </span>
+            </Fact>
+          )}
+        </FactLine>
       )}
     </ChoiceRow>
   )
@@ -209,23 +226,28 @@ function Provenance({
     case "git":
     case "local":
       return (
-        <span className="flex min-w-0 items-center gap-1.5">
-          <BranchChip
-            branch={runRef(run, deployment.sourceRef)}
-            className="max-w-28 shrink-0 sm:max-w-40"
-          />
-          <ShortSha sha={shortRevision(runRevision(run, release))} />
+        <FactLine nowrap>
+          <Fact>
+            <span className="inline-flex max-w-full min-w-0 items-center gap-x-1.5 align-top">
+              <BranchChip
+                branch={runRef(run, deployment.sourceRef)}
+                className="max-w-28 shrink-0 sm:max-w-40"
+              />
+              <ShortSha sha={shortRevision(runRevision(run, release))} />
+            </span>
+          </Fact>
           {/* The author's square stays on a phone, as on the run page; only
               the name goes. */}
           {author && (
-            <span className="flex min-w-0 shrink items-center gap-1">
-              <AuthorMark name={author} />
-              {wide && <span className="truncate">{author}</span>}
-            </span>
+            <Fact>
+              <span className="flex min-w-0 shrink items-center gap-1">
+                <AuthorMark name={author} />
+                {wide && <span className="truncate">{author}</span>}
+              </span>
+            </Fact>
           )}
-          {author && <FactDot />}
-          {trigger}
-        </span>
+          <Fact>{trigger}</Fact>
+        </FactLine>
       )
     case "image":
     case "compose":

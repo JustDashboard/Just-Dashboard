@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Check, ChevronDown, Clock } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { minuteSpan } from "@/lib/format"
-import { logTimeInput, parseLogTimeInput, resolveRange } from "@/lib/log-filter"
+import { logTimeInput, parseLogTimeInput, resolveRange } from "@/lib/log/filter"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -102,7 +102,7 @@ export function TimeWindow({
           size="sm"
           aria-label={`Time window: ${label}`}
           className={cn(
-            "h-8 max-w-64 min-w-0 shrink-0 gap-2 px-2.5 text-body font-normal max-sm:h-10",
+            "max-w-64 min-w-0 shrink-0 gap-2 px-2.5 text-body font-normal",
             className,
           )}
         >

@@ -3,26 +3,21 @@
 import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { useCallback, useMemo, useState } from "react"
-import { ArrowLeft, Notes, Shield, Terminal, Trash, Users } from "@/components/icons"
+import { Notes, Shield, Terminal, Trash, Users } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SaveBarProvider, useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { WireMark } from "@/components/deploy/wire"
+import { SaveBarProvider, useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
+import { WireMark } from "@/components/wire/wire"
 import { Field, FieldRow, FormSections, OptionList, OptionRow } from "@/components/form"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { DetailPage, useDetailTab, useSiblingSteps, type Step } from "@/components/detail-page"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { accountHref } from "@/components/system-users/access"
-import {
-  decodeSegment,
-  StepArrows,
-  useAddressTab,
-  ViewTabs,
-  type Step,
-  type View,
-} from "@/components/system-users/detail-shell"
 import { GroupMark, useGroups } from "@/components/system-users/group-parts"
 import { GroupRail } from "@/components/system-users/group-rail"
 import {
@@ -39,17 +34,18 @@ import { ReadFailed } from "@/components/system-users/read-state"
 import { AccountWireMark, GroupWireMark } from "@/components/system-users/wire-marks"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ViewTabList, type TabView } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
-import { Workspace } from "@/components/workspace/workspace"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { usePoll } from "@/hooks/use-poll"
 import { del, get, patch } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { SystemGroup, SystemUser } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "members", "settings"] as const
 type Tab = (typeof TABS)[number]
@@ -57,14 +53,7 @@ type Tab = (typeof TABS)[number]
 /** A list of accounts longer than this gets a box to find one in. */
 const SEARCH_FROM = 9
 
-const BACK = (
-  <Link
-    href="/system-users/groups"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Groups
-  </Link>
-)
+const BACK = { href: "/system-users/groups", label: "Groups" }
 
 /**
  * One group, as a place of its own.
@@ -85,7 +74,7 @@ export function GroupPage() {
   const params = useParams<{ name: string }>()
   const router = useRouter()
   const name = decodeSegment(params.name)
-  const [tab, setTab] = useAddressTab(TABS)
+  const [tab, setTab] = useDetailTab(TABS, { remember: "system-users.group.tab" })
   const groups = useGroups()
   const [showSystem, setShowSystem] = useViewState("system-groups.show-system", false)
   const [query, setQuery] = useSessionState("system-groups.query", "")
@@ -96,16 +85,11 @@ export function GroupPage() {
   )
   const group = groups.data?.find((g) => g.name === name)
   const open = useCallback((next: string) => router.push(groupHref(next, tab)), [router, tab])
-  const at = listed.findIndex((g) => g.name === name)
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? listed[at + direction] : listed[direction > 0 ? 0 : -1]
-    if (next) open(next.name)
-  }
-  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
-  const next = {
-    disabled: listed.length === 0 || at >= listed.length - 1,
-    run: () => adjacent(1),
-  }
+  const steps = useSiblingSteps(
+    listed.map((g) => g.name),
+    name,
+    open,
+  )
   const total = groups.data?.length ?? 0
   const caption = !groups.data
     ? "Reading the groups…"
@@ -115,70 +99,80 @@ export function GroupPage() {
         ? `${listed.length} of ${total}`
         : `${plural(listed.length, "group")} · root first`
 
+  const frame: Frame = {
+    steps,
+    refresh: groups.refresh,
+    rail: (
+      <GroupRail
+        groups={listed}
+        current={name}
+        currentGroup={group}
+        loading={groups.loading}
+        error={groups.data ? undefined : groups.error}
+        onRetry={groups.refresh}
+        query={query}
+        onQuery={setQuery}
+        showSystem={showSystem}
+        onShowSystem={setShowSystem}
+        filtered={scope === "root"}
+        onClearFilters={() => setScope("all")}
+        caption={caption}
+        onOpen={open}
+      />
+    ),
+  }
+
+  // Keyed, so another group opens with no edit of this one's held.
   return (
-    <Workspace
+    <SaveBarProvider key={name}>
+      <GroupMain
+        frame={frame}
+        name={name}
+        group={group}
+        loading={groups.loading}
+        error={groups.error}
+        refresh={groups.refresh}
+        tab={tab}
+        setTab={setTab}
+      />
+    </SaveBarProvider>
+  )
+}
+
+/** What every state of the page hands the shared frame. */
+type Frame = { steps: { previous: Step; next: Step }; refresh: () => void; rail: React.ReactNode }
+
+/** The group's detail frame: the way back, the walk and the rail (`DetailPage`). */
+function GroupFrame({
+  frame,
+  title,
+  identity,
+  children,
+}: {
+  frame: Frame
+  title: string
+  identity?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <DetailPage
       name="Group"
+      what="group"
       stateKey="system-users.group.page"
-      refresh={groups.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous group",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next group",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
+      refresh={frame.refresh}
+      steps={frame.steps}
+      back={BACK}
+      title={title}
+      rail={frame.rail}
+      identity={identity}
     >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <GroupRail
-            className="hidden w-72 shrink-0 xl:flex"
-            groups={listed}
-            current={name}
-            currentGroup={group}
-            loading={groups.loading}
-            query={query}
-            onQuery={setQuery}
-            showSystem={showSystem}
-            onShowSystem={setShowSystem}
-            filtered={scope === "root"}
-            onClearFilters={() => setScope("all")}
-            caption={caption}
-            onOpen={open}
-          />
-          <SaveBarProvider key={name}>
-            <GroupMain
-              name={name}
-              group={group}
-              loading={groups.loading}
-              error={groups.error}
-              refresh={groups.refresh}
-              tab={tab}
-              setTab={setTab}
-              previous={previous}
-              next={next}
-            />
-          </SaveBarProvider>
-        </div>
-      </Page>
-    </Workspace>
+      {children}
+    </DetailPage>
   )
 }
 
 function GroupMain({
+  frame,
   name,
   group,
   loading,
@@ -186,9 +180,8 @@ function GroupMain({
   refresh,
   tab,
   setTab,
-  previous,
-  next,
 }: {
+  frame: Frame
   name: string
   group?: SystemGroup
   loading: boolean
@@ -196,29 +189,33 @@ function GroupMain({
   refresh: () => void
   tab: Tab
   setTab: (tab: string) => void
-  previous: Step
-  next: Step
 }) {
-  const arrows = <StepArrows noun="group" previous={previous} next={next} />
   if (!group) {
     if (loading) {
       return (
-        <div className="flex min-w-0 flex-1 flex-col gap-5">
-          <PageContext eyebrow={BACK} title={name} actions={arrows} />
-          <HostIdentity
-            className="border-b-0 pb-0"
-            fallback={Users}
-            title={<span className="font-mono">{name}</span>}
-            state={null}
-            facts={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
-          />
+        <GroupFrame
+          frame={frame}
+          title={name}
+          identity={
+            // The line's final shape while the group is read, its menu's
+            // place held, so nothing under it moves when it lands (D11).
+            <IdentityHeader
+              loading
+              className="border-b-0 pb-0"
+              fallback={Users}
+              title={<span className="font-mono">{name}</span>}
+              facts={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+              state
+              menu={false}
+            />
+          }
+        >
           <LoadingRows />
-        </div>
+        </GroupFrame>
       )
     }
     return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title="Group" actions={arrows} />
+      <GroupFrame frame={frame} title="Group">
         {error ? (
           <ReadFailed error={error} onRetry={refresh} />
         ) : (
@@ -236,33 +233,24 @@ function GroupMain({
             }
           />
         )}
-      </div>
+      </GroupFrame>
     )
   }
-  return (
-    <GroupViews
-      key={group.name}
-      group={group}
-      refresh={refresh}
-      tab={tab}
-      setTab={setTab}
-      arrows={arrows}
-    />
-  )
+  return <GroupViews frame={frame} group={group} refresh={refresh} tab={tab} setTab={setTab} />
 }
 
 function GroupViews({
+  frame,
   group,
   refresh,
   tab,
   setTab,
-  arrows,
 }: {
+  frame: Frame
   group: SystemGroup
   refresh: () => void
   tab: Tab
   setTab: (tab: string) => void
-  arrows: React.ReactNode
 }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
@@ -363,17 +351,18 @@ function GroupViews({
     ? [{ key: "delete", label: "Delete group", icon: Trash, danger: true, run: remove }]
     : []
 
-  const views: View<Tab>[] = [
+  const views: TabView<Tab>[] = [
     { key: "overview", label: "Overview" },
     { key: "members", label: "Members", count: people.length },
     { key: "settings", label: "Settings" },
   ]
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={group.name} actions={arrows} />
-        <HostIdentity
+    <GroupFrame
+      frame={frame}
+      title={group.name}
+      identity={
+        <IdentityHeader
           className="animate-rise border-b-0 pb-0"
           logo={<GroupMark group={group} size="lg" />}
           title={<span className="truncate font-mono">{group.name}</span>}
@@ -386,31 +375,27 @@ function GroupViews({
           }
           facts={
             <>
-              <span className="numeric font-mono">gid {group.gid}</span>
-              <FactDot />
-              <span className="numeric">
+              <Fact className="numeric" mono>
+                gid {group.gid}
+              </Fact>
+              <Fact className="numeric">
                 {people.length === 0 ? "nobody in it" : plural(people.length, "account")}
-              </span>
+              </Fact>
               {(group.system || group.protected) && (
-                <>
-                  <FactDot />
-                  <span>{group.protected ? "the system depends on it" : "made by a package"}</span>
-                </>
+                <Fact>{group.protected ? "the system depends on it" : "made by a package"}</Fact>
               )}
             </>
           }
           menu={
-            verbs.length > 0 ? (
-              <VerbMenu verbs={verbs} label={`More for ${group.name}`} />
-            ) : undefined
+            verbs.length > 0 ? <VerbMenu verbs={verbs} label={`More for ${group.name}`} /> : false
           }
         />
-      </div>
+      }
+    >
+      <Tabs value={tab} onValueChange={setTab} className="gap-0">
+        <ViewTabList label={`Views of ${group.name}`} views={views} value={tab} sticky />
 
-      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <ViewTabs label={`Views of ${group.name}`} views={views} shown={tab} />
-
-        <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="overview" className="pt-6">
           <GroupOverview
             group={group}
             reach={reach}
@@ -420,7 +405,7 @@ function GroupViews({
           />
         </TabsContent>
 
-        <TabsContent value="members" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="members" className="pt-6">
           {tab === "members" && (
             <div className="mx-auto w-full max-w-3xl min-w-0 animate-rise pb-20">
               <MembersForm
@@ -434,7 +419,7 @@ function GroupViews({
           )}
         </TabsContent>
 
-        <TabsContent value="settings" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="settings" className="pt-6">
           {tab === "settings" && (
             <form
               aria-label="Name and number"
@@ -541,7 +526,7 @@ function GroupViews({
         </TabsContent>
       </Tabs>
       {dialog}
-    </div>
+    </GroupFrame>
   )
 }
 

@@ -386,7 +386,7 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
   await expect(inventory.nth(0)).toContainText("old.example.com")
   await expect(inventory.nth(1)).toContainText("test.example.com")
   await expect(inventory.nth(2)).toContainText("app.example.com")
-  await expect(card.getByText("test certificate", { exact: true })).toBeVisible()
+  await expect(card.getByText("Test certificate", { exact: true })).toBeVisible()
   await expect(card.getByText("80d left")).toHaveCount(0)
   await expect(card.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(0)
 
@@ -404,7 +404,7 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
     page.locator("[data-slot='host-identity'] img[src='/logos/lets-encrypt.svg']"),
   ).toHaveCount(0)
   await page
-    .locator("[data-slot='page-context']")
+    .locator("[data-slot='host-identity']")
     .getByRole("button", { name: "Replace with a real certificate" })
     .click()
 
@@ -649,7 +649,7 @@ test("a read-only account reads a test certificate for what it is, with nothing 
     .getByRole("list", { name: "Installed certificates" })
     .getByRole("listitem")
     .filter({ hasText: "www.test.example.com" })
-  await expect(card.getByText("test certificate", { exact: true })).toBeVisible()
+  await expect(card.getByText("Test certificate", { exact: true })).toBeVisible()
   await card.getByRole("button", { name: "Actions for test.example.com" }).click()
   await expect(page.getByRole("menuitem", { name: "Copy path" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: /real certificate/ })).toHaveCount(0)
@@ -678,8 +678,9 @@ test("a test certificate's row fits a phone with its verb", async ({ page }) => 
     ),
   ).toBe(true)
   await certRow(page, "test.example.com").getByRole("link").click()
+  // The command is the identity line's, not the back-link row's.
   const command = page
-    .locator("[data-slot='page-context']")
+    .locator("[data-slot='host-identity']")
     .getByRole("button", { name: "Replace with a real certificate" })
   await expect(command).toBeInViewport({ ratio: 1 })
   expect(

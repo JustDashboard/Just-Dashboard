@@ -12,9 +12,11 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { closeRepo, openRepoPull, useQuerySelection } from "@/hooks/use-query-selection"
-import { Page, PageContext, SearchInput, Toolbar } from "@/components/page"
-import { ChipCount, FilterChip } from "@/components/tabs"
-import { GroupRule } from "@/components/flow"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { Toolbar } from "@/components/toolbar"
+import { ChipCount, FilterChip } from "@/components/chips"
+import { GroupRule } from "@/components/choice-row"
 import { CloneDialog } from "@/components/git/clone-dialog"
 import { GitHubAccountControl } from "@/components/git/github-account"
 import { ForgeFace } from "@/components/git/marks"
@@ -24,7 +26,8 @@ import { useCheckoutRemoval } from "@/components/git/remove-checkout"
 import { InstallHandoff } from "@/components/network/install"
 import { WorktreeSection } from "@/components/git/worktree-list"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 type Filter = "all" | "dirty" | "behind" | "ahead" | "detached" | "pulls" | "worktrees"
@@ -208,7 +211,9 @@ export default function GitPage() {
         }}
       />
     ) : (
-      <Page fill className="px-2 py-2 md:px-3 md:py-3">
+      <Page fill="workspace">
+        {/* Named while the list is read, as the workspace it opens on is. */}
+        <PageContext title="Git" />
         <LoadingPanel rows={8} />
       </Page>
     )
@@ -248,8 +253,8 @@ export default function GitPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
-        <PageContext eyebrow="Workspace" title="Git" actions={<WorkspaceHelp />} />
+      <Page rise>
+        <PageContext title="Git" />
 
         {selected && repos.data && !active && (
           <ErrorState
@@ -319,7 +324,13 @@ export default function GitPage() {
                     ) : null,
                   )}
                 </div>
-                {controls}
+                {/* The shortcuts' `?` closes the page's one line of
+                    controls, as it closes an identity line (16 Nov): a row
+                    of its own above the toolbar pushed the shelves down. */}
+                <span className="ml-auto flex max-w-full items-center gap-2">
+                  {controls}
+                  <WorkspaceHelp />
+                </span>
               </Toolbar>
 
               {visible.cards.length === 0 && visible.worktrees.length === 0 ? (

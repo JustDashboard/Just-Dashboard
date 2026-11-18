@@ -460,7 +460,10 @@ test("the full template says what it carries and builds its image as a job befor
   // The build's own output, where the job console draws every job.
   await expect(settings.getByText("Building jd-postgres-full:18").first()).toBeVisible()
   await expect(settings.getByText(/Setting up postgresql-18-pgvector/)).toBeVisible()
-  await expect(settings).toContainText("This keeps running if you close the page")
+  // At a desktop's width; a phone's console head leaves the tag off so the
+  // job's name has its one row (proxy-streams.spec.ts reads that at 390).
+  expect(page.viewportSize()!.width).toBeGreaterThanOrEqual(640)
+  await expect(settings.getByText("Keeps running if you leave", { exact: true })).toBeVisible()
   expect(server.bodies("POST /databases/provision")).toEqual([])
 
   finished = true
@@ -526,12 +529,15 @@ test("the catalogue's empty and failed answers are said, and Retry asks again", 
     failing ? refusal(503, "docker_unavailable", "Docker did not answer", true) : { body: [] },
   )
   await page.goto("/databases/new")
-  await expect(page.getByText("Not available on this host")).toBeVisible()
+  // Docker that did not answer is the Docker screen, with the way to its page.
+  const absent = page.locator('[data-slot="missing-thing"][data-reason="docker-silent"]')
+  await expect(absent).toContainText("Docker is not answering")
+  await expect(absent.getByRole("link", { name: "Open Docker" })).toBeVisible()
   // A catalogue that could not be read is not one that offers nothing.
   await expect(page.getByText("This server offers no engine to start from here.")).toHaveCount(0)
   failing = false
   await page.getByRole("button", { name: "Retry loading database engines" }).click()
-  await expect(page.getByText("Not available on this host")).toHaveCount(0)
+  await expect(absent).toHaveCount(0)
   await expect(page.getByText("This server offers no engine to start from here.")).toBeVisible()
 })
 
@@ -549,7 +555,7 @@ test("a role that may only read is not offered the catalogue, and reads the supp
   await page.goto("/databases/1")
   // Beside the version it is about, before where the server runs.
   await expect(page.locator("[data-slot=host-identity]")).toContainText(
-    /PostgreSQL 16\.4\s*supported until Nov 2028/,
+    /PostgreSQL 16\.4 · supported until Nov 2028/,
   )
   await page.goto("/databases/1/settings")
   await expect(page.locator("section#connection")).toContainText("supported until Nov 2028")

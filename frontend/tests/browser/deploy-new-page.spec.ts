@@ -42,7 +42,7 @@ for (const width of [1280, 390]) {
     ).toBe(true)
 
     // Nothing about the flow changed: a repository still imports on a press.
-    await page.getByRole("button", { name: "Import Wayy01/wesmokefish", exact: true }).click()
+    await page.getByRole("button", { name: "Import operator/wesmokefish", exact: true }).click()
     await expect(page.getByRole("heading", { level: 1 })).not.toHaveText("What are you deploying?")
   })
 }

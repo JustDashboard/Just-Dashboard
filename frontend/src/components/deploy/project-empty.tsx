@@ -6,7 +6,7 @@ import { cn } from "@/lib/utils"
 import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 
 /**
  * A project page with nothing to show yet, drawn as Runtime draws a release

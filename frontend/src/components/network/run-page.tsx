@@ -3,17 +3,18 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, Notes } from "@/components/icons"
+import { ChevronDown, ChevronUp, Notes } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
+import { Bone } from "@/components/bone"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext } from "@/components/page"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useAuth } from "@/hooks/use-auth"
@@ -26,10 +27,11 @@ import {
   diagnosticFinished,
   diagnosticReading,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
-import { neighbours, runRequestLine, runTool } from "@/lib/network-runs-view"
+} from "@/lib/network/diagnostics"
+import { neighbours, runRequestLine, runTool } from "@/lib/network/runs-view"
 import { useViewState } from "@/lib/view-state"
-import { StateTile, toolGlyph } from "./diagnostic-marks"
+import { toolGlyph } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { ItemRail } from "./item-rail"
 import { NetworkReadWarning } from "./read-warning"
 import { useRunActions } from "./run-actions"
@@ -37,18 +39,12 @@ import { RunComparison } from "./run-comparison"
 import { RunHistory } from "./run-history"
 import { RunDetails, RunResult } from "./run-inspector"
 import { RunChips, runHref, useRunList } from "./saved-runs"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["result", "compare", "history", "details"] as const
 type Tab = (typeof TABS)[number]
 
-const BACK = (
-  <Link
-    href="/network/runs"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Saved runs
-  </Link>
-)
+const BACK = { href: "/network/runs", label: "Saved runs" }
 
 /**
  * One saved run, as a place of its own (the process page's shape): a way
@@ -61,7 +57,7 @@ export function RunPage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const params = useParams<{ id: string }>()
-  const id = params.id ? decodeURIComponent(params.id) : ""
+  const id = decodeSegment(params.id)
   const search = useSearchParams()
   const router = useRouter()
   const requested = search.get("tab")
@@ -91,11 +87,10 @@ export function RunPage() {
   if (!admin)
     return (
       <Page>
-        <PageContext eyebrow={BACK} title="Saved run" />
-        <EmptyState
-          icon={Notes}
-          title="Saved diagnostics need the admin capability"
-          description="Retained tests can include private network targets and decoded packet fields."
+        <PageContext back={BACK} title="Saved run" />
+        <NeedsAdmin
+          what="Saved diagnostics"
+          why="Kept runs can hold private targets and decoded packet fields."
         />
       </Page>
     )
@@ -150,7 +145,7 @@ export function RunPage() {
               href: runHref(run.id, tab),
               label: run.name,
               mark: (
-                <StateTile glyph={toolGlyph(run)} tone={diagnosticReading(run).tone} size="sm" />
+                <StateMark glyph={toolGlyph(run)} tone={diagnosticReading(run).tone} size="sm" />
               ),
               title: run.name,
               line: `${runTool(run)} · ${runRequestLine(run)}`,
@@ -214,7 +209,7 @@ function RunMain({
 
   const header = (
     <PageContext
-      eyebrow={BACK}
+      back={BACK}
       title={run?.name ?? "Saved run"}
       actions={
         <span className="flex items-center">
@@ -251,11 +246,14 @@ function RunMain({
           <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
         ) : (
           <>
-            <HostIdentity
+            {/* The loaded line's own parts, so it is as tall loading as loaded. */}
+            <IdentityHeader
+              loading
               fallback={Notes}
-              title={<TextShimmer>Reading the run…</TextShimmer>}
-              state={<span>&nbsp;</span>}
-              facts={<span>&nbsp;</span>}
+              // The state is a body-size word once read, so its bone is too.
+              state={<Bone className="w-24 text-body" />}
+              command
+              menu={false}
             />
             <LoadingRows rows={4} />
           </>
@@ -330,34 +328,30 @@ function RunView({
     <section aria-label="Saved diagnostic" className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
       <div className="flex min-w-0 shrink-0 flex-col gap-5">
         {header}
-        <HostIdentity
+        <IdentityHeader
           label={`About ${run.name}`}
-          logo={<StateTile glyph={toolGlyph(run)} tone={reading.tone} size="lg" />}
+          logo={<StateMark glyph={toolGlyph(run)} tone={reading.tone} size="lg" />}
           title={<span className="truncate">{run.name}</span>}
           state={<Status label={reading.label} tone={reading.tone} className="text-body" />}
           facts={
             <>
-              <span className="text-foreground">{runTool(run)}</span>
-              <FactDot />
-              <span className="min-w-0 truncate font-mono">{runRequestLine(run)}</span>
+              <Fact className="text-foreground">{runTool(run)}</Fact>
+              <Fact mono className="truncate">
+                {runRequestLine(run)}
+              </Fact>
               {run.scope.vantage !== "dashboard_host" && (
-                <>
-                  <FactDot />
-                  <span className="min-w-0 truncate">
-                    from {run.scope.source || run.scope.vantage.replaceAll("_", " ")}
-                  </span>
-                </>
+                <Fact className="truncate">
+                  from {run.scope.source || run.scope.vantage.replaceAll("_", " ")}
+                </Fact>
               )}
               {finished && diagnosticDuration(run) !== "Not recorded" && (
-                <>
-                  <FactDot />
-                  <span className="numeric">{diagnosticDuration(run)}</span>
-                </>
+                <Fact className="numeric">{diagnosticDuration(run)}</Fact>
               )}
-              <FactDot />
-              <time dateTime={run.createdAt} title={timestamp(run.createdAt)} className="numeric">
-                {relativeTime(run.createdAt)}
-              </time>
+              <Fact>
+                <time dateTime={run.createdAt} title={timestamp(run.createdAt)} className="numeric">
+                  {relativeTime(run.createdAt)}
+                </time>
+              </Fact>
             </>
           }
           command={
@@ -381,23 +375,7 @@ function RunView({
         {actions.console}
       </div>
       <Tabs value={shown} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of ${run.name}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {views.map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(shown === view.key, "h-10")}
-            >
-              {view.label}
-              {"count" in view && view.count !== undefined && view.count > 0 && (
-                <ChipCount>{view.count}</ChipCount>
-              )}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
+        <ViewTabList label={`Views of ${run.name}`} views={views} value={shown} />
         <TabsContent value="result" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
           {shown === "result" && <RunResult run={run} />}
         </TabsContent>

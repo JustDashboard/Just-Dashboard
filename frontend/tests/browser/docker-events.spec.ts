@@ -23,8 +23,16 @@ test("a restart loop is the verdict and one row, not sixteen", async ({ page }) 
   await expect(feed.getByText(/^shop-db-1 restarted ×8 in \d+ min$/)).toBeVisible()
   // Folded: none of its exits is a row of its own until it is opened.
   await expect(feed.getByText("shop-db-1 exited with status 1")).toHaveCount(0)
+  // The row keeps its height: its events open in a popover off the button.
+  const row = feed
+    .getByRole("listitem")
+    .filter({ hasText: /^.*shop-db-1 restarted/ })
+    .first()
+  const before = await row.boundingBox()
   await feed.getByRole("button", { name: "Show the 16 events" }).click()
-  await expect(feed.getByText("shop-db-1 exited with status 1")).toHaveCount(8)
+  const folded = page.getByRole("dialog", { name: "The 16 events" })
+  await expect(folded.getByText("shop-db-1 exited with status 1")).toHaveCount(8)
+  expect((await row.boundingBox())!.height).toBe(before!.height)
 })
 
 test("the containers table reads each container's state, failures and who", async ({ page }) => {
@@ -45,7 +53,7 @@ test("the containers table reads each container's state, failures and who", asyn
     row("uptime-kuma").getByRole("button", { name: "Where this event came from" }),
   ).toHaveText("External")
   // The polled copy, laid against the audit log, wins over the socket's.
-  await expect(row("shop-api-1").getByText("wayy")).toBeVisible()
+  await expect(row("shop-api-1").getByText("operator")).toBeVisible()
   // A container Docker still lists is a link to its own page.
   await expect(row("shop-api-1").getByRole("link", { name: /shop-api-1/ })).toHaveAttribute(
     "href",
@@ -116,7 +124,9 @@ test("the window narrows everything, and an arriving event is drawn", async ({ p
   await expect(feed.getByText("worker started")).toBeVisible()
 })
 
-test("the page opens on Docker's line, with the window at its end", async ({ page }) => {
+test("the page opens on its own name with Docker's line, and the window on the band", async ({
+  page,
+}) => {
   await mockEvents(page)
   await page.goto("/docker/events")
 
@@ -127,8 +137,12 @@ test("the page opens on Docker's line, with the window at its end", async ({ pag
   await expect(
     identity.getByRole("button", { name: "shop-db-1 is in a restart loop" }),
   ).toBeVisible()
+  await expect(identity.getByText("Events", { exact: true })).toBeVisible()
   await expect(identity.getByText("Live", { exact: true })).toBeVisible()
-  await expect(identity.getByLabel("Window")).toBeVisible()
+  // The window is the band's, on the first reading's line (PGH-27).
+  await expect(identity.getByLabel("Window")).toHaveCount(0)
+  await expect(page.getByLabel("Window")).toBeVisible()
+  await expect(page.locator("[data-slot=event-band]")).toBeVisible()
   await expect(identity.getByText(/^\d+ events kept$/)).toBeVisible()
 })
 

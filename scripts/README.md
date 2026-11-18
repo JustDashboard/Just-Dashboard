@@ -21,7 +21,7 @@ request. The frontend's build helpers are in `frontend/scripts/`, and the change
 | `pin-images.py` | Moves the image digests the Dockerfiles and the compose file are held to; `--check` verifies them offline | Release |
 | `test-changed.sh` | Runs the checks, Go tests and browser specs the diff can reach, and nothing else | Contributor |
 | `e2e-deployments.py` | Deployment acceptance against a real backend and a real Docker daemon | Contributor, for deployment changes |
-| `ci-plan.py` | Decides which jobs one run of the Verify workflow needs | CI; `test-changed.sh` asks it which Go packages a change reaches |
+| `ci-plan.py` | Decides which jobs one run of the Verify workflow needs, and deals the browser specs into them by the tests each runs | CI; `test-changed.sh` asks it which Go packages a change reaches |
 | `go-test-race.sh` | Runs Go packages under the race detector, split across processes | CI |
 | `check-live-test-results.py` | Fails a run whose required live fixture was skipped, absent or did not pass | CI |
 | `test_*.py` | The tests of the scripts above, one file per script it names | `test-changed.sh`, and CI for `test_ci_plan.py` |
@@ -37,6 +37,22 @@ sudo ./scripts/manage.sh status              # on a server; --help lists every c
 
 `test-changed.sh` picks a script's tests by file name: a test must name the script it runs by its
 last component (`manage.sh`, `docker-compose.yml`), or a change to that script runs nothing.
+
+`ci-plan.py` weighs a browser spec by reading it, with no Bun and no Playwright: a test written
+once in a loop counts for every item of the loop's list (a literal, a constant of the spec, or one
+it imports from a file beside it), and a test that an unset environment variable switches off
+counts for nothing. A spec says what the source does not in a comment on a line of its own:
+
+```ts
+// ci-plan: 190 tests                    the loop's list is computed, so the count is said
+// ci-plan: each weighs 2.5              a test here costs two and a half ordinary ones
+// ci-plan: 190 tests, each weighs 2.5
+```
+
+The specs are dealt heaviest first, each to the job that is lightest once its share of the spec's
+own section (the first word of the file's name) is counted twice, so a slow section is spread. A
+job is about a hundred tests in a pull request and two hundred in a merge's run, and a full run is
+`MOST_SHARDS` jobs; the comments beside those numbers say what each was measured from.
 
 ## Where the detail is
 

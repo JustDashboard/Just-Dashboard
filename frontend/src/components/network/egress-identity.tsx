@@ -5,7 +5,7 @@ import { InfoTip } from "@/components/form"
 import { Globe } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status, type DotTone } from "@/components/status-dot"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { SCOPE_WORD, identityVerdict } from "@/components/network/topology-reading"
 
 const VERDICT_TONE: Record<NetworkEgressIdentity["public"], DotTone> = {
@@ -89,7 +89,7 @@ function WayOut({ id }: { id: NetworkEgressIdentity }) {
             label={identityVerdict(id)}
             className="text-hint"
           />
-          <span aria-hidden className="text-muted-foreground/40">
+          <span aria-hidden className="text-faint">
             ·
           </span>
           {id.forwardingError ? (

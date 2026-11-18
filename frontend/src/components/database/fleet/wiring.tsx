@@ -3,9 +3,9 @@
 import { Box, CloudUpload, Globe } from "@/components/icons"
 import type { DbTopoEdge, DbTopoNode } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { WireHost, WireMark } from "@/components/deploy/wire"
+import { WireHost, WireMark } from "@/components/wire/wire"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { ProjectFavicon } from "@/components/project-mark"
 import type { Verdict } from "@/components/status-dot"
 import { edgeRank } from "@/components/database/fleet/fleet"
 

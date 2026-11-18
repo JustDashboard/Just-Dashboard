@@ -148,8 +148,11 @@ export function ConnectionSwitcher({
           ref={trigger}
           type="button"
           aria-label={`Database: ${conn.name}. Switch database`}
+          // A database's name in its header line is the switcher, so it is
+          // pressed with a thumb: 32px drawn under a finger and 44 to press
+          // (`hit-area`), where it was a 22px line of text.
           className={cn(
-            "group flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left text-sm font-medium",
+            "group hit-area flex max-w-full min-w-0 items-center gap-1.5 rounded-md text-left text-sm font-medium pointer-coarse:min-h-8",
             inset ? "focus-ring-inset" : "focus-ring",
             className,
           )}

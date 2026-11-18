@@ -17,7 +17,6 @@ import {
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics-export"
 import { duration, relativeTime, timestamp } from "@/lib/format"
 import {
   parseScanQuery,
@@ -43,7 +42,7 @@ import {
   STARTTLS_NAMES,
   STARTTLS_PORTS,
   termText,
-} from "@/lib/tls-report"
+} from "@/lib/tls/report"
 import {
   chainNodes,
   gradeVerdict,
@@ -51,7 +50,7 @@ import {
   serverProduct,
   type ChainNode,
   type ChainTone,
-} from "@/lib/tls-chain"
+} from "@/lib/tls/chain"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import type {
@@ -67,18 +66,21 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { Detail, DetailList, Page, PageContext } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { RowList } from "@/components/row-list"
 import { FindingList } from "@/components/finding-list"
-import { ErrorState, Notice, Spinner } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { useProxyRead } from "@/components/proxy/proxy-context"
 import { sitePath } from "@/components/proxy/site-verbs"
@@ -103,6 +105,8 @@ import {
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { DeepScanSection } from "@/components/proxy/tls-ciphers"
 import { ScanHistoryPanel, useScanHistory } from "@/components/proxy/tls-history"
+import { Ago } from "@/components/ago"
+import { saveText } from "@/lib/download"
 
 /**
  * What a visitor actually gets, graded.
@@ -336,9 +340,9 @@ function TLSReport() {
   const offeredSites = tlsSiteNames(sites.data)
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="TLS report" />
-      <HostIdentity
+      <IdentityHeader
         // The view strip under the line draws the rule: the line's own under
         // it made two.
         className="border-b-0 pb-0"
@@ -349,16 +353,14 @@ function TLSReport() {
             {scanned || targetKey || "Live TLS report"}
           </span>
         }
-        facts={
-          <ReportFacts
-            scan={scan}
-            busy={busy}
-            asked={target !== undefined}
-            admin={admin}
-            past={history.viewingId !== undefined}
-            sites={offeredSites.length}
-          />
-        }
+        facts={reportFacts({
+          scan,
+          busy,
+          asked: target !== undefined,
+          admin,
+          past: history.viewingId !== undefined,
+          sites: offeredSites.length,
+        })}
         // Laid out as a project's header: the answer's sentence beside the
         // name, the report's verbs behind `⋯`. Scan is the form's, under it.
         state={
@@ -415,9 +417,9 @@ function TLSReport() {
           label="Domain to scan"
           htmlFor="tls-domain"
           hint={
-            <span className="wrap-anywhere">
-              {typed.target ? `Scans ${targetHint(typed.target)}` : "A name, host:port or URL"}
-            </span>
+            typed.target && (
+              <span className="wrap-anywhere">{`Scans ${targetHint(typed.target)}`}</span>
+            )
           }
           error={fieldError && <span className="wrap-anywhere">{fieldError}</span>}
         >
@@ -888,9 +890,10 @@ const TONE_TEXT: Record<ChainTone, string> = {
 /**
  * The target's line of live facts: its grade as a coloured word, the
  * protocol it took, what answered and how old the report is. Before anything
- * is asked it says what this server offers to scan.
+ * is asked it says what this server offers to scan. They are `Fact`s, called
+ * for rather than rendered, so the header's line sees each one.
  */
-function ReportFacts({
+function reportFacts({
   scan,
   busy,
   asked,
@@ -907,61 +910,69 @@ function ReportFacts({
 }) {
   const facts: React.ReactNode[] = []
   if (scan) {
-    facts.push(<GradeWord key="grade" grade={scan.grade} />)
+    facts.push(
+      <Fact key="grade">
+        <GradeWord grade={scan.grade} />
+      </Fact>,
+    )
     if (scan.reachable && scan.negotiated)
       facts.push(
-        <span key="protocol" className={cn(scan.legacyOnly && "font-medium text-destructive")}>
+        <Fact key="protocol" className={cn(scan.legacyOnly && "font-medium text-destructive")}>
           {scan.negotiated}
-        </span>,
+        </Fact>,
       )
     const served = scan.origin?.site
     if (served)
       facts.push(
-        <HostFact key="served" product="nginx">
+        <Fact key="served" product="nginx">
           <Link href={sitePath(served)} className="font-mono hover:underline">
             {served}
           </Link>
-        </HostFact>,
+        </Fact>,
       )
     else if (scan.http?.server)
       facts.push(
-        <HostFact key="served" product={serverProduct(scan.http.server)}>
+        <Fact key="served" product={serverProduct(scan.http.server)}>
           {scan.http.server}
-        </HostFact>,
+        </Fact>,
       )
-    facts.push(<CheckedAgo key="checked" at={scan.checkedAt} />)
+    facts.push(
+      <Fact key="checked">
+        <Ago at={scan.checkedAt} verb="checked" />
+      </Fact>,
+    )
     if (past)
       facts.push(
-        <span key="past" className="font-medium text-warning">
+        <Fact key="past" className="font-medium text-warning">
           a past scan
-        </span>,
+        </Fact>,
       )
   } else if (busy) {
     facts.push(
-      <span key="busy" className="inline-flex items-center gap-1.5">
-        <Spinner className="size-3" /> scanning
-      </span>,
+      <Fact key="busy">
+        <span className="inline-flex items-center gap-1.5 align-top">
+          <Spinner className="size-3" /> scanning
+        </span>
+      </Fact>,
     )
   } else if (asked) {
-    facts.push(<span key="none">no report yet</span>)
+    facts.push(<Fact key="none">no report yet</Fact>)
   } else if (sites > 0) {
     facts.push(
-      <HostFact key="sites" product="nginx">
+      <Fact key="sites" product="nginx">
         {sites === 1 ? "1 name" : `${sites} names`} served over TLS here
-      </HostFact>,
+      </Fact>,
     )
   } else {
-    facts.push(<span key="what">what a visitor is served</span>)
+    facts.push(<Fact key="what">what a visitor is served</Fact>)
   }
   if (!admin)
     facts.push(
-      <span key="admin" className="font-medium text-warning">
+      <Fact key="admin" className="font-medium text-warning">
         scanning needs an administrator
-      </span>,
+      </Fact>,
     )
-  return facts.flatMap((fact, index) =>
-    index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact],
-  )
+  return facts
 }
 
 /** The grade as a word in its verdict's colour, its dot before it. */
@@ -970,7 +981,7 @@ function GradeWord({ grade }: { grade: string }) {
   return (
     <span
       data-slot="grade"
-      className={cn("inline-flex items-center gap-1.5 font-medium", TONE_TEXT[verdict])}
+      className={cn("inline-flex items-center gap-1.5 align-top font-medium", TONE_TEXT[verdict])}
     >
       <StatusDot
         tone={verdict === "success" ? "running" : verdict === "warning" ? "warning" : "danger"}
@@ -1027,7 +1038,7 @@ function reportVerbs({
       label: "Download JSON",
       icon: Download,
       run: () =>
-        downloadText(
+        saveText(
           reportFileName(scan, "tls.json"),
           JSON.stringify(scan, null, 2),
           "application/json",
@@ -1040,7 +1051,7 @@ function reportVerbs({
       label: "Download chain.pem",
       icon: Download,
       run: () =>
-        downloadText(reportFileName(scan, "chain.pem"), chainPem(scan), "application/x-pem-file"),
+        saveText(reportFileName(scan, "chain.pem"), chainPem(scan), "application/x-pem-file"),
     })
   verbs.push(COPY_LINK)
   if (admin && scan.origin?.site && !scan.starttls)
@@ -1362,10 +1373,12 @@ function CopyDetail({
     <Detail label={label} className={cn("group flex items-start gap-1", className)}>
       <span className="min-w-0 flex-1">{shown ?? (value || "—")}</span>
       {value && (
+        // 24 wide, the press box itself: at 20 the box reached 2px past the
+        // button, and past the end of a value that fills its line.
         <IconAction
           label={`Copy ${label}`}
           reveal
-          className="-my-1 size-5"
+          className="-my-1 size-6"
           onClick={() => void copyText(value, `${label} copied`)}
         >
           <Copy />
@@ -1835,12 +1848,6 @@ function PlainChain({ http }: { http: HTTPScan }) {
       ))}
     </ol>
   )
-}
-
-/** "checked 3 minutes ago", kept true while the page stays open. */
-function CheckedAgo({ at }: { at: string }) {
-  useNow(30_000)
-  return <span title={timestamp(at)}>checked {relativeTime(at)}</span>
 }
 
 /**

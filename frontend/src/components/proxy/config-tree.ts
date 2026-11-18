@@ -1,4 +1,3 @@
-import { duration } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { DotTone } from "@/components/status-dot"
 import type { ProxyConfigEntry, ProxyEffectiveConfig, ProxyPlacedDirective } from "@/lib/types"
@@ -306,12 +305,6 @@ export function diffStat(diff: string): { added: number; removed: number } {
     else if (line.startsWith("-")) removed++
   }
   return { added, removed }
-}
-
-/** "read 12s ago", in its largest unit, as the config test's age is said. */
-export function readLabel(at: number, now: number): string {
-  const age = Math.max(0, (now - at) / 1000)
-  return age < 5 ? "read just now" : `read ${duration(age).split(" ")[0]} ago`
 }
 
 /** The main file's place in the include map: the root every lane starts from. */

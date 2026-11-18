@@ -279,7 +279,7 @@ export function ScheduleBuilder({
           <>
             {describeCron(expression)}
             {preview.length > 0 && (
-              <span className="text-muted-foreground/80">
+              <span className="text-faint">
                 {" · next "}
                 {preview.map((d) => moment(d, timeZone)).join(", ")}
               </span>

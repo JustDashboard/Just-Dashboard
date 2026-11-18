@@ -17,22 +17,23 @@ import {
 import { EngineGlyph, EnvironmentTag } from "@/components/database/kit"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
-import { useNow } from "@/components/deploy/vocabulary"
+import { Segments } from "@/components/segments"
+import { useNow } from "@/hooks/use-now"
 import { Field, FormNote, FormSection } from "@/components/form"
-import { Check, Copy, Key, Pencil, Plus, Slash } from "@/components/icons"
+import { Key, Pencil, Plus, Slash } from "@/components/icons"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { CopyButton } from "@/components/copy"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbActions } from "@/components/verbs"
 import { useAuth } from "@/hooks/use-auth"
-import { useCopy } from "@/hooks/use-copy"
 import { del, post, put } from "@/lib/api"
 import { keyProduct } from "@/lib/clients"
 import { calendarDate, relativeTime } from "@/lib/format"
@@ -646,15 +647,5 @@ function MadeKey({ origin, secret }: { origin: string; secret: string }) {
         </div>
       </Field>
     </div>
-  )
-}
-
-function CopyButton({ label, text }: { label: string; text: string }) {
-  const { copy, copied } = useCopy()
-  return (
-    <Button size="xs" variant="outline" onClick={() => void copy(text)} aria-label={label}>
-      {copied ? <Check /> : <Copy />}
-      {copied ? "Copied" : "Copy"}
-    </Button>
   )
 }

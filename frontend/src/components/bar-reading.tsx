@@ -5,8 +5,8 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import { ArrowRight, Filter } from "@/components/icons"
 import { rowReveal } from "@/components/icon-action"
-import { LandedFigures } from "@/components/overview/readings"
-import { Sparkline } from "@/components/metrics/sparkline"
+import { LandedFigures } from "@/components/live-figure"
+import { Sparkline } from "@/components/sparkline"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   pushTrails,
@@ -377,10 +377,21 @@ export function BarReading({
                   // The mark alone. A rule in the part's colour under each one
                   // read as a row of tabs; the line's tick already carries the
                   // colour, and the span lights when its mark is pointed at.
+                  //
+                  // One rule for which marks scale: a mark's picture is drawn
+                  // at 115%, its words never are. The picture is its outermost
+                  // graphic: a glyph, an image, a dot (a live one too, whose
+                  // pulse is a child of it), or a tile, which scales whole
+                  // with its logo inside, so the logo keeps its margin. Words,
+                  // a count included, keep the strip's hint size. It was any
+                  // svg, image or empty dot at any depth, which grew a tile's
+                  // logo inside an unscaled tile and left a live dot small.
                   // Scaled rather than resized, so every caller's mark grows
-                  // alike, whether a 14px glyph, a count or a tile.
+                  // alike; the face stays the containing block a whole-mark
+                  // transform made it, so anything a mark lays over itself is
+                  // held to its cell.
                   const face = (
-                    <span className="flex min-w-3.5 scale-115 items-center justify-center">
+                    <span className="relative flex min-w-3.5 items-center justify-center [&_[aria-hidden]:not([aria-hidden]_*)]:scale-115 [&_img:not([aria-hidden]_*)]:scale-115 [&_svg:not([aria-hidden]_*)]:scale-115">
                       {part.mark}
                     </span>
                   )
@@ -511,8 +522,10 @@ function Line({
       )}
     >
       <span aria-hidden className="h-3 w-0.5 shrink-0 rounded-full" style={{ background: color }} />
-      {/* The name gives way last: the detail truncates long before it does. */}
-      <span className="min-w-0 shrink-[0.25] truncate font-medium">{name}</span>
+      {/* The name gives way last: the detail truncates long before it does.
+          Its cut is 24px tall, not the line's 20, so an Explain term in a
+          name keeps a pointer's press box; the line does not grow. */}
+      <span className="-my-0.5 min-w-0 shrink-[0.25] truncate py-0.5 font-medium">{name}</span>
       {detail && (
         <span className="numeric min-w-0 shrink-[4] truncate text-hint text-muted-foreground">
           {detail}

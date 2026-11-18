@@ -1,4 +1,4 @@
-import type { DiagnosticResult } from "../../../src/lib/network-diagnostics"
+import type { DiagnosticResult } from "../../../src/lib/network/diagnostics"
 
 /**
  * One representative structured answer per server diagnostic, in the shape

@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page } from "@playwright/test"
 import { admin, json, loaded, mockNetwork, type Mutation } from "./network-fixture"
 import { checks, measured, queued, vantage, vantages } from "./network-evidence-fixture"
 import { risen } from "./risen"
-import type { ExternalCheck, ExternalVantage } from "../../src/lib/network-external"
+import type { ExternalCheck, ExternalVantage } from "../../src/lib/network/external"
 
 const readonly = { ...admin, capabilities: ["read"], user: { ...admin.user, role: "readonly" } }
 

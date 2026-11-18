@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   ClockRewind,
   CodeBracket,
@@ -15,7 +16,7 @@ import { cn } from "@/lib/utils"
 import { errorMessage, get, put } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { clock, timestamp } from "@/lib/format"
-import { useLogView } from "@/lib/log-view"
+import { useLogView } from "@/lib/log/view"
 import { latency, latencyTone } from "@/lib/requests"
 import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
@@ -28,18 +29,16 @@ import type {
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { laneStyle } from "@/components/logs/log-text"
 import { Address } from "@/components/deploy/request-marks"
-import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter, Well } from "@/components/panel"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { engineFor, type Engine } from "@/components/database/engine"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { EngineGlyph } from "@/components/database/kit"
 import { StatementsPanel } from "@/components/database/ops/statements-panel"
 import type { DbSettingChange } from "@/components/database/ops/settings-parameters-model"
@@ -59,6 +58,7 @@ import {
   type QueryOrder,
   type QueryRange,
 } from "@/components/database/ops/queries"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** How many rows one read asks for; the server's cap is 500. */
 const LIMIT = 200
@@ -230,7 +230,8 @@ export function DatabaseQueries({
       <div className="flex min-h-9 shrink-0 items-stretch border-b border-hairline">
         <ChipStrip
           aria-label="Which statements"
-          className="scroll-affordance min-w-0 flex-1 px-2 py-1 max-sm:mx-0 max-sm:my-0 max-sm:px-2 max-sm:py-1 sm:flex-nowrap sm:overflow-x-auto"
+          bleed={false}
+          className="scroll-affordance min-w-0 flex-1 px-2 py-1 sm:flex-nowrap sm:overflow-x-auto"
         >
           <FilterChip selected={shown === "latest"} onClick={() => setReading("latest")}>
             Latest
@@ -282,7 +283,7 @@ export function DatabaseQueries({
             )}
             {result.error && !result.data ? (
               <div className="p-6">
-                <CouldNotRead
+                <ErrorState
                   what={`the ${noun.many}`}
                   error={result.error}
                   onRetry={result.refresh}
@@ -313,41 +314,30 @@ export function DatabaseQueries({
           </div>
           {result.data && rows.length > 0 && (
             <PaneFooter className="gap-x-2 px-3 text-hint text-muted-foreground">
-              <span className="numeric">{countWords(rows.length, noun)}</span>
-              {sqlite ? (
-                <>
-                  <FactDot />
-                  <span>run from this dashboard</span>
-                </>
-              ) : (
-                data && (
-                  <>
-                    <FactDot />
-                    <span>from {sourceWords(data.source)}</span>
-                    {data.threshold && (
-                      <>
-                        <FactDot />
-                        <span className="numeric">slower than {data.threshold}</span>
-                      </>
-                    )}
-                    {data.reason ? (
-                      <>
-                        <FactDot />
-                        <span className="min-w-0 truncate text-warning" title={data.reason}>
+              <FactLine className="flex-1">
+                <Fact className="numeric">{countWords(rows.length, noun)}</Fact>
+                {sqlite ? (
+                  <Fact>run from this dashboard</Fact>
+                ) : (
+                  data && (
+                    <>
+                      <Fact>from {sourceWords(data.source)}</Fact>
+                      {data.threshold && (
+                        <Fact className="numeric">slower than {data.threshold}</Fact>
+                      )}
+                      {data.reason ? (
+                        <Fact className="min-w-0 truncate text-warning" title={data.reason}>
                           {data.reason}
-                        </span>
-                      </>
-                    ) : (
-                      data.truncated && (
-                        <>
-                          <FactDot />
-                          <span>the newest {LIMIT} — narrow the window to see the rest</span>
-                        </>
-                      )
-                    )}
-                  </>
-                )
-              )}
+                        </Fact>
+                      ) : (
+                        data.truncated && (
+                          <Fact>the newest {LIMIT} — narrow the window to see the rest</Fact>
+                        )
+                      )}
+                    </>
+                  )
+                )}
+              </FactLine>
             </PaneFooter>
           )}
         </>
@@ -544,7 +534,7 @@ function QueryRows({
   const keys = entryKeys(entries)
   const { highlight } = useLogView()
   const plain = !highlight
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   // A column only for what some row has: SLOWLOG knows no database and
   // Postgres's log no row count, and a column of dashes is width the
   // statement needed.
@@ -558,7 +548,7 @@ function QueryRows({
   return (
     <div className="animate-rise py-1 font-mono text-xs leading-relaxed">
       {wide && (
-        <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-hairline bg-surface-sunken pr-4 pb-1 font-sans text-hint font-medium text-muted-foreground">
+        <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken pr-4 pb-1 font-sans text-hint font-medium text-muted-foreground">
           <span aria-hidden className="w-0.5 shrink-0" />
           <span className="w-16 shrink-0">Time</span>
           <span className="w-16 shrink-0 text-right">Took</span>
@@ -609,7 +599,7 @@ function QueryRows({
                 <>
                   <span
                     title={timestamp(entry.at)}
-                    className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
+                    className="numeric w-16 shrink-0 text-faint select-none"
                   >
                     {clock(entry.at)}
                   </span>
@@ -628,12 +618,12 @@ function QueryRows({
                       {entry.client ? (
                         <Address ip={entry.client} plain={plain} />
                       ) : (
-                        <span className="text-muted-foreground/50">—</span>
+                        <span className="text-faint">—</span>
                       )}
                     </span>
                   )}
                   {has.rows && (
-                    <span className="numeric hidden w-14 shrink-0 text-right text-muted-foreground/70 xl:block">
+                    <span className="numeric hidden w-14 shrink-0 text-right text-faint xl:block">
                       {entry.rows !== undefined ? entry.rows.toLocaleString() : "—"}
                     </span>
                   )}
@@ -644,17 +634,14 @@ function QueryRows({
                     <span className="min-w-0 flex-1 truncate">{oneLine(entry.query)}</span>
                     {took}
                   </span>
-                  <span className="flex min-w-0 items-center gap-1.5 font-sans text-hint text-muted-foreground">
-                    <span className="numeric shrink-0">{clock(entry.at)}</span>
+                  <FactLine nowrap className="font-sans text-hint text-muted-foreground">
+                    <Fact className="numeric shrink-0">{clock(entry.at)}</Fact>
                     {(entry.user || entry.db) && (
-                      <>
-                        <FactDot />
-                        <span className="truncate">
-                          {[entry.user, entry.db].filter(Boolean).join(" · ")}
-                        </span>
-                      </>
+                      <Fact className="truncate">
+                        {[entry.user, entry.db].filter(Boolean).join(" · ")}
+                      </Fact>
                     )}
-                  </span>
+                  </FactLine>
                 </span>
               )}
             </button>
@@ -678,7 +665,7 @@ function QueryRows({
 
 /** A name in its lane's hue, the way the log console draws who spoke. */
 function Lane({ value, plain, className }: { value?: string; plain: boolean; className?: string }) {
-  if (!value) return <span className={cn("shrink-0 text-muted-foreground/50", className)}>—</span>
+  if (!value) return <span className={cn("shrink-0 text-faint", className)}>—</span>
   return (
     <span
       title={value}

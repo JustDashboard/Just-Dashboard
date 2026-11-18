@@ -657,7 +657,11 @@ test("the firewall page opens on its defaults and offers the controls that set t
   await expect(page.getByText("1 IPv6 twin folded away", { exact: true })).toBeVisible()
   await expect(page.getByRole("radiogroup", { name: "Inbound default" })).toBeVisible()
   await expect(page.getByRole("button", { name: "Add rule" })).toBeVisible()
-  await expect(page.getByRole("switch", { name: "Firewall enabled" })).toBeChecked()
+  // Enforcing is the line's state; turning it off is a verb in its menu.
+  await expect(identity).toContainText("Active")
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await expect(page.getByRole("menuitem", { name: "Disable" })).toBeVisible()
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("row").filter({ hasText: "repeat offender" })).toBeVisible()
 
   // The rules folded by where they lead: each port admitted, and the default
@@ -755,7 +759,7 @@ test("a jail's page bans an address by hand and the tuning offers the caller's o
     .poll(() => mutations.find((m) => m.path === "/fail2ban/sshd/ban")?.body)
     .toEqual({ ip: "192.0.2.200" })
 
-  await page.getByRole("button", { name: "Actions for sshd" }).click()
+  await page.getByRole("button", { name: "More actions for sshd" }).click()
   await page.getByRole("menuitem", { name: "Tune" }).click()
   await page.getByRole("button", { name: "Never ban my address" }).click()
   await expect
@@ -799,7 +803,7 @@ test("connections offers a block only for an address that is not private", async
   await page.goto("/network/connections")
   await loaded(page)
 
-  await expect(page.getByRole("radio", { name: "From the internet 1" })).toBeVisible()
+  await expect(page.getByRole("button", { name: /^From the internet\s*1$/ })).toBeVisible()
   const internet = page.locator("[data-slot=choice-row]").filter({ hasText: "203.0.113.50" })
   await internet.getByRole("button", { name: "Actions for 203.0.113.50" }).click()
   await expect(page.getByRole("menuitem", { name: "Block at the firewall" })).toBeVisible()
@@ -838,17 +842,10 @@ test("the logins page folds the failed record into attackers", async ({ page }) 
     .toEqual({ action: "deny", direction: "in", from: "198.51.100.4", comment: "failed logins" })
 })
 
-/** A figure in the page's one grid, by its name. */
 /** One of a page's reading lines, by its name: what a tile became on Intrusion and SSH. */
 function reading(page: Page, label: string) {
   return page
     .locator("[data-slot=reading-line]")
-    .filter({ has: page.getByText(label, { exact: true }) })
-}
-
-function tile(page: Page, label: string) {
-  return page
-    .locator("[data-slot=stat-grid] [data-slot=stat-tile]")
     .filter({ has: page.getByText(label, { exact: true }) })
 }
 
@@ -910,15 +907,15 @@ test("the ssh page reads its auth log through the lens, the day's counts as its 
   await expect(lines.getByText("sudo", { exact: true })).toHaveCount(0)
 
   // A reading's line is a press away from the lines it counts, asked of the
-  // pane further down. The press is the line's own (`ReadingLine`'s
-  // `onPress`): its button is in the line and covers it, so a press anywhere
-  // on the line is one, and the line is still one height with its neighbours.
+  // pane further down. The press is the log lens's (`LensReadingLine`): a
+  // toggle laid over the line that says it is pressed, so a press anywhere on
+  // the line is one, and the line is still one height with its neighbours.
   const accepted = reading(page, "Accepted logins")
-  const press = accepted.getByRole("button", { name: "Show the lines behind accepted logins" })
+  const press = page.getByRole("button", { name: "Show the lines behind accepted logins" })
   const [lineBox, pressBox] = [(await accepted.boundingBox())!, (await press.boundingBox())!]
   expect(pressBox).toEqual(lineBox)
   expect(lineBox.height).toBe((await reading(page, "Failed attempts").boundingBox())!.height)
-  await accepted.click({ position: { x: 12, y: 12 } })
+  await press.click({ position: { x: 12, y: 12 } })
   await expect.poll(() => logs.sockets.at(-1)?.getAll("f")).toEqual(["event:ssh_accepted"])
   await expect(page.getByRole("button", { name: /^Accepted\b/ })).toHaveAttribute(
     "aria-pressed",
@@ -1361,7 +1358,7 @@ test("limited readers see no SSH, diagnostic, firewall or failed-login mutations
   await expect(page.getByText("SSH needs the admin capability", { exact: true })).toBeVisible()
   await page.goto("/network/tools")
   await expect(
-    page.getByText("Server diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need an administrator", { exact: true }),
   ).toBeVisible()
   await expect(page.getByText("calculated in this browser", { exact: true })).toBeVisible()
   await expect(page.getByRole("textbox", { name: "Target", exact: true })).toHaveCount(0)
@@ -1623,7 +1620,8 @@ test("firewall and SSH changes use ordinary confirmation", async ({ page }) => {
   const mutations: Mutation[] = []
   await mockSecurity(page, mutations)
   await page.goto("/network/firewall")
-  await page.getByRole("switch", { name: "Firewall enabled" }).click()
+  await page.getByRole("button", { name: "Firewall actions" }).click()
+  await page.getByRole("menuitem", { name: "Disable" }).click()
   await expect(page.getByRole("dialog").getByPlaceholder("Type the phrase above")).toHaveCount(0)
   await expect(
     page.getByRole("dialog").getByRole("button", { name: "Disable", exact: true }),

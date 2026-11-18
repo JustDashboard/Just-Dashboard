@@ -22,7 +22,7 @@ import { agentProduct } from "@/lib/clients"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useIsMobile } from "@/hooks/use-mobile"
+import { useBelow } from "@/lib/breakpoints"
 import type {
   DeploymentLifecycle,
   DeploymentRequests,
@@ -37,13 +37,13 @@ import type {
 import { latencyWords } from "@/lib/latency-words"
 import { ALERT_KINDS, latency, latencyTone, perMinute } from "@/lib/requests"
 import { cn } from "@/lib/utils"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HUE } from "@/components/overview/readings"
+import { TileTrend } from "@/components/sparkline"
+import { HUE } from "@/components/live-figure"
 import { Pane } from "@/components/panel"
 import { PaneBack, PaneBar, type PaneStop } from "@/components/phone-panes"
 import { ProductGlyphs } from "@/components/product-logo"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
@@ -74,7 +74,7 @@ import { AddAlertSheet } from "@/components/deploy/add-alert-sheet"
 import { traceLinkFor } from "@/components/deploy/log-drains"
 import { failingTone } from "@/components/deploy/fleet"
 import { failingWords } from "@/components/deploy/live-readings"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { ChannelNames, toldBy } from "@/components/deploy/settings/traffic-alerts"
 import { WrapDot } from "@/components/deploy/request-marks"
 import { MinuteStrip, isCleanExit } from "@/components/deploy/traffic-strip"
@@ -202,7 +202,7 @@ export function ProjectLogs() {
   const [adding, setAdding] = useState(false)
   // Chosen once by width, so each reading is in the document once: above the
   // pane at a desk, behind the pane's first line on a phone.
-  const phone = useIsMobile()
+  const phone = useBelow("md")
   const [hourOpen, setHourOpen] = useState(false)
   const hourShown = phone && hourOpen
 
@@ -407,7 +407,15 @@ export function ProjectLogs() {
           says a pane is, and each view scrolls inside it. On a phone the
           shell holds this page to the window and the pane is what is left of
           it, out to the screen's edges. */}
-      <Pane className={PANE_SIZE}>
+      {/* On a phone the Requests stop is the list: the chart of the same
+          window is Insights' first reading, a stop away, where over the rows
+          it left two of them above the bar. */}
+      <Pane
+        className={cn(
+          PANE_SIZE,
+          view === "requests" && "max-md:[&_[data-slot=request-chart]]:hidden",
+        )}
+      >
         {phone &&
           (hourShown ? (
             <HourPage onBack={() => setHourOpen(false)}>

@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react"
 import { Logs } from "@/components/icons"
-import { clock, plural, timestamp } from "@/lib/format"
+import { clock, duration, plural, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useRouter } from "next/navigation"
 import type {
@@ -11,11 +11,10 @@ import type {
   DeploymentStep,
   DeploymentSummary,
 } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { Group } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { ChipCount } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Disclosure } from "@/components/form"
 import { TranscriptRow } from "@/components/transcript-line"
@@ -24,7 +23,6 @@ import { Button } from "@/components/ui/button"
 import {
   RELEASE_GROUPS,
   StepMark,
-  formatDuration,
   frameworkLabel,
   groupedState,
   stageName,
@@ -47,13 +45,10 @@ import {
   settingsPathForField,
 } from "@/components/deploy/deployment-findings"
 import type { ConsoleRow } from "@/components/deploy/build-console"
-import {
-  CodeBlock,
-  EvidenceView,
-  JsonCode,
-  StepTile,
-  stepSummary,
-} from "@/components/deploy/run-evidence"
+import { CodeBlock, JsonCode } from "@/components/code"
+import { EvidenceView, StepTile, stepSummary } from "@/components/deploy/run-evidence"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /** Where a step sits in the run's time, as start and end in milliseconds. */
 function stepSpan(step: DeploymentStep, now: number) {
@@ -217,7 +212,14 @@ export function RunDetails({
   selected,
   onSelect,
   onShowOutput,
+  pane,
 }: {
+  /**
+   * One half alone, as a phone's pane draws it: the steps, or the record of
+   * the one picked, with no "Details" head and no frame, since the pane is
+   * the frame and its bar names it.
+   */
+  pane?: "steps" | "step"
   /** The project, so a preflight finding can open the settings page holding its field. */
   projectId?: number
   /** What the project is, for the marks of the steps that work with its source and build. */
@@ -235,7 +237,7 @@ export function RunDetails({
   /** Opens the build console on one step's output. */
   onShowOutput: (id: number) => void
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const rail = useRef<HTMLOListElement>(null)
   const inspector = useRef<HTMLDivElement>(null)
   const current = steps.find((step) => step.id === selected) ?? initialStep(steps)
@@ -282,8 +284,68 @@ export function RunDetails({
 
   const pick = (id: number) => {
     onSelect(id)
-    if (!wide) inspector.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    // A pane's step is another stop, which the page moves to.
+    if (!wide && !pane) scrollIntoViewRespectingMotion(inspector.current)
   }
+
+  const railList = (
+    <ol
+      ref={rail}
+      aria-label="Deployment steps"
+      className={cn(
+        "min-h-0 space-y-1 overflow-y-auto",
+        pane ? "-mx-2" : "p-2 max-lg:border-b lg:border-r",
+      )}
+    >
+      {stages.map((stage) => (
+        <li key={stage.label} className="min-w-0">
+          <StageHead label={stage.label} state={stage.state} steps={stage.steps} now={now} />
+          <ol aria-label={stage.label} className="min-w-0">
+            {stage.steps.map((step, index) => {
+              const span = spans.get(step.id)
+              return (
+                <StepRow
+                  key={step.id}
+                  step={step}
+                  deployment={deployment}
+                  operation={operation}
+                  now={now}
+                  lines={lineCounts.get(step.id) ?? 0}
+                  selected={step.id === current?.id}
+                  above={index > 0 ? stage.steps[index - 1].state : undefined}
+                  last={index === stage.steps.length - 1}
+                  left={span ? ((span.start - from) / length) * 100 : undefined}
+                  width={span ? ((span.end - span.start) / length) * 100 : undefined}
+                  onSelect={() => pick(step.id)}
+                />
+              )
+            })}
+          </ol>
+        </li>
+      ))}
+    </ol>
+  )
+  const record = current && (
+    <Inspector
+      key={current.id}
+      projectId={projectId}
+      deployment={deployment}
+      step={current}
+      operation={operation}
+      now={now}
+      rows={rows}
+      lines={lineCounts.get(current.id) ?? 0}
+      onShowOutput={() => onShowOutput(current.id)}
+      bare={pane !== undefined}
+    />
+  )
+
+  if (pane)
+    return (
+      <div id="run-details" className="min-w-0">
+        {pane === "steps" ? railList : record}
+      </div>
+    )
 
   return (
     <Section
@@ -303,54 +365,11 @@ export function RunDetails({
     >
       <div
         id="run-details"
-        className="grid min-w-0 scroll-mt-16 overflow-hidden rounded-xl border bg-card lg:h-[min(80vh,48rem)] lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
+        className="grid min-w-0 scroll-mt-16 overflow-hidden rounded-xl border bg-card lg:h-[min(80svh,48rem)] lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]"
       >
-        <ol
-          ref={rail}
-          aria-label="Deployment steps"
-          className="min-h-0 space-y-1 overflow-y-auto p-2 max-lg:border-b lg:border-r"
-        >
-          {stages.map((stage) => (
-            <li key={stage.label} className="min-w-0">
-              <StageHead label={stage.label} state={stage.state} steps={stage.steps} now={now} />
-              <ol aria-label={stage.label} className="min-w-0">
-                {stage.steps.map((step, index) => {
-                  const span = spans.get(step.id)
-                  return (
-                    <StepRow
-                      key={step.id}
-                      step={step}
-                      deployment={deployment}
-                      operation={operation}
-                      now={now}
-                      lines={lineCounts.get(step.id) ?? 0}
-                      selected={step.id === current?.id}
-                      above={index > 0 ? stage.steps[index - 1].state : undefined}
-                      last={index === stage.steps.length - 1}
-                      left={span ? ((span.start - from) / length) * 100 : undefined}
-                      width={span ? ((span.end - span.start) / length) * 100 : undefined}
-                      onSelect={() => pick(step.id)}
-                    />
-                  )
-                })}
-              </ol>
-            </li>
-          ))}
-        </ol>
+        {railList}
         <div ref={inspector} className="min-h-0 min-w-0 scroll-mt-16 overflow-y-auto">
-          {current && (
-            <Inspector
-              key={current.id}
-              projectId={projectId}
-              deployment={deployment}
-              step={current}
-              operation={operation}
-              now={now}
-              rows={rows}
-              lines={lineCounts.get(current.id) ?? 0}
-              onShowOutput={() => onShowOutput(current.id)}
-            />
-          )}
+          {record}
         </div>
       </div>
     </Section>
@@ -387,7 +406,7 @@ function StageHead({
         <Segment state={state} />
       </span>
       <span className="numeric w-10 shrink-0 text-right text-hint text-muted-foreground">
-        {seconds !== undefined ? formatDuration(seconds) : ""}
+        {seconds !== undefined ? duration(seconds) : ""}
       </span>
     </div>
   )
@@ -431,7 +450,7 @@ function StepRow({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute top-0 left-6 z-10 h-2.5 w-px",
+            "pointer-events-none absolute top-0 left-6 z-raised h-2.5 w-px",
             LINE[above] ?? "bg-hairline",
           )}
         />
@@ -440,7 +459,7 @@ function StepRow({
         <span
           aria-hidden
           className={cn(
-            "pointer-events-none absolute top-10.5 bottom-0 left-6 z-10 w-px",
+            "pointer-events-none absolute top-10.5 bottom-0 left-6 z-raised w-px",
             LINE[step.state] ?? "bg-hairline",
           )}
         />
@@ -468,15 +487,13 @@ function StepRow({
             </span>
             <span className="numeric shrink-0 text-hint text-muted-foreground">
               {step.attempt > 1 && `attempt ${step.attempt} · `}
-              {seconds !== undefined ? formatDuration(seconds) : stepStateLabel(step.state)}
+              {seconds !== undefined ? duration(seconds) : stepStateLabel(step.state)}
             </span>
           </span>
           <span className="flex min-w-0 items-baseline gap-2 text-hint text-muted-foreground">
             <span className="min-w-0 flex-1 truncate">{summary}</span>
             {lines > 0 && (
-              <span className="numeric shrink-0 text-muted-foreground/70">
-                {plural(lines, "line")}
-              </span>
+              <span className="numeric shrink-0 text-faint">{plural(lines, "line")}</span>
             )}
           </span>
           {/* Where in the run it happened, on the run's own scale: a picture
@@ -522,6 +539,7 @@ function Inspector({
   rows,
   lines,
   onShowOutput,
+  bare,
 }: {
   projectId?: number
   deployment?: DeploymentSummary
@@ -531,6 +549,8 @@ function Inspector({
   rows: ConsoleRow[]
   lines: number
   onShowOutput: () => void
+  /** Alone in a phone's pane: the pane's inset, and no "Details" head above its name. */
+  bare?: boolean
 }) {
   const seconds = stepSeconds(step, now)
   const evidence = step.evidence ?? {}
@@ -543,13 +563,17 @@ function Inspector({
   const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
   const recorded = Object.keys(evidence).length > 0
   const name = stepName(step.key, operation)
+  const Heading = bare ? "h2" : "h3"
   return (
-    <section aria-label={name} className="min-w-0 animate-rise space-y-6 p-4 sm:p-5">
+    <section
+      aria-label={name}
+      className={cn("min-w-0 animate-rise space-y-6", !bare && "p-4 sm:p-5")}
+    >
       <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
         <div className="flex min-w-0 flex-1 items-center gap-3">
           <StepTile step={step} state={step.state} deployment={deployment} size="md" />
           <div className="min-w-0 space-y-1">
-            <h3 className="truncate text-title font-semibold tracking-tight">{name}</h3>
+            <Heading className="truncate text-title font-semibold tracking-tight">{name}</Heading>
             <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
               <Status
                 tone={STEP_TONE[step.state] ?? "stopped"}
@@ -558,7 +582,7 @@ function Inspector({
               />
               {seconds !== undefined && (
                 <span>
-                  took <span className="numeric text-foreground">{formatDuration(seconds)}</span>
+                  took <span className="numeric text-foreground">{duration(seconds)}</span>
                 </span>
               )}
               {step.startedAt && (
@@ -673,14 +697,12 @@ function candidateLine(candidate: DeploymentDetectionCandidate) {
   const packageManager = packageManagerProduct(candidate.packageManager)
   return (
     <>
-      {framework && <ProductGlyph id={framework} className="mr-1 inline align-[-2px]" />}
+      {framework && <ProductGlyph id={framework} className="mr-1 glyph-inline" />}
       {candidate.framework ? frameworkLabel(candidate.framework) : candidate.name}
       {candidate.packageManager && (
         <>
           {" · "}
-          {packageManager && (
-            <ProductGlyph id={packageManager} className="mr-1 inline align-[-2px]" />
-          )}
+          {packageManager && <ProductGlyph id={packageManager} className="mr-1 glyph-inline" />}
           {candidate.packageManager}
         </>
       )}

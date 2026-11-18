@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { redisWrite } from "@/components/database/redis/api"
-import { parseJsonDoc } from "@/components/database/redis/keys/json-doc"
+import { parseJsonDoc } from "@/components/database/kit/json-doc"
 import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
 import { parseScore } from "@/components/database/redis/keys/score"
 import {

@@ -1,13 +1,14 @@
 "use client"
 
-import { useEffect, useId, useState } from "react"
+import { useId, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { Pencil } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { FormNote } from "@/components/form"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -23,16 +24,6 @@ import {
 import type { RedisBytes } from "@/components/database/redis/types"
 
 const PRESETS = ["1m", "1h", "1d", "7d", "30d"]
-
-/** The clock, re-read on an interval: what a countdown is drawn from. */
-function useNow(everyMs: number) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), everyMs)
-    return () => clearInterval(timer)
-  }, [everyMs])
-  return now
-}
 
 /** What is left of an expiry, counting down between reads of the key. */
 export function useRemaining(pttl: number, readAt: number): number {

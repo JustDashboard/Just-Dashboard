@@ -73,7 +73,7 @@ test("every source and every configure step fits the window without the page scr
   await expect.poll(overflow, { message: "a chosen template" }).toEqual({ down: 0, across: 0 })
 
   await page.getByRole("button", { name: "Git repository", exact: true }).click()
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   for (const step of ["project", "runtime", "variables", "review"] as const) {
     await gotoStep(page, step)
     await expect.poll(overflow, { message: step }).toEqual({ down: 0, across: 0 })
@@ -93,7 +93,7 @@ test("the repository list is drawn once, after both GitHub identities have answe
     json(route, {
       configured: true,
       installations: [
-        { id: 1, account: "Wayy01", accountType: "User", htmlUrl: "", repositorySelection: "all" },
+        { id: 1, account: "operator", accountType: "User", htmlUrl: "", repositorySelection: "all" },
       ],
     }),
   )
@@ -101,13 +101,13 @@ test("the repository list is drawn once, after both GitHub identities have answe
     json(route, [
       {
         installationId: 1,
-        account: "Wayy01",
-        nameWithOwner: "Wayy01/granted",
+        account: "operator",
+        nameWithOwner: "operator/granted",
         name: "granted",
         private: false,
         defaultBranch: "main",
-        cloneUrl: "https://github.com/Wayy01/granted.git",
-        htmlUrl: "https://github.com/Wayy01/granted",
+        cloneUrl: "https://github.com/operator/granted.git",
+        htmlUrl: "https://github.com/operator/granted",
         pushedAt: now,
       },
     ]),
@@ -122,11 +122,11 @@ test("the repository list is drawn once, after both GitHub identities have answe
   await appListed
   const skeletons = page.locator("[data-slot='flow-panel'] [data-slot='skeleton']")
   await expect(skeletons.first()).toBeVisible()
-  await expect(page.getByRole("button", { name: "Import Wayy01/granted" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Import operator/granted" })).toHaveCount(0)
 
   answer()
-  await expect(page.getByRole("button", { name: "Import Wayy01/granted" })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Import Wayy01/wesmokefish" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Import operator/granted" })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Import operator/wesmokefish" })).toBeVisible()
   await expect(skeletons).toHaveCount(0)
 })
 
@@ -135,8 +135,8 @@ test("one GitHub account reached by both the App and the CLI is drawn once", asy
   const installation = {
     id: 1,
     // GitHub logins are case-insensitive, and so is the comparison with the
-    // CLI's "Wayy01".
-    account: "wayy01",
+    // CLI's "operator".
+    account: "Operator",
     accountType: "User",
     htmlUrl: "https://github.com/settings/installations/1",
     repositorySelection: "all",
@@ -262,7 +262,7 @@ test("unfinished drafts sit behind a counted button beside the question and link
           {
             id: "abandoned-1",
             name: "storefront-redo",
-            source: "Wayy01/storefront @ main",
+            source: "operator/storefront @ main",
             currentStep: "configuration",
             updatedAt: "2026-09-02T09:00:00Z",
             expiresAt: "2026-10-02T09:00:00Z",
@@ -291,7 +291,7 @@ test("unfinished drafts sit behind a counted button beside the question and link
     "href",
     "/deploy/new?draft=abandoned-1",
   )
-  await expect(list.getByText("Wayy01/storefront @ main", { exact: true })).toBeVisible()
+  await expect(list.getByText("operator/storefront @ main", { exact: true })).toBeVisible()
   await expect(list.getByText("Configuration", { exact: true })).toBeVisible()
   await expect(list.getByRole("link", { name: "Untitled" })).toHaveAttribute(
     "href",
@@ -310,7 +310,7 @@ test("an invalid project name is flagged beside the field and clears once fixed"
 }) => {
   await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "project")
   const name = page.getByRole("textbox", { name: "Project name" })
   await name.fill("invalid name")
@@ -335,7 +335,7 @@ test("editing the name and pasting environment text keeps the text out of the UR
 }) => {
   const quick = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "project")
   await page.getByRole("textbox", { name: "Project name" }).fill("edited-site")
   await gotoStep(page, "variables")
@@ -372,7 +372,7 @@ for (const stage of ["runs"]) {
       }),
     )
     await page.goto("/deploy/new")
-    await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+    await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
     await gotoStep(page, "variables")
     await page.getByText("Paste .env", { exact: true }).click()
     await page
@@ -527,7 +527,7 @@ test("Add database from Configure creates a database, retries after a failed con
     return json(route, [])
   })
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "variables")
   await page.locator("#env-key-0").fill("API_KEY")
   await page.locator("#env-value-0").fill("another-secret")
@@ -931,7 +931,7 @@ test("quick deploy shows the actual HTTPS blocker instead of assuming Certbot is
     }),
   )
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
   await expect(page.getByText("Automatic HTTPS unavailable")).toBeVisible()
   await expect(page.getByText(reason, { exact: false }).last()).toBeVisible()
@@ -953,7 +953,7 @@ test("quick deploy keeps HTTPS automatic when Docker Caddy owns the public ports
     }),
   )
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
   await expect(
     page.getByText("The managed Caddy ingress orders the certificate", { exact: false }),
@@ -1003,13 +1003,13 @@ test("a detected site opens with its variables, its database and its single-page
           kind: "git",
           mode: "connected_repository",
           provider: "github",
-          repository: "Wayy01/wesmokefish",
+          repository: "operator/wesmokefish",
           ref: "main",
         },
         detection: {
           source: {
             kind: "git",
-            remote: "https://github.com/Wayy01/wesmokefish.git",
+            remote: "https://github.com/operator/wesmokefish.git",
             ref: "main",
             revision: "a12bc34d56ef7890a12bc34d56ef7890a12bc34d",
           },
@@ -1048,7 +1048,7 @@ test("a detected site opens with its variables, its database and its single-page
     ]),
   )
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
 
   // Three detected variables with nothing in them is a question only the
   // operator can answer, so that is the screen the sequence opens on.
@@ -1122,7 +1122,7 @@ test("container access options say what they allow, and they and the mounts reac
 }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new?mode=advanced")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
 
   // The consequence is the option's title (§7), not a "?" beside a 12px word.
@@ -1159,16 +1159,16 @@ test("a deploy link arrives on the Git tab with its clone URL and branch filled 
   page,
 }) => {
   await mockNewProject(page)
-  await page.goto("/deploy/new?repo=https://github.com/Wayy01/other.git&ref=release")
+  await page.goto("/deploy/new?repo=https://github.com/operator/other.git&ref=release")
   await expect(page.getByRole("textbox", { name: "Clone URL" })).toHaveValue(
-    "https://github.com/Wayy01/other.git",
+    "https://github.com/operator/other.git",
   )
   await page.locator("summary").filter({ hasText: "Branch & authentication" }).click()
   await expect(page.getByRole("textbox", { name: "Branch or tag" })).toHaveValue("release")
 
   // Importing from the prefilled field inspects that URL at that branch.
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByText("https://github.com/Wayy01/other.git", { exact: true })).toBeVisible()
+  await expect(page.getByText("https://github.com/operator/other.git", { exact: true })).toBeVisible()
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Branch" })).toHaveValue("release")
 
@@ -1229,11 +1229,11 @@ test("a Laravel import arrives with its application key and address set up, and 
         source: {
           kind: "git",
           mode: "git_url",
-          url: "https://github.com/Wayy01/shop.git",
+          url: "https://github.com/operator/shop.git",
           ref: "main",
         },
         detection: {
-          source: { kind: "git", remote: "https://github.com/Wayy01/shop.git", ref: "main" },
+          source: { kind: "git", remote: "https://github.com/operator/shop.git", ref: "main" },
           candidates: [candidate],
           selectedId: candidate.id,
           scannedFiles: 40,
@@ -1249,7 +1249,7 @@ test("a Laravel import arrives with its application key and address set up, and 
     }),
   )
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "project")
   await expect(page.getByText("Laravel", { exact: true })).toBeVisible()
   await gotoStep(page, "variables")
@@ -1313,7 +1313,7 @@ test("the public address can ask visitors for a password before the first deploy
 }) => {
   const quick = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
   await expect(page.getByRole("textbox", { name: "Hostname" })).toHaveValue(
     "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
@@ -1343,7 +1343,7 @@ test("workspace: deployment Back and Forward restore each step and its in-progre
 }) => {
   await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "project")
   await page.getByRole("textbox", { name: "Project name" }).fill("history-site")
   await gotoStep(page, "runtime")

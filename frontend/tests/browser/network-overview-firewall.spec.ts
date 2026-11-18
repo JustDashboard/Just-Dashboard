@@ -11,7 +11,7 @@ import {
 import { gateway, overrides as gatewayOverrides } from "./network-gateway-fixture"
 import { mockHostLogs } from "./host-logs-fixture"
 import { risen } from "./risen"
-import type { DriftReport } from "../../src/lib/network-drift"
+import type { DriftReport } from "../../src/lib/network/drift"
 
 /**
  * What the overhaul of the Network overview, Firewall, Gateway and Drift
@@ -189,11 +189,12 @@ for (const width of [1280, 390]) {
         })
         .check()
       expect(await top(rows.nth(1))).toBe(second)
-      // No framed notice stands over the plan: one sentence, then the rows.
+      // No framed notice or sentence stands over the plan: what it applies is
+      // the head's tip, then the rows.
       const plan = page.getByRole("region", { name: "Owned repair plan" })
       await expect(plan.getByText("Review only", { exact: true })).toHaveCount(1)
       await expect(plan.getByText("Selected repairs available")).toHaveCount(0)
-      await expect(plan).toContainText("Pick what to review.")
+      await expect(plan.getByRole("button", { name: "What this plan applies" })).toBeVisible()
       await expect(plan).toContainText("Review only")
       await plan.getByRole("button", { name: "Why 10.30.0.0/24 is review only" }).focus()
       await expect(page.getByRole("tooltip")).toContainText("Routes are restored by the boot unit")
@@ -203,6 +204,56 @@ for (const width of [1280, 390]) {
         "A rule this dashboard does not own occupies the owned comment.",
       )
       expect(await fits(page)).toBe(true)
+    })
+  })
+}
+
+// The 16 Nov rule: `?` closes the identity line, and has a row of its own
+// only beside a back link. Firewall has none, and its row of `?` alone set its
+// header 50px under Interfaces'.
+for (const [width, touch] of [
+  [1440, false],
+  [390, true],
+] as const) {
+  test.describe(`${width} wide`, () => {
+    test.use({ viewport: { width, height: 900 }, hasTouch: touch })
+
+    test("the firewall's header starts where a sibling's does, and `?` closes its line", async ({
+      page,
+    }) => {
+      await mockNetwork(page)
+      await mockHostLogs(page)
+      await page.goto("/network/interfaces")
+      await loaded(page)
+      const sibling = page.getByRole("region", { name: "About the interfaces" })
+      await expect(sibling).toBeVisible()
+      await risen(page)
+      const siblingTop = await top(sibling)
+
+      await page.goto("/network/firewall")
+      await loaded(page)
+      const identity = page.getByRole("region", { name: "About the firewall" })
+      await expect(identity).toContainText("Active")
+      await risen(page)
+      expect(await top(identity)).toBe(siblingTop)
+      // No row above the line: nothing the page draws stands over it.
+      await expect(page.locator("[data-slot=page] [data-slot=page-context]")).toHaveCount(0)
+
+      const help = page.getByRole("button", { name: "Firewall shortcuts" })
+      if (width < 640) {
+        // A phone has no keyboard for the shortcuts.
+        await expect(help).toBeHidden()
+        return
+      }
+      const line = (await identity.boundingBox())!
+      const cap = (await help.boundingBox())!
+      const menu = (await identity.getByRole("button", { name: "Firewall actions" }).boundingBox())!
+      // On the line's own row, after the `⋯`, at its far end.
+      expect(cap.y).toBeGreaterThanOrEqual(line.y)
+      expect(cap.y + cap.height).toBeLessThanOrEqual(line.y + line.height)
+      expect(Math.abs(cap.y + cap.height / 2 - (menu.y + menu.height / 2))).toBeLessThanOrEqual(1)
+      expect(cap.x).toBeGreaterThan(menu.x + menu.width - 1)
+      expect(line.x + line.width - (cap.x + cap.width)).toBeLessThanOrEqual(1)
     })
   })
 }
@@ -486,6 +537,7 @@ test("a reader is shown the firewall's defaults in words and no control it canno
   await expect(defaults.getByTestId("default-logging")).toHaveText("low")
   await expect(defaults.getByRole("radiogroup")).toHaveCount(0)
   await expect(page.getByRole("switch", { name: "Firewall enabled" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Disable" })).toHaveCount(0)
   for (const control of ["Add rule", "Edit rule", "Delete rule", "Rule history"])
     await expect(page.getByRole("button", { name: control, exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "Firewall actions" }).click()
@@ -620,7 +672,7 @@ test("the gateway opens on its line: what is in force, what forwards, and admiss
   // What each kind carried is its section's own total.
   const forwards = page.locator("[data-slot=panel]").filter({ hasText: "Port forwards" })
   await expect(forwards.locator("[data-slot=panel-header]")).toContainText(
-    /^Port forwards4 · [\d.]+K packets · [\d.]+ MB since load/,
+    /^Port forwards4 · [\d.]+k packets · [\d.]+ MB since load/,
   )
 
   // The command and the menu make what the section heads made.

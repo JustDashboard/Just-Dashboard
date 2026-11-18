@@ -11,7 +11,7 @@ import {
   shareLabel,
   type CongestionComparison,
   type CongestionView,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { OptionList, OptionRow } from "@/components/form"

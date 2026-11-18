@@ -4,14 +4,184 @@ import nextTs from "eslint-config-next/typescript"
 import jsxA11y from "eslint-plugin-jsx-a11y"
 
 import designSystem from "./eslint-rules/design-system.mjs"
+import retiredApis, { RETIRED_IDS } from "./eslint-rules/retired-apis.mjs"
+
+/*
+ * The files a guardrail id does not hold yet, each group with its reason. Both local rules are on
+ * everywhere else, and on every other id here; a file leaves this list when its page moves onto
+ * the shared component, and nothing joins it (0.9.0, WP-39). A file in several groups is excused
+ * from the ids of each.
+ */
+const NOT_YET = [
+  {
+    why: "A file WP-45 owns in wave 5, which moves it onto the shared components on its own branch.",
+    files: {
+      "src/app/(dashboard)/system-users/page.tsx": [
+        "animate-pulse-status",
+        "fact-dot",
+        "host-identity",
+      ],
+      "src/components/bar-reading.tsx": ["sweep"],
+      "src/components/database/generate/index.tsx": ["list-skeleton"],
+      "src/components/database/shell/database-header.tsx": ["host-identity"],
+      "src/components/database/workbench/chrome.tsx": ["container-arbitrary"],
+      "src/components/deploy/build-console.tsx": ["sweep"],
+      "src/components/deploy/settings/domains.tsx": ["container-arbitrary"],
+      "src/components/map/nodes.tsx": ["radius-arbitrary", "status-dot"],
+      "src/components/procs/cron-job-parts.tsx": ["stat-grid"],
+      "src/components/procs/cron-jobs.tsx": ["status-dot", "toggle-group"],
+      "src/components/procs/pm2-app-page.tsx": ["fact-dot"],
+      "src/components/procs/pm2-scale-dialog.tsx": ["icon-button"],
+      "src/components/procs/process-detail.tsx": ["stat-grid"],
+      "src/components/procs/process-table.tsx": ["fact-dot", "host-identity", "media-literal"],
+      "src/components/procs/schedule-band.tsx": ["animate-pulse-status", "fact-dot"],
+      "src/components/procs/service-views.tsx": ["stat-grid"],
+      "src/components/procs/services.tsx": ["fact-dot", "host-identity"],
+      "src/components/procs/timer-parts.tsx": ["stat-grid"],
+      "src/components/shell/app-sidebar.tsx": ["status-dot"],
+    },
+  },
+  {
+    why: "A view strip still drawn with tabClasses: moving it onto ViewTabs changes the roles and keys its page's specs read, so each moves with its page (A11Y-02).",
+    ids: ["tab-strip"],
+    files: [
+      "src/app/(dashboard)/network/protection/page.tsx",
+      "src/app/(dashboard)/packages/page.tsx",
+      "src/components/assistant/assistant-page.tsx",
+      "src/components/database/connect/index.tsx",
+      "src/components/database/mongo/aggregations/pipeline-view.tsx",
+      "src/components/database/mongo/documents/index.tsx",
+      "src/components/database/mongo/explain.tsx",
+      "src/components/database/ops/access-grants.tsx",
+      "src/components/database/ops/access-mongo.tsx",
+      "src/components/database/ops/performance.tsx",
+      "src/components/database/redis/console/index.tsx",
+      "src/components/database/redis/keys/json-editor.tsx",
+      "src/components/database/redis/keys/stream-editor.tsx",
+      "src/components/database/redis/keys/string-editor.tsx",
+      "src/components/deploy/new-project.tsx",
+      "src/components/deploy/project-logs.tsx",
+      "src/components/docker/network-page.tsx",
+      "src/components/files/quick-open.tsx",
+      "src/components/git/clone-dialog.tsx",
+      "src/components/git/conflict-preview.tsx",
+      "src/components/logs/log-workspace.tsx",
+      "src/components/logs/request-records.tsx",
+      "src/components/proxy/certs-panel.tsx",
+      "src/components/proxy/config-editor.tsx",
+      "src/components/proxy/request-tester.tsx",
+      "src/components/proxy/site-logs.tsx",
+      "src/components/security/intrusion-panels.tsx",
+      "src/components/shell/command-palette.tsx",
+      "src/components/terminal/workspace-tools.tsx",
+    ],
+  },
+  {
+    why: "A raw single ToggleGroup still to become Segments (PRM-07).",
+    ids: ["toggle-group"],
+    files: [
+      "src/app/(dashboard)/files/page.tsx",
+      "src/app/(dashboard)/metrics/page.tsx",
+      "src/components/account/api-keys.tsx",
+      "src/components/database/fleet/mcp-server-dialog.tsx",
+      "src/components/database/home/activity.tsx",
+      "src/components/deploy/environment-switch.tsx",
+      "src/components/deploy/project-database.tsx",
+      "src/components/deploy/project-runtime.tsx",
+      "src/components/deploy/settings/variable-type.tsx",
+      "src/components/deploy/site-preview.tsx",
+      "src/components/docker/container-shell-tab.tsx",
+      "src/components/files/quick-open.tsx",
+      "src/components/logs/filter-bar.tsx",
+      "src/components/metrics/hardware-panels.tsx",
+      "src/components/metrics/range-picker.tsx",
+      "src/components/network/connections/address-rail.tsx",
+      "src/components/network/connections/block-dialog.tsx",
+      "src/components/network/traffic/interface-charts.tsx",
+      "src/components/network/vpn/record.tsx",
+      "src/components/proxy/access-rules.tsx",
+      "src/components/proxy/alerts-page.tsx",
+      "src/components/proxy/cert-detail.tsx",
+      "src/components/proxy/certbot-panel.tsx",
+      "src/components/proxy/config-history.tsx",
+      "src/components/proxy/ports-proxy.tsx",
+      "src/components/proxy/private-cert-dialog.tsx",
+      "src/components/proxy/site-form.tsx",
+      "src/components/proxy/stream-servers.tsx",
+      "src/components/proxy/stream-setup.tsx",
+    ],
+  },
+  {
+    why: "A hand-built ⋯ menu still to become VerbMenu (PRM-22).",
+    ids: ["more-menu"],
+    files: [
+      "src/app/(dashboard)/dashboard/configuration/page.tsx",
+      "src/app/(dashboard)/terminal/page.tsx",
+      "src/components/assistant/agent/chat-list.tsx",
+      "src/components/database/data/field.tsx",
+      "src/components/docker/container-actions.tsx",
+      "src/components/docker/stack-row.tsx",
+      "src/components/files/editor-toolbar.tsx",
+      "src/components/files/file-tree.tsx",
+      "src/components/files/more-menu.tsx",
+      "src/components/network/captures.tsx",
+      "src/components/network/interfaces/device-identity.tsx",
+      "src/components/proxy/engine.tsx",
+      "src/components/xterm-pane.tsx",
+    ],
+  },
+  {
+    why: "A column's width still asked of the window: it becomes a container query with its page (FND-14).",
+    ids: ["media-literal"],
+    files: [
+      "src/components/database/data/index.tsx",
+      "src/components/docker/beside-rail.ts",
+      "src/components/docker/container-detail.tsx",
+      "src/components/docker/container-storage-tab.tsx",
+      "src/components/docker/network-views.tsx",
+      "src/components/docker/stack-preview.tsx",
+      "src/components/docker/stack-usage-band.tsx",
+      "src/components/network/routing/bgp.tsx",
+      "src/components/network/routing/route-tables.tsx",
+      "src/components/network/vpn/tailnet-machines.tsx",
+    ],
+  },
+  {
+    why: "A row of tiles still to be said in words (PRM-29).",
+    ids: ["stat-grid"],
+    files: ["src/components/deploy/run-railpack.tsx", "src/components/deploy/runtime-usage.tsx"],
+  },
+]
+
+/** The table as config: one block per file, its ids split between the two rules. */
+function notYet(table) {
+  const byFile = new Map()
+  for (const group of table) {
+    const entries = Array.isArray(group.files)
+      ? group.files.map((file) => [file, group.ids])
+      : Object.entries(group.files)
+    for (const [file, ids] of entries) byFile.set(file, [...(byFile.get(file) ?? []), ...ids])
+  }
+  return [...byFile].map(([file, ids]) => {
+    const retired = ids.filter((id) => RETIRED_IDS.includes(id))
+    const tokens = ids.filter((id) => !RETIRED_IDS.includes(id))
+    const rules = {}
+    if (tokens.length > 0) rules["design-system/tokens"] = ["error", { off: tokens }]
+    if (retired.length > 0) rules["retired-apis/retired"] = ["error", { off: retired }]
+    return { files: [file], rules }
+  })
+}
 
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
   {
-    plugins: { "design-system": designSystem },
+    plugins: { "design-system": designSystem, "retired-apis": retiredApis },
     rules: {
       "design-system/tokens": "error",
+      // The components and habits the 0.9.0 UI-system pass retired: each id names the shared
+      // component that owns the pattern (eslint-rules/retired-apis.mjs).
+      "retired-apis/retired": "error",
       // A date printed with options builds a fresh Intl.DateTimeFormat on
       // every call, which on a chart's axis was a quarter of what the Metrics
       // page cost while it sat open. `dateFormatter` in lib/format.ts builds
@@ -174,15 +344,32 @@ const eslintConfig = defineConfig([
     rules: { "no-restricted-syntax": "off" },
   },
   {
+    // A test, a codemod and the rules themselves hold the old spellings on purpose: as the input
+    // a function or a page is checked against, as the table a migration rewrites from, and as
+    // what a rule refuses.
+    files: [
+      "src/**/*.test.js",
+      "src/**/*.test.ts",
+      "tests/**",
+      "scripts/codemods/**",
+      "eslint-rules/**",
+      "eslint.config.mjs",
+    ],
+    rules: { "design-system/tokens": "off", "retired-apis/retired": "off" },
+  },
+  ...notYet(NOT_YET),
+  {
     // Where a value is *defined* rather than consumed. The generated shadcn
     // primitives own the control faces; `logo.tsx` owns the wordmark's own ramp;
-    // `components/metrics/` owns the chart palette; `icon-action.tsx` owns the
-    // reveal rule itself.
+    // `components/metrics/`, with the sparkline and the chart panel it shares,
+    // owns the chart palette; `icon-action.tsx` owns the reveal rule itself.
     files: [
       "src/components/ui/**",
       "src/components/icon-action.tsx",
       "src/components/logo.tsx",
       "src/components/metrics/**",
+      "src/components/sparkline.tsx",
+      "src/components/chart-panel.tsx",
       "src/components/logs/histogram.tsx",
       "src/components/git/graph-panel.tsx",
       "src/components/database/diagram/**",

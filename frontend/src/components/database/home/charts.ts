@@ -2,6 +2,8 @@ import { bytes, rate } from "@/lib/format"
 import type { Series } from "@/components/metrics/metric-chart"
 import { compact, perSecond } from "@/components/database/home/readings"
 import { TRANSACTIONS, sourced, type Sample, type Source } from "@/components/database/home/samples"
+// The product's one pair of traffic colours: received in RX, sent in TX.
+import { RX, TX } from "@/components/in-out"
 
 /**
  * What the home's activity charts show, per engine family.
@@ -210,14 +212,14 @@ export const REDIS_VIEWS: ChartView[] = [
     {
       key: "in",
       label: "Received",
-      color: "var(--chart-2)",
+      color: RX,
       kind: "area",
       from: { rate: "total_net_input_bytes" },
     },
     {
       key: "out",
       label: "Sent",
-      color: "var(--chart-5)",
+      color: TX,
       from: { rate: "total_net_output_bytes" },
     },
   ]),
@@ -260,11 +262,11 @@ export const MONGO_VIEWS: ChartView[] = [
     {
       key: "in",
       label: "Received",
-      color: "var(--chart-2)",
+      color: RX,
       kind: "area",
       from: { rate: "network.in" },
     },
-    { key: "out", label: "Sent", color: "var(--chart-5)", from: { rate: "network.out" } },
+    { key: "out", label: "Sent", color: TX, from: { rate: "network.out" } },
   ]),
 ]
 

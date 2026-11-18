@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Question, Trash, Warning } from "@/components/icons"
+import { Trash, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { get, post } from "@/lib/api"
 import { bytes } from "@/lib/format"
@@ -10,8 +10,9 @@ import type { CleanupCategory, CleanupPreview, PruneReport } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ROW_BLEED } from "@/components/row-list"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { Explain } from "@/components/explain"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import type { ConfirmFn } from "@/components/docker/shared"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -270,29 +271,24 @@ function CategoryRow({
  */
 function CategoryExplain({ category, empty }: { category: CleanupCategory; empty: boolean }) {
   return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          aria-label={`What removing ${category.label} costs`}
-          className="shrink-0 cursor-help text-muted-foreground focus-ring transition-colors hover:text-foreground"
-        >
-          <Question className="size-3.5" />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 space-y-1.5 text-xs leading-relaxed">
-        <p className="text-body font-medium">{category.label}</p>
-        <p className="text-muted-foreground">
-          {empty ? "Nothing on this server is in this category right now." : category.cost}
-        </p>
-        {category.examples.length > 0 && (
-          <p className="font-mono text-hint break-all text-muted-foreground">
-            {category.examples.join(", ")}
-            {category.items > category.examples.length &&
-              ` and ${category.items - category.examples.length} more`}
-          </p>
-        )}
-      </HoverCardContent>
-    </HoverCard>
+    <Explain
+      glyph="question"
+      label={`What removing ${category.label} costs`}
+      entry={{
+        title: category.label,
+        body: (
+          <div className="space-y-1.5">
+            <p>{empty ? "Nothing on this server is in this category right now." : category.cost}</p>
+            {category.examples.length > 0 && (
+              <p className="font-mono text-hint break-all">
+                {category.examples.join(", ")}
+                {category.items > category.examples.length &&
+                  ` and ${category.items - category.examples.length} more`}
+              </p>
+            )}
+          </div>
+        ),
+      }}
+    />
   )
 }

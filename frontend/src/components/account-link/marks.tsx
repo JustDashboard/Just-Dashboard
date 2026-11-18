@@ -1,4 +1,4 @@
-import type { Icon } from "@/components/icons"
+import { Archive, RefreshClockwise, type Icon } from "@/components/icons"
 import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { cn } from "@/lib/utils"
@@ -41,3 +41,26 @@ export function LargeMarkTile({ mark }: { mark: Mark }) {
     </span>
   )
 }
+
+/**
+ * A command a peer ran here, drawn as what it acts on: Docker for a container
+ * or a stack, this dashboard itself. Connect's and the Hub's Activity
+ * sections each carried a copy of this, word for word.
+ */
+export function commandMark(kind: string): Mark {
+  if (kind.startsWith("dashboard.")) return { brand: true }
+  if (kind.startsWith("container.")) return { product: "docker" }
+  if (kind.startsWith("stack.")) return { product: "docker-compose" }
+  if (kind.startsWith("backup.")) return { glyph: Archive, hue: "var(--tag-violet)" }
+  return { glyph: RefreshClockwise, hue: "var(--tag-blue)" }
+}
+
+/** How a command ended, as the `Status` at its row's far end. */
+export const COMMAND_STATUS = {
+  succeeded: { tone: "running", label: "Succeeded" },
+  failed: { tone: "danger", label: "Failed" },
+  refused: { tone: "warning", label: "Refused" },
+} as const
+
+/** An Activity row, on the section's own edge under its title: the rows open nothing, so no bleed. */
+export const ACTIVITY_ROW = "px-0 py-2.5"

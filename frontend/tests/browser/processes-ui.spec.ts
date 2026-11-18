@@ -901,8 +901,28 @@ test("the live table reads the host and every process verb is a word", async ({ 
   await expect(
     picture.getByRole("button", { name: /PM2 v6.0.5: God Daemon \(900\)/ }),
   ).toBeVisible()
-  await expect(page.getByRole("button", { name: "Terminate", exact: true })).toBeVisible()
-  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
+  // Its verbs are the identity line's: its logs as the command, and every
+  // signal behind the line's menu. No destructive verb takes the command:
+  // Terminate and Kill come last in the menu, in the destructive ink.
+  const line = page.locator("[data-slot='host-identity']")
+  await expect(line.getByRole("button", { name: "Open logs" })).toBeVisible()
+  await expect(line.getByRole("button", { name: /^(Terminate|Kill)$/ })).toHaveCount(0)
+  await line.getByRole("button", { name: "More actions for node" }).click()
+  const items = (await page.getByRole("menuitem").allTextContents()).map((item) => item.trim())
+  const ending = items.filter((item) => /^(Terminate|Kill)/.test(item))
+  expect(ending.slice(0, 2)).toEqual(["Terminate", "Kill"])
+  expect(items.slice(-ending.length)).toEqual(ending)
+  for (const name of ["Terminate", "Kill"])
+    await expect(page.getByRole("menuitem", { name, exact: true })).toHaveAttribute(
+      "data-variant",
+      "destructive",
+    )
+  await page.getByRole("menuitem", { name: "Terminate", exact: true }).click()
+  // It still asks first.
+  await expect(page.getByRole("alertdialog").or(page.getByRole("dialog"))).toContainText(
+    "is asked to shut down",
+  )
+  await page.keyboard.press("Escape")
   await expect(page.getByRole("dialog")).toHaveCount(0)
 })
 
@@ -983,13 +1003,13 @@ test("a process's page keeps the table beside it and carries the view between pr
   await page.goto("/processes/4021")
   const rail = page.getByRole("navigation", { name: "Processes" })
   await expect(rail).toBeVisible()
-  await expect(rail.getByRole("button", { name: "node, PID 4021" })).toHaveAttribute(
+  await expect(rail.getByRole("link", { name: "node, PID 4021" })).toHaveAttribute(
     "aria-current",
     "page",
   )
   await page.getByRole("tab", { name: /Files/ }).click()
   await expect(page).toHaveURL(/\/processes\/4021\?tab=files$/)
-  await rail.getByRole("button", { name: "nginx, PID 812" }).click()
+  await rail.getByRole("link", { name: "nginx, PID 812" }).click()
   await expect(page).toHaveURL(/\/processes\/812\?tab=files$/)
   await expect(page.getByRole("tab", { name: /Files/ })).toHaveAttribute("aria-selected", "true")
   await expect(page.getByText("/var/log/nginx/access.log")).toBeVisible()
@@ -1161,10 +1181,11 @@ test("a process that exits while its page is open says so and stops", async ({ p
       : route.fallback(),
   )
   await page.goto("/processes/4021")
-  await expect(page.getByRole("button", { name: "Kill", exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "More actions for node" })).toBeVisible()
   gone = true
   await expect(page.getByText("This process has exited")).toBeVisible({ timeout: 6000 })
-  await expect(page.getByRole("button", { name: "Kill", exact: true })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Open logs" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "More actions for node" })).toHaveCount(0)
   await expect(page.locator("[data-slot='stat-tile']", { hasText: "Memory" })).toBeVisible()
 })
 
@@ -1542,15 +1563,21 @@ test("scheduled says what each schedule means and builds a new one in words", as
   await expect(editor.getByRole("button", { name: "Add job" })).toBeEnabled()
   await page.keyboard.press("Escape")
 
-  // A job opens on its week, its command and the runs cron logged for it.
-  await jobs.getByRole("button", { name: "/usr/local/bin/backup" }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(page).toHaveURL(/job=cron(%3A|:)3/)
-  await expect(sheet.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
-  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
-  await expect(sheet.getByRole("button", { name: "Disable" })).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(page).not.toHaveURL(/job=/)
+  // A job opens its own page on its week and its command, with its verbs on
+  // its line and every schedule beside it; its runs are a view of their own.
+  await jobs
+    .getByRole("button", { name: /\/usr\/local\/bin\/backup/ })
+    .first()
+    .click()
+  await expect(page).toHaveURL(/\/processes\/scheduled\/cron\/root(%3A|:)3$/)
+  await expect(page.getByRole("img", { name: /over the next seven days/ })).toBeVisible()
+  await expect(page.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  const line = page.locator("[data-slot='host-identity']")
+  await expect(line.getByRole("button", { name: "Disable" })).toBeVisible()
+  await page.getByRole("tab", { name: "Runs" }).click()
+  await expect(page).toHaveURL(/\?tab=runs$/)
+  await page.getByRole("main").getByRole("link", { name: "Scheduled", exact: true }).click()
+  await expect(page).toHaveURL(/\/processes\/scheduled$/)
 })
 
 test("scheduled says what systemd runs instead and when each timer fires", async ({ page }) => {
@@ -1650,11 +1677,11 @@ test("scheduled says what systemd runs instead and when each timer fires", async
   await expect(page.getByText("1 cron line left to systemd")).toBeVisible()
 
   await certbot.getByRole("button", { name: /certbot:/ }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(sheet.getByText("systemd does this work here")).toBeVisible()
-  await sheet.getByRole("link", { name: "certbot.timer" }).click()
-  await expect(page).toHaveURL(/timer=certbot\.timer/)
-  await expect(page.getByRole("dialog")).toContainText(
+  await expect(page).toHaveURL(/\/processes\/scheduled\/cron\/system/)
+  await expect(page.getByText("systemd does this work here")).toBeVisible()
+  await page.getByRole("main").getByRole("link", { name: "certbot.timer" }).click()
+  await expect(page).toHaveURL(/\/processes\/scheduled\/timers\/certbot\.timer$/)
+  await expect(page.getByRole("main")).toContainText(
     "Twice a day, at 00:00 and 12:00, up to 12 hours later",
   )
 })
@@ -1878,11 +1905,12 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
   await expect(cronLog.getByRole("button", { name: /^Runs/ })).toContainText("143")
   await expect(cronLog.getByRole("button", { name: /^Output discarded/ })).toContainText("2")
 
-  // A timer opens its sheet on the runs of the service it fires.
+  // A timer opens its page, and its Runs view is the runs of the service it fires.
   await page.getByRole("button", { name: "certbot.timer", exact: true }).click()
-  const sheet = page.getByRole("dialog")
-  await expect(page).toHaveURL(/timer=certbot\.timer/)
-  await expect(sheet.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  await expect(page).toHaveURL(/\/processes\/scheduled\/timers\/certbot\.timer$/)
+  await expect(page.locator("[data-slot='stat-tile']").first()).toContainText("Next run")
+  await page.getByRole("tab", { name: "Runs" }).click()
+  const sheet = page.getByRole("main")
   const runs = sheet.getByRole("list", { name: "Runs" })
   const rows = runs.locator(":scope > li")
   await expect(rows).toHaveCount(3)
@@ -1896,8 +1924,6 @@ test("scheduled reads cron's own log and each timer's runs where they are", asyn
   await expect(rows.nth(1)).toContainText("exit 1")
   await expect(rows.nth(1)).toContainText("2.11s CPU")
   await expect(sheet.getByRole("button", { name: "Run now" })).toBeVisible()
-  await page.keyboard.press("Escape")
-  await expect(runs).toHaveCount(0)
 })
 
 test.describe("with no hover available", () => {
@@ -1938,6 +1964,38 @@ test.describe("with no hover available", () => {
 // under its sentence rather than squeezing it to a word a line.
 test.describe("a process on a phone", () => {
   test.use({ viewport: { width: 390, height: 844 } })
+
+  // The line drawn while the process is read holds the place of its verbs,
+  // so it is as tall as the line that replaces it and nothing under it moves.
+  for (const path of ["/processes/812", "/processes/services/nginx.service"]) {
+    test(`${path}: the line is as tall while it is read as once it is`, async ({ page }) => {
+      await mockHost(page)
+      let release!: () => void
+      const gate = new Promise<void>((resolve) => (release = resolve))
+      const read = path.startsWith("/processes/services")
+        ? "**/api/v1/systemd/nginx.service"
+        : "**/api/v1/processes/812"
+      await page.route(read, async (route) => {
+        await gate
+        return route.fallback()
+      })
+      await page.goto(path)
+      const line = page.locator("[data-slot='host-identity']")
+      // The row of facts is the line's last: everything above it is the
+      // part a phone draws before the facts, the name, the state and the verbs.
+      const facts = line.locator(":scope > div").last()
+      await expect(line).toHaveAttribute("aria-busy", "true")
+      const before = { line: (await line.boundingBox())!, facts: (await facts.boundingBox())! }
+      release()
+      await expect(line).not.toHaveAttribute("aria-busy", "true")
+      await expect(line.getByRole("button").first()).toBeVisible()
+      const after = { line: (await line.boundingBox())!, facts: (await facts.boundingBox())! }
+      expect(Math.abs(after.line.y - before.line.y)).toBeLessThan(1)
+      // The facts start where they will stand, under a verbs row that was
+      // held; only facts that wrap to a second line can add height below.
+      expect(Math.abs(after.facts.y - before.facts.y)).toBeLessThan(1)
+    })
+  }
 
   test("is one pane whose supervisor's verbs stay in reach", async ({ page }) => {
     await mockHost(page)
@@ -2270,35 +2328,21 @@ test("cron disable updates its existing row and keeps keyboard focus on the togg
   expect(await button.evaluate((element) => element.isConnected)).toBe(true)
 })
 
-test("a timer opened by deep link holds the list's first loaded order while its sheet is open", async ({
+test("a timer's old sheet address opens its page, with the schedules beside it", async ({
   page,
 }) => {
-  await page.clock.install()
   await mockHost(page)
-  let reversed = false
-  let reads = 0
-  await page.route("**/api/v1/systemd/timers", (route) => {
-    reads++
-    return json(route, {
-      ...timers,
-      timers: reversed ? [...timers.timers].reverse() : timers.timers,
-    })
-  })
+  await page.setViewportSize({ width: 1440, height: 900 })
   await page.goto("/processes/scheduled?timer=certbot.timer")
-  await expect(page.getByRole("dialog")).toBeVisible()
-  const names = () =>
-    page
-      .locator("[data-process-row]")
-      .evaluateAll((elements) =>
-        elements.map((element) => element.getAttribute("data-process-row")),
-      )
-  await expect.poll(names).toEqual(["certbot.timer", "fstrim.timer"])
-  reversed = true
-  const initialReads = reads
-  await page.clock.fastForward(31000)
-  await expect.poll(() => reads).toBeGreaterThan(initialReads)
-  expect(await names()).toEqual(["certbot.timer", "fstrim.timer"])
-  await expect(page.getByRole("dialog")).toBeVisible()
+  await expect(page).toHaveURL(/\/processes\/scheduled\/timers\/certbot\.timer$/)
+  await expect(page.getByRole("dialog")).toHaveCount(0)
+  const rail = page.getByRole("navigation", { name: "Schedules" })
+  await expect(rail.locator("[aria-current='page']")).toContainText("certbot")
+  // Alt+↓ walks the schedules, soonest first, and the view goes with it.
+  await page.getByRole("tab", { name: "Runs" }).click()
+  await page.locator("body").click({ position: { x: 900, y: 10 } })
+  await page.keyboard.press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/processes\/scheduled\/(cron|timers)\/[^?]+\?tab=runs$/)
 })
 
 for (const surface of ["pm2", "services"] as const) {

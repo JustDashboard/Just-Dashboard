@@ -6,11 +6,11 @@ import { cn } from "@/lib/utils"
 import { duration, plural } from "@/lib/format"
 import { useViewState } from "@/lib/view-state"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { Disclosure, FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import {
@@ -33,14 +33,13 @@ import {
 } from "@/components/database/ops/performance-activity"
 import { readLocks } from "@/components/database/ops/performance-api"
 import {
+  FIT_COLUMN,
   Named,
   NoFigure,
   NotAvailable,
   Notes,
-  Stale,
-  StatementLine,
-  ViewRead,
   RETURNS_FOCUS,
+  StatementLine,
 } from "@/components/database/ops/performance-parts"
 import { useStops, type Stops } from "@/components/database/ops/performance-stops"
 import type {
@@ -52,7 +51,9 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { clientOf, type KnownClient } from "@/components/database/clients"
 import { useKnownClients } from "@/components/database/use-known-clients"
 import { ProductGlyph } from "@/components/product-logo"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { ProjectFavicon } from "@/components/project-mark"
+import { Read, Stale } from "@/components/database/kit/read"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * Who is holding whom up.
@@ -102,7 +103,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
     <Panel plain aria-label="Locks" ref={frame} className="focus-ring" {...RETURNS_FOCUS}>
       {stops.dialog}
       <PanelHeader title="Who is waiting on whom" actions={<Stale poll={locks} />} />
-      <ViewRead poll={locks} what="the locks" skeleton={<LoadingPanel plain rows={4} />}>
+      <Read patience poll={locks} what="the locks" skeleton={<LoadingPanel plain rows={4} />}>
         {(data) => {
           if (!data.supported) {
             return (
@@ -124,7 +125,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
                   <p className="text-body">
                     <span className="numeric font-medium">{plural(waiting, "session")}</span>{" "}
                     <span className="text-muted-foreground">
-                      {waiting === 1 ? "is" : "are"} waiting behind{" "}
+                      {agree(waiting, "is", "are")} waiting behind{" "}
                       {tree.length === 1 ? "one other" : `${tree.length} others`}.
                     </span>
                   </p>
@@ -156,7 +157,7 @@ export function LocksView({ activity }: { activity: PollState<DbActivityResponse
             </PanelBody>
           )
         }}
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -227,7 +228,7 @@ function LockRow({
             {user && <Named name={user} className="text-xs" />}
             {session?.application && (
               <>
-                <span aria-hidden className="text-muted-foreground/60">
+                <span aria-hidden className="text-faint">
                   ·
                 </span>
                 <span className="flex min-w-0 items-center gap-1.5">
@@ -276,7 +277,7 @@ function LockRow({
             </p>
           )}
           {node.query ? (
-            <StatementLine text={node.query} className="text-hint text-foreground/80" />
+            <StatementLine text={node.query} className="text-hint text-muted-foreground" />
           ) : phantom ? (
             <p className="text-hint text-muted-foreground">
               Not a session: a prepared transaction, or one the server no longer lists.
@@ -367,13 +368,13 @@ function LockTable({
     </span>
   )
   return (
-    <div className="-mx-4 space-y-2">
+    <div className={cn("space-y-2", FIT_COLUMN)}>
       {width < 560 ? (
         <ul className="max-h-[28rem] divide-y divide-hairline overflow-y-auto border-y border-hairline">
           {locks.map((lock, index) => (
             <li
               key={`${lock.pid}:${lock.object}:${lock.mode}:${index}`}
-              className="space-y-1 px-4 py-2 text-xs"
+              className="space-y-1 py-2 text-xs"
             >
               <div className="flex min-w-0 items-center justify-between gap-3">
                 <span className="flex min-w-0 items-center gap-2">
@@ -437,7 +438,7 @@ function LockTable({
         </Table>
       )}
       {truncated && (
-        <FormNote className="px-4">
+        <FormNote>
           The server listed more locks than these; the first 500 are shown.
         </FormNote>
       )}

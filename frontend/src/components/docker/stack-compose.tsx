@@ -22,11 +22,13 @@ import { CodeEditor, type EditorCommands } from "@/components/code-editor"
 import { IconAction } from "@/components/icon-action"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { ContentConflict } from "@/components/files/content-conflict"
-import { ComposeDiff, DiffCount, ServiceLabel } from "@/components/docker/stack-diff"
+import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
+import { DiffCount } from "@/components/diff-count"
 import { bucketTone, type ServiceReading } from "@/components/docker/stack-service-readings"
 import {
   composeOutline,
@@ -477,7 +479,7 @@ function Outline({
             )}
           >
             <span className="min-w-0 flex-1 truncate">{section.key}</span>
-            <span className="numeric font-normal tracking-normal text-muted-foreground/60 normal-case">
+            <span className="numeric font-normal tracking-normal text-faint normal-case">
               {section.line}
             </span>
           </button>
@@ -514,7 +516,7 @@ function Outline({
                           className="shrink-0"
                         />
                       )}
-                      <span className="numeric w-6 shrink-0 text-right text-hint text-muted-foreground/60">
+                      <span className="numeric w-6 shrink-0 text-right text-hint text-faint">
                         {child.line}
                       </span>
                     </button>

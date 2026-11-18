@@ -6,8 +6,9 @@ import { errorMessage, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { Field, FormNote, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
+import { PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -97,7 +98,7 @@ export function RoleTester({
 
   return (
     <section aria-label="Try it as a role" className="space-y-4 border-t border-hairline px-4 py-4">
-      <h3 className="text-title font-medium">Try it as a role</h3>
+      <PanelHeader plain level={3} title="Try it as a role" className="border-b-0 pb-0" />
       <div className="grid gap-4 md:grid-cols-[14rem_minmax(0,1fr)]">
         <Field label="Role" htmlFor={`${ids}-role`}>
           {roles.length > 0 ? (
@@ -177,11 +178,7 @@ export function RoleTester({
                 Add a setting
               </Button>
               {unset.length > 0 && (
-                <ChipStrip
-                  role="group"
-                  aria-label="Settings the policies read"
-                  className="max-sm:mx-0 max-sm:px-0"
-                >
+                <ChipStrip role="group" aria-label="Settings the policies read" bleed={false}>
                   {unset.map((name) => (
                     <FilterChip
                       key={name}

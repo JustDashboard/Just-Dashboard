@@ -12,14 +12,14 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentSharedVariable, DeploymentVariable } from "@/lib/types"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { ProductGlyph, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -40,7 +40,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Copy, Eye, EyeOff, Linked, Pencil, Plus, Trash } from "@/components/icons"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { RevealedValue, ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import {
   parseSharedReference,
@@ -259,8 +259,10 @@ export function SharedVariables({
     return verbs
   }
 
+  // The server's page has one Add, in the primary face its sibling sections'
+  // Adds have; inside a project's settings it is a section's verb, outline.
   const addButton = canEdit && (
-    <Button size="sm" variant="outline" onClick={add}>
+    <Button size="sm" variant={scope.kind === "server" ? "default" : "outline"} onClick={add}>
       <Plus className="size-3.5" /> Add variable
     </Button>
   )
@@ -270,7 +272,7 @@ export function SharedVariables({
       {variables.error && !list ? (
         <ErrorState error={variables.error} onRetry={variables.refresh} />
       ) : !list ? (
-        <LoadingRows rows={3} />
+        <ChoiceListSkeleton rows={3} />
       ) : list.length === 0 ? (
         <EmptyState
           icon={Linked}
@@ -324,7 +326,7 @@ export function SharedVariables({
         onOpenChange={(next) => !next && close()}
         title={draft?.editing ? `Edit ${draft.name}` : `Add ${word} variable`}
         description="A value defined once and read by reference."
-        width="md"
+        size="md"
         footer={
           <>
             <FormNote className="mr-auto max-sm:hidden">
@@ -353,7 +355,7 @@ export function SharedVariables({
                 </FormFact>
               </FormFacts>
             )}
-            <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <div className="grid min-w-0 gap-4 sm:grid-cols-main-end">
               {!draft.editing && (
                 <Field
                   label="Variable name"
@@ -462,7 +464,7 @@ function SharedRow({
     revealed !== undefined ? (
       <RevealedValue name={variable.name} value={revealed} />
     ) : (
-      <span className="block h-4 truncate font-mono leading-4 text-foreground/90">
+      <span className="block h-4 truncate font-mono leading-4 text-foreground">
         {variable.reference}
       </span>
     )

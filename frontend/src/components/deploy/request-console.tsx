@@ -2,6 +2,7 @@
 
 import { useCallback, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
+import { Fact, FactLine } from "@/components/fact-line"
 import {
   BlendMode,
   Bug,
@@ -22,7 +23,7 @@ import {
 import { cn } from "@/lib/utils"
 import { bytes, clock, timestamp } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
-import { setLogView, useLogView } from "@/lib/log-view"
+import { setLogView, useLogView } from "@/lib/log/view"
 import { crawlerOf, networkOf, refererProduct } from "@/lib/clients"
 import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import type { RequestEntry, RequestSummary } from "@/lib/types"
@@ -37,9 +38,7 @@ import {
   statusClass,
 } from "@/lib/requests"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ClientMark, NETWORK_GLYPH, NetworkFact } from "@/components/client-mark"
-import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
@@ -55,6 +54,7 @@ import {
   clientName,
   isPrivate,
 } from "@/components/deploy/request-marks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The requests, and the chrome that belongs to them.
@@ -163,7 +163,7 @@ export function RequestConsole({
   const [open, setOpen] = useState<string | null>(null)
   const { highlight } = useLogView()
   const plain = !highlight
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const keys = entries.map((entry, i) => requestKey(entry, i))
   const arrived = useArrivals(keys)
   const rising = paused === false && following
@@ -259,7 +259,7 @@ export function RequestConsole({
               // Padded above as well as below, so once it sticks to the top
               // of the pane its labels stay centred in the band rather than
               // pressed against the band's top edge.
-              <div className="sticky top-0 z-10 flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 py-1 pr-4 font-sans text-hint font-medium text-muted-foreground">
+              <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 py-1 pr-4 font-sans text-hint font-medium text-muted-foreground">
                 <span aria-hidden className="w-0.5 shrink-0" />
                 <span className="w-16 shrink-0">Time</span>
                 <span className="w-12 shrink-0">Method</span>
@@ -317,7 +317,7 @@ export function RequestConsole({
                       />
                       <span
                         title={timestamp(entry.time)}
-                        className="numeric w-16 shrink-0 text-muted-foreground/70 select-none"
+                        className="numeric w-16 shrink-0 text-faint select-none"
                       >
                         {clock(entry.time)}
                       </span>
@@ -335,7 +335,7 @@ export function RequestConsole({
                       <span className="flex min-w-0 flex-1" title={requestURI(entry)}>
                         <RequestPath path={entry.path} query={entry.query} plain={plain} />
                       </span>
-                      <span className="numeric hidden w-16 shrink-0 text-right text-muted-foreground/70 lg:block">
+                      <span className="numeric hidden w-16 shrink-0 text-right text-faint lg:block">
                         {entry.size ? bytes(entry.size, 0) : "—"}
                       </span>
                       <ClientCell
@@ -369,23 +369,27 @@ export function RequestConsole({
                             <Took entry={entry} summary={summary} className="w-16" />
                           )}
                         </span>
-                        <span className="flex min-w-0 items-center gap-1.5 pl-12 font-sans text-hint text-muted-foreground">
-                          <span className="numeric shrink-0">{clock(entry.time)}</span>
-                          <FactDot />
-                          <MethodWord method={entry.method} plain={plain} className="shrink-0" />
-                          <FactDot />
-                          <span className="numeric shrink-0">
+                        <FactLine
+                          nowrap
+                          className="pl-12 font-sans text-hint text-muted-foreground"
+                        >
+                          <Fact className="numeric shrink-0">{clock(entry.time)}</Fact>
+                          <Fact>
+                            <MethodWord method={entry.method} plain={plain} className="shrink-0" />
+                          </Fact>
+                          <Fact className="numeric shrink-0">
                             {entry.size ? bytes(entry.size, 0) : "—"}
-                          </span>
-                          <FactDot />
-                          <ClientCell
-                            ip={entry.remoteIp}
-                            userAgent={entry.userAgent}
-                            user={entry.user}
-                            plain={plain}
-                            className="min-w-0"
-                          />
-                        </span>
+                          </Fact>
+                          <Fact>
+                            <ClientCell
+                              ip={entry.remoteIp}
+                              userAgent={entry.userAgent}
+                              user={entry.user}
+                              plain={plain}
+                              className="min-w-0"
+                            />
+                          </Fact>
+                        </FactLine>
                       </span>
                     </button>
                   )}
@@ -428,11 +432,10 @@ export function RequestConsole({
       )}
 
       <PaneFooter className="gap-x-4 gap-y-1 px-3 text-hint text-muted-foreground">
-        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-          {status}
-          {status && <FactDot />}
-          <span className="numeric whitespace-nowrap">{entries.length.toLocaleString()} shown</span>
-        </span>
+        <FactLine>
+          {status && <Fact>{status}</Fact>}
+          <Fact className="numeric whitespace-nowrap">{entries.length.toLocaleString()} shown</Fact>
+        </FactLine>
         {footer}
       </PaneFooter>
     </div>
@@ -699,19 +702,24 @@ function RequestDetail({
     // logs page's workbench it stands beside the source rail, and three
     // columns chosen by the viewport cut every value there.
     <div className="@container animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem]">
-      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline pb-2 font-sans text-xs">
-        {mark}
-        <span className="text-body font-medium">
-          {entry.userAgent ? clientName(entry.userAgent) : "No user agent"}
-        </span>
-        {ip && (
-          <>
-            <FactDot />
-            <NetworkFact ip={ip} glyph address={<Address ip={ip} plain={plain} />} />
-          </>
-        )}
+      <div className="flex items-center gap-x-2 border-b border-hairline pb-2 font-sans text-xs">
+        <FactLine className="flex-1">
+          <Fact>
+            <span className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-2 align-top">
+              {mark}
+              <span className="text-body font-medium">
+                {entry.userAgent ? clientName(entry.userAgent) : "No user agent"}
+              </span>
+            </span>
+          </Fact>
+          {ip && (
+            <Fact>
+              <NetworkFact ip={ip} glyph address={<Address ip={ip} plain={plain} />} />
+            </Fact>
+          )}
+        </FactLine>
         {scanner && (
-          <Tag tone="warning" className="ml-auto">
+          <Tag tone="warning" className="shrink-0">
             scanner
           </Tag>
         )}

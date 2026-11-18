@@ -5,7 +5,7 @@ import { relativeTime } from "@/lib/format"
 import { previewPromotionStatus, previewStatus } from "@/lib/pull-requests"
 import type { DeploymentPreview, GitPullRequest } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ChoiceRow } from "@/components/flow"
+import { ChoiceRow } from "@/components/choice-row"
 import { BranchChip, ForgeFace } from "@/components/git/marks"
 import { ChecksMark, CommentCount, PullStateMark, ReviewMark } from "@/components/git/pull-state"
 import { IconAction } from "@/components/icon-action"
@@ -134,7 +134,9 @@ export function PullRequestRow({
           <span className="numeric text-muted-foreground">#{pull.number}</span> {pull.title}
         </>
       }
-      verb={verb ?? `Open pull request #${pull.number}`}
+      // The name holds the words the title shows, the number and the title
+      // (label in name, A11Y-05): a voice user says what they see.
+      verb={verb ?? `Open pull request #${pull.number} ${pull.title}`}
       description={
         compact ? undefined : (
           <span className="inline-flex max-w-full items-center gap-1.5">

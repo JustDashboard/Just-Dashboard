@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { DNSSECChainCheck } from "@/components/network/dns/dnssec-chain"
 import { LookupRace } from "@/components/network/dns/lookup-race"
 import { DNSPolicyEvidence } from "@/components/network/dns/policy-evidence"

@@ -13,7 +13,7 @@ import {
   Pencil,
 } from "@/components/icons"
 import { downloadUrl, get } from "@/lib/api"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry, FilePreview } from "@/lib/types"
 import { copyText } from "@/lib/clipboard"
@@ -21,8 +21,9 @@ import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
-import { ErrorState, LoadingRows } from "@/components/state"
-import { FileIcon } from "@/components/files/file-icon"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { FileIcon } from "@/components/file-icon"
 import { mediaKind, rawUrl } from "@/components/files/media"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 
@@ -301,7 +302,7 @@ function OtherStage({ entry }: { entry: FileEntry }) {
         <p className="shrink-0 text-hint text-muted-foreground">
           {preview.truncated
             ? `First ${preview.lines} lines of ${bytes(preview.size)}. Open it in the editor for the rest.`
-            : `${preview.lines} line${preview.lines === 1 ? "" : "s"}`}
+            : plural(preview.lines ?? 0, "line")}
         </p>
       </div>
     )

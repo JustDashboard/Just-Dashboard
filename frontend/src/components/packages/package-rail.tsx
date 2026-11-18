@@ -1,12 +1,8 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import Link from "next/link"
 import { bytes } from "@/lib/format"
 import type { InstalledPackage } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { Rail, RailFigure, RailLine, RailName, RailRow } from "@/components/rail"
 import { StatusDot } from "@/components/status-dot"
 import { PackageMark } from "@/components/packages/marks"
 
@@ -30,6 +26,8 @@ export function PackageRail({
   current,
   currentPackage,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   filtered,
@@ -43,6 +41,9 @@ export function PackageRail({
   /** The package on screen, drawn first when the list does not hold it. */
   currentPackage?: RailPackage
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   filtered: boolean
@@ -52,124 +53,67 @@ export function PackageRail({
   className?: string
 }) {
   const at = packages.findIndex((p) => p.name === current)
-  const shown = packages.slice(0, MAX_ROWS)
+  const shown: RailPackage[] = packages.slice(0, MAX_ROWS)
   // Past the cap the one on screen is still on its own list, in the first place.
   const pinned = at < 0 || at >= MAX_ROWS ? (packages[at] ?? currentPackage) : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // Opened from a link or walked to past the column's edge, the package on
-  // screen would otherwise be off its own list.
-  useEffect(() => {
-    const row = list.current?.querySelector<HTMLElement>("[aria-current='page']")
-    row?.scrollIntoView({ block: "nearest" })
-  }, [current, shown.length])
-
   return (
-    <nav
-      aria-label="Packages"
-      data-slot="package-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Name, description or section"
-          aria-label="Search the installed packages"
-          containerClassName="sm:w-full"
-        />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">{caption}</span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={onClearFilters}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Packages to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {pinned && <RailRow pkg={pinned} current href={hrefFor(pinned.name)} />}
-        {pinned && shown.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {shown.map((pkg) => (
-          <RailRow
-            key={pkg.name}
-            pkg={pkg}
-            current={pkg.name === current}
-            href={hrefFor(pkg.name)}
-          />
-        ))}
-        {loading && packages.length === 0 && <LoadingRows rows={8} />}
-        {!loading && packages.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No package matches.</li>
-        )}
-        {packages.length > MAX_ROWS && (
-          <li className="px-3 py-3 text-hint text-muted-foreground">
-            The first {MAX_ROWS} of {packages.length.toLocaleString()}. Search to reach the rest.
-          </li>
-        )}
-      </ol>
-    </nav>
+    <Rail
+      slot="package-rail"
+      label="Packages"
+      search={{
+        label: "Search the installed packages",
+        placeholder: "Name, description or section",
+        query,
+        onQuery,
+      }}
+      rows={shown}
+      keyOf={(pkg) => pkg.name}
+      current={(pkg) => pkg.name === current}
+      pinned={pinned}
+      row={(pkg, on) => <PackageRow pkg={pkg} current={on} href={hrefFor(pkg.name)} />}
+      loading={loading}
+      loadingRows={8}
+      error={error}
+      onRetry={onRetry}
+      empty="No package matches."
+      filtered={filtered}
+      onClearFilters={onClearFilters}
+      caption={caption}
+      foot={
+        packages.length > MAX_ROWS &&
+        `The first ${MAX_ROWS} of ${packages.length.toLocaleString()}. Search to reach the rest.`
+      }
+      className={className}
+    />
   )
 }
 
-function RailRow({ pkg, current, href }: { pkg: RailPackage; current: boolean; href: string }) {
+function PackageRow({ pkg, current, href }: { pkg: RailPackage; current: boolean; href: string }) {
   return (
-    <li className="min-w-0">
-      <Link
-        href={href}
-        data-workspace-item={pkg.name}
-        data-workspace-name={pkg.name}
-        aria-current={current ? "page" : undefined}
-        aria-label={pkg.name}
-        title={pkg.summary}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <PackageMark
-            name={pkg.name}
-            section={pkg.section}
-            className="size-7 rounded-md [&_img]:size-4"
-          />
-          {pkg.upgradable && (
-            <span
-              aria-hidden
-              className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-            >
-              <StatusDot tone={pkg.security ? "warning" : "notice"} className="size-1.5" />
-            </span>
-          )}
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn(
-              "block truncate font-mono text-xs",
-              current ? "font-semibold" : "font-medium",
-            )}
-          >
-            {pkg.name}
-          </span>
-          <span className="block truncate font-mono text-hint text-muted-foreground">
-            {pkg.version ?? "not installed"}
-          </span>
-        </span>
-        {pkg.size ? (
-          <span className="numeric shrink-0 text-hint text-muted-foreground">
-            {bytes(pkg.size)}
-          </span>
-        ) : null}
-      </Link>
-    </li>
+    <RailRow
+      item={pkg.name}
+      name={pkg.name}
+      title={pkg.summary}
+      current={current}
+      href={href}
+      mark={
+        <PackageMark
+          name={pkg.name}
+          section={pkg.section}
+          className="size-7 rounded-md [&_img]:size-4"
+        />
+      }
+      dot={
+        pkg.upgradable ? (
+          <StatusDot tone={pkg.security ? "warning" : "notice"} className="size-1.5" />
+        ) : null
+      }
+      end={pkg.size ? <RailFigure mono={false}>{bytes(pkg.size)}</RailFigure> : null}
+    >
+      <RailName current={current} mono>
+        {pkg.name}
+      </RailName>
+      <RailLine className="font-mono">{pkg.version ?? "not installed"}</RailLine>
+    </RailRow>
   )
 }

@@ -2,11 +2,12 @@
 
 import { Database, Trash } from "@/components/icons"
 import { BarReading } from "@/components/bar-reading"
-import { LiveBytes } from "@/components/overview/readings"
+import { LiveBytes } from "@/components/live-figure"
 import { ProductGlyph } from "@/components/product-logo"
 import {
   STANDING_COLOR,
   STANDING_LABEL,
+  STANDING_WORD,
   STANDING_ORDER,
   holderHue,
   holders,
@@ -215,6 +216,9 @@ function MountShare({
   return (
     <BarReading
       title="Mounts"
+      // A container, so the strip says each standing in words where it has
+      // the room (PGH-20) and keeps to its dots and counts where it has not.
+      className="@container/reading"
       label="Where each volume stands"
       list="Where the volumes stand"
       fixed
@@ -243,10 +247,12 @@ function MountShare({
           value: g.volumes.length,
           color: STANDING_COLOR[g.standing],
           hatch: g.taken / g.volumes.length,
-          // Its standing's dot before its count: a strip of bare figures
-          // ("10 1 2 2 1") said nothing about which was which.
+          // Its standing's dot before its count, and its word after where
+          // the reading has the room: a strip of bare figures ("10 1 2 2 1")
+          // said nothing about which was which, and the dots said it in
+          // colour alone (PGH-20).
           mark: (
-            <span className="numeric inline-flex items-center gap-1.5 text-hint font-medium">
+            <span className="numeric inline-flex items-center gap-1.5 text-hint font-medium whitespace-nowrap @md/reading:mr-1.5">
               <span
                 aria-hidden
                 data-slot="standing-dot"
@@ -254,6 +260,9 @@ function MountShare({
                 style={{ background: STANDING_COLOR[g.standing] }}
               />
               {g.volumes.length}
+              <span className="-ml-0.5 hidden font-normal text-muted-foreground @md/reading:inline">
+                {STANDING_WORD[g.standing]}
+              </span>
             </span>
           ),
           name: <span className={cn(g.standing === "down" && "text-warning")}>{label}</span>,

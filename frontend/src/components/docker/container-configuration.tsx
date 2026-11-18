@@ -10,7 +10,8 @@ import { changedSpecFields } from "@/lib/container-configuration"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Textarea } from "@/components/ui/textarea"
 import { Button } from "@/components/ui/button"
@@ -142,7 +143,10 @@ function StandaloneConfiguration({
             <BorderBeam size={120} duration={4} />
           </span>
         )}
-        <Panel>
+        <Panel
+          // Framed: the replacement's border beam runs along its edge.
+          framed
+        >
           <PanelHeader
             title={<label htmlFor="remedy-spec">Replacement specification</label>}
             actions={
@@ -152,7 +156,7 @@ function StandaloneConfiguration({
                 <span className="flex min-w-0 flex-wrap items-center justify-end gap-x-2 gap-y-1">
                   <span className="text-hint text-muted-foreground">Edited</span>
                   {changed.map((field) => (
-                    <Tag key={field} mono style={{ color: "var(--git-modified)" }}>
+                    <Tag key={field} mono hue="var(--git-modified)">
                       {field}
                     </Tag>
                   ))}

@@ -17,12 +17,17 @@ import { useDatabase } from "@/components/database/shell/database-context"
  * stays inside it: the rail still lists its pages and the way to its home is
  * one press. It is drawn as the engine the database is, so the statement
  * names what it belongs to; it was a question mark on a plate.
+ *
+ * It is not the dashboard's `MissingPage` (`components/missing-page.tsx`),
+ * which draws the address asked for against this server's nearest pages: the
+ * database's own rail is the nearest pages here. It had the same name, and
+ * the two were taken for one another.
  */
-export function MissingPage() {
+export function DatabaseMissingPage() {
   const { conn, engine, href } = useDatabase()
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Databases" title={`${conn.name} · Page not found`} />
+    <Page rise>
+      <PageContext title={`${conn.name} · Page not found`} />
       <EmptyState
         mark={<EngineMark engine={engine} />}
         title="Page not found"

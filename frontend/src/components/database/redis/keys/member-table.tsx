@@ -4,14 +4,14 @@ import { useEffect, useRef, useState } from "react"
 import { Check, Cross } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { PaneFooter } from "@/components/panel"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { bytesLabel, isBinary, lineSafe } from "@/components/database/redis/bytes"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisBytes } from "@/components/database/redis/types"
 import type { PagedStatus } from "@/components/database/redis/use-paged"
 import { useRowWindow } from "@/components/database/redis/use-row-window"
@@ -132,7 +132,7 @@ export function MemberTable<R>({
                 <div
                   role="row"
                   style={template}
-                  className="sticky top-0 z-10 grid h-8 items-center gap-x-3 border-b border-hairline bg-card px-3 text-hint font-medium text-muted-foreground"
+                  className="sticky top-0 z-raised grid h-8 items-center gap-x-3 border-b border-hairline bg-card px-3 text-hint font-medium text-muted-foreground"
                 >
                   {columns.map((column) => (
                     <div
@@ -288,7 +288,7 @@ export function MemberText({
   return (
     <span className={cn("flex min-w-0 items-center gap-2", className)}>
       <span title={text.length > 60 ? text.slice(0, 2000) : undefined} className="min-w-0 truncate">
-        {text === "" ? <span className="text-muted-foreground/60 italic">empty</span> : text}
+        {text === "" ? <span className="text-faint italic">empty</span> : text}
       </span>
       {isBinary(value) && <Tag>bytes</Tag>}
       {truncated && <Tag>first 64 KiB</Tag>}
@@ -343,7 +343,7 @@ export function InlineEdit({
           align === "right" && "text-right",
         )}
       >
-        {value === "" ? <span className="text-muted-foreground/60 italic">empty</span> : value}
+        {value === "" ? <span className="text-faint italic">empty</span> : value}
       </button>
     )
   }

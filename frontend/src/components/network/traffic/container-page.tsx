@@ -4,61 +4,41 @@ import Link from "next/link"
 import { useMemo } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { ApiError, get } from "@/lib/api"
-import { bytes, plural, rate, relativeTime } from "@/lib/format"
-import { flowBytes, flowOwnerName, type FlowReport } from "@/lib/network-flows"
-import { foldHistoricalFlows, hourBounds, type ContainerTrafficDetail } from "@/lib/network-traffic"
+import { bytes, plural, relativeTime } from "@/lib/format"
+import { flowOwnerName, type FlowReport } from "@/lib/network/flows"
+import { foldHistoricalFlows, hourBounds, type ContainerTrafficDetail } from "@/lib/network/traffic"
 import type { ContainerTraffic } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { ArrowUpRight, Box } from "@/components/icons"
-import { Segments } from "@/components/deploy/settings/segments"
-import { ChartPanel } from "@/components/metrics/chart-panel"
-import { HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { PageContext } from "@/components/page"
+import { Explain } from "@/components/explain"
+import { WindowPicker } from "@/components/window-picker"
+import { ChartPanel } from "@/components/chart-panel"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, imageProduct } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { NetworkReadWarning } from "@/components/network/read-warning"
-import { RX, TX } from "@/components/network/rate-pair"
 import { containerHref, containerWindow, trafficHref } from "./address"
-import {
-  BackLink,
-  DetailRail,
-  DetailShell,
-  RailGhosts,
-  RailRow,
-  StepArrows,
-  steps,
-  type Step,
-} from "./detail-shell"
+import { DetailPage, useSiblingSteps } from "@/components/detail-page"
+import { Rail, RailLine, RailName, RailRow } from "@/components/rail"
 import { FactGroups, FactRowHeld } from "./facts"
 import { WINDOW_WORDS, type RecordedWindow } from "./span"
+import { decodeSegment } from "@/lib/route-params"
+import { axisRate, formatRate, InOut, inOutSeries } from "@/components/in-out"
 
-const SERIES = [
-  { key: "rx", label: "In", color: RX, kind: "area" as const },
-  { key: "tx", label: "Out", color: TX, kind: "area" as const },
-]
-const formatRate = (value: number) => rate(value)
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
+const SERIES = inOutSeries()
 const WINDOW_OPTIONS = (["1h", "6h", "24h", "7d"] as const).map((value) => ({
   value,
   label: value,
 }))
 const CHART_HEIGHT = 220
-
-function decoded(segment: string | undefined) {
-  if (!segment) return null
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
-}
 
 /**
  * One container's traffic, as a place of its own: its chart over a window at
@@ -77,7 +57,7 @@ export function ContainerTrafficPage() {
   const params = useParams<{ name: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decoded(params.name)
+  const name = decodeSegment(params.name) || null
   const range = containerWindow(search)
   const [query, setQuery] = useSessionState("network.traffic.containers.query", "")
   const list = usePoll<ContainerTraffic>(
@@ -92,7 +72,7 @@ export function ContainerTrafficPage() {
       .sort((a, b) => b.rxBytes + b.txBytes - (a.rxBytes + a.txBytes))
   }, [list.data, query])
   const open = (next: string) => router.push(containerHref(next, range))
-  const step = steps(
+  const step = useSiblingSteps(
     ranked.map((c) => c.name),
     name,
     open,
@@ -114,7 +94,7 @@ export function ContainerTrafficPage() {
   }
 
   return (
-    <DetailShell
+    <DetailPage
       name="Container traffic"
       what="container"
       stateKey="network.traffic.container"
@@ -122,16 +102,18 @@ export function ContainerTrafficPage() {
         list.refresh()
         detail.refresh()
       }}
-      previous={step.previous}
-      next={step.next}
+      steps={step}
       rail={
-        <DetailRail
-          label="Containers"
+        <Rail
           slot="container-rail"
-          current={name}
-          query={query}
-          onQuery={setQuery}
-          placeholder="Container name"
+          label="Containers"
+          rows={ranked}
+          keyOf={(c) => c.name}
+          current={(c) => c.name === name}
+          loading={!list.data && !list.error}
+          error={!list.data ? list.error : undefined}
+          onRetry={list.refresh}
+          search={{ placeholder: "Container name", query, onQuery: setQuery }}
           caption={
             list.data
               ? `${plural(ranked.length, "container")} · most moved in ${WINDOW_WORDS[range]}`
@@ -139,24 +121,15 @@ export function ContainerTrafficPage() {
                 ? "The containers could not be read"
                 : "Reading the containers…"
           }
-          empty={
-            list.data && ranked.length === 0
-              ? query.trim()
-                ? "No container matches."
-                : "No container moved anything."
-              : undefined
-          }
-        >
-          {!list.data && !list.error && <RailGhosts />}
-          {ranked.map((c) => (
+          empty={query.trim() ? "No container matches." : "No container moved anything."}
+          row={(c, current) => (
             <RailRow
-              key={c.name}
-              id={c.name}
+              item={c.name}
               name={c.name}
               label={`${c.name}, ${bytes(c.rxBytes + c.txBytes)}`}
-              current={c.name === name}
-              onOpen={() => open(c.name)}
-              leading={
+              current={current}
+              href={containerHref(c.name, range)}
+              mark={
                 <ProductLogo
                   id={imageProduct(c.name)}
                   size="sm"
@@ -164,20 +137,30 @@ export function ContainerTrafficPage() {
                   className="size-7 rounded-md [&_img]:size-4"
                 />
               }
-              detail={`↓ ${rate(c.rxRate)} ↑ ${rate(c.txRate)}`}
-              trailing={bytes(c.rxBytes + c.txBytes)}
-            />
-          ))}
-        </DetailRail>
+              end={
+                <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
+                  {bytes(c.rxBytes + c.txBytes)}
+                </span>
+              }
+            >
+              <RailName current={current} mono>
+                {c.name}
+              </RailName>
+              <RailLine>
+                <InOut rx={c.rxRate} tx={c.txRate} unit="rate" plain className="font-sans" />
+              </RailLine>
+            </RailRow>
+          )}
+        />
       }
-      header={
+      back={{ href: trafficHref({ span: range === "1h" ? "live" : range }), label: "Traffic" }}
+      title={name ? `${name} traffic` : "Container traffic"}
+      identity={
         <ContainerHeader
           name={name}
           range={range}
           detail={detail.data}
           missing={detail.error instanceof ApiError && detail.error.status === 404}
-          previous={step.previous}
-          next={step.next}
         />
       }
     >
@@ -194,7 +177,7 @@ export function ContainerTrafficPage() {
       ) : (
         <ContainerBody key={name} name={name} range={range} onWindow={setWindow} detail={detail} />
       )}
-    </DetailShell>
+    </DetailPage>
   )
 }
 
@@ -203,15 +186,11 @@ function ContainerHeader({
   range,
   detail: d,
   missing,
-  previous,
-  next,
 }: {
   name: string | null
   range: RecordedWindow
   detail: ContainerTrafficDetail | undefined
   missing: boolean
-  previous: Step
-  next: Step
 }) {
   const service = d
     ? d.project
@@ -222,15 +201,8 @@ function ContainerHeader({
     : undefined
   return (
     <>
-      <PageContext
-        eyebrow={
-          <BackLink href={trafficHref({ span: range === "1h" ? "live" : range })}>Traffic</BackLink>
-        }
-        title={name ? `${name} traffic` : "Container traffic"}
-        actions={<StepArrows what="container" previous={previous} next={next} />}
-      />
       {name !== null && (
-        <HostIdentity
+        <IdentityHeader
           label={`About ${name}`}
           mark={imageProduct(d?.image ?? name)}
           fallback={Box}
@@ -253,18 +225,18 @@ function ContainerHeader({
               <FactGroups
                 groups={[
                   [
-                    <HostFact key="image">
+                    <span key="image">
                       <span className="font-mono">{d.image ?? "image unknown"}</span>
-                    </HostFact>,
-                    <HostFact key="service">
+                    </span>,
+                    <span key="service">
                       <span className={d.project ? "font-mono" : undefined}>{service}</span>
-                    </HostFact>,
+                    </span>,
                   ],
                   [
                     d.networks.length > 0 && (
-                      <HostFact key="networks">
+                      <span key="networks">
                         on <span className="font-mono">{d.networks.join(", ")}</span>
-                      </HostFact>
+                      </span>
                     ),
                     <span key="seen">
                       last sample {relativeTime(new Date(d.lastSeen * 1000).toISOString())}
@@ -336,10 +308,10 @@ function ContainerBody({
     [flows.data?.rows],
   )
   const picker = (
-    <Segments
+    <WindowPicker
       label="How far back the chart reaches"
+      windows={WINDOW_OPTIONS}
       value={range}
-      options={WINDOW_OPTIONS}
       onChange={onWindow}
     />
   )
@@ -394,14 +366,18 @@ function ContainerBody({
               {d ? (
                 <>
                   <span>
-                    <span className="text-foreground">
-                      ↓ {bytes(d.rxBytes)} ↑ {bytes(d.txBytes)}
-                    </span>{" "}
+                    <InOut
+                      rx={d.rxBytes}
+                      tx={d.txBytes}
+                      unit="bytes"
+                      plain
+                      className="text-foreground"
+                    />{" "}
                     in {WINDOW_WORDS[range]}
                   </span>{" "}
                   <span className="max-sm:hidden">·</span>{" "}
                   <span>
-                    now ↓ {rate(d.rxRate)} ↑ {rate(d.txRate)}
+                    now <InOut rx={d.rxRate} tx={d.txRate} unit="rate" plain />
                   </span>
                 </>
               ) : (
@@ -416,7 +392,16 @@ function ContainerBody({
       </div>
       <Panel plain aria-label={`Who ${name} talked to`}>
         <PanelHeader
-          title="Who it talked to"
+          title={
+            <span className="inline-flex items-center gap-1.5">
+              Who it talked to
+              <Explain label="Where these peers come from">
+                The socket history&rsquo;s rows for this container&rsquo;s exact id. TCP bytes are
+                native counter deltas, UDP has none, and a socket that opened and closed between two
+                samples is not in it.
+              </Explain>
+            </span>
+          }
           actions={
             flows.data && (
               <span className="numeric text-hint text-muted-foreground">
@@ -461,22 +446,22 @@ function ContainerBody({
                   title={<span className="font-mono">{p.address}</span>}
                   subtitle={`${p.protocols.join(", ")} · ports ${p.localPorts.join(", ")} · ${plural(p.sockets, "socket row")}`}
                   trailing={
-                    <span className="numeric flex gap-3 font-mono text-hint">
-                      <span style={{ color: RX }}>↓ {flowBytes(p.rxBytes)}</span>
-                      <span style={{ color: TX }}>↑ {flowBytes(p.txBytes)}</span>
-                    </span>
+                    // UDP has no byte counters: said as a word, not as a coloured figure.
+                    p.rxBytes === null && p.txBytes === null ? (
+                      <span className="text-hint text-muted-foreground">not counted</span>
+                    ) : (
+                      // In the chart's units, so the page says its bytes one way.
+                      <InOut rx={p.rxBytes} tx={p.txBytes} unit="bytes" />
+                    )
                   }
                 />
               ))}
             </RowList>
           )}
-          {admin && flows.data && (
+          {admin && flows.data && (peers.length > 20 || flows.data.truncated) && (
             <p className="pt-3 text-hint text-muted-foreground">
-              Peers are the socket history&rsquo;s rows for this container&rsquo;s exact id: TCP
-              bytes are native counter deltas, UDP has none, and sockets that opened and closed
-              between two samples are not in it.
-              {peers.length > 20 && ` The first 20 of ${peers.length} are shown.`}
-              {flows.data.truncated && " More rows than shown were retained."}
+              {peers.length > 20 && `The first 20 of ${peers.length}.`}
+              {flows.data.truncated && " More rows were retained than are shown."}
             </p>
           )}
         </PanelBody>

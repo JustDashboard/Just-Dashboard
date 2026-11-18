@@ -7,6 +7,7 @@ import { Database } from "@/components/icons"
 import { get } from "@/lib/api"
 import { useSessionState } from "@/lib/view-state"
 import type { DbConnection } from "@/lib/types"
+import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Page, PageContext, PageState } from "@/components/page"
 import { EmptyState } from "@/components/state"
@@ -115,6 +116,26 @@ export function useDatabase() {
   const value = useContext(DatabaseContext)
   if (!value) throw new Error("useDatabase must be used inside a database's layout")
   return value
+}
+
+/**
+ * What the reader may do on this database's workbenches, by the one rule the
+ * engines share: a command of any kind needs `service.control`, a change also
+ * needs the connection unprotected, a removal needs `destructive`, and the
+ * accounts and the profiler need `system.admin`. Stopping a client or an
+ * operation is let through on a protected connection: it stops work and
+ * changes no data.
+ */
+export function useDatabaseRole() {
+  const { readOnly } = useDatabase()
+  const { can } = useAuth()
+  return {
+    canRun: can("service.control"),
+    canWrite: !readOnly && can("service.control"),
+    canDestroy: !readOnly && can("destructive"),
+    canKill: can("destructive"),
+    admin: can("system.admin"),
+  }
 }
 
 /** A write to the address that the router has not shown yet. */
@@ -325,7 +346,7 @@ export function DatabaseProvider({ id, children }: { id: number; children: React
   // they say which pages this engine has, and a page mounted before them
   // would ask a key–value store for its tables.
   if (value || !(loaded || error) || recheck.loading) {
-    return <PageState eyebrow="Databases" title={titleOf(pathname, found?.name)} />
+    return <PageState title={titleOf(pathname, found?.name)} />
   }
   // A list that failed is why the database cannot be shown only while
   // nothing has answered since; a second read that came back without it has.
@@ -333,7 +354,6 @@ export function DatabaseProvider({ id, children }: { id: number; children: React
   if (failure) {
     return (
       <PageState
-        eyebrow="Databases"
         title={titleOf(pathname)}
         error={failure}
         onRetry={() => {
@@ -365,7 +385,7 @@ function titleOf(pathname: string, name?: string) {
 export function DatabaseNotFound() {
   return (
     <Page>
-      <PageContext eyebrow="Databases" title="Database not found" />
+      <PageContext title="Database not found" />
       <EmptyState
         icon={Database}
         title="Database not found"

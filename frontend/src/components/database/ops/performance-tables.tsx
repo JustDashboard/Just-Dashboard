@@ -7,15 +7,18 @@ import { cn } from "@/lib/utils"
 import { bytes, percent, relativeTime, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { InfoTip } from "@/components/form"
-import { RowLink, SearchInput } from "@/components/page"
+import { RowLink } from "@/components/row-link"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { SplitBar } from "@/components/rank-list"
-import { EmptyNote, LoadingPanel } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
+  SortHead,
   Table,
   TableBody,
   TableCell,
@@ -34,15 +37,13 @@ import {
   type Maintenance,
 } from "@/components/database/ops/performance-maintenance"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
   Notes,
   ObjectName,
-  ScopeChips,
-  SortHead,
-  Stale,
-  ViewRead,
   RETURNS_FOCUS,
+  ScopeChips,
 } from "@/components/database/ops/performance-parts"
 import {
   columnWidth,
@@ -77,6 +78,8 @@ import {
 } from "@/components/database/ops/performance-words"
 import type { DbTableStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * What each table weighs and how it is being kept: its rows and its size by
@@ -115,8 +118,8 @@ export function TablesView() {
   })
   const by: TableSort = isTableSort(order.by) ? order.by : "size"
   const objects = engine.nouns.objects
-  const title = objects[0].toUpperCase() + objects.slice(1)
-  const noun = engine.nouns.object[0].toUpperCase() + engine.nouns.object.slice(1)
+  const title = capitalize(objects)
+  const noun = capitalize(engine.nouns.object)
 
   const all = stats.data?.tables
   const schemas = useMemo(() => schemasOf(all ?? []), [all])
@@ -220,7 +223,8 @@ export function TablesView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead
+      <Read
+        patience
         poll={stats}
         what={`the ${objects}`}
         locking={engine.can("locks")}
@@ -278,14 +282,14 @@ export function TablesView() {
                   </p>
                 )}
               </div>
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {data.tables.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     This database holds no {objects} yet. Create one on the Schema page, or import a
                     file on the Data page.
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No {engine.nouns.object} matches {filter.trim() || scope}.
                   </EmptyNote>
                 ) : columns ? (
@@ -341,9 +345,7 @@ export function TablesView() {
                         )}
                         {columns.has("vacuum") && <TableHead className="px-2">Vacuumed</TableHead>}
                         {columns.has("analyze") && <TableHead className="px-2">Analysed</TableHead>}
-                        <TableHead className="px-2">
-                          <span className="sr-only">Actions</span>
-                        </TableHead>
+                        <TableHead label="Actions" className="px-2" />
                       </TableRow>
                     </TableHeader>
                     <TableBody>
@@ -430,7 +432,7 @@ export function TablesView() {
                       <li
                         key={objectParam(table.schema, table.table)}
                         data-list-row="table"
-                        className="space-y-1 px-4 py-2.5"
+                        className="space-y-1 py-2.5"
                       >
                         <div className="flex min-w-0 items-center gap-2">
                           <span className="flex min-w-0 flex-1 items-center gap-2">
@@ -465,7 +467,7 @@ export function TablesView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -508,7 +510,7 @@ function Compression({ table }: { table: DbTableStat }) {
 
 /** When something was last done to a table, and whether the engine did it by itself. */
 function Kept({ run }: { run: ReturnType<typeof lastRun> }) {
-  if (!run) return <span className="text-muted-foreground/60">never</span>
+  if (!run) return <span className="text-faint">never</span>
   return (
     <span className="text-muted-foreground" title={timestamp(run.at)}>
       {relativeTime(run.at)}

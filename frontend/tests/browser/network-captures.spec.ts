@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { risen } from "./risen"
-import type { CaptureList, CaptureRun } from "../../src/lib/network-captures"
+import type { CaptureList, CaptureRun } from "../../src/lib/network/captures"
 
 const id = "c".repeat(32)
 const incident = "d".repeat(32)
@@ -106,7 +106,10 @@ for (const width of [390, 1440]) {
     await expect(page).toHaveURL(new RegExp(`/network/captures/${id}$`))
     await expect(detail(page)).toContainText(run.request.source!)
     await expect(detail(page)).toContainText("kernel drops unknown")
-    await expect(detail(page)).toContainText("do not establish the same flow")
+    // What connects the two is the related run's tip, not a footer under it.
+    await detail(page).getByRole("button", { name: "What connects them" }).focus()
+    await expect(page.getByRole("tooltip")).toContainText("do not show the same flow")
+    await page.keyboard.press("Escape")
     await expect(detail(page).getByRole("link", { name: /Related private path/ })).toHaveAttribute(
       "href",
       `/network/runs/${incident}`,
@@ -260,7 +263,7 @@ test("read accounts do not request private capture metadata, interfaces or artif
   for (const path of [`/network/captures?capture=${id}`, "/network/captures"]) {
     await page.goto(path)
     await expect(
-      page.getByText("Packet captures require the admin capability", { exact: true }),
+      page.getByText("Packet captures need an administrator", { exact: true }),
     ).toBeVisible()
     await expect(page.getByRole("button", { name: "New capture", exact: true })).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Capture actions" })).toHaveCount(0)
@@ -305,6 +308,30 @@ test("the opening line stands in one place while the list loads and once it has"
   await expect(page.getByRole("link", { name: `Open ${run.name}` })).toBeVisible()
   await risen(page)
   expect(await line.boundingBox()).toEqual(loading)
+})
+
+test("on a phone a capture's line is as tall while it is read as once it is", async ({ page }) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await setup(page)
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route(`**/api/v1/network/captures/${id}`, async (route) => {
+    await held
+    return json(route, run)
+  })
+  await page.goto(`/network/captures/${id}`)
+  // The loading line declares the loaded line's verbs, so no row is reserved
+  // for them and none appears when they land.
+  const line = page.locator("[data-slot='host-identity'][aria-busy='true']")
+  await expect(line).toBeVisible()
+  await risen(page)
+  const loading = (await line.boundingBox())!
+  release()
+  await expect(page.getByRole("link", { name: "Download PCAP" })).toBeVisible()
+  await risen(page)
+  const loaded = (await page.getByRole("region", { name: `About ${run.name}` }).boundingBox())!
+  expect(loaded.height).toBeCloseTo(loading.height, 0)
+  expect(loaded.y).toBeCloseTo(loading.y, 0)
 })
 
 test("the rail walks the captures with Alt+arrows and keeps the open view", async ({ page }) => {

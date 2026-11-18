@@ -7,7 +7,7 @@ import { errorMessage, post } from "@/lib/api"
 import { plural, timestamp } from "@/lib/format"
 import type { PortIdentification } from "@/lib/types"
 import { Field, FormSection } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   ownerLabel,
@@ -332,7 +332,7 @@ function Identify({ socket }: { socket: Socket }) {
         <Field
           label="Server name"
           htmlFor={`${id}-name`}
-          hint="Sent as SNI and Host; leave blank to ask by address"
+          info="Sent as SNI and Host; leave blank to ask by address."
         >
           <Input
             id={`${id}-name`}

@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react"
 
 import { beamLap } from "@/lib/beam-lap"
+import { reducedMotion } from "@/lib/motion"
 import { cn } from "@/lib/utils"
 
 /**
@@ -49,7 +50,8 @@ export function BorderBeam({
     const edge = frame.current
     const beam = light.current
     if (!edge || !beam || typeof beam.animate !== "function") return
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    // The system's request and the product's pause both mean no lap.
+    if (reducedMotion()) return
     let lap: Animation | undefined
     const run = () => {
       const { width, height } = edge.getBoundingClientRect()

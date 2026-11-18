@@ -2,26 +2,21 @@
 
 import { useMemo } from "react"
 import { ArrowDown, ArrowUp, Warning } from "@/components/icons"
-import { bytes, plural, rate } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import type { NetworkLink, NetworkLivePoint } from "@/lib/types"
-import { WireMark } from "@/components/deploy/wire"
-import { ChartPanel } from "@/components/metrics/chart-panel"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { WireMark } from "@/components/wire/wire"
+import { ChartPanel } from "@/components/chart-panel"
+import { TileTrend } from "@/components/sparkline"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ReadingLine, ReadingLines } from "@/components/reading-line"
 import { Notice } from "@/components/state"
-import { RX, TX } from "@/components/network/rate-pair"
 import { DeviceErrors, useDeviceDetail } from "./device-detail"
 import type { DeviceTab } from "./device-facts"
 import { DevicePicture } from "./device-picture"
 import { DeviceReadiness, READINESS_KINDS } from "./device-readiness"
+import { axisRate, formatRate, inOutSeries, RX, TX } from "@/components/in-out"
 
-const SERIES = [
-  { key: "rx", label: "In", color: RX, kind: "area" as const },
-  { key: "tx", label: "Out", color: TX, kind: "area" as const },
-]
-const formatRate = (value: number) => rate(value)
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
+const SERIES = inOutSeries()
 
 /**
  * A device's first view: what it is wired to, what it carried over the last

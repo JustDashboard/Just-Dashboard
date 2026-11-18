@@ -2,7 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowRight, Check, Copy, Key } from "@/components/icons"
+import { ArrowRight } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { post } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -10,17 +10,16 @@ import { describeClient } from "@/lib/clients"
 import { passwordChecks } from "@/lib/password"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useCopy } from "@/hooks/use-copy"
-import { Field, FieldCheck, FieldRow, InfoTip } from "@/components/form"
-import { useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { Well } from "@/components/panel"
+import { Field, FieldCheck, FieldChecks, FieldRow, InfoTip } from "@/components/form"
+import { useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
 import { ClientMark, NetworkFact } from "@/components/client-mark"
 import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { OneTimeCodeInput, RecoveryCodes } from "@/components/account/one-time-code"
 import { TotpSecret } from "@/components/account/totp-secret"
 import type { useSessions } from "@/components/account/sessions"
 import { sessionGuard } from "@/components/account/access"
@@ -140,48 +139,19 @@ export function PasswordSection() {
               />
             </Field>
           </FieldRow>
-          <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
+          <FieldChecks>
             <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
             <FieldCheck met={checks.mixed}>
               three of upper case, lower case, digits, symbols
               {next && !checks.mixed && ` · ${checks.classes} so far`}
             </FieldCheck>
-          </p>
+          </FieldChecks>
         </div>
         {/* Enter submits a form only where it has a submit control. This
             one is never drawn or reached: the floating bar is the control. */}
         <button type="submit" hidden tabIndex={-1} aria-label="Save" />
       </form>
     </SettingSection>
-  )
-}
-
-/** The codes, shown once, in a grid that reads down and copies whole. */
-function RecoveryCodes({ codes, onDone }: { codes: string[]; onDone: () => void }) {
-  const { copy, copied } = useCopy()
-  return (
-    <>
-      <Notice tone="warning" icon={Key} title="Save these recovery codes">
-        Each one works once, in place of your authenticator. Any previous set no longer works, and
-        this is the only time these are shown.
-      </Notice>
-      <Well className="grid max-w-md grid-cols-2 gap-x-4 gap-y-1.5">
-        {codes.map((c) => (
-          <span key={c} className="tracking-wider">
-            {c}
-          </span>
-        ))}
-      </Well>
-      <div className="flex flex-wrap gap-2">
-        <Button size="sm" variant="outline" onClick={() => void copy(codes.join("\n"))}>
-          {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
-          {copied ? "Copied" : "Copy all"}
-        </Button>
-        <Button size="sm" onClick={onDone}>
-          I have saved them
-        </Button>
-      </div>
-    </>
   )
 }
 
@@ -298,7 +268,7 @@ export function TwoFactorSection() {
       }
     >
       {codes ? (
-        <RecoveryCodes codes={codes} onDone={() => setCodes(null)} />
+        <RecoveryCodes framed codes={codes} onDone={() => setCodes(null)} />
       ) : enrollment ? (
         <>
           <TotpSecret secret={enrollment.secret} otpauthUrl={enrollment.otpauthUrl} />
@@ -307,15 +277,7 @@ export function TwoFactorSection() {
             htmlFor="enrol-code"
             info="The seed is sealed with the dashboard's master key and shown only here."
           >
-            <Input
-              id="enrol-code"
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="000000"
-              className="h-11 max-w-48 text-center font-mono text-lg tracking-[0.4em]"
-              value={code}
-              onChange={(e) => setCode(e.target.value)}
-            />
+            <OneTimeCodeInput id="enrol-code" value={code} onChange={setCode} />
           </Field>
           <div className="flex flex-wrap gap-2">
             <Button size="sm" disabled={busy || code.length < 6} onClick={enable} pending={busy}>

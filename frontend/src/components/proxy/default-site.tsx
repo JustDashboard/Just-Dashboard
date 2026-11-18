@@ -9,9 +9,12 @@ import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Field, FormNote } from "@/components/form"
-import { Panel, PanelBody, PanelHeader, Pane, PaneHeader } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { SectionLink } from "@/components/section-link"
 import { Tag } from "@/components/tag"
+import { useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { reloadFailure } from "@/components/proxy/site-outcome"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -50,16 +53,64 @@ function answeredBy(entry: DefaultListener) {
     : `${name}, the first server nginx reads there`
 }
 
+/** Where the catch-all is set: a section of the engine's settings. */
+export const UNKNOWN_HOSTS_HREF = "/proxy/config?tab=settings#unknown-hosts"
+
+/** What an unknown host gets now, in a word or two. */
+function answerWord(data: DefaultSite): string {
+  if (!data.installed) return "the first site"
+  switch (data.choice) {
+    case "close":
+      return "closed"
+    case "not_found":
+      return "404"
+    case "redirect":
+      return data.redirectTo ? `redirected to ${data.redirectTo}` : "redirected"
+    case "page":
+      return "a page"
+    default:
+      return "changed by hand"
+  }
+}
+
+const readDefaultSite = (signal: AbortSignal) =>
+  get<DefaultSite>("/proxy/default-site", undefined, signal)
+
+/**
+ * What an unknown host gets, said on the Sites page as one line with the way
+ * to the setting. The setting itself was a panel of its own between the site
+ * list and Password files, with its own Apply: the one setting on a list
+ * page. It is a section of the engine's settings now (`DefaultSiteSection`).
+ */
+export function UnknownHostsFact({ admin }: { admin: boolean }) {
+  const { data } = usePoll<DefaultSite>(readDefaultSite, 60_000)
+  if (!data || data.error) return null
+  const words = `Unknown hosts: ${answerWord(data)}`
+  return (
+    <p data-slot="unknown-hosts" className="flex min-w-0 text-hint text-muted-foreground">
+      {admin ? (
+        <SectionLink href={UNKNOWN_HOSTS_HREF} className="min-w-0 truncate">
+          {words}
+        </SectionLink>
+      ) : (
+        <span className="min-w-0 truncate">{words}</span>
+      )}
+    </p>
+  )
+}
+
 /**
  * The catch-all default site: what nginx answers when a request's Host names
  * no site. Without one, the first site nginx reads on a port serves every
  * scanner on the bare IP, and on 443 shows it that site's certificate.
+ *
+ * A section of the engine's settings (Configuration, Settings), saved by the
+ * page's one floating bar with the rest of them. The catch-all is its own
+ * file, written and reloaded at once whether or not the page reloads after
+ * its other settings.
  */
-export function DefaultSitePanel({ admin }: { admin: boolean }) {
-  const { data, error, loading, refresh } = usePoll<DefaultSite>(
-    (signal) => get("/proxy/default-site", undefined, signal),
-    60_000,
-  )
+export function DefaultSiteSection({ admin }: { admin: boolean }) {
+  const { data, error, loading, refresh } = usePoll<DefaultSite>(readDefaultSite, 60_000)
   const [draft, setDraft] = useState<DefaultChoice>()
   const [redirectDraft, setRedirectDraft] = useState<string>()
   const [busy, setBusy] = useState(false)
@@ -74,8 +125,10 @@ export function DefaultSitePanel({ admin }: { admin: boolean }) {
     choice === data.choice &&
     (choice !== "redirect" || redirectTo === data.redirectTo)
   const blocked = !data || Boolean(data.error) || data.others.length > 0
+  const dirty = Boolean(data) && (draft !== undefined || redirectDraft !== undefined) && !unchanged
+  const invalid = blocked || (choice === "redirect" && !redirectTo.trim())
 
-  const apply = async () => {
+  const apply = async (): Promise<boolean> => {
     setBusy(true)
     try {
       const res = await put<DefaultSiteResult>("/proxy/default-site", {
@@ -93,13 +146,27 @@ export function DefaultSitePanel({ admin }: { admin: boolean }) {
       }
       setDraft(undefined)
       setRedirectDraft(undefined)
+      return true
     } catch (err) {
       notify.error("Catch-all not applied", err)
+      return false
     } finally {
       setBusy(false)
       refresh()
     }
   }
+
+  useSaveBarEntry(
+    admin,
+    { name: "Unknown hosts", dirty, changes: 1, saving: busy, invalid, applies: "immediately" },
+    {
+      save: apply,
+      discard: () => {
+        setDraft(undefined)
+        setRedirectDraft(undefined)
+      },
+    },
+  )
 
   const remove = () =>
     confirm({
@@ -121,19 +188,20 @@ export function DefaultSitePanel({ admin }: { admin: boolean }) {
     })
 
   return (
-    <Panel plain>
-      <PanelHeader
-        title="Unknown hosts"
-        actions={
-          admin &&
-          data?.installed && (
-            <Button variant="outline" size="xs" onClick={remove}>
-              Remove
-            </Button>
-          )
-        }
-      />
-      <PanelBody className="space-y-4">
+    <SettingSection
+      id="unknown-hosts"
+      title="Unknown hosts"
+      status={settingStatus({ dirty })}
+      actions={
+        admin &&
+        data?.installed && (
+          <Button variant="outline" size="xs" onClick={remove}>
+            Remove
+          </Button>
+        )
+      }
+    >
+      <div className="space-y-4">
         {loading && !data ? (
           <LoadingRows rows={2} />
         ) : error && !data ? (
@@ -206,13 +274,11 @@ export function DefaultSitePanel({ admin }: { admin: boolean }) {
                     />
                   </Field>
                 )}
-                <Pane>
-                  <PaneHeader>
-                    <span className="text-hint font-medium text-muted-foreground">
-                      What an unknown host gets after Apply
-                    </span>
-                  </PaneHeader>
-                  <ul className="space-y-1.5 p-3 text-body">
+                <div className="space-y-1.5">
+                  <p className="text-hint font-medium text-muted-foreground">
+                    What an unknown host gets once saved
+                  </p>
+                  <ul className="space-y-1.5 text-body">
                     <li>
                       <b>HTTP</b> on{" "}
                       {data.covers
@@ -238,29 +304,16 @@ export function DefaultSitePanel({ admin }: { admin: boolean }) {
                       certbot can prove a name before its site exists.
                     </li>
                   </ul>
-                </Pane>
-                <div className="flex items-center justify-end gap-3">
-                  {data.installed && !data.choice && (
-                    <span className="mr-auto text-hint text-muted-foreground">
-                      {data.path} was changed by hand; Apply replaces it.
-                    </span>
-                  )}
-                  <Button
-                    pending={busy}
-                    disabled={
-                      blocked || Boolean(unchanged) || (choice === "redirect" && !redirectTo.trim())
-                    }
-                    onClick={apply}
-                  >
-                    Apply
-                  </Button>
                 </div>
+                {data.installed && !data.choice && (
+                  <FormNote>{data.path} was changed by hand; saving replaces it.</FormNote>
+                )}
               </>
             )}
           </>
         ) : null}
-      </PanelBody>
+      </div>
       {dialog}
-    </Panel>
+    </SettingSection>
   )
 }

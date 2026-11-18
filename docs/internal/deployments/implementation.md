@@ -216,12 +216,12 @@ only renderer/executor/validation authority for their feature.
   push, so until this travelled with the commit "manual only" was a setting reachable only after a
   production service had already released a commit nobody meant to ship. Saved credentials are picked from
   `GET /deploy/credentials`. The page is kept for the tab (`useSessionState`,
-  [`../frontend/data-theming.md`](../frontend/data-theming.md)): the source tab and its form, and the
+  [`../frontend/patterns/data-flow.md`](../frontend/patterns/data-flow.md)): the source tab and its form, and the
   configure screen's flow, findings and Advanced disclosure, survive a walk to another page and a
   reload until the project is created or the source is changed. `?step=source|project|runtime|variables|review`
   makes step changes browser history entries; Back to the chooser preserves the inspected flow and
   Forward reopens it. Each step remembers field focus and scroll indices without field values,
-  as detailed in [`../frontend/workspace-interactions.md`](../frontend/workspace-interactions.md).
+  as detailed in [`../frontend/patterns/keyboard-and-place.md`](../frontend/patterns/keyboard-and-place.md).
   A remembered flow whose draft has expired is dropped with a notice on the way in. Unsaved environment
   values and visitor passwords never enter the URL or browser storage. Configuration saves stage environment values in the additive
   `deploy_drafts.environment_enc` column, sealed with the install key; only `environmentKeys` returns
@@ -997,7 +997,10 @@ only renderer/executor/validation authority for their feature.
   printed by a framework's own startup line, then any program's generic "`X_Y` is not set / must be
   set / is required" (read this late, and never from a line that calls itself a warning, because
   programs print it as a warning and carry on: `SENTRY_DSN is not set` beside the port the server
-  really took must name the port), and a single container that stopped with exit code 0 instead of
+  really took must name the port), a single container that died with a failing exit code while its
+  start command's migration tool was the last thing it printed (`runtime_migration_silent`: drizzle-kit
+  migrate's spinner, with the database's error kept to itself — the usual cause a database it cannot
+  reach or that refuses it, so the fix points at the linked database), and a single container that stopped with exit code 0 instead of
   serving (`runtime_start_exited`; several containers are a Compose stack, where a one-off service
   exits 0 by design), and a Django candidate whose check was answered with a 5xx while the output
   holds no error at all (`runtime_errors_hidden`, a 400 read as `runtime_host_disallowed`, a 401, 403 or
@@ -1037,6 +1040,17 @@ only renderer/executor/validation authority for their feature.
   and full URLs retain their configured targets. Quick deploy leaves the check port unset to follow
   allocation. Failed gates log the check name, safe address, attempt count and specific status/reason;
   saved older failures derive the same explanation from retained check evidence when read.
+- A gate stops asking a candidate that is gone (`CheckRunner.candidateGone`, `checks.go`). After each
+  failed attempt it inspects the target's container (`dockerx.ContainerLiveness`: state, exit code,
+  restart count, no log). An `exited` or `dead` container, which nothing will start again (Docker marks
+  one its policy restarts as `restarting` the moment it exits), ends the check at once. One that is
+  `restarting` ends it after five restarts and thirty seconds from the check's start, so an application
+  that exits while the database it waits for comes up is not given up on. The last attempt's code is
+  `application_exited`, with the container's state, exit code and `restarts`, and the message says the
+  application kept exiting (code N, restarted M times) instead of "could not connect" after every
+  attempt ran out: a start command that failed before the server listened used to wait out forty
+  attempts. A running container, a target without one and a backend that cannot read it keep the
+  attempts as configured.
 - HTTP, TCP, Docker-health, command and public-route checks have closed configuration, per-attempt
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
@@ -2133,7 +2147,7 @@ only renderer/executor/validation authority for their feature.
     `deploy.template.delete` (with how many deployments use it). Refusals answer 422
     `invalid_template` in the catalogue's own words, 409 `template_exists`, 404 `template_not_found`.
   - Pages: the picker's Your templates and its Yours chip, the Templates page and Save as template on
-    Settings → General ([feature map](../frontend/feature-map.md)). Tested by `blueprint/user_test.go`,
+    Settings → General ([feature map](../frontend/features/README.md)). Tested by `blueprint/user_test.go`,
     `deploy/user_templates_test.go` (a real store and run snapshot: nothing secret, no domain and no
     volume name of the deployment survives, and the template plans for another address and port),
     `api/handlers_deploy_templates_test.go` (every route, the secrecy proof through HTTP, the key and
@@ -2612,13 +2626,13 @@ permanently under the danger rule. Starting a run goes through `useProjectStart`
 own.
 
 **The project's pages are on the sidebar, not in a strip above them.** `ProjectShell` publishes them
-through `useNavScope` (`components/nav-scope.tsx`) and the rail draws a third level inside Deployments:
+through `useNavScope` (`components/shell/nav-scope.tsx`) and the rail draws a third level inside Deployments:
 Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, then a
 Settings group of the nine settings pages, each marked while it holds a saved change that is not live
 yet (`PENDING_KIND_PAGE` maps a pending change's kind to its page). The panel's head is the project's
 favicon or product and its name as written, and a run page keeps the project's panel with Deployments
 marked current, because that is where a run is opened from. The strip of eight tabs and
-the settings rail beside them are both gone; the lists themselves live in `components/nav.ts` as
+the settings rail beside them are both gone; the lists themselves live in `components/shell/nav.ts` as
 `PROJECT_NAV` and `PROJECT_SETTINGS_NAV`, which is also what the rail draws from the route alone until
 the project's read lands. Stop and Restart need the destructive capability, as the Docker container
 verbs do, and each asks first, since either is one press from a fleet card's menu; the menu hides
@@ -2727,7 +2741,7 @@ Console keep their contracts ([request observability](request-observability.md) 
 Logs offers the activation window of the live run when the run's log handoff names one.
 
 Settings are nine pages — General, Build, Runtime, Environment variables, Domains, Storage, Databases
-& backups, Automation, Danger zone — drawn in one frame (`settings/setting-card.tsx`): what is saved
+& backups, Automation, Danger zone — drawn in one frame (`components/settings/setting-card.tsx`): what is saved
 but not live yet at the top, as a strip that names each change and links to its page but carries no
 command (the header's is the one), then, on the page that holds it, the newest failed deployment's
 fix while that failure is still the news (`settings/last-failure.tsx`), then the page's readings,

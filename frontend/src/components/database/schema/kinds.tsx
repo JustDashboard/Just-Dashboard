@@ -40,19 +40,19 @@ export type GroupSpec = {
 }
 
 const ROWLESS: Partial<Record<DbCatalogGroup, Omit<GroupSpec, "rows">>> = {
-  functions: { label: "Function", plural: "Functions", icon: Code, hue: "text-(--tag-green)" },
+  functions: { label: "Function", plural: "Functions", icon: Code, hue: "text-tag-green" },
   procedures: {
     label: "Procedure",
     plural: "Procedures",
     icon: ListOrdered,
-    hue: "text-(--tag-green)",
+    hue: "text-tag-green",
   },
-  packages: { label: "Package", plural: "Packages", icon: Box, hue: "text-(--tag-green)" },
-  triggers: { label: "Trigger", plural: "Triggers", icon: Lightning, hue: "text-(--tag-amber)" },
-  events: { label: "Event", plural: "Events", icon: Clock, hue: "text-(--tag-amber)" },
-  sequences: { label: "Sequence", plural: "Sequences", icon: Hash, hue: "text-(--tag-slate)" },
-  types: { label: "Type", plural: "Types", icon: Puzzle, hue: "text-(--tag-pink)" },
-  synonyms: { label: "Synonym", plural: "Synonyms", icon: Link, hue: "text-(--tag-slate)" },
+  packages: { label: "Package", plural: "Packages", icon: Box, hue: "text-tag-green" },
+  triggers: { label: "Trigger", plural: "Triggers", icon: Lightning, hue: "text-tag-amber" },
+  events: { label: "Event", plural: "Events", icon: Clock, hue: "text-tag-amber" },
+  sequences: { label: "Sequence", plural: "Sequences", icon: Hash, hue: "text-tag-slate" },
+  types: { label: "Type", plural: "Types", icon: Puzzle, hue: "text-tag-pink" },
+  synonyms: { label: "Synonym", plural: "Synonyms", icon: Link, hue: "text-tag-slate" },
 }
 
 /** The legend of one branch of the catalogue. */

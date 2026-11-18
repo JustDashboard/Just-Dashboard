@@ -8,7 +8,7 @@ import { NumberTicker } from "@/components/ui/number-ticker"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { siteProduct } from "@/components/proxy/marks"
 import { activeOwner } from "@/components/proxy/site-details"
-import { ProjectFavicon, ProjectMark, ProjectMarkOf } from "@/components/deploy/project-mark"
+import { ProjectFavicon, ProjectMark, ProjectMarkOf } from "@/components/project-mark"
 import { useProjects } from "@/hooks/use-projects"
 import {
   certCounts,
@@ -22,14 +22,12 @@ import {
 import type { SiteChip } from "@/components/proxy/site-filters"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { upstreamLabel, upstreamTone } from "@/components/proxy/upstream-health"
-import { plural } from "@/lib/format"
+import { compactCount, plural } from "@/lib/format"
 import type { Certificate, SiteUpstreamHealth, SitesTraffic, VHost } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /** How many things each block names; the rest are counted at its strip's end. */
 const SHOWN = 5
-
-const compact = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
 
 /**
  * A site as the things it is made of: the application it hands requests to,
@@ -56,11 +54,11 @@ export function SiteMark({
         lead={<ProjectMark deployment={deployment} size={size} />}
         ids={[engine]}
         size={size}
-        ring="ring-(--choice-surface)"
+        ring="ring-choice-surface"
       />
     )
   if (!app?.product || app.product === engine) return <ProductLogo id={engine} size={size} />
-  return <ProductLogos ids={[app.product, engine]} size={size} ring="ring-(--choice-surface)" />
+  return <ProductLogos ids={[app.product, engine]} size={size} ring="ring-choice-surface" />
 }
 
 /**
@@ -160,7 +158,7 @@ function TrafficBlock({
       trail
       rest={rest}
       restLabel="Other sites"
-      format={(value) => `${compact.format(value)} requests`}
+      format={(value) => `${compactCount(value)} requests`}
       figure={shares && <HeadFigure value={total} word="requests in the hour" />}
       message={
         shares ? (
@@ -208,8 +206,8 @@ function TrafficBlock({
               {(reading.errorRate * 100).toFixed(1)}% 5xx
             </span>
           ),
-          figure: compact.format(reading.requests),
-          label: `${vhost.name} ${compact.format(reading.requests)} requests`,
+          figure: compactCount(reading.requests),
+          label: `${vhost.name} ${compactCount(reading.requests)} requests`,
           title: `${reading.requests.toLocaleString()} requests in the last hour`,
           href: { label: `Open ${vhost.name}`, to: sitePath(vhost.name) },
         }
@@ -246,6 +244,15 @@ function daysLeft(cert: Certificate) {
   return cert.daysLeft === 0 ? "ends today" : `${cert.daysLeft} d left`
 }
 
+/**
+ * A press in a band's note, which narrows the list to what it names. The note
+ * cuts what leaves its box, so a press box grown past the words would be cut
+ * with it: the button is the full 28px of the strip's line instead, and the
+ * words sit where they did.
+ */
+const NOTE_BUTTON =
+  "inline-flex h-7 shrink-0 items-center rounded-sm focus-ring hover:underline hover:underline-offset-2"
+
 function CertificatesBlock({
   hosts,
   certs,
@@ -260,15 +267,23 @@ function CertificatesBlock({
   const { rows, plain, unknown, tls } = certRows(hosts, certs)
   const counts = certCounts(rows)
   const enabled = hosts.filter((v) => v.enabled).length
-  const plainButton = plain.length > 0 && (
-    <button
-      type="button"
-      onClick={() => onChip("plain")}
-      className="shrink-0 rounded-sm text-warning focus-ring hover:underline hover:underline-offset-2"
-    >
-      {plural(plain.length, "site")} on plain HTTP
-    </button>
-  )
+  // In the note it is the line's full height; in the message it is words in a
+  // sentence, which keep the sentence's own line.
+  const plainButton = (inNote: boolean) =>
+    plain.length > 0 && (
+      <button
+        type="button"
+        onClick={() => onChip("plain")}
+        className={cn(
+          inNote
+            ? NOTE_BUTTON
+            : "shrink-0 rounded-sm focus-ring hover:underline hover:underline-offset-2",
+          "text-warning",
+        )}
+      >
+        {plural(plain.length, "site")} on plain HTTP
+      </button>
+    )
   return (
     <BarReading
       title="Certificates"
@@ -278,7 +293,7 @@ function CertificatesBlock({
       figure={<HeadFigure value={tls} word={`of ${enabled} on TLS`} />}
       message={
         rows.length > 0 ? undefined : tls === 0 ? (
-          <>No enabled site is on TLS. {plainButton}</>
+          <>No enabled site is on TLS. {plainButton(false)}</>
         ) : !certs && loading ? (
           <TextShimmer>Reading the certificate inventory…</TextShimmer>
         ) : !certs ? (
@@ -289,7 +304,7 @@ function CertificatesBlock({
       }
       note={
         <>
-          {plainButton}
+          {plainButton(true)}
           <Note
             parts={[unknown > 0 && `${unknown} with a certificate the inventory does not read`]}
           />
@@ -389,7 +404,7 @@ function ApplicationsBlock({
             <button
               type="button"
               onClick={() => onChip("down")}
-              className="shrink-0 rounded-sm text-destructive focus-ring hover:underline hover:underline-offset-2"
+              className={cn(NOTE_BUTTON, "text-destructive")}
             >
               {down === 1 ? "1 refuses connections" : `${down} refuse connections`}
             </button>

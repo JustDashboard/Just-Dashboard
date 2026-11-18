@@ -5,9 +5,9 @@ import { FirewallCheck, Globe, NetworkDevice, Router } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { plural } from "@/lib/format"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { DashboardMark } from "@/components/backups/marks"
+import { DashboardMark } from "@/components/logo"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark, WireNode } from "@/components/deploy/wire"
+import { WireHost, WireMark, WireNode } from "@/components/wire/wire"
 import {
   LANE_WORDS,
   listenerProduct,

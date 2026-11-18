@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test"
 import {
+  ago,
   asSentence,
   byteParts,
   bytes,
@@ -7,12 +8,20 @@ import {
   clock,
   clockAt,
   clockMinute,
+  compactCount,
   dateFormatter,
   dayAt,
+  dayHeading,
   dayMinuteAt,
+  grouped,
+  localInputValue,
   minuteAt,
   minuteSpan,
+  plural,
   rate,
+  sharePercent,
+  shortDigest,
+  shortSha,
   timestamp,
   weekdayAt,
   sentenceCase,
@@ -249,4 +258,111 @@ test("a reason on its own line ends on a full stop, unless it ends on something 
   )
   expect(asSentence("line one\nline two")).toBe("Line one\nline two")
   expect(asSentence("")).toBe("")
+})
+
+test("a count is grouped the one way, whatever the reader's locale", () => {
+  expect(grouped(0)).toBe("0")
+  expect(grouped(999)).toBe("999")
+  expect(grouped(1204)).toBe("1,204")
+  expect(grouped(16_103_894)).toBe("16,103,894")
+  expect(grouped(-4200)).toBe("-4,200")
+  expect(plural(1, "row")).toBe("1 row")
+  expect(plural(1204, "row")).toBe("1,204 rows")
+  expect(plural(2, "index", "indexes")).toBe("2 indexes")
+})
+
+test("a compact count is a lower-case k, one decimal under a hundred of its unit", () => {
+  expect(compactCount(0)).toBe("0")
+  expect(compactCount(999)).toBe("999")
+  expect(compactCount(1000)).toBe("1k")
+  expect(compactCount(1204)).toBe("1.2k")
+  expect(compactCount(1950)).toBe("2k")
+  expect(compactCount(60_000)).toBe("60k")
+  expect(compactCount(123_456)).toBe("123k")
+  expect(compactCount(2_500_000)).toBe("2.5M")
+  expect(compactCount(16_103_894)).toBe("16.1M")
+  expect(compactCount(3_000_000_000)).toBe("3B")
+  expect(compactCount(-28_600)).toBe("-28.6k")
+  expect(compactCount(Number.NaN)).toBe("—")
+  for (const n of [1204, 60_000, 999_999]) expect(compactCount(n)).not.toMatch(/K/)
+})
+
+test("a compact count that rounds to a thousand of its unit is the next unit", () => {
+  expect(compactCount(999_960)).toBe("1M")
+  expect(compactCount(999_400)).toBe("999k")
+})
+
+test("below exactBelow every digit is written", () => {
+  expect(compactCount(9999, { exactBelow: 10_000 })).toBe("9,999")
+  expect(compactCount(10_000, { exactBelow: 10_000 })).toBe("10k")
+  expect(compactCount(28_600, { exactBelow: 10_000 })).toBe("28.6k")
+  expect(compactCount(12.6, { exactBelow: 10_000 })).toBe("13")
+  // A threshold under a thousand would write "0.5k".
+  expect(compactCount(500, { exactBelow: 100 })).toBe("500")
+})
+
+test("an age is its largest unit, and just now for its first five seconds", () => {
+  const at = 1_700_000_000_000
+  expect(ago(at, at)).toBe("just now")
+  expect(ago(at, at + 4_999)).toBe("just now")
+  expect(ago(at, at + 5_000)).toBe("5s ago")
+  expect(ago(at, at + 14_000)).toBe("14s ago")
+  expect(ago(at, at + 150_000)).toBe("2m ago")
+  expect(ago(at, at + 3 * 3_600_000 + 7_000)).toBe("3h ago")
+  expect(ago(at, at + 47 * 3_600_000)).toBe("1d ago")
+  expect(ago(at, at + 9 * 86_400_000)).toBe("9d ago")
+  // Two clocks a little apart: an instant just ahead is now, not "-2s".
+  expect(ago(at, at - 2_000)).toBe("just now")
+})
+
+test("an age in two units keeps the seconds", () => {
+  const at = 1_700_000_000_000
+  expect(ago(at, at + 150_000, { units: 2 })).toBe("2m 30s ago")
+  expect(ago(at, at + 3_600_000, { units: 2 })).toBe("1h ago")
+  expect(ago(at, at + 2_000, { units: 2 })).toBe("just now")
+})
+
+test("a day's heading is today, yesterday, then the date", () => {
+  // The fixture clock ages with its worker, so the days are built from now.
+  const now = Date.now()
+  const daysAgo = (n) => {
+    const d = new Date(now)
+    d.setDate(d.getDate() - n)
+    d.setHours(12, 0, 0, 0)
+    return d.toISOString()
+  }
+  expect(dayHeading(new Date(now).toISOString(), now)).toBe("Today")
+  expect(dayHeading(daysAgo(1), now)).toBe("Yesterday")
+  const older = dayHeading(daysAgo(3), now)
+  expect(older).toMatch(/^[A-Z][a-z]{2} \d{1,2}(, \d{4})?$/)
+  expect(older).toBe(
+    new Date(daysAgo(3)).getFullYear() === new Date(now).getFullYear()
+      ? dayAt(new Date(daysAgo(3)))
+      : calendarDate(daysAgo(3)),
+  )
+  expect(dayHeading(daysAgo(400), now)).toMatch(/^[A-Z][a-z]{2} \d{1,2}, \d{4}$/)
+  expect(dayHeading("not a date", now)).toBe("—")
+})
+
+test("a digest is twelve hex characters with no algorithm and no ellipsis", () => {
+  const hex = "4f1c2a9b8e7d6c5b4a39281706f5e4d3c2b1a09f8e7d6c5b4a3928170615e4d3"
+  expect(shortDigest(`sha256:${hex}`)).toBe("4f1c2a9b8e7d")
+  expect(shortDigest(hex)).toBe("4f1c2a9b8e7d")
+  expect(shortDigest("release-2026-11-15-a")).toBe("release-2026")
+  expect(shortDigest("image")).toBe("image")
+  expect(shortDigest(undefined)).toBe("")
+  expect(shortSha(hex)).toBe("4f1c2a9")
+})
+
+test("a share in whole percent never calls a sliver nothing or a near-whole all of it", () => {
+  expect(sharePercent(0)).toBe("0%")
+  expect(sharePercent(0.004)).toBe("<1%")
+  expect(sharePercent(0.42)).toBe("42%")
+  expect(sharePercent(0.996)).toBe(">99%")
+  expect(sharePercent(1)).toBe("100%")
+})
+
+test("a date as a datetime-local input holds it is the wall clock with no zone", () => {
+  const date = new Date(2026, 10, 15, 14, 3, 7, 250)
+  expect(localInputValue(date)).toBe("2026-11-15T14:03:07.250")
 })

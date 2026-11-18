@@ -15,9 +15,9 @@ import { relativeTime } from "@/lib/format"
 import type { ApiToken, DashboardUser, SessionInfo } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { activeNow } from "@/components/account/access"
-import { UserAvatar } from "@/components/account/user-avatar"
+import { UserAvatar } from "@/components/user-avatar"
 
 type Size = "lg" | "md" | "sm"
 

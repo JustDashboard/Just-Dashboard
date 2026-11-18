@@ -1100,7 +1100,7 @@ test.describe("a deployment's traffic", () => {
 
     // The release is the reader's next move, so it is a link to the run that
     // put it there rather than a piece of text.
-    await expect(page.getByRole("link", { name: "· release 20" }).first()).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "release 20" }).first()).toHaveAttribute(
       "href",
       "/deploy/7/runs/84",
     )
@@ -1595,8 +1595,11 @@ test.describe("a deployment's traffic", () => {
       expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
     }
 
-    const pages = page.getByRole("heading", { name: "Pages", exact: true }).locator("../..")
-    const head = await pages.locator("h3").locator("..").boundingBox()
+    // The facet is a section under a plain section head; the head's right edge is the header's.
+    const pages = page
+      .getByRole("heading", { name: "Pages", exact: true })
+      .locator("xpath=ancestor::section[1]")
+    const head = await pages.locator("header").first().boundingBox()
     const share = await pages.locator("[data-slot=rank-share]").first().boundingBox()
     expect(Math.abs(share!.x + share!.width - (head!.x + head!.width))).toBeLessThanOrEqual(1)
   })
@@ -1913,9 +1916,10 @@ test.describe("a deployment's traffic", () => {
       await page.setViewportSize({ width, height: 900 })
       await page.goto("/deploy/7/logs")
       // A phone picks the view on the bar at the pane's foot, a desk on the
-      // strip at its head.
+      // strip at its head; both are buttons, so the phone's is the bar's.
+      const bar = page.locator("[data-slot=pane-bar]")
       const view = (name: string) =>
-        page.getByRole(width === 390 ? "tab" : "button", { name, exact: true })
+        (width === 390 ? bar : page).getByRole("button", { name, exact: true })
       await expect(view("Requests")).toBeVisible()
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

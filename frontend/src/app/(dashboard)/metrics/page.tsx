@@ -1,6 +1,8 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import { Fact } from "@/components/fact-line"
+import { cpuModes } from "@/components/metrics/cpu-modes"
 import { Download, Pause, Play } from "@/components/icons"
 import { bytes, duration, percent, rate } from "@/lib/format"
 import type { MetricEvent, Snapshot } from "@/lib/types"
@@ -23,29 +25,30 @@ import {
   type ChartRow,
   type MetricsWindow,
   type StorageSeriesMeta,
-} from "@/lib/metrics-range"
-import { downloadText, rowsToCsv } from "@/lib/metrics-export"
+} from "@/lib/metrics/range"
+import { rowsToCsv } from "@/lib/metrics/export"
 import {
   formatDelta,
   relativeChange,
   windowStat,
   windowStatSum,
   type WindowStat,
-} from "@/lib/metrics-summary"
-import { Page, PageContext, PageState, Section } from "@/components/page"
+} from "@/lib/metrics/summary"
+import { Page, PageContext, PageState } from "@/components/page"
+import { Section } from "@/components/section"
 import { StatGrid, StatTile } from "@/components/stat-tile"
 import { utilisationTone } from "@/components/meter"
 import type { Tone } from "@/components/tone"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { RangePicker, windowPhrase } from "@/components/metrics/range-picker"
 import { HeadReading } from "@/components/metrics/chart-reading"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { MomentInspector } from "@/components/metrics/moment-inspector"
-import { getCrosshair, unpinCrosshair } from "@/lib/metrics-crosshair"
+import { getCrosshair, unpinCrosshair } from "@/lib/metrics/crosshair"
 import { NotableMoments } from "@/components/metrics/notable-moments"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { CapacityForecastSection } from "@/components/metrics/capacity-forecast"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/sparkline"
 import {
   InterfacesPanel,
   MemoryPanel,
@@ -61,16 +64,17 @@ import {
   LiveFigure,
   SeriesKey,
   StreamState,
-} from "@/components/overview/readings"
+} from "@/components/live-figure"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { HostAlertsLink } from "@/components/metrics/alerts-link"
 import { cpuProduct, platformProduct, virtualizationProduct } from "@/components/product-logo"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { saveText } from "@/lib/download"
 
 /*
  * A series' hue is the measurement's, never its position on a chart (§10).
@@ -319,7 +323,11 @@ export default function MetricsPage() {
 
   const exportCsv = () => {
     const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")
-    downloadText(`${host.hostname}-metrics-${windowLabel(win)}-${stamp}.csv`, rowsToCsv(rows))
+    saveText(
+      `${host.hostname}-metrics-${windowLabel(win)}-${stamp}.csv`,
+      rowsToCsv(rows),
+      "text/csv",
+    )
   }
 
   return (
@@ -334,71 +342,56 @@ export default function MetricsPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext title="Metrics" />
 
         {/* What this machine is made of. The Overview's line says what it
           runs; this one says what it runs on, drawn as the processor itself,
           because every figure below is a share of something named here. The
-          window's controls sit at its end because they change every chart
-          under it; the shortcuts are the key beside them, where they had been
-          a line of their own above the page. */}
-        <HostIdentity
+          window is not here: it is the first reading's, on the Resources
+          line, as Runtime's is (PGH-27), and on a phone this line no longer
+          wraps to three rows. The shortcuts are the key at its end, where they
+          had been a line of their own above the page. */}
+        <IdentityHeader
           mark={cpuProduct(host.cpuModel, host.kernelArch)}
           title={host.cpuModel || "Unknown processor"}
           facts={
             <>
-              <span className="numeric">
+              <Fact className="numeric">
                 {cores} cores{host.cpuMhz > 0 ? ` at ${(host.cpuMhz / 1000).toFixed(1)} GHz` : ""}
-              </span>
-              <FactDot />
-              <span className="numeric">{bytes(snapshot.memory.total, 0)} memory</span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">{bytes(snapshot.memory.total, 0)} memory</Fact>
+              <Fact className="numeric">
                 {snapshot.swap.total > 0 ? `${bytes(snapshot.swap.total, 0)} swap` : "no swap"}
-              </span>
+              </Fact>
               {host.virtualization && (
-                <>
-                  <FactDot />
-                  <HostFact product={virtualizationProduct(host.virtualization)}>
-                    {host.virtualization}
-                  </HostFact>
-                </>
+                <Fact product={virtualizationProduct(host.virtualization)}>
+                  {host.virtualization}
+                </Fact>
               )}
-              <FactDot />
-              <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-              <FactDot />
-              {recorded.disabled ? (
-                <Tag tone="warning">history off</Tag>
-              ) : (
-                recorded.history && (
-                  <span className="numeric">
-                    sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
-                    {duration(recorded.history.retentionSeconds)}
-                  </span>
-                )
-              )}
+              <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
+              <Fact>
+                {recorded.disabled ? (
+                  <Tag tone="warning">history off</Tag>
+                ) : (
+                  recorded.history && (
+                    <span className="numeric">
+                      sampled every {recorded.history.sampleIntervalSeconds}s, kept{" "}
+                      {duration(recorded.history.retentionSeconds)}
+                    </span>
+                  )
+                )}
+              </Fact>
             </>
           }
           aside={
             <div className="flex max-w-full flex-wrap items-center gap-2">
               <HostAlertsLink />
-              {live && (
-                <IconAction
-                  label={paused ? "Resume live feed" : "Pause live feed"}
-                  onClick={() =>
-                    setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
-                  }
-                >
-                  {paused ? <Play /> : <Pause />}
-                </IconAction>
-              )}
               {/* Export the exact window and resolution on screen, peaks included. */}
               <Button variant="outline" size="sm" disabled={rows.length === 0} onClick={exportCsv}>
                 <Download />
                 Export CSV
               </Button>
-              <RangePicker controls={controls} />
               <WorkspaceHelp compact />
             </div>
           }
@@ -417,9 +410,22 @@ export default function MetricsPage() {
         <Section
           title="Resources"
           actions={
-            <div className="flex items-center gap-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
               <span className="numeric text-hint text-muted-foreground">{span.head}</span>
               <StreamState connection={connection} />
+              <span className="flex items-center gap-1">
+                {live && (
+                  <IconAction
+                    label={paused ? "Resume live feed" : "Pause live feed"}
+                    onClick={() =>
+                      setFrozen(paused ? null : { live, rows: liveChartRows, storage: liveStorage })
+                    }
+                  >
+                    {paused ? <Play /> : <Pause />}
+                  </IconAction>
+                )}
+                <RangePicker controls={controls} />
+              </span>
             </div>
           }
         >
@@ -849,11 +855,7 @@ function Readings({
         tone={utilisationTone(snapshot.cpu.totalPercent)}
         trend={cpuTrend}
         meter={cpuTrend ? undefined : snapshot.cpu.totalPercent}
-        hint={
-          modes
-            ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
-            : `${cores} cores`
-        }
+        hint={modes ? cpuModes(modes) : `${cores} cores`}
         trailing={
           <span className="inline-flex items-center gap-2">
             <CoreBars cores={snapshot.cpu.perCore} color={HUE.cpu} />

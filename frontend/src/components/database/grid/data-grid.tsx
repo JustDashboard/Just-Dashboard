@@ -11,14 +11,15 @@ import {
   useRef,
   useState,
 } from "react"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { PaneHeader } from "@/components/panel"
 import { EmptyNote, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { ContextMenu, ContextMenuContent, ContextMenuTrigger } from "@/components/ui/context-menu"
+import { Sweep } from "@/components/loading"
 import { errorMessage } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
+import { canPaste, copyText, pasteText as readClipboard } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import {
@@ -1387,8 +1388,7 @@ export function DataGrid({
         value !== undefined &&
         !isDefault(value),
       canCopySQL: onCopySQL !== undefined,
-      canPaste:
-        canEdit && typeof navigator !== "undefined" && navigator.clipboard?.readText !== undefined,
+      canPaste: canEdit && canPaste(),
     }
   }, [
     menu,
@@ -1448,7 +1448,7 @@ export function DataGrid({
         })
       },
       paste: () => {
-        navigator.clipboard.readText().then(pasteText, () =>
+        readClipboard().then(pasteText, () =>
           notify.error("Could not paste", undefined, {
             description:
               "The browser would not let the page read the clipboard. Press Ctrl+V instead.",
@@ -1708,7 +1708,7 @@ export function DataGrid({
                 Arrow keys and Tab move between cells. Shift with Space ticks the row. Escape, then
                 Tab, leaves the grid.
               </p>
-              <div role="rowgroup" className="sticky top-0 z-20" {...headerHandlers}>
+              <div role="rowgroup" className="sticky top-0 z-sticky" {...headerHandlers}>
                 <GridHeader
                   template={template}
                   pinned={pinnedCols}
@@ -1736,9 +1736,7 @@ export function DataGrid({
                     aria-hidden
                     className="pointer-events-none sticky left-0 h-0 w-(--jd-grid-view)"
                   >
-                    <div className="absolute inset-x-0 top-0 h-0.5 overflow-hidden">
-                      <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep bg-brand" />
-                    </div>
+                    <Sweep track={false} className="absolute inset-x-0 top-0 h-0.5" />
                   </div>
                 )}
               </div>

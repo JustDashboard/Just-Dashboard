@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation"
 import { Linked, Trash } from "@/components/icons"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ProductLogos } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
 import { Tag } from "@/components/tag"
@@ -19,7 +18,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { RX, RatePair, TX } from "@/components/network/rate-pair"
 import { membersKnown } from "@/lib/docker-networks"
 import { plural, rate as formatRate } from "@/lib/format"
@@ -34,6 +33,7 @@ import {
   networkOwner,
   removeRefusal,
 } from "@/components/docker/networks"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type RowsProps = {
   rates: Map<string, NetworkRate>
@@ -65,7 +65,7 @@ type RowsProps = {
  */
 export function NetworkRows({ rows, ...rest }: RowsProps & { rows: DockerNetwork[] }) {
   const arrived = useArrivals(rows.map((n) => n.id))
-  const wide = useMediaQuery("(min-width: 1280px)")
+  const wide = useBreakpoint("xl")
   if (!wide) {
     return (
       <ul aria-label="Networks" className="divide-y divide-hairline px-4">
@@ -81,7 +81,7 @@ export function NetworkRows({ rows, ...rest }: RowsProps & { rows: DockerNetwork
     )
   }
   return (
-    <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+    <Table className="table-fixed" containerClassName="max-h-rail">
       <TableHeader className={stickyTableHeader}>
         <TableRow>
           <TableHead>Network</TableHead>

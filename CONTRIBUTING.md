@@ -60,7 +60,10 @@ as described under [Security issues](#security-issues).
 
 New to the tree? [`docs/internal/reference/finding-things.md`](docs/internal/reference/finding-things.md)
 says which route, components, handler files, package, specs and document belong to each page, and
-`backend/`, `frontend/`, `scripts/` and `docs/` each open on a short README.
+`backend/`, `frontend/`, `scripts/` and `docs/` each open on a short README. A frontend page is built
+from [`docs/internal/frontend/README.md`](docs/internal/frontend/README.md) and held to
+[`standard.md`](docs/internal/frontend/standard.md); a shared component is added, documented and
+retired as [`contributing-a-component.md`](docs/internal/frontend/contributing-a-component.md) says.
 
 Keep the PR focused and use the template to explain what changed, why, and how you verified it. Link
 related issues and include before/after screenshots for visual changes or a recording for interaction
@@ -240,15 +243,24 @@ never into `docs/audits/`.
   merging; the push run of the merge, which nobody waits on, follows the same change to every page it
   reaches, the whole suite for the shell or a public asset, so what the pull request left out is
   checked one merge later. A change to the dependencies, the build's configuration or the request
-  proxy runs the whole suite in both. The specs are dealt into up to eight jobs, in name order, so
-  that a slow section is spread over the jobs: of about a hundred tests each for a pull request, which
-  finishes sooner, and two hundred for a merge. A change to the workflow or its scripts runs
-  everything, as does a manual run, and a documentation-only change runs nothing past `plan`. A pull
-  request from `main` or a `patch/*` branch runs nothing either: its commit is the one that branch's
-  push run checks, and GitHub shows that run's checks on the pull request.
+  proxy runs the whole suite in both. The specs are dealt into up to twelve jobs by the tests each
+  really runs, which `scripts/ci-plan.py` reads from the spec's source: a test written once in a loop
+  counts for every item of the loop's list, and a screenshot test that an unset variable switches off
+  counts for nothing. A spec whose loop the source cannot count, or whose tests cost several ordinary
+  ones, says so in a comment on a line of its own, `// ci-plan: 190 tests, each weighs 2.5`; either
+  half works alone. The heaviest spec is dealt first, and a slow section is spread over the jobs: of
+  about a hundred tests each for a pull request, which finishes sooner, and two hundred for a merge.
+  A full run is twelve jobs of about four hundred, which is twelve minutes of tests on the slowest
+  runner seen, of the twenty a job has. A change to the workflow or its scripts runs everything, as
+  does a manual run. A documentation-only change runs nothing past `plan`, except one to the UI docs
+  (`docs/internal/frontend/`), which runs `frontend` for the unit test that holds them to the code.
+  A pull request from `main` or a `patch/*` branch runs nothing either: its commit is the one that
+  branch's push run checks, and GitHub shows that run's checks on the pull request.
   GitHub runs twenty jobs of a public repository's at once across every branch, so the suites are
   split only as far as a runner's four cores are full: more jobs than that queue behind each other and
-  behind every other pull request. Go and Bun come from `go.mod` and `package.json`, and dependencies
+  behind every other pull request. The browser specs of a full run are the one exception: they need
+  their twelve jobs to stay inside the limit, so a full run starts twenty-two jobs and two of them wait
+  for the first to finish, which costs less than a job that is cancelled. Go and Bun come from `go.mod` and `package.json`, and dependencies
   use the frozen Bun lockfile. The module, build, Bun, Playwright, Next and `tsc` caches are saved only
   by runs on `main` and `patch/*` and restored by pull requests into them, because a run can read
   the caches of its base branch and never those of another task branch.

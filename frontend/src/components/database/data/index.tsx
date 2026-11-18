@@ -3,30 +3,26 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import {
-  GridSquare,
-  Plus,
-  SidebarLeftClose,
-  SidebarLeftOpen,
-  SidebarRightOpen,
-  Table,
-} from "@/components/icons"
+import { GridSquare, Plus, SidebarRightOpen, Table } from "@/components/icons"
 import { usePanelSize } from "@/lib/panel-size"
-import { cn } from "@/lib/utils"
 import { useMemoryState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { PaneBar } from "@/components/phone-panes"
-import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, ErrorState } from "@/components/state"
-import type { Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { EMPTY_CHANGE_STATE, useChangeSet, type ChangeSetState } from "@/components/database/grid"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
+import { SchemaHeadSkeleton } from "@/components/database/kit/schema-head"
+import {
+  WORKBENCH_PAGE,
+  WorkbenchFrame,
+  WorkbenchSide,
+  sideVerbs,
+} from "@/components/database/workbench/chrome"
+import { clamp } from "@/components/database/workbench/side-model"
 import {
   SETTLED,
   addressKey,
@@ -49,17 +45,15 @@ import { useExport } from "@/components/database/data/use-export"
 import { useCatalog, useTableDetail } from "@/components/database/data/use-table"
 import { readView, sameRows, viewParams, type ViewState } from "@/components/database/data/view"
 import { TableWorkbench, type TableWorkbenchHandle } from "@/components/database/data/workbench"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const NO_STAGED: Record<string, number> = {}
-const NO_VERBS: Verb[] = []
 
 /** The frame's width under which a table's rows are read as cards rather than a grid. */
 const CARDS_UNDER = 480
 
 /** The panes of the table editor where it shows one at a time. */
 type DataPane = "tables" | "rows" | "details"
-
-const clamp = (value: number, min: number, max: number) => Math.min(Math.max(value, min), max)
 
 type Select = ReturnType<typeof useDatabase>["select"]
 
@@ -132,7 +126,7 @@ export function SqlData() {
   // window's (`panes.ts`). Before it is measured — one render, never painted —
   // the window answers.
   const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
-  const windowWide = useMediaQuery("(min-width: 1024px)")
+  const windowWide = useBreakpoint("lg")
   const windowPhone = useMediaQuery("(max-width: 479px)")
   const [railPinned, setRailPinned] = useViewState("databases.data.rail", true)
   const [railWidth, setRailWidth, resetRailWidth] = usePanelSize(
@@ -352,16 +346,7 @@ export function SqlData() {
 
   // Beside the table the rail is a column to show or put away, from the
   // head's menu; over it, the bar is how it is reached.
-  const menu: Verb[] = railBeside
-    ? [
-        {
-          key: "rail",
-          label: `${railShown ? "Hide" : "Show"} the ${engine.nouns.objects}`,
-          icon: railShown ? SidebarLeftClose : SidebarLeftOpen,
-          run: toggleRail,
-        },
-      ]
-    : NO_VERBS
+  const menu = sideVerbs({ beside: railBeside }, railShown, engine.nouns.objects, toggleRail)
 
   const listed = catalog.data?.schema ?? selection.schema
   // The address names a schema the connection does not have.
@@ -401,7 +386,6 @@ export function SqlData() {
         ref={frame}
         section="data"
         slot="table-editor"
-        style={{ "--jd-data-rail": `${railColumn}px` } as React.CSSProperties}
         menu={menu}
         bar={
           !railBeside && (
@@ -419,14 +403,16 @@ export function SqlData() {
         }
       >
         {railShown && (
-          <div
-            role="presentation"
-            className={cn(
-              "flex min-h-0 flex-col border-hairline bg-card",
-              railBeside
-                ? "relative w-(--jd-data-rail) shrink-0 border-r"
-                : "absolute inset-0 z-30",
-            )}
+          <WorkbenchSide
+            column={{
+              beside: railBeside,
+              width: railColumn,
+              min: RAIL.min,
+              max: panes.railMax,
+              setWidth: (px, commit) => setRailWidth(clamp(px, RAIL.min, panes.railMax), commit),
+              reset: resetRailWidth,
+            }}
+            label="Tables width"
             // Lying over the table, the rail is put away by choosing one. After
             // the link has acted, not before: taken off the page first, the
             // link was followed by the browser instead — the whole document
@@ -446,19 +432,7 @@ export function SqlData() {
               onImportNew={canImportNew ? () => setImportingNew(true) : undefined}
               saidBeside={railBeside && shown === null}
             />
-            {railBeside ? (
-              <ResizeHandle
-                side="left"
-                label="Tables width"
-                value={railColumn}
-                min={RAIL.min}
-                max={panes.railMax}
-                onChange={(px, commit) => setRailWidth(clamp(px, RAIL.min, panes.railMax), commit)}
-                onReset={resetRailWidth}
-                className="absolute inset-y-0 -right-1 z-20"
-              />
-            ) : null}
-          </div>
+          </WorkbenchSide>
         )}
 
         {shown ? (
@@ -495,35 +469,20 @@ export function SqlData() {
                 {catalog.error && !catalog.data ? (
                   // Why the list could not be read is said once, here, with the
                   // way to ask again; the rail beside it only says that it is empty.
-                  <div className="w-full max-w-md space-y-3">
-                    <ErrorState error={catalog.error} />
-                    <Button size="sm" variant="outline" onClick={catalog.refresh}>
-                      Try again
-                    </Button>
-                  </div>
+                  <ErrorState
+                    retryable
+                    error={catalog.error}
+                    onRetry={catalog.refresh}
+                    className="w-full max-w-md"
+                  />
                 ) : !catalog.data ? (
-                  // The catalogue is on its way: the shape of what it will say.
-                  <div
-                    role="status"
-                    aria-label={`Reading the ${engine.nouns.objects}`}
-                    className="w-full max-w-xl space-y-6"
-                  >
-                    <div className="flex items-center gap-3">
-                      <Skeleton className="size-10 rounded-lg" />
-                      <div className="space-y-2">
-                        <Skeleton className="h-3.5 w-28" />
-                        <Skeleton className="h-3 w-64 max-w-full" />
-                      </div>
-                    </div>
-                    <div className="space-y-4">
-                      {["w-40", "w-28", "w-32", "w-24"].map((width) => (
-                        <div key={width} className="space-y-1.5">
-                          <Skeleton className={cn("h-3", width)} />
-                          <Skeleton className="h-1 w-full" />
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                  // The catalogue is on its way: the shape of what it will say —
+                  // the head, then the largest as a ranked list, with no bar
+                  // under any name, as the landing draws them.
+                  <SchemaHeadSkeleton
+                    label={`Reading the ${engine.nouns.objects}`}
+                    className="max-w-xl"
+                  />
                 ) : unknown ? (
                   // A schema that is not there is not an empty one: nothing can
                   // be made in it, and the way on is the one that exists.

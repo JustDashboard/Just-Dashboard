@@ -20,10 +20,11 @@ import type { GitHubAccount, GitHubDeviceStart, GitHubDeviceState } from "@/lib/
 import { useAuth } from "@/hooks/use-auth"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Notice, Spinner } from "@/components/state"
+import { Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Status } from "@/components/status-dot"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { ForgeFace } from "@/components/git/marks"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
@@ -252,7 +253,7 @@ export function GitHubAccountControl({
                 {account.committerEmail && (
                   <Detail
                     label="Commits as"
-                    className="truncate font-mono text-hint text-foreground/85"
+                    className="truncate font-mono text-hint text-foreground"
                   >
                     <span title={`${account.committerName} <${account.committerEmail}>`}>
                       {account.committerName} &lt;{account.committerEmail}&gt;
@@ -260,7 +261,7 @@ export function GitHubAccountControl({
                   </Detail>
                 )}
                 {account.owner && (
-                  <Detail label="Host account" className="font-mono text-hint text-foreground/85">
+                  <Detail label="Host account" className="font-mono text-hint text-foreground">
                     {account.owner}
                   </Detail>
                 )}

@@ -27,7 +27,7 @@ import {
 import { logPlaceIdentities } from "@/components/logs/log-place"
 import { useMemoryState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
-import { plural, timestamp } from "@/lib/format"
+import { grouped, plural, timestamp } from "@/lib/format"
 import type { LogLine } from "@/lib/types"
 import {
   LEVEL_EDGE,
@@ -38,9 +38,9 @@ import {
   lineValue,
   segmentLine,
   type LogLevel,
-} from "@/lib/log-filter"
-import { eventMeta } from "@/lib/log-lenses"
-import { fieldOf, type LogFieldKind } from "@/lib/log-fields"
+} from "@/lib/log/filter"
+import { eventMeta } from "@/lib/log/lenses"
+import { fieldOf, type LogFieldKind } from "@/lib/log/fields"
 import {
   EVENT_WORD,
   LEVEL_WORD,
@@ -50,8 +50,8 @@ import {
 } from "@/components/logs/log-text"
 import { FieldValue } from "@/components/logs/field-value"
 import { buildRows, columnWidthFor, eventColumnFor, type Row } from "@/components/logs/logs-model"
-import { LOG_TIMES, TIME_WIDTH, formatLogTime, setLogView, useLogView } from "@/lib/log-view"
-import type { LogTime } from "@/lib/log-view"
+import { LOG_TIMES, TIME_WIDTH, formatLogTime, setLogView, useLogView } from "@/lib/log/view"
+import type { LogTime } from "@/lib/log/view"
 import { useMetrics } from "@/hooks/use-metrics"
 import type { LogFilterState } from "@/components/logs/types"
 import { PaneFooter } from "@/components/panel"
@@ -449,9 +449,7 @@ export function LogConsole({
             // The held count stays beside the glyph at every width: it is the
             // one thing a paused pane has to say.
             extra={
-              paused && held > 0 ? (
-                <span className="numeric">{held.toLocaleString()} held</span>
-              ) : undefined
+              paused && held > 0 ? <span className="numeric">{grouped(held)} held</span> : undefined
             }
           />
         )}
@@ -547,8 +545,8 @@ export function LogConsole({
                     />
                     <span className="numeric">
                       {row.expanded
-                        ? `Fold the last ${row.hidden.toLocaleString()}`
-                        : `${row.hidden.toLocaleString()} more ${row.hidden === 1 ? "line" : "lines"}`}
+                        ? `Fold the last ${grouped(row.hidden)}`
+                        : `${grouped(row.hidden)} more ${row.hidden === 1 ? "line" : "lines"}`}
                     </span>
                   </button>
                 )
@@ -590,7 +588,7 @@ export function LogConsole({
         >
           <ChevronDoubleDown className="size-3" />
           Jump to the end
-          {held > 0 && <span className="numeric">· {held.toLocaleString()} held</span>}
+          {held > 0 && <span className="numeric">· {grouped(held)} held</span>}
         </button>
       )}
 
@@ -782,18 +780,14 @@ export const LogRow = memo(function LogRow({
         )}
       />
       {showLineNumbers && (
-        <span className="numeric w-12 shrink-0 text-right text-muted-foreground/40 select-none @max-lg:hidden">
+        <span className="numeric w-12 shrink-0 text-right text-faint select-none @max-lg:hidden">
           {line.no ?? ""}
         </span>
       )}
       {showTime && (
         <span
           title={line.timestamp ? timestamp(line.timestamp) : undefined}
-          className={cn(
-            "numeric shrink-0 text-muted-foreground/70 select-none",
-            TIME_WIDTH[time],
-            beside,
-          )}
+          className={cn("numeric shrink-0 text-faint select-none", TIME_WIDTH[time], beside)}
         >
           {/* A record's lines share its head's moment; the time down each of
               them made a Postgres error with its DETAIL read as three. */}
@@ -841,7 +835,7 @@ export const LogRow = memo(function LogRow({
           return (
             <span
               key={key}
-              className={cn("hidden shrink-0 overflow-hidden @min-[900px]:flex", width)}
+              className={cn("hidden shrink-0 overflow-hidden @4xl:flex", width)}
               style={width ? undefined : { width: `${columnWidths?.[key] || 6}ch` }}
             >
               {value && <FieldValue name={key} value={value} compact lens={lens} />}
@@ -849,10 +843,7 @@ export const LogRow = memo(function LogRow({
           )
         })}
       {showFile && line.file && (
-        <span
-          className="w-28 shrink-0 truncate text-muted-foreground/70 @max-xl:hidden"
-          title={line.file}
-        >
+        <span className="w-28 shrink-0 truncate text-faint @max-xl:hidden" title={line.file}>
           {line.file}
         </span>
       )}
@@ -871,14 +862,14 @@ export const LogRow = memo(function LogRow({
         // failure that was not there. A line the lens read has its own
         // severity, and a record's later lines its head's, so the stream
         // says nothing about either.
-        <span className="shrink-0 text-muted-foreground/70 select-none">stderr</span>
+        <span className="shrink-0 text-faint select-none">stderr</span>
       )}
       {repeat && repeat > 1 && (
         <span
           className="numeric shrink-0 font-medium text-muted-foreground select-none"
-          title={`${repeat.toLocaleString()} identical lines${since ? ` since ${timestamp(since)}` : ""}`}
+          title={`${grouped(repeat)} identical lines${since ? ` since ${timestamp(since)}` : ""}`}
         >
-          ×{repeat.toLocaleString()}
+          ×{grouped(repeat)}
         </span>
       )}
       {highlight ? (

@@ -219,7 +219,11 @@ for (const width of [1280, 390]) {
     await page.setViewportSize({ width, height: 844 })
     await mockShell(page, { "/logs/sources": (route) => json(route, BARE_SOURCES) })
     await page.goto("/logs?source=file:/var/log/auth.log")
-    if (width === 390) await page.getByRole("tab", { name: "Sources" }).click()
+    if (width === 390)
+      await page
+        .getByRole("navigation", { name: "Logs", exact: true })
+        .getByRole("button", { name: "Sources" })
+        .click()
     const rail = page.locator('[aria-label="Log sources"]')
     const lines = rail.locator("[data-slot=missing-line]")
     await expect(lines).toHaveCount(3)

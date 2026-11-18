@@ -140,7 +140,7 @@ test("an edit keeps the sealed headers unless they are replaced, and a header ne
   const writes = await withDrains(page, [failing])
   await page.goto("/deploy/drains")
   await page.getByRole("button", { name: "Edit Grafana Cloud" }).click()
-  const sheet = page.getByRole("dialog", { name: "Edit drain" })
+  const sheet = page.getByRole("dialog", { name: "Edit Grafana Cloud" })
   await expect(sheet.getByText("Sends Authorization, sealed.")).toBeVisible()
 
   // Plain http to another machine with the saved header: refused before it

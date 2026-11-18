@@ -7,7 +7,7 @@ import {
   readDNSList,
   readDNSProvision,
   type DNSServiceProvision,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import type { DNSView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -18,7 +18,7 @@ import { EmptyState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { dnsLogSources } from "@/components/network/dns/log-sources"
 
-const PANE = "h-[min(75vh,40rem)] min-h-80"
+const PANE = "h-workbench min-h-80"
 
 /**
  * The logs of what answers this host's lookups, on the page about them:

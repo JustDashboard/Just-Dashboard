@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
 import { get } from "@/lib/api"
-import { bytes, dateFormatter, rate } from "@/lib/format"
+import { dateFormatter } from "@/lib/format"
 import type { NetworkHistory, NetworkLink, NetworkLivePoint } from "@/lib/types"
 import {
   localInput,
@@ -12,11 +12,11 @@ import {
   rangeProblem,
   type Percentiles,
   type TrafficAnnotation,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import { usePoll } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { useAuth } from "@/hooks/use-auth"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { ChartActivity } from "@/components/icons"
 import { Field } from "@/components/form"
@@ -24,7 +24,6 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { LinkGlyph, ROLE_LABEL } from "@/components/network/marks"
-import { RX, TX } from "@/components/network/rate-pair"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useViewState } from "@/lib/view-state"
 import { cn } from "@/lib/utils"
@@ -37,23 +36,19 @@ import {
   type TrafficWindow,
 } from "./span"
 import { thresholdWords, throughputWords } from "./words"
+import { axisRate, formatRate, inOutSeries, RX, TX } from "@/components/in-out"
 
 const rangeEnd = dateFormatter({ dateStyle: "short", timeStyle: "short" })
 const rangeLabel = (r: TrafficRange) => `${rangeEnd(r.from * 1000)} – ${rangeEnd(r.to * 1000)}`
 
-const LIVE_SERIES = [
-  { key: "rx", label: "In", color: RX, kind: "area" as const },
-  { key: "tx", label: "Out", color: TX, kind: "area" as const },
-]
+const LIVE_SERIES = inOutSeries()
 const RECORDED_SERIES = [
   { key: "rx", label: "In", color: RX, kind: "area" as const, peakKey: "rxPeak" },
   { key: "tx", label: "Out", color: TX, kind: "area" as const, peakKey: "txPeak" },
 ]
-const formatRate = (value: number) => rate(value)
 
 type DeviceRow = { ts: number; rx: number; tx: number; rxPeak?: number; txPeak?: number }
 const NO_ROWS: DeviceRow[] = []
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
 
 /**
  * The window every chart on the page follows: the live ring, a named recorded

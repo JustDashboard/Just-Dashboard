@@ -10,17 +10,13 @@ import type { InterfaceReading, KernelProfile, ProtectionSetting } from "@/lib/t
 import { ConfirmDialog, useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
 import { EmptyNote } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import {
   Select,
   SelectContent,
@@ -329,7 +325,7 @@ function SettingRow({
       {edited && (
         <span
           aria-hidden
-          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
         />
       )}
       <div className="min-w-0 space-y-0.5">

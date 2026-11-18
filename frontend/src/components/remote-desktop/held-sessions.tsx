@@ -5,10 +5,11 @@ import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import { ArrowRight, Cross } from "@/components/icons"
+import { Dock } from "@/components/dock"
 import { IconAction } from "@/components/icon-action"
 import { ProductGlyph } from "@/components/product-logo"
 import { ComputerMark } from "@/components/remote-desktop/marks"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { sessionHref, type RdOS, type SessionMode } from "@/lib/remote-desktop"
@@ -148,7 +149,7 @@ export function HeldSessionsHost() {
           </div>
         )
       })}
-      {!shown && held.length > 0 && <HeldSessionsDock held={held} onRelease={release} />}
+      <HeldSessionsDock open={!shown && held.length > 0} held={held} onRelease={release} />
     </>
   )
 }
@@ -156,15 +157,20 @@ export function HeldSessionsHost() {
 /**
  * The sessions still connected while another page is up: each one as its
  * computer, how it is drawn and whether it is live, one press back to it and
- * one to end it. Without it a stream would play on unseen.
+ * one to end it. Without it a stream would play on unseen. It has the corner
+ * first: the lowest dock in the bottom stack (`components/dock.tsx`).
  */
-function HeldSessionsDock({ held, onRelease }: { held: Held[]; onRelease: (id: string) => void }) {
+function HeldSessionsDock({
+  open,
+  held,
+  onRelease,
+}: {
+  open: boolean
+  held: Held[]
+  onRelease: (id: string) => void
+}) {
   return (
-    <aside
-      aria-label="Remote sessions"
-      data-slot="held-sessions-dock"
-      className="fixed right-4 bottom-4 z-40 flex w-[22rem] max-w-[calc(100vw-2rem)] animate-rise flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-xl backdrop-blur"
-    >
+    <Dock open={open} label="Remote sessions" slot="held-sessions-dock" order={0}>
       {held.map((session) => {
         const name = session.name ?? "Remote session"
         const href = heldHref(session)
@@ -218,6 +224,6 @@ function HeldSessionsDock({ held, onRelease }: { held: Held[]; onRelease: (id: s
           </div>
         )
       })}
-    </aside>
+    </Dock>
   )
 }

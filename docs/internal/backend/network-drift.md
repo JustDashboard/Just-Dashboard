@@ -173,7 +173,7 @@ inspection and immediate pre-effect checks describe an observation window.
 `/network/drift` uses the reading register to show dated desired, rendered and
 runtime evidence, ownership conflicts, and measured unit activation separately
 from reboot attribution. Every comparison is one row (`driftRows` in
-`frontend/src/lib/network-drift.ts`): the spec, the journal, each render and
+`frontend/src/lib/network/drift.ts`): the spec, the journal, each render and
 runtime observation, the boot unit, its measured activation and each enabled
 blocklist, so the verdict, the table's counts and the picture cannot disagree.
 A route or policy rule is named by its saved destination or priority rather

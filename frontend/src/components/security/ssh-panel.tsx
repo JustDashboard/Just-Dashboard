@@ -4,8 +4,8 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import Link from "next/link"
 import { useSessionState } from "@/lib/view-state"
+import { Fact } from "@/components/fact-line"
 import {
-  ArrowRight,
   CheckCircle,
   Crosshair,
   CrossCircle,
@@ -19,28 +19,25 @@ import {
 } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { get, post } from "@/lib/api"
-import { lensFor } from "@/lib/log-lenses"
+import { lensFor } from "@/lib/log/lenses"
 import type { Job, NetworkConfirmationView, SSHDConfig, SSHSetting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { FormSections, InfoTip } from "@/components/form"
 import { PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { IdentityHeader } from "@/components/identity-header"
+import { InitialsMark } from "@/components/user-avatar"
 import { Modal } from "@/components/modal"
-import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { SectionLink } from "@/components/section-link"
 import { ReadingLines } from "@/components/reading-line"
 import { Row, RowList } from "@/components/row-list"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { ChipCount, FilterChip } from "@/components/tabs"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { ChipCount, FilterChip } from "@/components/chips"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { AUTH_LOG } from "@/components/security/host-logs"
 import {
   HostLogSection,
@@ -56,7 +53,7 @@ import {
   JumpHostSection,
   jumpProfiled,
 } from "@/components/security/bastion"
-import { LensReadingLine, type ReadingLook } from "@/components/security/lens-reading-line"
+import { LensReadingLine, type ReadingLook } from "@/components/logs/lens-reading-line"
 import { SSHPicture } from "@/components/security/ssh-picture"
 import { sshReading } from "@/components/security/ssh-reading"
 import { boundaryVerdict } from "@/components/security/boundary"
@@ -209,7 +206,7 @@ export function SSHPanel() {
     return (
       <>
         {header}
-        <HostIdentity
+        <IdentityHeader
           slot="ssh-identity"
           fallback={SecureConnection}
           title="sshd"
@@ -327,7 +324,7 @@ export function SSHPanel() {
     <SaveBarProvider>
       {header}
 
-      <HostIdentity
+      <IdentityHeader
         label="About sshd"
         slot="ssh-identity"
         fallback={SecureConnection}
@@ -335,7 +332,7 @@ export function SSHPanel() {
           <span className="flex items-baseline gap-2">
             sshd
             <span className="numeric font-mono text-body font-normal text-muted-foreground">
-              port <span className="text-[var(--tag-pink)]">{data.ports.join(", ") || "22"}</span>
+              port <span className="text-tag-pink">{data.ports.join(", ") || "22"}</span>
             </span>
           </span>
         }
@@ -355,30 +352,25 @@ export function SSHPanel() {
         }
         facts={
           <>
-            <span>
+            <Fact>
               {data.source.endsWith("-T") ? "as sshd reports it" : "read from sshd_config"}
-            </span>
+            </Fact>
             {data.socket?.unit && (
-              <>
-                <FactDot />
-                <span title="The systemd socket that holds the listener">
-                  listener held by{" "}
-                  <span className="font-mono text-foreground">{data.socket.unit}</span>
-                </span>
-              </>
+              <Fact title="The systemd socket that holds the listener">
+                listener held by{" "}
+                <span className="font-mono text-foreground">{data.socket.unit}</span>
+              </Fact>
             )}
             {data.managedFile && (
-              <>
-                <FactDot />
-                <span className="inline-flex items-center gap-1">
+              <Fact>
+                <span className="inline-flex items-center gap-1 align-top">
                   saved to a drop-in
                   <InfoTip label="Where SSH changes are saved">{data.managedFile}</InfoTip>
                 </span>
-              </>
+              </Fact>
             )}
             {data.hasMatchBlocks && (
-              <>
-                <FactDot />
+              <Fact>
                 <Tag
                   tone="warning"
                   icon={Warning}
@@ -386,7 +378,7 @@ export function SSHPanel() {
                 >
                   match blocks
                 </Tag>
-              </>
+              </Fact>
             )}
           </>
         }
@@ -394,7 +386,7 @@ export function SSHPanel() {
           <Button size="sm" asChild>
             <Link href="/system-users">
               <Key aria-hidden />
-              <span className="max-sm:sr-only">Add a key</span>
+              Add a key
             </Link>
           </Button>
         }
@@ -411,21 +403,17 @@ export function SSHPanel() {
       {/* The four facts an attacker cares about (the port, passwords, root
           and who holds a key) as the doors a login can take, before the
           settings that open and shut them. Drawn as a path they are read as
-          one answer, and they follow the draft. */}
-      <Panel plain>
-        <PanelHeader title="Ways in" />
-        <PanelBody>
-          <SSHPicture
-            config={data}
-            value={draft}
-            traffic={{
-              accepted: figure("accepted"),
-              failed: figure("failed"),
-              attackers: figure("attackers"),
-            }}
-          />
-        </PanelBody>
-      </Panel>
+          one answer, and they follow the draft. The page opens straight on
+          it, as its siblings open on theirs: no section head over it. */}
+      <SSHPicture
+        config={data}
+        value={draft}
+        traffic={{
+          accepted: figure("accepted"),
+          failed: figure("failed"),
+          attackers: figure("attackers"),
+        }}
+      />
 
       {/* What the last day made of those doors, from the auth log: each a
           press away from the lines it counts. Drawn while the log is still
@@ -475,12 +463,18 @@ export function SSHPanel() {
             const settings = general.filter((s) => sshGroup(s.key) === group.title && visible(s))
             if (settings.length === 0) return null
             return (
+              // The page's section anatomy: the title on the left, the count,
+              // the state and the filter on the right, over the hairline.
               <SettingSection
                 key={group.title}
                 title={group.title}
-                state={<span className="numeric">{plural(settings.length, "directive")}</span>}
                 status={settingStatus({ dirty: settings.some(changed) })}
-                actions={group.title === firstGroup ? onlyEdited || undefined : undefined}
+                actions={
+                  <>
+                    <SectionCount>{plural(settings.length, "directive")}</SectionCount>
+                    {group.title === firstGroup ? onlyEdited || undefined : undefined}
+                  </>
+                }
               >
                 <div className="divide-y divide-hairline">{settings.map(row)}</div>
               </SettingSection>
@@ -510,20 +504,15 @@ export function SSHPanel() {
           )}
           <SettingSection
             title="Accounts with an authorized key"
-            state={
-              <span className="numeric">
-                {noKeys
-                  ? "Every login depends on a password"
-                  : `${plural(data.keyedAccounts.length, "account")} · ${plural(keys, "key")}`}
-              </span>
-            }
             actions={
-              <Link
-                href="/system-users"
-                className="flex items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-              >
-                Users <ArrowRight className="size-3" />
-              </Link>
+              <>
+                <SectionCount>
+                  {noKeys
+                    ? "Every login depends on a password"
+                    : `${plural(data.keyedAccounts.length, "account")} · ${plural(keys, "key")}`}
+                </SectionCount>
+                <SectionLink href="/system-users">Users</SectionLink>
+              </>
             }
           >
             {noKeys ? (
@@ -827,7 +816,7 @@ function SettingRow({
       {changed && (
         <span
           aria-hidden
-          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
+          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
         />
       )}
       <div className="min-w-0 space-y-0.5">
@@ -906,5 +895,21 @@ function SettingRow({
         </p>
       </div>
     </div>
+  )
+}
+
+/**
+ * A section's count at its title line's far end, as `PanelHeader count` draws
+ * one. It stands at a chip's height, so the Edited filter and the section's
+ * state landing beside it move neither the head nor the rows under it.
+ */
+function SectionCount({ children }: { children: React.ReactNode }) {
+  return (
+    <span
+      data-slot="panel-count"
+      className="numeric mr-1 inline-flex min-h-7 items-center text-hint text-muted-foreground"
+    >
+      {children}
+    </span>
   )
 }

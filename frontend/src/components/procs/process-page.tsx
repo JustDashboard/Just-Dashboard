@@ -1,10 +1,10 @@
 "use client"
 
-import { useCallback, useEffect, useRef, useState } from "react"
+import { INLINE_LINK } from "@/components/inline-link"
+import { useCallback } from "react"
 import Link from "next/link"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ArrowUpRight, ChevronDown, ChevronUp, Copy, Cpu } from "@/components/icons"
+import { useParams, useRouter } from "next/navigation"
+import { ArrowUpRight, Copy, Cpu, Logs } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { duration, plural, timestamp } from "@/lib/format"
@@ -14,10 +14,12 @@ import { useSessionState, useViewState } from "@/lib/view-state"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { rowReveal, IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { rowReveal } from "@/components/icon-action"
+import { DetailPage, useDetailTab, useSiblingSteps } from "@/components/detail-page"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader, IdentityVerbs } from "@/components/identity-header"
+import { VerbMenu, type Verb } from "@/components/verbs"
 import {
   ProductGlyph,
   ProductLogo,
@@ -25,13 +27,12 @@ import {
   processProduct,
   unitProduct,
 } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
-import { VerbBar } from "@/components/verbs"
+import { ViewTabList, type TabView } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useProcessInspect, useProcessReading } from "@/components/procs/process-detail"
 import { processHref } from "@/components/procs/process-facts"
 import { ProcessOverview } from "@/components/procs/process-overview"
@@ -44,7 +45,6 @@ import {
   ProcessLogs,
   ProcessNetwork,
   ProcessThreads,
-  ownerLogSources,
   useOwner,
 } from "@/components/procs/process-views"
 import { useProcessControl, useProcessVerbs } from "@/components/procs/process-actions"
@@ -57,11 +57,14 @@ import {
 import {
   managerHref,
   managerName,
+  ownerKeepsLogs,
   ownerName,
+  processHasCommand,
   processKey,
   processStateTone,
   uncontrollable,
 } from "@/components/procs/shared"
+import { useDebounced } from "@/hooks/use-debounced"
 
 const TABS = [
   "overview",
@@ -75,14 +78,7 @@ const TABS = [
 ] as const
 type Tab = (typeof TABS)[number]
 
-const BACK = (
-  <Link
-    href="/processes"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Processes
-  </Link>
-)
+const BACK = { href: "/processes", label: "Processes" }
 
 /**
  * One process, as a place of its own.
@@ -93,108 +89,210 @@ const BACK = (
  * a drawer — and everything else the kernel keeps about a process (its
  * threads, descriptors, limits, environment, the signals it handles) had
  * nowhere to go. So a process is a destination with a way back, the way a
- * container is (`docker/container-detail`), and its views are the underlined
- * strip under its identity line.
+ * container is (`docker/container-detail`), on the shared detail frame
+ * (`DetailPage`), and its views are the underlined strip under its identity
+ * line.
  *
  * What the sheet did well — the table beside the thing being read — is the
  * column on the left from `xl` (`ProcessRail`): the table's own ranking,
  * filters and search folded into a list, so checking the next worker is one
  * press, Alt+↑ and Alt+↓ walk it, and the view on screen goes with you. On a
  * phone the page is the one pane, with the way back and the same two arrows.
+ * The view is remembered, as on every detail page: a reader checking each
+ * worker's files opens the next one on its files.
  */
 export function ProcessPage() {
   const params = useParams<{ pid: string }>()
-  const search = useSearchParams()
   const router = useRouter()
   const pid = params.pid && /^\d+$/.test(params.pid) ? Number(params.pid) : null
-  const requested = search.get("tab")
-  const [remembered, remember] = useViewState<string>("processes.process.tab", "overview")
-  const [chosen, setChosen] = useState<string>(requested ?? remembered)
-  const tab: Tab = (TABS as readonly string[]).includes(chosen) ? (chosen as Tab) : "overview"
-  const setTab = useCallback(
-    (next: string) => {
-      setChosen(next)
-      remember(next)
-      // The address says which view, so a link to a process's files opens on
-      // its files; replaced rather than pushed, because the view is not a
-      // place Back should step through.
-      const url = new URL(window.location.href)
-      if (next === "overview") url.searchParams.delete("tab")
-      else url.searchParams.set("tab", next)
-      window.history.replaceState(null, "", `${url.pathname}${url.search}`)
-    },
-    [remember],
-  )
+  const [tab, setTab] = useDetailTab(TABS, { remember: "processes.process.tab" })
   const open = useCallback((next: number) => router.push(processHref(next, tab)), [router, tab])
 
   const rail = useRail()
-  const at = rail.rows.findIndex((row) => row.pid === pid)
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? rail.rows[at + direction] : rail.rows[direction > 0 ? 0 : -1]
-    if (next) open(next.pid)
-  }
+  const steps = useSiblingSteps(
+    rail.rows.map((row) => row.pid),
+    pid,
+    open,
+  )
   const reading = useProcessReading(pid)
+  const railRow = rail.rows.find((candidate) => candidate.pid === pid)
+  const { confirm, dialog } = useConfirm()
+  const { snapshot } = useMetrics()
+  const memTotal = snapshot?.memory?.total ?? 0
+  const { row, gone } = reading
+  const live = Boolean(row) && !gone
+  const inspect = useProcessInspect(row, live)
+  // usePoll never lends one resource's answer to another, so a process
+  // opened from the rail never draws the last one's lineage while its own loads.
+  const tree = usePoll(
+    (signal) => get<ProcessTree>(`/processes/${pid}/tree`, undefined, signal),
+    6000,
+    [pid],
+    { enabled: pid !== null && live },
+  )
+  const { owner, pending: ownerPending, refresh: refreshOwner } = useOwner(row)
+  const refreshInspect = inspect.refresh
+  const refreshTree = tree.refresh
+  const refreshReading = reading.refresh
+  const changed = useCallback(() => {
+    refreshReading()
+    refreshInspect()
+    refreshTree()
+    refreshOwner()
+  }, [refreshReading, refreshInspect, refreshTree, refreshOwner])
+  const control = useProcessControl(changed)
+  const children = tree.data?.children.length ?? row?.children ?? 0
+  const busy = row ? control.pending[processKey(row)] : undefined
+  const missing = pid === null || (!row && reading.error)
+
+  const views: TabView<Tab>[] = row
+    ? [
+        { key: "overview", label: "Overview" },
+        { key: "threads", label: "Threads", count: inspect.data?.threadsTotal ?? row.threads },
+        { key: "files", label: "Files", count: inspect.data?.files.total ?? row.fileDescriptors },
+        {
+          key: "network",
+          label: "Network",
+          count:
+            (row.listening?.length ?? 0) + (inspect.data?.connectionsTotal ?? row.connections ?? 0),
+        },
+        { key: "environment", label: "Environment", count: inspect.data?.environment.length },
+        { key: "limits", label: "Limits and privileges" },
+        { key: "control", label: "Control" },
+        // From the row alone, so the view and the line's Logs command are
+        // there from the first read, not once a PM2 app's read lands.
+        ...(ownerKeepsLogs(row) ? [{ key: "logs" as const, label: "Logs" }] : []),
+      ]
+    : []
+  const shown = views.some((view) => view.key === tab) ? tab : "overview"
 
   return (
-    <Workspace
+    <DetailPage
       name="Process"
+      what="process"
       stateKey="process.page"
       refresh={reading.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous process",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: at <= 0,
-          run: () => adjacent(-1),
-        },
-        {
-          id: "next",
-          label: "Next process",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: rail.rows.length === 0 || at >= rail.rows.length - 1,
-          run: () => adjacent(1),
-        },
-      ]}
+      steps={steps}
+      back={BACK}
+      title={missing ? "Process" : (row?.name ?? `Process ${pid}`)}
+      rail={
+        <ProcessRail
+          rows={rail.rows}
+          current={pid}
+          currentRow={row}
+          loading={rail.loading}
+          error={rail.error}
+          onRetry={rail.retry}
+          query={rail.query}
+          onQuery={rail.setQuery}
+          filtered={rail.filtered}
+          onClearFilters={rail.clearFilters}
+          caption={rail.caption}
+          onOpen={open}
+          bindings={rail.bindings}
+        />
+      }
+      identity={
+        missing ? undefined : row ? (
+          <ProcessIdentity
+            process={row}
+            gone={gone}
+            busy={busy}
+            waitChannel={inspect.data?.waitChannel}
+            childCount={children}
+            confirm={confirm}
+            signal={control.signal}
+            onOpen={open}
+            onLogs={views.some((view) => view.key === "logs") ? () => setTab("logs") : undefined}
+            logsOpen={shown === "logs"}
+          />
+        ) : (
+          // The line's final shape while the process is read, its verbs'
+          // place held, so nothing under it moves when it lands (D11).
+          <IdentityHeader
+            loading
+            className="border-b-0 pb-0"
+            title={<TextShimmer>{`Reading PID ${pid}…`}</TextShimmer>}
+            state
+            // The rail's row, when it is in, says whether this process will
+            // have a command; the slot is held only for one that will.
+            command={railRow ? processHasCommand(railRow) : true}
+            menu={false}
+          />
+        )
+      }
     >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole, so the header gives the
-          screen back to the view. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <ProcessRail
-            className="hidden w-72 shrink-0 xl:flex"
-            rows={rail.rows}
-            current={pid}
-            currentRow={reading.row}
-            loading={rail.loading}
-            query={rail.query}
-            onQuery={rail.setQuery}
-            filtered={rail.filtered}
-            onClearFilters={rail.clearFilters}
-            caption={rail.caption}
-            onOpen={open}
-            bindings={rail.bindings}
+      {missing ? (
+        reading.error && !(reading.error instanceof ApiError && reading.error.status === 404) ? (
+          <ErrorState error={reading.error} />
+        ) : (
+          <EmptyState
+            icon={Cpu}
+            title={
+              pid === null ? "That is not a process ID" : `No process with PID ${pid} is running`
+            }
+            description="Short-lived processes can exit between being listed and being opened. Pick another from the list."
+            action={
+              <Link href="/processes" className="text-body font-medium text-brand hover:underline">
+                Back to the processes
+              </Link>
+            }
           />
-          <ProcessMain
-            key={pid ?? "none"}
-            pid={pid}
-            reading={reading}
-            tab={tab}
-            setTab={setTab}
-            onOpen={open}
-            previous={{ disabled: at <= 0, run: () => adjacent(-1) }}
-            next={{
-              disabled: rail.rows.length === 0 || at >= rail.rows.length - 1,
-              run: () => adjacent(1),
-            }}
-          />
-        </div>
-      </Page>
-    </Workspace>
+        )
+      ) : !row ? (
+        <LoadingRows />
+      ) : (
+        <Tabs key={pid} value={shown} onValueChange={setTab} className="gap-0">
+          <ViewTabList label={`Views of ${row.name}`} views={views} value={shown} sticky />
+
+          <TabsContent value="overview" className="pt-6">
+            <ProcessOverview
+              process={row}
+              gone={gone}
+              inspect={inspect.data}
+              tree={tree.data}
+              memTotal={memTotal}
+              onOpen={open}
+              onTab={setTab}
+            />
+          </TabsContent>
+          <TabsContent value="threads" className="flex flex-col pt-4">
+            {shown === "threads" && <ProcessThreads inspect={inspect.data} />}
+          </TabsContent>
+          <TabsContent value="files" className="pt-4">
+            {shown === "files" && <ProcessFiles inspect={inspect.data} />}
+          </TabsContent>
+          <TabsContent value="network" className="pt-4">
+            {shown === "network" && <ProcessNetwork row={row} inspect={inspect.data} />}
+          </TabsContent>
+          <TabsContent value="environment" className="flex flex-col pt-4">
+            {shown === "environment" && <ProcessEnvironment inspect={inspect.data} />}
+          </TabsContent>
+          <TabsContent value="limits" className="pt-4">
+            {shown === "limits" && <ProcessLimits row={row} inspect={inspect.data} />}
+          </TabsContent>
+          <TabsContent value="control" className="pt-6">
+            {shown === "control" && (
+              <ProcessControl
+                row={row}
+                gone={gone}
+                inspect={inspect.data}
+                childCount={children}
+                owner={owner}
+                confirm={confirm}
+                signal={control.signal}
+                pending={busy}
+                onChanged={changed}
+              />
+            )}
+          </TabsContent>
+          <TabsContent value="logs" className="flex flex-col pt-4">
+            {shown === "logs" && <ProcessLogs row={row} owner={owner} pending={ownerPending} />}
+          </TabsContent>
+        </Tabs>
+      )}
+      {dialog}
+    </DetailPage>
   )
 }
 
@@ -249,6 +347,8 @@ function useRail() {
     rows: inspection.rows,
     bindings: inspection.bindings,
     loading: list.loading,
+    error: list.data ? undefined : list.error,
+    retry: list.refresh,
     query,
     setQuery,
     filtered,
@@ -262,275 +362,65 @@ function useRail() {
   }
 }
 
-type Step = { disabled: boolean; run: () => void }
-
-function ProcessMain({
-  pid,
-  reading,
-  tab,
-  setTab,
-  onOpen,
-  previous,
-  next,
-}: {
-  pid: number | null
-  reading: ReturnType<typeof useProcessReading>
-  tab: Tab
-  setTab: (tab: string) => void
-  onOpen: (pid: number) => void
-  previous: Step
-  next: Step
-}) {
-  const { confirm, dialog } = useConfirm()
-  const { snapshot } = useMetrics()
-  const memTotal = snapshot?.memory?.total ?? 0
-  const { row, gone } = reading
-  const live = Boolean(row) && !gone
-  const inspect = useProcessInspect(row, live)
-  const tree = usePoll(
-    (signal) => get<ProcessTree>(`/processes/${pid}/tree`, undefined, signal),
-    6000,
-    [pid],
-    { enabled: pid !== null && live },
-  )
-  const { owner, refresh: refreshOwner } = useOwner(row)
-  const refreshInspect = inspect.refresh
-  const refreshTree = tree.refresh
-  const refreshReading = reading.refresh
-  const changed = useCallback(() => {
-    refreshReading()
-    refreshInspect()
-    refreshTree()
-    refreshOwner()
-  }, [refreshReading, refreshInspect, refreshTree, refreshOwner])
-  const control = useProcessControl(changed)
-  const children = tree.data?.children.length ?? row?.children ?? 0
-  const busy = row ? control.pending[processKey(row)] : undefined
-
-  const views = row
-    ? [
-        { key: "overview", label: "Overview" },
-        { key: "threads", label: "Threads", count: inspect.data?.threadsTotal ?? row.threads },
-        { key: "files", label: "Files", count: inspect.data?.files.total ?? row.fileDescriptors },
-        {
-          key: "network",
-          label: "Network",
-          count:
-            (row.listening?.length ?? 0) + (inspect.data?.connectionsTotal ?? row.connections ?? 0),
-        },
-        { key: "environment", label: "Environment", count: inspect.data?.environment.length },
-        { key: "limits", label: "Limits and privileges" },
-        { key: "control", label: "Control" },
-        ...(ownerLogSources(row, owner).length > 0 ? [{ key: "logs", label: "Logs" }] : []),
-      ]
-    : []
-  const shown = views.some((view) => view.key === tab) ? tab : "overview"
-
-  if (pid === null || (!row && reading.error)) {
-    return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title="Process" />
-        {reading.error && !(reading.error instanceof ApiError && reading.error.status === 404) ? (
-          <ErrorState error={reading.error} />
-        ) : (
-          <EmptyState
-            icon={Cpu}
-            title={
-              pid === null ? "That is not a process ID" : `No process with PID ${pid} is running`
-            }
-            description="Short-lived processes can exit between being listed and being opened. Pick another from the list."
-            action={
-              <Link href="/processes" className="text-body font-medium text-brand hover:underline">
-                Back to the processes
-              </Link>
-            }
-          />
-        )}
-      </div>
-    )
-  }
-
-  return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext
-          eyebrow={BACK}
-          title={row?.name ?? `Process ${pid}`}
-          actions={
-            <>
-              {row && (
-                <HeaderVerbs
-                  process={row}
-                  gone={gone}
-                  childCount={children}
-                  confirm={confirm}
-                  signal={control.signal}
-                  onOpen={onOpen}
-                />
-              )}
-              <span className="flex items-center">
-                <IconAction
-                  label="Previous process"
-                  disabled={previous.disabled}
-                  onClick={previous.run}
-                >
-                  <ChevronUp />
-                </IconAction>
-                <IconAction label="Next process" disabled={next.disabled} onClick={next.run}>
-                  <ChevronDown />
-                </IconAction>
-                <span className="max-sm:hidden">
-                  <WorkspaceHelp compact />
-                </span>
-              </span>
-            </>
-          }
-        />
-        {row ? (
-          <ProcessIdentity
-            process={row}
-            gone={gone}
-            busy={busy}
-            waitChannel={inspect.data?.waitChannel}
-            onOpen={onOpen}
-          />
-        ) : (
-          <HostIdentity
-            className="border-b-0 pb-0"
-            title={<TextShimmer>{`Reading PID ${pid}…`}</TextShimmer>}
-            facts={<span>&nbsp;</span>}
-          />
-        )}
-      </div>
-
-      {!row && <LoadingRows />}
-
-      {row && (
-        <Tabs value={shown} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-          <TabsPrimitive.List
-            aria-label={`Views of ${row.name}`}
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {views.map((view) => (
-              <TabsPrimitive.Trigger
-                key={view.key}
-                value={view.key}
-                className={tabClasses(shown === view.key, "h-10")}
-              >
-                {view.label}
-                {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
-
-          <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
-            <ProcessOverview
-              process={row}
-              gone={gone}
-              inspect={inspect.data}
-              tree={tree.data}
-              memTotal={memTotal}
-              onOpen={onOpen}
-              onTab={setTab}
-            />
-          </TabsContent>
-          <TabsContent
-            value="threads"
-            className="flex min-h-0 flex-1 flex-col pt-4 xl:overflow-y-auto"
-          >
-            {shown === "threads" && <ProcessThreads inspect={inspect.data} />}
-          </TabsContent>
-          <TabsContent value="files" className="min-h-0 flex-1 pt-4 xl:overflow-y-auto">
-            {shown === "files" && <ProcessFiles inspect={inspect.data} />}
-          </TabsContent>
-          <TabsContent value="network" className="min-h-0 flex-1 pt-4 xl:overflow-y-auto">
-            {shown === "network" && <ProcessNetwork row={row} inspect={inspect.data} />}
-          </TabsContent>
-          <TabsContent
-            value="environment"
-            className="flex min-h-0 flex-1 flex-col pt-4 xl:overflow-y-auto"
-          >
-            {shown === "environment" && <ProcessEnvironment inspect={inspect.data} />}
-          </TabsContent>
-          <TabsContent value="limits" className="min-h-0 flex-1 pt-4 xl:overflow-y-auto">
-            {shown === "limits" && <ProcessLimits row={row} inspect={inspect.data} />}
-          </TabsContent>
-          <TabsContent value="control" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
-            {shown === "control" && (
-              <ProcessControl
-                row={row}
-                gone={gone}
-                inspect={inspect.data}
-                childCount={children}
-                owner={owner}
-                confirm={confirm}
-                signal={control.signal}
-                pending={busy}
-                onChanged={changed}
-              />
-            )}
-          </TabsContent>
-          <TabsContent
-            value="logs"
-            className="flex min-h-0 flex-1 flex-col pt-4 xl:overflow-y-auto"
-          >
-            {shown === "logs" && <ProcessLogs row={row} owner={owner} />}
-          </TabsContent>
-        </Tabs>
-      )}
-      {dialog}
-    </div>
-  )
-}
-
-/**
- * The page's verbs: Terminate and Kill as words, everything else behind the
- * menu — the other signals, ending it with what it started, and the ways of
- * carrying its identity somewhere else. A process that has gone has none.
- */
-function HeaderVerbs({
-  process,
-  gone,
-  childCount,
-  confirm,
-  signal,
-  onOpen,
-}: {
-  process: ProcessRow
-  gone?: string
-  childCount: number
-  confirm: Parameters<typeof useProcessVerbs>[0]["confirm"]
-  signal: Parameters<typeof useProcessVerbs>[0]["signal"]
-  onOpen: (pid: number) => void
-}) {
-  const verbs = useProcessVerbs({ process, confirm, signal, onOpen, children: childCount })
-  if (gone) return null
-  return <VerbBar verbs={verbs} />
-}
-
 /**
  * The line the page opens on, the one every destination in the product opens
- * on (`HostIdentity`): the process as the product it is with its state in the
- * tile's corner, its name and PID, and after them the facts a process is
- * opened to check — who runs it, what supervises it (with that supervisor's
- * own mark, a link to its page), how long it has been up, ticking, and its
- * parent. Its state stands at the line's end, with what it is waiting in when
- * it is waiting.
+ * on (`IdentityHeader`): the process as the product it is with its state in
+ * the tile's corner, its name and PID, its state beside them, and after them
+ * the facts a process is opened to check — who runs it, what supervises it
+ * (with that supervisor's own mark, a link to its page), how long it has been
+ * up, ticking, and its parent. A process nothing supervises leads the facts,
+ * because that is the one a reader acts on. Its verbs are the line's own:
+ * its logs as the command, where its owner keeps any (a zombie's parent, its
+ * remedy, before them), and every signal behind `⋯`, Terminate and Kill last
+ * in the destructive ink. No destructive verb takes the command: with no
+ * logs and no parent to open, the line has only its menu. A process that has
+ * gone has none.
  */
 function ProcessIdentity({
   process: row,
   gone,
   busy,
   waitChannel,
+  childCount,
+  confirm,
+  signal,
   onOpen,
+  onLogs,
+  logsOpen,
 }: {
   process: ProcessRow
   gone?: string
   busy?: string
   waitChannel?: string
+  childCount: number
+  confirm: Parameters<typeof useProcessVerbs>[0]["confirm"]
+  signal: Parameters<typeof useProcessVerbs>[0]["signal"]
   onOpen: (pid: number) => void
+  /** Opens the Logs view; absent when the process's owner keeps none. */
+  onLogs?: () => void
+  /**
+   * The Logs view is the one open: the command stays, so the line holds
+   * still, but it has nothing to do there and says so by being off.
+   */
+  logsOpen?: boolean
 }) {
   const now = useNow(1000, !gone)
+  const signals = useProcessVerbs({ process: row, confirm, signal, onOpen, children: childCount })
+  const parent = signals.find((verb) => verb.inline)
+  const logs: Verb | undefined = onLogs && {
+    key: "logs",
+    label: "Open logs",
+    short: "Logs",
+    icon: Logs,
+    inline: true,
+    disabled: logsOpen,
+    run: onLogs,
+  }
+  const verbs = [
+    ...(parent ? [parent] : []),
+    ...(logs ? [logs] : []),
+    ...signals.filter((verb) => verb !== parent),
+  ]
   const kind = uncontrollable(row)
   const started = new Date(row.createTime).getTime()
   const up = duration(Math.max(0, (now - started) / 1000))
@@ -545,22 +435,37 @@ function ProcessIdentity({
           : undefined
   const product = processProduct(row.name)
   const state = gone ? "stopped" : processStateTone(row.state)
+  const unmanaged = row.manager === "unmanaged"
+  const supervisor = owner ? (
+    <Fact>
+      <Link
+        href={owner}
+        className="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-foreground focus-ring hover:underline"
+      >
+        {ownerProduct && hasProductLogo(ownerProduct) && <ProductGlyph id={ownerProduct} />}
+        <span className="truncate">
+          {managerName(row.manager)} · {ownerName(row)}
+        </span>
+        <ArrowUpRight aria-hidden className="size-3 shrink-0" />
+      </Link>
+    </Fact>
+  ) : (
+    <Fact className={cn(unmanaged && "text-warning")}>
+      {managerName(row.manager)}
+      {row.manager === "session" && row.managerName ? ` · ${row.managerName}` : ""}
+    </Fact>
+  )
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise border-b-0 pb-0"
       logo={
         <span className="relative flex shrink-0">
           <ProductLogo
             id={product ?? (kind === "kernel" ? "linux" : undefined)}
             fallback={Cpu}
-            className="size-12 rounded-xl [&_img]:size-7"
+            className="size-10 rounded-lg [&_img]:size-6"
           />
-          <span
-            aria-hidden
-            className="absolute -right-1 -bottom-1 flex size-4 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot state={state} live={!gone && row.state === "running"} />
-          </span>
+          <StatusDot corner="lg" state={state} live={!gone && row.state === "running"} />
         </span>
       }
       title={
@@ -577,84 +482,53 @@ function ProcessIdentity({
           </button>
         </span>
       }
+      state={
+        busy ? (
+          <span className="inline-flex items-center gap-1.5 text-body font-medium">
+            <StatusDot tone="notice" />
+            <TextShimmer>{`${busy}…`}</TextShimmer>
+          </span>
+        ) : (
+          <Status state={state} live={!gone && row.state === "running"} label={gone ?? row.state} />
+        )
+      }
       facts={
         <>
-          <span className="font-mono">{row.username || "unknown user"}</span>
-          <FactDot />
-          {owner ? (
-            <Link
-              href={owner}
-              className="inline-flex min-w-0 items-center gap-1.5 rounded-sm text-foreground focus-ring hover:underline"
-            >
-              {ownerProduct && hasProductLogo(ownerProduct) && <ProductGlyph id={ownerProduct} />}
-              <span className="truncate">
-                {managerName(row.manager)} · {ownerName(row)}
-              </span>
-              <ArrowUpRight aria-hidden className="size-3 shrink-0" />
-            </Link>
-          ) : (
-            <span className={cn(row.manager === "unmanaged" && "text-warning")}>
-              {managerName(row.manager)}
-              {row.manager === "session" && row.managerName ? ` · ${row.managerName}` : ""}
-            </span>
-          )}
-          <FactDot />
-          <span
+          {unmanaged && supervisor}
+          <Fact mono>{row.username || "unknown user"}</Fact>
+          {!unmanaged && supervisor}
+          <Fact
             className={cn("numeric", !gone && "text-foreground")}
             title={timestamp(row.createTime)}
           >
             {gone || kind === "zombie" ? `started ${up} ago` : `up ${up}`}
-          </span>
+          </Fact>
           {row.ppid > 0 && (
-            <>
-              <FactDot />
+            <Fact>
               <button
                 type="button"
-                className="numeric rounded-sm focus-ring hover:text-foreground hover:underline"
+                className={cn("numeric hit-area hover:text-foreground", INLINE_LINK)}
                 onClick={() => onOpen(row.ppid)}
               >
                 parent {row.ppid}
               </button>
-            </>
+            </Fact>
           )}
-          <FactDot />
-          <span className="numeric">{plural(row.threads, "thread")}</span>
+          <Fact className="numeric">{plural(row.threads, "thread")}</Fact>
+          {!gone && !kind && waitChannel && row.state !== "running" && (
+            <Fact mono>in {waitChannel}</Fact>
+          )}
         </>
       }
-      aside={
-        <span className="flex flex-col items-end gap-0.5 max-sm:items-start">
-          {busy ? (
-            <span className="inline-flex items-center gap-1.5 text-body font-medium">
-              <StatusDot tone="notice" />
-              <TextShimmer>{`${busy}…`}</TextShimmer>
-            </span>
-          ) : (
-            <Status
-              state={state}
-              live={!gone && row.state === "running"}
-              label={gone ?? row.state}
-              className="text-body"
-            />
-          )}
-          {!gone && !kind && waitChannel && row.state !== "running" && (
-            <span className="font-mono text-hint text-muted-foreground">in {waitChannel}</span>
-          )}
-        </span>
-      }
+      {...(gone
+        ? { menu: false }
+        : parent || logs
+          ? IdentityVerbs({ verbs, name: row.name })
+          : {
+              menu: verbs.length > 0 && (
+                <VerbMenu verbs={verbs} label={`More actions for ${row.name}`} />
+              ),
+            })}
     />
   )
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [settled, setSettled] = useState(value)
-  const first = useRef(true)
-  useEffect(() => {
-    if (first.current) {
-      first.current = false
-      return
-    }
-    const timer = window.setTimeout(() => setSettled(value), delay)
-    return () => window.clearTimeout(timer)
-  }, [value, delay])
-  return settled
 }

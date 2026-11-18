@@ -1,5 +1,6 @@
 import type { DbHistoryEntry, DbQueryEntry, DbQueryLog } from "@/lib/types"
 import type { Engine } from "@/components/database/engine"
+import { capitalize } from "@/components/database/kit/figures"
 
 /**
  * The Queries view's decisions, kept apart from its drawing: what each
@@ -43,10 +44,9 @@ export function queryNoun(engine: QueryEngine, source?: DbQueryLog["source"]): Q
   const queries = source !== undefined && QUERY_TABLES.has(source)
   const one = queries ? "query" : engine.nouns.statement
   const many = queries ? "queries" : engine.nouns.statements
-  const capital = (word: string) => word[0].toUpperCase() + word.slice(1)
   return {
     // A key–value store has no queries: its view is named for what it runs.
-    view: engine.kind === "keyvalue" ? capital(engine.nouns.statements) : "Queries",
+    view: engine.kind === "keyvalue" ? capitalize(engine.nouns.statements) : "Queries",
     title: !engine.can("server")
       ? // A file has no server keeping a log: its list is what was run from here.
         "Run from here"

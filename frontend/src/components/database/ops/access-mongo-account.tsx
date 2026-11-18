@@ -2,11 +2,12 @@
 
 import { useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { useConfirm } from "@/components/confirm-dialog"
 import { FormNote } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
 import { Cross, Key, Trash } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -18,7 +19,6 @@ import { usePoll } from "@/hooks/use-poll"
 import { errorMessage, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { nameHue } from "@/components/database/home/kinds"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
@@ -40,8 +40,9 @@ import {
   type AccountList,
 } from "@/components/database/ops/account-frame"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 const userKey = (user: Pick<MongoUser, "user" | "db">) => `${user.db}.${user.user}`
 
@@ -63,7 +64,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
   const { can } = useAuth()
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const [password, setPassword] = useState(false)
   const [busy, setBusy] = useState<string>()
@@ -121,6 +122,8 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
           .join(" · ") || (one.roles.length > 0 ? plural(one.roles.length, "role") : "no role"),
     })),
     loading: users.loading && !down,
+    error: users.data ? undefined : users.error,
+    onRetry: users.refresh,
     caption: down
       ? "The server is not running"
       : users.data
@@ -152,7 +155,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
   const mark = <AccountMark name={name} />
   const title = <AccountName name={name} host={home} className="text-title" />
   const identity = user ? (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${user.user}`}
       slot="account-identity"
       className="animate-rise border-b-0 pb-0"
@@ -167,21 +170,17 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
       }
       facts={
         <AccountFacts>
-          <span className="shrink-0">
+          <Fact className="shrink-0">
             kept in <span className="font-mono text-foreground">{user.db}</span>
-          </span>
+          </Fact>
           {user.mechanisms.length > 0 && (
-            <>
-              <FactDot />
-              <span className="min-w-0 truncate">
-                signs in by <span className="font-mono">{user.mechanisms.join(", ")}</span>
-              </span>
-            </>
+            <Fact className="min-w-0 truncate">
+              signs in by <span className="font-mono">{user.mechanisms.join(", ")}</span>
+            </Fact>
           )}
-          <FactDot />
-          <span className="numeric shrink-0">
+          <Fact className="numeric shrink-0">
             {user.roles.length > 0 ? `holds ${plural(user.roles.length, "role")}` : "holds no role"}
-          </span>
+          </Fact>
         </AccountFacts>
       }
       command={
@@ -197,7 +196,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
       }
     />
   ) : (
-    <HostIdentity
+    <IdentityHeader
       slot="account-identity"
       className="border-b-0 pb-0"
       logo={mark}
@@ -230,7 +229,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
               <ServerDown what="Its users" />
             ) : !users.data ? (
               users.error ? (
-                <CouldNotRead what="the user" error={users.error} onRetry={users.refresh} />
+                <ErrorState what="the user" error={users.error} onRetry={users.refresh} />
               ) : (
                 <Panel plain aria-hidden>
                   <PanelHeader title="Roles" />

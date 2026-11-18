@@ -2,12 +2,12 @@
 
 import { Suspense } from "react"
 import { Page } from "@/components/page"
-import { LoadingPanel } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { ConnectionsPanel } from "@/components/network/connections-panel"
 
 export default function NetworkConnectionsPage() {
   return (
-    <Page className="animate-rise">
+    <Page rise>
       {/* The panel reads its search from the address bar, which the server does not have. */}
       <Suspense fallback={<LoadingPanel />}>
         <ConnectionsPanel />

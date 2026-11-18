@@ -16,11 +16,12 @@ import {
   type WatchedEndpoint,
 } from "@/lib/watched-probes"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormSection, FormSections } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { ErrorState, Hold, LoadingRows } from "@/components/state"
+import { Sparkline } from "@/components/sparkline"
+import { ErrorState } from "@/components/state"
+import { Hold, LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { VerbBar } from "@/components/verbs"
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
@@ -217,38 +218,42 @@ export function WatchedDomains({
       <FormSection
         aside
         title="Watched domains"
-        hint={
-          interval === undefined
-            ? `${rows?.length ?? 0} watched`
-            : `${rows?.length ?? 0} watched, checked by the server ${intervalLabel(interval)}`
-        }
+        // How many are watched, and how often, is the section's state: a
+        // reading at the head's end, not a line under its title.
         actions={
-          admin && (
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => void watchSites()}
-                pending={watchingSites}
-                disabled={watchingSites || !rows}
-              >
-                <Globe className="size-3.5" />
-                Watch every site domain
-              </Button>
-              {rows && rows.length > 0 && (
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="numeric text-hint text-muted-foreground">
+              {interval === undefined
+                ? `${rows?.length ?? 0} watched`
+                : `${rows?.length ?? 0} watched, checked by the server ${intervalLabel(interval)}`}
+            </span>
+            {admin && (
+              <>
                 <Button
                   variant="outline"
                   size="sm"
-                  onClick={() => void checkNow()}
-                  pending={checking}
-                  disabled={checking}
+                  onClick={() => void watchSites()}
+                  pending={watchingSites}
+                  disabled={watchingSites || !rows}
                 >
-                  <RefreshClockwise className="size-3.5" />
-                  {checking ? "Re-checking…" : "Re-check now"}
+                  <Globe className="size-3.5" />
+                  Watch every site domain
                 </Button>
-              )}
-            </div>
-          )
+                {rows && rows.length > 0 && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void checkNow()}
+                    pending={checking}
+                    disabled={checking}
+                  >
+                    <RefreshClockwise className="size-3.5" />
+                    {checking ? "Re-checking…" : "Re-check now"}
+                  </Button>
+                )}
+              </>
+            )}
+          </div>
         }
       >
         {admin && (

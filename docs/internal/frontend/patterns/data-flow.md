@@ -1,0 +1,583 @@
+# Data flow
+
+API and socket state, metrics state, confirmations, progress and updates.
+
+## The rule
+
+- **A page reads through the shared hooks**: `usePoll` for a read on an interval (shared between
+  blocks with `sharedPoll`), `useSocket` for a push socket, `useMetrics` for the metrics stream.
+  No block opens a socket or a timer of its own.
+- **The server decides.** A capability the account lacks is not offered, and a control the page
+  draws is still checked by the server. A confirmation guards a slip; it enforces nothing.
+- **An action in flight is said where it was started**: a dialog's footer
+  (`OperationProgress`), a row's own state, a job's console. A wait is never a percentage the
+  interface invented.
+- **A read that fails keeps what it had** ([`live-data.md`](live-data.md)), and a write that is
+  refused keeps the draft.
+- **Selection and filters worth sharing live in the address** (`useQuerySelection`, `useViewTab`);
+  a preference of this browser lives in its storage; nothing secret lives in either.
+
+The short forms are in [`live-data.md`](live-data.md) and [`confirmations.md`](confirmations.md).
+What follows is the detail, by subject.
+
+A dialog's action in flight uses `components/operation-progress.tsx` for a named working bar and
+elapsed time, and only a dialog does: `Modal` takes the reading as its `progress` prop and draws it
+into its footer, so no page, workbench or job console carries one. The bar is indeterminate unless a
+caller reports a measured count. It does not estimate remaining time, invent a server stage or imply
+a durable background operation. `ConfirmDialog` shows the reading while awaiting the existing action;
+`workingLabel` names that action and the action's optional second argument reports detail or
+processed-item counts. Failure clears the working state and leaves the confirmation available for a
+deliberate retry. Its existing dismissal and typed confirmation rules still apply.
+
+File deletion counts processed top-level items, including refused ones; the count is not byte
+progress inside a directory. Git clone and initialisation show the reading in their own dialog. SQL
+and MongoDB imports use browser upload readings followed by an indeterminate database-processing
+reading; 100% uploaded does not claim the import has finished. MongoDB imports share the multipart
+upload helper and its mutation headers and error handling. Page operations — Files copy, move,
+duplicate and extraction, Git workspace actions, exports, backup runs, diagnostics, blocklist
+refreshes, the proxy request tester and job consoles — keep their own feedback (pending controls,
+toasts, transcripts) and draw no working bar.
+
+The [operation progress audit](../../../audits/2026-10-14-operation-progress/README.md) records the
+original placements; [dialog progress](https://github.com/JustDashboard/Just-Dashboard/tree/397e711c0c5c01e4c0c32b9ed34061f3198e4dc4/docs/audits/2026-10-16-dialog-progress) has the current
+footer recordings.
+
+Network pages retain useful readings when a poll fails and mark them with
+`components/network/read-warning.tsx`; a failed initial read stays an error or loading state.
+The workload traffic, bandwidth link inventory, eBPF and Firewall warnings include the last successful
+read time and a Refresh action. Each read owns its freshness independently: a working live sampler does
+not make a failed link inventory current. Docker attachment candidates retain failed-refresh context,
+disable attachment while unreadable, and offer retry instead of claiming the candidate list is empty.
+The overview's latest network-change record reports runtime, persistence, boot restoration and
+independent host recovery separately. A saved change means the host apply/save finished; the UI
+explicitly states that this status does not confirm browser reconnect or application reachability.
+Unavailable recovery, unverified boot restoration and recovery errors remain visible. Runtime-only
+changes say they are applied and explicitly state that they are not saved for boot.
+Device creation offers VXLAN unicast or multicast destinations; multicast requires a sending card
+and matching local/destination address families. Its notice leaves multicast-underlay readiness and
+peer reachability unverified. GRE and GRETAP, in both families, expose decimal uint32 tunnel keys
+and outer TTL/hop limits, with blank or zero retaining the kernel defaults. A key is an identifier;
+GRE remains unencrypted, and creating a link does not test endpoint reachability.
+The live throughput ring (`use-live-traffic.ts`) carries its own last-success time and retry, so
+the Overview, Interfaces and the live Traffic window show a dated "live throughput" warning while
+the retained ring stays drawn; the Overview's Throughput head also counts the newest reading's age
+on the browser clock and turns stale past three sampler intervals. A later namespaces poll failure
+keeps the list with its own dated warning; a single namespace whose devices could not be read says
+so in place, and the namespace sheet, device detail, bridge and readiness reads each keep their last
+answer with a dated warning. Parts of those reads that did not arrive (`Reading` state unavailable,
+not_applicable or failed) are worded as such, never as empty lists.
+Historical traffic, namespace and BGP read errors are shown explicitly. Network write controls follow
+the administrator capability, with destructive controls also following the destructive capability;
+backend route checks remain authoritative. VPN peer reads are disabled for a reader without the
+administrator capability. Interface sheets are keyed by device, and address/MTU drafts clear only
+after a successful write. Their bridge selector reaches the existing guarded membership route, and
+the create dialog includes the IPv6 GRE/GRETAP kinds the backend supports.
+Administrator sheets for unmanaged devices read the existing
+[native persistent profile](../../backend/network-native-managers.md). A response
+must name the requested device before it can create or refresh a draft. The editor keeps configured,
+runtime and boot evidence separate, and exposes only the supported IPv4/IPv6 address, DNS/domain
+and route intent. New routes inherit the observed VRF table, with table 254 for ordinary profiles;
+bond membership and mode remain with the existing owner. Failed reads and rejected writes retain
+the typed fields. A changed generation blocks apply until the operator reviews the latest owner
+and explicitly rebases the generation; rebasing preserves every draft field. An owner/profile change
+cannot be rebased into a different native profile.
+The leaf contract in `lib/network/native-profile.ts` validates every rendered metadata/evidence field,
+family method and preference, bounded string collection and route entry before a poll replaces its
+last successful data. Malformed items become a failed retained read and block apply. An already-open
+confirmation rechecks the latest rendered ownership, generation, read state and draft when clicked;
+its old callback cannot send an obsolete client review. Backend identity fences remain authoritative.
+Native profile writes always request temporary apply and reconnection confirmation, even when the
+ordinary managed-network preference (the Network overview's *Managed changes* row) is off. A confirmed or recovered network decision with pending
+or failed native cleanup remains a warning, including outside Network. Further journaled changes
+remain blocked; the applying owner can explicitly retry cleanup. The warning cannot be dismissed
+until cleanup succeeds. Read accounts do not request administrator-only native profiles.
+The route form exposes an optional preferred source and shows returned sources in the routes
+table. Policy rules include an outgoing-interface selector and validated note. The routing diagram selects
+IPv4 or IPv6 rules and family-specific table routes, starting with the browser path's family and
+following the family of an address asked about. Its highlighted policy rule is explicitly an inference.
+The diagram's target field asks the kernel through the read-only `/network/routing/lookup` endpoint
+with optional source and packet mark once the typing pauses on one literal address, and again every
+fifteen seconds, without sending traffic or claiming end-to-end reachability. Tailscale subnet drafts clear only after a successful offer;
+retry reads current preferences so an accepted offer with a lost response is not duplicated.
+Resolver fallback servers and cache modes are editable through the existing confirmed apply;
+managed values are preserved, and unset defaults stay unset until explicitly chosen. Endpoint validation retains
+custom ports, interface scopes and TLS names.
+
+Network diagnostics retain independent inputs/results/history and reject malformed TCP ports before
+submitting. VXLAN creation likewise rejects invalid UDP ports instead of choosing the default.
+WireGuard setup permits an intentionally empty automatic port and rejects any nonempty invalid
+port draft, including whitespace, before submitting.
+Host support, route lookup, path MTU, packet snapshots and Wake-on-LAN use the same probe
+surface; Wake-on-LAN reports that a packet was sent rather than claiming the target is awake. The
+packet snapshot shows bounded summaries that may include sensitive decoded protocol fields. The
+subnet calculator uses pure IPv4/IPv6 arithmetic with exact IPv6 counts. It is available with read access;
+privileged server diagnostics are not mounted for readers and retain their backend admin gate.
+Saved runs retain bounded named artifacts with explicit queued/running/completed/failed/cancelled/
+interrupted lifecycle, dated scope, typed outcomes, compatible comparison and administrator-only
+export. They use polled status without a socket-only live halo and can watch the existing job stream.
+The connection investigator retains its previous report and tuple after a failed retry, labeling
+each layer observed, modeled, measured or unknown. Drift readings preserve dated observations on a
+failed refresh and expire a selected repair review when compared identities or evidence change.
+Selected executable file/admission repairs require exact review tokens and pending reconnection;
+wider native objects remain advice.
+Packet captures retain dated native observations after poll failures. Their immutable scope uses
+one interface/family and literal filter fields; rejected launches retain the entire bounded draft.
+Original PCAP and redacted support have separate downloads. A cancel remains pending until native
+cleanup, and interrupted captures never replay. Admin-only rendering issues no private capture
+requests for read accounts. Incident references compare timestamps without assuming the same flow.
+DNS lookup defaults to the configured host resolver chain. Supported resolved delegation uses the
+native split-policy and explicit alias checks; static/foreign paths report private-policy and recursive
+alias behavior as unknown. The pre-query hint states this support boundary. Direct comparison requires selected,
+named destinations and acknowledgment that private names leave their usual policy scope; the old
+`includePublic` flag does not authorize fan-out. Resolver changes may carry a private
+`verificationName` for a network that cannot resolve public names. This verification input is a check
+for that apply, not saved resolver state.
+Native policy investigations retain answering-link, encryption, TLS trust and DNSSEC provenance
+separately from configured switches and classic direct comparisons. Effective resolved lookup uses
+the same safe native adapter; its optional typed `hops` retain each question, alias edge and complete
+policy fingerprint. Failed launches/history reads retain
+dated evidence and the query draft. Reload never reruns a private question or grants direct-query
+disclosure consent.
+Native DNS service sheets are private administrator surfaces and issue no service reads for reader
+accounts. `lib/network/dns-services.ts` validates connection, inventory and retained-review envelopes;
+an incomplete response is a read error. Credentials, tokens, CA material and bootstrap passwords stay
+request-only and are cleared after submission; only bounded review IDs are stored in account-scoped
+session storage to hold an uncertain apply across navigation/reload. Retained history never starts or
+replays a native action. Open confirmations check current capabilities, read freshness, generation,
+policy fingerprint and immutable reviewed intent again before sending. Owned removal checks the exact
+current owner/image/resource identities separately. HTTP 200 with a nonverified state remains a
+retained outcome requiring review. A late planned read cannot overwrite a terminal native response.
+Record/client forms retain typed drafts through field/native refusals, with linked focused error
+summaries and associated inline errors. Authoritative records require a fresh explicit zone reading;
+unsupported RR types stay read-only. Existing Pi-hole clients use native group IDs, with an explicit
+empty membership list. Successful refreshes preserve edited group choices and refuse staging if a
+selected client or group has disappeared. Retained reviews wait for their full baseline before
+polling `/changes/{id}/current`; ordinary connection inventory cannot supply selected-policy
+freshness. The current read retains raw record/client fingerprints, while open confirmations also
+compare the complete immutable request and selected metadata. Explicit null and empty client
+comments have distinct labels and remain unchanged in native readback.
+Unreadable native client memberships or group identities keep their own unknown evidence;
+their section headers withhold counts rather than presenting an unknown inventory as zero policy.
+Filter metadata uses the separate bounded `lib/network/dns-filters.ts` decoder and `/filters` read.
+It checks complete connection identity and generation, redacted HTTP(S) origins, closed per-engine
+entry kinds and configured/fingerprint consistency. Native unavailable or transport failures retain
+the previous same-owner data and observation time; a fresh partial reading shows unknown sections
+without treating them as empty. Connection replacement clears all retained filter rows, and a stale
+owner read suspends its filter poll. These reads do not stage or apply a filter change.
+Reviewed custom-domain forms use the closed `network-dns-service-policy` validator and retained
+service DTO reader. Engine-specific suffix/exact matching is explicit; raw rule syntax is not a
+draft field. Pi-hole add drafts preserve empty memberships and native zero, require configured
+native groups and refuse disappeared group IDs after refresh. A configured missing ID has an
+explicit removal control; unknown inventory retains selections and holds review. Refused reviews
+retain draft values. Selected-filter evidence distinguishes absence, ambiguous or other-target
+policy, native false/empty/null and unreported fields; owner and exact-match counts remain visible.
+Ordinary inventory cannot replace `/changes/{id}/current`; changed selected metadata or fingerprints
+hold apply even if a top-level digest is reused. Open confirmations also compare the complete
+immutable selected-filter baseline. Native readback shows configured policy rather than measured
+filter priority or client decisions.
+WireGuard setup separates opt-in IPv6 addressing from IPv6 exit, preserving every rejected draft
+and displaying independently observed family evidence. Legacy IPv4 full tunnels explain IPv6
+containment; successful setup says configured when native runtime is not up. Its Advanced fold
+checks an MTU and hand-typed resolver addresses before submitting. Peer edits send only changed
+fields, keep the draft and show the refusal when rejected, and confirm a site withdrawal before
+the request; budgets parse binary units as `bytes` prints them. The record's trend, endpoint and
+lifecycle reads poll per peer and window and keep their last data with a retry after a failure.
+SQM retains its entire bounded profile after rejected writes and requires pending reconnection
+even when the global preference is off. Failed native shaping polls block edits until fresh reads.
+IPAM handoffs preserve the exact owner/resource/prefix and hold uncertain outcomes for explicit
+review; planning release never deletes a native resource. Incomplete planning envelopes or malformed
+rows are failed reads: a selected owner draft survives an unreadable refresh and its handoff is blocked
+until fresh inventory is available. Creation links initialize once per seed identity after a valid
+row is available; consumed/detached seeds cannot overwrite retained edits or gate an unselected
+draft. A new seed identity and delayed admin authentication can still initialize a plan. External
+pickers accept only current option identities so synthetic empty
+form events cannot erase dependent scope. External check reload/filter/comparison never launch
+probes and retain source/family/time distinctions. Socket history keeps native decimal-string TCP
+counter deltas separate from opt-in kernel TCP/UDP transport-payload subtotals, including when both
+channels describe the same socket. Missing lengths, owners, UTC certainty and delivery/budget/storage
+gaps remain explicit. Observer activation and stop use reviewed destructive controls, gated by fresh
+admin reads and history recording; page reads, ordinary opt-in and restart never attach it. Retained
+attachments after a failed stop offer retry without claiming off. The observer must be stopped
+explicitly before ordinary history opt-out; history erasure also stops it. Historical program/link IDs
+are dated evidence, not proof of current attachment ownership.
+
+- `src/lib/api.ts` is the only fetch layer: `get/post/put/patch/del`, `credentials: "include"`,
+  `X-JD-CSRF` on every mutation, URI-encoded exact `X-Confirm` with
+  `X-Confirm-Encoding: uri` only when a typed phrase is supplied (including Unicode and surrounding
+  whitespace), `ApiError` with
+  `needsConfirmation`/`isAuthProblem`/`needsTotp` and the whole parsed `body`, for a refusal that
+  carries more than the error (the proxy engine's config-test refusal carries the test). A
+  `403 hub_session_not_allowed` (a session opened through Just Hub, on a route that makes or changes a
+  credential or a link) gets `HUB_SESSION_REFUSED` as its message, so every page says to sign in on this
+  server itself rather than repeating the server's words. **An answer that is there and does not parse is a
+  failure.** A 2xx body that is not JSON throws `ApiError` with code `bad_response` and the message
+  `UNREADABLE_ANSWER`; only a 204 and an empty body read as nothing. It used to read as `undefined`, so an
+  answer cut off by a proxy timeout was a successful read of nothing and the page drew its empty state. A
+  poll counts it among the failures it backs off from. `wsUrl()` and `downloadUrl()` build the non-JSON
+  URLs. A `Query` value may be an array, which is a repeated
+  parameter (`f=a&f=b`, the log routes' field predicates): joining on a character and splitting it again
+  on the server breaks on a value that holds it, and an IPv6 address is all colons. `useSocket` takes the
+  same `Query`.
+- A log source is asked for by one id, built only in `lib/log/sources.ts` (`dockerSource`,
+  `fileSource` → `file:<path>`, `journalSource`, `journalIdSource`, `kernelSource`, `stackSource`,
+  `pm2Source`): an id spelled by hand — a bare path here, `file:` there — was a different session key for
+  the same file and opened on the wrong remembered filter.
+- `usePoll` schedules the next request only after the previous one settles and stops scheduling on
+  hidden tabs. Coming back to the tab fetches at once, replacing any pending timer; a request still in
+  flight stands as that refresh, and an interval of 0 ignores the tab. `pollLoop` is that schedule, with
+  `document` passed in so `bun test` can drive it. **A poll does not keep its cadence against a server
+  that cannot answer.** After a 429, a 5xx, a body cut off or no answer at all (`isTransient` in
+  `lib/backoff.ts`), the next request waits what the answer's `Retry-After` asked for (`ApiError.retryAfterMs`,
+  read once in `responseError` and never trusted past five minutes; the limiter's 429 says 30 seconds), or a
+  wait that doubles from the cadence to a 30 second ceiling with half of each step random; the first success
+  puts the cadence back, a 4xx the server meant keeps it, and returning to the tab does not cut the wait
+  short. The three reads that watch the dashboard through its own restart (`use-self-update`,
+  `use-self-config`, `use-self-uninstall`) pass `steady` while a run is live: a 502 is the restart, and
+  they keep their two seconds so the page sees the moment it ends, while a 429's `Retry-After` is still
+  waited out. Each successful response records `lastSuccess`; failed refreshes retain
+  that timestamp only for the same resource. Its fixed-length dependency list identifies the resource:
+  changing it immediately hides the previous resource's data and resets loading. Refreshes and cadence changes
+  retain the same resource's data. **A cadence change asks for nothing.** The interval is read from a ref
+  each time the loop schedules, and a new value only moves the next request to that long after the last
+  answer (`PollHandle.retime`; `pollLoop` lives in `hooks/poll-loop.ts`); a request in flight finishes. The
+  interval was an effect dependency, so every `busy ? 2_000 : 30_000` flip aborted the request and fetched
+  again what had just been read, and the update notice's single settling read was two, 36 ms apart.
+  Cleanup aborts the request and ignores late responses.
+  **A poll that names its request shares it.** `usePoll`'s `key` option (the request's path, and its query
+  when it has one) joins the component to the one `SharedPoll` for that key (`hooks/poll-share.ts`): one
+  request and one timer for all of them, at the fastest cadence any reader asked for; a reader arriving
+  while a request is in flight, or within two seconds of the last answer, asks nothing, and one arriving
+  later asks once for everybody; `refresh` aborts what is in flight and asks again for every reader, once
+  however many call it in a tick. The last answer is kept for five minutes after its last reader leaves, so
+  a page opened again draws it at once with `loading` true until the new answer lands, which is what `seed`
+  does by hand; the kept answer is never an error. The key is the resource's whole identity, so `deps` are
+  not read, and every reader of a key must make the same request. An answer belongs to the account that
+  was given it: another account signing in forgets every kept answer and reads again for whatever is on
+  screen (`forgetSharedPolls`), and signing out keeps none past the page that is reading it, without
+  asking the server anything more (`releaseSharedPolls`); both sit beside `forgetWorkingState` in
+  `use-auth.tsx`. Keyed
+  today: `/assistant` (`useAssistantSettings`, nine readers), `/deploy/traffic` (the Overview, the fleet,
+  a project's readings and the request records), `/system/host` (the three one-time readers; the metrics
+  stream seeds its own store) and `/jobs` (the certificates page and `RecentJobs`, which was a hand-written
+  interval). A read is worth a key when more than one mounted component makes it, or when coming back to
+  its page should not start from a skeleton; a poll without one is its own, as before.
+  Live Processes treats its search and filters as resource identity, and ranking/row-count
+  changes as refreshes of that inventory. Automatic focus therefore keeps the table and scroll
+  mounted while fetching its new ranking; response-local focus metadata keeps the footer truthful
+  during that read. `components/procs/inspection-order.ts` holds row order during pointer or focus
+  inspection across the Processes lists without freezing values or retaining exited processes.
+- Database activity (`components/database/home/use-samples.ts`) reads retained snapshots from
+  `GET /databases/{id}/stats/history` every 30 seconds, independently of the live snapshot read.
+  The selected 1h, 6h, 24h or 7d range is view state per connection; the samples live in the backend
+  store, rather than a browser-owned rolling buffer. Failed refreshes retain the last result, and a
+  stopped database can show history without dialing its engine. Counter resets and recording gaps
+  longer than 90 seconds break chart lines and rates; missing snapshots are ignored. Historical
+  working-session counts are the recorded active count minus the recorded waiting count, while live
+  session filters use the current session list. SQLite has no activity chart or recording poll.
+  Performance's Statement history (`components/database/ops/performance-history.tsx`) reads
+  `GET /databases/{id}/statements/history` every minute over the same per-connection range, and a
+  statement's page (`performance-statement.tsx`) its `/statements/history/{statement}` on the same
+  cadence, for its History view and the trends beside its figures; both are the backend's
+  store, which the recorder writes every five minutes. A point no reading falls in is a gap in a
+  statement's charts, and a reset is a mark on their time axis.
+- The hub link is read in two places, both through `usePoll` (`hooks/use-hub-link.tsx`).
+  `HubLinkProvider`, above the dashboard layout's title and shell, reads `GET /dashboard/hub` every
+  15 seconds for the switcher, the palette's Servers and the notice card — and is disabled, asking
+  nothing, unless `/auth/session` carried a `hub` field; once it has an answer, a status that is not
+  `linked` takes the hub away from the shell, and an idle one takes away the hub's address and every
+  notice's link (`shellHub` in `lib/hub-link.ts`). The name the tab and the switcher give the server
+  is not the hub's: it is the host name the shell's metrics stream already reads (`useHostName`,
+  `/system/host`). Settings → Hub's own `useHubLink` is the account link's hook pointed at the hub's
+  routes: every 3 seconds while a request waits for approval and every 15 otherwise, each mutation's
+  answer drawn at once, and a `409` or `hub_link_disabled` refusal (`outdated`) followed by a read —
+  which takes Connect's form away, so Connect says that refusal in a toast rather than in the form. Because the session is read
+  once per load, the page refreshes it (and the provider) whenever the link starts or stops, which
+  is what turns the shell hub-aware without a reload.
+- `useSocket` — reconnect with backoff (these sockets ride a tunnel that drops routinely), handlers in a
+  ref so a fresh closure does not rebuild the socket. The delay doubles from 1 s to a 15 s ceiling with
+  half of each step random (`retryDelay`), and resets only after a connection has stayed open for 10 s:
+  an endpoint that accepts, reports an error and closes is not redialled every second.
+- Persisted view/session values use individual Web Storage entries, so changing a small filter does not
+  serialize unrelated editor drafts. Writes remain synchronous for reload persistence. Existing single
+  documents migrate on first read, with restoration and the old persistence path if splitting exceeds
+  quota. Prefix deletion and sign-out remove the same values; the memory store never writes to storage.
+- `components/workspace/` keeps row identifiers, field indices and scroll offsets per page/step/
+  log question. Logs and Login place memory use RAM; field values and server row payloads never
+  enter these snapshots. `useFilterHistory` pushes settled Audit/Security filter questions and
+  restores native Back/Forward. `useHeldList` preserves existing row order in React state while
+  polling updates values, and exposes counted new arrivals for explicit reveal. Git commit messages
+  and per-run backup archive selections are session drafts. See
+  [`keyboard-and-place.md`](keyboard-and-place.md) for the complete contract.
+- `lib/view-state.ts` is what a page remembers about itself, in three stores drawn by how long the
+  thing should live. `useViewState` is **how the page is arranged** — a hidden panel, a chosen tab, a
+  sort order, a toggle — in localStorage, so a reload keeps it. `useSessionState` is **what you were
+  doing** — the filter in the box, the chip narrowed to, the page of results, the row whose detail is
+  open, the SQL in the editor, a form half filled in — in sessionStorage, so it survives moving between
+  pages and a reload and is gone when the tab closes. `useMemoryState` is the same for a value that must
+  never be written down by the browser (a secret in an unsaved form: a credential, a database password,
+  a backup destination's keys, an environment value): it lives as long as the page's JavaScript does,
+  across navigation but not a reload. All three have `useState`'s shape; a dotted key names the page and
+  the thing, and a third argument to `useSessionState` is the value the address bar handed over, which
+  wins on arrival and is remembered from then on. A form draft is keyed under the revision or name it
+  was read from, so a save from anywhere starts it again from the server's copy — except where one
+  revision covers several forms: every deployment settings form saves a new revision of the whole
+  configuration, so each keys its draft on a digest of its *own* saved value (`useSettingDraft`), and
+  a save of the form beside it leaves the draft alone while its own save still restarts it. A
+  dialog's fields are
+  forgotten (`forgetSessionState`/`forgetMemoryState` by prefix) when it is closed by hand, never by
+  navigation; and `forgetWorkingState` empties both working stores on sign-out. `useQuerySelection`
+  keeps a sheet's selection in the address bar and, per page and key, in the session store, so
+  arriving on the rail's bare link puts the last selection back with `replaceState`. A database's
+  layout does the same for the reader's place inside it — `?schema=&table=`, `?db=&collection=` — per
+  database (`databases.<id>.place`, `database/shell/place.ts`): a page's address holds only what that
+  page can use, so the place the last address stated is kept, every link the shell builds
+  (`useDatabase().href`) carries the part its target can hold, and a bare address is completed from it.
+  Which database is the path (`/databases/<id>`), never remembered. Inside a database a page writes its
+  address through the layout's context and never with a `router.replace` of its own, which the
+  context's next write would undo: `useDatabase().select` replaces, with the writes made in one press
+  batched into one change and read back at once, and `goto` pushes. The shared keys are the selection
+  (`schema`, `table`; `db`, `collection`; `db`, `key`); what a page adds is its own view of it — a
+  filter list, a sort and a page on Data, an object and a view on Schema, a view strip's choice, an
+  open session or statement on Performance — so a pasted link opens on what was being looked at, and
+  opening a table, a key or a view is a history entry while narrowing one is not. A statement handed
+  to Query (`?sql=`, `?saved=`) is read once, opened in a tab of its own and taken out of the address.
+  The stores follow the same three lifetimes under one naming: arrangement is `useViewState` under
+  `databases.<area>.…` where it is the area's (a rail shown, a split's share, the last generator) and
+  `databases.<id>.<area>.…` where it is one database's (a page size, a column layout per table, saved
+  pipelines, the diagram's copy of an arrangement the server also keeps); work in progress is
+  `useSessionState` (`databases.<id>.query.tabs`, a new-table draft, the place, and the rail's memory
+  of the databases this tab has opened, `databases.known`, which holds names and so must not outlive
+  a sign-out); and whatever holds rows of data or a secret — a staged change set, what a tab ran,
+  unsaved Redis values, a console's transcript, staged document edits, a connect form's password — is
+  `useMemoryState` and never reaches Web Storage. A settings draft is `useSessionState`, so a secret
+  typed in one is held beside it: the Domains form keeps visitor passwords in `useMemoryState` by
+  hostname and merges them only into what it sends (`settings/domain-passwords.ts`). One thing is kept beside the stores on purpose: a
+  change of power in flight is written to `sessionStorage` and told over a `BroadcastChannel`
+  (`jd.databases.power`, `database/home/power.ts`), so a reload, or another tab, shows a start or a
+  stop that is under way. Every route area was reviewed for this:
+  filters, chips, facets, pagination, chosen sub-tabs, open detail rows, in-progress forms and the
+  whole new-project flow are remembered; a search box is no longer the exception it used to be. A
+  service's logs keep their reading — source, view, filter, lens, range, window — under the embedding
+  page's `storageKey` (`databases.<id>.logs`, `docker.container.<id>.logs`, `docker.stack.<name>.logs`,
+  `deploy.<id>.output`, `proxy.site.<name>`, `security.ssh.log`, `packages.log`, …), never under
+  `logs.*`, which is the host Logs page's own; a sheet's live only as long as it is open. A request
+  record's question is kept under its owner's key (`deploy.<id>.requests`,
+  `proxy.site.<name>.requests`), so a deployment's or a site's requests read the same question on its
+  own page and on `/logs`.
+- `useMetricsWindow` — the charts' window as a **stack**: zooming is exploratory, so the way out of five
+  minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
+  range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
+  empty window with no obvious way out. `useMetricEvents` polls on a much slower cadence.
+- `src/lib/types.ts` mirrors the backend's JSON by hand, including the `Capability` union — it drifts if
+  backend types change without it. The proxy pages' shapes live in `src/lib/proxy/types-*.ts`, one file
+  per area of those pages, and `types.ts` re-exports them, so an import from `@/lib/types` finds them. `useAuth`'s `can("capability")` hides controls a role cannot use:
+  **affordance only**, the server re-decides every request.
+- An account that owes a password change remains unauthenticated in the UI after completing any
+  required second factor. `/login` presents the current/new password form, then returns to credentials
+  after the server revokes sessions. `password_change_required` responses also return the shell to this
+  flow; they never grant access to ordinary feature controls.
+- Database selection belongs to a specific query and result snapshot. Sorting, filtering, paging,
+  refreshing, and changing tables require a fresh selection. A staged change set is scoped to one
+  connection and table (`useChangeSet({ scope })` in `database/grid/change-set.ts`): leaving the table
+  takes the set and its undo history with it, and the page asks before a dirty one is left. Exact
+  integer/decimal SQL values and Redis scan cursors travel as strings; the grid's cell parser keeps
+  them exact and refuses a float outside the finite range (`database/grid/values.ts`), the grid
+  computes on them as strings (`database/grid/decimal.ts`), and a JSON value is laid out and compared as text, token by token,
+  never through `JSON.parse`, so a `9007199254740993` goes back as it came. NULL is never drawn or
+  written as an empty string. CSV exports escape column names and carriage returns with the same
+  rules as cell values.
+- What a database engine is, the frontend knows in one module: `components/database/engine.ts`. It holds
+  how an engine is presented — its name and logo by flavour, the words it uses for its objects, which
+  page a capability opens, how a program connects to it — and states no capability: every flag comes from
+  the server's catalogue (`GET /databases/drivers`, per driver and per flavour) and, for one connection,
+  from its summary (`GET /databases/{id}`), resolved for the product that answered. A page asks
+  `engine.kind`, `engine.can(flag)`, `engine.has(section)` and `engine.nouns`; no other file decides from
+  a driver's name what an engine can do. What stays beside the pages is how an engine is *written*, which
+  no flag says: each dialect's quoting, keywords and diagnostic snippets for the editor
+  (`database/query/dialect.ts`, `keywords.ts`, `snippets.ts`), each engine's index methods and
+  foreign-key actions for the schema forms (`database/schema/engine-notes.ts`), and how each driver's
+  connection string spells TLS (`database/connect/dsn.ts`, beside `lib/db-dsn.ts`). The registry's tests
+  and the browser fixture read the catalogue from the file a Go test holds to the route
+  (`backend/internal/api/testdata/database-drivers.json`), so a capability given to an engine or taken
+  from one reaches the frontend's tests as the table the server really serves.
+- PM2 actions and deletes send both the trusted `daemonId` as `user` and numeric `id`, and a PM2
+  application's logs are the `pm2:<daemon>/<id>/<name>` source on `/logs/stream` (`pm2Source`, the
+  account and name escaped): the application name alone cannot identify a process across multiple
+  account-owned daemons. A false `logsAvailable` shows the server's `logsUnavailableReason` instead of
+  opening a rejected socket. Available log streams show their connection state, including reconnects,
+  and a stream that ended says Stopped rather than reconnecting for ever.
+- Blueprint catalogue entries expose `deploymentSupported` and `unavailableReason`. Unsupported
+  entries remain visible with their reason but cannot be selected or inspected for deployment.
+  Template selection keeps a stable details column while fetching, preserves per-template edits, and
+  ignores obsolete inspection responses. The new-project flow keeps secret-bearing inputs in memory;
+  saved environment values resume as masked names from the encrypted server draft. Hostname changes
+  update only unchanged template-derived URL defaults, and retain visitor password protection.
+- Compose stack creation, file edits, validation, and execution require `system.admin` alongside each
+  action's existing capability. Stack pages hide those controls from limited accounts, explain the
+  restriction, and retain stack/config/log read views. Direct container controls retain their separate
+  capability checks.
+- `ConfirmDialog` collects a phrase only for permanent deletion of an archived deployment project,
+  deletion of an entire database, or Docker stack removal. The server checks those phrases too
+  ([`invariants.md`](../../security/invariants.md),
+  [`permanent-deletion.md`](../../deployments/permanent-deletion.md)). Other destructive actions use the
+  ordinary dialog; `phrase` stays optional.
+  The dialog toasts "<title> completed" when the action resolves, unless the action resolves to
+  `"reported"`: an outcome that is only partly what the title promises — a site deleted but nginx not
+  reloaded — is announced by the action itself, and a bare "completed" beside it would be the untrue
+  half.
+- **One reading out of the metrics store is read through `useMetricsValue(select, same)`**
+  (`hooks/use-metrics.ts`, over `reader` in `lib/metrics/store.ts`), not through `useMetrics()`. The
+  store builds a new state on every two-second frame, so a component that subscribes to all of it
+  renders every two seconds whatever it draws. The Files page read the whole state for the free space
+  on one disk and drew every row of the folder again on each frame: 0.9 to 1.7 s of script in ten idle
+  seconds on a 521-row folder, a long task per frame. The reading lives in `files/disk-room.tsx` now and
+  the page does not subscribe at all. `useMetrics()` is for a component that draws the frame itself.
+- **A long list's rows are `memo` over props that change only when the row does.** `FileRow` and the
+  grid's `Tile` take the entry, four booleans and one `handlers` object that is the page's for its whole
+  life (`files/entry-handlers.ts`: each call reaches the handler of the latest render through a ref), and
+  build a row's verbs when one is pressed. A click then draws the two rows whose `active` moved instead
+  of all of them. `files-ui.spec.ts` counts the rows React drew for a click and for a metrics frame; a
+  new prop that is a fresh closure or object per render fails it.
+- `lib/metrics/store.ts` keeps the live series **outside React**: owning five minutes of history in a route
+  component threw it away on navigation, and pushing a 2 s frame through a context above the router
+  re-rendered the terminal and log tail twice a second. Mirrored to sessionStorage so a reload keeps its
+  chart, with points older than `STALE_MS` dropped on the way back in — a graph silently stitching this
+  minute onto one from an hour ago is worse than one that starts empty. While the tab is hidden the store
+  keeps taking frames but does not notify its readers; one notification on `visibilitychange` brings them
+  up to date, so a background tab does not redraw charts nobody can see.
+- `lib/metrics/range.ts` defines the windows (`live`, `1h`, `6h`, `24h`, `7d`), their buckets and cadence,
+  and the `MetricsWindow` a dragged span becomes (fixed in the past, fetched once, never re-polled).
+  **Live and recorded data are never spliced into one line** — the cadences differ by two orders of
+  magnitude, and a chart drawing twenty coarse points and a hundred fine ones at equal spacing lies about
+  when things happened. A container's Usage tab is a project Runtime's `RuntimeUsage`: its Live range
+  is the stats socket's last five minutes bucketed apart from the recorded ranges, never joined to
+  them, and its breakdowns read the newest frame of that same socket (`useContainerFrame`). The rate
+  helper differences Docker timestamps and per-interface counters, rejects resets and gaps, and
+  establishes a new baseline after reconnects; a ten-second-stale feed says so without hiding
+  recorded history, and a stopped container opens no socket at all. The Overview tab's four readings
+  (`docker/container-readings.tsx`) open the same socket only while that tab is showing, so the two
+  never run together, and draw the recorded hour as each tile's trend beside the live figure rather
+  than splicing the frames into that line. `hooks/use-metrics.ts` and
+  `hooks/use-metrics-history.ts` are the React surface over those two.
+- `hooks/use-self-update.tsx` is one poll for the whole shell, and its gotcha is the feature's design
+  problem: **the API goes away in the middle of the thing it is watching**. A failed poll during a run
+  renders as "restarting", never an error, and the cadence is set from the fetch rather than an effect so a
+  failure does not drop back to the five-minute interval. `components/update/` is the sidebar-footer notice
+  (which renders *nothing* when there is nothing to say), the dialog that installs an update, and the
+  panel on `/dashboard` — that page is the dashboard's own version and nothing else, because the server's
+  packages and the tool you look at it through are updated by completely different machinery. The
+  notice's links all go to that page, which is where the release notes are read; there is no second
+  rendering of them in a sheet. Installing goes through `useUpdateDialog`, not the shared
+  `ConfirmDialog`: that one is for acts that are awkward to undo and its command is always destructive
+  red, where an update is something taken, so its command is the brand face. It is a yes or a no and
+  nothing else to read — the notes are on the page. Both the notice and the page hold one.
+- `hooks/use-self-config.tsx` is the same shape for the dashboard's own settings, with one problem the
+  update flow does not have: a change to the port or the address means the dashboard **does not come back
+  here**. Nothing on the client can follow it, so the run record carries the new endpoint and
+  `components/config/restart-progress.tsx` states it as a URL to open rather than spinning on an address
+  that is now answering nothing. It also renders a fourth outcome — `rolled_back`, the configuration that
+  did not come up and was undone — because showing that as either success or failure would misreport it.
+  The form on `/dashboard/configuration` **derives** its draft from the poll rather than mirroring it into
+  state: a copy refreshed every two seconds would wipe half-typed input during a restart.
+- `hooks/use-self-uninstall.tsx` watches the one run whose API **never comes back**. A failed poll while
+  the run is live is `lost`, not an error, and `lib/uninstall.ts` reads it as the stack having gone
+  whichever phase the page last saw — a keep can finish between two polls. A backend that merely crashed
+  restarts and answers with the run closed as failed, which replaces that reading. Once it is gone,
+  `components/config/uninstall.tsx` stops following: it says the dashboard has stopped and gives the
+  commands for what is left (the transcript in `/var/log/just-dashboard-uninstall.log`, the reinstall or
+  the checkout to delete). While a run is live the configuration page keeps its last report drawn and
+  hides the stack and the settings, which describe what is being taken away.
+- `hooks/use-arrivals.ts` answers which rows of a polled or streamed list were not in it the last time
+  it changed, so those rows alone take `animate-rise` (request rows, container events, deliveries,
+  players). It is empty on the first render and holds its answer until the keys change again, kept as
+  state adjusted during render rather than in an effect, so an arrival costs no second paint and a
+  re-render mid-rise does not cut it short.
+- The three runs' transcripts are drawn by `components/run-transcript.tsx` over `lib/transcript.ts`, and a
+  deployment's build console paints its lines with the same row and the same drip
+  (`components/transcript-line.tsx`, which both import). The polled
+  report carries only the file's last 64 KB; when that tail starts with the server's trimmed marker the
+  console reads the whole file once (`getText` on `…/update/log` or `…/config/log`) and from then on
+  extends it with each tail, finding where the tail begins in the whole copy (`extendTranscript`) and
+  reading the file again only when the two stop overlapping. A read that fails during the restart leaves
+  the tail on screen. While a run is live and the reader is at the end, the lines a poll brought are let
+  out a few a frame rather than landing at once; scrolled up, searching or with reduced motion they are
+  drawn outright. `lib/transcript.test.js` covers the line shapes and the merge.
+- **There is one theme.** The light palette was removed: every tinted surface, status hue, chart colour
+  and terminal ANSI slot had to be chosen twice and verified twice, and the second set was seen by almost
+  nobody. Colours live on `:root` in `globals.css`. `lib/themes.ts` is now one function —
+  `themeBootstrapScript()`, inlined in `<head>` with the request's CSP nonce — which puts `.dark` on the
+  root element before first paint so the generated shadcn primitives' `dark:` variants resolve, sets
+  `color-scheme`, puts `data-motion="paused"` on the root for a browser that paused the product's
+  animations, and clears the stored light/dark preference from anyone upgrading. the theme hook,
+  the top bar's toggle, the palette's theme commands and `/appearance` are all gone; `<html>` keeps
+  `suppressHydrationWarning` because the class is still applied by script.
+
+Saved connection investigations share the `netdiag` lifecycle and exact-source comparison. The
+`kind: "investigation"` record retains its typed request/report; `components/network/path-report.tsx`
+is used by both quick and saved readings. Report-completed-with-unknowns is a dated evidence outcome,
+not a connected/live state. The shared naming dialog snapshots its discriminated request kind.
+
+## Recovering an ended session
+
+`lib/api.ts` owns `fetchResponse`, which returns successful binary/streaming bodies untouched and
+reads a refused response once through `responseError`. XHR file uploads, database imports and dump
+uploads use the same synchronous `errorFromResponse` parser without changing upload progress.
+SQL table/query exports, MongoDB exports,
+image editing, PDF previews and the diagram keepalive save use that same path; cancellation signals,
+response headers and export completion/truncation checks remain with each reader. Image saves
+also fence asynchronous canvas encoding and upload completion to their mounted editor and working-state
+generation. Unmounting or clearing account-owned state aborts an in-flight upload; a late encoder never
+starts an old-canvas upload, and late responses cannot announce success or call a departed editor's
+callbacks. Image revision conflicts use the inline warning without a second error toast, keeping
+Save as and reload controls reachable. `files-ui.spec.ts` holds encoders and upload responses to cover both boundaries.
+
+All shared HTTP response readers emit `jd:authentication-lost` for an ordinary feature request's
+recognized authentication failure. Authentication endpoints are excluded: an incorrect password or
+code is a form error. The auth provider coalesces recovery, rechecks `/auth/session`, and sends a
+confirmed ended session to `/login?reason=session` with a visible notice that survives a reload.
+An unavailable recheck retains the current identity for retry. **The first probe of a page load holds
+to the same rule: only the server's own answer makes a browser signed out.** A 429, a 5xx, a refusal
+that is not about the session or no answer at all is waited out and asked again (`untilAnswered` in
+`lib/session-probe.ts`, by the waits in `lib/backoff.ts`: the answer's `Retry-After`, or one second
+doubling to thirty), with `loading` still true and the failure in `useAuth().stalled`; the shell keeps
+its splash, which then says why it is still there (`waitingReason`), and the address is untouched. It
+used to count any failure as signed out, so a restored window of tabs that drained the limiter, or a
+load during a restart, ended on the sign-in form with a session that was still good. **The probe leaves
+with the document, not after hydration.** The root layout's `<head>` carries a second nonced inline
+script (`sessionProbeScript`) that sends `GET /auth/session` and leaves the promise on `window`; the
+provider's first ask takes it (`earlySession`), so the answer travels while the JavaScript downloads
+instead of after it, and a retry or recheck makes a request of its own. It is a script rather than a
+`<link rel=preload as=fetch>` because whether a preload is handed to a later `fetch` depends on the
+browser and the response's cache headers, and a miss would be a second request. Request
+generations prevent a stale session probe or recheck from replacing a newer sign-in, and end a probe
+that is still waiting. Sign-out requests are coalesced, clear working
+drafts immediately, and finish their cookie expiry before a new sign-in is allowed; pending sign-out
+never starts expiry recovery. Reauthentication by a different account clears the prior account's
+working drafts; the same account retains values held in the shared session/memory stores. The
+mounted dashboard workspace is keyed by authenticated account ID. A recovery probe that discovers
+another usable account remounts its providers and pages at the current route, removing the prior
+account's local editors, canvases and active work as well as its shared drafts. Raw proxy validation
+and save callbacks also check their retained-draft generation before sending, fencing the synchronous
+cleanup interval before React remounts; a cleared owner cannot start another validation or save
+from its old buffer. Cleanup does not retract an already-sent authorized request or prove its
+publication outcome.
+A same-account recovery
+keeps the mounted workspace and local buffers. `auth-recovery.spec.ts` exercises actual raw-config
+PUT refusals followed by both kinds of session answer, including refusal to reuse the old buffer.
+Local
+component drafts are not covered by this retention and unmount on the sign-in redirect. A nonsensitive
+account ID retained in sessionStorage preserves owner isolation after an expiry/reload. If Web Storage
+is unavailable, the in-memory owner covers the current document. A sign-in with unknown ownership
+clears shared working drafts conservatively. `api-auth-recovery.test.js` and `auth-recovery.spec.ts` cover this contract.
+
+API-key creation uses the same reset path for Done, dismissal and reopening, so one-time secrets do
+not become the next key's form. Session views use actual `authMethod` provenance rather than treating
+an access-elevation bit as proof of a code; legacy provenance is unknown.
+
+The redesigned account identity, authenticator coverage band, user cards and account filters use the
+current `require2fa` policy. An enabled account without an authenticator is password-only under the
+optional policy and requires enrollment under the required policy; disabled accounts are excluded
+from both coverage counts and those filters. Reset-two-factor guidance follows the same distinction.
+The Profile picture labels required enrollment, and the Security sign-in picture draws a direct
+password-to-server path only when two-factor is optional. Session pictures continue to describe each
+session's recorded authentication method, independently of the current policy.

@@ -4,19 +4,19 @@ import Link from "next/link"
 import { calendarDate, plural, relativeTime } from "@/lib/format"
 import { parseAgent } from "@/lib/clients"
 import { useAuth } from "@/hooks/use-auth"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, PageState, Section } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { Page, PageContext, PageState } from "@/components/page"
+import { Section } from "@/components/section"
 import { Status } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { SettingsColumn } from "@/components/settings-column"
-import { ROLE_MARK } from "@/components/account/capabilities"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
+import { SettingsColumn } from "@/components/settings/settings-column"
+import { RoleTag } from "@/components/account/role"
 import { AccessPicture } from "@/components/account/access-picture"
 import { ProfileSection } from "@/components/account/profile-panel"
 import { RoleLadder } from "@/components/account/role-ladder"
-import { AvatarRun, UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { AvatarRun, UserAvatar, displayNameOf } from "@/components/user-avatar"
 import { NetworkFact } from "@/components/client-mark"
 import { useSessions } from "@/components/account/sessions"
 import { useApiKeys } from "@/components/account/api-keys"
@@ -55,46 +55,45 @@ function Profile() {
   const keys = useApiKeys()
   const users = useDashboardUsers(admin)
 
-  if (!user) return <PageState eyebrow="Account" title="Profile" />
+  // While the account is read the page is already its own shape: the identity
+  // line with bones in its boxes, not a framed table that the line replaces.
+  if (!user) return <PageState title="Profile" skeleton={<IdentityHeader loading state />} />
 
   const name = displayNameOf(user)
   const twoFactor = user.totpEnabled
   const current = sessions.data?.find((s) => s.current)
   const agent = current && parseAgent(current.userAgent)
-  const RoleMark = ROLE_MARK[user.role]
   const people = users.data ?? []
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Account" title={name} />
+    <Page rise>
+      <PageContext title={name} />
 
-      <HostIdentity
+      <IdentityHeader
         logo={<UserAvatar key={user.avatarVersion} user={user} size="lg" />}
         title={
           <span className="inline-flex min-w-0 items-center gap-2.5">
             <span className="truncate font-mono">@{user.username}</span>
-            <Tag icon={RoleMark}>{user.role}</Tag>
+            <RoleTag role={user.role} />
           </span>
         }
         facts={
           <>
-            <span>member since {calendarDate(user.createdAt)}</span>
-            <FactDot />
-            <span>signed in {user.lastLoginAt ? relativeTime(user.lastLoginAt) : "just now"}</span>
+            <Fact>member since {calendarDate(user.createdAt)}</Fact>
+            <Fact>signed in {user.lastLoginAt ? relativeTime(user.lastLoginAt) : "just now"}</Fact>
             {current && agent && (
               <>
-                <FactDot />
-                <HostFact product={agent.product}>
+                <Fact product={agent.product} className="truncate">
                   {agent.client}
                   {agent.os && ` on ${agent.os}`}
-                </HostFact>
-                <FactDot />
-                <NetworkFact ip={current.ip} />
+                </Fact>
+                <Fact>
+                  <NetworkFact ip={current.ip} />
+                </Fact>
               </>
             )}
             {admin && people.length > 0 && (
-              <>
-                <FactDot />
+              <Fact>
                 <Link
                   href="/account/users"
                   className="inline-flex items-center gap-1.5 rounded-sm focus-ring hover:text-foreground"
@@ -102,7 +101,7 @@ function Profile() {
                   <AvatarRun users={people} />
                   {plural(people.length, "account")}
                 </Link>
-              </>
+              </Fact>
             )}
           </>
         }
@@ -115,17 +114,15 @@ function Profile() {
       />
 
       <Section title="Signed in as you">
-        {sessions.data && (keys.data || keys.error) ? (
-          <AccessPicture
-            user={user}
-            required={Boolean(status?.require2fa)}
-            sessions={sessions.data}
-            // An administrator is handed everyone's keys; only this account's act as it.
-            keys={keys.data?.filter((k) => k.userId === user.id)}
-          />
-        ) : (
-          <LoadingRows rows={3} />
-        )}
+        {/* Until both reads land the picture waits at its loaded shape, so the
+            page has its final shape before the sessions arrive (D11). */}
+        <AccessPicture
+          user={user}
+          required={Boolean(status?.require2fa)}
+          sessions={sessions.data && (keys.data || keys.error) ? sessions.data : undefined}
+          // An administrator is handed everyone's keys; only this account's act as it.
+          keys={keys.data?.filter((k) => k.userId === user.id)}
+        />
       </Section>
 
       <SettingsColumn>

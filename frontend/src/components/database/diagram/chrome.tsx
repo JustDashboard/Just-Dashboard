@@ -1,44 +1,20 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useEffect, useId, useRef, useState } from "react"
-import Link from "next/link"
-import { useReactFlow, useStore } from "@xyflow/react"
-import {
-  ChevronDown,
-  Crosshair,
-  Fingerprint,
-  Key,
-  Linked,
-  LockClosed,
-  Minus,
-  Plus,
-  RotateCounterClockwise,
-  Trash,
-} from "@/components/icons"
+import { Crosshair, Fingerprint, Key, Linked, LockClosed, Trash } from "@/components/icons"
 import { relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
-import { KEYCAP } from "@/components/command-search/keycaps"
+import { Keycaps } from "@/components/keycaps"
+import { ARROW_CAPS } from "@/components/map/canvas-keys"
 import { Field } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Textarea } from "@/components/ui/textarea"
-import { useFocusReturn } from "@/components/database/schema/focus"
-import { SchemaMark } from "@/components/database/schema/rail"
-import type { DbCatalogSchema } from "@/components/database/schema/types"
-import { useDatabase } from "@/components/database/shell/database-context"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
+import { NameMark } from "@/components/database/kit/marks"
 import type { MemoryStatus } from "@/components/database/diagram/memory"
 
+/** How long a fit glides; the diagram asks `motionMs` for it, so a reduced-motion reader gets none. */
 export const FIT = { duration: 300 }
 
 /**
@@ -47,84 +23,6 @@ export const FIT = { duration: 300 }
  * is fitted is fitted clear of them, not under them.
  */
 export const FIT_PADDING = { top: "56px", right: "24px", bottom: "56px", left: "24px" } as const
-
-/**
- * Which schema the picture is of, said in the toolbar and changed there.
- *
- * The diagram used to draw whichever schema the last table selection had left
- * in the address, with nothing on the page saying which or offering another.
- * "Every schema" is a picture of its own — the one that shows a key crossing
- * from one schema into the next — and has its own arrangement. Each choice is
- * a link: a picture is a place, Back returns to the one before it, and a
- * pasted address opens the picture it names.
- */
-export function DiagramSchemaPicker({
-  schemas,
-  current,
-}: {
-  /** Absent while the list is being read, or where it could not be. */
-  schemas: readonly DbCatalogSchema[] | undefined
-  current: string
-}) {
-  const { engine, href } = useDatabase()
-  const own = (schemas ?? []).filter((schema) => !schema.system)
-  const system = (schemas ?? []).filter((schema) => schema.system)
-  const every = `Every ${engine.nouns.container}`
-  const item = (schema: DbCatalogSchema) => (
-    <DropdownMenuItem
-      key={schema.name}
-      asChild
-      className={cn(schema.name === current && "bg-accent")}
-    >
-      <Link href={href("diagram", { schema: schema.name, limit: null, every: null })}>
-        <SchemaMark name={schema.name} />
-        <MenuItemText
-          hint={
-            schema.tables >= 0 && (
-              <span className="numeric text-hint text-muted-foreground">{schema.tables}</span>
-            )
-          }
-        >
-          <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-        </MenuItemText>
-      </Link>
-    </DropdownMenuItem>
-  )
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="sm"
-          variant="ghost"
-          aria-label={`${engine.nouns.container}: ${current || every}`}
-          className="h-7 max-w-56 min-w-0 justify-start gap-1.5 px-1.5"
-        >
-          {current ? <SchemaMark name={current} /> : null}
-          <span className={cn("min-w-0 truncate text-xs", current && "font-mono")}>
-            {current || every}
-          </span>
-          <ChevronDown className="size-3 shrink-0 text-muted-foreground" />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="max-h-80 w-64 overflow-y-auto">
-        {/* Said in so many words: an address with the schema left out would be
-            completed from where the reader last was. */}
-        <DropdownMenuItem asChild className={cn(current === "" && "bg-accent")}>
-          <Link href={href("diagram", { every: "1", limit: null })}>{every}</Link>
-        </DropdownMenuItem>
-        {own.length > 0 && <DropdownMenuSeparator />}
-        {own.map(item)}
-        {system.length > 0 && (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuLabel>The engine&rsquo;s own</DropdownMenuLabel>
-            {system.map(item)}
-          </>
-        )}
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
 
 /** Whether the arrangement is kept, in a word the operator can trust. */
 export function Saved({
@@ -153,67 +51,6 @@ export function Saved({
     >
       {text}
     </span>
-  )
-}
-
-/** A control floating on the canvas, drawn as the server map draws its own. */
-export const FLOAT =
-  "absolute flex items-center gap-0.5 rounded-md border border-hairline bg-popover p-0.5"
-
-/**
- * The bar at the foot of the canvas, as the server's map has it: out, how
- * far in the picture is drawn (pressed, the real size), in, Fit, and — while
- * something has been moved — putting every table back where the layout would.
- *
- * It took the place of three glyphs in a card at the top of the canvas and a
- * minimap in the corner opposite. A whiteboard in this product is zoomed and
- * fitted from one place, and where the reader is in the picture is said by
- * the percentage rather than by a second, smaller picture.
- */
-export function ZoomBar({ onFit, onTidy }: { onFit: () => void; onTidy?: () => void }) {
-  const flow = useReactFlow()
-  const percent = useStore((state) => Math.round(state.transform[2] * 100))
-  return (
-    <div data-slot="diagram-zoom" className={cn(FLOAT, "bottom-3 left-3")}>
-      <IconAction
-        label="Zoom out"
-        className="size-7"
-        onClick={() => void flow.zoomOut({ duration: 150 })}
-      >
-        <Minus />
-      </IconAction>
-      <Button
-        size="xs"
-        variant="ghost"
-        title="Back to the real size (Ctrl 0)"
-        aria-label={`Zoom ${percent}%: back to the real size`}
-        className="numeric h-7 min-w-12 px-1.5 text-hint"
-        onClick={() => void flow.zoomTo(1, { duration: 150 })}
-      >
-        {percent}%
-      </Button>
-      <IconAction
-        label="Zoom in"
-        className="size-7"
-        onClick={() => void flow.zoomIn({ duration: 150 })}
-      >
-        <Plus />
-      </IconAction>
-      <Button
-        size="xs"
-        variant="ghost"
-        title="Fit the picture to the canvas (F)"
-        className="h-7 px-2 text-hint"
-        onClick={onFit}
-      >
-        Fit
-      </Button>
-      {onTidy && (
-        <IconAction label="Tidy: lay every table out again" className="size-7" onClick={onTidy}>
-          <RotateCounterClockwise />
-        </IconAction>
-      )}
-    </div>
   )
 }
 
@@ -263,18 +100,28 @@ export function CanvasHolds({
   )
 }
 
-/** The diagram's keys, as caps, at the foot of its inspector — where the map says its own. */
+/**
+ * The diagram's keys, as caps, at the foot of its inspector — where the map
+ * says its own. A key means nothing under a finger, so a touch screen is not
+ * shown them.
+ */
 export function KeyLegend() {
   return (
     <div
       data-slot="diagram-keys"
-      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-3 py-2.5 text-hint text-muted-foreground"
+      className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-3 py-2.5 text-hint text-muted-foreground pointer-coarse:hidden"
     >
       <Keycap cap="F">Fit</Keycap>
       <Keycap cap="/">Find</Keycap>
       <Keycap cap="I">Panel</Keycap>
       <Keycap cap="H">Hide</Keycap>
+      <Keycap cap="↵">Pick</Keycap>
       <Keycap cap="Esc">Let go</Keycap>
+      {/* The arrows slide the canvas until Enter picks a table, then move
+          the tables picked, as on the server map; Shift's longer step is
+          said in the legend, which wraps, not only in a title. */}
+      <Keycap cap={ARROW_CAPS}>Slide, move</Keycap>
+      <Keycap cap="Shift">Longer step</Keycap>
     </div>
   )
 }
@@ -282,7 +129,7 @@ export function KeyLegend() {
 function Keycap({ cap, children }: { cap: string; children: React.ReactNode }) {
   return (
     <span className="flex items-center gap-1.5">
-      <kbd className={KEYCAP}>{cap}</kbd>
+      <Keycaps keys={cap} />
       {children}
     </span>
   )
@@ -312,7 +159,7 @@ export function Legend({ schemas }: { schemas?: readonly string[] }) {
           <span aria-hidden className="h-3 w-px bg-border" />
           {schemas.slice(0, SCHEMAS_NAMED).map((schema) => (
             <span key={schema} className="flex min-w-0 items-center gap-1 font-mono">
-              <SchemaMark name={schema} />
+              <NameMark name={schema} />
               <span className="max-w-28 truncate">{schema}</span>
             </span>
           ))}
@@ -350,7 +197,7 @@ export function NoteDialog({
   const [text, setText] = useState(initial)
   const [asking, setAsking] = useState(false)
   const dirty = text.trim() !== initial.trim()
-  useFocusReturn(true, returnTo)
+  useSurfaceFocusReturn(true, returnTo)
   // The question takes the keyboard, and hands it back to the note.
   const keep = useRef<HTMLButtonElement>(null)
   const note = useRef<HTMLTextAreaElement>(null)

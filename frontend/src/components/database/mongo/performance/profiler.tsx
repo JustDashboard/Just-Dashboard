@@ -2,16 +2,17 @@
 
 import { useState } from "react"
 import { RefreshClockwise } from "@/components/icons"
-import { relativeTime, timestamp } from "@/lib/format"
+import { grouped, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FieldRow } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { EmptyState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,14 +36,14 @@ import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark } from "@/components/database/kit"
 import { mongoProfiler, setProfiler } from "@/components/database/mongo/api"
 import { operationColor } from "@/components/database/mongo/kinds"
-import { DatabaseMark } from "@/components/database/mongo/rail"
+import { NameMark } from "@/components/database/kit/marks"
 import type {
   MongoDatabase,
   MongoProfilerEntry,
   MongoProfilerLevel,
 } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const LEVELS: { value: `${MongoProfilerLevel}`; label: string }[] = [
   { value: "0", label: "Off" },
@@ -58,8 +59,6 @@ const LEVEL_HINT: Record<MongoProfilerLevel, string> = {
 /** How often the list is read while the profiler is recording, and while it is off. */
 const RECORDING_MS = 4000
 const IDLE_MS = 20_000
-
-const grouped = (n: number) => n.toLocaleString("en-US")
 
 function took(millis: number): string {
   if (millis >= 60_000) return `${(millis / 60_000).toFixed(1)} min`
@@ -120,7 +119,7 @@ export function ProfilerView({
       <SelectContent position="popper" align="end" className="max-h-72">
         {listed.map((name) => (
           <SelectItem key={name} value={name} className="font-mono text-xs">
-            <DatabaseMark name={name} />
+            <NameMark name={name} />
             {name}
           </SelectItem>
         ))}

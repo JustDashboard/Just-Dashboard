@@ -1,5 +1,4 @@
 import { cn } from "@/lib/utils"
-import { Skeleton } from "@/components/ui/skeleton"
 
 /**
  * A bone standing in for words that have not arrived, in a line that keeps the
@@ -15,7 +14,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 export function Bone({ className }: { className?: string }) {
   return (
     <span aria-hidden className={cn("inline-flex max-w-full items-center align-bottom", className)}>
-      <Skeleton className="h-[0.7em] w-full" />
+      {/* Skeleton's look on a span: a div may not stand in a paragraph. */}
+      <span
+        data-slot="skeleton"
+        className="block h-[0.7em] w-full animate-pulse rounded-md bg-muted"
+      />
       {"​"}
     </span>
   )

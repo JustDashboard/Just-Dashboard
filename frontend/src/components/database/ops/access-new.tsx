@@ -3,7 +3,7 @@
 import { useEffect, useId, useState } from "react"
 import { UserPlus } from "@/components/icons"
 import { ApiError, errorMessage, post } from "@/lib/api"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import {
   Disclosure,
   Field,
@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { generatePassword } from "@/components/database/connect/rules"
+import { generatePassword } from "@/lib/password"
 import {
   ATTRIBUTES,
   accountDsn,
@@ -39,6 +39,7 @@ import type {
 } from "@/components/database/ops/access-types"
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { agree } from "@/components/database/kit/figures"
 
 type Level = DbPresetLevel | "none"
 
@@ -335,7 +336,7 @@ export function NewAccount({
               />
               {plan?.plan?.schemas && plan.plan.schemas.length > 0 && (
                 <FormNote>
-                  Covers the {plan.plan.schemas.length === 1 ? "schema" : "schemas"}{" "}
+                  Covers the {agree(plan.plan.schemas.length, "schema", "schemas")}{" "}
                   <span className="font-mono">{plan.plan.schemas.join(", ")}</span>.
                 </FormNote>
               )}

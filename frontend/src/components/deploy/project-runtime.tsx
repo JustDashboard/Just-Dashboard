@@ -43,13 +43,14 @@ import type {
   DeploymentStorageMount,
   VolumeDetail,
 } from "@/lib/types"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
-import { EmptyNote, EmptyState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
@@ -78,7 +79,6 @@ import {
 import type { ConfirmFn } from "@/components/docker/shared"
 import { JobCard } from "@/components/backups/job-card"
 import { useProject } from "@/components/deploy/project-context"
-import { ProjectMark } from "@/components/deploy/project-mark"
 import { ServiceDetails } from "@/components/deploy/runtime-details"
 import {
   isImageDigest,
@@ -103,6 +103,7 @@ import {
   ROUTE_TONE,
   humanize,
 } from "@/components/deploy/vocabulary"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** Who owns a route or a mount, as the tag in the line under its name. */
 const OWNERSHIP_WORD: Record<DeploymentOwnership, string> = {
@@ -234,14 +235,14 @@ export function ProjectRuntime() {
   // Where a service's release, state, CPU and memory stand beside its name and
   // leave the name some 240px: inside the project's own navigation that is
   // the extra-large width. Its ports and its id join them at the 2xl one.
-  const wide = useMediaQuery("(min-width: 1280px)")
-  const widest = useMediaQuery("(min-width: 1536px)")
+  const wide = useBreakpoint("xl")
+  const widest = useBreakpoint("2xl")
   // A domain's route and certificate beside its hostname, once its tags have
   // moved under it: from the large width the hostname keeps some 190px, and
   // below it the line is the hostname's alone.
-  const domainsWide = useMediaQuery("(min-width: 1024px)")
+  const domainsWide = useBreakpoint("lg")
   // Where a card's state fits on the line beside its name: all but a phone.
-  const roomy = useMediaQuery("(min-width: 640px)")
+  const roomy = useBreakpoint("sm")
 
   const operations = project.operations
   const loading = project.operationsLoading
@@ -440,11 +441,9 @@ export function ProjectRuntime() {
               </Button>
             </Notice>
           ) : services.length === 0 ? (
-            <EmptyState
-              mark={<ProjectMark deployment={deployment} product={project.product} />}
+            <ProjectEmpty
               title="No managed runtime services"
-              description="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
-              className="border-0 py-6"
+              reason="Docker returned no managed containers for this environment. Observed imports remain under Docker until managed deployment creates a runtime."
             />
           ) : (
             <ChoiceList aria-label="Runtime services">

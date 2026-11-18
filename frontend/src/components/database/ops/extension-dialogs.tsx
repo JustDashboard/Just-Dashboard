@@ -22,8 +22,8 @@ import { del, errorMessage } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
-import { Segments } from "@/components/deploy/settings/segments"
-import { GroupRule } from "@/components/flow"
+import { Segments } from "@/components/segments"
+import { GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldRow,
@@ -34,7 +34,7 @@ import {
   Statement,
 } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Select,
   SelectContent,
@@ -42,7 +42,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ChangeDialog } from "@/components/database/schema/change-dialog"
 import type { DdlRequest } from "@/components/database/schema/changes"
@@ -55,6 +54,8 @@ import {
 } from "@/components/database/ops/extensions-model"
 import { TaskDialog } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
+import { agree } from "@/components/database/kit/figures"
 
 /**
  * The three things done to one extension, each in the dialog its kind takes:
@@ -163,7 +164,7 @@ function ExtensionFacts({ extension }: { extension: DbExtension }) {
 /** The read every dialog waits on, said in the dialog's own place. */
 function DetailState({ detail }: { detail: { error: Error | undefined; refresh: () => void } }) {
   return detail.error ? (
-    <CouldNotRead what="the extension" error={detail.error} onRetry={detail.refresh} />
+    <ErrorState what="the extension" error={detail.error} onRetry={detail.refresh} />
   ) : (
     <LoadingRows rows={2} />
   )
@@ -307,7 +308,7 @@ export function EnableExtension({ extension, onClose, onDone }: DialogProps) {
           {missing.length > 0 && !cascade && (
             <FormNote tone="warning">
               Without it the server refuses: {listWords(missing)}{" "}
-              {missing.length === 1 ? "is" : "are"} not enabled in {conn.database || conn.name}.
+              {agree(missing.length, "is", "are")} not enabled in {conn.database || conn.name}.
             </FormNote>
           )}
           {chosen?.superuser && !chosen.trusted && !data.superuser && (

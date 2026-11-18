@@ -3,7 +3,7 @@
 import { useCallback, useRef, useState } from "react"
 import { Copy, Download, Layout, Trash, Backspace } from "@/components/icons"
 import { api } from "@/lib/api"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
@@ -17,7 +17,6 @@ import { focusAfterDialog } from "@/components/database/data/focus"
 import { ROW_OBJECT_KINDS, type RowObjectKind } from "@/components/database/data/kinds"
 import type { DbCatalogObject, DbDdlResult } from "@/components/database/data/types"
 import type { ExportRequest } from "@/components/database/data/use-export"
-import { grouped } from "@/components/database/data/view"
 
 /** The attribute a row's menu button is found by again, and what it holds for an object. */
 export const ACTIONS_OF = "data-actions-of"

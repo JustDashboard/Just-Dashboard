@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { risen } from "./risen"
-import type { PathRequest, PathResult } from "../../src/lib/network-investigator-types"
+import type { PathRequest, PathResult } from "../../src/lib/network/investigator-types"
 
 const id = "a".repeat(64)
 const evidence = (
@@ -273,7 +273,7 @@ test("read-only accounts are shown no diagnostic they cannot start, and no sourc
   await page.goto("/network/investigate?target=private.corp")
   await expect(page).toHaveURL(/\/network\/tools\?tool=path&target=private\.corp$/)
   await expect(
-    page.getByText("Server diagnostics need the admin capability", { exact: true }),
+    page.getByText("Server diagnostics need an administrator", { exact: true }),
   ).toBeVisible()
   await expect(pane(page)).toHaveCount(0)
   await expect(page.getByLabel("Destination", { exact: true })).toHaveCount(0)

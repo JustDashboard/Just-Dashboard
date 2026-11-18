@@ -17,8 +17,8 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { WireMark, WireNode } from "@/components/deploy/wire"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { WireMark, WireNode } from "@/components/wire/wire"
+import { ProjectFavicon } from "@/components/project-mark"
 import { EndpointText } from "@/components/config/request-path"
 import { CertLife, expiryTone } from "@/components/proxy/expiry-status"
 import { certificateProduct, certPathProduct } from "@/components/proxy/marks"
@@ -38,7 +38,7 @@ const SHOWN_MEMBERS = 4
 /**
  * The way a request reaches the site, drawn in the wiring vocabulary the
  * dashboard's own request path and a deployment's map already speak
- * (`deploy/wire`): who asked in the last hour, drawn as the browsers and bots
+ * (`components/wire/wire`): who asked in the last hour, drawn as the browsers and bots
  * they were; the names they asked for and whose certificate answers them; the
  * engine and what the site's file switches on; and what answers at the far
  * end — each server of a pool with the check's reading of it, or the program
@@ -294,7 +294,7 @@ function Ports({ listen }: { listen: string[] }) {
   const ports = [...new Set(listen.map((l) => l.match(/(\d+)/)?.[1]).filter(Boolean))]
   if (ports.length === 0) return null
   return (
-    <span className="numeric font-mono text-[var(--tag-pink)]">
+    <span className="numeric font-mono text-tag-pink">
       {ports.map((port) => `:${port}`).join(" ")}
     </span>
   )

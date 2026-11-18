@@ -24,7 +24,6 @@ import { sshKeyShape, tokenProduct, type SshKeyShape } from "@/lib/secrets"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import type {
   DeploymentCredential,
@@ -35,17 +34,19 @@ import type {
 } from "@/lib/types"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, Hold, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { Hold, Sweep } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Tag } from "@/components/tag"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FieldCheck,
+  FieldChecks,
   FieldRow,
   FormFact,
   FormFacts,
@@ -74,8 +75,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { AccountFace, GitHubAppPanel, projectsUsing } from "@/components/deploy/github-app-card"
 import { SourceBranch } from "@/components/git/glyphs"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { useGitHubApp } from "@/hooks/use-github"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Fleet-level secrets: the tokens and keys the server uses on behalf of every
@@ -395,7 +397,7 @@ export function CredentialsPage() {
   const { confirm, dialog } = useConfirm()
   // On a phone the kind goes under the name, which otherwise had the width the
   // kind and the verbs left it — none. Chosen once, so it is in the page once.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   const installations = githubApp.data?.installations ?? []
   const installationOf = (credential: DeploymentCredential) =>
@@ -594,14 +596,7 @@ export function CredentialsPage() {
 
   return (
     <Page>
-      <PageContext
-        eyebrow={
-          <Link href="/deploy" className="rounded-sm focus-ring hover:underline">
-            Deployments
-          </Link>
-        }
-        title="Credentials"
-      />
+      <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Credentials" />
 
       <GitHubAppPanel
         admin={admin}
@@ -616,26 +611,26 @@ export function CredentialsPage() {
       <Panel plain>
         <PanelHeader
           title="Saved credentials"
+          count={
+            list && list.length > 0 ? (
+              <>
+                {plural(list.length, "credential")}
+                {/* A host is optional for every kind but a registry login.
+                    Left out on a phone, where it pushed the command under
+                    the title. */}
+                {hosts.size > 0 && (
+                  <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>
+                )}
+              </>
+            ) : undefined
+          }
           actions={
-            <span className="flex flex-wrap items-center gap-3">
-              {list && list.length > 0 && (
-                <span className="numeric text-hint text-muted-foreground">
-                  {plural(list.length, "credential")}
-                  {/* A host is optional for every kind but a registry login.
-                      Left out on a phone, where it pushed the command under
-                      the title. */}
-                  {hosts.size > 0 && (
-                    <span className="max-sm:hidden"> · {plural(hosts.size, "host")}</span>
-                  )}
-                </span>
-              )}
-              {admin && (
-                <Button size="sm" onClick={() => open(emptyDraft("git_bearer"))}>
-                  <Plus className="size-3.5" />
-                  Add credential
-                </Button>
-              )}
-            </span>
+            admin && (
+              <Button size="sm" onClick={() => open(emptyDraft("git_bearer"))}>
+                <Plus className="size-3.5" />
+                Add credential
+              </Button>
+            )
           }
         />
         <PanelBody>
@@ -644,7 +639,7 @@ export function CredentialsPage() {
           ) : credentials.error ? (
             <ErrorState error={credentials.error} onRetry={credentials.refresh} />
           ) : credentials.loading && !list ? (
-            <LoadingRows rows={3} />
+            <ChoiceListSkeleton rows={3} />
           ) : (list?.length ?? 0) === 0 ? (
             // The empty list is the same picker the sheet opens on: the four
             // kinds, each pressed straight into its form.
@@ -681,9 +676,9 @@ export function CredentialsPage() {
       <SidePanel
         open={Boolean(draft)}
         onOpenChange={(open) => !open && closeDraft()}
-        title={draft?.id ? "Edit credential" : "Add credential"}
+        title={draft?.id ? `Edit ${editing?.name ?? "credential"}` : "Add credential"}
         description="A token or key the server uses to read a private repository or registry."
-        width="md"
+        size="md"
         footer={
           <>
             <Button variant="outline" onClick={closeDraft} disabled={saving}>
@@ -791,7 +786,7 @@ function CredentialCard({
           className="inline-flex min-w-0 items-center gap-1.5"
         >
           <ProjectMark deployment={project} size="xs" />
-          <span className={cn("truncate text-foreground/80", wide && "max-w-36 max-xl:sr-only")}>
+          <span className={cn("truncate text-muted-foreground", wide && "max-w-36 max-xl:sr-only")}>
             {project.name}
           </span>
         </span>
@@ -836,7 +831,11 @@ function CredentialCard({
             <span className="flex w-24 justify-end">{tag}</span>
             {!onEdit && <span aria-hidden className="w-3.5 shrink-0" />}
           </>
-        ) : undefined
+        ) : (
+          // The arrow's slot, kept for the App's row on a phone as well, so
+          // the verbs after it end on one edge down the list.
+          !onEdit && <span aria-hidden className="w-3.5 shrink-0" />
+        )
       }
       actions={<VerbActions dim verbs={verbs} menuLabel={`Actions for ${credential.name}`} />}
     >
@@ -1017,11 +1016,11 @@ function CredentialForm({
         </Field>
         {/* The server's own rule for a name, lit as it is met, so a refusal is
             never the first the reader hears of it. */}
-        <p className="flex flex-wrap gap-x-4 gap-y-1" aria-live="polite">
+        <FieldChecks>
           <FieldCheck met={/^[A-Za-z0-9]/.test(name)}>starts with a letter or digit</FieldCheck>
           <FieldCheck met={/^[A-Za-z0-9._-]*$/.test(name)}>letters, digits . - _ only</FieldCheck>
           <FieldCheck met={name.length <= 64}>64 at most</FieldCheck>
-        </p>
+        </FieldChecks>
       </div>
 
       <FormSection title="Where it signs in">
@@ -1294,11 +1293,7 @@ function TestCredentialDialog({
         </>
       }
     >
-      {busy && (
-        <div aria-hidden className="absolute inset-x-0 top-0 h-0.5 overflow-hidden bg-meter-track">
-          <div className="h-full w-1/3 animate-sweep bg-brand" />
-        </div>
-      )}
+      {busy && <Sweep className="absolute inset-x-0 top-0 h-0.5" />}
       {credential && (
         <div className="space-y-4">
           <div className="flex min-w-0 items-center gap-3">

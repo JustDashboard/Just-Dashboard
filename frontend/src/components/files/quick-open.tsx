@@ -2,16 +2,17 @@
 
 import { forwardRef, useEffect, useId, useRef, useState } from "react"
 import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
+import { IconAction } from "@/components/icon-action"
 import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural } from "@/lib/format"
+import { bytes, grouped, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry, FileFindResult, FilePlaces } from "@/lib/types"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Button } from "@/components/ui/button"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { ErrorState, Spinner } from "@/components/state"
-import { FileIcon } from "@/components/files/file-icon"
+import { ErrorState } from "@/components/state"
+import { Spinner } from "@/components/loading"
+import { FileIcon } from "@/components/file-icon"
 import { PaletteModal } from "@/components/modal"
 import { PaneFooter } from "@/components/panel"
 import { tabClasses } from "@/components/tabs"
@@ -217,6 +218,9 @@ function SearchBody({
           }}
           placeholder={mode === "names" ? "Find a file or folder…" : "Find text inside files…"}
           spellCheck={false}
+          // The palette's search box: the caret is its focus mark, as in every
+          // palette, and the results under it say where the arrows are.
+          // eslint-disable-next-line design-system/tokens
           className="h-12 min-w-0 flex-1 border-0 bg-transparent text-body shadow-none outline-none placeholder:text-muted-foreground"
         />
         <span className="flex size-4 shrink-0 items-center justify-center">
@@ -224,17 +228,18 @@ function SearchBody({
         </span>
         <span className="size-6 shrink-0">
           {query && (
-            <Button
+            <IconAction
               variant="ghost"
               size="icon-xs"
-              aria-label="Clear search"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Clear search"
               onClick={() => {
                 setQuery("")
                 input.current?.focus()
               }}
             >
               <Cross />
-            </Button>
+            </IconAction>
           )}
         </span>
       </div>
@@ -259,24 +264,26 @@ function SearchBody({
         </div>
         {mode === "content" && (
           <div className="flex items-center gap-1">
-            <Button
+            <IconAction
               size="icon-xs"
               variant={matchCase ? "secondary" : "ghost"}
-              aria-label="Match case"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Match case"
               aria-pressed={matchCase}
               onClick={() => setMatchCase((v) => !v)}
             >
               Aa
-            </Button>
-            <Button
+            </IconAction>
+            <IconAction
               size="icon-xs"
               variant={regex ? "secondary" : "ghost"}
-              aria-label="Regular expression"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Regular expression"
               aria-pressed={regex}
               onClick={() => setRegex((v) => !v)}
             >
               .*
-            </Button>
+            </IconAction>
           </div>
         )}
       </div>
@@ -396,7 +403,7 @@ function SearchBody({
       {/* One line on a wide screen, two on a phone, and the same lines in
           every state: what changes as results arrive is text inside a cell,
           never a row appearing under the others. */}
-      <PaneFooter className="grid grid-cols-[minmax(0,1fr)_auto] gap-x-4 gap-y-1.5 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_auto]">
+      <PaneFooter className="grid grid-cols-main-end gap-x-4 gap-y-1.5 px-3 py-2 text-hint text-muted-foreground sm:grid-cols-[minmax(0,1fr)_auto_auto]">
         <div className="col-span-full flex min-w-0 items-center gap-2 sm:col-span-1">
           {scopes.length > 1 && (
             <ToggleGroup
@@ -451,7 +458,7 @@ function SearchBody({
                 : busy
                   ? "Searching…"
                   : current?.total && current.total > hits.length
-                    ? `Best ${hits.length} of ${current.total.toLocaleString()}`
+                    ? `Best ${hits.length} of ${grouped(current.total)}`
                     : trimmed
                       ? plural(
                           hits.length,

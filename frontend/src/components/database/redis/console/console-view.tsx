@@ -8,8 +8,14 @@ import { cn } from "@/lib/utils"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { FormFact } from "@/components/form"
 import { Well } from "@/components/panel"
-import { Spinner } from "@/components/state"
-import { Tag } from "@/components/tag"
+import { Spinner } from "@/components/loading"
+import {
+  COMMAND_CLASS,
+  CommandClassTag,
+  TRANSCRIPT_KEPT,
+  commandMs,
+  type CommandClass,
+} from "@/components/database/kit/command-class"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { redisClassify, redisCommand } from "@/components/database/redis/api"
@@ -64,20 +70,17 @@ const ELSEWHERE: Record<string, { view: ConsoleElsewhere; why?: string }> = {
   SSUBSCRIBE: { view: "pubsub" },
 }
 
-const KEEP = 60
+/** Redis's classes of a command, in the one console vocabulary. */
+const CLASS: Record<RedisCommandClass, CommandClass> = {
+  read: "read",
+  write: "write",
+  dangerous: "removes",
+  blocked: "refused",
+}
 
 /** The tag a command's class takes: a read is the ordinary case and says nothing. */
 export function ClassTag({ value, admin }: { value: RedisCommandClass; admin?: boolean }) {
-  return (
-    <>
-      {value !== "read" && (
-        <Tag tone={value === "write" ? "default" : value === "dangerous" ? "warning" : "danger"}>
-          {value === "write" ? "writes" : value === "dangerous" ? "removes data" : "not run here"}
-        </Tag>
-      )}
-      {admin && <Tag>admin</Tag>}
-    </>
-  )
+  return <CommandClassTag value={CLASS[value]} admin={admin} />
 }
 
 const CAPABILITY: Record<string, string> = {
@@ -150,7 +153,7 @@ export function ConsoleView({
 
   const add = (entry: Omit<ConsoleEntry, "id" | "db">) =>
     setEntries((held) => [
-      ...held.slice(-(KEEP - 1)),
+      ...held.slice(-(TRANSCRIPT_KEPT - 1)),
       { ...entry, db, id: (held[held.length - 1]?.id ?? 0) + 1 },
     ])
 
@@ -346,7 +349,7 @@ export function ConsoleView({
             id={listId}
             role="listbox"
             aria-label="Commands"
-            className="absolute bottom-full left-2 z-20 mb-1 max-h-64 w-[min(34rem,calc(100%-1rem))] overflow-auto rounded-md border bg-popover p-1 shadow-md"
+            className="absolute bottom-full left-2 z-sticky mb-1 max-h-64 w-[min(34rem,calc(100%-1rem))] overflow-auto rounded-md border bg-popover p-1 shadow-md"
           >
             {options.map((option, at) => (
               <li
@@ -430,7 +433,9 @@ export function ConsoleView({
             }}
             onKeyDown={onKeyDown}
             onBlur={() => setTyping(false)}
-            className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-muted-foreground/60 max-sm:text-base"
+            // The console's line is the field and the caret its focus mark.
+            // eslint-disable-next-line design-system/tokens
+            className="h-7 min-w-0 flex-1 bg-transparent font-mono text-xs outline-none placeholder:text-faint max-sm:text-base"
           />
           <Button size="xs" pending={busy} disabled={!line.trim()} onClick={() => void run()}>
             <CornerDownLeft />
@@ -454,15 +459,14 @@ function Entry({
       <div className="flex min-w-0 items-baseline gap-2">
         <span className="shrink-0 text-muted-foreground select-none">db{entry.db ?? ""}&gt;</span>
         <span className="min-w-0 flex-1 font-medium break-all whitespace-pre-wrap">
-          {entry.command}
+          <CommandWord
+            command={entry.command}
+            color={entry.class && COMMAND_CLASS[CLASS[entry.class]].color}
+          />
         </span>
         <span className="flex shrink-0 items-center gap-2 font-sans text-hint text-muted-foreground">
           {entry.class && <ClassTag value={entry.class} />}
-          {entry.ms !== undefined && (
-            <span className="numeric">
-              {entry.ms < 10 ? entry.ms.toFixed(2) : Math.round(entry.ms)} ms
-            </span>
-          )}
+          {entry.ms !== undefined && <span className="numeric">{commandMs(entry.ms)}</span>}
         </span>
       </div>
       <div className="mt-0.5 min-w-0">
@@ -489,5 +493,18 @@ function Entry({
         )}
       </div>
     </div>
+  )
+}
+
+/** The command with its first word in the hue of what it does, as MongoDB's console draws it. */
+function CommandWord({ command, color }: { command: string; color: string | undefined }) {
+  const match = /^(\s*)(\S+)([\s\S]*)$/.exec(command)
+  if (!match || !color) return <>{command}</>
+  return (
+    <>
+      {match[1]}
+      <span style={{ color }}>{match[2]}</span>
+      {match[3]}
+    </>
   )
 }

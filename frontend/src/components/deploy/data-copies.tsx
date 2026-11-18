@@ -29,7 +29,8 @@ import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { FormFact, FormFacts, FormNote } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
@@ -45,7 +46,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { cn } from "@/lib/utils"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import {
   DATA_COPY_HOURS,
   NOT_POINTED,
@@ -570,7 +571,7 @@ export function DataCopyComparisonSheet({
                       <TableCell
                         className={cn(
                           "text-right",
-                          differs ? "font-medium text-(--git-modified)" : "text-muted-foreground",
+                          differs ? "font-medium text-git-modified" : "text-muted-foreground",
                         )}
                       >
                         {tableDifference(table)}

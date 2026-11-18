@@ -7,7 +7,6 @@ import { post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { clock, plural } from "@/lib/format"
 import { LANES, hueFor } from "@/lib/hue"
-import { downloadText } from "@/lib/metrics-export"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type { GameConsoleResult } from "@/lib/types"
@@ -18,7 +17,7 @@ import { LogText } from "@/components/logs/log-text"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
 import {
@@ -36,6 +35,7 @@ import {
   GameIdentitySkeleton,
   useGameOverview,
 } from "@/components/deploy/game/identity"
+import { saveText } from "@/lib/download"
 
 /**
  * The console's height: the window below the project's header and this page's
@@ -206,7 +206,7 @@ export function GameConsole({ projectId }: { projectId: number }) {
               <IconAction
                 label="Download the transcript"
                 disabled={lines.length === 0}
-                onClick={() => downloadText("game-console.log", `${transcript()}\n`, "text/plain")}
+                onClick={() => saveText("game-console.log", `${transcript()}\n`, "text/plain")}
               >
                 <Download />
               </IconAction>
@@ -382,7 +382,7 @@ const Exchange = memo(function Exchange({
         <time
           dateTime={line.at}
           aria-hidden
-          className="numeric w-10 shrink-0 text-right text-muted-foreground/60 select-none"
+          className="numeric w-10 shrink-0 text-right text-faint select-none"
         >
           {clock(line.at).slice(0, 5)}
         </time>
@@ -402,13 +402,10 @@ const Exchange = memo(function Exchange({
             failed && "bg-wash-warning hover:bg-wash-warning",
           )}
         >
-          <span
-            aria-hidden
-            className="numeric w-10 shrink-0 text-right text-muted-foreground/60 select-none"
-          >
+          <span aria-hidden className="numeric w-10 shrink-0 text-right text-faint select-none">
             {index + 1}
           </span>
-          <span className={cn("min-w-0 flex-1 text-foreground/85", flow)}>
+          <span className={cn("min-w-0 flex-1 text-foreground", flow)}>
             <ReplyText text={text} pattern={pattern} />
           </span>
         </li>

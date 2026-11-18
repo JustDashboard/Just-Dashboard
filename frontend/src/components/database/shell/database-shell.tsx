@@ -1,15 +1,14 @@
 "use client"
 
-import { Fragment } from "react"
 import { usePathname } from "next/navigation"
 import { cn } from "@/lib/utils"
-import { FactDot } from "@/components/metrics/host-identity"
+import { Fact, FactLine } from "@/components/fact-line"
 import { EngineMark } from "@/components/database/kit/engine-mark"
 import { EnvironmentTag, ProtectedTag } from "@/components/database/kit/environment-tag"
 import { ConnectPopover } from "@/components/database/shell/connect-popover"
 import { ConnectionSwitcher } from "@/components/database/shell/connection-switcher"
 import { useDatabase } from "@/components/database/shell/database-context"
-import { DatabaseHeader } from "@/components/database/shell/database-header"
+import { DatabaseHeader, OpenContents } from "@/components/database/shell/database-header"
 import { DatabaseVerbs } from "@/components/database/shell/database-verbs"
 import { connectionFacts } from "@/components/database/shell/facts"
 import { databaseHead, fillsUnderHeader } from "@/components/database/shell/header-rule"
@@ -86,10 +85,14 @@ export function DatabaseShell({ children }: { children: React.ReactNode }) {
 }
 
 /**
- * Which database this is, over the page of one of its items: its engine, its
- * name as the control that goes to another, what it is and where, what it is
- * for, whether it answers, and the two things asked of a database from any
- * page — how to connect to it, and its verbs.
+ * Which database this is, over the page of one of its items: a smaller copy
+ * of the database's header, in its order. Its engine, its name as the control
+ * that goes to another, whether it answers beside the name, what it is and
+ * where, what it is for; and at the end the same three things the header
+ * ends in — the command that opens its contents, Connect, and its verbs.
+ *
+ * It dropped the command and stood the state at the far end beside Connect,
+ * so going from Access to an account moved the state and changed the verbs.
  *
  * It is one compact row, not a header: the page under it opens on the item's
  * own identity line, and the facts are muted text rather than a second line
@@ -100,7 +103,8 @@ export function DatabaseShell({ children }: { children: React.ReactNode }) {
  * anything is drawn over anything — it truncates, and the facts go first.
  * Below the width where the labels fit beside the status they take a line of
  * their own under the name rather than leave: "production" and "protected"
- * are the two words a page must not lose on a phone.
+ * are the two words a page must not lose on a phone. On a phone the command
+ * and Connect keep their glyphs and lose their words.
  */
 function IdentityStrip() {
   const { conn, summary, engine, status, readOnly } = useDatabase()
@@ -111,22 +115,25 @@ function IdentityStrip() {
         <div className="flex min-w-0 flex-1 items-center gap-x-3">
           <EngineMark engine={engine} size="sm" />
           <ConnectionSwitcher />
+          <DatabaseStatusMark status={status} />
           {/* What it is and where, for a strip with the width to say it.
               The home says the same in full, so a narrow one loses nothing
               it cannot reach. It shrinks long before the name does. */}
-          <span className="hidden min-w-0 shrink-[1000] items-center gap-x-2 overflow-hidden text-body text-muted-foreground @4xl:flex">
-            {connectionFacts(conn, engine, summary).map((fact, index) => (
-              <Fragment key={fact.key}>
-                {index > 0 && <FactDot />}
-                <span
-                  title={fact.title}
-                  className={cn("min-w-0 truncate", fact.mono && "font-mono text-xs")}
-                >
-                  {fact.text}
-                </span>
-              </Fragment>
+          <FactLine
+            nowrap
+            className="hidden shrink-[1000] text-body text-muted-foreground @4xl:block"
+          >
+            {connectionFacts(conn, engine, summary).map((fact) => (
+              <Fact
+                key={fact.key}
+                title={fact.title}
+                mono={fact.mono}
+                className={cn(fact.mono && "text-xs")}
+              >
+                {fact.text}
+              </Fact>
             ))}
-          </span>
+          </FactLine>
         </div>
         {labelled && (
           <div
@@ -138,7 +145,7 @@ function IdentityStrip() {
           </div>
         )}
         <div className="flex shrink-0 items-center gap-2">
-          <DatabaseStatusMark status={status} />
+          <OpenContents compact />
           <ConnectPopover />
           <DatabaseVerbs />
         </div>

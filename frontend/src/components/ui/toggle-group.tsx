@@ -5,6 +5,7 @@ import { type VariantProps } from "class-variance-authority"
 import { ToggleGroup as ToggleGroupPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useField } from "@/components/form"
 import { toggleVariants } from "@/components/ui/toggle"
 
 const ToggleGroupContext = React.createContext<
@@ -17,17 +18,34 @@ const ToggleGroupContext = React.createContext<
   spacing: 0,
 })
 
+/**
+ * Inside a `Field` the group is named by the field's label — a group is not a
+ * control a `for` can point at — and described by its hint and error, unless
+ * the caller named it.
+ */
 function ToggleGroup({
   className,
   variant,
   size,
   spacing = 0,
   children,
-  ...props
+  ...rest
 }: React.ComponentProps<typeof ToggleGroupPrimitive.Root> &
   VariantProps<typeof toggleVariants> & {
     spacing?: number
   }) {
+  const field = useField()
+  const named = Boolean(rest["aria-label"] || rest["aria-labelledby"])
+  const describedBy =
+    [rest["aria-describedby"], field?.describedBy].filter(Boolean).join(" ") || undefined
+  const props = field
+    ? {
+        ...rest,
+        "aria-labelledby": named ? rest["aria-labelledby"] : field.labelId,
+        "aria-describedby": describedBy,
+        "aria-invalid": rest["aria-invalid"] ?? (field.invalid || undefined),
+      }
+    : rest
   return (
     <ToggleGroupPrimitive.Root
       data-slot="toggle-group"
@@ -36,7 +54,9 @@ function ToggleGroup({
       data-spacing={spacing}
       style={{ "--gap": spacing } as React.CSSProperties}
       className={cn(
-        "group/toggle-group flex w-fit items-center gap-[--spacing(var(--gap))] rounded-md data-[spacing=default]:data-[variant=outline]:shadow-xs",
+        // No shadow on the outline group: it is a control on the page, and
+        // nothing on the page lifts.
+        "group/toggle-group flex w-fit items-center gap-[--spacing(var(--gap))] rounded-md",
         className,
       )}
       {...props}
@@ -68,8 +88,8 @@ function ToggleGroupItem({
           variant: context.variant || variant,
           size: context.size || size,
         }),
-        "w-auto min-w-0 shrink-0 px-3 focus:z-10 focus-visible:z-10",
-        "data-[spacing=0]:rounded-none data-[spacing=0]:shadow-none data-[spacing=0]:first:rounded-l-md data-[spacing=0]:last:rounded-r-md data-[spacing=0]:data-[variant=outline]:border-l-0 data-[spacing=0]:data-[variant=outline]:first:border-l",
+        "w-auto min-w-0 shrink-0 px-3 focus:z-raised focus-visible:z-raised",
+        "data-[spacing=0]:rounded-none data-[spacing=0]:first:rounded-l-md data-[spacing=0]:last:rounded-r-md data-[spacing=0]:data-[variant=outline]:border-l-0 data-[spacing=0]:data-[variant=outline]:first:border-l",
         className,
       )}
       {...props}

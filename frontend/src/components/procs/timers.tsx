@@ -8,6 +8,7 @@ import { clockLabel, describeTimer, longClock } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { SystemdTimer, SystemdUnit } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { TABLE_BLEED } from "@/components/row-list"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
@@ -15,12 +16,14 @@ import { useSessionState } from "@/lib/view-state"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, unitProduct } from "@/components/product-logo"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -30,7 +33,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { useUnitControl } from "@/components/procs/unit-actions"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { Countdown } from "@/components/procs/schedule-band"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { NoSystemd, NoSystemdOrError } from "@/components/procs/no-systemd"
@@ -58,8 +61,8 @@ function stateOf(timer: SystemdTimer): Exclude<TimerState, ""> {
  *
  * The head counts what the Timers armed tile used to — armed, running now,
  * stopped — as chips that narrow the table to what they count, and how many
- * start on boot beside them. A row opens the timer's sheet
- * (`timer-sheet.tsx`): its calendar in words, what it runs, how the last run
+ * start on boot beside them. A row opens the timer's own page
+ * (`schedule-page.tsx`): its calendar in words, what it runs, how the last run
  * ended and every run before it. A timer whose service is running says so as
  * it happens.
  */
@@ -150,7 +153,7 @@ export function TimersPanel({
         {shown.length > 0 && (
           <Table
             className="table-fixed"
-            containerClassName="w-auto max-h-[calc(100svh-22rem)] group-data-[plain]/panel:-mx-4"
+            containerClassName={cn("max-h-[calc(100svh-22rem)] w-auto", TABLE_BLEED)}
           >
             <TableHeader className={stickyTableHeader}>
               <TableRow>
@@ -159,7 +162,8 @@ export function TimersPanel({
                 <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
                 <TableHead className="hidden w-28 xl:table-cell">Last run</TableHead>
                 <TableHead className="w-24 md:w-32">State</TableHead>
-                <TableHead className="w-20 md:w-24" />
+                {/* Two 40px targets under a finger, so the ⋯ is not cut off. */}
+                <TableHead label="Actions" className="w-20 md:w-24 pointer-coarse:w-32" />
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -197,7 +201,7 @@ function asUnit(timer: SystemdTimer): SystemdUnit {
 }
 
 /**
- * Every verb this operator may use on a timer, for its row and its sheet
+ * Every verb this operator may use on a timer, for its row and its page
  * alike: Run now starts the service the way the timer would, Start and Stop
  * arm and disarm the timer itself, and Enable and Disable say whether it is
  * armed again at boot.
@@ -295,7 +299,7 @@ export function useTimerVerbs({
   }, [timer, can, confirm, act, onChanged])
 }
 
-/** A timer's state as a word: what a row and the sheet's head both say. */
+/** A timer's state as a word: what a row and the page's line both say. */
 export function TimerState({ timer, busy }: { timer: SystemdTimer; busy?: string }) {
   if (busy) {
     return (
@@ -358,10 +362,11 @@ function TimerRow({
           <div className="min-w-0">
             <button
               type="button"
+              {...ROW_NAME}
               onClick={onOpen}
               aria-label={timer.unit}
               title={timer.unit}
-              className="block max-w-full truncate text-left text-body font-medium hover:underline"
+              className="block max-w-full truncate rounded-sm text-left text-body font-medium focus-ring hover:underline"
             >
               {timer.unit.replace(/\.timer$/, "")}
             </button>

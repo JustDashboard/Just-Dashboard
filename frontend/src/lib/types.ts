@@ -11,7 +11,7 @@ import type {
   TCPLatency,
   TCPPoint,
   UploadProfile,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import type { ForwardAuthProvider } from "./proxy/types-siteform"
 
 export type Capability =
@@ -1695,7 +1695,7 @@ export type LogSource = {
   /** A live source's state — a stopped container still has logs worth reading. */
   status?: string
   /**
-   * The lens the server reads this source through (`lib/log-lenses.ts`) —
+   * The lens the server reads this source through (`lib/log/lenses.ts`) —
    * detected from the path, the image or the unit. Absent where none applies,
    * and for a stack whose containers disagree.
    */

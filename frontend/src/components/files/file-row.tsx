@@ -212,14 +212,14 @@ export const FileRow = memo(function FileRow({
                   </IconAction>
                 )
               ) : (
-                <Button
+                <IconAction
                   size="icon-sm"
                   variant="ghost"
-                  aria-label={media ? "View" : caps.write ? "Edit" : "Open"}
+                  label={media ? "View" : caps.write ? "Edit" : "Open"}
                   onClick={media ? onView : onEdit}
                 >
                   {media ? <Eye className="size-3.5" /> : <Pencil className="size-3.5" />}
-                </Button>
+                </IconAction>
               )}
               {fullControls ? (
                 <IconAction label="Download" asChild>

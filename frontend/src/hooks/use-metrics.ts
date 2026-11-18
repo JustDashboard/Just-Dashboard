@@ -15,7 +15,7 @@ import {
   setHost,
   subscribe,
   type MetricsState,
-} from "@/lib/metrics-store"
+} from "@/lib/metrics/store"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 
 /** Reads the live metrics store. Re-renders only on a new frame. */

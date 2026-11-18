@@ -22,7 +22,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { compact } from "@/components/network/gateway/reading"
 import { EXPIRY_CHOICES, exceptionState, expiryFrom } from "@/components/network/protection/reading"
 import { useAuth } from "@/hooks/use-auth"

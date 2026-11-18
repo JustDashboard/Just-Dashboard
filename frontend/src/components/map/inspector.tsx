@@ -11,8 +11,11 @@ import {
   Warning,
 } from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
-import { KEYCAP } from "@/components/command-search/keycaps"
+import { Keycaps } from "@/components/keycaps"
+import { ARROW_CAPS } from "@/components/map/canvas-keys"
 import { Status } from "@/components/status-dot"
+import { PaneSection } from "@/components/panel"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { copyText } from "@/lib/clipboard"
@@ -24,7 +27,7 @@ import { VIA_LABEL, wireLabel } from "@/components/map/edges"
 import { ItemMark, KIND_GLYPH, TONE_DOT } from "@/components/map/marks"
 import type { UnreadNotice } from "@/components/map/unread"
 import { MissingLine } from "@/components/missing-thing"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { nodeKindLabel } from "@/components/map/nodes"
 
 type Point = (id: string | null) => void
@@ -112,11 +115,22 @@ export function MapInspector({
         )}
       </div>
 
-      <div className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground">
+      {/* The canvas's keys. A key means nothing under a finger, so a touch
+          screen is not shown them. */}
+      <div
+        data-slot="map-keys"
+        className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1.5 border-t border-hairline px-4 py-2.5 text-hint text-muted-foreground pointer-coarse:hidden"
+      >
+        {/* The arrows slide the canvas until Enter picks a box or a frame,
+            then move it, as on a database's diagram. Shift's longer step is
+            said here, where a keyboard and a reader without a pointer see
+            it; the legend wraps rather than hide it in a title. */}
         <Key cap="F">Fit</Key>
         <Key cap="I">Panel</Key>
-        <Key cap="↵">Open</Key>
+        <Key cap="↵">Pick, open</Key>
         <Key cap="Esc">Let go</Key>
+        <Key cap={ARROW_CAPS}>Slide, move</Key>
+        <Key cap="Shift">Longer step</Key>
       </div>
     </aside>
   )
@@ -125,7 +139,7 @@ export function MapInspector({
 function Key({ cap, children }: { cap: string; children: React.ReactNode }) {
   return (
     <span className="flex items-center gap-1.5">
-      <kbd className={KEYCAP}>{cap}</kbd>
+      <Keycaps keys={cap} />
       {children}
     </span>
   )
@@ -143,7 +157,7 @@ function Identity({
   actions?: React.ReactNode
 }) {
   return (
-    <div className="space-y-4 p-4">
+    <div className="space-y-4 border-b border-hairline p-4 last:border-b-0">
       <div className="flex min-w-0 items-start gap-3">
         {mark}
         <div className="min-w-0 flex-1 pt-0.5">
@@ -158,38 +172,18 @@ function Identity({
   )
 }
 
-function Section({
-  title,
-  count,
-  children,
-}: {
-  title: string
-  count?: number
-  children: React.ReactNode
-}) {
-  return (
-    <section className="border-t border-hairline px-4 py-4">
-      <h3 className="mb-2.5 flex items-center gap-2">
-        <span className="eyebrow">{title}</span>
-        {count !== undefined && (
-          <span className="numeric text-hint text-muted-foreground">{count}</span>
-        )}
-      </h3>
-      {children}
-    </section>
-  )
-}
+/** One group of the inspector: the pane's shared section, as Files' and a remote session's. */
+const Section = PaneSection
 
 function Facts({ facts }: { facts: { label: string; value: string }[] }) {
   return (
-    <dl className="grid grid-cols-[minmax(0,6.5rem)_minmax(0,1fr)] gap-x-3 gap-y-2 text-body">
+    <DetailList size="body" className="gap-y-2">
       {facts.map((fact) => (
-        <div key={fact.label} className="contents">
-          <dt className="truncate text-muted-foreground">{fact.label}</dt>
-          <dd className="min-w-0 break-words">{fact.value}</dd>
-        </div>
+        <Detail key={fact.label} label={fact.label} className="break-words">
+          {fact.value}
+        </Detail>
       ))}
-    </dl>
+    </DetailList>
   )
 }
 

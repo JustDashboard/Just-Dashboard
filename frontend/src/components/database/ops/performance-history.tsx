@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState } from "react"
+import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Clock } from "@/components/icons"
 import { ApiError } from "@/lib/api"
@@ -8,16 +9,19 @@ import { relativeTime, timestamp } from "@/lib/format"
 import { LATENCY_SHARE, latencyHead } from "@/lib/latency-words"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { InfoTip } from "@/components/form"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import type { Series } from "@/components/metrics/metric-chart"
-import { Sparkline } from "@/components/metrics/sparkline"
-import { SearchInput } from "@/components/page"
+import { Sparkline } from "@/components/sparkline"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, EmptyState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import {
+  ROW_NAME,
+  SortHead,
   Table,
   TableBody,
   TableCell,
@@ -49,13 +53,11 @@ import {
   type HistoryRow,
 } from "@/components/database/ops/performance-recorded"
 import {
+  FIT_COLUMN,
   NoFigure,
   NotAvailable,
-  SortHead,
-  Stale,
-  StatementLine,
-  ViewRead,
   RETURNS_FOCUS,
+  StatementLine,
 } from "@/components/database/ops/performance-parts"
 import { Fig, FigureLine, TitleAside, TitleFact } from "@/components/database/ops/performance-words"
 import type {
@@ -66,6 +68,8 @@ import type {
   DbStatementHistorySort,
 } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { Read, Stale } from "@/components/database/kit/read"
+import { agree } from "@/components/database/kit/figures"
 
 /** How many statements the list asks for. The server's cap is 200. */
 const TOP = 50
@@ -189,7 +193,8 @@ export function StatementHistoryView() {
           </TitleAside>
         )}
       </PanelHeader>
-      <ViewRead
+      <Read
+        patience
         poll={history}
         what="the statement history"
         skeleton={<LoadingPanel plain rows={8} />}
@@ -214,13 +219,13 @@ export function StatementHistoryView() {
                   <p>The history below ends at the last reading that worked.</p>
                 </Notice>
               )}
-              <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+              <PanelBody flush className={FIT_COLUMN}>
                 {answer.statements.length === 0 ? (
-                  <EmptyNote className="px-4">
+                  <EmptyNote>
                     No {engine.nouns.statement} ran in {windowWords(answer.hours)}.
                   </EmptyNote>
                 ) : rows.length === 0 ? (
-                  <EmptyNote className="px-4">No statement matches {filter.trim()}.</EmptyNote>
+                  <EmptyNote>No statement matches {filter.trim()}.</EmptyNote>
                 ) : (
                   <Table>
                     <TableHeader>
@@ -242,10 +247,17 @@ export function StatementHistoryView() {
                           onActivate={() =>
                             router.push(statementHref(id, entry.id, { tab: "history" }))
                           }
-                          aria-label={`Open the history of the statement: ${oneLine(entry.query).slice(0, 80)}`}
                         >
                           <TableCell className="w-full max-w-0 py-2">
-                            <StatementLine text={entry.query} />
+                            {/* The statement is the row's name, and the keyboard's way in. */}
+                            <Link
+                              href={statementHref(id, entry.id, { tab: "history" })}
+                              {...ROW_NAME}
+                              aria-label={`Open the history of the statement: ${oneLine(entry.query).slice(0, 80)}`}
+                              className="block min-w-0 rounded-sm focus-ring hover:underline"
+                            >
+                              <StatementLine text={entry.query} />
+                            </Link>
                           </TableCell>
                           <TableCell className="px-2 py-2">
                             <Sparkline
@@ -296,7 +308,7 @@ export function StatementHistoryView() {
             </div>
           )
         }
-      </ViewRead>
+      </Read>
     </Panel>
   )
 }
@@ -418,13 +430,14 @@ export function StatementRecorded({
       ) : (
         <>
           {entry && <RecordedFigures entry={entry} facts={data} />}
-          <ViewRead
+          <Read
+            patience
             poll={detail}
             what="the statement's history"
             skeleton={<LoadingPanel plain rows={4} />}
           >
             {(answer) => <Charts rows={rows} facts={answer} events={events} />}
-          </ViewRead>
+          </Read>
         </>
       )}
     </div>
@@ -449,7 +462,7 @@ function RecordedFigures({
         <Fig>{shareWords(entry.share)}</Fig> of the window&apos;s statement time
       </span>
       <span>
-        <Fig>{entry.calls.toLocaleString()}</Fig> {entry.calls === 1 ? "call" : "calls"}
+        <Fig>{entry.calls.toLocaleString()}</Fig> {agree(entry.calls, "call", "calls")}
       </span>
       <span>
         <Fig>{millis(entry.totalMs)}</Fig> in all
@@ -466,7 +479,7 @@ function RecordedFigures({
         )
       })}
       <span>
-        <Fig>{entry.rows.toLocaleString()}</Fig> {entry.rows === 1 ? "row" : "rows"}
+        <Fig>{entry.rows.toLocaleString()}</Fig> {agree(entry.rows, "row", "rows")}
         {each !== undefined && `, ${ratio(each)} a call`}
       </span>
       {entry.rowsRead !== undefined && (

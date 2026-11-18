@@ -3,9 +3,10 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ArrowDown, ArrowUp, Crosshair, Globe, RefreshClockwise, Wrench } from "@/components/icons"
 import { get } from "@/lib/api"
-import { bytes, plural, rate } from "@/lib/format"
+import { bytes, plural } from "@/lib/format"
 import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -17,12 +18,12 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HostIdentity, HostFact, FactDot } from "@/components/metrics/host-identity"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { TileTrend } from "@/components/sparkline"
+import { IdentityHeader } from "@/components/identity-header"
+import { ChartPanel } from "@/components/chart-panel"
 import { NetworkFact } from "@/components/client-mark"
-import { LiveBytes, StreamState } from "@/components/overview/readings"
-import { WireMark } from "@/components/deploy/wire"
+import { LiveBytes, StreamState } from "@/components/live-figure"
+import { WireMark } from "@/components/wire/wire"
 import {
   Topology as TopologyPicture,
   TopologyLoading,
@@ -49,9 +50,11 @@ import {
   type LiveTraffic,
 } from "@/components/network/use-live-traffic"
 import { deviceHref } from "@/components/network/interfaces/device-facts"
+import { axisRate, formatRate, RX, TX } from "@/components/in-out"
 
-const IN = "var(--chart-5)"
-const OUT = "var(--chart-2)"
+// In and out are the network chart's two colours, as every in/out pair draws them.
+const IN = RX
+const OUT = TX
 const TUNNELS = "var(--chart-4)"
 const CONTAINERS = "var(--chart-3)"
 
@@ -61,9 +64,6 @@ const SERIES = [
   { key: "tunnels", label: "Tunnels", color: TUNNELS, kind: "line" as const },
   { key: "containers", label: "Containers", color: CONTAINERS, kind: "line" as const },
 ]
-
-const formatRate = (value: number) => rate(value)
-const axisRate = (value: number) => `${bytes(value, 0)}/s`
 
 /** What the picture drew at the last visit, so the grey page is the page's own shape. */
 type Shape = { outside: number; inside: number; facts: number }
@@ -129,8 +129,8 @@ export default function NetworkOverviewPage() {
   const failed = !data && Boolean(overview.error)
   const nodeOf = (id: string) => flowNode(id, data!, links)
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Network" />
+    <Page rise>
+      <PageContext title="Network" />
       <NetworkIdentity
         overview={data}
         links={links}
@@ -329,7 +329,7 @@ function NetworkIdentity({
   const menu = <VerbMenu verbs={verbs} label="Network actions" />
   if (!overview)
     return (
-      <HostIdentity
+      <IdentityHeader
         label="About the network"
         fallback={Globe}
         title={
@@ -374,7 +374,7 @@ function NetworkIdentity({
   const way = family(primary?.family === "inet6" ? "inet6" : "inet")
   const state = uplinkState(overview, links)
   return (
-    <HostIdentity
+    <IdentityHeader
       label="About the network"
       fallback={Globe}
       title={
@@ -386,65 +386,54 @@ function NetworkIdentity({
       command={command}
       menu={menu}
       facts={
-        <span ref={facts} className={FACTS}>
-          {primary ? (
-            <HostFact>
-              <span className="font-mono">{primary.device}</span>
-              {uplink?.speedMbps ? (
-                <span className="ml-1.5">· {speed(uplink.speedMbps)}</span>
-              ) : null}
-              {primary.gateway && (
-                <span className="ml-1.5">
-                  via <span className="font-mono">{primary.gateway}</span>
-                </span>
-              )}
-            </HostFact>
-          ) : (
-            <HostFact>no default route</HostFact>
-          )}
+        <FactLine ref={facts} className="[&>span]:gap-y-1">
+          <Fact>
+            {primary ? (
+              <>
+                <span className="font-mono">{primary.device}</span>
+                {uplink?.speedMbps ? (
+                  <span className="ml-1.5">· {speed(uplink.speedMbps)}</span>
+                ) : null}
+                {primary.gateway && (
+                  <span className="ml-1.5">
+                    via <span className="font-mono">{primary.gateway}</span>
+                  </span>
+                )}
+              </>
+            ) : (
+              "no default route"
+            )}
+          </Fact>
           {v4 && v6 && (
-            <>
-              <FactDot />
-              <HostFact>
-                <span className="font-mono">{v6.replace(/\/\d+$/, "")}</span>
-              </HostFact>
-            </>
+            <Fact>
+              <span className="font-mono">{v6.replace(/\/\d+$/, "")}</span>
+            </Fact>
           )}
           {way && way.public !== "nic" && way.public !== "no_route" && (
-            <>
-              <FactDot />
-              <HostFact>
-                <span title={way.detail}>{identityVerdict(way)}</span>
-              </HostFact>
-            </>
+            <Fact>
+              <span title={way.detail}>{identityVerdict(way)}</span>
+            </Fact>
           )}
-          <FactDot />
-          <HostFact>
+          <Fact>
             <span data-testid="forwarding-families">
               {forwardingWord("IPv4", family("inet"), overview.forwarding.ipv4)}
               {" · "}
               {forwardingWord("IPv6", family("inet6"), overview.forwarding.ipv6)}
             </span>
-          </HostFact>
+          </Fact>
           {overview.persistence.made > 0 && (
-            <>
-              <FactDot />
-              <HostFact>
-                <span
-                  className={overview.persistence.unit === "enabled" ? undefined : "text-warning"}
-                >
-                  {plural(overview.persistence.made, "change")}{" "}
-                  {overview.persistence.unit === "enabled"
-                    ? "kept for boot"
-                    : "not restored at boot"}
-                </span>
-              </HostFact>
-            </>
+            <Fact>
+              <span
+                className={overview.persistence.unit === "enabled" ? undefined : "text-warning"}
+              >
+                {plural(overview.persistence.made, "change")}{" "}
+                {overview.persistence.unit === "enabled" ? "kept for boot" : "not restored at boot"}
+              </span>
+            </Fact>
           )}
           {overview.client.address && (
-            <>
-              <FactDot />
-              <span className="inline-flex min-w-0 items-center gap-1.5">
+            <Fact>
+              <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                 <span>you</span>
                 <NetworkFact ip={overview.client.address} glyph />
                 {overview.client.device && !overview.client.local && (
@@ -453,9 +442,9 @@ function NetworkIdentity({
                   </span>
                 )}
               </span>
-            </>
+            </Fact>
           )}
-        </span>
+        </FactLine>
       }
     />
   )
@@ -700,7 +689,6 @@ function TrafficChart({ links, live }: { links: NetworkLink[]; live: LiveTraffic
                   ))}
                 </span>
               ))}
-            <span>Select a stretch of the chart to see what carried it.</span>
           </p>
         )
       }

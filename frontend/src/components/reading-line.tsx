@@ -1,5 +1,9 @@
+import { useId } from "react"
 import Link from "next/link"
 import { cn } from "@/lib/utils"
+import type { Icon } from "@/components/icons"
+import type { Tone } from "@/components/tone"
+import { WireMark } from "@/components/wire/wire"
 
 /**
  * One reading as a sentence on a mark: a tinted glyph, what the reading is,
@@ -24,6 +28,16 @@ import { cn } from "@/lib/utils"
  * `BarReading`'s line under a band is another thing with its own slot
  * (`bar-reading-line`): a spec that counts the one must not count the other.
  */
+/**
+ * A reading line's height, for a cell that stands in a run of them without
+ * being one — the Overview's one-disk storage band. 10 + 14 + 17.875 + 15.125
+ * + 10: the padding, the eyebrow's micro line, the reading and its detail. The
+ * band had it as `min-h-17`, the 68 the lines were while the eyebrow sat on a
+ * 15px line; when the micro step took its own 14px line the lines became 67
+ * and the band did not, so a server's sixth cell grew a pixel when it landed.
+ */
+export const readingLineHeight = "min-h-[4.1875rem]"
+
 export function ReadingLine({
   href,
   onPress,
@@ -40,7 +54,7 @@ export function ReadingLine({
   onPress?: () => void
   /** Where the line goes or what a press does, as its accessible name. */
   label?: string
-  /** A `WireMark`, on the measure's own hue or the reading's tone. */
+  /** A `ReadingMark`: the measure's glyph on its own hue, or on the reading's tone. */
   mark: React.ReactNode
   name: React.ReactNode
   children: React.ReactNode
@@ -49,22 +63,30 @@ export function ReadingLine({
   trend?: React.ReactNode
   className?: string
 }) {
+  const reading = useId()
+  // A link named by `label` ("CPU on Metrics") holds the words it shows in
+  // its name: the measure's name does, and the reading and its detail are
+  // the link's description instead, outside the name's check (WCAG 2.5.3,
+  // axe `label-content-name-mismatch`). A screen reader still hears them.
+  const described = Boolean(href && label)
   const body = (
     <>
       {mark}
       <span className="block min-w-0 flex-1">
         <span className="eyebrow flex items-center gap-1.5">{name}</span>
-        <span className="block truncate text-body leading-snug font-medium">{children}</span>
-        {/* The line's third row holds its place when there is no detail, so
-            a line with a hint and one without are the same height. */}
-        <span className="block truncate text-hint leading-snug text-muted-foreground">
-          {hint ?? " "}
+        <span id={reading} aria-hidden={described || undefined} className="block min-w-0">
+          <span className="block truncate text-body leading-snug font-medium">{children}</span>
+          {/* The line's third row holds its place when there is no detail, so
+              a line with a hint and one without are the same height. */}
+          <span className="block truncate text-hint leading-snug text-muted-foreground">
+            {hint ?? " "}
+          </span>
         </span>
       </span>
       <span className="hidden w-32 shrink-0 sm:block 2xl:w-48">{trend}</span>
     </>
   )
-  const shape = "flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5"
+  const shape = cn("flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5", readingLineHeight)
   if (!href && onPress)
     return (
       <div
@@ -90,11 +112,50 @@ export function ReadingLine({
     <Link
       href={href}
       aria-label={label}
+      aria-describedby={described ? reading : undefined}
       data-slot="reading-line"
       className={cn(shape, "focus-ring transition-colors hover:bg-row-hover", className)}
     >
       {body}
     </Link>
+  )
+}
+
+/**
+ * A reading's mark: its glyph on the measure's own hue (§10's `HUE`), or on
+ * the tone of what is wrong with it once it is past a line, so the line that
+ * needs looking at is the one in amber or red. The host Overview, a PM2
+ * application and the database home each drew this switch under a name of
+ * their own.
+ *
+ * `glyph` is an icon component; a mark that is not one (an application's
+ * interpreter) is passed as `children`. `success` is not a reading's worry and
+ * draws as the hue.
+ */
+export function ReadingMark({
+  tone = "default",
+  hue,
+  glyph: Glyph,
+  children,
+  className,
+}: {
+  tone?: Tone
+  hue?: string
+  glyph?: Icon
+  children?: React.ReactNode
+  className?: string
+}) {
+  const drawn = Glyph ? <Glyph aria-hidden /> : children
+  if (tone === "warning" || tone === "danger")
+    return (
+      <WireMark size="md" tone={tone} className={className}>
+        {drawn}
+      </WireMark>
+    )
+  return (
+    <WireMark size="md" hue={hue} className={className}>
+      {drawn}
+    </WireMark>
   )
 }
 

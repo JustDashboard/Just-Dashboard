@@ -17,7 +17,8 @@ import { notify } from "@/lib/toast"
 import type { NetworkLink } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -29,12 +30,11 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { AddressLine } from "@/components/network/address"
+import { AddressLine } from "@/components/address"
 import { LinkMark, OWNER_LABEL, ROLE_LABEL, kindLabel } from "@/components/network/marks"
 import { describeDevice, deviceState } from "./device-facts"
 
 const TILE = "size-10 rounded-lg [&_img]:size-6 [&_svg]:size-5"
-const FACTS = "flex h-4 w-full min-w-0 items-center gap-x-3 overflow-hidden whitespace-nowrap"
 
 /**
  * The line a device's page opens on, laid out as a project's header: the
@@ -126,7 +126,7 @@ export function DeviceIdentity({
 
   return (
     <>
-      <HostIdentity
+      <IdentityHeader
         slot="device-identity"
         label={`About ${link.name}`}
         className="border-b-0 pb-0"
@@ -155,26 +155,20 @@ export function DeviceIdentity({
           // One line at every width, so the line is as tall with a device on
           // it as while it waits for one: a phone gets the first address and
           // leaves who keeps the device to its Settings.
-          <span className={FACTS}>
-            <span className="shrink-0">
-              {ROLE_LABEL[link.role]}
-              {kindLabel(link).toLowerCase() !== ROLE_LABEL[link.role].toLowerCase() &&
-                ` · ${kindLabel(link)}`}
-            </span>
-            {link.managed && (
-              <>
-                <FactDot />
-                <span className="shrink-0">made here</span>
-              </>
+          <FactLine nowrap className="h-4 w-full">
+            <Fact className="shrink-0!">{ROLE_LABEL[link.role]}</Fact>
+            {kindLabel(link).toLowerCase() !== ROLE_LABEL[link.role].toLowerCase() && (
+              <Fact className="shrink-0!">{kindLabel(link)}</Fact>
             )}
-            <FactDot />
-            <AddressLine addresses={link.addresses} max={1} className="sm:hidden" />
-            <AddressLine addresses={link.addresses} className="shrink-0 max-sm:hidden" />
-            <span className="contents max-sm:hidden">
-              <FactDot />
-              <span className="truncate">{describeDevice(link, OWNER_LABEL)}</span>
-            </span>
-          </span>
+            {link.managed && <Fact className="shrink-0!">made here</Fact>}
+            <Fact className="sm:hidden">
+              <AddressLine addresses={link.addresses} max={1} />
+            </Fact>
+            <Fact className="shrink-0! max-sm:hidden">
+              <AddressLine addresses={link.addresses} />
+            </Fact>
+            <Fact className="max-sm:hidden">{describeDevice(link, OWNER_LABEL)}</Fact>
+          </FactLine>
         }
         command={
           admin && !link.adminUp ? (
@@ -236,7 +230,9 @@ export function DeviceIdentity({
                 )}
               </DropdownMenuContent>
             </DropdownMenu>
-          ) : undefined
+          ) : (
+            false
+          )
         }
       />
       {dialog}
@@ -244,16 +240,18 @@ export function DeviceIdentity({
   )
 }
 
-/** The line while the devices are being read: the same line, with nothing on it yet. */
+/** The line while the devices are being read: the same line, its name known, "Reading…" for its state, the rest bones. */
 export function DeviceIdentityLoading({ name }: { name: string }) {
   return (
-    <HostIdentity
+    <IdentityHeader
+      loading
       slot="device-identity"
       className="border-b-0 pb-0"
-      logo={<span className="size-10 shrink-0 rounded-lg border border-hairline bg-control" />}
       title={<span className="truncate font-mono">{name}</span>}
+      // What the line is doing is said, as a state word, until it has one.
       state={<TextShimmer className="text-xs font-medium">Reading…</TextShimmer>}
-      facts={<span className={FACTS}>&nbsp;</span>}
+      // The device's verbs are the line's foot on a phone; their place is kept.
+      menu={false}
     />
   )
 }

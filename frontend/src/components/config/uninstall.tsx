@@ -37,7 +37,8 @@ import { Modal } from "@/components/modal"
 import { Panel, Well } from "@/components/panel"
 import { RunPhases, phaseStates } from "@/components/run-phases"
 import { RunTranscript } from "@/components/run-transcript"
-import { ErrorState, Spinner } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupAddon, InputGroupInput } from "@/components/ui/input-group"
@@ -54,8 +55,8 @@ import { Skeleton } from "@/components/ui/skeleton"
  */
 export function UninstallRow({ onUninstall }: { onUninstall: () => void }) {
   return (
-    <Panel className="border-rule-danger">
-      <div className="grid min-w-0 gap-x-8 gap-y-3 px-5 py-4 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+    <Panel framed className="border-rule-danger">
+      <div className="grid min-w-0 gap-x-8 gap-y-3 px-5 py-4 sm:grid-cols-main-end sm:items-center">
         <div className="min-w-0 space-y-1">
           <h4 className="text-sm font-medium">Uninstall Just Dashboard</h4>
           <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">
@@ -400,7 +401,7 @@ function LineList({
               aria-hidden
               className={cn(
                 "mt-0.5 size-3.5 shrink-0",
-                tone === "removed" ? "text-[var(--git-deleted)]" : "text-muted-foreground",
+                tone === "removed" ? "text-git-deleted" : "text-muted-foreground",
               )}
             />
             <div className="min-w-0 space-y-0.5">

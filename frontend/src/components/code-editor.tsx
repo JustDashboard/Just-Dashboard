@@ -4,7 +4,7 @@ import { useEffect, useRef } from "react"
 import dynamic from "next/dynamic"
 import { cn } from "@/lib/utils"
 import { MONACO_VS } from "@/lib/vendored"
-import { Spinner } from "@/components/state"
+import { Spinner } from "@/components/loading"
 
 // Monaco pulls in a large worker bundle and touches `window`, so it is loaded
 // only when an editor is actually opened.

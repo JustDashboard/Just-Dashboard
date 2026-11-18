@@ -50,13 +50,16 @@ import type { GitPreview } from "@/components/git/preview-panel"
 import { openPreview } from "@/components/git/pull-request-row"
 import type { GitRun } from "@/components/git/run"
 import { TestPullDialog } from "@/components/git/test-pull-dialog"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFacts, FormFact, OptionList, OptionRow } from "@/components/form"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { ViewTabs, type TabView } from "@/components/tabs"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -368,26 +371,37 @@ export function GitHubPanel({
     setSection(next)
   }
 
-  return (
-    <div className="flex min-h-0 flex-1 flex-col">
-      <div role="tablist" className="flex h-9 shrink-0 items-center border-b border-hairline px-1">
-        <SectionTab selected={section === "pulls"} onClick={() => pickSection("pulls")}>
-          Pull requests
-        </SectionTab>
-        <SectionTab selected={section === "issues"} onClick={() => pickSection("issues")}>
-          Issues
-          {issues.data && issues.data.length > 0 && <ChipCount>{issues.data.length}</ChipCount>}
-        </SectionTab>
-        {branch && (
-          <SectionTab selected={section === "runs"} onClick={() => pickSection("runs")}>
-            Actions
-            {runsFailing && (
-              <CrossCircle role="img" aria-label="failing" className="size-3.5 text-destructive" />
-            )}
-          </SectionTab>
-        )}
-      </div>
+  const sections: TabView<Section>[] = [
+    { key: "pulls", label: "Pull requests" },
+    { key: "issues", label: "Issues", count: issues.data?.length },
+  ]
+  if (branch) {
+    sections.push({
+      key: "runs",
+      label: (
+        <>
+          Actions
+          {runsFailing && (
+            <CrossCircle role="img" aria-label="failing" className="size-3.5 text-destructive" />
+          )}
+        </>
+      ),
+    })
+  }
 
+  return (
+    // The three sections as real tabs: the arrow keys move along the strip
+    // and the chosen one names what is under it. It was a tablist of buttons
+    // the arrows did nothing on.
+    <ViewTabs
+      label="GitHub"
+      size="sm"
+      value={section}
+      onValueChange={pickSection}
+      views={sections}
+      className="px-1"
+      rootClassName="min-h-0 flex-1"
+    >
       {section === "pulls" && (
         <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-hairline px-2 py-1.5">
           {(["open", "merged", "closed"] as const).map((key) => (
@@ -437,7 +451,10 @@ export function GitHubPanel({
         </div>
       )}
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <TabsPrimitive.Content
+        value={section}
+        className="min-h-0 flex-1 overflow-auto focus-ring-inset"
+      >
         {section === "pulls" && (
           <>
             {pulls.error && <ErrorState error={pulls.error} className="m-3" />}
@@ -545,7 +562,7 @@ export function GitHubPanel({
                     key={issue.number}
                     className="group flex min-w-0 items-start gap-2.5 py-2.5 pr-1.5 pl-3 transition-colors hover:bg-row-hover"
                   >
-                    <IssueMark aria-hidden className="mt-px size-4 shrink-0 text-(--pull-open)" />
+                    <IssueMark aria-hidden className="mt-px size-4 shrink-0 text-pull-open" />
                     <div className="min-w-0 flex-1">
                       <span className="line-clamp-2 text-body leading-snug font-medium">
                         {issue.title}
@@ -645,7 +662,7 @@ export function GitHubPanel({
             )}
           </>
         )}
-      </div>
+      </TabsPrimitive.Content>
 
       <CreatePullDialog
         open={creating}
@@ -719,7 +736,7 @@ export function GitHubPanel({
           onCommented={() => issues.refresh()}
         />
       )}
-    </div>
+    </ViewTabs>
   )
 }
 
@@ -933,28 +950,6 @@ function CreatePullDialog({
   )
 }
 
-function SectionTab({
-  selected,
-  onClick,
-  children,
-}: {
-  selected: boolean
-  onClick: () => void
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={selected}
-      onClick={onClick}
-      className={tabClasses(selected, "h-9 px-2.5")}
-    >
-      {children}
-    </button>
-  )
-}
-
 /**
  * How an Actions run stands, as the mark GitHub draws for it: a tick, a
  * cross, a clock while it runs, and a slashed circle for one that was
@@ -963,13 +958,7 @@ function SectionTab({
  */
 function RunMark({ run }: { run: GitHubWorkflowRun }) {
   if (run.status !== "completed") {
-    return (
-      <Clock
-        role="img"
-        aria-label="running"
-        className="mt-px size-4 shrink-0 animate-pulse text-warning"
-      />
-    )
+    return <Clock role="img" aria-label="running" className="mt-px size-4 shrink-0 text-warning" />
   }
   switch (run.conclusion) {
     case "success":

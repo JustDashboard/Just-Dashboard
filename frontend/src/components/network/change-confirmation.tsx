@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { usePathname } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
-import { setNetworkPendingApply } from "@/lib/network-pending"
+import { setNetworkPendingApply } from "@/lib/network/pending"
 import type { BoundaryAfterVerify, NetworkChangeStatus, NetworkConfirmationView } from "@/lib/types"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
@@ -73,11 +74,11 @@ export function NetworkChangeConfirmation() {
   }>()
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string>()
-  const [now, setNow] = useState(() => Date.now())
   const { confirm, dialog } = useConfirm()
   const available = state.data?.available === true
   const change = state.data?.change
   const pending = change?.phase === "awaiting_confirmation"
+  const now = useNow(1000, pending)
   const cleanupPending = change?.cleanup === "pending" || change?.cleanup === "failed"
   const owned = state.data?.owned === true
   // An SSH apply rides the same journal and watchdog; only its words differ.
@@ -119,12 +120,6 @@ export function NetworkChangeConfirmation() {
     document.addEventListener("visibilitychange", shown)
     return () => document.removeEventListener("visibilitychange", shown)
   }, [admin, refresh])
-
-  useEffect(() => {
-    if (!pending) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [pending])
 
   const verify = async () => {
     if (!change) return

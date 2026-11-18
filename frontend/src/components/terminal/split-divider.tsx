@@ -1,8 +1,8 @@
 "use client"
 
 import { useRef, useState } from "react"
-import type { Divider } from "@/lib/terminal-layout"
-import { SPLIT_GAP } from "@/lib/terminal-layout"
+import type { Divider } from "@/lib/terminal/layout"
+import { SPLIT_GAP } from "@/lib/terminal/layout"
 import { cn } from "@/lib/utils"
 
 export function SplitDivider({
@@ -36,7 +36,7 @@ export function SplitDivider({
       title="Drag to resize · Arrow keys to resize · Home or double-click to balance"
       style={{ left: divider.x, top: divider.y, width: divider.width, height: divider.height }}
       className={cn(
-        "absolute z-10 touch-none bg-border/50 focus-ring-inset select-none hover:bg-primary/50 focus-visible:bg-primary",
+        "absolute z-raised touch-none bg-border/50 focus-ring-inset select-none hover:bg-primary/50 focus-visible:bg-primary",
         horizontal ? "cursor-col-resize" : "cursor-row-resize",
       )}
       onPointerDown={(event) => {
@@ -90,7 +90,7 @@ export function SplitDivider({
         <span
           aria-hidden
           className={cn(
-            "fixed inset-0 z-50",
+            "fixed inset-0 z-overlay",
             horizontal ? "cursor-col-resize" : "cursor-row-resize",
           )}
         />

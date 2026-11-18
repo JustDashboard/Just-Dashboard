@@ -1,11 +1,10 @@
 "use client"
 
-import Link from "next/link"
-import { ArrowRight } from "@/components/icons"
+import { SectionLink } from "@/components/section-link"
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { timeAt } from "@/components/bar-reading-model"
-import { useNow } from "@/components/deploy/vocabulary"
-import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
+import { useNow } from "@/hooks/use-now"
+import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { ProductGlyph, containerProduct, imageProduct } from "@/components/product-logo"
 import { DOT_COLOR } from "@/components/status-dot"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -211,13 +210,9 @@ export function ContainerBand({
         className="lg:col-span-2 xl:col-span-1"
         ticks
         figure={
-          <Link
-            href="/docker/events"
-            className="flex h-7 items-center gap-1 rounded-md text-hint font-medium text-muted-foreground focus-ring hover:text-foreground"
-          >
+          <SectionLink href="/docker/events" className="h-7">
             {changes.length > 0 ? `${plural(changes.length, "change")} in the last day` : "Events"}
-            <ArrowRight className="size-3" />
-          </Link>
+          </SectionLink>
         }
         message={
           changes.length > 0 ? undefined : !eventsRead ? (

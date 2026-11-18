@@ -2,7 +2,7 @@
 
 import { External } from "@/components/icons"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { Hint } from "@/components/docker/explain"
+import { FormNote } from "@/components/form"
 import { Tag } from "@/components/tag"
 
 /**
@@ -68,10 +68,10 @@ export function looksLikeDatabase(...hints: (string | undefined)[]): boolean {
  */
 export function DatabaseStorageWarning() {
   return (
-    <Hint className="text-warning">
+    <FormNote className="text-warning">
       This looks like a database&apos;s own files. Reading is safe; changing or deleting one
       underneath a running database corrupts it in ways that only show up later. Stop the container
       first if you need to write here.
-    </Hint>
+    </FormNote>
   )
 }

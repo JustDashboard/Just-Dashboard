@@ -204,17 +204,26 @@ test.describe("Redirects, access and headers", () => {
     await expect(page.getByText("Domains saved", { exact: true })).toBeVisible()
 
     // The menu offers the redirect only towards a name that serves the app,
-    // and the row then says where it sends visitors.
+    // and the row then says where it sends visitors: a fact on its line, whose
+    // two choices are a layer over the row rather than a band under it. The
+    // press that asked for the redirect opens both choices at once, with the
+    // keyboard on the first, rather than choosing a target without a word.
     await page.getByRole("button", { name: "Actions for www.api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Redirect to another domain" }).click()
     const row = page.getByRole("list", { name: "Domains" }).getByRole("listitem").nth(1)
-    await expect(row.getByText("Sends visitors to")).toBeVisible()
+    const sends = row.getByRole("button", {
+      name: "Sends visitors from www.api.example.test to api.example.test",
+    })
+    await expect(sends).toContainText("· 308")
     await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toHaveText(
       "api.example.test",
     )
+    await expect(page.getByRole("combobox", { name: "Sends visitors to" })).toBeFocused()
     await expect(page.getByRole("combobox", { name: "Answer" })).toHaveText("Permanent · 308")
     await page.getByRole("combobox", { name: "Answer" }).click()
     await page.getByRole("option", { name: "Temporary · 307" }).click()
+    await expect(sends).toContainText("· 307")
+    await page.keyboard.press("Escape")
 
     // The route's rules are one form under the list, for every name at once.
     const access = page.getByRole("form", { name: "Access and headers" })
@@ -258,7 +267,7 @@ test.describe("Redirects, access and headers", () => {
     // Removing the name redirected to puts the other back to serving.
     await page.getByRole("button", { name: "Actions for api.example.test" }).click()
     await page.getByRole("menuitem", { name: "Remove" }).click()
-    await expect(page.getByText("Sends visitors to")).toHaveCount(0)
+    await expect(page.getByRole("button", { name: /^Sends visitors from/ })).toHaveCount(0)
   })
 
   test("each domain says its own scheme, and HSTS follows the HTTPS domains", async ({ page }) => {
@@ -509,7 +518,7 @@ test.describe("Tailnet only", () => {
     await who.fill("ALICE@example.com")
     await who.press("Enter")
     await expect(tailnet.getByText("alice@example.com is already on the list")).toBeVisible()
-    const list = tailnet.getByRole("list", { name: "Admitted on the tailnet" })
+    const list = tailnet.getByRole("list", { name: "Who may open it" })
     await expect(list.getByRole("listitem")).toHaveText(["alice@example.com", "tag:ci"])
     await expect(tailnet.getByText("Only 2 logins and tags")).toBeVisible()
     await expect(tailnet.getByText(/The application is told X-Tailnet-Login/)).toBeVisible()
@@ -919,11 +928,13 @@ test.describe("Databases & backups", () => {
     expect(variablePuts[0].url).toContain("/variables/DATABASE_URL")
     // A new variable reaches the build too, the way a database linked while
     // creating the project does: a static env import or Prisma's config reads it there.
+    // The link goes as a reference: sent as a value, the server kept the characters.
     expect(variablePuts[0].body).toMatchObject({
-      value: "${{database.9}}",
+      reference: "${{database.9}}",
       sensitivity: "secret",
       scopes: ["runtime", "build"],
     })
+    expect(variablePuts[0].body).not.toHaveProperty("value")
 
     const orders = page.getByRole("link", { name: "orders-db", exact: true })
     await expect(orders).toHaveAttribute("href", "/databases/9")
@@ -944,13 +955,21 @@ test.describe("Databases & backups", () => {
       page.getByRole("list", { name: "How the application reaches its databases" }),
     ).toBeVisible()
 
+    const variableDeletes: string[] = []
+    await page.route("**/api/v1/deploy/7/environments/12/variables/**", async (route) => {
+      if (route.request().method() !== "DELETE") return route.fallback()
+      variableDeletes.push(route.request().url())
+      await json(route, { desiredRevision: 4 })
+    })
     await page.getByRole("button", { name: "Actions for orders-db" }).click()
     await page.getByRole("menuitem", { name: "Remove database" }).click()
-    // The fixture's configuration echoes no `reference` for the variable that
-    // was just written, so the page sees a bound database it cannot name a
-    // carrier for and asks before removing the link alone.
-    await expect(page.getByText("This page finds no variable referencing orders-db")).toBeVisible()
-    await page.getByRole("button", { name: "Remove the link", exact: true }).click()
+    // The link was written as the reference it is, so the page names the
+    // variable that carries it, which goes with the link. Written as text it
+    // had no carrier and stayed behind.
+    await expect(page.getByText("DATABASE_URL carries this database")).toBeVisible()
+    await page.getByRole("button", { name: "Remove the link and its variables" }).click()
+    await expect.poll(() => variableDeletes.length).toBe(1)
+    expect(variableDeletes[0]).toContain("/variables/DATABASE_URL")
     await expect.poll(() => configPuts.length).toBe(2)
     expect(configPuts[1].dependencies).toEqual(
       expect.arrayContaining([expect.objectContaining({ kind: "backup" })]),
@@ -1500,7 +1519,7 @@ test.describe("Automation", () => {
       sheet.getByRole("group", { name: "Provider" }).getByRole("button", { name: /^GitHub/ }),
     ).toHaveAttribute("aria-pressed", "true")
     await sheet.getByRole("textbox", { name: "Name" }).fill("Deploy hook")
-    await sheet.getByRole("textbox", { name: "Repository" }).fill("Wayy01/storefront")
+    await sheet.getByRole("textbox", { name: "Repository" }).fill("operator/storefront")
     await sheet.getByRole("textbox", { name: "Branch" }).fill("main")
     await sheet.getByRole("button", { name: "Add webhook" }).click()
 
@@ -1602,7 +1621,7 @@ test.describe("Automation", () => {
     await expect(page.getByText("Enabled", { exact: true }).first()).toBeVisible()
 
     await page.getByRole("button", { name: "Runs", exact: true }).click()
-    const runsSheet = page.getByRole("dialog", { name: "Nightly backup runs" })
+    const runsSheet = page.getByRole("dialog", { name: "Nightly backup · history" })
     await expect(runsSheet).toBeVisible()
     await expect(runsSheet.getByText("#4 Deploy", { exact: true })).toBeVisible()
     await page.keyboard.press("Escape")
@@ -1626,8 +1645,8 @@ test.describe("Automation", () => {
       triggerId: 31,
       providerRef: "43",
       revision: "deadbeefcafefeed0000",
-      repository: "Wayy01/storefront",
-      headRepository: "Wayy01/storefront",
+      repository: "operator/storefront",
+      headRepository: "operator/storefront",
       author: "octocat",
       state: "pending",
       configured: false,
@@ -1739,7 +1758,7 @@ test.describe("Automation", () => {
       name: "Deploy hook",
       kind: "github",
       provider: "github",
-      config: { repository: "Wayy01/storefront", ref: "main" },
+      config: { repository: "operator/storefront", ref: "main" },
       hookId: "provider-hook",
       enabled: true,
       lastStatus: "accepted",
@@ -1791,7 +1810,7 @@ test.describe("Automation", () => {
     await page.getByRole("button", { name: "Actions for Deploy hook" }).click()
     await page.getByRole("menuitem", { name: "Deliveries" }).click()
 
-    await expect(page.getByRole("heading", { name: "Deliveries · Deploy hook" })).toBeVisible()
+    await expect(page.getByRole("heading", { name: "Deploy hook · history" })).toBeVisible()
     const sheet = page.getByRole("dialog")
     await expect(sheet.getByText("Accepted", { exact: true })).toBeVisible()
     await expect(sheet.getByText("Ignored", { exact: true })).toBeVisible()
@@ -1822,8 +1841,8 @@ test.describe("Automation", () => {
       triggerId: 31,
       providerRef: "43",
       revision: "deadbeefcafefeed0000",
-      repository: "Wayy01/storefront",
-      headRepository: "Wayy01/storefront",
+      repository: "operator/storefront",
+      headRepository: "operator/storefront",
       author: "octocat",
       state: "pending",
       configured: false,
@@ -2215,6 +2234,155 @@ test.describe("Screenshots", () => {
   }
 })
 
+test.describe("A domain row", () => {
+  // Every name has a live route and certificate, so each line holds the most
+  // it can: the state, the certificate and its days left, then the sign-in's
+  // key or where a redirect goes.
+  const served = (hostname: string) => ({
+    ...healthyOperations.domains.domains[0],
+    hostname,
+    certificateName: hostname,
+  })
+  const names = [
+    "api.example.test",
+    "plain.example.test",
+    "www.example.test",
+    "team.example.test",
+    "last.example.test",
+  ]
+
+  for (const width of [1440, 390]) {
+    test(`is one height with a password on, a redirect set, or neither, at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      const fixture = await mockProject(page, {
+        operations: {
+          ...healthyOperations,
+          domains: { ...healthyOperations.domains, domains: names.map(served) },
+        },
+      })
+      ;(fixture.configuration() as { domains: unknown[] }).domains = [
+        { hostname: "api.example.test", https: true, ownership: "managed" },
+        { hostname: "plain.example.test", https: true, ownership: "managed" },
+        {
+          hostname: "www.example.test",
+          https: true,
+          ownership: "managed",
+          redirectTo: "api.example.test",
+        },
+        {
+          hostname: "team.example.test",
+          https: true,
+          ownership: "managed",
+          protection: { username: "a-rather-long-user-name", hash: "fixture-sealed" },
+        },
+        // The last row has no hairline under it, so it is not one of those compared.
+        { hostname: "last.example.test", https: true, ownership: "managed" },
+      ]
+      await page.goto("/deploy/7/settings/domains")
+      const list = page.getByRole("list", { name: "Domains" })
+      await expect(list.getByRole("listitem")).toHaveCount(5)
+      await expect(
+        page.getByRole("button", {
+          name: "Password · a-rather-long-user-name on team.example.test",
+        }),
+      ).toBeVisible()
+      await expect(
+        page.getByRole("button", {
+          name: "Sends visitors from www.example.test to api.example.test",
+        }),
+      ).toBeVisible()
+
+      // The first row has no padding above it, so the three states are
+      // compared from the second row on: neither, a redirect, a password.
+      const rows = await list.getByRole("listitem").evaluateAll((items) =>
+        items.map((item) => {
+          const box = item.getBoundingClientRect()
+          const at = (selector: string) => {
+            const inner = item.querySelector(selector)!.getBoundingClientRect()
+            return { top: inner.top - box.top, height: inner.height }
+          }
+          return {
+            top: box.top,
+            height: box.height,
+            name: at("a[aria-label^='Open']"),
+            owner: at("[role=combobox]"),
+          }
+        }),
+      )
+      const [first, plain, redirecting, guarded] = rows
+      for (const row of [redirecting, guarded]) {
+        expect(row.height).toBeCloseTo(plain.height, 0)
+        // Position, not only height: the name, its line and the controls sit
+        // where they sit in a plain row, and the rows step evenly down.
+        expect(row.name.top).toBeCloseTo(plain.name.top, 0)
+        expect(row.owner.top).toBeCloseTo(plain.owner.top, 0)
+      }
+      expect(plain.top - first.top).toBeCloseTo(first.height, 0)
+      expect(redirecting.top - plain.top).toBeCloseTo(plain.height, 0)
+      expect(guarded.top - redirecting.top).toBeCloseTo(plain.height, 0)
+      expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(
+        true,
+      )
+    })
+
+    test(`says a certificate that wants attention whole, ahead of a redirect's target, at ${width}`, async ({
+      page,
+    }) => {
+      await page.setViewportSize({ width, height: 1200 })
+      const fixture = await mockProject(page, {
+        operations: {
+          ...healthyOperations,
+          domains: {
+            ...healthyOperations.domains,
+            domains: [
+              served("api.example.test"),
+              { ...served("www.example.test"), certificate: "expired", certificateDaysLeft: 0 },
+              served("last.example.test"),
+            ],
+          },
+        },
+      })
+      ;(fixture.configuration() as { domains: unknown[] }).domains = [
+        { hostname: "api.example.test", https: true, ownership: "managed" },
+        // The most a line holds: a sign-in, a redirect and a certificate past its day.
+        {
+          hostname: "www.example.test",
+          https: true,
+          ownership: "managed",
+          redirectTo: "api.example.test",
+          protection: { username: "ops", hash: "fixture-sealed" },
+        },
+        { hostname: "last.example.test", https: true, ownership: "managed" },
+      ]
+      await page.goto("/deploy/7/settings/domains")
+      const rows = page.getByRole("list", { name: "Domains" }).getByRole("listitem")
+      await expect(rows).toHaveCount(3)
+      const row = rows.nth(1)
+      const expired = row.getByText("Certificate expired", { exact: true })
+      const sends = row.getByRole("button", {
+        name: "Sends visitors from www.example.test to api.example.test",
+      })
+      await expect(expired).toBeVisible()
+      // The line cuts what does not fit at its end, so a danger is not left
+      // there: it is inside the line whole, and the redirect follows it.
+      const cut = await expired.evaluate((word) => {
+        let line = word.parentElement!
+        while (getComputedStyle(line).overflowX !== "clip") line = line.parentElement!
+        return word.getBoundingClientRect().right - line.getBoundingClientRect().right
+      })
+      expect(cut).toBeLessThanOrEqual(0.5)
+      const [danger, target] = [(await expired.boundingBox())!, (await sends.boundingBox())!]
+      expect(target.x).toBeGreaterThan(danger.x + danger.width)
+      // And the row is still the height of the plain one before it.
+      const [plain, full] = [(await rows.nth(0).boundingBox())!, (await row.boundingBox())!]
+      // The first row has no padding above it; the rest of a row is the same.
+      expect(full.height - plain.height).toBeCloseTo(12, 0)
+    })
+  }
+})
+
 test.describe("Password protection", () => {
   test("a domain can be put behind a password, keeps the hash on later saves, and can be opened again", async ({
     page,
@@ -2252,8 +2420,14 @@ test.describe("Password protection", () => {
     // sends no password.
     await page.goto("/deploy/7/settings/domains")
     await expect(password).toHaveAttribute("aria-pressed", "true")
+    // The row says who signs in; its two fields are a layer over it, so the
+    // list keeps one height per row.
+    const signIn = page.getByRole("button", { name: "Password · team on api.example.test" })
+    await expect(page.getByLabel("User name")).toHaveCount(0)
+    await signIn.click()
     await expect(page.getByLabel("User name")).toHaveValue("team")
     await expect(page.locator("#domain-password-0")).toHaveAttribute("placeholder", "Unchanged")
+    await page.keyboard.press("Escape")
     await https.click()
     await saveSettings(page)
     await expectSaved(page)
@@ -2272,6 +2446,7 @@ test.describe("Password protection", () => {
 
     // Turning it off sends no protection at all.
     await password.click()
+    await expect(signIn).toHaveCount(0)
     await expect(page.getByLabel("User name")).toHaveCount(0)
     await saveSettings(page)
     await expect.poll(() => puts.length).toBe(3)

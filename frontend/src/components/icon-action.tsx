@@ -34,8 +34,17 @@ import { cn } from "@/lib/utils"
  * source for literal class names, so a variant built from a template string at
  * runtime is a class that never gets generated.
  */
-const REVEAL_BASE =
-  "opacity-0 transition-opacity focus-visible:opacity-100 data-[state=open]:opacity-100 [@media(hover:none)]:opacity-100"
+const REVEAL_BASE = "opacity-0 transition-opacity [@media(hover:none)]:opacity-100"
+
+/**
+ * The keyboard and the open menu, said of what is revealed. A single control
+ * takes the focus itself and carries `data-state` itself; a cluster of them
+ * holds the focus and the open menu somewhere inside it.
+ */
+const REVEAL_HOLD = {
+  control: "focus-visible:opacity-100 data-[state=open]:opacity-100",
+  cluster: "focus-within:opacity-100 has-[[data-state=open]]:opacity-100",
+} as const
 
 const REVEAL_BY_GROUP = {
   default: "group-hover:opacity-100 group-focus-visible:opacity-100",
@@ -46,8 +55,12 @@ const REVEAL_BY_GROUP = {
 
 export type RevealGroup = keyof typeof REVEAL_BY_GROUP
 
-export function rowReveal(group: RevealGroup = "default") {
-  return `${REVEAL_BASE} ${REVEAL_BY_GROUP[group]}`
+/**
+ * The reveal, for one control (the default) or for a cluster of them —
+ * `RowActions` is this with `"cluster"`, so the two can no longer drift.
+ */
+export function rowReveal(group: RevealGroup = "default", what: "control" | "cluster" = "control") {
+  return `${REVEAL_BASE} ${REVEAL_HOLD[what]} ${REVEAL_BY_GROUP[group]}`
 }
 
 /** The unnamed-group form, for the callers that only need the string. */
@@ -68,6 +81,10 @@ export const ROW_REVEAL = rowReveal()
  * pointer is on the row. Same four mechanisms as `rowReveal` (the row's
  * hover, focus inside it, an open menu, no hover at all).
  *
+ * Two answers, then, and one API each: `rowReveal` (with `RowActions` and
+ * `IconAction reveal` as its two spellings) for an extra in a shared column,
+ * `DimActions` for controls with a column of their own.
+ *
  * Quiet is not the whole cluster at 55%. That dimmed the words with the
  * glyphs, and a resting "Sign out" measured 2.3:1. `row-dim` (globals.css)
  * fades the glyphs and sets the words in the faint ink, which keeps 4.5:1.
@@ -78,11 +95,23 @@ export function DimActions({ className, ...props }: React.ComponentProps<"div">)
   return <div className={cn("flex shrink-0 items-center gap-0.5", ROW_DIM, className)} {...props} />
 }
 
-export function RowActions({ className, ...props }: React.ComponentProps<"div">) {
+/**
+ * A cluster of row controls that appears with the row: `rowReveal` for a
+ * cluster, so a lone `IconAction reveal` and a run of them behave alike.
+ */
+export function RowActions({
+  revealGroup,
+  className,
+  ...props
+}: React.ComponentProps<"div"> & {
+  /** The row's group name, where it has one. */
+  revealGroup?: RevealGroup
+}) {
   return (
     <div
       className={cn(
-        "flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100 focus-within:opacity-100 has-[[data-state=open]]:opacity-100 [@media(hover:none)]:opacity-100",
+        "flex shrink-0 items-center gap-0.5",
+        rowReveal(revealGroup, "cluster"),
         className,
       )}
       {...props}
@@ -98,18 +127,25 @@ export function RowActions({ className, ...props }: React.ComponentProps<"div">)
  * button before finding out it deletes something. It also becomes the button's
  * accessible name, which a `title` only weakly provides.
  *
+ * `tooltip` says more than the name where the name alone would leave the
+ * reader guessing ("See every branch and where it forked" for "Branch
+ * graph"); the label stays the accessible name.
+ *
  * It cannot be a `DropdownMenuTrigger asChild`: this renders a tooltip root
  * rather than an element, so there is nothing for the trigger to hand its props
  * to. A menu button is an ordinary `Button` carrying an `aria-label`.
  */
 export function IconAction({
   label,
+  tooltip,
   reveal,
   revealGroup,
   className,
   ...props
 }: React.ComponentProps<typeof Button> & {
   label: string
+  /** What the tooltip says, when it says more than the label. */
+  tooltip?: React.ReactNode
   /**
    * For the lone action that stands in a row without a `RowActions` around it:
    * the same appear-on-hover rule, so one button and a cluster of them behave
@@ -134,7 +170,7 @@ export function IconAction({
           {...props}
         />
       </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
+      <TooltipContent>{tooltip ?? label}</TooltipContent>
     </Tooltip>
   )
 }

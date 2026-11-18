@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { admin, json, mockNetwork } from "./network-fixture"
 import { overrides } from "./network-dns-fixture"
-import type { DNSInvestigationRequest, SavedDNSEvidence } from "../../src/lib/network-dns-evidence"
+import type { DNSInvestigationRequest, SavedDNSEvidence } from "../../src/lib/network/dns-evidence"
 
 const id = "a".repeat(32)
 function record(): SavedDNSEvidence {

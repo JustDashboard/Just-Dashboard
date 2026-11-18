@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact, FactLine } from "@/components/fact-line"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import {
@@ -23,22 +24,19 @@ import type {
 } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import {
-  BlocklistList,
-  BlocklistModal,
-  CardRowsSkeleton,
-} from "@/components/network/protection/blocklists"
+import { BlocklistList, BlocklistModal } from "@/components/network/protection/blocklists"
 import {
   ExceptionList,
   ExceptionModal,
@@ -59,6 +57,7 @@ import {
   stagedChanges,
 } from "@/components/network/protection/reading"
 import { TrustedList } from "@/components/network/protection/trusted"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 type Editor =
   | { kind: "list"; list?: ProtectionBlocklist }
@@ -71,6 +70,9 @@ type Editor =
  * start and the picture under it does not move when the read lands.
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
+
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-9 [&>span]:gap-y-1"
 
 type View = "overview" | "table" | "kernel"
 
@@ -196,12 +198,12 @@ export default function NetworkProtectionPage() {
   ]
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Protection" />
+    <Page rise>
+      <PageContext title="Protection" />
       {/* The line and its views are one block, as a process's page has them:
           the strip's hairline is the rule under the line. */}
       <div className="flex min-w-0 flex-col gap-4">
-        <HostIdentity
+        <IdentityHeader
           label="About protection"
           className="border-b-0 pb-0"
           fallback={ShieldCheck}
@@ -233,20 +235,17 @@ export default function NetworkProtectionPage() {
                 <Skeleton className="my-0.5 h-3 w-72 max-w-full" />
               </span>
             ) : (
-              <span className={FACTS}>
-                <span className="numeric">{plural(totals.lists, "blocklist")}</span>
-                <FactDot />
-                <span className="numeric">{plural(totals.limits, "limit")}</span>
-                <FactDot />
-                <span className="numeric">
+              <FactLine className={FACT_LINE}>
+                <Fact className="numeric">{plural(totals.lists, "blocklist")}</Fact>
+                <Fact className="numeric">{plural(totals.limits, "limit")}</Fact>
+                <Fact className="numeric">
                   <span className="text-foreground">{totals.dropped.toLocaleString()}</span> dropped
                   since load
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   <span className="text-foreground">{totals.refused.toLocaleString()}</span> refused
-                </span>
-              </span>
+                </Fact>
+              </FactLine>
             )
           }
           command={
@@ -289,7 +288,7 @@ export default function NetworkProtectionPage() {
                 >
                   {v.label}
                   {v.key === "kernel" && staged > 0 && (
-                    <ChipCount className="text-[var(--git-modified)]">{staged}</ChipCount>
+                    <ChipCount className="text-git-modified">{staged}</ChipCount>
                   )}
                 </TabsPrimitive.Trigger>
               ))}
@@ -552,7 +551,7 @@ const EMPTY_HEIGHT = "h-[10.5rem]"
  */
 function SectionSkeleton({ rows, card }: { rows: number; card?: boolean }) {
   if (rows === 0) return <Skeleton aria-hidden className={`${EMPTY_HEIGHT} w-full rounded-xl`} />
-  if (card) return <CardRowsSkeleton rows={rows} />
+  if (card) return <ChoiceListSkeleton rows={rows} mark={false} />
   return (
     <ul aria-hidden className="divide-y divide-hairline">
       {Array.from({ length: rows }, (_, i) => (

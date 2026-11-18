@@ -15,21 +15,24 @@ import {
   RefreshClockwise,
   RotateCounterClockwise,
   Shield,
+  ShieldOff,
   Trash,
   Warning,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { del, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
-import { lensFor, type LensReading } from "@/lib/log-lenses"
+import { lensFor, type LensReading } from "@/lib/log/lenses"
 import type { FirewallRule, FirewallStatus, LogLine } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { ConfirmDialog, useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { InfoTip } from "@/components/form"
 import { Address } from "@/components/security/marks"
-import { ProductLogo, ProductLogos, portProduct } from "@/components/product-logo"
-import { PageContext, SearchInput } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { ProductLogo, portProduct } from "@/components/product-logo"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { AddRuleDialog, EditRuleDialog, type RuleHandoff } from "@/components/security/rule-form"
@@ -40,7 +43,8 @@ import {
   type FirewallCounts,
 } from "@/components/network/firewall-picture"
 import { firewallProduct } from "@/components/network/firewall-words"
-import { InstallHandoff, usePackageKnown } from "@/components/network/install"
+import { InstallHandoff, usePackageKnown } from "@/components/install-handoff"
+import { MissingThing } from "@/components/missing-thing"
 import {
   FirewallAccessPanel,
   FirewallEnforcement,
@@ -60,19 +64,14 @@ import {
   useReadingPress,
 } from "@/components/security/log-section"
 import { useLensReadings, type LensReadingsState } from "@/components/logs/lens-readings"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { Segments } from "@/components/segments"
+import { settingStatus } from "@/components/settings/setting-card"
+import { useSaveBarEntry } from "@/components/settings/save-bar"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { IconAction, DimActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { Switch } from "@/components/ui/switch"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import {
@@ -206,7 +205,17 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
       ? rules.find((r) => r.number === handoffEdit.number && r.port === handoffEdit.port)
       : undefined
 
-  const header = <PageContext eyebrow="Network" title="Firewall" />
+  // The page has no way back, so nothing else would share a row above the
+  // line: a row of its own for the shortcuts' `?` set Firewall's header 50px
+  // lower than its sibling pages'. The `?` closes the identity line instead,
+  // after the `⋯` (`help` below).
+  const header = <PageContext title="Firewall" />
+  // A touch screen has no keyboard for the shortcuts, so it is never drawn there.
+  const help = (
+    <span className="flex max-sm:hidden pointer-coarse:hidden">
+      <WorkspaceHelp compact />
+    </span>
+  )
   const refreshVerb: Verb = {
     key: "refresh",
     label: "Refresh",
@@ -219,8 +228,9 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
     return (
       <>
         {header}
-        <HostIdentity
+        <IdentityHeader
           label="About the firewall"
+          loading={!failed}
           fallback={FirewallCheck}
           title="Firewall"
           state={
@@ -232,14 +242,15 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
               </span>
             )
           }
-          facts={
-            failed ? (
-              <span>The firewall could not be read.</span>
-            ) : (
-              <Skeleton className="my-0.5 h-3 w-56 max-w-full" />
-            )
+          facts={failed ? <Fact>The firewall could not be read.</Fact> : undefined}
+          menu={
+            <>
+              <VerbMenu verbs={[refreshVerb]} label="Firewall actions" />
+              {/* The `?`'s place, held until the workspace that draws it is
+                  up, so the `⋯` does not move when the firewall is read. */}
+              <span aria-hidden className="size-6 shrink-0 max-sm:hidden pointer-coarse:hidden" />
+            </>
           }
-          menu={<VerbMenu verbs={[refreshVerb]} label="Firewall actions" />}
         />
         {failed && error ? (
           <ErrorState error={error} onRetry={refresh} />
@@ -296,12 +307,6 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
         refresh()
       },
     })
-  const verbs: Verb[] = [
-    refreshVerb,
-    ...(writable && caps.reset && mayDestroy
-      ? [{ key: "reset", label: "Reset", icon: RotateCounterClockwise, run: reset, danger: true }]
-      : []),
-  ]
   const toggle = (enabled: boolean) =>
     confirm({
       title: enabled ? "Enable firewall" : "Disable firewall",
@@ -327,6 +332,28 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
         refresh()
       },
     })
+  // Turning it on or off is a verb in the menu, worded for what it does; the
+  // line's state already says which it is. It was a bare switch beside the
+  // page's command, the one identity line that had one.
+  const verbs: Verb[] = [
+    refreshVerb,
+    ...(writable && caps.toggle && mayDestroy
+      ? [
+          status.enabled
+            ? {
+                key: "disable",
+                label: "Disable",
+                icon: ShieldOff,
+                run: () => toggle(false),
+                danger: true,
+              }
+            : { key: "enable", label: "Enable", icon: Shield, run: () => toggle(true) },
+        ]
+      : []),
+    ...(writable && caps.reset && mayDestroy
+      ? [{ key: "reset", label: "Reset", icon: RotateCounterClockwise, run: reset, danger: true }]
+      : []),
+  ]
   // What the log says the rules did, for the nodes that did it. Not while
   // logging is off, when every figure would be a zero that means "not
   // recorded" rather than "nothing happened".
@@ -357,7 +384,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
           the zone its rules are held in. The switch that decides whether it
           enforces sits before the page's command, beside the fact it
           changes. */}
-      <HostIdentity
+      <IdentityHeader
         label="About the firewall"
         mark={firewallProduct(status.backend)}
         fallback={FirewallCheck}
@@ -370,51 +397,31 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
         }
         facts={
           <>
-            <span>{caps.editable ? "managed from here" : "read only from here"}</span>
-            {status.zone && (
-              <>
-                <FactDot />
-                <span>
-                  zone <span className="font-mono text-foreground">{status.zone}</span>
-                </span>
-              </>
+            {/* The danger leads, so a phone's one line keeps it. */}
+            {dangerous > 0 && (
+              <Fact className="numeric text-destructive">
+                {dangerous} open{dangerous === 1 ? "s" : ""} a sensitive port to everyone
+              </Fact>
             )}
-            <FactDot />
-            <span className="numeric">
+            <Fact className="numeric">
               <span style={{ color: ACTION_HUE.ALLOW }}>{allows} allow</span> ·{" "}
               <span style={{ color: ACTION_HUE.DENY }}>{rules.length - allows} deny</span>
-            </span>
-            {dangerous > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric text-destructive">
-                  {dangerous} open{dangerous === 1 ? "s" : ""} a sensitive port to everyone
-                </span>
-              </>
+            </Fact>
+            {status.zone && (
+              <Fact>
+                zone <span className="font-mono text-foreground">{status.zone}</span>
+              </Fact>
             )}
+            <Fact>{caps.editable ? "managed from here" : "read only from here"}</Fact>
             {hidden > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">
-                  {hidden} IPv6 twin{hidden === 1 ? "" : "s"} folded away
-                </span>
-              </>
+              <Fact className="numeric">
+                {hidden} IPv6 twin{hidden === 1 ? "" : "s"} folded away
+              </Fact>
             )}
           </>
         }
         command={
           <>
-            <span className="max-sm:hidden">
-              <WorkspaceHelp compact />
-            </span>
-            {writable && caps.toggle && mayDestroy && (
-              <Switch
-                id="firewall-enabled"
-                aria-label="Firewall enabled"
-                checked={status.enabled}
-                onCheckedChange={toggle}
-              />
-            )}
             {writable && (
               <AddRuleDialog
                 onDone={refresh}
@@ -429,7 +436,12 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
             )}
           </>
         }
-        menu={<VerbMenu verbs={verbs} label="Firewall actions" />}
+        menu={
+          <>
+            <VerbMenu verbs={verbs} label="Firewall actions" />
+            {help}
+          </>
+        }
       />
 
       {/* The rules folded by where they lead, before the rules in the order
@@ -472,7 +484,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
         />
       )}
 
-      <Panel id="rules" className="scroll-mt-6">
+      <Panel framed id="rules" className="scroll-mt-6">
         <PanelHeader
           title={
             <span className="inline-flex items-center gap-1.5">
@@ -488,15 +500,10 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
               )}
             </span>
           }
-          actions={
-            <span className="numeric text-hint text-muted-foreground">
-              {query.trim() ? `${shown.length} of ${rules.length}` : rules.length}
-            </span>
-          }
+          count={query.trim() ? `${shown.length} of ${rules.length}` : rules.length}
         />
         <PanelToolbar>
           <SearchInput
-            dense
             data-workspace-search
             aria-label="Filter rules"
             placeholder="Filter rules"
@@ -554,7 +561,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
                           style={{ background: actionHue(rule.action) }}
                         />
                         <div className="space-y-1.5">
-                          <Tag style={{ color: actionHue(rule.action) }}>{rule.action}</Tag>
+                          <Tag hue={actionHue(rule.action)}>{rule.action}</Tag>
                           <span className="block font-mono text-hint text-muted-foreground">
                             {rule.number !== undefined ? `#${rule.number}` : "configured"} ·{" "}
                             {rule.direction || "IN"}
@@ -687,7 +694,7 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
                           className="absolute inset-y-3 left-0 w-0.5 rounded-full border-l border-dashed border-border-strong"
                         />
                         <div className="space-y-1.5">
-                          <Tag style={{ color: actionHue(inbound) }}>{inbound}</Tag>
+                          <Tag hue={actionHue(inbound)}>{inbound}</Tag>
                           <span className="block font-mono text-hint text-muted-foreground">
                             default · IN
                           </span>
@@ -845,7 +852,7 @@ function Destination({ to }: { to: string }) {
   if (!match) return <>{to || "Any destination"}</>
   return (
     <span className="numeric font-mono">
-      <span className="text-[var(--tag-pink)]">{match[1]}</span>
+      <span className="text-tag-pink">{match[1]}</span>
       {match[2] && <span className="text-muted-foreground">{match[2]}</span>}
     </span>
   )
@@ -1085,65 +1092,80 @@ function FirewallDefaults({
       setBusy(false)
     }
   }
+  const saveAll = useSaveBarEntry(
+    editable,
+    {
+      name: "Defaults",
+      dirty: staged.length > 0,
+      changes: staged.length,
+      saving: busy,
+      invalid: false,
+      applies: "immediately",
+    },
+    { save, discard: () => setDraft({}) },
+  )
 
   return (
     <div className="min-w-0">
-      <SettingForm
-        name="Defaults"
-        canEdit={editable}
-        dirty={staged.length > 0}
-        changes={staged.length}
-        saving={busy}
-        applies="immediately"
-        onSave={save}
-        onDiscard={() => setDraft({})}
+      {/* The page's width, as Rules above and the changes below it: as a
+          settings column it stopped two-thirds across. The save bar is the
+          settings pages' own. */}
+      <form
+        aria-label="Defaults"
+        onSubmit={(event) => {
+          event.preventDefault()
+          void saveAll?.()
+        }}
       >
-        <SettingSection title="Defaults" status={settingStatus({ dirty: staged.length > 0 })}>
-          <div className="divide-y divide-hairline">
-            {rows.map((row) => {
-              const value = draft[row.key] ?? row.current
-              const edited = row.editable && value !== row.current
-              return (
-                <div
-                  key={row.key}
-                  data-slot="firewall-default"
-                  data-edited={edited || undefined}
-                  className="relative flex min-h-12 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2"
-                >
-                  {/* A staged change is marked down the row's edge in git's
-                      modified hue, the colour of a change not applied yet. */}
-                  {edited && (
-                    <span
-                      aria-hidden
-                      className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-[var(--git-modified)]"
-                    />
-                  )}
-                  <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
-                    {row.label}
-                    <InfoTip label={`About the ${row.label.toLowerCase()} default`}>
-                      {row.why}
-                    </InfoTip>
-                  </span>
-                  {row.editable ? (
-                    <Segments
-                      id={row.key === "logging" ? LOGGING_CONTROL : undefined}
-                      label={row.name}
-                      value={value}
-                      options={row.options.map((option) => ({ value: option, label: option }))}
-                      onChange={(next) => setDraft((held) => ({ ...held, [row.key]: next }))}
-                      disabled={busy}
-                    />
-                  ) : (
-                    <span className="text-body font-medium" data-testid={`default-${row.key}`}>
-                      {row.word}
+        <Panel plain>
+          <PanelHeader title="Defaults" actions={settingStatus({ dirty: staged.length > 0 })} />
+          <PanelBody>
+            <div className="divide-y divide-hairline">
+              {rows.map((row) => {
+                const value = draft[row.key] ?? row.current
+                const edited = row.editable && value !== row.current
+                return (
+                  <div
+                    key={row.key}
+                    data-slot="firewall-default"
+                    data-edited={edited || undefined}
+                    className="relative flex min-h-12 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2"
+                  >
+                    {/* A staged change is marked down the row's edge in git's
+                  modified hue, the colour of a change not applied yet. */}
+                    {edited && (
+                      <span
+                        aria-hidden
+                        className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
+                      />
+                    )}
+                    <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
+                      {row.label}
+                      <InfoTip label={`About the ${row.label.toLowerCase()} default`}>
+                        {row.why}
+                      </InfoTip>
                     </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        </SettingSection>
-      </SettingForm>
+                    {row.editable ? (
+                      <Segments
+                        id={row.key === "logging" ? LOGGING_CONTROL : undefined}
+                        label={row.name}
+                        value={value}
+                        options={row.options.map((option) => ({ value: option, label: option }))}
+                        onChange={(next) => setDraft((held) => ({ ...held, [row.key]: next }))}
+                        disabled={busy}
+                      />
+                    ) : (
+                      <span className="text-body font-medium" data-testid={`default-${row.key}`}>
+                        {row.word}
+                      </span>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          </PanelBody>
+        </Panel>
+      </form>
       <ConfirmDialog
         request={review}
         onOpenChange={(open) => {
@@ -1175,17 +1197,21 @@ function FirewallMissing({ reason, onInstalled }: { reason?: string; onInstalled
         products={["netfilter"]}
         icon={Shield}
         title="No firewall on this host"
-        description={`${description} ufw goes in switched off: nothing is filtered until you turn it on here.`}
         onInstalled={onInstalled}
         phases={false}
-      />
+      >
+        {`${description} ufw goes in switched off: nothing is filtered until you turn it on here.`}
+      </InstallHandoff>
     )
   return (
-    <EmptyState
-      mark={<ProductLogos ids={["netfilter"]} />}
+    <MissingThing
+      size="block"
+      reason="not-installed"
+      thing="netfilter"
       title="No firewall on this host"
-      description={description}
-    />
+    >
+      {description}
+    </MissingThing>
   )
 }
 

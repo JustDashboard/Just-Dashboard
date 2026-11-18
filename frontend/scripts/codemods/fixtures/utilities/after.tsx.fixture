@@ -1,0 +1,22 @@
+function Glyph(props: { className?: string }) {
+  return <svg {...props} />
+}
+
+export function Demo() {
+  return (
+    <div className="grid grid-cols-main-end gap-3">
+      <div className="grid grid-cols-start-main" />
+      <div className="sm:grid-cols-start-main-end" />
+      <div className="xl:grid-rows-fill" />
+      <aside className="w-rail" />
+      <aside className="lg:w-inspector" />
+      <div className="h-workbench max-h-rail" />
+      <Glyph className="mr-1 size-3 glyph-inline" />
+      <span className="inline-flex items-center gap-1 align-[-2px]" />
+      <code className="code-inline" />
+      <span className="text-[0.9em]" />
+      <div className="xl:grid-cols-[minmax(0,1fr)_24rem]" />
+      <div className="xl:grid-cols-[minmax(0,1fr)_22rem]" />
+    </div>
+  )
+}

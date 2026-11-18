@@ -74,7 +74,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard, ChoiceGrid, ProductCard } from "@/components/choice-card"
 import { ProductLogo } from "@/components/product-logo"
 import { CodeEditor } from "@/components/code-editor"
-import { DiffView } from "@/components/files/diff-view"
+import { DiffView } from "@/components/diff-view"
 import {
   Disclosure,
   Field as FormField,
@@ -91,9 +91,11 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { Modal } from "@/components/modal"
 import { Group, Pane, Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { ListField as SharedListField } from "@/components/list-field"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -146,7 +148,7 @@ import {
   type PartMark,
 } from "@/components/proxy/site-settings"
 import { siteSettingsHref, type SettingsView } from "@/components/proxy/site-tabs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
 import {
   applyPreset,
   BLANK,
@@ -232,29 +234,18 @@ function Part({
   children: React.ReactNode
 }) {
   const page = useContext(PageLayout)
-  if (page) {
-    return (
-      <SettingSection
-        title={
-          hint ? (
-            <span className="inline-flex items-center gap-1.5">
-              {title}
-              <InfoTip label={`About ${title.toLowerCase()}`}>{hint}</InfoTip>
-            </span>
-          ) : (
-            title
-          )
-        }
-      >
-        {children}
-      </SettingSection>
-    )
-  }
-  return (
-    <FormSection title={title} hint={hint}>
-      {children}
-    </FormSection>
+  // What the part is for is a sentence nobody needs before acting, so it is
+  // behind an ⓘ beside the title in both, never a line under it (PRM-16).
+  const named = hint ? (
+    <span className="inline-flex items-center gap-1.5">
+      {title}
+      <InfoTip label={`About ${title.toLowerCase()}`}>{hint}</InfoTip>
+    </span>
+  ) : (
+    title
   )
+  if (page) return <SettingSection title={named}>{children}</SettingSection>
+  return <FormSection title={named}>{children}</FormSection>
 }
 
 /**
@@ -2239,88 +2230,17 @@ function DomainChecks({ checks }: { checks: SitePreflightCheck[] }) {
   )
 }
 
-/** Single values, added one at a time. The deployment Domains page uses it too. */
-export function ListField({
-  id,
-  label,
-  placeholder,
-  values,
-  onChange,
-  hint,
-  error,
-  disabled,
-}: {
-  id: string
-  label: string
-  placeholder: string
-  values: string[]
-  onChange: (values: string[]) => void
-  hint?: string
-  error?: string
-  /** Read-only: the values without the controls that change them. */
-  disabled?: boolean
-}) {
-  const [draft, setDraft] = useState("")
-  const add = () => {
-    const entry = draft.trim()
-    if (!entry) return
-    // The server refuses an entry listed twice, so one typed again is just done.
-    if (!values.includes(entry)) onChange([...values, entry])
-    setDraft("")
-  }
-  return (
-    <Field label={label} htmlFor={id} tip={hint} error={error}>
-      <div className="space-y-2">
-        {values.length > 0 && (
-          <div className="flex flex-wrap items-center gap-1.5">
-            {values.map((value, i) => (
-              <Tag key={`${value}-${i}`} mono className="gap-1.5 pr-0.5">
-                {value}
-                {!disabled && (
-                  <IconAction
-                    type="button"
-                    label={`Remove ${value}`}
-                    size="icon-xs"
-                    className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                    onClick={() => onChange(values.filter((_, j) => j !== i))}
-                  >
-                    <Trash />
-                  </IconAction>
-                )}
-              </Tag>
-            ))}
-          </div>
-        )}
-        {!disabled && (
-          <div className="flex items-center gap-2">
-            <Input
-              id={id}
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault()
-                  add()
-                }
-              }}
-              placeholder={placeholder}
-              className="font-mono text-xs"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={add}
-              disabled={!draft.trim()}
-              aria-label={`Add to ${label.toLowerCase()}`}
-            >
-              <Plus className="size-3.5" />
-            </Button>
-          </div>
-        )}
-      </div>
-    </Field>
-  )
+/**
+ * Single values, added one at a time: the shared `ListField`, with the
+ * form's rule for the sentence that says what it is for (`Field`'s `tip`):
+ * under it in the sheet, behind the ⓘ in Settings.
+ *
+ * @deprecated outside this form, import `ListField` from `@/components/list-field`.
+ */
+export function ListField({ hint, ...props }: React.ComponentProps<typeof SharedListField>) {
+  const page = useContext(PageLayout)
+  if (page) return <SharedListField {...props} info={props.info ?? hint} />
+  return <SharedListField {...props} hint={hint} />
 }
 
 /**

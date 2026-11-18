@@ -1,0 +1,328 @@
+"use client"
+
+import { useMemo, useState } from "react"
+import Link from "next/link"
+import { Copy } from "@/components/icons"
+import { get } from "@/lib/api"
+import { copyText } from "@/lib/clipboard"
+import { duration, relativeTime } from "@/lib/format"
+import { journalSource } from "@/lib/log/sources"
+import {
+  calendarToCron,
+  countdown,
+  describeTimer,
+  execCommand,
+  longClock,
+  randomDelay,
+  spanMs,
+  spanWords,
+  timerRuns,
+  timerTriggers,
+} from "@/lib/schedule"
+import { cn } from "@/lib/utils"
+import type { SystemdTimer, SystemdUnit } from "@/lib/types"
+import { usePoll } from "@/hooks/use-poll"
+import { ShellWords } from "@/components/code"
+import { useNow } from "@/hooks/use-now"
+import { IconAction } from "@/components/icon-action"
+import { ServiceLogs, type ServiceLogSource } from "@/components/logs/service-logs"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Well } from "@/components/panel"
+import { unitProduct } from "@/components/product-logo"
+import { StatGrid, StatTile } from "@/components/stat-tile"
+import { Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { unitRunsView } from "@/components/procs/unit-runs"
+import { KIND } from "@/components/procs/schedule-band"
+import {
+  ScheduleSummary,
+  SheetSection,
+  WeekStrip,
+  WhenItRuns,
+} from "@/components/procs/schedule-sheet"
+
+const DAY = 24 * 3600_000
+
+type UnitShow = { unit: SystemdUnit; properties: Record<string, string> }
+
+/** How a oneshot's last run ended, in systemd's `Result` words. */
+const RESULT: Record<string, string> = {
+  success: "succeeded",
+  "exit-code": "failed",
+  signal: "killed",
+  "core-dump": "core dumped",
+  timeout: "timed out",
+  "oom-kill": "killed for memory",
+  watchdog: "watchdog timeout",
+  "start-limit-hit": "start limit hit",
+  resources: "resources unavailable",
+}
+
+/** A monotonic microsecond property, or zero for one systemd has not set. */
+function micro(props: Record<string, string> | undefined, key: string) {
+  const value = Number(props?.[key] ?? 0)
+  return Number.isFinite(value) ? value : 0
+}
+
+/**
+ * One timer's page parts, opened from its row or its lane on the band
+ * (`schedule-page.tsx`): when it fires next and how the last run ended, as
+ * readings; what it fires on, in words, beside the calendar it was written
+ * as; what it runs, coloured as a command (Overview); and every run of that
+ * service, read from its journal (Runs).
+ *
+ * It replaced a disclosure under the timer's row that held only the runs,
+ * and was a sheet until 0.9.0. "Why does certbot run at 06:40 when its
+ * calendar says midnight and noon" is the question a timer is opened with
+ * more often than any other, and its answer — a random delay of up to twelve
+ * hours — was in no place on the page.
+ *
+ * The timer comes from the page's poll, so the head and verbs follow the
+ * list; the two units' own properties are read here, the service's more
+ * often, because "running now" is said from it.
+ */
+export function TimerOverview({ timer, zone }: { timer: SystemdTimer; zone?: string }) {
+  const now = useNow(1000)
+  const own = usePoll(
+    (signal) => get<UnitShow>(`/systemd/${encodeURIComponent(timer.unit)}`, undefined, signal),
+    30_000,
+    [timer.unit],
+  )
+  const service = usePoll(
+    (signal) => get<UnitShow>(`/systemd/${encodeURIComponent(timer.activates)}`, undefined, signal),
+    10_000,
+    [timer.activates],
+    { enabled: Boolean(timer.activates) },
+  )
+  const props = own.data?.properties
+  const run = service.data?.properties
+  // The list already carries the triggers on a host whose systemctl answers
+  // `show`; the unit's own read is the fallback, and the source of the rest.
+  const triggers = props ? timerTriggers(props) : []
+  const delay = timer.randomDelay ?? (props ? randomDelay(props) : undefined)
+  const sentence =
+    describeTimer({
+      calendar: timer.calendar ?? triggers.filter((t) => !t.spec.includes("=")).map((t) => t.spec),
+      monotonic: timer.monotonic ?? triggers.filter((t) => t.spec.includes("=")).map((t) => t.spec),
+      randomDelay: delay,
+    }) ?? (props ? "Only when started by hand" : undefined)
+  const command = run ? execCommand(run) : undefined
+  const calendars =
+    timer.calendar ?? triggers.filter((t) => !t.spec.includes("=")).map((t) => t.spec)
+  const weekly = calendars.length === 1 ? calendarToCron(calendars[0]) : undefined
+  const spread = delay ? spanMs(delay) : undefined
+
+  const minute = Math.floor(now / 60_000) * 60_000
+  const runs = useMemo(
+    () => timerRuns(timer, minute, minute + 7 * DAY, zone),
+    [timer, minute, zone],
+  )
+  const next = timer.next ? new Date(timer.next).getTime() : undefined
+  const started = micro(run, "ExecMainStartTimestampMonotonic")
+  const exited = micro(run, "ExecMainExitTimestampMonotonic")
+  const took = started > 0 && exited >= started ? (exited - started) / 1e6 : undefined
+  const result = run?.Result
+  const failed = Boolean(result && result !== "success")
+  const status = run?.ExecMainStatus
+  const stopped = timer.activeState !== "active"
+
+  return (
+    <div className="flex animate-rise flex-col pb-2">
+      <ScheduleSummary
+        flush
+        sentence={sentence ?? <span className="text-muted-foreground">Reading the timer…</span>}
+        expression={triggers.length > 0 ? triggers.map((t) => t.spec).join(" · ") : undefined}
+        facts={[zone && `${zone} time`]}
+        notice={
+          stopped ? (
+            <Notice title="Stopped">
+              The timer is not armed, so {timer.activates || "its service"} does not run on this
+              schedule until the timer is started.
+            </Notice>
+          ) : undefined
+        }
+      />
+
+      <StatGrid columns={3} dense className="border-t border-hairline">
+        <StatTile
+          className="px-0"
+          label="Next run"
+          value={
+            next !== undefined && next > now ? (
+              <span className="numeric">in {countdown(next - now)}</span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )
+          }
+          hint={
+            next !== undefined
+              ? longClock(next, zone)
+              : stopped
+                ? "the timer is stopped"
+                : "nothing scheduled"
+          }
+        />
+        <StatTile
+          className="px-0"
+          label="Last run"
+          tone={failed ? "danger" : "default"}
+          value={
+            timer.last ? (
+              <span className="numeric">{relativeTime(timer.last)}</span>
+            ) : (
+              <span className="text-muted-foreground">never</span>
+            )
+          }
+          hint={
+            !run
+              ? timer.last
+                ? longClock(new Date(timer.last).getTime(), zone)
+                : "since the timer was installed"
+              : started === 0
+                ? "not since the server started"
+                : `${RESULT[result ?? ""] ?? result ?? "ended"}${
+                    failed && status && status !== "0" ? ` · exit ${status}` : ""
+                  }`
+          }
+        />
+        <StatTile
+          className="px-0"
+          label="Took"
+          value={
+            took !== undefined ? (
+              <span className="numeric">
+                {took < 1 ? `${Math.round(took * 1000)}ms` : duration(took)}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">—</span>
+            )
+          }
+          hint={
+            run?.ActiveState === "activating" || run?.ActiveState === "active"
+              ? "running now"
+              : "the last run"
+          }
+        />
+      </StatGrid>
+
+      <SheetSection flush title="When it runs">
+        <WhenItRuns
+          times={runs.times}
+          dense={runs.dense}
+          zone={zone}
+          empty={stopped ? "Not while the timer is stopped." : "systemd has nothing scheduled."}
+          week={
+            weekly ? (
+              <WeekStrip
+                schedule={weekly}
+                timeZone={zone}
+                color={KIND.timer.color}
+                spread={spread}
+                className={cn(stopped && "opacity-50")}
+              />
+            ) : undefined
+          }
+        />
+        {delay && (
+          <p className="mt-4 text-hint leading-relaxed text-muted-foreground">
+            systemd adds a random delay of up to {spanWords(delay)} to every run, so servers with
+            the same package do not all fire at once. The shaded part of each day is when it may
+            really start; only the next run is known for sure.
+          </p>
+        )}
+      </SheetSection>
+
+      {timer.activates && (
+        <SheetSection
+          flush
+          title="Command"
+          actions={
+            command && (
+              <IconAction
+                label="Copy command"
+                onClick={() => void copyText(command, "Command copied")}
+              >
+                <Copy />
+              </IconAction>
+            )
+          }
+        >
+          {command ? (
+            <Well className="max-h-48 text-xs leading-relaxed break-all whitespace-pre-wrap">
+              <ShellWords command={command} />
+            </Well>
+          ) : service.data ? (
+            <p className="text-body text-muted-foreground">
+              {timer.activates} has no command of its own.
+            </p>
+          ) : (
+            <LoadingRows rows={1} />
+          )}
+        </SheetSection>
+      )}
+
+      <SheetSection flush title="Details">
+        <DetailList className="gap-y-2.5">
+          {(timer.description || run?.Description) && (
+            <Detail label="What it is">{timer.description || run?.Description}</Detail>
+          )}
+          <Detail label="Starts">
+            {timer.activates ? (
+              <Link
+                href={`/processes/services/${encodeURIComponent(timer.activates)}`}
+                className="font-mono hover:underline"
+              >
+                {timer.activates}
+              </Link>
+            ) : (
+              "nothing"
+            )}
+          </Detail>
+          <Detail label="After a reboot">
+            {timer.enabled ? "armed again" : "stays off until started"}
+          </Detail>
+          {props?.Persistent === "yes" && (
+            <Detail label="Missed runs">made up when the server comes back</Detail>
+          )}
+          {props?.FragmentPath && (
+            <Detail label="Unit file">
+              <Link
+                href={`/files?path=${encodeURIComponent(props.FragmentPath)}`}
+                className="font-mono break-all hover:underline"
+              >
+                {props.FragmentPath}
+              </Link>
+            </Detail>
+          )}
+        </DetailList>
+      </SheetSection>
+    </div>
+  )
+}
+
+/**
+ * The runs of what a timer fires: the service's own journal with Runs in
+ * front, so a failed run is one press from the lines it wrote, and Live
+ * beside it for a run started with "Run now".
+ */
+export function TimerRuns({ unit }: { unit: string }) {
+  const sources = useMemo<ServiceLogSource[]>(
+    () => [{ id: journalSource(unit), label: unit, kind: "journal", product: unitProduct(unit) }],
+    [unit],
+  )
+  const views = useMemo(() => [unitRunsView(unit)], [unit])
+  // Runs is as tall as its rows, up to a limit; the lines scroll inside a
+  // height of their own, so Live and History take the limit outright.
+  const [reading, setReading] = useState("runs")
+  return (
+    <ServiceLogs
+      sources={sources}
+      views={views}
+      view="runs"
+      onViewChange={setReading}
+      modes={["live", "search"]}
+      className="[contain:inline-size]"
+      paneClassName={reading === "runs" ? "max-h-[36rem]" : "h-[min(70svh,36rem)]"}
+    />
+  )
+}

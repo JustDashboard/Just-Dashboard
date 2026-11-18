@@ -5,7 +5,7 @@ import { ChevronDown, RefreshClockwise, Stopwatch, Warning } from "@/components/
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
 import { bytes, clock, dayMinuteAt, duration, plural, relativeTime, timestamp } from "@/lib/format"
-import { journalSource } from "@/lib/log-sources"
+import { journalSource } from "@/lib/log/sources"
 import { latency } from "@/lib/requests"
 import type { LogSearchResult } from "@/lib/types"
 import {
@@ -23,12 +23,13 @@ import {
   type UnitRun,
 } from "@/lib/unit-runs"
 import { usePoll } from "@/hooks/use-poll"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { IconAction } from "@/components/icon-action"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
-import { RESULT_WORDS } from "@/components/procs/units"
+import { RESULT_WORDS, signalName } from "@/components/procs/units"
 
 /**
  * The most lifecycle lines one read returns. A unit restarting every five
@@ -426,14 +427,25 @@ function when(iso: string) {
   return dayMinuteAt(d)
 }
 
+/**
+ * How a run ended, in the words a unit's own line uses (`procs/units.ts`):
+ * "exit 1", "killed by SIGTERM", "dumped core on SIGSEGV". The run carries
+ * the signal's name where the journal gave it, and its number otherwise.
+ */
 function exitWords(run: UnitRun) {
+  const status = run.exitStatus
+  const signal = run.signal
+    ? `SIG${run.signal}`
+    : status && /^\d+$/.test(status)
+      ? signalName(Number(status))
+      : (status ?? "a signal")
   switch (run.exitCode) {
     case "exited":
       return run.exitStatus !== undefined ? `exit ${run.exitStatus}` : undefined
     case "killed":
-      return run.signal ? `SIG${run.signal}` : `signal ${run.exitStatus ?? "?"}`
+      return `killed by ${signal}`
     case "dumped":
-      return run.signal ? `core dumped, SIG${run.signal}` : "core dumped"
+      return `dumped core on ${signal}`
   }
   return undefined
 }

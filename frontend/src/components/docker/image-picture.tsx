@@ -4,7 +4,7 @@ import { Box, Globe, Layers } from "@/components/icons"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import type { ImageDetail, ImageUpdateStatus } from "@/lib/types"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { ReferenceWords } from "@/components/docker/image-marks"
 import {
   FRESHNESS_COLOR,
@@ -16,7 +16,7 @@ import {
 } from "@/components/docker/images"
 import { ProductGlyph, hasProductLogo, hostProduct, imageProduct } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 
 /** How many containers the picture names before the rest are one "N more". */
 const NAMED = 2
@@ -130,12 +130,7 @@ function user(container: ImageDetail["usedBy"][number]): WireFlowNode {
         <WireMark size={size}>
           <Box aria-hidden />
         </WireMark>
-        <span
-          aria-hidden
-          className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background"
-        >
-          <StatusDot state={container.state} />
-        </span>
+        <StatusDot state={container.state} corner="md" />
       </span>
     ),
     eyebrow: container.stack ? (

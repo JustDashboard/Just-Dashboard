@@ -1,12 +1,11 @@
 "use client"
 
 import type { NetworkLink } from "@/lib/types"
-import { observationAge } from "@/lib/network-traffic"
+import { observationAge } from "@/lib/network/traffic"
 import { ChartActivity } from "@/components/icons"
-import { useNow } from "@/components/deploy/vocabulary"
-import { HostIdentity } from "@/components/metrics/host-identity"
+import { useNow } from "@/hooks/use-now"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { linkGlyph, linkProduct } from "@/components/network/marks"
 import type { LiveTraffic } from "@/components/network/use-live-traffic"
 import { FactGroups } from "./facts"
 import { carryingWords } from "./words"
@@ -53,25 +52,31 @@ export function TrafficIdentity({
     <Status state="running" label={`read ${age.seconds}s ago`} />
   )
   return (
-    <HostIdentity
-      label="About the uplink"
+    <IdentityHeader
+      label="About the traffic"
       className={className}
-      mark={uplink ? linkProduct(uplink) : undefined}
-      fallback={uplink ? linkGlyph(uplink.kind) : ChartActivity}
-      title={uplink ? <span className="font-mono">{uplink.name}</span> : "Traffic"}
+      // Titled by the page, not by one device: the page charts every device,
+      // and the uplink is a fact of its line (design-system §16).
+      fallback={ChartActivity}
+      title="Traffic"
       state={state}
       facts={
         <FactGroups
           groups={[
             [
               <span key="what">
-                {uplink
-                  ? "Uplink"
-                  : links
-                    ? "No uplink found"
-                    : linksError
-                      ? "The devices could not be read"
-                      : "Reading the devices…"}
+                {uplink ? (
+                  <>
+                    Uplink{" "}
+                    <span className="font-mono leading-none text-foreground">{uplink.name}</span>
+                  </>
+                ) : links ? (
+                  "No uplink found"
+                ) : linksError ? (
+                  "The devices could not be read"
+                ) : (
+                  "Reading the devices…"
+                )}
               </span>,
               carrying && (
                 <span key="carrying" className="numeric text-foreground">

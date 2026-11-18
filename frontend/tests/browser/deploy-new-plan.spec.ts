@@ -13,14 +13,14 @@ test("the plan drawing reads the setup back and opens the field that decides eac
 }) => {
   await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   // The drawing is beside every one of the four configure screens, so it reads
   // the setup back wherever the reader is standing in the sequence.
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toBeVisible()
 
   const plan = page.getByRole("list", { name: "What this setup will create" })
-  await expect(plan.getByText("Wayy01/wesmokefish", { exact: true })).toBeVisible()
+  await expect(plan.getByText("operator/wesmokefish", { exact: true })).toBeVisible()
   await expect(plan.getByText("Automatic recipe · Next.js")).toBeVisible()
   await expect(plan.getByText("Port 3000 · candidate first")).toBeVisible()
 
@@ -42,7 +42,7 @@ test("the plan drawing reads the setup back and opens the field that decides eac
 test("a second hostname can be added before the first deploy", async ({ page }) => {
   const journey = await mockNewProject(page)
   await page.goto("/deploy/new")
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   await gotoStep(page, "runtime")
 
   await page.getByRole("textbox", { name: "Hostname", exact: true }).fill("wesmokefish.test")
@@ -70,7 +70,7 @@ test("an unfinished setup can be discarded, and changing source discards the one
     {
       id: "abandoned-1",
       name: "lampino",
-      source: "git · https://github.com/Wayy01/lampino.git",
+      source: "git · https://github.com/operator/lampino.git",
       currentStep: "detection",
       updatedAt: now,
       expiresAt: "2026-10-02T09:00:00Z",
@@ -92,7 +92,7 @@ test("an unfinished setup can be discarded, and changing source discards the one
   // Every press of Import creates a draft, so walking away from one and
   // picking a different source has to throw the first away rather than leave
   // it to expire — three tries at one repository were three rows here.
-  await page.getByRole("button", { name: "Import Wayy01/wesmokefish" }).click()
+  await page.getByRole("button", { name: "Import operator/wesmokefish" }).click()
   // The way out of the sequence is the way back from its first screen: there
   // is no step behind that one, so "Back" is "Change source".
   await gotoStep(page, "project")

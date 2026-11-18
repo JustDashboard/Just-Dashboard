@@ -24,23 +24,24 @@ import { cn } from "@/lib/utils"
 import type { FileContent } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
+import { IconAction } from "@/components/icon-action"
 import { CodeEditor, type EditorCommands } from "@/components/code-editor"
-import { DiffView } from "@/components/files/diff-view"
-import { unifiedDiff } from "@/components/files/diff"
+import { DiffView } from "@/components/diff-view"
+import { unifiedDiff } from "@/lib/diff"
 import { isImage, rawUrl } from "@/components/files/media"
 import { EditorSurface } from "./editor-surface"
 import { EditorToolbar } from "./editor-toolbar"
 import { ContentConflict } from "./content-conflict"
-import { FileIcon } from "./file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { handoffDraft, takeDraft } from "./editor-handoff"
 import { editorHref } from "./search"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   Select,
   SelectContent,
@@ -651,22 +652,16 @@ function Toggle({
   children: React.ReactNode
 }) {
   return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <Button
-          size="icon-sm"
-          variant={active ? "secondary" : "ghost"}
-          aria-label={label}
-          aria-pressed={active}
-          className={cn(!active && "text-muted-foreground")}
-          onClick={onClick}
-          disabled={disabled}
-        >
-          {children}
-        </Button>
-      </TooltipTrigger>
-      <TooltipContent>{label}</TooltipContent>
-    </Tooltip>
+    <IconAction
+      label={label}
+      variant={active ? "secondary" : "ghost"}
+      aria-pressed={active}
+      className={cn(!active && "text-muted-foreground")}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      {children}
+    </IconAction>
   )
 }
 

@@ -6,17 +6,15 @@ import { useSearchParams } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 import { engineOf } from "@/components/database/engine"
 import { lastTopology, readTopology } from "@/components/database/fleet/read"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { useDatabases } from "@/components/database/shell/databases-context"
 import { DATABASE_ID } from "@/components/database/shell/routes"
-import { Plus } from "@/components/icons"
+import { Plus, Route } from "@/components/icons"
 import {
   MapSkeleton,
   lastServerMap,
   readServerMap,
   stillFilling,
   unreadKinds,
-  useFullscreen,
 } from "@/components/map"
 import type { MapBoard } from "@/components/map/board"
 import { MapCanvas, type Unread } from "@/components/map/canvas"
@@ -24,7 +22,9 @@ import { useMapMemory } from "@/components/map/memory"
 import { Page, PageContext } from "@/components/page"
 import { Pane } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
+import { ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
+import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
 import {
   DATABASE_KINDS,
@@ -61,6 +61,10 @@ const DATABASES_BOARD: MapBoard = {
       return [...byEngine.values()].sort((a, b) => a.label.localeCompare(b.label))
     },
     empty: "No database is connected yet.",
+    // The page draws no header, so the rail is headed as the server map's
+    // is, level with the inspector's head across the canvas: one pattern,
+    // drawn one way on both maps.
+    head: { icon: Route, title: "Map" },
   },
   census: databaseCensusLine,
   holds: (system) => {
@@ -88,7 +92,9 @@ const DATABASES_BOARD: MapBoard = {
     return {
       eyebrow: "Databases",
       title: plural(systems.length, "database"),
-      line: "Each one drawn with what reads it and where it runs",
+      // The engines, as a fact on the title's line: it was a sentence about
+      // the picture, which the picture already is.
+      line: engineNames(systems),
       heading: "Across them",
       facts: [
         { label: "Read by", value: readers.size },
@@ -100,6 +106,34 @@ const DATABASES_BOARD: MapBoard = {
         .map((fact) => ({ label: fact.label, value: fact.value.toLocaleString("en-US") })),
     }
   },
+  home: busiest,
+}
+
+/** The engines a set of databases runs on, by name, in the rail's order. */
+function engineNames(systems: System[]): string {
+  const names = new Set(systems.map((system) => engineOf(system.anchor.product ?? "").label))
+  return [...names].sort((a, b) => a.localeCompare(b)).join(", ")
+}
+
+/**
+ * The database the canvas opens on when every diagram at once is too small to
+ * read: the one with the most reading it and the most sessions open, then the
+ * largest diagram. It opened on all five at 36%, with names 4px tall.
+ */
+function busiest(systems: System[]): string | undefined {
+  let best: { id: string; score: number[] } | undefined
+  for (const system of systems) {
+    const census = databaseCensus(system)
+    const score = [census.readers.length, census.sessions, system.nodes.length]
+    if (!best || compareScores(score, best.score) > 0) best = { id: system.id, score }
+  }
+  return best?.id
+}
+
+/** Which of two scores is larger, by their first figure that differs. */
+function compareScores(a: readonly number[], b: readonly number[]): number {
+  const at = a.findIndex((value, index) => value !== b[index])
+  return at < 0 ? 0 : a[at] - b[at]
 }
 
 /**
@@ -165,23 +199,24 @@ export function DatabaseMap() {
 
   return (
     <Page fill className="max-w-none gap-2 p-0 lg:px-3 lg:py-3">
-      <PageContext eyebrow="Databases" title="Map" />
+      <PageContext title="Map" />
       <div
         ref={root}
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          screen.immersive && "fixed inset-0 z-50 p-3",
+          screen.immersive && "fixed inset-0 z-immersive p-3",
         )}
       >
         <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
           {failed ? (
-            <ReadFailed
+            <ErrorState
               className="p-4"
               error={topology.error!}
               onRetry={() => {
                 topology.refresh()
                 map.refresh()
               }}
+              retryable
               every="30 seconds"
             />
           ) : answered && memory.document ? (

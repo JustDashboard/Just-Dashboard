@@ -1,12 +1,13 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { StopCircle, Wrench } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { duration } from "@/lib/format"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { FormFact, FormFacts, FormNote, Statement } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
@@ -30,6 +31,8 @@ import {
 } from "@/components/database/ops/performance-storage"
 import type { DbMaintenanceResult } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { agree } from "@/components/database/kit/figures"
+import { Sweep } from "@/components/loading"
 
 type Run = {
   verb: MaintenanceVerb
@@ -355,12 +358,7 @@ function MaintenanceRun({
                 <TextShimmer>Running…</TextShimmer>
                 <Elapsed since={run.since} />
               </p>
-              <div
-                aria-hidden
-                className="relative h-0.5 overflow-hidden rounded-full bg-meter-track"
-              >
-                <span className="absolute inset-y-0 left-0 w-1/3 animate-sweep rounded-full bg-brand" />
-              </div>
+              <Sweep rounded className="h-0.5" />
             </div>
           ) : run.state === "stopped" ? (
             <Notice title="Stopped">
@@ -387,7 +385,7 @@ function MaintenanceRun({
         {result && (
           <>
             <Statement
-              label={result.statements.length === 1 ? "Statement" : "Statements"}
+              label={agree(result.statements.length, "Statement", "Statements")}
               sql={result.statements.join("\n")}
               placeholder="The engine was sent no statement."
             />
@@ -413,11 +411,7 @@ function MaintenanceRun({
 
 /** How long the run has been going, counted by the second. Not announced: it changes every second. */
 function Elapsed({ since }: { since: number }) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useNow()
   return (
     <span aria-hidden className="numeric text-muted-foreground">
       {duration(Math.max(0, (now - since) / 1000))}

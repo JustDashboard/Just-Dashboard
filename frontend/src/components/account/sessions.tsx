@@ -1,5 +1,6 @@
 "use client"
 
+import { Fact, FactLine } from "@/components/fact-line"
 import { DesktopDevice, Terminal } from "@/components/icons"
 import { del, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -8,14 +9,15 @@ import { describeClient, parseAgent } from "@/lib/clients"
 import type { SessionInfo } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { DimActions } from "@/components/icon-action"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ClientMark, NetworkFact } from "@/components/client-mark"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { activeNow } from "@/components/account/access"
 import { SessionMap } from "@/components/account/session-map"
 
@@ -56,25 +58,19 @@ function factorLabel(session: SessionInfo) {
 export function CurrentSession({ session }: { session: SessionInfo }) {
   const agent = parseAgent(session.userAgent)
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={agent.product ?? agent.osProduct}
       fallback={agent.device === "program" ? Terminal : DesktopDevice}
       title={<span title={session.userAgent}>{agent.client}</span>}
       facts={
         <>
-          {agent.os && (
-            <>
-              <HostFact product={agent.osProduct}>{agent.os}</HostFact>
-              <FactDot />
-            </>
-          )}
-          <NetworkFact ip={session.ip} />
-          <FactDot />
-          <span>signed in {relativeTime(session.createdAt)}</span>
-          <FactDot />
-          <span>{factorLabel(session)}</span>
-          <FactDot />
-          <span>expires {relativeTime(session.expiresAt)}</span>
+          {agent.os && <Fact product={agent.osProduct}>{agent.os}</Fact>}
+          <Fact>
+            <NetworkFact ip={session.ip} />
+          </Fact>
+          <Fact>signed in {relativeTime(session.createdAt)}</Fact>
+          <Fact>{factorLabel(session)}</Fact>
+          <Fact>expires {relativeTime(session.expiresAt)}</Fact>
         </>
       }
       aside={<Status tone="running" label="this device" />}
@@ -120,15 +116,13 @@ export function OtherSessions({ sessions }: { sessions: ReturnType<typeof useSes
                 leading={<ClientMark userAgent={session.userAgent} />}
                 title={<span title={session.userAgent}>{describeClient(session.userAgent)}</span>}
                 subtitle={
-                  <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-                    <NetworkFact ip={session.ip} />
-                    <FactDot />
-                    <span className="shrink-0">signed in {relativeTime(session.createdAt)}</span>
-                    <span className="hidden shrink-0 items-center gap-2 md:inline-flex">
-                      <FactDot />
-                      {factorLabel(session)}
-                    </span>
-                  </span>
+                  <FactLine nowrap>
+                    <Fact>
+                      <NetworkFact ip={session.ip} />
+                    </Fact>
+                    <Fact className="shrink-0">signed in {relativeTime(session.createdAt)}</Fact>
+                    <Fact className="hidden shrink-0 md:block">{factorLabel(session)}</Fact>
+                  </FactLine>
                 }
                 trailing={
                   <span className="flex justify-end sm:w-24">

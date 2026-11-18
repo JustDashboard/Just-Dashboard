@@ -341,7 +341,7 @@ function InlineEditor({
           aria-invalid={error ? true : undefined}
           aria-describedby={hintId}
           className={cn(
-            "absolute inset-0 z-10 w-full min-w-0 bg-popover px-2 font-mono text-xs text-foreground focus-ring-inset placeholder:text-muted-foreground/60 max-sm:text-base",
+            "absolute inset-0 z-raised w-full min-w-0 bg-popover px-2 font-mono text-xs text-foreground focus-ring-inset placeholder:text-faint max-sm:text-base",
             column.kind === "number" && "text-right",
           )}
           onChange={(event) => setText(event.target.value)}
@@ -640,6 +640,8 @@ function ListEditor({
           tabIndex={0}
           aria-label={`Set ${column.name}`}
           aria-activedescendant={`${baseId}-${highlight}`}
+          // The highlighted option is the focus mark (aria-activedescendant).
+          // eslint-disable-next-line design-system/tokens
           className="max-h-64 overflow-y-auto outline-none"
           onKeyDown={(event) => {
             const last = options.length - 1
@@ -669,8 +671,7 @@ function ListEditor({
               aria-selected={index === highlight}
               className={cn(
                 "flex cursor-default items-center gap-2 rounded-sm px-2 py-1.5 font-mono text-xs select-none",
-                option.special &&
-                  "font-sans text-micro font-medium tracking-[0.06em] text-muted-foreground uppercase",
+                option.special && "caps font-sans text-micro",
                 index === highlight && "bg-menu-hover",
               )}
               onPointerMove={() => setHighlight(index)}

@@ -2,9 +2,9 @@
 
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { timeAt } from "@/components/bar-reading-model"
-import { LiveBytes } from "@/components/overview/readings"
+import { LiveBytes } from "@/components/live-figure"
 import { ProductGlyph, containerProduct } from "@/components/product-logo"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { RX, TX } from "@/components/network/rate-pair"
 import { ago } from "@/components/procs/units"
 import { TextShimmer } from "@/components/ui/text-shimmer"

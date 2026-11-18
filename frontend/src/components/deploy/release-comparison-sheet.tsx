@@ -2,7 +2,8 @@
 
 import Link from "next/link"
 import { ArrowRight, Database, Globe, Key, LockClosed } from "@/components/icons"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { SidePanel } from "@/components/side-panel"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -13,6 +14,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
+import { PanelHeader } from "@/components/panel"
+import type { GitTone } from "@/lib/git-status"
 import type {
   DeploymentRelease,
   ReleaseComparisonResponse,
@@ -21,6 +24,7 @@ import type {
 } from "@/lib/types"
 import { CHANGE_TONE, sentence, shortIdentity, shortRevision } from "@/components/deploy/vocabulary"
 import { dataPointChanges } from "@/components/deploy/data-rollback-model"
+import { DIFF_WASH } from "@/components/diff-view"
 
 const UPDATE_TEXT: Record<NonNullable<ReleaseUpdateStatus["state"]>, string> = {
   current: "The upstream tag still resolves to the digest this release pinned.",
@@ -50,10 +54,10 @@ const LETTER: Record<ReleaseListChange["change"], string> = {
   unchanged: "",
 }
 
-/** The diff view's own wash behind an added or a removed value (`files/diff-view.tsx`). */
+/** The diff view's own wash behind an added or a removed value. */
 const WASH: Partial<Record<ReleaseListChange["change"], string>> = {
-  added: "color-mix(in oklab, var(--git-added) 9%, transparent)",
-  removed: "color-mix(in oklab, var(--git-deleted) 9%, transparent)",
+  added: DIFF_WASH.add,
+  removed: DIFF_WASH.del,
 }
 
 type Change = {
@@ -280,12 +284,7 @@ function ReleaseName({ release, id }: { release?: DeploymentRelease; id: number 
 function ChangeSection({ title, changes }: { title: string; changes: Change[] }) {
   return (
     <section className="min-w-0 space-y-1" aria-label={title}>
-      <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-2">
-        <h3 className="text-title leading-tight font-semibold tracking-tight">{title}</h3>
-        <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {changes.length} changed
-        </span>
-      </div>
+      <PanelHeader plain level={3} title={title} count={`${changes.length} changed`} />
       <ul className="divide-y divide-hairline">
         {changes.map((change) => (
           <ChangeRow key={change.key} change={change} />
@@ -295,16 +294,21 @@ function ChangeSection({ title, changes }: { title: string; changes: Change[] })
   )
 }
 
+/** A change's letter in its git hue, as classes the theme registers. */
+const GIT_TEXT: Partial<Record<GitTone, string>> = {
+  added: "text-git-added",
+  modified: "text-git-modified",
+  deleted: "text-git-deleted",
+}
+
 function ChangeRow({ change }: { change: Change }) {
   const tone = CHANGE_TONE[change.change]
-  const colour = tone ? `var(--git-${tone})` : undefined
   return (
     <li className="min-w-0 space-y-1.5 py-2.5">
       <div className="flex min-w-0 items-center gap-2">
         <span
           title={change.change}
-          className="w-3 shrink-0 font-mono text-xs font-semibold"
-          style={{ color: colour }}
+          className={cn("w-3 shrink-0 font-mono text-xs font-semibold", tone && GIT_TEXT[tone])}
         >
           {LETTER[change.change]}
         </span>
@@ -325,10 +329,10 @@ function ChangeRow({ change }: { change: Change }) {
       >
         <Value
           value={change.from}
-          className="text-(--git-deleted) line-through decoration-(--git-deleted)/50"
+          className="text-git-deleted line-through decoration-git-deleted/50"
         />
         <span className="text-muted-foreground"> → </span>
-        <Value value={change.to} className="text-(--git-added)" />
+        <Value value={change.to} className="text-git-added" />
       </p>
     </li>
   )

@@ -22,17 +22,19 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetrics } from "@/hooks/use-metrics"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, platformName } from "@/components/metrics/host-identity"
-import { StreamState } from "@/components/overview/readings"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { StreamState } from "@/components/live-figure"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { EmptyState, ErrorState } from "@/components/state"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
-import { ExplainIcon } from "@/components/docker/explain"
+import { Definition } from "@/components/docker/explain"
 import { ContainerBand } from "@/components/docker/containers-band"
 import { ContainerRows } from "@/components/docker/containers-table"
 import { useContainerControl } from "@/components/docker/container-actions"
@@ -329,12 +331,13 @@ export default function ContainersPage() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {/* Containers are deployed from the Deploy pages — there is no
             standalone create flow here. */}
         <PageContext eyebrow="Docker" title="Containers" />
 
         <DockerIdentity
+          page="Containers"
           version={version}
           host={host ?? undefined}
           hostDetail={host?.platform ? platformName(host) : undefined}
@@ -351,37 +354,21 @@ export default function ContainersPage() {
           }
           facts={
             <>
-              {info.data?.Driver && (
-                <span className="contents max-sm:hidden">
-                  <span>{info.data.Driver}</span>
-                  <FactDot />
-                </span>
-              )}
-              <span className="numeric">
+              {info.data?.Driver && <Fact className="max-sm:hidden">{info.data.Driver}</Fact>}
+              <Fact className="numeric">
                 {running.length} of {plural(containers.length, "container")} running
-              </span>
-              {projects > 0 && (
-                <>
-                  <FactDot />
-                  <span className="numeric">{plural(projects, "stack")}</span>
-                </>
-              )}
+              </Fact>
+              {projects > 0 && <Fact className="numeric">{plural(projects, "stack")}</Fact>}
               {info.data && (
-                <span className="contents max-sm:hidden">
-                  <FactDot />
-                  <span className="numeric">{plural(info.data.Images, "image")}</span>
-                </span>
+                <Fact className="numeric max-sm:hidden">{plural(info.data.Images, "image")}</Fact>
               )}
               {running.length > 0 && (
-                <span className="contents max-sm:hidden">
-                  <FactDot />
-                  <span
-                    className="numeric"
-                    title={`${plural(running.length - checked, "running container")} not vouched for by a passing health check`}
-                  >
-                    {checked} of {running.length} pass a health check
-                  </span>
-                </span>
+                <Fact
+                  className="numeric max-sm:hidden"
+                  title={`${plural(running.length - checked, "running container")} not vouched for by a passing health check`}
+                >
+                  {checked} of {running.length} pass a health check
+                </Fact>
               )}
             </>
           }
@@ -402,17 +389,18 @@ export default function ContainersPage() {
 
         {/* Framed, because it is a table: the grid owns a scroll region and
             the edge is what says so (§2). Everything above it stays plain. */}
-        <Panel>
+        <Panel
+          // Framed: a table: the frame is the edge of its scroll (§2).
+          framed
+        >
           <PanelHeader
             title={
               <span className="inline-flex items-center gap-1.5">
                 Containers
-                <span className="numeric text-body font-normal text-muted-foreground">
-                  {containers.length}
-                </span>
-                <ExplainIcon name="container" />
+                <Definition name="container" />
               </span>
             }
+            count={containers.length}
             // Until the chips fit beside it, Recent's head says Live for both.
             actions={
               <span className="hidden xl:inline-flex">
@@ -535,10 +523,10 @@ export default function ContainersPage() {
           </PanelBody>
           <PanelFooter className="text-hint text-muted-foreground">
             <span className="numeric">{plural(visible.length, "container")} shown</span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>{SORT_WORDS[sort.key]}</span>
             {sort.key !== "state" && sort.dir !== FIRST_DIR[sort.key] && <span>, reversed</span>}
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>readings every 2 seconds</span>
           </PanelFooter>
         </Panel>

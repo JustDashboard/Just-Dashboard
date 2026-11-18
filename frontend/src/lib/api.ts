@@ -12,7 +12,7 @@
  */
 
 import { retryAfterMs } from "@/lib/backoff"
-import { networkPendingHeaders } from "@/lib/network-pending"
+import { networkPendingHeaders } from "@/lib/network/pending"
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "/api/v1"
 
@@ -61,6 +61,17 @@ export type ApiErrorBody = {
  */
 export function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err)
+}
+
+/**
+ * An answer held to the one field the page cannot do without. A server that
+ * answers a route with something else — an older backend, a proxy's page —
+ * is a failed read with a sentence, not a page that throws half-way through
+ * drawing it.
+ */
+export function shaped<T>(value: unknown, field: string, what: string): T {
+  if (typeof value === "object" && value !== null && field in value) return value as T
+  throw new Error(`The server's answer for ${what} could not be read.`)
 }
 
 export class ApiError extends Error {

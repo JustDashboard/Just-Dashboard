@@ -3,6 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
+import { Fact, FactLine } from "@/components/fact-line"
 import { ChartActivity, Cross, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { bytes, duration, percent, plural, relativeTime } from "@/lib/format"
@@ -13,14 +14,17 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { IdentityHeader } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { RowLink } from "@/components/row-link"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
 import { Row, RowList, ROW_BLEED } from "@/components/row-list"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { EmptyState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions, VerbMenu } from "@/components/verbs"
@@ -200,7 +204,7 @@ function PM2Applications() {
     return (
       <Page>
         {header}
-        <HostIdentity
+        <IdentityHeader
           mark="pm2"
           title="PM2"
           state={
@@ -262,10 +266,10 @@ function PM2Applications() {
         return false
       }}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {header}
 
-        <HostIdentity
+        <IdentityHeader
           mark="pm2"
           title="PM2"
           state={
@@ -297,25 +301,22 @@ function PM2Applications() {
           }
           facts={
             <PM2FactsLine>
-              {daemons.length === 1 ? (
-                <DaemonFacts daemon={daemons[0]} nodeVersions={nodeVersions} />
-              ) : (
-                <>
-                  <span className="numeric font-medium text-foreground">
-                    {daemons.length} daemons
-                  </span>
-                  <FactDot />
-                  <span className="truncate">{daemons.map((d) => d.account).join(", ")}</span>
-                  {nodeVersions.length > 0 && (
-                    <>
-                      <FactDot />
-                      <HostFact product="nodejs">Node {nodeVersions.join(", ")}</HostFact>
-                    </>
-                  )}
-                </>
-              )}
-              <FactDot />
-              <span className="numeric">{plural(apps.length, "application")}</span>
+              <FactLine className="w-full [&>span]:gap-y-1">
+                {daemons.length === 1 ? (
+                  daemonFacts(daemons[0], nodeVersions)
+                ) : (
+                  <>
+                    <Fact className="numeric font-medium text-foreground">
+                      {daemons.length} daemons
+                    </Fact>
+                    <Fact className="truncate">{daemons.map((d) => d.account).join(", ")}</Fact>
+                    {nodeVersions.length > 0 && (
+                      <Fact product="nodejs">Node {nodeVersions.join(", ")}</Fact>
+                    )}
+                  </>
+                )}
+                <Fact className="numeric">{plural(apps.length, "application")}</Fact>
+              </FactLine>
             </PM2FactsLine>
           }
         />
@@ -329,11 +330,7 @@ function PM2Applications() {
                   <Row
                     key={daemon.account}
                     title={daemon.account}
-                    subtitle={
-                      <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                        <DaemonFacts daemon={daemon} nodeVersions={[]} />
-                      </span>
-                    }
+                    subtitle={<FactLine>{daemonFacts(daemon, [])}</FactLine>}
                     trailing={<ResurrectVerdict daemons={[daemon]} processes={processes} />}
                     className="py-2.5"
                   />
@@ -347,12 +344,12 @@ function PM2Applications() {
 
         {/* Framed, because it is a table: the grid owns a scroll region and the
           edge is what says so (§2). Everything above it stays plain. */}
-        <Panel>
+        <Panel framed>
           <PanelHeader
             title={
               <>
                 Applications
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                   {apps.length}
                 </span>
               </>
@@ -467,11 +464,11 @@ function PM2Applications() {
               </span>
               {counts.errored > 0 && (
                 <>
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <span>crashing applications first</span>
                 </>
               )}
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span>read from PM2 every {POLL / 1000}s</span>
             </PanelFooter>
           )}
@@ -506,20 +503,15 @@ function PM2Applications() {
  * day-after-the-reboot surprise this page exists to prevent, so each is
  * said plainly rather than hidden in a tooltip on the Save button.
  */
-function DaemonFacts({ daemon, nodeVersions }: { daemon: PM2Daemon; nodeVersions: string[] }) {
+/** One daemon's facts, as the `Fact`s a `FactLine` lays out: called, not rendered, so the line sees them. */
+function daemonFacts(daemon: PM2Daemon, nodeVersions: string[]) {
   const hook = Boolean(daemon.startupUnit)
   const saved = Boolean(daemon.dumpSavedAt)
   return (
     <>
-      <span className="font-medium text-foreground">{daemon.account}</span>
-      {nodeVersions.length > 0 && (
-        <>
-          <FactDot />
-          <HostFact product="nodejs">Node {nodeVersions.join(", ")}</HostFact>
-        </>
-      )}
-      <FactDot />
-      <span className="truncate">
+      <Fact className="font-medium text-foreground">{daemon.account}</Fact>
+      {nodeVersions.length > 0 && <Fact product="nodejs">Node {nodeVersions.join(", ")}</Fact>}
+      <Fact className="truncate">
         {hook ? (
           <>
             hook <span className="font-mono">{daemon.startupUnit}</span>
@@ -529,9 +521,8 @@ function DaemonFacts({ daemon, nodeVersions }: { daemon: PM2Daemon; nodeVersions
             run <span className="font-mono">pm2 startup</span> as {daemon.account} to install one
           </>
         )}
-      </span>
-      <FactDot />
-      <span>{saved ? `list saved ${relativeTime(daemon.dumpSavedAt)}` : "list not yet saved"}</span>
+      </Fact>
+      <Fact>{saved ? `list saved ${relativeTime(daemon.dumpSavedAt)}` : "list not yet saved"}</Fact>
     </>
   )
 }
@@ -654,7 +645,7 @@ function PM2Rows({
   return (
     <>
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead>Application</TableHead>

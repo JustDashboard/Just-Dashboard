@@ -3,25 +3,29 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { Logout, RefreshClockwise, SignIn, Slash } from "@/components/icons"
 import { get, post, ApiError } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
 import { plural, relativeTime, timestamp } from "@/lib/format"
-import type { MetricsState } from "@/lib/metrics-store"
+import type { MetricsState } from "@/lib/metrics/store"
 import { notify } from "@/lib/toast"
 import type { AttackSummary, Attacker, LoginRecord, LoginSession } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useMetricsValue } from "@/hooks/use-metrics"
 import { usePoll, type PollState } from "@/hooks/use-poll"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { IdentityHeader } from "@/components/identity-header"
 import { deniedSources } from "@/components/network/firewall-reading"
-import { PageContext, SearchInput } from "@/components/page"
-import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { Segments } from "@/components/segments"
+import { Panel, PanelBody, PanelHeader } from "@/components/panel"
+import { ListToolbar } from "@/components/toolbar"
 import { ProductGlyph, ProductLogo, platformProduct } from "@/components/product-logo"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
 import { addressVerbs, blockAddress } from "@/components/security/address-verbs"
@@ -50,7 +54,6 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useHeldList } from "@/components/workspace/held-list"
 import { useFilterHistory } from "@/components/workspace/history"
@@ -174,7 +177,7 @@ function LoginsIdentity({
   const attacks = attackers.data
   const latest = history.data?.find((record) => record.kind === "login" && record.loginTime)
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={platformProduct(platform)}
       fallback={SignIn}
       label="Logins on this server"
@@ -208,49 +211,47 @@ function LoginsIdentity({
           </>
         ) : (
           <>
-            {latest ? (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span>last login</span>
-                <span className="font-medium text-foreground">{latest.user}</span>
-                <span className="numeric" title={timestamp(latest.loginTime)}>
-                  {relativeTime(latest.loginTime)}
+            <Fact>
+              {latest ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
+                  <span>last login</span>
+                  <span className="font-medium text-foreground">{latest.user}</span>
+                  <span className="numeric" title={timestamp(latest.loginTime)}>
+                    {relativeTime(latest.loginTime)}
+                  </span>
+                  <span>from</span>
+                  <Address ip={latest.from || "the console"} className="text-foreground" />
                 </span>
-                <span>from</span>
-                <Address ip={latest.from || "the console"} className="text-foreground" />
-              </span>
-            ) : noRecord(history.error) ? (
-              <span>no login record this server can read</span>
-            ) : history.error && !history.data ? (
-              <span className="text-warning">login record unread</span>
-            ) : history.data ? (
-              <span>no login on record</span>
-            ) : (
-              <span>reading the login record</span>
-            )}
-            {remote > 0 && (
-              <>
-                <FactDot />
-                <span className="numeric">{remote} over ssh</span>
-              </>
-            )}
-            <FactDot />
-            {!admin ? (
-              <span>failed attempts: administrators only</span>
-            ) : attacks ? (
-              <span className="numeric">
-                <span className={cn("font-medium", attacks.attempts > 0 && "text-foreground")}>
-                  {attemptsWords(attacks)}
-                </span>{" "}
-                failed {attacks.attempts === 1 ? "attempt" : "attempts"} in{" "}
-                {windowWords(attacks.windowHours)}
-              </span>
-            ) : noRecord(attackers.error) ? (
-              <span>no failed-login record on this server</span>
-            ) : attackers.error ? (
-              <span className="text-warning">failed attempts unread</span>
-            ) : (
-              <span>counting failed attempts</span>
-            )}
+              ) : noRecord(history.error) ? (
+                <span>no login record this server can read</span>
+              ) : history.error && !history.data ? (
+                <span className="text-warning">login record unread</span>
+              ) : history.data ? (
+                <span>no login on record</span>
+              ) : (
+                <span>reading the login record</span>
+              )}
+            </Fact>
+            {remote > 0 && <Fact className="numeric">{remote} over ssh</Fact>}
+            <Fact>
+              {!admin ? (
+                <span>failed attempts: administrators only</span>
+              ) : attacks ? (
+                <span className="numeric">
+                  <span className={cn("font-medium", attacks.attempts > 0 && "text-foreground")}>
+                    {attemptsWords(attacks)}
+                  </span>{" "}
+                  failed {attacks.attempts === 1 ? "attempt" : "attempts"} in{" "}
+                  {windowWords(attacks.windowHours)}
+                </span>
+              ) : noRecord(attackers.error) ? (
+                <span>no failed-login record on this server</span>
+              ) : attackers.error ? (
+                <span className="text-warning">failed attempts unread</span>
+              ) : (
+                <span>counting failed attempts</span>
+              )}
+            </Fact>
           </>
         )
       }
@@ -263,11 +264,6 @@ function LoginsIdentity({
       }
     />
   )
-}
-
-/** A section's count, at the far end of its title line. */
-function Count({ children }: { children: React.ReactNode }) {
-  return <span className="numeric text-hint text-muted-foreground">{children}</span>
 }
 
 /** One line in a section that has nothing to list, at the height of the row that would stand there. */
@@ -309,7 +305,7 @@ function CurrentSessions({ poll }: { poll: PollState<LoginSession[]> }) {
   return (
     <>
       <Panel plain id="sessions" className="scroll-mt-6">
-        <PanelHeader title="Signed in" actions={data && <Count>{sessions.length}</Count>} />
+        <PanelHeader title="Signed in" count={data && sessions.length} />
         <PanelBody>
           {loading && !data && !error ? (
             <Skeleton className="h-14.5 rounded-xl" />
@@ -444,14 +440,11 @@ function AttackersPanel({
     <Panel plain id="attackers" className="scroll-mt-6">
       <PanelHeader
         title="Attackers"
-        actions={
-          data && (
-            <Count>
-              {data.attempts === 0
-                ? `none in ${windowWords(data.windowHours)}`
-                : `${attemptsWords(data)} ${data.attempts === 1 ? "attempt" : "attempts"} from ${plural(data.addresses, "address", "addresses")}${data.since ? ` · since ${relativeTime(data.since)}` : ""}`}
-            </Count>
-          )
+        count={
+          data &&
+          (data.attempts === 0
+            ? `none in ${windowWords(data.windowHours)}`
+            : `${attemptsWords(data)} ${data.attempts === 1 ? "attempt" : "attempts"} from ${plural(data.addresses, "address", "addresses")}${data.since ? ` · since ${relativeTime(data.since)}` : ""}`)
         }
       />
       <PanelBody flush>
@@ -591,43 +584,49 @@ function LoginHistoryPanel({ history }: { history: PollState<LoginRecord[]> }) {
     <Panel plain id="recent" className="scroll-mt-6">
       <PanelHeader
         title={showFailed ? "Failed login attempts" : "Recent logins"}
-        actions={data && data.length > 0 && <Count>{plural(data.length, "record")}</Count>}
+        count={data && data.length > 0 && plural(data.length, "record")}
       />
       {!noRecord(error) && !(error && !data) && (
-        <PanelToolbar className="border-b-0 pb-0">
-          {admin && (
-            <ToggleGroup
-              type="single"
-              value={showFailed ? "failed" : "ok"}
-              onValueChange={(next) => next && setFailed(next === "failed")}
-              variant="outline"
-              size="sm"
-              aria-label="Which logins to show"
-            >
-              <ToggleGroupItem value="ok" className="px-2.5 text-hint">
-                Successful
-              </ToggleGroupItem>
-              <ToggleGroupItem value="failed" className="px-2.5 text-hint">
-                Failed
-              </ToggleGroupItem>
-            </ToggleGroup>
-          )}
-          {held.pending > 0 && (
-            <Button size="xs" aria-label={`Show ${held.pending} new logins`} onClick={held.reveal}>
-              <span role="status">{held.pending} new logins</span> · Show
-            </Button>
-          )}
-          <span className="flex-1" />
-          <SearchInput
-            dense
-            data-workspace-search
-            aria-label="Filter login records"
-            placeholder="User, terminal or address"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            containerClassName="sm:w-64"
-          />
-        </PanelToolbar>
+        // The list's one toolbar: the search first, then which logins and
+        // the held rows under it, as every list in the area has it.
+        <ListToolbar
+          className="pt-3"
+          search={
+            <SearchInput
+              data-workspace-search
+              aria-label="Filter login records"
+              placeholder="User, terminal or address"
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+            />
+          }
+          chips={
+            (admin || held.pending > 0) && (
+              <div className="flex min-w-0 flex-wrap items-center gap-2">
+                {admin && (
+                  <Segments
+                    label="Which logins to show"
+                    value={showFailed ? "failed" : "ok"}
+                    onChange={(next) => setFailed(next === "failed")}
+                    options={[
+                      { value: "ok", label: "Successful" },
+                      { value: "failed", label: "Failed" },
+                    ]}
+                  />
+                )}
+                {held.pending > 0 && (
+                  <Button
+                    size="xs"
+                    aria-label={`Show ${held.pending} new logins`}
+                    onClick={held.reveal}
+                  >
+                    <span role="status">{held.pending} new logins</span> · Show
+                  </Button>
+                )}
+              </div>
+            )
+          }
+        />
       )}
       <PanelBody flush className="pt-3">
         {noRecord(error) ? (
@@ -699,7 +698,7 @@ function RecordTable({ records, failed }: { records: LoginRecord[]; failed: bool
   return (
     <div className="overflow-hidden rounded-xl border bg-card">
       <Table containerClassName="max-h-[30rem] max-sm:hidden">
-        <TableHeader className="sticky top-0 z-10 [&_tr]:border-b">
+        <TableHeader className="sticky top-0 z-raised [&_tr]:border-b">
           <TableRow>
             <TableHead>Account</TableHead>
             <TableHead>Terminal</TableHead>

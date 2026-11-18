@@ -18,6 +18,7 @@ import {
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { relativeTime } from "@/lib/format"
+import { shellQuote } from "@/lib/tls/report"
 import { del, errorMessage, get, post } from "@/lib/api"
 import {
   authorityName,
@@ -41,6 +42,7 @@ import type {
 import { useViewState } from "@/lib/view-state"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
+import { IconAction } from "@/components/icon-action"
 import { useConfirm, type ConfirmRequest } from "@/components/confirm-dialog"
 import { FindingList } from "@/components/finding-list"
 import { Field, OptionList, OptionRow } from "@/components/form"
@@ -50,12 +52,14 @@ import { Meter } from "@/components/meter"
 import { ROW_BLEED } from "@/components/row-list"
 import { CertLife } from "@/components/proxy/expiry-status"
 import { dnsProviderProduct } from "@/components/proxy/marks"
-import { EmptyState, ErrorState, Hold, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { Hold } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Modal } from "@/components/modal"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
+import { MissingThing } from "@/components/missing-thing"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import {
@@ -1264,7 +1268,7 @@ function IssueDialogBody({
       controller.abort()
     }
   }, [previewReady, body])
-  const command = preview.plan ? preview.plan.args.map(shellWord).join(" ") : ""
+  const command = preview.plan ? preview.plan.args.map(shellQuote).join(" ") : ""
   const { copied, copy } = useCopy()
 
   // What would fail the run, asked of this host before it: only the fields
@@ -1822,14 +1826,15 @@ function IssueDialogBody({
             {command && (
               <Well className="flex items-start gap-2 p-2">
                 <code className="min-w-0 flex-1 break-all">{command}</code>
-                <Button
+                <IconAction
                   variant="ghost"
                   size="icon-xs"
-                  aria-label="Copy the command"
+                  className="[&_svg:not([class*='size-'])]:size-3"
+                  label="Copy the command"
                   onClick={() => copy(command)}
                 >
                   {copied ? <Check /> : <Copy />}
-                </Button>
+                </IconAction>
               </Well>
             )}
           </Field>
@@ -1982,15 +1987,11 @@ function hostOf(url: string) {
   }
 }
 
-/** An argv word as a shell reads it back: quoted only where it has to be. */
-function shellWord(word: string) {
-  return /^[A-Za-z0-9_@%+=:,./-]+$/.test(word) ? word : `'${word.replaceAll("'", `'\\''`)}'`
-}
-
 /**
- * The certbot-is-missing state, shared by the page's two places that need it.
- * An admin can install it with the host's package manager from here; a host
- * without one says why in the refusal.
+ * The certbot-is-missing state, shared by the page's two places that need it:
+ * the section's absence screen at block size (`MissingThing`), never an empty
+ * list's dashed box (PRX-04). An admin can install it with the host's package
+ * manager from here; a host without one says why in the refusal.
  */
 export function CertbotMissing({ onInstall }: { onInstall?: (job: Job) => void }) {
   const [busy, setBusy] = useState(false)
@@ -2006,19 +2007,22 @@ export function CertbotMissing({ onInstall }: { onInstall?: (job: Job) => void }
     }
   }
   return (
-    <EmptyState
+    <MissingThing
+      size="block"
+      thing="letsencrypt"
       icon={ShieldOff}
       title="certbot is not installed"
-      description="Install it to issue and renew Let's Encrypt certificates from here. A certificate placed on disk by any other means still shows up in the list below."
-      action={
+      step={
         onInstall && (
-          <Button size="sm" variant="outline" onClick={install} pending={busy}>
+          <Button size="sm" onClick={install} pending={busy}>
             <Download className="size-3.5" />
             Install certbot
           </Button>
         )
       }
-      className="mt-2"
-    />
+    >
+      Install it to issue and renew Let&apos;s Encrypt certificates from here. A certificate placed
+      on disk by any other means still shows up in the list below.
+    </MissingThing>
   )
 }

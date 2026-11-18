@@ -5,9 +5,11 @@ import { Route as RouteGlyph, StopCircle } from "@/components/icons"
 import type { NetworkRouting } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireMark, WireNode } from "@/components/deploy/wire"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { WireMark, WireNode } from "@/components/wire/wire"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { Bone } from "@/components/bone"
+import { Skeleton } from "@/components/ui/skeleton"
 import { addressFamily, decisionRules, decisionTables, type RouteFamily } from "./decision-reading"
 import { parseTarget, replyHighlight, ruleSelectors, ruleThen } from "./route-reading"
 import { AnswerLine, TargetField, type RouteLookup, type RouteQuestion } from "./route-lookup"
@@ -17,7 +19,7 @@ import { AnswerLine, TargetField, type RouteLookup, type RouteQuestion } from ".
  * on the left in the order they are asked — priority first — and the tables
  * they send a packet to on the right, each with how many routes it holds.
  * Two columns wired to each other, which is not the shape `WireFlow` draws
- * (things through one hub), so it is laid by hand on `deploy/wire`.
+ * (things through one hub), so it is laid by hand on `components/wire/wire`.
  *
  * Its head is the question: the family, and the address a packet is going
  * to. With nothing asked, the rule and table behind this browser's replies
@@ -268,7 +270,8 @@ export function DecisionMapWaiting({ rules, tables }: { rules: number; tables: n
           <Bar className="h-7 w-12 rounded-md" />
           <Bar className="h-7 w-12 rounded-md" />
         </div>
-        <Bar className="h-10 w-full rounded-md sm:h-8 sm:w-[22.375rem]" />
+        {/* The lookup field's own heights: 44px on a phone and under a finger. */}
+        <Bar className="h-11 w-full rounded-md sm:h-8 sm:w-[22.375rem] pointer-coarse:h-11" />
       </div>
       <p className="flex min-h-10 items-start text-xs sm:min-h-5">
         <Bar className="mt-1 h-2.5 w-72 max-w-full" />
@@ -304,24 +307,11 @@ export function DecisionMapWaiting({ rules, tables }: { rules: number; tables: n
 
 /** A grey bar inside a line of text: a span, so it may stand in a paragraph. */
 function Bar({ className }: { className?: string }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn("inline-block animate-pulse rounded-sm bg-muted align-middle", className)}
-    />
-  )
+  return <Bone className={className} />
 }
 
 function Ghost({ size }: { size: "sm" | "md" }) {
-  return (
-    <span
-      data-slot="skeleton"
-      className={cn(
-        "block animate-pulse rounded-xl bg-muted",
-        size === "sm" ? "size-9" : "size-11",
-      )}
-    />
-  )
+  return <Skeleton className={cn("block rounded-xl", size === "sm" ? "size-9" : "size-11")} />
 }
 
 // A node's three lines, each a bar on the line the words will take.

@@ -1,4 +1,4 @@
-import type { UploadProfile } from "@/lib/network-traffic"
+import type { UploadProfile } from "@/lib/network/traffic"
 
 export type UploadDraft = Omit<UploadProfile, "overhead" | "mpu" | "rttMillis"> & {
   overhead: string

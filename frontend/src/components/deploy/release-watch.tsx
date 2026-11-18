@@ -1,6 +1,7 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight } from "@/components/icons"
@@ -15,7 +16,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   readingLine,
   shareOf,
@@ -152,9 +153,7 @@ export function ReleaseWatch({
               <WireMark tone="logo" size="md">
                 <ProductGlyph id={watchProxy(watch)} />
               </WireMark>
-              <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                <StatusDot tone={lead.tone} />
-              </span>
+              <StatusDot tone={lead.tone} corner="md" />
             </span>
           }
           title={lead.title}
@@ -199,7 +198,7 @@ export function useReleaseWatch(projectId: number, environmentId: number, enable
     { enabled },
   )
   const watch = read.data?.watch ?? null
-  const now = useNow(Boolean(watch) && watch?.state !== "closed")
+  const now = useNow(1000, Boolean(watch) && watch?.state !== "closed")
   return { base, watch, now, shown: watchShown(watch, now), refresh: read.refresh }
 }
 
@@ -228,7 +227,7 @@ function BeforeAndAfter({ watch }: { watch: RollbackWatch }) {
           <li
             key={key}
             data-slot="watch-row"
-            className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-4 gap-y-1 sm:h-5 sm:grid-cols-[9.5rem_minmax(0,1fr)_15rem]"
+            className="grid min-w-0 grid-cols-main-end items-center gap-x-4 gap-y-1 sm:h-5 sm:grid-cols-[9.5rem_minmax(0,1fr)_15rem]"
           >
             <span className="truncate text-hint text-muted-foreground">{name}</span>
             <span className="numeric truncate text-right text-hint text-foreground sm:order-3">
@@ -256,15 +255,4 @@ function BeforeAndAfter({ watch }: { watch: RollbackWatch }) {
       })}
     </ul>
   )
-}
-
-/** The time, ticking each second while a window counts down. */
-function useNow(ticking: boolean) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!ticking) return
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [ticking])
-  return now
 }

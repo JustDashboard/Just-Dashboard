@@ -8,19 +8,16 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { Segments } from "@/components/deploy/settings/segments"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { GroupRule } from "@/components/flow"
+import { Segments } from "@/components/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { GroupRule } from "@/components/choice-row"
 import { Disclosure, FormNote, InfoTip, OptionList, OptionRow, Statement } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
-import { LoadingRows, Notice } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -31,7 +28,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { EngineGlyph } from "@/components/database/kit"
 import { isDown } from "@/components/database/ops/performance-parts"
@@ -440,7 +436,7 @@ export function ParametersSection() {
           </FormNote>
         ) : !data ? (
           list.error ? (
-            <CouldNotRead what={`the ${noun}s`} error={list.error} onRetry={list.refresh} />
+            <ErrorState what={`the ${noun}s`} error={list.error} onRetry={list.refresh} />
           ) : (
             <LoadingRows rows={6} />
           )

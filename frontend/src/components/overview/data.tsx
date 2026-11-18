@@ -11,17 +11,17 @@ import { LastRun, nextLabel } from "@/components/backups/job-card"
 import { runJobNow } from "@/components/backups/job-verbs"
 import { destinationProduct } from "@/components/backups/marks"
 import { engineFor, sectionHref } from "@/components/database/engine"
-import { sortFleet } from "@/components/database/fleet/fleet"
+import { objectNouns, sortFleet } from "@/components/database/fleet/fleet"
 import { EngineMark, EnvironmentTag } from "@/components/database/kit"
 import { DatabaseStatusMark, fleetStatus } from "@/components/database/shell/status"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { backupOrder, failedBackups } from "./order"
-import { SectionLink } from "./section-link"
+import { SectionLink } from "@/components/section-link"
 
 /** The worst few of each, the way to the rest at the end of the head. */
 const SHOWN = 4
@@ -52,13 +52,13 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
                 {down > 0 && <span className="text-destructive"> · {down} not answering</span>}
               </span>
             )}
-            <SectionLink href="/databases">Control center</SectionLink>
+            <SectionLink href="/databases">Databases</SectionLink>
           </div>
         }
       />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={3} />
         ) : !data ? (
           <p className="py-2 text-body text-muted-foreground">
             {error ? "The databases could not be read." : "Nothing to show."}
@@ -82,6 +82,7 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
             {entries.slice(0, SHOWN).map((entry) => {
               const engine = engineFor(entry)
               const version = entry.versionNumber ? ` ${entry.versionNumber}` : ""
+              const nouns = objectNouns(entry.objectWord)
               return (
                 <ChoiceRow
                   key={entry.id}
@@ -95,7 +96,7 @@ export function DatabasesPanel({ read }: { read: PollState<DbFleet> }) {
                         {engine.label}
                         {version}
                         {entry.sizesKnown && ` · ${bytes(entry.bytes)}`}
-                        {` · ${plural(entry.objects, entry.objectWord.replace(/s$/, ""), entry.objectWord)}`}
+                        {` · ${plural(entry.objects, nouns.one, nouns.many)}`}
                       </>
                     ) : (
                       <span title={entry.error}>
@@ -155,7 +156,7 @@ export function BackupsPanel({ read }: { read: PollState<BackupJob[]> }) {
       />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={3} />
         ) : !data ? (
           <p className="py-2 text-body text-muted-foreground">
             {error ? "The backup jobs could not be read." : "Nothing to show."}

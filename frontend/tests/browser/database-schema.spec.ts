@@ -699,7 +699,7 @@ test("on a phone the tree lies over the schema, and has a way off it with nothin
 
   // The bar at the foot is the way off the tree: to the schema with nothing
   // chosen, and back to the tree again.
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Objects", "Schema"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Objects", "Schema"])
   await showPane(page, "Schema")
   await expect(rail).toBeHidden()
   await expect(page.getByRole("region", { name: "Largest in sales" })).toBeVisible()
@@ -711,7 +711,7 @@ test("on a phone the tree lies over the schema, and has a way off it with nothin
   await rail.getByRole("link", { name: /^orders/ }).click()
   await expect(page.getByRole("heading", { name: "sales.orders" })).toContainText("sales")
   await expect(rail).toBeHidden()
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Objects", "Table"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Objects", "Table"])
 })
 
 test("a table is its schema and its name: two schemas' orders are two tables", async ({ page }) => {
@@ -810,14 +810,14 @@ test("a catalogue that cannot be read offers Retry, and a later failure keeps wh
   // last reading, not the one just asked for.
   down.down = true
   await rail.getByRole("button", { name: "Read the schema again" }).click()
-  await expect(rail.getByText("Not read again")).toBeVisible()
+  await expect(rail.locator("[data-slot=stale]")).toContainText("Not updating")
   await expect(page.getByText("The schema could not be read again")).toBeVisible()
   await expect(
     rail.getByRole("region", { name: "Tables" }).getByRole("link", { name: /^orders/ }),
   ).toBeVisible()
   down.down = false
   await rail.getByRole("button", { name: "Try again" }).click()
-  await expect(rail.getByText("Not read again")).toBeHidden()
+  await expect(rail.locator("[data-slot=stale]")).toHaveCount(0)
 })
 
 test("a table that cannot be read again says so over what it read before", async ({ page }) => {
@@ -829,7 +829,8 @@ test("a table that cannot be read again says so over what it read before", async
   // The read that follows a change is the same read: a failure there used to
   // leave the old structure on screen without a word.
   await page.getByRole("button", { name: "Read the schema again" }).click()
-  await expect(page.getByText("What is shown is the last reading of orders.")).toBeVisible()
+  const stale = page.locator("[data-slot=stale]").filter({ hasText: "last reading of orders" })
+  await expect(stale).toContainText("Not updating")
   await expect(page.getByRole("cell", { name: "customer_id", exact: true })).toBeVisible()
   down.down = false
   await page
@@ -837,7 +838,7 @@ test("a table that cannot be read again says so over what it read before", async
     .filter({ hasText: "last reading of orders" })
     .getByRole("button", { name: "Try again" })
     .click()
-  await expect(page.getByText("What is shown is the last reading of orders.")).toBeHidden()
+  await expect(stale).toHaveCount(0)
 })
 
 test("reading the schema again reads the open table again with it", async ({ page }) => {
@@ -2011,6 +2012,67 @@ test("the diagram moves as the server's map does: two fingers slide it, a pinch 
   await expect.poll(async () => (await diagramView(page)).zoom).toBeLessThan(1)
 })
 
+test("the arrows slide the diagram that has the keyboard, and move a chosen table as a drag does", async ({
+  page,
+}) => {
+  // WCAG 2.5.7: what a drag does, a key does too.
+  const { sent } = await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await diagramStill(page)
+  const start = await diagramView(page)
+  const slid = async () => {
+    const now = await diagramView(page)
+    return { x: Math.round(now.x - start.x), y: Math.round(now.y - start.y) }
+  }
+
+  // In the search field an arrow moves the caret, never the canvas.
+  const find = page.getByRole("textbox", { name: "Find a table or column" })
+  await find.fill("ord")
+  await page.keyboard.press("ArrowLeft")
+  await page.keyboard.press("Shift+ArrowLeft")
+  expect(await slid()).toEqual({ x: 0, y: 0 })
+  await find.fill("")
+
+  // The canvas is a stop of its own: with nothing chosen it slides a step the
+  // way the arrow points, and Shift a longer one.
+  await page.locator(".react-flow").focus()
+  await page.keyboard.press("ArrowRight")
+  await expect.poll(slid).toEqual({ x: -48, y: 0 })
+  await page.keyboard.press("Shift+ArrowUp")
+  await expect.poll(slid).toEqual({ x: -48, y: 240 })
+
+  // A chosen table moves by a step on the canvas and is kept as a drag keeps it.
+  const id = "public.customers"
+  const place = () =>
+    tableNode(page, id).evaluate((el) => {
+      const m = new DOMMatrix(getComputedStyle(el).transform)
+      return { x: Math.round(m.e), y: Math.round(m.f) }
+    })
+  await tableNode(page, id).click({ position: { x: 24, y: 12 } })
+  const before = await place()
+  const camera = await diagramView(page)
+  await page.keyboard.press("ArrowDown")
+  await page.keyboard.press("Shift+ArrowRight")
+  await expect.poll(place).toEqual({ x: before.x + 40, y: before.y + 8 })
+  expect((await diagramView(page)).x).toBe(camera.x)
+  await expect
+    .poll(() => {
+      const put = sent.layouts.filter((l) => l.method === "PUT").at(-1)?.body as
+        { positions?: Record<string, { x: number; y: number }> } | undefined
+      const at = put?.positions?.[id]
+      return at && { x: Math.round(at.x), y: Math.round(at.y) }
+    })
+    .toEqual({ x: before.x + 40, y: before.y + 8 })
+
+  // Let go, and the keyboard stays on the canvas, whose arrows slide it again.
+  await page.keyboard.press("Escape")
+  await expect(page.locator(".react-flow")).toBeFocused()
+  await page.keyboard.press("ArrowDown")
+  await expect.poll(async () => Math.round((await diagramView(page)).y - camera.y)).toBe(-48)
+  expect(await place()).toEqual({ x: before.x + 40, y: before.y + 8 })
+})
+
 test("on a phone the inspector takes none of the canvas until it is asked for", async ({
   page,
 }) => {
@@ -2294,7 +2356,21 @@ test("the diagram is zoomed and fitted from one bar at its foot, as the maps are
 
   // The keys are said as caps at the foot of the inspector.
   await page.getByRole("button", { name: "Show the inspector (I)" }).click()
-  await expect(page.locator("[data-slot=diagram-keys] kbd")).toHaveText(["F", "/", "I", "H", "Esc"])
+  await expect(page.locator("[data-slot=diagram-keys] kbd")).toHaveText([
+    "F",
+    "/",
+    "I",
+    "H",
+    "↵",
+    "Esc",
+    "←",
+    "↑",
+    "↓",
+    "→",
+    "Shift",
+  ])
+  // Shift's longer step is said in the legend, not only in a title.
+  await expect(page.locator("[data-slot=diagram-keys]")).toContainText("Longer step")
 
   // Which way the layout runs is a word in the head's menu.
   await headMenu(page, "Lay out top to bottom")
@@ -2310,7 +2386,7 @@ test("on a phone the diagram and its inspector are two panes of one frame", asyn
   await page.goto("/databases/1/diagram?schema=public")
   await expect(tableNode(page, "public.orders")).toBeVisible()
   const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Diagram", "Tables"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Diagram", "Tables"])
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
 

@@ -4,20 +4,36 @@ import * as React from "react"
 import { Switch as SwitchPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
+import { useFieldControl } from "@/components/form"
+import { hitAreaClasses } from "@/components/ui/button"
 
+/**
+ * A switch is an 18px track, and the finger that presses it is not: the
+ * press box around it is 24px under a mouse and 44px under a finger, so a
+ * switch standing alone (the Users page's "can sign in", a gateway card's
+ * toggle) is as easy to hit as one inside a row that takes the tap.
+ *
+ * No shadow, and the track's edge is the control edge, so an unchecked switch
+ * reads as a control on the card rather than a dent in it.
+ *
+ * Inside a `Field` it is the field's control, as an `Input` is: named by the
+ * label, described by the hint and the error, and invalid with the error.
+ */
 function Switch({
   className,
   size = "default",
-  ...props
+  ...rest
 }: React.ComponentProps<typeof SwitchPrimitive.Root> & {
   size?: "sm" | "default"
 }) {
+  const props = fieldMember(rest, useFieldControl(rest))
   return (
     <SwitchPrimitive.Root
       data-slot="switch"
       data-size={size}
       className={cn(
-        "peer group/switch inline-flex shrink-0 items-center rounded-full border border-transparent shadow-xs focus-ring transition-all disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-[1.15rem] data-[size=default]:w-8 data-[size=sm]:h-3.5 data-[size=sm]:w-6 data-[state=checked]:bg-primary data-[state=unchecked]:bg-input dark:data-[state=unchecked]:bg-input/80",
+        "peer group/switch inline-flex shrink-0 items-center rounded-full border border-control-edge focus-ring transition-all disabled:cursor-not-allowed disabled:opacity-50 data-[size=default]:h-[1.15rem] data-[size=default]:w-8 data-[size=sm]:h-3.5 data-[size=sm]:w-6 data-[state=checked]:border-primary data-[state=checked]:bg-primary data-[state=unchecked]:bg-input/80",
+        hitAreaClasses,
         className,
       )}
       {...props}
@@ -25,11 +41,26 @@ function Switch({
       <SwitchPrimitive.Thumb
         data-slot="switch-thumb"
         className={cn(
-          "pointer-events-none block rounded-full bg-background ring-0 transition-transform group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=unchecked]:translate-x-0 dark:data-[state=checked]:bg-primary-foreground dark:data-[state=unchecked]:bg-foreground",
+          "pointer-events-none block rounded-full ring-0 transition-transform group-data-[size=default]/switch:size-4 group-data-[size=sm]/switch:size-3 data-[state=checked]:translate-x-[calc(100%-2px)] data-[state=checked]:bg-primary-foreground data-[state=unchecked]:translate-x-0 data-[state=unchecked]:bg-foreground",
         )}
       />
     </SwitchPrimitive.Root>
   )
+}
+
+/**
+ * A switch with a name of its own (`aria-label`, `aria-labelledby`) is
+ * beside the field's label rather than named by it — "On" against the
+ * question the label asks: it keeps the field's hint and error but not the
+ * field's id, so the label is not pointed at a control that names itself.
+ */
+function fieldMember<P extends { id?: string; "aria-label"?: string; "aria-labelledby"?: string }>(
+  own: P,
+  wired: P,
+): P {
+  return own.id === undefined && (own["aria-label"] || own["aria-labelledby"])
+    ? { ...wired, id: undefined }
+    : wired
 }
 
 export { Switch }

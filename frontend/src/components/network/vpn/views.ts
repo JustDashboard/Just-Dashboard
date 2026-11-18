@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { VPNView } from "@/lib/types"
 
 /**
@@ -69,7 +70,7 @@ export function vpnReading(vpn: {
   if (tunnels.length > 0)
     words.push(
       up === tunnels.length
-        ? `${up} ${up === 1 ? "tunnel" : "tunnels"} up`
+        ? `${plural(up, "tunnel")} up`
         : `${up} of ${tunnels.length} tunnels up`,
     )
   if (vpn.tailscale.installed)

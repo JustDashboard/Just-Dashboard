@@ -1,12 +1,13 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { ReactFlowProvider } from "@xyflow/react"
 import { Page, PageContext } from "@/components/page"
 import { Pane } from "@/components/panel"
 import { ErrorState } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
+import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
 import { get } from "@/lib/api"
 import { kindOf } from "@/lib/server-map"
@@ -70,49 +71,16 @@ export function unreadKinds(kinds: MapKindReading[], drawn: ReadonlySet<string>)
 }
 
 /**
- * Full screen for a canvas: the browser's own where it is offered, and a
- * fixed overlay where it is refused, as the diagram does.
- */
-export function useFullscreen(root: RefObject<HTMLDivElement | null>) {
-  const [fullscreen, setFullscreen] = useState(false)
-  const [immersive, setImmersive] = useState(false)
-  const toggle = useCallback(() => {
-    if (fullscreen || immersive) {
-      if (document.fullscreenElement) void document.exitFullscreen().catch(() => undefined)
-      setImmersive(false)
-      setFullscreen(false)
-      return
-    }
-    const el = root.current
-    if (el?.requestFullscreen) {
-      el.requestFullscreen().then(
-        () => setFullscreen(true),
-        () => setImmersive(true),
-      )
-    } else {
-      setImmersive(true)
-    }
-  }, [fullscreen, immersive, root])
-  useEffect(() => {
-    const onChange = () => {
-      setFullscreen(document.fullscreenElement === root.current && root.current !== null)
-      if (!document.fullscreenElement) setImmersive(false)
-    }
-    document.addEventListener("fullscreenchange", onChange)
-    return () => document.removeEventListener("fullscreenchange", onChange)
-  }, [root])
-  return { full: fullscreen || immersive, immersive, toggle }
-}
-
-/**
  * The server map: every system the server runs — each deployment, Compose
  * stack and PM2 app, this dashboard itself — drawn as its own diagram of what
  * it is made of and wired to (`lib/server-systems.ts`, `canvas.tsx`).
  *
  * A reading page held to the window as a workbench (design system §16), one
  * frame around the rail of systems, a canvas and its inspector, the way a
- * database's Diagram is. Below the width those fit, the canvas alone, edge to
- * edge.
+ * database's Diagram is. Below the width those fit, one of the three at a
+ * time, edge to edge, with a bar at the foot to pick which: the canvas alone
+ * left a phone no list of systems, no inspector and no way to the command
+ * the desk's inspector has, where the databases map had all three.
  */
 export function ServerMapPage() {
   const asked = useSearchParams().get("system") ?? undefined
@@ -134,13 +102,13 @@ export function ServerMapPage() {
   const ready = map && memory.document
 
   return (
-    <Page fill className="max-w-none gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" className="gap-2">
       <PageContext title="Map" />
       <div
         ref={root}
         className={cn(
           "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          screen.immersive && "fixed inset-0 z-50 p-3",
+          screen.immersive && "fixed inset-0 z-immersive p-3",
         )}
       >
         <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
@@ -154,6 +122,7 @@ export function ServerMapPage() {
                 full={screen.full}
                 onFullscreen={screen.toggle}
                 initialSystem={asked}
+                panes
               />
             </ReactFlowProvider>
           ) : read.error && !map ? (

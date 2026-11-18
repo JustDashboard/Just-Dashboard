@@ -2,11 +2,12 @@
 
 import Link from "next/link"
 import { useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { Hash, Plus, RefreshClockwise } from "@/components/icons"
 import { Page, PageContext } from "@/components/page"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Status } from "@/components/status-dot"
-import { EmptyState, ErrorState } from "@/components/state"
+import { ErrorState, NeedsAdmin } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -23,7 +24,7 @@ import {
   type IPAMPreview,
   type IPAMReservation,
   type IPAMView,
-} from "@/lib/network-ipam"
+} from "@/lib/network/ipam"
 import { IPAMPools } from "@/components/network/ipam/ipam-pools"
 import { IPAMPreviewField } from "@/components/network/ipam/ipam-preview"
 import { IPAMCoverageTable, IPAMReservations } from "@/components/network/ipam/ipam-reservations"
@@ -123,9 +124,9 @@ export function AddressPlanningPage() {
   ]
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Address planning" />
-      <HostIdentity
+    <Page rise>
+      <PageContext title="Address planning" />
+      <IdentityHeader
         fallback={Hash}
         title="Address planning"
         label="About address planning"
@@ -151,18 +152,15 @@ export function AddressPlanningPage() {
               <span>the plan could not be read</span>
             ) : (
               <>
-                <span className="numeric">{plural(counts.pools, "pool")}</span>
-                <FactDot />
-                <span className="numeric">{plural(counts.reservations, "reservation")} held</span>
-                <FactDot />
-                <span className="numeric">{plural(counts.observed, "native range")} observed</span>
-                <FactDot />
-                <span>
+                <Fact className="numeric">{plural(counts.pools, "pool")}</Fact>
+                <Fact className="numeric">{plural(counts.reservations, "reservation")} held</Fact>
+                <Fact className="numeric">{plural(counts.observed, "native range")} observed</Fact>
+                <Fact>
                   read{" "}
                   <time dateTime={data.inventory.checkedAt}>
                     {relativeTime(data.inventory.checkedAt)}
                   </time>
-                </span>
+                </Fact>
               </>
             )}
           </IdentityFacts>
@@ -176,13 +174,20 @@ export function AddressPlanningPage() {
             </Button>
           ) : undefined
         }
-        menu={admin && data ? <VerbMenu verbs={menu} label="More planning actions" /> : undefined}
+        menu={
+          admin && data ? (
+            <VerbMenu verbs={menu} label="More planning actions" />
+          ) : admin && loading ? (
+            // The verbs' place while the plan is read, so on a phone the
+            // line holds the row they land on.
+            false
+          ) : undefined
+        }
       />
       {!admin ? (
-        <EmptyState
-          icon={Hash}
-          title="Address planning needs an administrator"
-          description="Shared pools and private native-owner inventories require system administrator access. The local subnet calculator remains available to read accounts."
+        <NeedsAdmin
+          what="Address planning"
+          why="The subnet calculator works for every account."
           action={
             <Button asChild size="sm" variant="outline">
               <Link href="/network/tools?tool=subnet">Open the subnet calculator</Link>

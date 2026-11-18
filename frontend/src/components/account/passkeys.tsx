@@ -10,14 +10,16 @@ import { registerPasskey, suggestedPasskeyName, useHostname, usePasskeyPlace } f
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { Field, FormNote } from "@/components/form"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
 import { Modal } from "@/components/modal"
 import { Row, RowList } from "@/components/row-list"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { OneTimeCodeInput } from "@/components/account/one-time-code"
 import { VerbActions, type Verb } from "@/components/verbs"
 
 /**
@@ -30,9 +32,13 @@ import { VerbActions, type Verb } from "@/components/verbs"
  * how many there are and what one replaces are the head's line of facts, and
  * *Add a passkey* is on the title line.
  */
-export function PasskeysSection() {
+/** This account's passkeys, read once for the page's line and its Passkeys section. */
+export function usePasskeys() {
+  return usePoll((signal) => get<Passkey[]>("/account/passkeys", undefined, signal), 30000)
+}
+
+export function PasskeysSection({ keys }: { keys: ReturnType<typeof usePasskeys> }) {
   const { status } = useAuth()
-  const keys = usePoll((signal) => get<Passkey[]>("/account/passkeys", undefined, signal), 30000)
   const place = usePasskeyPlace()
   const hostname = useHostname()
   const [adding, setAdding] = useState(false)
@@ -234,16 +240,7 @@ function AddPasskey({
         </Field>
         {totp && (
           <Field label="Code from your authenticator" htmlFor="passkey-code">
-            <Input
-              id="passkey-code"
-              inputMode="numeric"
-              autoComplete="one-time-code"
-              maxLength={6}
-              placeholder="000000"
-              className="max-w-48 text-center font-mono tracking-[0.4em]"
-              value={code}
-              onChange={(event) => setCode(event.target.value)}
-            />
+            <OneTimeCodeInput id="passkey-code" value={code} onChange={setCode} />
           </Field>
         )}
         {error && (

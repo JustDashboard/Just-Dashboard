@@ -1,8 +1,8 @@
 "use client"
 
 import { ArrowUpDown, Monitoring } from "@/components/icons"
-import { WireMark } from "@/components/deploy/wire"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { WireMark } from "@/components/wire/wire"
+import { TileTrend } from "@/components/sparkline"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import type { LiveTraffic } from "@/components/network/use-live-traffic"

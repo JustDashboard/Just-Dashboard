@@ -2,9 +2,9 @@
 
 A control center for every database on the server, even the ones nothing has connected to yet.
 
-<a href="../readme/databases.png"><img src="../readme/databases.png" alt="The database control center with storage, sessions, backups and every database as a card"></a>
+<a href="../readme/databases.png"><img src="../readme/databases.png" alt="Databases, with storage, sessions, backups and every database as a card"></a>
 
-<p align="center"><sub><b>Control center</b> — every engine on the server, each as itself</sub></p>
+<p align="center"><sub><b>Databases</b> — every engine on the server, each as itself</sub></p>
 
 ## Every engine
 

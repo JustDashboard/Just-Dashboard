@@ -2,7 +2,7 @@
 
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { ChartActivity } from "@/components/icons"
-import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
+import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { ProductGlyph, pm2Product } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { bytes, percent, plural } from "@/lib/format"

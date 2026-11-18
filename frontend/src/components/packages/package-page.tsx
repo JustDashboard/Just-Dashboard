@@ -2,45 +2,29 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import {
-  ArrowCircleUp,
-  ArrowLeft,
-  ArrowRight,
-  ChevronDown,
-  ChevronUp,
-  Download,
-  Puzzle,
-  Trash,
-} from "@/components/icons"
+import { useParams, useRouter } from "next/navigation"
+import { Fact, FactLine } from "@/components/fact-line"
+import { ArrowCircleUp, ArrowRight, Download, Puzzle, Trash } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { HostInfo, Job, PackageDetail, PackageInventory, PackageUsage } from "@/lib/types"
-import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { IconAction } from "@/components/icon-action"
 import { JobConsole, useJobConsole } from "@/components/job-console"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext } from "@/components/page"
+import { DetailPage, useDetailTab, useSiblingSteps, type Step } from "@/components/detail-page"
+import { IdentityHeader } from "@/components/identity-header"
 import { ProductLogo, platformProduct } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList, type TabView } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import {
-  PACKAGE_TABS,
-  packageHref,
-  packageName,
-  type PackageTab,
-} from "@/components/packages/inventory"
+import { PACKAGE_TABS, packageHref, type PackageTab } from "@/components/packages/inventory"
 import { PackageLogView } from "@/components/packages/log-view"
 import {
   VersionTo,
@@ -60,17 +44,11 @@ import {
   needsOf,
 } from "@/components/packages/package-views"
 import { usePackageFilter } from "@/components/packages/use-package-filter"
+import { decodeSegment } from "@/lib/route-params"
 
-const BACK = (
-  <Link
-    href="/packages"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Packages
-  </Link>
-)
+const BACK = { href: "/packages", label: "Packages" }
 
-const VIEWS: { key: PackageTab; label: string }[] = [
+const VIEWS: TabView<PackageTab>[] = [
   { key: "overview", label: "Overview" },
   { key: "files", label: "Files" },
   { key: "manual", label: "Manual" },
@@ -110,29 +88,9 @@ type Reading = {
  */
 export function PackagePage() {
   const params = useParams<{ name: string }>()
-  const search = useSearchParams()
   const router = useRouter()
-  const name = packageName(params.name)
-  const requested = search.get("tab")
-  const [remembered, remember] = useViewState<string>("packages.page.tab", "overview")
-  const [chosen, setChosen] = useState<string>(requested ?? remembered)
-  const tab: PackageTab = (PACKAGE_TABS as readonly string[]).includes(chosen)
-    ? (chosen as PackageTab)
-    : "overview"
-  const setTab = useCallback(
-    (next: string) => {
-      setChosen(next)
-      remember(next)
-      // The address says which view, so a link to a package's files opens on
-      // them; replaced rather than pushed, because the view is not a place
-      // Back should step through.
-      const url = new URL(window.location.href)
-      if (next === "overview") url.searchParams.delete("tab")
-      else url.searchParams.set("tab", next)
-      window.history.replaceState(null, "", `${url.pathname}${url.search}`)
-    },
-    [remember],
-  )
+  const name = decodeSegment(params.name)
+  const [tab, setTab] = useDetailTab(PACKAGE_TABS, { remember: "packages.page.tab" })
   const hrefFor = useCallback((next: string) => packageHref(next, tab), [tab])
 
   const inventory = usePoll(
@@ -140,16 +98,11 @@ export function PackagePage() {
     120000,
   )
   const filter = usePackageFilter(inventory.data)
-  const at = filter.rows.findIndex((p) => p.name === name)
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? filter.rows[at + direction] : filter.rows[direction > 0 ? 0 : -1]
-    if (next) router.push(hrefFor(next.name))
-  }
-  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
-  const next = {
-    disabled: filter.rows.length === 0 || at >= filter.rows.length - 1,
-    run: () => adjacent(1),
-  }
+  const steps = useSiblingSteps(
+    filter.rows.map((p) => p.name),
+    name,
+    (next) => router.push(hrefFor(next)),
+  )
 
   // The two reads are fired together rather than the usage one waiting for the
   // detail: they are independent on the server and the manual is the slower of
@@ -206,75 +159,84 @@ export function PackagePage() {
       }${narrowed ? ` · ${narrowed}` : ""}${filter.bySize ? " · largest first" : ""}`
     : "Reading the packages…"
 
+  const frame: Frame = {
+    steps,
+    refresh: () => {
+      reading.refresh()
+      inventory.refresh()
+    },
+    rail: (
+      <PackageRail
+        packages={filter.rows}
+        current={name}
+        currentPackage={railCurrent}
+        loading={inventory.loading}
+        error={inventory.data ? undefined : inventory.error}
+        onRetry={inventory.refresh}
+        query={filter.query}
+        onQuery={filter.setQuery}
+        filtered={Boolean(narrowed)}
+        onClearFilters={() => {
+          filter.setScope("all")
+          filter.setSoftware("")
+        }}
+        caption={caption}
+        hrefFor={hrefFor}
+      />
+    ),
+  }
+
+  // Keyed, so another package opens on its own state, never on this one's
+  // pending install.
   return (
-    <Workspace
-      name="Package"
-      stateKey="package.page"
-      refresh={() => {
-        reading.refresh()
-        inventory.refresh()
-      }}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous package",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next package",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <PackageRail
-            className="hidden w-72 shrink-0 xl:flex"
-            packages={filter.rows}
-            current={name}
-            currentPackage={railCurrent}
-            loading={inventory.loading}
-            query={filter.query}
-            onQuery={filter.setQuery}
-            filtered={Boolean(narrowed)}
-            onClearFilters={() => {
-              filter.setScope("all")
-              filter.setSoftware("")
-            }}
-            caption={caption}
-            hrefFor={hrefFor}
-          />
-          <PackageMain
-            key={name}
-            name={name}
-            reading={reading}
-            inventory={inventory.data}
-            console_={console_}
-            tab={tab}
-            setTab={setTab}
-            hrefFor={hrefFor}
-            previous={previous}
-            next={next}
-          />
-        </div>
-      </Page>
-    </Workspace>
+    <PackageMain
+      key={name}
+      frame={frame}
+      name={name}
+      reading={reading}
+      inventory={inventory.data}
+      console_={console_}
+      tab={tab}
+      setTab={setTab}
+      hrefFor={hrefFor}
+    />
   )
 }
 
-type Step = { disabled: boolean; run: () => void }
+/** What every state of the page hands the shared frame. */
+type Frame = { steps: { previous: Step; next: Step }; refresh: () => void; rail: React.ReactNode }
+
+/** The package's detail frame: the way back, the walk and the rail (`DetailPage`). */
+function PackageFrame({
+  frame,
+  title,
+  identity,
+  children,
+}: {
+  frame: Frame
+  title: string
+  identity?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <DetailPage
+      name="Package"
+      what="package"
+      stateKey="package.page"
+      refresh={frame.refresh}
+      steps={frame.steps}
+      back={BACK}
+      title={title}
+      rail={frame.rail}
+      identity={identity}
+    >
+      {children}
+    </DetailPage>
+  )
+}
 
 function PackageMain({
+  frame,
   name,
   reading,
   inventory,
@@ -282,9 +244,8 @@ function PackageMain({
   tab,
   setTab,
   hrefFor,
-  previous,
-  next,
 }: {
+  frame: Frame
   name: string
   reading: ReturnType<typeof usePoll<Reading>>
   inventory?: PackageInventory
@@ -292,8 +253,6 @@ function PackageMain({
   tab: PackageTab
   setTab: (tab: string) => void
   hrefFor: (name: string) => string
-  previous: Step
-  next: Step
 }) {
   const { can } = useAuth()
   const { confirm, dialog } = useConfirm()
@@ -387,25 +346,10 @@ function PackageMain({
       },
     })
 
-  const arrows = (
-    <span className="flex items-center">
-      <IconAction label="Previous package" disabled={previous.disabled} onClick={previous.run}>
-        <ChevronUp />
-      </IconAction>
-      <IconAction label="Next package" disabled={next.disabled} onClick={next.run}>
-        <ChevronDown />
-      </IconAction>
-      <span className="max-sm:hidden">
-        <WorkspaceHelp compact />
-      </span>
-    </span>
-  )
-
   if (error) {
     const notFound = error instanceof ApiError && [400, 404].includes(error.status)
     return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name || "Package"} actions={arrows} />
+      <PackageFrame frame={frame} title={name || "Package"}>
         {notFound ? (
           <EmptyState
             icon={Puzzle}
@@ -425,7 +369,7 @@ function PackageMain({
         ) : (
           <ErrorState error={error} onRetry={reading.refresh} retryable />
         )}
-      </div>
+      </PackageFrame>
     )
   }
 
@@ -480,144 +424,141 @@ function PackageMain({
   )
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={arrows} />
-        <HostIdentity
-          label={`About ${name}`}
-          slot="package-identity"
-          className="border-b-0 pb-0"
-          logo={
-            <ProductLogo
-              id={packageProduct(name)}
-              fallback={sectionGlyph(detail?.section ?? row?.section)}
-              className="size-10 rounded-lg [&_img]:size-6"
-            />
-          }
-          title={<span className="min-w-0 truncate font-mono">{name}</span>}
-          state={
-            !detail ? (
-              <TextShimmer className="text-body">Reading the package…</TextShimmer>
-            ) : acting ? (
-              <span className="inline-flex items-center gap-1.5 text-body font-medium">
-                <StatusDot tone="notice" />
-                <TextShimmer>{`${runWord(acting, detail.installed)}…`}</TextShimmer>
-              </span>
-            ) : (
-              <>
-                <Status
-                  verdict={detail.installed ? "ok" : "notice"}
-                  label={detail.installed ? "Installed" : "Not installed"}
-                  className="text-body"
-                />
-                {upgradable && (
+    <PackageFrame
+      frame={frame}
+      title={name}
+      identity={
+        <>
+          <IdentityHeader
+            label={`About ${name}`}
+            slot="package-identity"
+            className="border-b-0 pb-0"
+            logo={
+              <ProductLogo
+                id={packageProduct(name)}
+                fallback={sectionGlyph(detail?.section ?? row?.section)}
+                className="size-10 rounded-lg [&_img]:size-6"
+              />
+            }
+            title={<span className="min-w-0 truncate font-mono">{name}</span>}
+            state={
+              !detail ? (
+                <TextShimmer className="text-body">Reading the package…</TextShimmer>
+              ) : acting ? (
+                <span className="inline-flex items-center gap-1.5 text-body font-medium">
+                  <StatusDot tone="notice" />
+                  <TextShimmer>{`${runWord(acting, detail.installed)}…`}</TextShimmer>
+                </span>
+              ) : (
+                <>
                   <Status
-                    verdict={security ? "warning" : "notice"}
-                    label={security ? "Security update" : "Update available"}
+                    verdict={detail.installed ? "ok" : "notice"}
+                    label={detail.installed ? "Installed" : "Not installed"}
                     className="text-body"
                   />
-                )}
-              </>
-            )
-          }
-          command={
-            detail && canInstall && (!detail.installed || upgradable) ? (
-              <Button
-                size="sm"
-                pending={busy}
-                disabled={Boolean(acting)}
-                onClick={install}
-                title={upgradable ? `Update to ${upgradable}` : undefined}
-              >
-                {upgradable ? (
-                  <ArrowCircleUp className="size-3.5" />
-                ) : (
-                  <Download className="size-3.5" />
-                )}
-                {upgradable ? "Update" : "Install"}
-              </Button>
-            ) : undefined
-          }
-          menu={verbs.length > 0 && <VerbMenu verbs={verbs} label={`Actions on ${name}`} />}
-          facts={
-            // The same rows whatever a package says about itself, so the views
-            // under the line do not move when it lands. One line from `sm`: the
-            // version it is at and the one an update lands on, its size, then
-            // what it is, which gives way. On a phone the description goes
-            // under the figures. Beside the rail at 1280 the line has under
-            // 500px, which is why how it came to be installed is in About.
-            <span className="flex w-full min-w-0 flex-col gap-y-1 sm:flex-row sm:items-center sm:gap-x-3">
-              <span className="flex min-w-0 items-center gap-x-3 whitespace-nowrap sm:shrink-0">
-                {detail ? (
-                  <span
-                    className="min-w-0 truncate font-mono text-foreground"
-                    title={detail.installedVersion ?? detail.version}
-                  >
-                    {detail.installedVersion ?? detail.version ?? "—"}
-                  </span>
-                ) : (
-                  <span>&nbsp;</span>
-                )}
-                {upgradable && (
-                  <span
-                    className="inline-flex shrink-0 items-center gap-1.5"
-                    title={`${security ? "A security update" : "An update"} to ${upgradable} is waiting`}
-                  >
-                    <ArrowRight aria-hidden className="size-3" />
-                    <span className="sr-only">update to</span>
-                    <VersionTo
-                      from={detail?.installedVersion}
-                      to={upgradable}
-                      security={security}
+                  {upgradable && (
+                    <Status
+                      verdict={security ? "warning" : "notice"}
+                      label={security ? "Security update" : "Update available"}
+                      className="text-body"
                     />
+                  )}
+                </>
+              )
+            }
+            command={
+              detail && canInstall && (!detail.installed || upgradable) ? (
+                <Button
+                  size="sm"
+                  pending={busy}
+                  disabled={Boolean(acting)}
+                  onClick={install}
+                  title={upgradable ? `Update to ${upgradable}` : undefined}
+                >
+                  {upgradable ? (
+                    <ArrowCircleUp className="size-3.5" />
+                  ) : (
+                    <Download className="size-3.5" />
+                  )}
+                  {upgradable ? "Update" : "Install"}
+                </Button>
+              ) : undefined
+            }
+            menu={verbs.length > 0 && <VerbMenu verbs={verbs} label={`Actions on ${name}`} />}
+            facts={
+              // The same rows whatever a package says about itself, so the views
+              // under the line do not move when it lands. One line from `sm`: the
+              // version it is at and the one an update lands on, its size, then
+              // what it is, which gives way. On a phone the description goes
+              // under the figures. Beside the rail at 1280 the line has under
+              // 500px, which is why how it came to be installed is in About.
+              <span className="flex w-full min-w-0 flex-col gap-y-1 sm:flex-row sm:items-center sm:gap-x-3">
+                <FactLine nowrap className="sm:shrink-0">
+                  {/* A flex row, as the line it was: the version in mono and the
+                      update's arrow stand on one centre line. */}
+                  <Fact className="flex items-center">
+                    <span className="flex max-w-full min-w-0 items-center gap-x-3">
+                      {detail ? (
+                        <span
+                          className="min-w-0 truncate font-mono text-foreground"
+                          title={detail.installedVersion ?? detail.version}
+                        >
+                          {detail.installedVersion ?? detail.version ?? "—"}
+                        </span>
+                      ) : (
+                        <span>&nbsp;</span>
+                      )}
+                      {upgradable && (
+                        <span
+                          className="inline-flex shrink-0 items-center gap-1.5"
+                          title={`${security ? "A security update" : "An update"} to ${upgradable} is waiting`}
+                        >
+                          <ArrowRight aria-hidden className="size-3" />
+                          <span className="sr-only">update to</span>
+                          <VersionTo
+                            from={detail?.installedVersion}
+                            to={upgradable}
+                            security={security}
+                          />
+                        </span>
+                      )}
+                    </span>
+                  </Fact>
+                  {detail?.size ? (
+                    <Fact className="numeric shrink-0">
+                      {bytes(detail.size)} {detail.installed ? "on disk" : "once installed"}
+                    </Fact>
+                  ) : null}
+                </FactLine>
+                {detail?.summary && (
+                  <span aria-hidden className="text-faint max-sm:hidden">
+                    ·
                   </span>
                 )}
-                {detail?.size ? (
-                  <>
-                    <FactDot />
-                    <span className="numeric shrink-0">
-                      {bytes(detail.size)} {detail.installed ? "on disk" : "once installed"}
-                    </span>
-                  </>
-                ) : null}
-              </span>
-              {detail?.summary && (
-                <span className="max-sm:hidden">
-                  <FactDot />
+                <span className="min-w-0 truncate" title={detail?.summary}>
+                  {detail?.summary || "\u00a0"}
                 </span>
-              )}
-              <span className="min-w-0 truncate" title={detail?.summary}>
-                {detail?.summary || "\u00a0"}
               </span>
-            </span>
-          }
+            }
+          />
+          <JobConsole
+            job={console_.job}
+            lines={console_.lines}
+            onDismiss={console_.dismiss}
+            onCancel={console_.cancel}
+          />
+        </>
+      }
+    >
+      <Tabs value={tab} onValueChange={setTab} className="gap-0">
+        <ViewTabList
+          label={`Views of ${name}`}
+          views={VIEWS.map((view) => ({ ...view, count: counts[view.key] }))}
+          value={tab}
+          sticky
         />
-        <JobConsole
-          job={console_.job}
-          lines={console_.lines}
-          onDismiss={console_.dismiss}
-          onCancel={console_.cancel}
-        />
-      </div>
 
-      <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of ${name}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {VIEWS.map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(tab === view.key, "h-10")}
-            >
-              {view.label}
-              {(counts[view.key] ?? 0) > 0 && <ChipCount>{counts[view.key]}</ChipCount>}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
-
-        <TabsContent value="overview" className="min-h-0 flex-1 pt-2 xl:overflow-y-auto">
+        <TabsContent value="overview" className="pt-2">
           {detail ? (
             <PackageOverview
               detail={detail}
@@ -635,7 +576,7 @@ function PackageMain({
             picture
           )}
         </TabsContent>
-        <TabsContent value="files" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="files" className="pt-6">
           {tab === "files" &&
             (detail ? (
               <PackageFiles
@@ -649,7 +590,7 @@ function PackageMain({
               <LoadingRows rows={6} />
             ))}
         </TabsContent>
-        <TabsContent value="manual" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="manual" className="pt-6">
           {tab === "manual" &&
             (detail ? (
               <PackageManual
@@ -663,7 +604,7 @@ function PackageMain({
               <LoadingRows rows={6} />
             ))}
         </TabsContent>
-        <TabsContent value="depends" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="depends" className="pt-6">
           {tab === "depends" &&
             (detail ? (
               <PackageDepends
@@ -676,13 +617,13 @@ function PackageMain({
               <LoadingRows rows={6} />
             ))}
         </TabsContent>
-        <TabsContent value="log" className="flex min-h-0 flex-1 flex-col pt-4 xl:overflow-y-auto">
+        <TabsContent value="log" className="flex flex-col pt-4">
           {/* Keyed on the package so another package starts a clean pane. */}
           {tab === "log" && <PackageLogView key={name} product={product} about={name} />}
         </TabsContent>
       </Tabs>
       {dialog}
-    </div>
+    </PackageFrame>
   )
 }
 

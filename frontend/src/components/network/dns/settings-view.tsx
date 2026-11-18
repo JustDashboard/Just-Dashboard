@@ -6,10 +6,11 @@ import type { DNSView, HostRecords } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { FormNote, FormSection, FormSections } from "@/components/form"
 import { ErrorState, Notice } from "@/components/state"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { SaveBarProvider } from "@/components/settings/save-bar"
 import { Bar } from "@/components/network/dns/ghost"
 import { HostRecordsEditor } from "@/components/network/dns/host-records"
 import { OwnerHandoff } from "@/components/network/dns/resolver-owner"
+import { Skeleton } from "@/components/ui/skeleton"
 import {
   ResolverOutcomeNote,
   ResolverSettings,
@@ -21,7 +22,7 @@ const SECTIONS = ["Upstreams", "DNS over TLS", "DNSSEC", "Cache", "Host records"
 
 /**
  * The resolver's settings, in the shape every settings page in the product
- * has (`deploy/settings/setting-card.tsx`): one centred column of sections
+ * has (`components/settings/setting-card.tsx`): one centred column of sections
  * divided by hairlines, each head over its fields carrying what the section
  * currently is, and one Save floating at the foot while an edit is held.
  *
@@ -51,10 +52,7 @@ export function SettingsView({
         <FormSections>
           {SECTIONS.map((title) => (
             <FormSection key={title} aside title={title} hint={<Bar className="w-40" />}>
-              <div
-                data-slot="skeleton"
-                className="h-9 w-full animate-pulse rounded-md bg-muted sm:max-w-md"
-              />
+              <Skeleton className="h-9 w-full sm:max-w-md" />
             </FormSection>
           ))}
         </FormSections>
@@ -110,10 +108,7 @@ export function SettingsView({
               {hosts.error ? (
                 <ErrorState error={hosts.error} onRetry={hosts.refresh} />
               ) : (
-                <div
-                  data-slot="skeleton"
-                  className="h-9 w-full animate-pulse rounded-md bg-muted"
-                />
+                <Skeleton className="h-9 w-full" />
               )}
             </FormSection>
           )}

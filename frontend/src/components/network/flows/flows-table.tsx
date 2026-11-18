@@ -26,7 +26,7 @@ import {
   flowOwnerName,
   flowTotals,
   type FlowRow,
-} from "@/lib/network-flows"
+} from "@/lib/network/flows"
 import { UTCTime, counted } from "@/components/network/flows/marks"
 
 export type FlowFilters = { day: string; address: string; containerId: string }
@@ -83,18 +83,10 @@ export function FlowsTable({
   const totals = flowTotals(rows)
   const observed = flowKernelTotals(rows)
   return (
-    <Panel id="flow-rows" aria-label="Socket hours" className="scroll-mt-6">
+    <Panel framed id="flow-rows" aria-label="Socket hours" className="scroll-mt-6">
       <PanelHeader
-        title={
-          <>
-            Socket hours
-            {!loading && rows.length > 0 && (
-              <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-                {rows.length}
-              </span>
-            )}
-          </>
-        }
+        title="Socket hours"
+        count={!loading && rows.length > 0 ? rows.length : undefined}
         actions={
           <>
             {truncated && (
@@ -142,10 +134,10 @@ export function FlowsTable({
           />
           <Input
             aria-label="Observed peer IP"
-            placeholder="Any peer, or a literal IP"
+            placeholder="Any peer, or an IP address"
             value={draft.address}
             onChange={(event) => onDraft({ ...draft, address: event.target.value })}
-            className="min-w-40 flex-1 font-mono max-sm:basis-full sm:max-w-60"
+            className="min-w-40 flex-1 font-mono placeholder:font-sans max-sm:basis-full sm:max-w-60"
             spellCheck={false}
           />
           <Input
@@ -153,7 +145,7 @@ export function FlowsTable({
             placeholder="Any owner, or a full Docker ID"
             value={draft.containerId}
             onChange={(event) => onDraft({ ...draft, containerId: event.target.value })}
-            className="min-w-40 flex-1 font-mono max-sm:basis-full sm:max-w-72"
+            className="min-w-40 flex-1 font-mono placeholder:font-sans max-sm:basis-full sm:max-w-72"
             spellCheck={false}
           />
           <Button type="submit" size="sm" variant="outline" disabled={!flowDateRange(draft.day)}>
@@ -199,7 +191,10 @@ export function FlowsTable({
                     onActivate={() => onSelect(key)}
                     className="h-11"
                   >
-                    <TableCell className="truncate">
+                    {/* The owner is a 20px body line: on the cell's own 12px
+                        padding it filled the 44 by itself, the hairline made
+                        a row 45 and the last row, which draws none, 44.5. */}
+                    <TableCell className="truncate py-2.5">
                       <span className="flex min-w-0 items-center gap-2">
                         <OwnerGlyph row={row} />
                         <button
@@ -406,7 +401,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
           ["Sent", bytesOf(row, "tx")],
           ["Received", bytesOf(row, "rx")],
           ["Retransmits", counted(row.retransmissions)],
-          ["Outstanding-loss gauge max", counted(row.lostGaugeMax)],
+          ["Most counted lost at once", counted(row.lostGaugeMax)],
           [
             "Samples",
             `${row.samples} samples · ${row.measuredIntervals} measured · ${row.skippedIntervals} skipped`,
@@ -418,7 +413,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
         ]
   facts.push(
     [
-      "Observed UTC window",
+      "Seen, UTC",
       <span key="window">
         <UTCTime value={row.firstSeen} /> → <UTCTime value={row.lastSeen} />
       </span>,
@@ -431,7 +426,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
           ? "Retained packet window; full connection span unknown"
           : "Observed span; no close event",
     ],
-    ["Owner evidence", <Mono key="owner">{ownerEvidence(row)}</Mono>],
+    ["How its owner is known", <Mono key="owner">{ownerEvidence(row)}</Mono>],
     [
       "Socket identity",
       <Mono key="identity">
@@ -440,7 +435,7 @@ export function FlowRowReading({ row }: { row: FlowRow }) {
       </Mono>,
     ],
     [
-      "Read through",
+      "Read by",
       <Mono key="via">
         {row.sourceName} · Boot {row.bootId}
       </Mono>,

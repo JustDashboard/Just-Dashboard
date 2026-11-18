@@ -3,8 +3,8 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Copy, Download, Logs } from "@/components/icons"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
-import { SearchInput } from "@/components/page"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { SearchInput } from "@/components/search-input"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { IconAction } from "@/components/icon-action"
 import { Status } from "@/components/status-dot"
 import { TranscriptRow, useTranscriptDrip } from "@/components/transcript-line"
@@ -20,21 +20,21 @@ import {
 import {
   RUN_LABELS,
   StepMark,
-  formatDuration,
   runFailed,
   runTone,
   stepName,
   stepSeconds,
 } from "@/components/deploy/vocabulary"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { clock, plural } from "@/lib/format"
+import { clock, duration, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
-import { downloadText } from "@/lib/metrics-export"
 import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
 import type { DeploymentRunState, DeploymentStep, DeploymentSummary } from "@/lib/types"
 import { StepTile } from "@/components/deploy/run-evidence"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
+import { saveText } from "@/lib/download"
+import { useBreakpoint } from "@/lib/breakpoints"
+import { elapsed, stampColumnCh } from "./build-stamp"
 
 /**
  * One `step.log` event as the stream delivers it: a chunk, not a line, from
@@ -107,16 +107,6 @@ export function transcriptSummary(rows: ConsoleRow[]) {
 /** A console row's element id: its persisted sequence and its line in that chunk. */
 function lineAnchor(id: string) {
   return `build-line-${id.replace(":", "-")}`
-}
-
-/** "+1:04", "+1:02:09": how far into the run a line was written. */
-function elapsed(ts: string, from: number) {
-  const seconds = Math.max(0, Math.round((new Date(ts).getTime() - from) / 1000))
-  if (Number.isNaN(seconds)) return ""
-  const h = Math.floor(seconds / 3600)
-  const m = Math.floor((seconds % 3600) / 60)
-  const s = String(seconds % 60).padStart(2, "0")
-  return h > 0 ? `+${h}:${String(m).padStart(2, "0")}:${s}` : `+${m}:${s}`
 }
 
 /**
@@ -209,10 +199,10 @@ export function BuildConsole({
   // reader's only when it went up from there — lines landing between the
   // scroll and its event must not read as the reader leaving the end.
   const followedTo = useRef(0)
-  const rail = useMediaQuery("(min-width: 1536px)")
-  // On a phone the elapsed column is 48px of a 326px line, and its chip the
+  const rail = useBreakpoint("2xl")
+  // On a phone the elapsed column is a sixth of a 326px line, and its chip the
   // one the toolbar's second row has no room for.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const stamped = time && wide
 
   // Grows by appending while events arrive in order, which is what lets the
@@ -251,12 +241,38 @@ export function BuildConsole({
     return out
   }, [visible, stepById])
   const zero = new Date(startedAt).getTime()
+  // Sized from the longest stamp, so a line an hour in does not print over
+  // its text.
+  const stampCh = useMemo(
+    () => stampColumnCh(rows.map((row) => elapsed(row.ts, zero))),
+    [rows, zero],
+  )
 
   useEffect(() => {
     if (!follow || !body.current) return
     body.current.scrollTop = body.current.scrollHeight
     followedTo.current = body.current.scrollTop
   }, [visible, follow])
+
+  // A hidden console (a phone's pane while another stop is read) has no box,
+  // so the lines that land meanwhile cannot be followed. When it is shown
+  // again, or resized, its box changes size, and a console that was
+  // following goes back to the last line.
+  const following = useRef(follow)
+  useEffect(() => {
+    following.current = follow
+  }, [follow])
+  useEffect(() => {
+    const el = body.current
+    if (!el) return
+    const observer = new ResizeObserver(() => {
+      if (!following.current || el.clientHeight === 0) return
+      el.scrollTop = el.scrollHeight
+      followedTo.current = el.scrollTop
+    })
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [])
 
   // A search or the errors filter could hide the line; following would pull
   // the console away from it again.
@@ -310,8 +326,10 @@ export function BuildConsole({
   )
 
   return (
-    <Pane flush={flush} className={cn("relative", className ?? "h-[min(70vh,44rem)] min-h-72")}>
-      {active && <BorderBeam size={96} duration={7} />}
+    <Pane flush={flush} className={cn("relative", className ?? "h-[min(70svh,44rem)] min-h-72")}>
+      {/* A flush pane's edges are the screen's (a phone's pane), so a beam
+          there would run round the window rather than the console. */}
+      {active && !flush && <BorderBeam size={96} duration={7} />}
       <PaneHeader className="flex-wrap gap-2 py-2">
         <SearchInput
           dense
@@ -323,7 +341,7 @@ export function BuildConsole({
           containerClassName="order-1 min-w-0 flex-1 max-sm:min-w-32 sm:max-w-64"
         />
         {stagePicker}
-        <ChipStrip className="order-4 flex-1 max-sm:mx-0 max-sm:px-0 sm:order-3 sm:flex-none">
+        <ChipStrip bleed={false} className="order-4 flex-1 sm:order-3 sm:flex-none">
           <FilterChip
             selected={errorsOnly}
             disabled={errors === 0 && !errorsOnly}
@@ -379,7 +397,7 @@ export function BuildConsole({
             label="Download build logs"
             disabled={!rows.length}
             onClick={() =>
-              downloadText(`deployment-${runNumber}.log`, `${plain(rows)}\n`, "text/plain")
+              saveText(`deployment-${runNumber}.log`, `${plain(rows)}\n`, "text/plain")
             }
           >
             <Download />
@@ -410,6 +428,9 @@ export function BuildConsole({
           ref={body}
           onScroll={(event) => {
             const el = event.currentTarget
+            // Hidden, it has no box: what the browser reports then is not
+            // the reader leaving the end.
+            if (el.clientHeight === 0) return
             const atEnd = el.scrollHeight - el.scrollTop - el.clientHeight < 32
             // Following stops the moment the reader scrolls up, or a build
             // still writing yanks them back down with every line; it resumes
@@ -464,7 +485,8 @@ export function BuildConsole({
                             <time
                               dateTime={row.ts}
                               title={clock(row.ts)}
-                              className="numeric w-12 shrink-0 text-right text-muted-foreground/60 select-none"
+                              style={{ width: `${stampCh}ch` }}
+                              className="numeric shrink-0 text-right text-faint select-none"
                             >
                               {elapsed(row.ts, zero)}
                             </time>
@@ -586,7 +608,7 @@ function StepRule({
   return (
     <div
       aria-hidden
-      className="sticky top-0 z-10 mb-1 flex min-w-0 items-center gap-2 border-b border-hairline bg-surface-sunken px-3 py-1 font-sans text-hint sm:px-4 sm:text-xs"
+      className="sticky top-0 z-raised mb-1 flex min-w-0 items-center gap-2 border-b border-hairline bg-surface-sunken px-3 py-1 font-sans text-hint sm:px-4 sm:text-xs"
     >
       <StepMark state={step.state} />
       <span
@@ -599,7 +621,7 @@ function StepRule({
       </span>
       {seconds !== undefined && (
         <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {formatDuration(seconds)}
+          {duration(seconds)}
         </span>
       )}
       <span className="numeric ml-auto shrink-0 text-hint text-muted-foreground">
@@ -688,13 +710,13 @@ function StageRail({
             </span>
             {seconds !== undefined && (
               <span className="numeric shrink-0 text-hint text-muted-foreground">
-                {formatDuration(seconds)}
+                {duration(seconds)}
               </span>
             )}
             <span
               className={cn(
                 "numeric w-6 shrink-0 text-right text-hint",
-                lines ? "text-muted-foreground" : "text-muted-foreground/40",
+                lines ? "text-muted-foreground" : "text-faint",
               )}
             >
               {lines}

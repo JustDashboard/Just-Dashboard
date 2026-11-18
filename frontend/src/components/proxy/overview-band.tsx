@@ -5,18 +5,19 @@ import { useRouter } from "next/navigation"
 import { ArrowRight, Box, LockClosed } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { LANES } from "@/lib/hue"
-import { plural, relativeTime } from "@/lib/format"
+import { compactCount, plural, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { Certificate, ErrorReport, SiteTrafficReading } from "@/lib/types"
 import { BarReading, type ReadingPart } from "@/components/bar-reading"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { SectionLink } from "@/components/section-link"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { certificateProduct } from "@/components/proxy/marks"
-import { ProjectFavicon } from "@/components/deploy/project-mark"
+import { ProjectFavicon } from "@/components/project-mark"
 import { isActionableProxyError } from "@/components/proxy/site-errors"
 import { useAuth } from "@/hooks/use-auth"
-import { compactCount, errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
+import { errorRateTone, readingHref, share } from "@/components/proxy/site-traffic"
 import { certificateFileHref } from "@/components/proxy/certificate-paths"
 
 /** How many sites and certificates a block names; the rest are one link away. */
@@ -91,17 +92,6 @@ export function OverviewBand({
         />
       )}
     </div>
-  )
-}
-
-function HeadLink({ href, children }: { href: string; children: React.ReactNode }) {
-  return (
-    <Link
-      href={href}
-      className="flex h-7 shrink-0 items-center gap-1 rounded-md text-hint font-medium whitespace-nowrap text-muted-foreground focus-ring hover:text-foreground"
-    >
-      {children} <ArrowRight className="size-3" />
-    </Link>
   )
 }
 
@@ -195,7 +185,7 @@ function TrafficBlock({
       figure={
         <span className="flex h-7 items-center gap-3">
           {read.length > 0 && <HeadFigure value={compactCount(total)} word="requests this hour" />}
-          <HeadLink href="/proxy/traffic">All traffic</HeadLink>
+          <SectionLink href="/proxy/traffic">All traffic</SectionLink>
         </span>
       }
       message={
@@ -334,7 +324,7 @@ function CertificatesBlock({
                 tone="success"
               />
             )}
-            <HeadLink href="/proxy/certificates">All certificates</HeadLink>
+            <SectionLink href="/proxy/certificates">All certificates</SectionLink>
           </span>
         )
       }
@@ -554,7 +544,7 @@ function ErrorsBlock({
       fixed
       figure={
         nginx ? (
-          <HeadLink href="/proxy/traffic?view=errors">{figure ?? "Error log"}</HeadLink>
+          <SectionLink href="/proxy/traffic?view=errors">{figure ?? "Error log"}</SectionLink>
         ) : (
           figure
         )

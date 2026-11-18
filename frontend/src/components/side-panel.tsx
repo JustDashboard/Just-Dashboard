@@ -5,6 +5,7 @@ import { createPortal } from "react-dom"
 import { cn } from "@/lib/utils"
 import { useFocusReturn } from "@/hooks/use-focus-return"
 import { useWorkspaceFocus } from "@/components/workspace/workspace"
+import type { OverlaySize } from "@/components/modal"
 import {
   Sheet,
   SheetContent,
@@ -13,25 +14,36 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 
+/**
+ * The overlay size names (`OverlaySize`, written at `components/modal.tsx`)
+ * as a sheet's widths. A sheet is a column the height of the window, so each
+ * step is wider than the dialog's of the same name: a sheet's `md` holds what
+ * a dialog's `lg` does, with the room a column needs for its labels.
+ */
 const WIDTHS = {
   sm: "sm:max-w-lg",
   md: "sm:max-w-2xl",
   lg: "sm:max-w-3xl",
   xl: "sm:max-w-5xl",
-} as const
+} as const satisfies Record<OverlaySize, string>
 
 /**
- * The detail surface: a container's stats, a repository's history, a vhost's
- * config, a backup's runs.
+ * The sheet: a small add or edit form that opens over the page it belongs to,
+ * such as a credential, a channel, a webhook or a mount.
+ *
+ * It is not where an item's detail goes. Since 0.8.7 an item's detail is a page
+ * of its own, with its views in `?tab=` and a rail of its siblings from `xl`
+ * (docs/internal/frontend/standard.md, D9), and the address that opened a sheet
+ * redirects to that page.
  *
  * Its header is the title and the actions, with no icon plot in front of them —
  * see the note at `PanelHeader`.
  *
  * Eight places opened a Sheet and each laid its own header out — some padded,
  * some not, some with the title in the body. They are one component now, so a
- * detail view opens the same way whichever page you came from, and the body is
- * the only part that scrolls: the title and the actions stay put while you
- * read down a long log.
+ * sheet opens the same way whichever page you came from, and the body is the
+ * only part that scrolls: the title and the actions stay put while you read
+ * down a long form.
  *
  * **What goes inside one.** The frame being one component was not enough: the
  * deploy sheets each put a different body in it — a Select for a kind, a
@@ -65,7 +77,8 @@ export function SidePanel({
   description,
   actions,
   footer,
-  width = "lg",
+  size,
+  width,
   initialFocus = "first",
   onCloseAutoFocus,
   bodyClassName,
@@ -79,7 +92,10 @@ export function SidePanel({
   description?: React.ReactNode
   actions?: React.ReactNode
   footer?: React.ReactNode
-  width?: keyof typeof WIDTHS
+  /** How much the sheet holds, by the overlays' one vocabulary; `lg` if left out. */
+  size?: OverlaySize
+  /** @deprecated use `size`, the name `Modal` has for the same thing. */
+  width?: OverlaySize
   /**
    * Where the keyboard lands when the sheet opens, as `Modal`'s does. A form
    * wants its first field; one whose first field already holds a sensible
@@ -99,7 +115,7 @@ export function SidePanel({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
-        className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[width], className)}
+        className={cn("flex w-full flex-col gap-0 p-0", WIDTHS[size ?? width ?? "lg"], className)}
         onCloseAutoFocus={(event) => {
           onCloseAutoFocus?.(event)
           if (!event.defaultPrevented && restoreFocus?.()) event.preventDefault()
@@ -135,6 +151,8 @@ export function SidePanel({
         <div
           ref={body}
           tabIndex={initialFocus === "body" ? -1 : undefined}
+          // Focus is only ever sent here (tabIndex -1), which a ring would box whole.
+          // eslint-disable-next-line design-system/tokens
           className={cn("min-h-0 flex-1 overflow-y-auto outline-none", bodyClassName ?? "p-4")}
         >
           <FooterSlot.Provider value={{ node: slot }}>{children}</FooterSlot.Provider>

@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import type { AuditEntry, NetworkLink } from "@/lib/types"
 
 /**
@@ -15,16 +16,6 @@ export type DeviceTab = (typeof DEVICE_TABS)[number]
 export function deviceHref(name: string, tab?: string) {
   const path = `/network/interfaces/${encodeURIComponent(name)}`
   return tab && tab !== "traffic" ? `${path}?tab=${encodeURIComponent(tab)}` : path
-}
-
-/** The `[name]` segment as the kernel spells the device. */
-export function deviceName(segment: string | undefined) {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 type Stateful = Pick<NetworkLink, "adminUp" | "carrier" | "state">
@@ -123,7 +114,7 @@ export function describeDevice(link: NetworkLink, ownerLabel: Record<string, str
   if (link.container) return `${link.container} · on ${link.master ?? "no bridge"}`
   if (link.dockerNetwork) return `Docker network ${link.dockerNetwork}`
   if (link.role === "bridge" && link.members?.length)
-    return `${link.members.length} port${link.members.length === 1 ? "" : "s"}: ${link.members.slice(0, 3).join(", ")}`
+    return `${plural(link.members.length, "port")}: ${link.members.slice(0, 3).join(", ")}`
   if (link.parent) return `on ${link.parent}${link.master ? ` · port of ${link.master}` : ""}`
   if (link.remote) return `to ${link.remote}`
   if (link.master) return `port of ${link.master}`

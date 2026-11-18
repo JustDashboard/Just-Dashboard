@@ -169,7 +169,7 @@ export type ScanFinding = {
   title: string
   detail: string
   advice?: string
-  /** The remedy the page can carry out for this finding, as lib/tls-fixes.ts reads it. */
+  /** The remedy the page can carry out for this finding, as lib/tls/fixes.ts reads it. */
   fix?:
     | "renew"
     | "issue"

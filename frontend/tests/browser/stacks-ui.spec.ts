@@ -227,7 +227,8 @@ test("recent says what Docker did to the stacks, and a line opens its stack", as
 
   const recent = page.getByRole("region", { name: "Recent changes" })
   const line = recent.locator("[data-slot=bar-reading-line]")
-  await expect(line).toContainText("unhealthy")
+  // The words a stack's own services use for a health event (docker/words.ts).
+  await expect(line).toContainText("failing its check")
   // The oom and the exit it caused are one mark.
   const alertmanager = recent.getByRole("button", { name: /^Open monitoring: alertmanager/ })
   await expect(alertmanager).toHaveCount(1)

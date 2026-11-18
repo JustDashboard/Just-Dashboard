@@ -3,22 +3,23 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import { useParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { CodeBracket, GridSquare } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes, relativeTime, timestamp } from "@/lib/format"
+import { bytes, relativeTime, sharePercent, timestamp } from "@/lib/format"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Detail, DetailList } from "@/components/page"
+import { IdentityHeader } from "@/components/identity-header"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { SplitBar, percent as share } from "@/components/rank-list"
-import { EmptyNote, EmptyState, LoadingRows } from "@/components/state"
+import { SplitBar } from "@/components/rank-list"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { KindGlyph, rowObjectKind } from "@/components/database/data/kinds"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { compact } from "@/components/database/home/readings"
 import { EngineMark } from "@/components/database/kit"
 import { parseTableSegment, tableHref } from "@/components/database/ops/performance-address"
@@ -26,7 +27,6 @@ import { STORAGE_LIMIT, readTableStats } from "@/components/database/ops/perform
 import {
   DetailFrame,
   DetailGate,
-  DetailHead,
   DetailRail,
   DetailTabs,
   stepOf,
@@ -64,6 +64,7 @@ import {
 import { Fig } from "@/components/database/ops/performance-words"
 import type { DbTableStat } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { capitalize } from "@/components/database/kit/figures"
 
 type Tab = "figures" | "maintenance"
 
@@ -147,7 +148,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
       ),
       sub: entry.rows < 0 ? "rows not counted" : `${compact(entry.rows)} rows`,
       figure: bytes(entry.totalBytes),
-      figureSub: whole > 0 ? share(entry.totalBytes / whole) : undefined,
+      figureSub: whole > 0 ? sharePercent(entry.totalBytes / whole) : undefined,
     }))
     // `carried` is two strings: held by what they are.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -173,16 +174,14 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
 
   const back = {
     href: href("performance", { view: "tables", scope: scope || null }),
-    label: objects[0].toUpperCase() + objects.slice(1),
+    label: capitalize(objects),
   }
-  const head = (
-    <DetailHead
-      title={`${conn.name} · ${current ?? engine.nouns.object}`}
-      back={back}
-      noun={engine.nouns.object}
-      step={stepOf(rows, current)}
-    />
-  )
+  const head = {
+    title: `${conn.name} · ${current ?? engine.nouns.object}`,
+    back,
+    noun: engine.nouns.object,
+    step: stepOf(rows, current),
+  }
   const rail = (
     <DetailRail
       label={back.label}
@@ -193,23 +192,35 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
       rows={rows}
       current={current}
       loading={!stats.data && !stats.error}
+      error={stats.data ? undefined : stats.error}
+      onRetry={stats.refresh}
       empty={stats.error && !stats.data ? "" : `No ${engine.nouns.object} matches.`}
     />
   )
 
   if (!table) {
     return (
-      <DetailFrame rail={rail}>
-        {head}
-        {named && !stats.data && !stats.error ? (
-          <>
-            <HostIdentity
+      <DetailFrame
+        rail={rail}
+        head={head}
+        identity={
+          named && !stats.data && !stats.error ? (
+            // The loaded line's form, with a place for its command and verbs
+            // (empty until they are known), so nothing under it moves when it is read.
+            <IdentityHeader
+              loading
               className="border-b-0 pb-0"
               logo={<TableTile />}
               title={<ObjectName schema={named.schema || undefined} name={named.name} />}
               state={<TextShimmer className="text-xs">Reading its figures…</TextShimmer>}
-              facts={<span>&nbsp;</span>}
+              command
+              menu={false}
             />
+          ) : undefined
+        }
+      >
+        {named && !stats.data && !stats.error ? (
+          <>
             {/* The page's own shape while it is read: the strip is where it will be. */}
             <DetailTabs
               label={`Views of ${qualified(named.schema, named.name)}`}
@@ -221,7 +232,7 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
             </DetailTabs>
           </>
         ) : stats.error && !stats.data ? (
-          <CouldNotRead what={`the ${objects}`} error={stats.error} onRetry={stats.refresh} />
+          <ErrorState what={`the ${objects}`} error={stats.error} onRetry={stats.refresh} />
         ) : stats.data && !stats.data.supported ? (
           <EmptyState
             mark={<EngineMark engine={engine} size="md" />}
@@ -270,11 +281,11 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
   ]
 
   return (
-    <DetailFrame rail={rail}>
-      {maintenance.dialogs}
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        {head}
-        <HostIdentity
+    <DetailFrame
+      rail={rail}
+      head={head}
+      identity={
+        <IdentityHeader
           label={`About ${qualified(table.schema, table.table)}`}
           className="animate-rise border-b-0 pb-0"
           logo={<TableTile kind={table.kind} />}
@@ -290,33 +301,19 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
           }
           facts={
             <>
-              <span>
+              <Fact>
                 <Fig>{bytes(table.totalBytes)}</Fig>
-                {whole > 0 && ` · ${share(table.totalBytes / whole)} of the database`}
-              </span>
-              <FactDot />
-              <span className="numeric">
+                {whole > 0 && ` · ${sharePercent(table.totalBytes / whole)} of the database`}
+              </Fact>
+              <Fact className="numeric">
                 {table.rows < 0 ? "rows not counted" : `${compact(table.rows)} rows`}
-              </span>
-              {table.engine && (
-                <>
-                  <FactDot />
-                  <span className="font-mono">{table.engine}</span>
-                </>
-              )}
-              {table.kind && table.kind !== "table" && (
-                <>
-                  <FactDot />
-                  <span>{table.kind}</span>
-                </>
-              )}
+              </Fact>
+              {table.engine && <Fact className="font-mono">{table.engine}</Fact>}
+              {table.kind && table.kind !== "table" && <Fact>{table.kind}</Fact>}
               {every.has("vacuum") && (
-                <>
-                  <FactDot />
-                  <span title={vacuumed ? timestamp(vacuumed.at) : undefined}>
-                    {vacuumed ? `vacuumed ${relativeTime(vacuumed.at)}` : "never vacuumed"}
-                  </span>
-                </>
+                <Fact title={vacuumed ? timestamp(vacuumed.at) : undefined}>
+                  {vacuumed ? `vacuumed ${relativeTime(vacuumed.at)}` : "never vacuumed"}
+                </Fact>
               )}
             </>
           }
@@ -336,7 +333,9 @@ function Table({ named }: { named: { schema: string; name: string } | null }) {
             )
           }
         />
-      </div>
+      }
+    >
+      {maintenance.dialogs}
 
       <DetailTabs
         label={`Views of ${qualified(table.schema, table.table)}`}
@@ -470,7 +469,7 @@ function Figures({ table, columns }: { table: DbTableStat; columns: ReadonlySet<
                     <span className={cn("numeric", needsVacuum(table) && "text-warning")}>
                       {dead.toLocaleString()}
                       {dead > 0 && deadOf !== undefined && (
-                        <span className="text-muted-foreground"> · {share(deadOf)}</span>
+                        <span className="text-muted-foreground"> · {sharePercent(deadOf)}</span>
                       )}
                     </span>
                   )}
@@ -499,7 +498,7 @@ function Figures({ table, columns }: { table: DbTableStat; columns: ReadonlySet<
             title="How it is read"
             actions={
               seq !== undefined && (
-                <span className="numeric text-hint">{share(seq)} sequential</span>
+                <span className="numeric text-hint">{sharePercent(seq)} sequential</span>
               )
             }
           />

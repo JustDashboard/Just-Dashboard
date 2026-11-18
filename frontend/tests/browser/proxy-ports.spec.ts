@@ -62,7 +62,7 @@ test("each socket says where it answers, with the network named", async ({ page 
   await mockHost(page)
   await page.goto("/proxy/ports")
 
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   // Seven services on nine sockets: sshd and caddy each answer in both families.
   await expect(rows).toHaveCount(7)
 
@@ -89,13 +89,13 @@ test("each socket says where it answers, with the network named", async ({ page 
 
   // Only real loopback reads as this server's in the reach column.
   await expect(rows.getByText("This server only", { exact: true })).toHaveCount(2)
-  await expect(rows.locator("td:nth-child(3)").getByText(/loopback/i)).toHaveCount(0)
+  await expect(rows.getByText(/loopback/i)).toHaveCount(0)
 })
 
 test("the chips split the services by who can connect, counting a pair once", async ({ page }) => {
   await mockHost(page)
   await page.goto("/proxy/ports")
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
 
   await expect(page.getByRole("button", { name: "All 7" })).toBeVisible()
   await page.getByRole("button", { name: "Internet-facing 3" }).click()
@@ -157,7 +157,7 @@ test("a host with nothing the internet can reach reads so", async ({ page }) => 
   // A chip with nothing behind it is not offered.
   await expect(page.getByRole("button", { name: /^Internet-facing/ })).toHaveCount(0)
   // caddy on the tailnet is a notice, not an alarm.
-  const caddy = page.getByRole("table").locator("tbody tr").filter({ hasText: "caddy" })
+  const caddy = rowsOf(page).filter({ hasText: "caddy" })
   await expect(caddy.getByText("Tailnet only", { exact: true })).toHaveClass(
     /text-muted-foreground/,
   )
@@ -202,11 +202,11 @@ test("a port Docker publishes in both families is one row and one count", async 
   await mockHost(page, [...hostPorts, ...dockerIngress])
   await page.goto("/proxy/ports")
 
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   await expect(rows).toHaveCount(9)
   const http = rows.filter({ has: page.locator(titled("PID 1883643, 1883650")) })
   await expect(http).toHaveCount(1)
-  await expect(http.locator("td").first()).toContainText("0.0.0.0, ::")
+  await expect(http).toContainText("0.0.0.0, ::")
   await expect(rows.filter({ has: page.locator(titled("PID 1883666, 1883672")) })).toHaveCount(1)
   await expect(fact(page, "5 internet-facing")).toBeVisible()
   await expect(page.getByRole("button", { name: "Internet-facing 5" })).toBeVisible()
@@ -223,7 +223,7 @@ test("the ports view retains observed firewall attribution", async ({ page }) =>
   await mockHost(page, firewalledDatabases)
   await page.goto("/proxy/ports")
 
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   await expect(rows).toHaveCount(2)
   for (const label of ["Redis · Every interface", "PostgreSQL · Public address"]) {
     const status = rows.getByText(label)
@@ -241,7 +241,7 @@ test("a database Docker publishes or a rule admits stays critical behind a firew
   await mockHost(page, pastFirewallDatabases)
   await page.goto("/proxy/ports")
 
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   await expect(rows).toHaveCount(3)
   const postgres = rows.filter({ has: page.locator(titled("PID 1883700, 1883706")) })
   await expect(postgres.getByText("PostgreSQL · Every interface")).toHaveClass(/text-destructive/)
@@ -276,7 +276,7 @@ test("a socket on the private uplink is not said to be out of the internet's rea
   await expect(fact(page, "nothing the internet can reach")).toHaveCount(0)
   await expect(internet).not.toHaveClass(/text-success/)
 
-  const row = page.getByRole("table").locator("tbody tr").filter({ hasText: "172.31.5.9" })
+  const row = rowsOf(page).filter({ hasText: "172.31.5.9" })
   const status = row.getByText("Docker API · Private uplink")
   await expect(status).toHaveClass(/text-warning/)
   await expect(
@@ -313,19 +313,19 @@ test("a folded pair's addresses and protocol hold one line, whole on its page", 
   ).toBe(false)
 
   await page.setViewportSize({ width: 1280, height: 900 })
-  const cell = rowsOf(page).filter({ hasText: "46505" }).locator("td").first()
-  // One line, both addresses in it and in its tooltip, inside the Endpoint column.
-  const addresses = cell.locator("[title]")
-  await expect(addresses).toHaveAttribute("title", "10.0.0.1, fe80::b482:4dff:fe92:4281")
+  const cell = rowsOf(page).filter({ hasText: "46505" })
+  // One line, both addresses in it and in its tooltip, inside the row.
+  const addresses = cell.locator("[title='10.0.0.1, fe80::b482:4dff:fe92:4281']")
+  await expect(addresses).toHaveText("10.0.0.1, fe80::b482:4dff:fe92:4281")
   const inside = await addresses.evaluate((node) => {
-    const td = node.closest("td")!.getBoundingClientRect()
+    const row = node.closest("[data-slot='choice-row']")!.getBoundingClientRect()
     const own = node.getBoundingClientRect()
-    return own.right <= td.right && own.left >= td.left
+    return own.right <= row.right && own.left >= row.left
   })
   expect(inside).toBe(true)
 
   // Whole on the port's page, with the user beside them.
-  await cell.getByRole("link").click()
+  await cell.getByRole("link").first().click()
   await expect(page).toHaveURL(/\/proxy\/ports\/tcp-46505$/)
   const identity = page.locator("[data-slot='host-identity']")
   await expect(identity.getByText("10.0.0.1, fe80::b482:4dff:fe92:4281")).toBeVisible()
@@ -341,7 +341,7 @@ test("a database is coloured by who can connect, and counted once however it is 
   // Postgres on every interface in both families is one row, and critical;
   // Redis on the Docker bridges and MongoDB on a link-local address are
   // warnings, as the posture calls them.
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   await expect(rows).toHaveCount(4)
   const postgres = rows.filter({ hasText: "0.0.0.0, ::" }).getByText("PostgreSQL · Every interface")
   await expect(postgres).toHaveClass(/text-destructive/)
@@ -427,17 +427,22 @@ test("a listing that timed out can be tried again", async ({ page }) => {
   timeout = false
   const beforeRetry = requests
   await page.getByRole("button", { name: "Try again" }).click()
-  await expect(page.getByRole("table").locator("tbody tr").first()).toBeVisible()
+  await expect(rowsOf(page).first()).toBeVisible()
   expect(requests).toBeGreaterThan(beforeRetry)
 })
 
-function rowsOf(page: Page) {
-  return page.getByRole("table").locator("tbody tr")
+/** The list's sockets: cards that open a port's page, one list or one per application. */
+function socketLists(page: Page) {
+  return page.locator("[data-slot='choice-list'][aria-label$='sockets']")
 }
 
-/** The ports of the table's socket rows, top to bottom. */
+function rowsOf(page: Page) {
+  return socketLists(page).locator("[data-slot='choice-row']")
+}
+
+/** The ports of the socket rows, top to bottom. */
 function portOrder(page: Page) {
-  return rowsOf(page).locator("td:first-child a").allTextContents()
+  return rowsOf(page).locator("[data-slot='port-row'] > span:first-child").allTextContents()
 }
 
 test("reach and protocol combine, and the address bar carries the view", async ({ page }) => {
@@ -470,7 +475,8 @@ test("reach and protocol combine, and the address bar carries the view", async (
 
   // The search and the sort go into the address too, readably.
   await page.getByLabel("Search sockets").fill(":22")
-  await page.getByRole("columnheader", { name: "Endpoint" }).getByRole("button").click()
+  await page.getByRole("combobox", { name: "Sort" }).click()
+  await page.getByRole("option", { name: "Port, low to high" }).click()
   await expect(page).toHaveURL(/\/proxy\/ports\?q=:22&reach=internet&sort=port$/)
   await expect(rows).toHaveCount(1)
 
@@ -482,10 +488,7 @@ test("reach and protocol combine, and the address bar carries the view", async (
   await expect(other.getByLabel("Search sockets")).toHaveValue(":22")
   await expect(rowsOf(other)).toHaveCount(1)
   await expect(rowsOf(other).filter({ hasText: "sshd" })).toHaveCount(1)
-  await expect(other.getByRole("columnheader", { name: "Endpoint" })).toHaveAttribute(
-    "aria-sort",
-    "ascending",
-  )
+  await expect(other.getByRole("combobox", { name: "Sort" })).toContainText("Port, low to high")
 
   // A link naming part of the view names all of it: what this tab typed
   // does not narrow what the link asks for.
@@ -497,36 +500,36 @@ test("reach and protocol combine, and the address bar carries the view", async (
   await expect(page).toHaveURL(/\/proxy\/ports\?reach=private$/)
 })
 
-test("each column sorts both ways and says which way to a screen reader", async ({ page }) => {
+test("the list takes each order from one menu, at every width", async ({ page }) => {
   await mockHost(page)
   await page.goto("/proxy/ports")
-  const heading = (name: string) => page.getByRole("columnheader", { name })
+  const sort = page.getByRole("combobox", { name: "Sort" })
+  const choose = async (name: string) => {
+    await sort.click()
+    await page.getByRole("option", { name }).click()
+  }
 
   // Worst first: the critical Redis, what the internet reaches, the private
   // networks, then this server's own.
-  await expect(heading("Reach")).toHaveAttribute("aria-sort", "descending")
-  await expect(heading("Endpoint")).toHaveAttribute("aria-sort", "none")
+  await expect(sort).toContainText("Worst first")
+  // A list of cards has no column headings to sort by.
+  await expect(page.getByRole("columnheader")).toHaveCount(0)
   expect(await portOrder(page)).toEqual(["6379", "22", "68", "8443", "9100", "53", "5432"])
 
-  await heading("Endpoint").getByRole("button").click()
-  await expect(heading("Endpoint")).toHaveAttribute("aria-sort", "ascending")
-  await expect(heading("Reach")).toHaveAttribute("aria-sort", "none")
+  await choose("Port, low to high")
   expect(await portOrder(page)).toEqual(["22", "53", "68", "5432", "6379", "8443", "9100"])
-  await heading("Endpoint").getByRole("button").click()
-  await expect(heading("Endpoint")).toHaveAttribute("aria-sort", "descending")
+  await choose("Port, high to low")
   expect(await portOrder(page)).toEqual(["9100", "8443", "6379", "5432", "68", "53", "22"])
+  await expect(page).toHaveURL(/sort=-port/)
 
-  await heading("Application").getByRole("button").click()
-  await expect(heading("Application")).toHaveAttribute("aria-sort", "ascending")
+  await choose("Application, A to Z")
   await expect(rowsOf(page).first()).toContainText("caddy")
-  await heading("Reach").getByRole("button").click()
-  await expect(heading("Reach")).toHaveAttribute("aria-sort", "descending")
+  await choose("Worst first")
   expect((await portOrder(page))[0]).toBe("6379")
 
-  // A phone has no column headings; the same orders are one menu.
+  // A phone has the same menu over the same list.
   await page.setViewportSize({ width: 390, height: 844 })
-  await page.getByRole("combobox", { name: "Sort" }).click()
-  await page.getByRole("option", { name: "Port, high to low" }).click()
+  await choose("Port, high to low")
   const items = page.getByRole("list", { name: "Listening sockets" }).locator("li")
   await expect(items.first()).toContainText("9100")
   await expect(page).toHaveURL(/sort=-port/)
@@ -540,22 +543,20 @@ test("twenty git-daemon sockets fold under one application, and the kernel's eph
   const rows = rowsOf(page)
   await expect(rows).toHaveCount(27)
 
-  await page.getByRole("button", { name: "Group by application" }).click()
-  await expect(rows).toHaveCount(8)
-  const group = rows.filter({ hasText: "20 sockets" })
-  await expect(group).toHaveCount(1)
-  await expect(group).toContainText("33012, 34333, 35654 +17")
-  await expect(group).toContainText("20 PIDs")
-  const toggle = group.getByRole("button", { name: "git-daemon, 20 sockets" })
-  await expect(toggle).toHaveAttribute("aria-expanded", "false")
-  await toggle.click()
-  await expect(toggle).toHaveAttribute("aria-expanded", "true")
-  await expect(rows).toHaveCount(28)
-  // The row itself is the pointer's target too.
-  await group.locator("td").first().click()
-  await expect(rows).toHaveCount(8)
+  // Grouped, an application's sockets stand under its name, a section of
+  // the list: no row opens rows under it.
   await page.getByRole("button", { name: "Group by application" }).click()
   await expect(rows).toHaveCount(27)
+  const group = page.getByRole("list", { name: "git-daemon sockets" })
+  await expect(group.locator("[data-slot='choice-row']")).toHaveCount(20)
+  const head = page.locator("p.eyebrow", { hasText: "git-daemon" }).locator("..")
+  await expect(head).toContainText("20")
+  await expect(head).toContainText("33012, 34333, 35654 +17")
+  await expect(head).toContainText("20 PIDs")
+  await expect(page.locator("[aria-expanded]", { hasText: "git-daemon" })).toHaveCount(0)
+  await page.getByRole("button", { name: "Group by application" }).click()
+  await expect(rows).toHaveCount(27)
+  await expect(page.getByRole("list", { name: "git-daemon sockets" })).toHaveCount(0)
 
   // Every git-daemon socket is on loopback inside 32768–60999.
   const hide = page.getByRole("button", { name: "Hide loopback ephemeral ports 20" })
@@ -563,7 +564,7 @@ test("twenty git-daemon sockets fold under one application, and the kernel's eph
   await expect(hide).toHaveAttribute("aria-pressed", "true")
   await expect(rows).toHaveCount(7)
   await expect(page.getByText("20 on loopback ports 32768–60999 hidden")).toBeVisible()
-  await expect(page.getByText("7 of 27 sockets")).toBeVisible()
+  await expect(page.locator("[data-slot='panel-count']")).toHaveText("7 of 27")
   // The identity line still counts the host.
   await expect(fact(page, "27 listening")).toBeVisible()
 
@@ -842,7 +843,7 @@ test("the list's controls are named, and a phone draws one list with no overflow
   await expect(page.getByRole("button", { name: "Actions for tcp 0.0.0.0:22" })).toHaveCount(1)
   await expect(list.getByRole("button", { name: "More actions" })).toHaveCount(0)
   await page.getByRole("button", { name: "Group by application" }).click()
-  await expect(list.locator("li")).toHaveCount(8)
+  await expect(page.getByRole("list", { name: "git-daemon sockets" }).locator("li")).toHaveCount(20)
   await page.getByRole("button", { name: "Hide loopback ephemeral ports 20" }).click()
   for (const width of [390, 1280]) {
     await page.setViewportSize({ width, height: 900 })
@@ -863,14 +864,15 @@ test("the list's controls are named, and a phone draws one list with no overflow
       ),
     ).toBe(false)
   }
-  await expect(page.getByRole("table")).toHaveCount(1)
-  await expect(page.getByRole("list", { name: "Listening sockets" })).toHaveCount(0)
+  // The same list at every width: no table behind it.
+  await expect(page.getByRole("table")).toHaveCount(0)
+  await expect(page.getByRole("list", { name: "Listening sockets" })).toHaveCount(1)
 })
 
 test("each socket names who it answers for, not only the process holding it", async ({ page }) => {
   await mockHost(page, ownedPorts)
   await page.goto("/proxy/ports")
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   // Twelve sockets, nine services: each pair of families is one row.
   await expect(rows).toHaveCount(9)
 
@@ -899,7 +901,7 @@ test("each socket names who it answers for, not only the process holding it", as
   const ssh = rows.filter({ hasText: "ssh.socket" })
   await expect(ssh.getByText("ssh.service", { exact: true })).toBeVisible()
   await expect(ssh.getByText("ssh.socket → ssh.service", { exact: true })).toBeVisible()
-  await expect(page.getByRole("table").getByText("systemd", { exact: true })).toHaveCount(0)
+  await expect(socketLists(page).getByText("systemd", { exact: true })).toHaveCount(0)
 
   await expect(
     rows.filter({ has: page.locator(titled("nginx: master")) }).getByText("nginx.service", {
@@ -912,7 +914,7 @@ test("each socket names who it answers for, not only the process holding it", as
   // node calls its main thread MainThread; the program is named instead.
   const byHand = rows.filter({ hasText: "Login session c521" })
   await expect(byHand.getByText("node", { exact: true })).toBeVisible()
-  await expect(page.getByRole("table").getByText("MainThread", { exact: true })).toHaveCount(0)
+  await expect(socketLists(page).getByText("MainThread", { exact: true })).toHaveCount(0)
 
   // The dashboard's backend and the proxy its session arrives through.
   const own = rows.filter({ hasText: "This dashboard" })
@@ -924,11 +926,11 @@ test("each socket names who it answers for, not only the process holding it", as
 test("'Open container' opens the container a port is published for", async ({ page }) => {
   await mockHost(page, ownedPorts)
   await page.goto("/proxy/ports")
-  const ingress = page
-    .getByRole("table")
-    .locator("tbody tr")
-    .filter({ hasText: "just-dashboard-ingress" })
-  await ingress.getByRole("button", { name: "Open container" }).click()
+  const ingress = rowsOf(page).filter({ hasText: "just-dashboard-ingress" })
+  // The row ends on its arrow and its menu: the owner's page is a verb in it.
+  await expect(ingress.getByRole("button", { name: "Open container" })).toHaveCount(0)
+  await ingress.getByRole("button", { name: /^Actions for/ }).click()
+  await page.getByRole("menuitem", { name: "Open container" }).click()
   await expect(page).toHaveURL(/\/docker\/containers\/just-dashboard-ingress$/)
 })
 
@@ -936,7 +938,7 @@ test("a row's owner opens its own page: the deployment, the unit, the PM2 app", 
   page,
 }) => {
   await mockHost(page, ownedPorts)
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
 
   await page.goto("/proxy/ports")
   await page.getByRole("button", { name: "Actions for tcp 127.0.0.1:39069" }).click()
@@ -952,16 +954,23 @@ test("a row's owner opens its own page: the deployment, the unit, the PM2 app", 
   await page.getByRole("button", { name: "Actions for tcp 0.0.0.0:22" }).click()
   await expect(page.getByRole("menuitem", { name: "Copy endpoint" })).toBeVisible()
   await expect(page.getByRole("menuitem", { name: "Process" })).toHaveCount(0)
-  await page.keyboard.press("Escape")
-  await ssh.getByRole("button", { name: "Open unit" }).click()
+  await page.getByRole("menuitem", { name: "Open unit" }).click()
   await expect(page).toHaveURL(/\/processes\/services\/ssh\.service$/)
 
   await page.goto("/proxy/ports")
-  await rows.filter({ hasText: "PM2 · node" }).getByRole("button", { name: "Open app" }).click()
+  await rows
+    .filter({ hasText: "PM2 · node" })
+    .getByRole("button", { name: /^Actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Open app" }).click()
   await expect(page).toHaveURL(/\/processes\/pm2\/api$/)
 
   await page.goto("/proxy/ports")
-  await rows.filter({ hasText: "nginx.service" }).getByRole("button", { name: "Process" }).click()
+  await rows
+    .filter({ hasText: "nginx.service" })
+    .getByRole("button", { name: /^Actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Process" }).click()
   await expect(page).toHaveURL(/\/processes\/812$/)
 })
 
@@ -970,7 +979,7 @@ test("a search finds a socket by its container, image, deployment, unit or the d
 }) => {
   await mockHost(page, ownedPorts)
   await page.goto("/proxy/ports")
-  const rows = page.getByRole("table").locator("tbody tr")
+  const rows = rowsOf(page)
   const search = page.getByLabel("Search sockets")
   for (const [query, count] of [
     ["ingress", 1],
@@ -1034,7 +1043,7 @@ for (const width of [1280, 390]) {
     await mockHost(page)
     await page.route("**/api/v1/ports", (route) => json(route, listeners))
     await page.goto("/proxy/ports")
-    const rows = page.locator("[data-slot='port-row']")
+    const rows = rowsOf(page)
     await expect(rows).toHaveCount(16)
     await risen(page)
     const heights = await rows.evaluateAll((all) =>
@@ -1048,7 +1057,9 @@ for (const width of [1280, 390]) {
     listeners = [...withClients, ...ownedPorts]
     await (await listVerb(page, "Refresh now")).click()
     if (width === 1280) {
-      await expect(rowsOf(page).filter({ hasText: "sshd" }).locator("td").nth(4)).toHaveText("3")
+      await expect(
+        rowsOf(page).filter({ hasText: "sshd" }).locator("[title^='Busiest']"),
+      ).toHaveText("3")
     }
     await risen(page)
     expect(await second.boundingBox()).toEqual(before)
@@ -1187,7 +1198,7 @@ test("a port's page: its views in the address, the list beside it, and the next 
 
   // The rail is the list, in the list's order, the port on screen filled.
   const rail = page.getByRole("navigation", { name: "Ports" })
-  await expect(rail.getByRole("button", { name: "22/tcp, sshd" })).toHaveAttribute(
+  await expect(rail.getByRole("link", { name: "22/tcp, sshd" })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -1213,7 +1224,7 @@ test("every verb a row had is on the port's page too", async ({ page, context })
   await mockHost(page, ownedPorts)
   await page.goto("/proxy/ports/tcp-80")
   await expect(page.getByRole("button", { name: "Open container" })).toBeVisible()
-  await page.getByRole("button", { name: "Actions for tcp 0.0.0.0:80" }).click()
+  await page.getByRole("button", { name: "More actions for tcp 0.0.0.0:80" }).click()
   for (const name of ["Open deployment", "Copy endpoint", "Firewall", "Restart container"]) {
     const item = page.getByRole("menuitem", { name })
     if (name === "Open deployment" && (await item.count()) === 0) continue
@@ -1222,7 +1233,7 @@ test("every verb a row had is on the port's page too", async ({ page, context })
   await page.getByRole("menuitem", { name: "Copy endpoint" }).click()
   expect(await page.evaluate(() => navigator.clipboard.readText())).toBe("0.0.0.0:80")
 
-  await page.getByRole("button", { name: "Actions for tcp 0.0.0.0:80" }).click()
+  await page.getByRole("button", { name: "More actions for tcp 0.0.0.0:80" }).click()
   await page.getByRole("menuitem", { name: "Restart container" }).click()
   await expect(page.getByText(/Docker stops just-dashboard-ingress/)).toBeVisible()
 })
@@ -1255,6 +1266,6 @@ test("an account that only reads is offered nothing it cannot do", async ({ page
   await expect(page.locator("[data-slot='host-identity']").getByText("redis-server")).toBeVisible()
   await expect(page.getByText("From outside", { exact: true })).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Identify", exact: true })).toHaveCount(0)
-  await page.getByRole("button", { name: "Actions for tcp 203.0.113.5:6379" }).click()
+  await page.getByRole("button", { name: "More actions for tcp 203.0.113.5:6379" }).click()
   await expect(page.getByRole("menuitem", { name: /^Kill|^Terminate/ })).toHaveCount(0)
 })

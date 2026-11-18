@@ -1,0 +1,31 @@
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { cn } from "@/lib/utils"
+
+export function Demo({ busy, size }: { busy: boolean; size: "sm" | "default" }) {
+  return (
+    <form>
+      <Button className="h-11 sm:h-9">Save</Button>
+      <Button className="h-11 w-full sm:h-9 sm:w-auto">Save</Button>
+      <Button size="default" className={cn("h-11 sm:h-9", busy && "opacity-50")}>
+        Go
+      </Button>
+      <Button size="sm" className="h-11 sm:h-9">
+        Small
+      </Button>
+      <Button size={size} className="h-11 sm:h-9">
+        Either
+      </Button>
+      <Button size="sm" className="gap-1 max-sm:h-8">
+        Phone
+      </Button>
+      <Button className="max-sm:h-10">Phone</Button>
+      <Button size="xs" className="h-7 max-sm:h-8">
+        Fixed
+      </Button>
+      <Input className="h-8 font-mono sm:h-7" />
+      <Input className="h-8" />
+      <div className="h-11 sm:h-9" />
+    </form>
+  )
+}

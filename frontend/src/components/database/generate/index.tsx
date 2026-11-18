@@ -1,37 +1,32 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
-import { useEffect, useId, useMemo, useRef, useState } from "react"
-import { ChevronDown, CloudDownload, Code, Sparkles, Table, Warning } from "@/components/icons"
+import { useEffect, useId, useMemo, useState } from "react"
+import { CloudDownload, Code, Sparkles, Table, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { ChoiceCard } from "@/components/choice-card"
-import { Segments } from "@/components/deploy/settings/segments"
-import { GroupRule } from "@/components/flow"
-import { Disclosure, Field, InfoTip, OptionRow } from "@/components/form"
+import { Segments } from "@/components/segments"
+import { GroupRule } from "@/components/choice-row"
+import { Disclosure, Field, OptionRow } from "@/components/form"
+import { Explain } from "@/components/explain"
 import { LanguageMark } from "@/components/language-icon"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { hasProductLogo, ProductLogo } from "@/components/product-logo"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
+import { EmptyState, Notice } from "@/components/state"
+import { LoadingRows, Sweep } from "@/components/loading"
+import { ViewTabs } from "@/components/tabs"
+import { TabsContent } from "@/components/ui/tabs"
+import { ChipCount } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuCheckboxItem,
-  DropdownMenuContent,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
-import { nameHue } from "@/components/database/home/kinds"
 import { CodeView, EngineMark, SectionFrame } from "@/components/database/kit"
-import { ReadError } from "@/components/database/redis/read-error"
+import { SchemaChips } from "@/components/database/kit/schema-chips"
+import { ReadError } from "@/components/database/kit/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   countsLine,
@@ -56,6 +51,7 @@ import {
 import { SeedPanel } from "@/components/database/generate/seed"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import { downloadArchive } from "@/components/database/generate/zip"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 type Schema = { name: string; system?: boolean; tables: number }
 type Head = { defaultSchema: string; schemas: Schema[] }
@@ -136,7 +132,7 @@ export function Generate() {
   const seeding = storedTarget === SEED && engine.can("seed")
 
   // Beside the files where there is room for both; folded to the chosen one where there is not.
-  const beside = useMediaQuery("(min-width: 1280px)")
+  const beside = useBreakpoint("xl")
   const [browsing, setBrowsing] = useState(false)
 
   /* ---------------------------------------------------------------- scope */
@@ -238,6 +234,9 @@ export function Generate() {
     generation.data ??
     (generation.error || kept?.result.target !== target?.id ? undefined : kept?.result)
   const writing = generation.loading || (armed && wanted !== asked.key && !reason && !problem)
+  // Before anything is written the output's empty state holds the one Generate;
+  // the head's appears once there is something to write again.
+  const untouched = !shown && !writing && !generation.error && !(!beside && browsing)
 
   const generate = () => {
     if (!wanted) return
@@ -320,9 +319,13 @@ export function Generate() {
                     >
                       {entry.label}
                     </span>
-                    <Tag className="max-w-full">
-                      <LanguageMark language={entry.language} />
-                    </Tag>
+                    {/* "Prisma" over "prisma" says the name twice: the tag is for a
+                        language other than the generator's own name. */}
+                    {!sameWord(entry.language, entry.label) && (
+                      <Tag className="max-w-full">
+                        <LanguageMark language={entry.language} />
+                      </Tag>
+                    )}
                   </span>
                 </ChoiceCard>
               )
@@ -372,10 +375,14 @@ export function Generate() {
   )
   const schemaChips = scoped && (
     <SchemaChips
-      named={named}
-      picked={schemas}
+      mode="many"
+      schemas={named}
+      value={schemas}
       // One is always read: the last cannot be taken off.
       onChange={(next) => next.length > 0 && setPickedSchemas(next)}
+      label={`The ${engine.nouns.containers} read`}
+      noun={{ one: engine.nouns.container, many: engine.nouns.containers }}
+      visible={SCHEMA_CHIPS}
     />
   )
 
@@ -401,23 +408,25 @@ export function Generate() {
               title={
                 <span className="flex min-w-0 items-center gap-2.5">
                   <span className="min-w-0 truncate">{target.label}</span>
-                  <Tag className="shrink-0">
-                    <LanguageMark language={target.language} />
-                  </Tag>
+                  {!sameWord(target.language, target.label) && (
+                    <Tag className="shrink-0">
+                      <LanguageMark language={target.language} />
+                    </Tag>
+                  )}
                   {/* What it writes, and that it only reads: it was a
                       paragraph in the files' place before anything was
                       written, where it stood between the reader and Generate. */}
-                  <InfoTip label={`What ${target.label} writes`}>
+                  <Explain label={`What ${target.label} writes`}>
                     {target.description} Generate reads the catalogue and writes{" "}
                     {target.filename || "the files"} for you to review; nothing in the database is
                     changed.
-                  </InfoTip>
+                  </Explain>
                 </span>
               }
               actions={
                 <>
                   {browseButton}
-                  {!reason && (
+                  {!reason && !untouched && (
                     <Button
                       size="sm"
                       onClick={generate}
@@ -487,86 +496,6 @@ function TargetLogo({ target, size = "sm" }: { target: OrmTarget; size?: "sm" | 
   const key =
     logoKeys(target).find(hasProductLogo) ?? (target.language === "sql" ? engine.logo : undefined)
   return <ProductLogo id={key} size={size} fallback={Code} />
-}
-
-/**
- * The schemas read, as chips: the ones ticked first, then the others while
- * there is room, and every one past that in a menu — so a server that names
- * thirty has thirty to choose from, and what is ticked is always in sight.
- */
-function SchemaChips({
-  named,
-  picked,
-  onChange,
-}: {
-  named: Schema[]
-  picked: string[]
-  onChange: (names: string[]) => void
-}) {
-  const { engine } = useDatabase()
-  const toggle = (name: string) =>
-    onChange(picked.includes(name) ? picked.filter((entry) => entry !== name) : [...picked, name])
-  const on = named.filter((schema) => picked.includes(schema.name))
-  const off = named.filter((schema) => !picked.includes(schema.name))
-  const chips = [...on, ...off.slice(0, Math.max(0, SCHEMA_CHIPS - on.length))]
-  const rest = off.slice(Math.max(0, SCHEMA_CHIPS - on.length))
-  return (
-    <ChipStrip role="group" aria-label={`The ${engine.nouns.containers} read`}>
-      {chips.map((schema) => (
-        <FilterChip
-          key={schema.name}
-          selected={picked.includes(schema.name)}
-          onClick={() => toggle(schema.name)}
-        >
-          <SchemaMark name={schema.name} />
-          <span className="font-mono">{schema.name}</span>
-          {schema.tables >= 0 && <ChipCount>{schema.tables}</ChipCount>}
-        </FilterChip>
-      ))}
-      {rest.length > 0 && (
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <FilterChip aria-label={`${rest.length} more ${engine.nouns.containers}`}>
-              {rest.length} more
-              <ChevronDown className="size-3" />
-            </FilterChip>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="start" className="max-h-72 w-64 overflow-y-auto">
-            {rest.map((schema) => (
-              <DropdownMenuCheckboxItem
-                key={schema.name}
-                checked={false}
-                onCheckedChange={() => toggle(schema.name)}
-              >
-                <SchemaMark name={schema.name} />
-                <MenuItemText
-                  hint={
-                    schema.tables >= 0 && (
-                      <span className="numeric text-hint text-muted-foreground">
-                        {schema.tables}
-                      </span>
-                    )
-                  }
-                >
-                  <span className="min-w-0 flex-1 truncate font-mono text-xs">{schema.name}</span>
-                </MenuItemText>
-              </DropdownMenuCheckboxItem>
-            ))}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      )}
-    </ChipStrip>
-  )
-}
-
-function SchemaMark({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-sm"
-      style={{ background: nameHue(name) }}
-    />
-  )
 }
 
 /**
@@ -681,9 +610,7 @@ function Output({
   problem: string | undefined
   target: OrmTarget
 }) {
-  const ids = useId()
   const [file, setFile] = useState(0)
-  const strip = useRef<HTMLDivElement>(null)
   const files = result?.files ?? []
   const at = Math.min(file, Math.max(0, files.length - 1))
   const current = files[at]
@@ -692,9 +619,7 @@ function Output({
   if (!result || !current) {
     return writing ? (
       <div role="status" aria-label="Writing the files" className="space-y-3">
-        <div aria-hidden className="h-0.5 overflow-hidden rounded-full bg-meter-track">
-          <div className="h-full w-1/3 animate-sweep bg-primary" />
-        </div>
+        <Sweep rounded className="h-0.5" />
         <LoadingRows rows={8} />
       </div>
     ) : (
@@ -714,24 +639,47 @@ function Output({
     )
   }
 
-  const onTabKey = (event: React.KeyboardEvent) => {
-    const to =
-      event.key === "ArrowRight"
-        ? (at + 1) % files.length
-        : event.key === "ArrowLeft"
-          ? (at + files.length - 1) % files.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? files.length - 1
-              : -1
-    if (to < 0) return
-    event.preventDefault()
-    setFile(to)
-    const tab = strip.current?.querySelector<HTMLElement>(`[data-file="${to}"]`)
-    tab?.focus()
-    tab?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }
+  const panel = (
+    <div className={cn("relative transition-opacity", problem && "opacity-60")}>
+      <CodeView
+        code={current.content}
+        language={editorLanguage(result.language)}
+        filename={current.filename}
+        // The file's name, and what the files hold between them.
+        label={
+          <span className="flex min-w-0 items-baseline gap-3">
+            <span className="min-w-0 truncate font-mono">{current.filename}</span>
+            <span className="numeric shrink-0 text-hint text-muted-foreground max-sm:hidden">
+              {countsLine(result.counts)}
+            </span>
+          </span>
+        }
+        // Down to the bottom of the window: the files are what the page is for.
+        className="h-[calc(100svh-20rem)] min-h-80"
+        actions={
+          files.length > 1 && (
+            <Button
+              size="xs"
+              variant="ghost"
+              onClick={() => downloadArchive(files, `${result.target || target.id}.zip`)}
+            >
+              <CloudDownload />
+              All {files.length} files
+            </Button>
+          )
+        }
+      />
+      {writing && (
+        <span
+          aria-hidden
+          // Clipped to the frame: the light's own box is wider than the edge it lights.
+          className="pointer-events-none absolute -inset-px overflow-hidden rounded-xl"
+        >
+          <BorderBeam size={120} duration={4} />
+        </span>
+      )}
+    </div>
+  )
 
   return (
     <section aria-label="Generated files" className="min-w-0 animate-rise space-y-2">
@@ -742,77 +690,23 @@ function Output({
         </Notice>
       )}
       {result.warnings.length > 0 && <Warnings warnings={result.warnings} />}
-      {files.length > 1 && (
-        // eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself
-        <div
-          ref={strip}
-          role="tablist"
-          aria-label="Generated files"
-          className="scroll-affordance flex min-w-0 [scrollbar-width:none] items-stretch overflow-x-auto border-b border-hairline [--panel-ground:var(--background)] [&::-webkit-scrollbar]:hidden"
-          onKeyDown={onTabKey}
+      {files.length > 1 ? (
+        // A tab for each file, and the code is its panel.
+        <ViewTabs
+          label="Generated files"
+          views={files.map((entry, index) => ({ key: String(index), label: entry.filename }))}
+          value={String(at)}
+          onValueChange={(next) => setFile(Number(next))}
+          size="sm"
+          mono
         >
-          {files.map((entry, index) => (
-            <button
-              key={entry.filename}
-              type="button"
-              role="tab"
-              id={`${ids}-tab-${index}`}
-              data-file={index}
-              aria-selected={index === at}
-              aria-controls={index === at ? `${ids}-panel` : undefined}
-              tabIndex={index === at ? 0 : -1}
-              className={cn(tabClasses(index === at, "h-9"), "shrink-0 font-mono text-xs")}
-              onClick={() => setFile(index)}
-            >
-              {entry.filename}
-            </button>
-          ))}
-        </div>
+          <TabsContent value={String(at)} className="mt-2">
+            {panel}
+          </TabsContent>
+        </ViewTabs>
+      ) : (
+        panel
       )}
-      <div
-        role={files.length > 1 ? "tabpanel" : undefined}
-        id={`${ids}-panel`}
-        aria-labelledby={files.length > 1 ? `${ids}-tab-${at}` : undefined}
-        className={cn("relative transition-opacity", problem && "opacity-60")}
-      >
-        <CodeView
-          code={current.content}
-          language={editorLanguage(result.language)}
-          filename={current.filename}
-          // The file's name, and what the files hold between them.
-          label={
-            <span className="flex min-w-0 items-baseline gap-3">
-              <span className="min-w-0 truncate font-mono">{current.filename}</span>
-              <span className="numeric shrink-0 text-hint text-muted-foreground max-sm:hidden">
-                {countsLine(result.counts)}
-              </span>
-            </span>
-          }
-          // Down to the bottom of the window: the files are what the page is for.
-          className="h-[calc(100svh-20rem)] min-h-80"
-          actions={
-            files.length > 1 && (
-              <Button
-                size="xs"
-                variant="ghost"
-                onClick={() => downloadArchive(files, `${result.target || target.id}.zip`)}
-              >
-                <CloudDownload />
-                All {files.length} files
-              </Button>
-            )
-          }
-        />
-        {writing && (
-          <span
-            aria-hidden
-            // Clipped to the frame: the light's own box is wider than the edge it lights.
-            className="pointer-events-none absolute -inset-px overflow-hidden rounded-xl"
-          >
-            <BorderBeam size={120} duration={4} />
-          </span>
-        )}
-      </div>
       <p className="text-hint text-muted-foreground">
         A reviewed starting point: check types, defaults and relation names before committing it.
       </p>
@@ -880,4 +774,9 @@ function GenerateSilhouette() {
       </div>
     </div>
   )
+}
+
+/** Whether a generator's language is its own name ("Prisma" over "prisma"): then the tag says it twice. */
+function sameWord(language: string | undefined, label: string): boolean {
+  return language?.toLowerCase() === label.toLowerCase()
 }

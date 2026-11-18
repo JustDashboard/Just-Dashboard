@@ -1,0 +1,88 @@
+{
+  "$comment": "The 0.9.0 file moves, applied by scripts/move-files.ts. Paths are relative to frontend/src. A file's .test.js moves with it. `files` entries may end in `-*`/`*`: every file of that prefix in that folder moves, the prefix dropped. `exports` lists names that now live in another file: an import of them is pointed there. The files Go tests read stay where they are: components/deploy/vocabulary.tsx, deployment-defaults.ts, failure-cause.ts, lib/scan-target-cases.json and lib/version.ts.",
+  "files": [
+    { "from": "components/deploy/wire.tsx", "to": "components/wire/wire.tsx" },
+    { "from": "components/wire-flow.tsx", "to": "components/wire/wire-flow.tsx" },
+    { "from": "components/wire-flow-model.ts", "to": "components/wire/wire-flow-model.ts" },
+    { "from": "components/metrics/host-identity.tsx", "to": "components/identity-header.tsx" },
+    { "from": "components/deploy/settings/segments.tsx", "to": "components/segments.tsx" },
+    {
+      "from": "components/deploy/settings/setting-card.tsx",
+      "to": "components/settings/setting-card.tsx"
+    },
+    {
+      "from": "components/deploy/settings/setting-picture.tsx",
+      "to": "components/settings/setting-picture.tsx"
+    },
+    { "from": "components/deploy/settings/save-bar.tsx", "to": "components/settings/save-bar.tsx" },
+    {
+      "from": "components/deploy/settings/save-bar-words.ts",
+      "to": "components/settings/save-bar-words.ts"
+    },
+    {
+      "from": "components/deploy/settings/pending-strip.tsx",
+      "to": "components/settings/pending-strip.tsx"
+    },
+    {
+      "from": "components/deploy/settings/facts-line.tsx",
+      "to": "components/settings/facts-line.tsx"
+    },
+    { "from": "components/settings-column.tsx", "to": "components/settings/settings-column.tsx" },
+    { "from": "components/deploy/settings/use-column-width.ts", "to": "hooks/use-column-width.ts" },
+    { "from": "components/deploy/project-mark.tsx", "to": "components/project-mark.tsx" },
+    { "from": "components/metrics/sparkline.tsx", "to": "components/sparkline.tsx" },
+    { "from": "components/metrics/chart-panel.tsx", "to": "components/chart-panel.tsx" },
+    { "from": "components/overview/readings.tsx", "to": "components/live-figure.tsx" },
+    { "from": "components/overview/section-link.tsx", "to": "components/section-link.tsx" },
+    { "from": "components/account/user-avatar.tsx", "to": "components/user-avatar.tsx" },
+    { "from": "components/app-sidebar.tsx", "to": "components/shell/app-sidebar.tsx" },
+    { "from": "components/nav.ts", "to": "components/shell/nav.ts" },
+    { "from": "components/nav-scope.tsx", "to": "components/shell/nav-scope.tsx" },
+    { "from": "components/command-palette.tsx", "to": "components/shell/command-palette.tsx" },
+    { "from": "components/tab-title.tsx", "to": "components/shell/tab-title.tsx" },
+    { "from": "components/bar-list.tsx", "to": "components/database/query/bar-list.tsx" },
+    { "from": "lib/network-*", "to": "lib/network/*" },
+    { "from": "lib/log-*", "to": "lib/log/*" },
+    { "from": "lib/metrics-*", "to": "lib/metrics/*" },
+    { "from": "lib/terminal-*", "to": "lib/terminal/*" },
+    { "from": "lib/board-*", "to": "lib/board/*" },
+    { "from": "lib/boards.ts", "to": "lib/board/boards.ts" },
+    { "from": "lib/tls-*", "to": "lib/tls/*" }
+  ],
+  "exports": [
+    { "from": "components/page.tsx", "to": "components/section.tsx", "names": ["Section"] },
+    { "from": "components/page.tsx", "to": "components/toolbar.tsx", "names": ["Toolbar"] },
+    {
+      "from": "components/page.tsx",
+      "to": "components/search-input.tsx",
+      "names": ["SearchInput"]
+    },
+    {
+      "from": "components/page.tsx",
+      "to": "components/detail-list.tsx",
+      "names": ["Metric", "MetricStrip", "DetailList", "Detail"]
+    },
+    { "from": "components/page.tsx", "to": "components/row-link.tsx", "names": ["RowLink"] },
+    {
+      "from": "components/flow.tsx",
+      "to": "components/choice-row.tsx",
+      "names": ["ChoiceRow", "ChoiceList", "GroupRule", "CONTROL"]
+    },
+    {
+      "from": "components/tabs.tsx",
+      "to": "components/chips.tsx",
+      "names": ["FilterChip", "ChipStrip", "ChipCount"]
+    },
+    {
+      "from": "components/state.tsx",
+      "to": "components/loading.tsx",
+      "names": ["Spinner", "LoadingRows", "Hold", "LoadingPanel", "HOLD_AT_MOST_MS"]
+    },
+    {
+      "from": "components/choice-card.tsx",
+      "to": "components/database/engine-card.tsx",
+      "names": ["EngineCard"]
+    },
+    { "from": "components/deploy/vocabulary.tsx", "to": "hooks/use-now.ts", "names": ["useNow"] }
+  ]
+}

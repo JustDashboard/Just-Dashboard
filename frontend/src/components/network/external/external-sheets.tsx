@@ -2,7 +2,7 @@
 
 import { SidePanel } from "@/components/side-panel"
 import { Field, FieldRow, FormNote, FormSection, OptionRow } from "@/components/form"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -21,7 +21,7 @@ import type {
   ExternalEnrollment,
   ExternalScope,
   ExternalVantage,
-} from "@/lib/network-external"
+} from "@/lib/network/external"
 import { checkTime, familyWord } from "@/components/network/external/reading"
 
 /** What a check asks: the source, its scope, the family, the port and TLS. */

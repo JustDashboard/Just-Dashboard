@@ -1,14 +1,13 @@
 "use client"
 
-import { useEffect, useRef } from "react"
+import { useSearchParams } from "next/navigation"
 import { networkOf } from "@/lib/clients"
+import { plural } from "@/lib/format"
 import type { Peer } from "@/lib/types"
-import { cn } from "@/lib/utils"
-import { SearchInput } from "@/components/page"
-import { LoadingRows } from "@/components/state"
+import { Rail, RailFigure, RailLine, RailName, RailRow } from "@/components/rail"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { AddressMark } from "@/components/network/connections/rows"
-import { reached, shortAddress } from "@/components/network/connections/model"
+import { addressHref, reached, shortAddress } from "@/components/network/connections/model"
 
 /**
  * The live list, folded into a column beside the address it opened: the same
@@ -22,6 +21,8 @@ export function AddressRail({
   rows,
   current,
   loading,
+  error,
+  onRetry,
   query,
   onQuery,
   scope,
@@ -33,39 +34,33 @@ export function AddressRail({
   rows: Peer[]
   current: string
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   query: string
   onQuery: (value: string) => void
   scope: "all" | "public"
   onScope: (scope: "all" | "public") => void
   /** Undefined until the list is read: the chip has no count to show before. */
   fromInternet: number | undefined
-  onOpen: (address: string) => void
+  /** Opens an address carrying the page's view; the row's link does the same without it. */
+  onOpen?: (address: string) => void
   className?: string
 }) {
-  const listed = rows.some((row) => row.address === current)
-  const list = useRef<HTMLOListElement>(null)
-  // The address on screen is kept in view: opened from a link or by Alt+↓
-  // past the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    list.current?.querySelector<HTMLElement>("[aria-current='page']")?.scrollIntoView({
-      block: "nearest",
-    })
-  }, [current])
-
+  const search = useSearchParams()
+  const view = { tab: search.get("tab") ?? undefined, hour: search.get("hour") ?? undefined }
   return (
-    <nav
-      aria-label="Remote addresses"
-      data-slot="address-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <SearchInput
-          value={query}
-          onChange={(event) => onQuery(event.target.value)}
-          placeholder="Address, port or process"
-          aria-label="Search the addresses"
-          containerClassName="sm:w-full"
-        />
+    <Rail<{ address: string; peer?: Peer }>
+      slot="address-rail"
+      label="Remote addresses"
+      listLabel="Addresses to open"
+      search={{
+        label: "Search the addresses",
+        placeholder: "Address, port or process",
+        query,
+        onQuery,
+      }}
+      filters={
         <ToggleGroup
           type="single"
           value={scope}
@@ -82,81 +77,64 @@ export function AddressRail({
             From the internet {fromInternet}
           </ToggleGroupItem>
         </ToggleGroup>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Addresses to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {!listed && (
-          <>
-            <RailRow address={current} current onOpen={onOpen} />
-            {rows.length > 0 && <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />}
-          </>
-        )}
-        {rows.map((row) => (
-          <RailRow
-            key={row.address}
-            address={row.address}
-            peer={row}
-            current={row.address === current}
-            onOpen={onOpen}
-          />
-        ))}
-        {loading && rows.length === 0 && <LoadingRows rows={8} />}
-        {!loading && rows.length === 0 && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No address matches.</li>
-        )}
-      </ol>
-    </nav>
+      }
+      caption={
+        loading && rows.length === 0
+          ? "Reading the addresses…"
+          : plural(rows.length, "address", "addresses")
+      }
+      rows={rows.map((peer) => ({ address: peer.address, peer }))}
+      keyOf={(row) => row.address}
+      current={(row) => row.address === current}
+      pinned={{ address: current }}
+      row={(row, on) => (
+        <AddressRow
+          address={row.address}
+          peer={row.peer}
+          current={on}
+          href={addressHref(row.address, view)}
+          onOpen={onOpen}
+        />
+      )}
+      loading={loading}
+      loadingRows={8}
+      error={error}
+      onRetry={onRetry}
+      empty="No address matches."
+      className={className}
+    />
   )
 }
 
-function RailRow({
+function AddressRow({
   address,
   peer,
   current,
+  href,
   onOpen,
 }: {
   address: string
   peer?: Peer
   current: boolean
-  onOpen: (address: string) => void
+  href: string
+  onOpen?: (address: string) => void
 }) {
   return (
-    <li className="min-w-0">
-      <button
-        type="button"
-        data-workspace-item={address}
-        data-workspace-name={address}
-        aria-current={current ? "page" : undefined}
-        aria-label={address}
-        title={address}
-        onClick={() => onOpen(address)}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <AddressMark address={address} className="size-7 rounded-md [&_svg]:size-3.5" />
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn(
-              "block truncate font-mono text-body",
-              current ? "font-semibold" : "font-medium",
-            )}
-          >
-            {/* The column holds some twenty characters; an IPv6 address keeps both ends. */}
-            {shortAddress(address, 21)}
-          </span>
-          <span className="block truncate text-hint text-muted-foreground">
-            {peer ? reached(peer) : networkOf(address).label}
-          </span>
-        </span>
-        <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">
-          {peer ? peer.count : "—"}
-        </span>
-      </button>
-    </li>
+    <RailRow
+      item={address}
+      name={address}
+      title={address}
+      current={current}
+      href={href}
+      onOpen={onOpen && (() => onOpen(address))}
+      mark={<AddressMark address={address} className="size-7 rounded-md [&_svg]:size-3.5" />}
+      end={<RailFigure>{peer ? peer.count : "—"}</RailFigure>}
+    >
+      <RailName current={current} mono>
+        {/* The column holds some twenty characters; an IPv6 address keeps both ends. */}
+        {shortAddress(address, 21)}
+      </RailName>
+      <RailLine>{peer ? reached(peer) : networkOf(address).label}</RailLine>
+    </RailRow>
   )
 }

@@ -2,7 +2,7 @@
 
 import { ChevronDown } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -123,7 +123,7 @@ export function ColumnChips({
   onChange: (chosen: string[]) => void
 }) {
   return (
-    <ChipStrip role="group" aria-label={label} className="max-sm:mx-0 max-sm:px-0">
+    <ChipStrip role="group" aria-label={label} bleed={false}>
       {columns.map((column) => {
         const at = chosen.indexOf(column)
         return (

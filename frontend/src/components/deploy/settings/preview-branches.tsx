@@ -9,13 +9,9 @@ import { useAuth } from "@/hooks/use-auth"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Textarea } from "@/components/ui/textarea"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { useSettingDraft } from "@/components/deploy/settings/use-configuration"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 
 type BranchDraft = Record<string, { mode: PreviewBranchMode; columns: string }>
 

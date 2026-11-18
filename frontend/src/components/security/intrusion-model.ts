@@ -1,7 +1,7 @@
 import { plural } from "@/lib/format"
 import type { CrowdSecView, Fail2banJail, SuricataView } from "@/lib/types"
 import type { DotTone } from "@/components/status-dot"
-import type { WireLine } from "@/components/wire-flow-model"
+import type { WireLine } from "@/components/wire/wire-flow-model"
 import { ENFORCEMENT, enforcementOf } from "@/components/security/enforcement"
 
 /**

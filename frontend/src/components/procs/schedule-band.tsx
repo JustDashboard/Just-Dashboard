@@ -14,11 +14,11 @@ import {
 } from "@/lib/schedule"
 import { useSessionState } from "@/lib/view-state"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot } from "@/components/metrics/host-identity"
+import { useNow } from "@/hooks/use-now"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct, unitProduct } from "@/components/product-logo"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 
 const HOUR = 3600_000
@@ -174,7 +174,7 @@ export function ScheduleBand({
               >
                 <span
                   aria-hidden
-                  className="size-2 rounded-[3px]"
+                  className="size-2 rounded-xs"
                   style={{ background: KIND[key].color }}
                 />
                 {KIND[key].label}
@@ -245,35 +245,34 @@ export function ScheduleBand({
           {settled && (listed.length > SHOWN || later + atBoot + off + skipped > 0) && (
             <div className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 border-t border-hairline pt-2 text-hint text-muted-foreground">
               {listed.length > SHOWN && (
-                <>
-                  <Button
-                    variant="ghost"
-                    size="xs"
-                    className="-ml-2 text-foreground"
-                    onClick={() => setAll(!all)}
-                  >
-                    {all ? `Show the next ${SHOWN}` : `Show all ${listed.length}`}
-                  </Button>
-                  {later + atBoot + off + skipped > 0 && <FactDot />}
-                </>
+                <Button
+                  variant="ghost"
+                  size="xs"
+                  className="-ml-2 text-foreground"
+                  onClick={() => setAll(!all)}
+                >
+                  {all ? `Show the next ${SHOWN}` : `Show all ${listed.length}`}
+                </Button>
               )}
-              {[
-                later > 0 && { text: `${later} run later in the week or month` },
-                atBoot > 0 && { text: `${atBoot} only at boot` },
-                off > 0 && { text: `${off} switched off` },
-                skipped > 0 && {
-                  text: `${plural(skipped, "cron line")} left to systemd`,
-                  title:
-                    "Package cron lines that step aside on a host running systemd, because a timer does the same work",
-                },
-              ]
-                .filter((item): item is { text: string; title?: string } => Boolean(item))
-                .map((item, i) => (
-                  <span key={i} className="inline-flex items-center gap-2" title={item.title}>
-                    {i > 0 && <FactDot />}
-                    {item.text}
-                  </span>
-                ))}
+              {/* Each fact carries its dot, so a wrapped line ends in none. */}
+              <FactLine className="flex-1">
+                {[
+                  later > 0 && { text: `${later} run later in the week or month` },
+                  atBoot > 0 && { text: `${atBoot} only at boot` },
+                  off > 0 && { text: `${off} switched off` },
+                  skipped > 0 && {
+                    text: `${plural(skipped, "cron line")} left to systemd`,
+                    title:
+                      "Package cron lines that step aside on a host running systemd, because a timer does the same work",
+                  },
+                ]
+                  .filter((item): item is { text: string; title?: string } => Boolean(item))
+                  .map((item, i) => (
+                    <Fact key={i} title={item.title}>
+                      {item.text}
+                    </Fact>
+                  ))}
+              </FactLine>
             </div>
           )}
         </section>
@@ -344,19 +343,17 @@ function DayChart({
   else if (lane) {
     const next = upcoming(lane, now)
     readout = (
-      <>
-        <span className="font-medium text-foreground">{lane.name}</span>
-        <FactDot />
-        <span className="first-letter:uppercase">{lane.when}</span>
+      <FactLine className="min-w-0">
+        <Fact className="font-medium text-foreground">{lane.name}</Fact>
+        <Fact>
+          <span className="inline-block first-letter:uppercase">{lane.when}</span>
+        </Fact>
         {next !== undefined && (
-          <>
-            <FactDot />
-            <span className="numeric">
-              next {longClock(next, zone)}, in {countdown(next - now)}
-            </span>
-          </>
+          <Fact className="numeric">
+            next {longClock(next, zone)}, in {countdown(next - now)}
+          </Fact>
         )}
-      </>
+      </FactLine>
     )
   } else if (column) {
     const from = `${String(column.hour).padStart(2, "0")}:00`
@@ -436,7 +433,7 @@ function DayChart({
               data-hour={col.hour}
               onMouseEnter={() => onHour(i)}
               className={cn(
-                "relative flex flex-col-reverse gap-[2px] rounded-[4px] p-[2px] transition-colors",
+                "relative flex flex-col-reverse gap-[2px] rounded-sm p-[2px] transition-colors",
                 i === 0 ? "bg-row-hover" : "bg-surface-sunken",
                 hour === i && "bg-row-hover ring-1 ring-border",
                 col.hour === 0 &&
@@ -454,7 +451,7 @@ function DayChart({
                   onMouseLeave={() => onPoint(null)}
                   onClick={() => onOpen(lane)}
                   className={cn(
-                    "h-[10px] w-full shrink-0 cursor-pointer rounded-[2px] transition-opacity",
+                    "h-[10px] w-full shrink-0 cursor-pointer rounded-xs transition-opacity",
                     pointed
                       ? pointed === lane.key
                         ? "ring-1 ring-foreground/70"
@@ -550,7 +547,7 @@ function UpNextRow({
         title={next !== undefined ? longClock(next, zone) : undefined}
       >
         {at?.day && <span className="text-hint text-muted-foreground">{at.day}</span>}
-        <span className={cn("font-medium", soonest ? "text-foreground" : "text-foreground/90")}>
+        <span className={cn("font-medium", soonest ? "text-foreground" : "text-muted-foreground")}>
           {at?.time ?? "—"}
         </span>
       </span>
@@ -577,7 +574,7 @@ function UpNextRow({
       <span className="hidden min-w-0 items-center gap-2 text-hint text-muted-foreground md:flex">
         <span
           aria-hidden
-          className="size-2 shrink-0 rounded-[3px]"
+          className="size-2 shrink-0 rounded-xs"
           style={{ background: KIND[lane.kind].color }}
         />
         <span className="truncate">{KIND[lane.kind].one}</span>
@@ -607,34 +604,27 @@ export function NextUp({ lanes, zone }: { lanes: ScheduleLane[]; zone?: string }
     if (at !== undefined && (!best || at < best.at)) best = { lane, at }
   }
   if (!best) {
-    return <p className="text-body text-muted-foreground">Nothing is due</p>
+    return <span className="text-xs text-muted-foreground">Nothing is due</span>
   }
   const at = clockLabel(best.at, now, zone)
+  // The page's state, beside its name: what fires next and when, in the
+  // line's own size. It stood where the page's command goes, as a 24px
+  // countdown that took a block of its own on a phone.
   return (
-    <div
+    <span
       data-slot="next-up"
-      className="flex min-w-0 items-center gap-4"
-      title={longClock(best.at, zone)}
+      className="inline-flex min-w-0 items-center gap-1.5 text-xs"
+      title={`${best.lane.name} at ${at.day ? `${at.day} ` : ""}${at.time} (${longClock(best.at, zone)})`}
     >
-      <div className="min-w-0 sm:text-right">
-        <p className="eyebrow">Next run</p>
-        <p className="flex min-w-0 items-center gap-1.5 text-body sm:justify-end">
-          <span
-            aria-hidden
-            className="size-2 shrink-0 rounded-[3px]"
-            style={{ background: KIND[best.lane.kind].color }}
-          />
-          <span className="truncate font-medium">{best.lane.name}</span>
-          <span className="numeric shrink-0 text-muted-foreground">
-            at {at.day ? `${at.day} ` : ""}
-            {at.time}
-          </span>
-        </p>
-      </div>
-      <p className="numeric text-2xl font-semibold tracking-tight tabular-nums">
-        {countdown(best.at - now)}
-      </p>
-    </div>
+      <span
+        aria-hidden
+        className="size-2 shrink-0 rounded-xs"
+        style={{ background: KIND[best.lane.kind].color }}
+      />
+      <span className="shrink-0 text-muted-foreground">Next run</span>
+      <span className="truncate font-medium">{best.lane.name}</span>
+      <span className="numeric shrink-0 font-medium">in {countdown(best.at - now)}</span>
+    </span>
   )
 }
 

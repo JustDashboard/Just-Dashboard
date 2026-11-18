@@ -162,7 +162,7 @@ test("the key is drawn with what depends on it, and says so while no copy has le
   await expect(panel).toContainText("Keep a copy of the key off this server")
   await expect(panel.getByRole("button", { name: "Export key…" })).toBeEnabled()
   // Which jobs seal what they write is on their cards.
-  await expect(card(page, "Databases nightly")).toContainText("wayy-backups · encrypted")
+  await expect(card(page, "Databases nightly")).toContainText("operator-backups · encrypted")
   await expect(card(page, "Nginx configuration")).not.toContainText("encrypted")
 })
 
@@ -241,7 +241,7 @@ test("the job form encrypts what leaves the server unless the operator says not 
   await expect(option).not.toBeChecked()
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Offsite configuration")
   await dialog.getByRole("textbox", { name: "Sources (one per line)" }).fill("/etc/nginx")
-  await dialog.getByRole("textbox", { name: "Bucket", exact: true }).fill("wayy-config")
+  await dialog.getByRole("textbox", { name: "Bucket", exact: true }).fill("operator-config")
   const created = page.waitForRequest(
     (request) => request.url().endsWith("/api/v1/backups/") && request.method() === "POST",
   )
@@ -249,7 +249,11 @@ test("the job form encrypts what leaves the server unless the operator says not 
   expect((await created).postDataJSON()).toMatchObject({ targetKind: "b2", encrypt: false })
 
   await page.goto("/backups/2")
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const edit = page.getByRole("dialog", { name: "Edit Databases nightly" })
   await expect(
     edit.getByRole("switch", { name: "Encrypt archives with this server's backup key" }),
@@ -334,6 +338,8 @@ test("at 390px neither page scrolls sideways", async ({ page }) => {
   await expect(keyPanel(page)).toContainText("not exported yet")
   expect(await noSidewaysScroll(page)).toBe(false)
   await page.goto("/backups/2")
+  // On a phone a run is opened from the list, in its place.
+  await page.getByRole("button", { name: /^Run \d+,/ }).first().click()
   await expect(page.getByRole("region", { name: "Encryption" })).toContainText(RECIPIENT)
   expect(await noSidewaysScroll(page)).toBe(false)
 })
@@ -398,7 +404,11 @@ test("encrypted backups, for the pull request @shots", async ({ page }) => {
   })
   await shot("sealed-run-1440.png")
 
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const edit = page.getByRole("dialog", { name: "Edit Databases nightly" })
   const option = edit.getByRole("switch", {
     name: "Encrypt archives with this server's backup key",

@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { applySiteFix, fixFor, fixLabel, type SiteFix, type TLSFix } from "@/lib/tls-fixes"
+import { applySiteFix, fixFor, fixLabel, type SiteFix, type TLSFix } from "@/lib/tls/fixes"
 import type {
   DirectiveUse,
   Job,
@@ -16,13 +16,14 @@ import type {
   VHost,
 } from "@/lib/types"
 import type { Finding } from "@/components/finding-list"
-import { unifiedDiff } from "@/components/files/diff"
-import { DiffView } from "@/components/files/diff-view"
+import { unifiedDiff } from "@/lib/diff"
+import { DiffView } from "@/components/diff-view"
 import { JobConsole, useJobConsole } from "@/components/job-console"
 import { Pane } from "@/components/panel"
 import { RowList, Row } from "@/components/row-list"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyState, ErrorState, Notice, Spinner } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { useNginxReload } from "@/components/proxy/tls-served-by"

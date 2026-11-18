@@ -1157,7 +1157,7 @@ test("unsaved full-page edits are guarded when changing files or leaving", async
   await finder.press("Enter")
   await expect(page.getByRole("dialog")).toHaveCount(0)
   await expect(page.locator(".monaco-editor")).toContainText("dirty")
-  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Back to Files", exact: true }).click()
   await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await expect(page.locator(".monaco-editor")).toContainText("dirty")
@@ -1165,7 +1165,7 @@ test("unsaved full-page edits are guarded when changing files or leaving", async
   await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
   await expect(page).toHaveURL(/\/files\/editor\?/)
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
-  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Back to Files", exact: true }).click()
   await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
   await expect(page).toHaveURL(/\/files\?path=/)
 })
@@ -1261,7 +1261,7 @@ test("full editors and the search palette fit desktop and phone widths", async (
   await expect(page.getByRole("complementary", { name: "File explorer" })).toBeHidden()
   await page
     .getByRole("navigation", { name: "File editor" })
-    .getByRole("tab", { name: "Files" })
+    .getByRole("button", { name: "Files" })
     .click()
   const tree = page.getByRole("complementary", { name: "File explorer" })
   await expect(tree).toBeVisible()
@@ -1320,7 +1320,7 @@ test("image export saves live adjustments and a copy keeps the source dirty", as
   expect(red).toBeGreaterThan(0)
   expect(red).toBeLessThan(255)
   await expect(page.getByText("Unsaved edits", { exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Files", exact: true }).click()
+  await page.getByRole("button", { name: "Back to Files", exact: true }).click()
   await expect(page.getByRole("dialog")).toContainText("Leave without saving?")
   await page.getByRole("button", { name: "Cancel", exact: true }).click()
   await page.getByRole("button", { name: "Save over original", exact: true }).click()
@@ -2292,7 +2292,7 @@ for (const exit of ["account cleanup", "editor departure"] as const) {
     if (exit === "account cleanup") {
       await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
     } else {
-      await page.getByRole("button", { name: "Files", exact: true }).click()
+      await page.getByRole("button", { name: "Back to Files", exact: true }).click()
       await page.getByRole("button", { name: "Discard and leave", exact: true }).click()
       await expect(page.getByLabel("Image editing canvas")).toHaveCount(0)
     }
@@ -2489,7 +2489,7 @@ test.describe("Files on a phone", () => {
   test.use({ viewport: PHONE, hasTouch: true })
 
   const bar = (page: Page) => page.getByRole("navigation", { name: "Files", exact: true })
-  const stop = (page: Page, name: string) => bar(page).getByRole("tab", { name, exact: true })
+  const stop = (page: Page, name: string) => bar(page).getByRole("button", { name, exact: true })
   const strip = (page: Page) => page.locator("[data-slot='pane-header']").first()
   const listing = (page: Page) => page.getByRole("region", { name: "Folder contents" })
   const places = (page: Page) => page.getByRole("navigation", { name: "Places" })
@@ -2520,8 +2520,10 @@ test.describe("Files on a phone", () => {
     expect(await boxOf(strip(page))).toEqual(loading.strip)
     expect(await boxOf(bar(page))).toEqual(loading.bar)
 
-    // One row: the way back, where you are, find, New and the rest.
-    expect(loading.strip.height).toBeLessThanOrEqual(46)
+    // One row: the way back, where you are, find, New and the rest. Under a
+    // finger a compact control is 40 tall (0.9.0), so one row is 40 on the
+    // strip's 6px padding and its hairline, 53; a second row would be 90.
+    expect(loading.strip.height).toBeLessThanOrEqual(53)
     for (const name of ["Back to previous folder", "Find", "New", "More"]) {
       await expect(strip(page).getByRole("button", { name, exact: true })).toBeVisible()
     }
@@ -2547,7 +2549,7 @@ test.describe("Files on a phone", () => {
     ).toBeInViewport()
 
     await expectBarAtTheFoot(bar(page))
-    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-current", "page")
     await expectFullPane(listing(page), bar(page))
     await expect(places(page)).toBeHidden()
     await expect(inspector(page)).toBeHidden()
@@ -2567,7 +2569,7 @@ test.describe("Files on a phone", () => {
 
     await places(page).locator("button[title='/etc']").click()
     await expect(page.getByRole("button", { name: "Folders in /etc" })).toBeVisible()
-    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-current", "page")
     await expect(listing(page)).toBeVisible()
     await expect(places(page)).toBeHidden()
 
@@ -2581,7 +2583,7 @@ test.describe("Files on a phone", () => {
     await stop(page, "Places").click()
     await strip(page).getByRole("button", { name: "Back to previous folder" }).click()
     await expect(page.locator(`tr[data-entry-path='${home}/photos']`)).toBeVisible()
-    await expect(stop(page, "Folder")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Folder")).toHaveAttribute("aria-current", "page")
   })
 
   test("the sidebar and details put away at a desk are still on a phone's bar", async ({
@@ -2797,7 +2799,8 @@ test.describe("Files on a phone", () => {
     const sheet = page.getByRole("dialog", { name: "notes.md", exact: true })
     await expect(sheet.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
     const toolbar = sheet.locator("[data-slot=editor-toolbar]")
-    expect((await boxOf(toolbar)).height).toBe(32)
+    // One row of compact controls, which are 40 under a finger.
+    expect((await boxOf(toolbar)).height).toBe(40)
     await expect(toolbar.getByRole("button", { name: "Open full editor" })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       PHONE.width,
@@ -2809,7 +2812,7 @@ test.describe("the file editor on a phone", () => {
   test.use({ viewport: PHONE, hasTouch: true })
 
   const bar = (page: Page) => page.getByRole("navigation", { name: "File editor", exact: true })
-  const stop = (page: Page, name: string) => bar(page).getByRole("tab", { name, exact: true })
+  const stop = (page: Page, name: string) => bar(page).getByRole("button", { name, exact: true })
   const editor = (page: Page) => page.getByRole("region", { name: "File editor" })
   const tree = (page: Page) => page.getByRole("complementary", { name: "File explorer" })
   const menu = (page: Page) => page.getByRole("button", { name: "More editor commands" })
@@ -2827,14 +2830,15 @@ test.describe("the file editor on a phone", () => {
     await openEditor(page)
     await risen(page)
     await expectBarAtTheFoot(bar(page))
-    await expect(stop(page, "Editor")).toHaveAttribute("aria-selected", "true")
+    await expect(stop(page, "Editor")).toHaveAttribute("aria-current", "page")
     await expect(tree(page)).toBeHidden()
     await expect(page.getByRole("button", { name: /file tree/ })).toBeHidden()
     await expectFullPane(editor(page), bar(page))
 
     // One row: the language, find, undo and redo, and the menu.
     const toolbar = editor(page).locator("[data-slot=editor-toolbar]")
-    expect((await boxOf(toolbar)).height).toBe(32)
+    // One row of compact controls, which are 40 under a finger.
+    expect((await boxOf(toolbar)).height).toBe(40)
     await expect(toolbar.getByRole("combobox", { name: "File language" })).toBeVisible()
     for (const name of ["Find", "Undo", "Redo", "More editor commands"]) {
       await expect(toolbar.getByRole("button", { name, exact: true })).toBeVisible()
@@ -3150,7 +3154,7 @@ test.describe("Files at a desk", () => {
     expect(Math.round((await boxOf(strip)).y)).toBe(Math.round(frame.y))
     await page
       .getByRole("navigation", { name: "Files", exact: true })
-      .getByRole("tab", { name: "Details" })
+      .getByRole("button", { name: "Details" })
       .click()
     await expect(page.locator("[data-files-inspector]")).toBeVisible()
   })

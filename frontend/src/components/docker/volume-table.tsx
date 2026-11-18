@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowDown, ArrowUp, CheckCircle, Database } from "@/components/icons"
+import { CheckCircle, Database } from "@/components/icons"
 import { ProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -23,6 +23,8 @@ import {
   type VolumeSort,
 } from "@/components/docker/volumes"
 import {
+  ROW_NAME,
+  SortHead,
   Table,
   TableBody,
   TableCell,
@@ -99,10 +101,10 @@ export function VolumeTable({
     <SortHead
       label={label}
       active={sort.key === key}
-      desc={sort.desc}
+      descending={sort.desc}
       onSort={() => onSort(key)}
       className={className}
-      right={right}
+      align={right ? "right" : "left"}
     />
   )
   return (
@@ -114,9 +116,7 @@ export function VolumeTable({
           {wide && head("standing", "State", "w-44")}
           {widest && head("created", "Created", "w-28")}
           {head("size", "Size", wide ? "w-28" : cn("w-24", NARROW_PAD), true)}
-          <TableHead className={wide ? "w-20" : "w-10 px-1"}>
-            <span className="sr-only">Actions</span>
-          </TableHead>
+          <TableHead label="Actions" className={wide ? "w-20" : "w-10 px-1"} />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -145,7 +145,7 @@ export function VolumeTable({
                     {wide ? (
                       facts.map((fact, i) => (
                         <span key={i} className="inline-flex min-w-0 items-center gap-1.5">
-                          {i > 0 && <span className="text-muted-foreground/40">·</span>}
+                          {i > 0 && <span className="text-faint">·</span>}
                           {fact}
                         </span>
                       ))
@@ -157,7 +157,7 @@ export function VolumeTable({
                         <StandingWord volume={volume} />
                         {backup && (
                           <>
-                            <span className="text-muted-foreground/40">·</span>
+                            <span className="text-faint">·</span>
                             <BackupWord backup={backup} short />
                           </>
                         )}
@@ -215,47 +215,6 @@ export function VolumeTable({
 }
 
 /**
- * A column's head that orders the rows under it, saying which way through
- * `aria-sort`. The Databases performance table has the same head, in a module
- * that brings the engine kit with it.
- */
-function SortHead({
-  label,
-  active,
-  desc,
-  onSort,
-  right,
-  className,
-}: {
-  label: string
-  active: boolean
-  desc: boolean
-  onSort: () => void
-  right?: boolean
-  className?: string
-}) {
-  const Arrow = desc ? ArrowDown : ArrowUp
-  return (
-    <TableHead
-      aria-sort={active ? (desc ? "descending" : "ascending") : "none"}
-      className={cn(right && "text-right", className)}
-    >
-      <button
-        type="button"
-        onClick={onSort}
-        className={cn(
-          "-mx-1 inline-flex items-center gap-1 rounded-sm px-1 focus-ring transition-colors hover:text-foreground",
-          active && "text-foreground",
-        )}
-      >
-        {label}
-        {active && <Arrow aria-hidden className="size-3" />}
-      </button>
-    </TableHead>
-  )
-}
-
-/**
  * The volume as the product whose data it holds, then its name — a Compose
  * project's prefix a step back, because down a column of `shop_*` it is the
  * part after the underscore that differs.
@@ -268,6 +227,7 @@ function VolumeName({ volume, product }: { volume: VolumeDetail; product?: strin
       <ProductLogo id={product} fallback={Database} size="sm" />
       <Link
         href={volumeHref(volume.name)}
+        {...ROW_NAME}
         title={volume.name}
         aria-label={volume.name}
         className={cn(
@@ -278,7 +238,7 @@ function VolumeName({ volume, product }: { volume: VolumeDetail; product?: strin
         {anonymous ? (
           <>
             {volume.name.slice(0, 12)}
-            <span className="text-muted-foreground/60">…</span>
+            <span className="text-faint">…</span>
           </>
         ) : (
           <>

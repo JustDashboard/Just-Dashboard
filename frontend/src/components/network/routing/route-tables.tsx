@@ -3,16 +3,18 @@
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { useMediaQuery } from "@/hooks/use-mobile"
+import { IconAction } from "@/components/icon-action"
 import { Pencil, Plus, Trash } from "@/components/icons"
 import { del } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkRoute, NetworkRouting, NetworkRule } from "@/lib/types"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
 import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph } from "@/components/product-logo"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -27,7 +29,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { routeRows, routeVia, ruleSelectors, ruleThen, type RouteRow } from "./route-reading"
 
 const OWNER_PRODUCT: Partial<Record<NetworkRoute["owner"], string>> = {
@@ -48,7 +50,7 @@ const OWNER_WORD: Record<NetworkRoute["owner"], string> = {
 
 // From here the seven columns fit beside the rail; narrower, a route is two lines.
 const WIDE = "(min-width: 1100px)"
-const RULES_WIDE = "(min-width: 768px)"
+const RULES_WIDE = breakpointQuery("md")
 
 export type RouteTarget = {
   /** What was typed, trimmed. */
@@ -146,16 +148,10 @@ export function RoutesTable({
   )
 
   return (
-    <Panel aria-label="Routes" data-routing="routes">
+    <Panel framed aria-label="Routes" data-routing="routes">
       <PanelHeader
-        title={
-          <>
-            Routes
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-              {target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
-            </span>
-          </>
-        }
+        title="Routes"
+        count={target ? `${covering.length} of ${all.length} cover ${target.text}` : all.length}
         actions={
           hiddenLocal > 0 && (
             <InfoTip label="What is not listed">
@@ -165,7 +161,15 @@ export function RoutesTable({
           )
         }
       >
-        <ChipStrip aria-label="Routing table" className="mr-auto">
+        {/* On a phone the chips take the head's second row of their own, as
+            their place does while the routes are read, and the note stays
+            beside the title: a framed panel is the screen's width there, and
+            with the count out of the title the chips fitted beside it, so the
+            head grew shorter when the routes landed. */}
+        <ChipStrip
+          aria-label="Routing table"
+          className="mr-auto max-sm:order-last max-sm:basis-full"
+        >
           <FilterChip selected={scope === undefined} onClick={() => setChosen(undefined)}>
             All <ChipCount>{covering.length}</ChipCount>
           </FilterChip>
@@ -346,7 +350,7 @@ function Owner({ route, short }: { route: NetworkRoute; short?: boolean }) {
       <span className={cn("truncate", route.managed ? "text-brand" : "text-muted-foreground")}>
         {OWNER_WORD[route.owner]}
       </span>
-      {!short && <span className="text-muted-foreground/60">· {route.protocol}</span>}
+      {!short && <span className="text-faint">· {route.protocol}</span>}
     </span>
   )
 }
@@ -371,14 +375,26 @@ function RowVerbs({
   return (
     <span className="flex h-6 items-center justify-end gap-0.5">
       {edit && (
-        <Button size="icon-xs" variant="ghost" aria-label={edit.label} onClick={edit.run}>
+        <IconAction
+          size="icon-xs"
+          variant="ghost"
+          className="[&_svg:not([class*='size-'])]:size-3"
+          label={edit.label}
+          onClick={edit.run}
+        >
           <Pencil aria-hidden />
-        </Button>
+        </IconAction>
       )}
       {remove && (
-        <Button size="icon-xs" variant="ghost" aria-label={remove.label} onClick={remove.run}>
+        <IconAction
+          size="icon-xs"
+          variant="ghost"
+          className="[&_svg:not([class*='size-'])]:size-3"
+          label={remove.label}
+          onClick={remove.run}
+        >
           <Trash aria-hidden />
-        </Button>
+        </IconAction>
       )}
       {guard && !edit && !remove && (
         <span className="flex size-6 items-center justify-center">
@@ -432,16 +448,10 @@ export function RulesTable({
     />
   )
   return (
-    <Panel aria-label="Policy rules" data-routing="rules">
+    <Panel framed aria-label="Policy rules" data-routing="rules">
       <PanelHeader
-        title={
-          <>
-            Policy rules
-            <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-              {rules.length}
-            </span>
-          </>
-        }
+        title="Policy rules"
+        count={rules.length}
         actions={
           onAdd && (
             <Button size="xs" variant="outline" onClick={onAdd}>
@@ -577,7 +587,7 @@ export function TableWaiting({
 }) {
   const wide = useMediaQuery(`(min-width: ${wideFrom})`)
   return (
-    <Panel aria-label={title} aria-busy>
+    <Panel framed aria-label={title} aria-busy>
       <PanelHeader title={title}>
         {/* The line's own height: the chips or the verb that will stand on it. */}
         <span aria-hidden className={cn("h-7", chips && "max-sm:basis-full")} />

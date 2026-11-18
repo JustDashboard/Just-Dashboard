@@ -10,24 +10,25 @@ import type {
   MongoPlanNode,
 } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
-import { Segments } from "@/components/deploy/settings/segments"
+import { ReadError } from "@/components/database/kit/read-error"
+import { Segments } from "@/components/segments"
 import { FormNote } from "@/components/form"
 import { Meter } from "@/components/meter"
 import { Modal } from "@/components/modal"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { cn } from "@/lib/utils"
 import { useEffect, useMemo, useState } from "react"
+import { grouped } from "@/lib/format"
 
 /** What is explained: a find as the query bar states it, or a pipeline. */
 export type ExplainSubject =
   | { kind: "find"; spec: MongoFindSpec; statement: string }
   | { kind: "pipeline"; pipeline: string; statement: string }
 
-const grouped = (n: number | null) => (n === null ? "—" : n.toLocaleString("en-US"))
+const figure = (n: number | null) => (n === null ? "—" : grouped(n))
 
 /** Every node of a plan with how deep it sits, the last thing done first. */
 function flatten(node: MongoPlanNode, depth = 0): { node: MongoPlanNode; depth: number }[] {
@@ -147,10 +148,10 @@ function Explain({
 
           {summary?.executed && (
             <p className="text-body text-muted-foreground">
-              Returned {grouped(summary.returned)} documents
-              {summary.timeMs !== null ? ` in ${grouped(summary.timeMs)} ms (server estimate)` : ""}
-              ; examined {grouped(summary.docsExamined)} documents and{" "}
-              {grouped(summary.keysExamined)} index keys.
+              Returned {figure(summary.returned)} documents
+              {summary.timeMs !== null ? ` in ${figure(summary.timeMs)} ms (server estimate)` : ""};
+              examined {figure(summary.docsExamined)} documents and {figure(summary.keysExamined)}{" "}
+              index keys.
             </p>
           )}
           {summary && (
@@ -209,7 +210,7 @@ function Explain({
               >
                 <span className="min-w-0 flex-1">Step</span>
                 <span className="w-20 text-right">Returned</span>
-                <span className="w-20 text-right max-sm:hidden">Documents</span>
+                <span className="w-34 text-right max-sm:hidden">Documents</span>
                 <span className="w-16 text-right max-sm:hidden">Keys</span>
                 <span className="w-14 text-right">ms</span>
               </li>
@@ -256,7 +257,7 @@ function PlanRow({
           style={{ paddingLeft: `${depth * 16}px` }}
         >
           {depth > 0 && (
-            <span aria-hidden className="shrink-0 text-muted-foreground/50">
+            <span aria-hidden className="shrink-0 text-faint">
               └
             </span>
           )}
@@ -272,27 +273,39 @@ function PlanRow({
             </span>
           )}
         </div>
-        <span className="numeric w-20 shrink-0 text-right text-xs">{grouped(node.returned)}</span>
-        <span className="numeric w-20 shrink-0 text-right text-xs max-sm:hidden">
-          {grouped(node.docsExamined)}
+        <span className="numeric w-20 shrink-0 text-right text-xs">{figure(node.returned)}</span>
+        {/* The share of the busiest step's documents, beside the figure as the
+            SQL plan draws it: a bar under the row made every row taller once
+            the plan had run. */}
+        <span
+          title={
+            executed && node.docsExamined
+              ? `${node.stage} examined ${figure(node.docsExamined)} documents`
+              : undefined
+          }
+          className="flex w-34 shrink-0 items-center justify-end gap-2 max-sm:hidden"
+        >
+          {executed && node.docsExamined !== null && node.docsExamined > 0 && (
+            <span className="w-12 shrink-0">
+              <Meter
+                size="cell"
+                decorative
+                value={share * 100}
+                tone={scan ? "warning" : "default"}
+              />
+            </span>
+          )}
+          <span className="numeric min-w-0 truncate text-right text-xs">
+            {figure(node.docsExamined)}
+          </span>
         </span>
         <span className="numeric w-16 shrink-0 text-right text-xs max-sm:hidden">
-          {grouped(node.keysExamined)}
+          {figure(node.keysExamined)}
         </span>
         <span className="numeric w-14 shrink-0 text-right text-xs text-muted-foreground">
-          {grouped(node.timeMs)}
+          {figure(node.timeMs)}
         </span>
       </div>
-      {executed && node.docsExamined !== null && node.docsExamined > 0 && (
-        <div style={{ paddingLeft: `${depth * 16 + (depth > 0 ? 20 : 0)}px` }} className="pt-1">
-          <Meter
-            size="thin"
-            value={share * 100}
-            tone={scan ? "warning" : "default"}
-            label={`${node.stage} examined ${grouped(node.docsExamined)} documents`}
-          />
-        </div>
-      )}
     </li>
   )
 }

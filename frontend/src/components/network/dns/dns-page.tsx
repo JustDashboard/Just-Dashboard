@@ -8,12 +8,13 @@ import type { DNSTLSReport, DNSView, HostRecords } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { Globe, Inspect, Plus, RefreshClockwise } from "@/components/icons"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { Fact, FactLine } from "@/components/fact-line"
+import { Globe, Inspect, MagnifyingGlass, Plus, RefreshClockwise } from "@/components/icons"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
@@ -239,7 +240,7 @@ export function DNSPage() {
   const panel = "min-w-0 pt-6 focus-ring data-[state=inactive]:hidden"
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Network" title="DNS" />
       {/* One block, as on a process's page: the strip's hairline is the line
           under the identity, rather than a second one a band of ground away. */}
@@ -248,9 +249,11 @@ export function DNSPage() {
           view={data}
           failed={Boolean(failed)}
           command={
-            <Button size="sm" onClick={resolve} aria-label="Resolve a name">
-              <span className="sm:hidden">Resolve</span>
-              <span className="max-sm:hidden">Resolve a name</span>
+            // Its icon alone on a phone, as every identity line's command is;
+            // its words from `sm`, and its name the tip.
+            <Button size="sm" onClick={resolve}>
+              <MagnifyingGlass className="size-3.5" />
+              Resolve a name
             </Button>
           }
           menu={<VerbMenu verbs={verbs} label="DNS actions" />}
@@ -268,20 +271,11 @@ export function DNSPage() {
           onValueChange={(next) => show(next as DNSViewKey)}
           className="min-w-0 gap-0"
         >
-          <TabsPrimitive.List
-            aria-label="Views of DNS"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {DNS_VIEWS.map((key) => (
-              <TabsPrimitive.Trigger
-                key={key}
-                value={key}
-                className={tabClasses(view === key, "h-10")}
-              >
-                {DNS_VIEW_NAME[key]}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
+          <ViewTabList
+            label="Views of DNS"
+            views={DNS_VIEWS.map((key) => ({ key, label: DNS_VIEW_NAME[key] }))}
+            value={view}
+          />
 
           <TabsPrimitive.Content value="resolver" className={panel}>
             {unread ?? (
@@ -356,6 +350,9 @@ export function DNSPage() {
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
 
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-9 [&>span]:gap-y-1"
+
 /**
  * The line the page opens on, laid out as a project's header: the resolver's
  * mark and name with its state beside it, then the address programs ask, where
@@ -376,7 +373,7 @@ function Identity({
 }) {
   if (!view) {
     return (
-      <HostIdentity
+      <IdentityHeader
         fallback={Globe}
         className="border-b-0 pb-0"
         label="About the resolver"
@@ -409,7 +406,7 @@ function Identity({
   const upstream = upstreamWords(view)
   const stats = view.resolved.statistics
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={resolver.product}
       fallback={Globe}
       className="border-b-0 pb-0"
@@ -417,21 +414,13 @@ function Identity({
       title={resolver.path ? <span className="font-mono">{resolver.name}</span> : resolver.name}
       state={<Status tone={resolver.state.tone} label={resolver.state.label} />}
       facts={
-        <span className={FACTS}>
+        <FactLine className={FACT_LINE}>
           {resolver.address && (
-            <>
-              <span className="font-mono text-foreground">{resolver.address}</span>
-              <FactDot />
-            </>
+            <Fact className="font-mono text-foreground">{resolver.address}</Fact>
           )}
-          <HostFact product={upstream.product}>{upstream.words}</HostFact>
-          {stats && (
-            <>
-              <FactDot />
-              <span className="numeric">{Math.round(stats.hitPercent)}% from cache</span>
-            </>
-          )}
-        </span>
+          <Fact product={upstream.product}>{upstream.words}</Fact>
+          {stats && <Fact className="numeric">{Math.round(stats.hitPercent)}% from cache</Fact>}
+        </FactLine>
       }
       command={command}
       menu={menu}

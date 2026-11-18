@@ -211,7 +211,7 @@ test("from xl the networks stand beside it as a rail, and Alt+↓ walks it with 
   await expect(column.getByText("11 networks")).toBeVisible()
   const rows = column.getByRole("listitem")
   await expect(rows).toHaveCount(11)
-  await expect(column.getByRole("button", { name: "shop_backend", exact: true })).toHaveAttribute(
+  await expect(column.getByRole("link", { name: "shop_backend", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -221,7 +221,7 @@ test("from xl the networks stand beside it as a rail, and Alt+↓ walks it with 
 
   await page.keyboard.press("Alt+ArrowDown")
   await expect(page).toHaveURL(/\/docker\/networks\/shop_default\?tab=members$/)
-  await expect(column.getByRole("button", { name: "shop_default", exact: true })).toHaveAttribute(
+  await expect(column.getByRole("link", { name: "shop_default", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   )
@@ -229,14 +229,14 @@ test("from xl the networks stand beside it as a rail, and Alt+↓ walks it with 
   await expect(page).toHaveURL(/\/docker\/networks\/shop_backend\?tab=members$/)
 
   // The rail's search is the table's, and the one on screen stays first when it is filtered out.
-  await column.getByRole("textbox", { name: "Find networks" }).fill("monitoring")
+  await column.getByRole("textbox", { name: "Search the networks" }).fill("monitoring")
   // The one named for it, and the proxy network Grafana is also on.
   await expect(column.getByText("2 of 11")).toBeVisible()
-  await expect(column.getByRole("button", { name: "shop_backend", exact: true })).toHaveAttribute(
+  await expect(column.getByRole("link", { name: "shop_backend", exact: true })).toHaveAttribute(
     "aria-current",
     "page",
   )
-  await column.getByRole("button", { name: "monitoring_default", exact: true }).click()
+  await column.getByRole("link", { name: "monitoring_default", exact: true }).click()
   await expect(page).toHaveURL(/\/docker\/networks\/monitoring_default\?tab=members$/)
 })
 
@@ -367,7 +367,10 @@ test("a network the inspect cannot read is drawn from the list, and with neither
 
   await page.route("**/api/v1/docker/networks/", (route) => route.fulfill(unreachable))
   await page.reload()
-  await expect(page.locator("[data-slot=error-state]")).toBeVisible()
+  // A daemon that does not answer is the Docker screen, not a red box.
+  await expect(
+    page.locator('[data-slot="missing-thing"][data-reason="docker-silent"]'),
+  ).toContainText("Docker is not answering")
   await expect(identity(page)).toHaveCount(0)
 })
 

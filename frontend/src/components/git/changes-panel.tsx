@@ -21,11 +21,13 @@ import type { GitFileChange, GitResult, GitStash, GitStatus } from "@/lib/types"
 import type { usePoll } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { SourceCommit } from "@/components/git/glyphs"
+import { FileIcon } from "@/components/file-icon"
 import { GitExplain } from "@/components/git/help"
 import { IdentityDialog } from "@/components/git/identity-dialog"
 import type { GitPreview } from "@/components/git/preview-panel"
 import type { GitRun } from "@/components/git/run"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -51,6 +53,15 @@ import {
  * without it. Stashes sit at the top, because "where did my changes go" is
  * answered here or nowhere.
  */
+/**
+ * Who the commit is recorded as, a line of hint text that opens the identity
+ * dialog. The press box is 24px under a mouse and 44 under a finger
+ * (`hit-area`) without making the commit line any taller; the words are cut
+ * inside it, because a button that cuts its own text clips its press box too.
+ */
+const IDENTITY =
+  "hit-area flex min-w-0 rounded-sm text-left text-hint text-muted-foreground focus-ring hover:text-foreground hover:underline"
+
 export function ChangesPanel({
   repoPath,
   status,
@@ -124,8 +135,22 @@ export function ChangesPanel({
         ? `Delete ${file.path.split("/").pop()}`
         : `Discard changes to ${file.path.split("/").pop()}`,
       confirmLabel: untracked ? "Delete" : "Discard",
+      subject: {
+        mark: (
+          <FileIcon
+            entry={{
+              name: file.path.split("/").pop() ?? file.path,
+              isDir: false,
+              isSymlink: false,
+            }}
+            className="size-6"
+          />
+        ),
+        name: file.path.split("/").pop() ?? file.path,
+        facts: <span className="font-mono break-all">{file.path}</span>,
+      },
       description: (
-        <p className="text-destructive">
+        <p>
           {untracked ? (
             <>
               <span className="font-mono break-all">{file.path}</span> has never been committed, so
@@ -151,7 +176,7 @@ export function ChangesPanel({
       title: clean ? "Discard everything" : "Discard every change",
       confirmLabel: "Discard all",
       description: (
-        <p className="text-destructive">
+        <p>
           Every tracked file is put back to the last commit.{" "}
           {clean ? "Untracked files are deleted as well." : "Untracked files are left alone."} This
           cannot be undone.
@@ -180,7 +205,7 @@ export function ChangesPanel({
     hasIdentity
 
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div data-slot="changes-panel" className="flex min-h-0 flex-1 flex-col">
       <div className="min-h-0 flex-1 overflow-auto">
         {stashes.length > 0 && (
           <Group label="Set aside" explain="stash" count={stashes.length}>
@@ -274,13 +299,14 @@ export function ChangesPanel({
                     {canDestruct && (
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild>
-                          <button
-                            type="button"
+                          <Button
+                            size="xs"
+                            variant="ghost"
                             disabled={!!busy}
-                            className="rounded-sm px-1.5 py-0.5 text-hint text-destructive transition-colors hover:bg-wash-danger disabled:opacity-40"
+                            className="font-normal text-destructive hover:bg-wash-danger hover:text-destructive"
                           >
                             Discard all
-                          </button>
+                          </Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end" className="min-w-44">
                           <DropdownMenuItem onSelect={() => discardAll(false)}>
@@ -387,18 +413,18 @@ export function ChangesPanel({
               <button
                 type="button"
                 onClick={() => setIdentityOpen(true)}
-                className="min-w-0 truncate text-left text-hint text-muted-foreground hover:text-foreground hover:underline"
+                className={IDENTITY}
                 title={`${identity?.name} <${identity?.email}> — change who commits are recorded as`}
               >
-                as {identity?.name}
+                <span className="truncate">as {identity?.name}</span>
               </button>
             ) : (
               <button
                 type="button"
                 onClick={() => setIdentityOpen(true)}
-                className="min-w-0 truncate text-left text-hint text-warning hover:underline"
+                className={cn(IDENTITY, "text-warning hover:text-warning")}
               >
-                git has no name and address here — set them
+                <span className="truncate">git has no name and address here — set them</span>
               </button>
             )}
             <span className="flex-1" />
@@ -471,7 +497,7 @@ function Group({
 }) {
   return (
     <div>
-      <div className="sticky top-0 z-10 flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
+      <div className="sticky top-0 z-raised flex h-8 items-center gap-1.5 border-b border-hairline bg-card px-3">
         <span className="eyebrow">{label}</span>
         <span className="numeric text-hint text-muted-foreground">{count}</span>
         <GitExplain name={explain} />
@@ -564,7 +590,7 @@ function StashRow({
   return (
     <div
       className={cn(
-        "group flex min-w-0 items-center gap-2 py-1 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
+        "group flex min-w-0 items-center gap-2 pr-1.5 pl-3 transition-colors hover:bg-row-hover",
         active && "bg-accent",
       )}
     >
@@ -573,7 +599,7 @@ function StashRow({
         type="button"
         onClick={onClick}
         aria-pressed={active}
-        className="min-w-0 flex-1 truncate text-left text-xs focus-ring-inset hover:underline"
+        className="min-w-0 flex-1 truncate py-1 text-left text-xs focus-ring-inset hover:underline max-lg:py-2"
       >
         {stash.message}
         <span className="text-muted-foreground">
@@ -608,8 +634,11 @@ function RowAction({
           variant="ghost"
           aria-label={label}
           disabled={disabled}
+          // Its press box grows up and down to 44 under a finger but not
+          // sideways: at the row's end it reached 4px past the list and made
+          // the list scroll sideways under a thumb.
           className={cn(
-            "size-6 shrink-0 p-0 text-muted-foreground hover:text-foreground",
+            "size-6 shrink-0 p-0 text-muted-foreground after:inset-x-0 hover:text-foreground",
             className,
           )}
           onClick={onClick}
@@ -640,14 +669,15 @@ function GroupAction({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <button
-          type="button"
+        <Button
+          size="xs"
+          variant="ghost"
           disabled={disabled}
           onClick={onClick}
-          className="rounded-sm px-1.5 py-0.5 text-hint text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40"
+          className="font-normal text-muted-foreground hover:text-foreground"
         >
           {children}
-        </button>
+        </Button>
       </TooltipTrigger>
       <TooltipContent>{hint}</TooltipContent>
     </Tooltip>

@@ -2,8 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import { get } from "@/lib/api"
-import { LEVEL_MARK, type LogLevel } from "@/lib/log-filter"
-import { formatLogTime } from "@/lib/log-view"
+import { LEVEL_MARK, type LogLevel } from "@/lib/log/filter"
+import { formatLogTime } from "@/lib/log/view"
 import { plural, timestamp } from "@/lib/format"
 import type { DbLogSource, DbLogSources, LogLine } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -13,14 +13,15 @@ import { LEVEL_WORD, LogText } from "@/components/logs/log-text"
 import { resumeFrom, unseen, type Resume } from "@/components/logs/resume"
 import { Well } from "@/components/panel"
 import { Status } from "@/components/status-dot"
-import {
-  Block,
-  BlockLink,
-  CouldNotRead,
-  Quiet,
-  RowsSkeleton,
-} from "@/components/database/home/blocks"
+import Link from "next/link"
+import { Block } from "@/components/database/home/blocks"
+import { RowsSkeleton } from "@/components/row-list"
+import { EngineMark } from "@/components/database/kit"
+import { MissingThing } from "@/components/missing-thing"
+import { Button } from "@/components/ui/button"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
+import { SectionLink } from "@/components/section-link"
 
 /** How many of the newest lines the tail asks for, and keeps. */
 const KEPT = 200
@@ -49,12 +50,12 @@ export function ServerLog() {
   )
   const sources = found.data?.sources ?? []
   const source = sources.find((one) => one.primary) ?? sources[0]
-  const link = engine.has("logs") ? <BlockLink href={href("logs")}>Logs</BlockLink> : undefined
+  const link = engine.has("logs") ? <SectionLink href={href("logs")}>Logs</SectionLink> : undefined
 
   if (found.error && !found.data) {
     return (
       <Block title="Server log" actions={link}>
-        <CouldNotRead
+        <ErrorState
           what="where this server writes its log"
           error={found.error}
           onRetry={found.refresh}
@@ -72,12 +73,23 @@ export function ServerLog() {
   if (!source) {
     return (
       <Block title="Server log" actions={link}>
-        <Quiet>
+        <MissingThing
+          size="block"
+          mark={<EngineMark engine={engine} size="md" />}
+          title="The server log is not here"
+          step={
+            engine.has("logs") && (
+              <Button size="sm" variant="outline" asChild>
+                <Link href={href("logs")}>Open Logs</Link>
+              </Button>
+            )
+          }
+        >
           {found.data.reason ??
             (found.data.refused?.length
               ? `${found.data.refused[0].path} is ${found.data.refused[0].reason}.`
               : "This server's log is not on this machine.")}
-        </Quiet>
+        </MissingThing>
       </Block>
     )
   }
@@ -163,7 +175,7 @@ function Tail({ source, link }: { source: DbLogSource; link?: React.ReactNode })
           {source.detail && <span className="truncate max-md:hidden">· {source.detail}</span>}
         </p>
         {failed && lines.length === 0 ? (
-          <Quiet className="wrap-anywhere">The log could not be followed: {failed}</Quiet>
+          <ErrorState what="the server log" error={new Error(failed)} className="wrap-anywhere" />
         ) : (
           <Lines lines={lines} waiting={!ended && lines.length === 0} />
         )}
@@ -223,7 +235,7 @@ function Lines({ lines, waiting }: { lines: Held[]; waiting: boolean }) {
                 )}
               >
                 <span
-                  className="w-16 shrink-0 text-muted-foreground/60 select-none"
+                  className="w-16 shrink-0 text-faint select-none"
                   title={line.timestamp ? timestamp(line.timestamp) : undefined}
                 >
                   {line.timestamp ? formatLogTime(line.timestamp, "clock") : ""}

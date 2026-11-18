@@ -1,13 +1,12 @@
 "use client"
 
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import {
   ArrowRight,
   Backspace,
   Code,
   Copy,
-  Fingerprint,
   GridSquare,
   Key,
   Linked,
@@ -19,18 +18,21 @@ import {
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { FormFact } from "@/components/form"
-import { EmptyNote, EmptyState } from "@/components/state"
-import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { PanelHeader } from "@/components/panel"
+import { SplitBar } from "@/components/rank-list"
+import { Stale } from "@/components/stale"
+import { ViewTabList } from "@/components/tabs"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   Table,
   TableBody,
@@ -42,8 +44,6 @@ import {
 import { VerbActions, VerbMenu, type Verb } from "@/components/verbs"
 import { rowObjectKind } from "@/components/database/data/kinds"
 import { TableDefinition } from "@/components/database/data/structure"
-import { grouped } from "@/components/database/data/view"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   objectParams,
@@ -63,7 +63,8 @@ import {
   truncateRequest,
   viewQuery,
 } from "@/components/database/schema/changes"
-import { HeadVerbs } from "@/components/database/workbench/chrome"
+import { ColumnsTable } from "@/components/database/schema/columns-table"
+import { HeadVerbs, ObjectHead } from "@/components/database/workbench/chrome"
 import { FactsLine } from "@/components/database/workbench/facts-line"
 import { tableFacts } from "@/components/database/workbench/table-facts"
 import { GroupGlyph, groupSpec } from "@/components/database/schema/kinds"
@@ -162,8 +163,6 @@ export function TableView({
 }) {
   const { id, engine, href, goto, readOnly } = useDatabase()
   const { can } = useAuth()
-  const tabsId = useId()
-  const tabs = useRef<HTMLDivElement>(null)
   const [form, setForm] = useState<Form | null>(null)
   const { destroy, dialog } = useDestroy()
   const data = detail.data
@@ -242,31 +241,6 @@ export function TableView({
       : []),
   ]
   const open = views.some((entry) => entry.id === view) ? view : "columns"
-
-  // The reading that is open is on screen in the strip, however narrow.
-  useEffect(() => {
-    tabs.current
-      ?.querySelector<HTMLElement>(`[data-view="${open}"]`)
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }, [open])
-
-  const onTabKey = (event: React.KeyboardEvent) => {
-    const at = views.findIndex((entry) => entry.id === open)
-    const to =
-      event.key === "ArrowRight"
-        ? (at + 1) % views.length
-        : event.key === "ArrowLeft"
-          ? (at - 1 + views.length) % views.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? views.length - 1
-              : -1
-    if (to < 0) return
-    event.preventDefault()
-    onView(views[to].id)
-    tabs.current?.querySelector<HTMLElement>(`[data-view="${views[to].id}"]`)?.focus()
-  }
 
   const full = qualified(data?.schema ?? schema, name)
   const word = groupSpec(group).label.toLowerCase()
@@ -372,7 +346,11 @@ export function TableView({
   const missing = !data && detail.error instanceof ApiError && detail.error.status === 404
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+    <Tabs
+      value={open}
+      onValueChange={(next) => onView(next as TableViewId)}
+      className="flex min-h-0 min-w-0 flex-1 flex-col gap-0"
+    >
       {!missing && (
         <HeadVerbs>
           {engine.has("data") && (
@@ -391,31 +369,13 @@ export function TableView({
           )}
         </HeadVerbs>
       )}
-      <div className="flex min-h-10 shrink-0 items-center gap-1.5 border-b border-hairline bg-surface-header pr-1.5 pl-3">
-        <GroupGlyph group={group} />
-        {/* Named whole: read part by part, its two halves are two words. */}
-        <h2
-          aria-label={full}
-          title={full}
-          className="flex min-w-0 items-baseline font-mono text-body font-medium"
-        >
-          {/* The schema is half of the name at every width: it gives way to
-              the name by truncating, never by leaving. */}
-          {(data?.schema ?? schema) && (
-            <span className="min-w-[3ch] shrink-[2] truncate text-muted-foreground">
-              {data?.schema ?? schema}
-            </span>
-          )}
-          {(data?.schema ?? schema) && <span className="text-muted-foreground">.</span>}
-          <span className="min-w-[4ch] truncate">{name}</span>
-        </h2>
-        {data?.type && data.type !== "table" && <Tag className="shrink-0">{data.type}</Tag>}
-        {!missing && (
-          <div className="ml-auto flex shrink-0 items-center gap-1 pl-2">
-            <VerbMenu verbs={tableVerbs} label={`Actions for ${name}`} />
-          </div>
-        )}
-      </div>
+      <ObjectHead
+        mark={<GroupGlyph group={group} />}
+        prefix={(data?.schema ?? schema) || undefined}
+        name={name}
+        kind={data?.type && data.type !== "table" ? <Tag>{data.type}</Tag> : undefined}
+        verbs={!missing && <VerbMenu verbs={tableVerbs} label={`Actions for ${name}`} />}
+      />
 
       {missing ? (
         <div className="flex min-h-0 flex-1 items-center justify-center p-6">
@@ -434,29 +394,18 @@ export function TableView({
         </div>
       ) : !data && detail.error ? (
         <div className="p-4">
-          <ReadFailed error={detail.error} onRetry={detail.refresh} />
+          <ErrorState retryable error={detail.error} onRetry={detail.refresh} />
         </div>
       ) : (
         <>
           <MaintenanceBand schema={data?.schema ?? schema} table={name} />
-          {data && detail.error && (
-            // What is below is the last reading: the one just asked for failed.
-            <div
-              role="status"
-              className="flex shrink-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline px-4 py-1.5"
-            >
-              <Status tone="warning" label="Not read again" />
-              <span
-                className="min-w-0 flex-1 truncate text-hint text-muted-foreground"
-                title={detail.error.message}
-              >
-                What is shown is the last reading of {name}.
-              </span>
-              <Button size="xs" variant="outline" className={TOUCH} onClick={detail.refresh}>
-                Try again
-              </Button>
-            </div>
-          )}
+          {/* What is below is the last reading: the one just asked for failed. */}
+          <Stale
+            form="strip"
+            error={data ? detail.error : undefined}
+            subject={name}
+            onRetry={detail.refresh}
+          />
           {/* What the table amounts to, before any of its parts. */}
           <div className="shrink-0 space-y-3 border-b border-hairline px-4 py-3">
             {data ? (
@@ -487,38 +436,19 @@ export function TableView({
               and on a phone the reading's commands take a line of their own
               under the readings rather than covering them. */}
           <div className="@container/strip shrink-0 border-b border-hairline px-1.5">
-            <div className="flex min-h-10 items-stretch @max-[36rem]/strip:flex-wrap">
-              {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
-              <div
-                ref={tabs}
-                role="tablist"
-                aria-label={`Readings of ${name}`}
-                className="flex min-w-0 [scrollbar-width:none] items-stretch overflow-x-auto [&::-webkit-scrollbar]:hidden"
-                onKeyDown={onTabKey}
-              >
-                {views.map((entry) => {
-                  const selected = open === entry.id
-                  return (
-                    <button
-                      key={entry.id}
-                      type="button"
-                      role="tab"
-                      id={`${tabsId}-${entry.id}`}
-                      data-view={entry.id}
-                      aria-selected={selected}
-                      aria-controls={selected ? `${tabsId}-panel` : undefined}
-                      tabIndex={selected ? 0 : -1}
-                      className={cn(tabClasses(selected, "h-10"), "max-sm:px-2.5")}
-                      onClick={() => onView(entry.id)}
-                    >
-                      {entry.label}
-                      {entry.count !== undefined && <ChipCount>{entry.count}</ChipCount>}
-                    </button>
-                  )
-                })}
-              </div>
+            <div className="flex min-h-10 items-stretch @max-xl/strip:flex-wrap">
+              <ViewTabList
+                label={`Readings of ${name}`}
+                value={open}
+                views={views.map((entry) => ({
+                  key: entry.id,
+                  label: entry.label,
+                  count: entry.count,
+                }))}
+                className="min-w-0 border-b-0 [&_[role=tab]]:max-sm:px-2.5"
+              />
               {data && (
-                <div className="ml-auto flex shrink-0 items-center gap-1 py-1 pl-2 empty:hidden @max-[36rem]/strip:basis-full @max-[36rem]/strip:justify-end @max-[36rem]/strip:pb-1.5">
+                <div className="ml-auto flex shrink-0 items-center gap-1 py-1 pl-2 empty:hidden @max-xl/strip:basis-full @max-xl/strip:justify-end @max-xl/strip:pb-1.5">
                   {open === "columns" && isTable && mayWrite && has("addColumn") && (
                     <Button
                       size="xs"
@@ -551,8 +481,8 @@ export function TableView({
                         >
                           <Plus />
                           {/* The strip is one line: the verb goes before the tabs do. */}
-                          <span className="@max-[50rem]/strip:hidden">Add constraint</span>
-                          <span className="@min-[50rem]/strip:hidden">Constraint</span>
+                          <span className="@max-4xl/strip:hidden">Add constraint</span>
+                          <span className="@4xl/strip:hidden">Constraint</span>
                         </Button>
                       )}
                       {has("foreignKeys") && (
@@ -563,8 +493,8 @@ export function TableView({
                           onClick={() => setForm({ type: "add-foreign-key" })}
                         >
                           <Plus />
-                          <span className="@max-[50rem]/strip:hidden">Add foreign key</span>
-                          <span className="@min-[50rem]/strip:hidden">Foreign key</span>
+                          <span className="@max-4xl/strip:hidden">Add foreign key</span>
+                          <span className="@4xl/strip:hidden">Foreign key</span>
                         </Button>
                       )}
                     </>
@@ -595,12 +525,7 @@ export function TableView({
             </div>
           </div>
 
-          <div
-            role="tabpanel"
-            id={`${tabsId}-panel`}
-            aria-labelledby={`${tabsId}-${open}`}
-            className="flex min-h-0 min-w-0 flex-1 flex-col"
-          >
+          <TabsContent value={open} className="flex min-h-0 min-w-0 flex-col">
             {!data ? (
               <TableSkeleton />
             ) : open === "columns" ? (
@@ -767,7 +692,7 @@ export function TableView({
             ) : (
               <TableStatistics detail={data} mayRun={!readOnly && changeable} asked={asked} />
             )}
-          </div>
+          </TabsContent>
         </>
       )}
 
@@ -869,30 +794,30 @@ export function TableView({
         />
       )}
       {dialog}
-    </div>
+    </Tabs>
   )
 }
 
 /**
  * How a table's bytes divide between its rows and its indexes, as one thin
- * bar under the two figures: the proportion is read at a glance, in the
- * colours the Statistics reading gives the same two parts.
+ * bar after the two figures: the proportion is read at a glance, in the
+ * colours the Statistics reading gives the same two parts. The shared
+ * `SplitBar` at its small size, with no join: at 4px the join was the bar.
  */
 function Split({ data, indexes }: { data: number; indexes: number }) {
   const total = data + indexes
   if (total <= 0) return null
   return (
-    <span
-      role="img"
-      aria-label={`${Math.round((indexes / total) * 100)}% of it is indexes`}
-      className="flex h-1 w-24 shrink-0 overflow-hidden rounded-full bg-meter-track"
-    >
-      <span
-        className="h-full"
-        style={{ width: `${(data / total) * 100}%`, backgroundColor: "var(--chart-1)" }}
-      />
-      <span className="h-full flex-1" style={{ backgroundColor: "var(--chart-2)" }} />
-    </span>
+    <SplitBar
+      size="sm"
+      gap={false}
+      label={`${Math.round((indexes / total) * 100)}% of it is indexes`}
+      className="w-24 shrink-0"
+      parts={[
+        { key: "data", count: data, color: "var(--chart-1)" },
+        { key: "indexes", count: indexes, color: "var(--chart-2)" },
+      ]}
+    />
   )
 }
 
@@ -950,23 +875,8 @@ function Columns({
   onForm: (form: Form) => void
   onDrop: (column: DbColumn) => void
 }) {
-  const { engine, href } = useDatabase()
+  const { engine } = useDatabase()
   const operations = engine.capabilities.ddlOperations
-  // Where the engine's key does not tell rows apart it is the order they are
-  // kept in, and is called that.
-  const keyWord = engine.capabilities.rowIdentity === "none" ? "sorting key" : "primary"
-  const foreign = new Map(
-    detail.foreignKeys.flatMap((key) =>
-      key.columns.map((column, index) => [column, { key, index }] as const),
-    ),
-  )
-  const unique = new Set(
-    detail.indexes
-      .filter(
-        (index) => index.unique && !index.primary && index.columns.length === 1 && !index.predicate,
-      )
-      .map((index) => index.columns[0]),
-  )
   const verbsFor = (column: DbColumn): Verb[] => [
     // A computed column's type and value are its expression's: no engine takes
     // a default for one and most refuse to alter it at all, so it is renamed,
@@ -1006,176 +916,10 @@ function Columns({
       ? [{ key: "drop", label: "Drop…", icon: Trash, danger: true, run: () => onDrop(column) }]
       : []),
   ]
-  const acts = editable || droppable
-  // The readings are drawn across while there is room for them and down when
-  // there is not: one shape, chosen by the width the table is given.
-  const [box, width] = useColumnWidth<HTMLDivElement>()
-  const narrow = width > 0 && width < NARROW
-
-  const marks = (column: DbColumn) => {
-    const reference = foreign.get(column.name)
-    return (
-      <>
-        {detail.primaryKey.includes(column.name) && (
-          <span className="flex items-center gap-1">
-            <Key aria-hidden className="size-3 text-chart-2" />
-            <Tag>{keyWord}</Tag>
-          </span>
-        )}
-        {unique.has(column.name) && (
-          <span className="flex items-center gap-1">
-            <Fingerprint aria-hidden className="size-3 text-muted-foreground" />
-            <Tag>unique</Tag>
-          </span>
-        )}
-        {column.identity && <Tag title={column.identity}>numbered</Tag>}
-        {column.generated && (
-          <Tag title="Its value is its expression: it is changed by rewriting that, in Query">
-            computed
-          </Tag>
-        )}
-        {reference && (
-          <Link
-            href={href(
-              "schema",
-              tableParams(reference.key.refSchema ?? detail.schema, reference.key.refTable),
-            )}
-            className="flex items-center gap-1 rounded-sm font-mono text-xs text-muted-foreground focus-ring transition-colors hover:text-foreground"
-          >
-            <Linked aria-hidden className="size-3 text-chart-1" />
-            {/* A key into another schema says which: the name alone would be
-                read as this schema's table of that name. */}
-            {reference.key.refSchema && reference.key.refSchema !== detail.schema
-              ? `${reference.key.refSchema}.`
-              : ""}
-            {reference.key.refTable}.{reference.key.refColumns[reference.index]}
-          </Link>
-        )}
-      </>
-    )
-  }
-  const said = (column: DbColumn) =>
-    column.generated ? `= ${column.generated}` : (column.default ?? "")
 
   return (
-    <div ref={box} className="@container min-h-0 flex-1 overflow-y-auto">
-      {narrow ? (
-        <ul aria-label="Columns" className="divide-y divide-hairline border-b border-hairline">
-          {detail.columns.map((column) => {
-            const verbs = verbsFor(column)
-            return (
-              <li key={column.name} className="group flex items-start gap-2 py-2 pr-2 pl-4">
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
-                    <span className="font-mono text-xs font-medium">{column.name}</span>
-                    <Tag mono className="block max-w-full truncate" title={column.type}>
-                      {column.type}
-                    </Tag>
-                  </div>
-                  <div className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1 text-xs text-muted-foreground">
-                    <span>{column.nullable ? "takes NULL" : "not null"}</span>
-                    {said(column) && (
-                      <span className="max-w-full min-w-0 truncate font-mono" title={said(column)}>
-                        {column.generated ? "" : "default "}
-                        {said(column)}
-                      </span>
-                    )}
-                    {marks(column)}
-                  </div>
-                  {column.comment && (
-                    <p className="text-hint text-muted-foreground">{column.comment}</p>
-                  )}
-                </div>
-                {verbs.length > 0 && (
-                  <VerbActions verbs={verbs} menuLabel={`Actions for ${column.name}`} />
-                )}
-              </li>
-            )
-          })}
-        </ul>
-      ) : (
-        <Table>
-          <TableHeader>
-            <TableRow className="hover:bg-transparent">
-              <TableHead className={cn(HEAD, "w-10 pr-0 text-right @max-[52rem]:hidden")}>
-                #
-              </TableHead>
-              <TableHead className={HEAD}>Name</TableHead>
-              <TableHead className={HEAD}>Type</TableHead>
-              <TableHead className={HEAD}>NULL</TableHead>
-              <TableHead className={HEAD}>Default</TableHead>
-              <TableHead className={HEAD}>Key</TableHead>
-              {acts && (
-                <TableHead className={cn(HEAD, "w-px")}>
-                  <span className="sr-only">Actions</span>
-                </TableHead>
-              )}
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {detail.columns.map((column) => {
-              const verbs = verbsFor(column)
-              return (
-                <TableRow key={column.name} className="group">
-                  <TableCell
-                    className={cn(
-                      CELL,
-                      "numeric pr-0 text-right text-muted-foreground @max-[52rem]:hidden",
-                    )}
-                  >
-                    {column.position}
-                  </TableCell>
-                  <TableCell className={CELL}>
-                    <span className="font-mono font-medium">{column.name}</span>
-                    {column.comment && (
-                      <p
-                        className="max-w-80 truncate text-hint text-muted-foreground"
-                        title={column.comment}
-                      >
-                        {column.comment}
-                      </p>
-                    )}
-                  </TableCell>
-                  <TableCell className={CELL}>
-                    <Tag mono className="block max-w-48 truncate" title={column.type}>
-                      {column.type}
-                    </Tag>
-                  </TableCell>
-                  <TableCell className={cn(CELL, "text-muted-foreground")}>
-                    {column.nullable ? "yes" : "no"}
-                  </TableCell>
-                  <TableCell
-                    className={cn(
-                      CELL,
-                      "max-w-64 truncate font-mono text-muted-foreground @min-[56rem]:max-w-[26rem]",
-                    )}
-                    title={said(column)}
-                  >
-                    {said(column)}
-                  </TableCell>
-                  <TableCell className={CELL}>
-                    <span className="flex flex-wrap items-center gap-x-2.5 gap-y-1">
-                      {marks(column)}
-                    </span>
-                  </TableCell>
-                  {acts && (
-                    <TableCell className={cn(CELL, "pl-0")}>
-                      {verbs.length > 0 && (
-                        <VerbActions
-                          verbs={verbs}
-                          dim
-                          menuLabel={`Actions for ${column.name}`}
-                          className={ROW_ACTIONS}
-                        />
-                      )}
-                    </TableCell>
-                  )}
-                </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
-      )}
+    <div className="min-h-0 flex-1 overflow-y-auto">
+      <ColumnsTable detail={detail} actions={editable || droppable ? { verbsFor } : undefined} />
       <Limits
         lines={
           unchangeable
@@ -1516,13 +1260,14 @@ function Keys({
 
       {detail.referencedBy.length > 0 && (
         <section aria-label="Referenced by" className="pt-4">
-          <h3 className="flex items-baseline gap-2 px-4 pb-1 text-title font-medium">
-            Referenced by
-            <span className="numeric text-xs font-normal text-muted-foreground">
-              {detail.referencedBy.length}
-            </span>
-          </h3>
-          <ul className="divide-y divide-hairline border-y border-hairline">
+          <PanelHeader
+            plain
+            level={3}
+            title="Referenced by"
+            count={detail.referencedBy.length}
+            className="px-4 pb-2"
+          />
+          <ul className="divide-y divide-hairline border-b border-hairline">
             {detail.referencedBy.map((reference) => (
               <li key={`${reference.schema}.${reference.table}.${reference.name}`}>
                 <Link

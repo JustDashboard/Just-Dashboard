@@ -1,4 +1,10 @@
+"use client"
+
+import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { Tabs as TabsPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
+import { ChipCount } from "@/components/chips"
+import { StatusDot, type DotTone } from "@/components/status-dot"
 
 /**
  * One interaction language for every switcher in the product.
@@ -18,130 +24,236 @@ import { cn } from "@/lib/utils"
  *
  * A control can be all three at once and still be readable, which is the test.
  *
- * These lived under `components/docker/` while Docker was the only section with
- * a switcher inside a panel. Five other sections had since grown one each, so
- * they are here instead.
- *
- * What is *not* here any more is the strip that switched between the pages of
- * a section. Six of them existed, one per section layout, and each said the
- * same thing the sidebar was saying two hundred pixels to the left. The rail
- * drills into a section now and lists its pages there, so a page is a page:
- * everything left in this file switches between views of one page, never
- * between pages.
+ * Everything in this file switches between views of one page, never between
+ * pages: the rail drills into a section and lists its pages there.
  */
+
+// 13px, the body size (§8): with the title at 24 the strip has a rank of its
+// own, and 12px chrome under a 24px title read as an afterthought. The 2px top
+// padding balances the 2px underline, so the label sits on the strip's centre
+// line with whatever else shares the strip. The underline is the brand blue:
+// the tab says which view you are looking at, which is what the hue is for.
+// The label stays ink — it is not a command. The ring is inset because the
+// strip scrolls, and a scroller clips a ring drawn outside it.
+const TAB_BASE =
+  "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 pt-0.5 text-body font-medium whitespace-nowrap transition-colors focus-ring-inset"
 
 /**
  * The underlined-tab look, for a switcher between views of the page you are
- * already on — the log console's live feed against its search, the packages
- * page's installed against its updates. Written once so "which one am I on" is
- * the same mark wherever it is asked.
+ * already on.
+ *
+ * @deprecated use `ViewTabs`, which draws the strip, the roles and the
+ * scrolling with it. The editor tabs (`database/query/tab-strip.tsx`) keep the
+ * look for a different control, and the wave-2 passes move the other callers.
  */
 export function tabClasses(selected: boolean | undefined, height: string) {
   return cn(
-    // 13px, the body size (§8). It was 12 while the page title was 20 and
-    // the strip sat within two pixels of the title above it and the panel
-    // titles below; with the title at 24 the strip has a rank of its own
-    // again, and 12px chrome under a 24px title read as an afterthought.
-    // The 2px top padding balances the 2px underline, so the label sits on the
-    // strip's centre line with whatever else shares the strip.
-    "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 pt-0.5 text-body font-medium whitespace-nowrap transition-colors",
+    TAB_BASE,
     height,
-    "focus-ring-inset",
-    // The underline is the brand blue: the tab says which view you are
-    // looking at, which is what the hue is for. The label stays ink — it is not
-    // a command.
     selected
-      ? "border-brand text-foreground"
+      ? // A count inside the chosen tab takes the label's ink, not the faint one.
+        "border-brand text-foreground [--count-ink:currentColor]"
       : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
   )
 }
 
-/**
- * A filter chip: which subset of the rows is shown.
- *
- * Squared rather than fully rounded, because a pill is the shape this product
- * reserves for nothing at all — see `components/tag.tsx`.
- *
- * Selected is `bg-accent` with a hairline, which is the same mark the terminal
- * rail puts on the active session and `ToggleGroup` puts on the pressed item.
- * It used to be a primary tint, so a row of filters and a row of toggles two
- * panels apart disagreed about what "chosen" looks like — and the primary tint
- * is the one thing on the page reserved for a *command*.
- *
- * At rest it has an edge, the outline every other control in the row has. A
- * chip that was bare text until it was chosen sat in the log pane's filter row
- * beside bordered fields and buttons, and read as a caption: "Errors 238" was
- * a word with a number, not a thing to press. Chosen, the edge steps up to
- * `--border-strong` under the accent ground, so a row of them reads chosen
- * against unchosen at a glance and not by comparing two greys.
- */
-export function FilterChip({
-  selected,
-  className,
-  ...props
-}: React.ComponentProps<"button"> & { selected?: boolean }) {
-  return (
-    <button
-      type="button"
-      aria-pressed={selected}
-      data-selected={selected || undefined}
-      className={cn(
-        "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-hint font-medium whitespace-nowrap transition-colors",
-        "focus-ring",
-        selected
-          ? "border-border-strong bg-accent text-foreground"
-          : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
-        className,
-      )}
-      {...props}
-    />
-  )
+// Keyed on Radix's own state, so a strip that stands inside a caller's `Tabs`
+// is drawn right without being told which tab is chosen.
+const TRIGGER = cn(
+  TAB_BASE,
+  "data-[state=active]:border-brand data-[state=active]:text-foreground data-[state=active]:[--count-ink:currentColor]",
+  "data-[state=inactive]:border-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:border-border data-[state=inactive]:hover:text-foreground",
+  "disabled:pointer-events-none disabled:text-faint",
+)
+
+const HEIGHT = { md: "h-10", sm: "h-9" } as const
+
+/** One view in the strip. */
+export type TabView<T extends string> = {
+  key: T
+  label: React.ReactNode
+  /** Beside the label; nothing at zero, so an empty view does not shout "0". */
+  count?: number
+  /** A mark that something in the view wants a look: an unsaved edit, a failure. */
+  dot?: { tone: DotTone; label: string }
+  disabled?: boolean
+}
+
+type Fade = "none" | "start" | "end" | "both"
+
+// A shade where the strip runs on past the edge, so a cut tab reads as more
+// rather than as a word cut short ('Stora', 'U'). Whole class names: Tailwind
+// reads the source.
+const FADE: Record<Fade, string | undefined> = {
+  none: undefined,
+  end: "[mask-image:linear-gradient(to_right,black_calc(100%-2rem),transparent)]",
+  start: "[mask-image:linear-gradient(to_left,black_calc(100%-2rem),transparent)]",
+  both: "[mask-image:linear-gradient(to_right,transparent,black_2rem,black_calc(100%-2rem),transparent)]",
+}
+
+// The room kept clear of the shade when the chosen tab is scrolled to, so it
+// lands in full ink rather than under the fade.
+const FADE_ROOM = 32
+
+function fadeOf(node: HTMLElement): Fade {
+  const before = node.scrollLeft > 1
+  const after = node.scrollLeft + node.clientWidth < node.scrollWidth - 1
+  return before && after ? "both" : before ? "start" : after ? "end" : "none"
+}
+
+/** Scrolls the strip sideways only: a strip below the fold must not move the page. */
+function reveal(list: HTMLElement, tab: HTMLElement) {
+  if (list.scrollWidth <= list.clientWidth) return
+  const box = list.getBoundingClientRect()
+  const at = tab.getBoundingClientRect()
+  if (at.left < box.left + FADE_ROOM) list.scrollLeft -= box.left + FADE_ROOM - at.left
+  else if (at.right > box.right - FADE_ROOM) list.scrollLeft += at.right - (box.right - FADE_ROOM)
+}
+
+type StripProps<T extends string> = {
+  /** The strip's accessible name: "Views of nginx.service". */
+  label: string
+  views: TabView<T>[]
+  /** The view on screen; the strip scrolls it into view when it changes. */
+  value: T
+  /** `md` is a page's strip (40px); `sm` a pane's or a workbench's (36px). */
+  size?: keyof typeof HEIGHT
+  /** The labels are names a machine wrote: units, keys, files. */
+  mono?: boolean
+  /** Hold the strip at the top of the scroller it is in. */
+  sticky?: boolean
+  /** Controls at the strip's right end, outside the tab list: a search, a verb. */
+  trailing?: React.ReactNode
+  /** Draw nothing when there is one view or none: one tab is a title, not a choice. */
+  hideWhenSingle?: boolean
+  className?: string
 }
 
 /**
- * A run of `FilterChip`s.
- *
- * On a phone the run scrolls sideways instead of wrapping: wrapped, a strip of
- * five chips broke into ragged lines with "Pending changes" alone on the last,
- * and three lines of filters pushed the list they filter down a screen. It
- * bleeds to the edges of the page's gutter so the chip cut off at the edge is
- * the affordance, as `ui/tabs` does, with no scrollbar to eat the strip's
- * height. The vertical step is room for the focus ring, which the scroller
- * would otherwise clip. From `sm` it wraps as a row of chips always has.
+ * The strip of a page's views, standing inside a `Tabs` the caller holds
+ * (`ui/tabs`), whose `TabsContent` are the panels. `ViewTabs` with
+ * `onValueChange` holds the `Tabs` itself.
  */
-export function ChipStrip({ className, ...props }: React.ComponentProps<"div">) {
+export function ViewTabList<T extends string>({
+  label,
+  views,
+  value,
+  size = "md",
+  mono,
+  sticky,
+  trailing,
+  hideWhenSingle,
+  className,
+}: StripProps<T>) {
+  const list = useRef<HTMLDivElement>(null)
+  const [fade, setFade] = useState<Fade>("none")
+
+  const measure = useCallback(() => {
+    const node = list.current
+    if (node) setFade(fadeOf(node))
+  }, [])
+
+  // Whether the strip overflows changes with the window, the labels and the
+  // counts, so it is measured whenever the strip changes size.
+  useLayoutEffect(() => {
+    const node = list.current
+    if (!node) return
+    measure()
+    const observer = new ResizeObserver(measure)
+    observer.observe(node)
+    for (const child of node.children) observer.observe(child)
+    return () => observer.disconnect()
+  }, [measure, views.length])
+
+  // The chosen tab is brought into view at mount and on every change: a
+  // `?tab=` link to the fifth view opened with it off the screen.
+  useLayoutEffect(() => {
+    const node = list.current
+    const tab = node?.querySelector<HTMLElement>('[role="tab"][data-state="active"]')
+    if (node && tab) {
+      reveal(node, tab)
+      setFade(fadeOf(node))
+    }
+  }, [value, views.length])
+
+  if (hideWhenSingle && views.length < 2) return null
+
   return (
     <div
+      data-slot="view-tabs"
       className={cn(
-        "flex min-w-0 [scrollbar-width:none] items-center gap-1.5 overflow-x-auto [&::-webkit-scrollbar]:hidden",
-        "max-sm:-mx-5 max-sm:-my-1 max-sm:px-5 max-sm:py-1",
-        "sm:flex-wrap sm:overflow-visible",
+        "flex min-w-0 shrink-0 items-stretch border-b border-hairline",
+        sticky && "sticky top-0 z-sticky [background-color:var(--panel-ground,var(--background))]",
         className,
       )}
-      {...props}
-    />
+    >
+      <TabsPrimitive.List
+        ref={list}
+        aria-label={label}
+        onScroll={measure}
+        className={cn(
+          "flex min-w-0 flex-1 [scrollbar-width:none] gap-1 overflow-x-auto [&::-webkit-scrollbar]:hidden",
+          FADE[fade],
+        )}
+      >
+        {views.map((view) => (
+          <TabsPrimitive.Trigger
+            key={view.key}
+            value={view.key}
+            disabled={view.disabled}
+            className={cn(TRIGGER, HEIGHT[size], mono && "font-mono")}
+          >
+            {view.label}
+            {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
+            {view.dot && (
+              <span title={view.dot.label} className="flex items-center">
+                <StatusDot tone={view.dot.tone} />
+                <span className="sr-only">, {view.dot.label}</span>
+              </span>
+            )}
+          </TabsPrimitive.Trigger>
+        ))}
+      </TabsPrimitive.List>
+      {trailing && <div className="flex shrink-0 items-center gap-1.5 pl-2">{trailing}</div>}
+    </div>
   )
 }
 
 /**
- * A count beside a chip's or a tab's label. Muted inside an unselected control
- * and inherited inside a selected one, so the number never competes with the
- * word — and plain tabular text rather than a second small container, because
- * a chip with a chip inside it is exactly the stacking this pass removed.
- * One step behind the word, and no more: at 60% of an unselected tab's muted
- * ink the count measured 3.4:1 at 10px, where WCAG AA asks 4.5:1. At 80% it
- * is 5.2:1 on the page and 4.9:1 on the faintest ground a tab sits on.
- * A chip that is a legend — the request log's status families — passes its
- * colour for the chosen state, so "5xx 13" says which thirteen.
+ * The underlined strip of a page's views, with real tab semantics: Radix Tabs,
+ * so the arrow keys move along it, Home and End reach its ends, and each tab
+ * names the panel it shows.
+ *
+ * Given `onValueChange` it holds the `Tabs` and its `children` are the panels
+ * (`TabsContent` from `ui/tabs`); without, it is the strip alone and stands
+ * inside the caller's `Tabs`. Pair it with `useViewTab` to keep the view in
+ * the address.
+ *
+ * The strip scrolls sideways when the views do not fit, shades the edge they
+ * run under, and brings the chosen tab into view. A strip that changes route
+ * is links, not tabs; a closable, renamable strip is the editor's `TabStrip`.
  */
-export function ChipCount({
+export function ViewTabs<T extends string>({
+  onValueChange,
   children,
-  className,
-}: {
-  children: React.ReactNode
-  className?: string
+  rootClassName,
+  ...strip
+}: StripProps<T> & {
+  onValueChange?: (value: T) => void
+  /** The panels, when the strip holds the `Tabs`. */
+  children?: React.ReactNode
+  /** The `Tabs` it holds: its place in the page's layout. */
+  rootClassName?: string
 }) {
+  if (!onValueChange) return <ViewTabList {...strip} />
   return (
-    <span className={cn("numeric text-micro tabular-nums opacity-80", className)}>{children}</span>
+    <TabsPrimitive.Root
+      value={strip.value}
+      onValueChange={(next) => onValueChange(next as T)}
+      className={cn("flex min-w-0 flex-col", rootClassName)}
+    >
+      <ViewTabList {...strip} />
+      {children}
+    </TabsPrimitive.Root>
   )
 }

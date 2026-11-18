@@ -18,7 +18,7 @@ import { Modal } from "@/components/modal"
 import { ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ChoiceCard } from "@/components/choice-card"
-import { GroupRule } from "@/components/flow"
+import { GroupRule } from "@/components/choice-row"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { AuthorMark } from "@/components/git/marks"
@@ -242,7 +242,7 @@ export function PromoteDialog({
                         <ReleaseRevision revision={release.sourceRevision} />
                         <AuthorMark name={commit?.author} />
                         {commit?.subject && (
-                          <span className="min-w-0 truncate text-foreground/80">
+                          <span className="min-w-0 truncate text-muted-foreground">
                             {commit.subject}
                           </span>
                         )}

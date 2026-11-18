@@ -15,7 +15,8 @@ import { Policy } from "@/components/account-link/policy"
 import { SharedFields } from "@/components/account-link/shared-fields"
 import { Activity, Keys, LinkActions, ScopeSection } from "@/components/account-link/status-panel"
 import { LogoGlyph } from "@/components/logo"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { Page, PageContext, PageState } from "@/components/page"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -64,7 +65,13 @@ export default function AccountLinkPage() {
   }, [state, owner])
 
   if (!status) {
-    return <PageState eyebrow="Settings" title="Connect" error={account.error} />
+    return (
+      <PageState
+        title="Connect"
+        error={account.error}
+        skeleton={<IdentityHeader loading logo={<SiteTile />} state />}
+      />
+    )
   }
 
   const site = siteHost(status.siteUrl)
@@ -72,18 +79,13 @@ export default function AccountLinkPage() {
   const scope = link?.scope ?? status.request?.scope ?? choice
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Settings" title="Connect" />
+    <Page rise>
+      <PageContext title="Connect" />
 
-      <HostIdentity
-        logo={
-          <span
-            aria-hidden
-            className="flex size-12 shrink-0 items-center justify-center rounded-xl border border-hairline bg-surface-sunken"
-          >
-            <LogoGlyph className="h-6 w-auto text-brand" />
-          </span>
-        }
+      {/* The Hub page's line: the state beside the site's name, as a project's
+          is, and the two things done to a link that exists at the far end. */}
+      <IdentityHeader
+        logo={<SiteTile />}
         title={
           // With linking off nothing here leads to the site: it is a name, not a destination.
           status.enabled ? (
@@ -101,19 +103,17 @@ export default function AccountLinkPage() {
             site
           )
         }
-        facts={<Facts status={status} />}
-        aside={
-          <span className="flex flex-wrap items-center gap-3">
-            <LinkState status={status} />
-            {link && (
-              <LinkActions
-                site={site}
-                owner={link.owner}
-                onSync={account.sync}
-                onUnlink={account.unlink}
-              />
-            )}
-          </span>
+        state={<LinkState status={status} />}
+        facts={linkFacts(status)}
+        command={
+          link ? (
+            <LinkActions
+              site={site}
+              owner={link.owner}
+              onSync={account.sync}
+              onUnlink={account.unlink}
+            />
+          ) : undefined
         }
       />
 
@@ -168,36 +168,39 @@ export default function AccountLinkPage() {
 /** Each section stands alone under a hairline, at the deploy settings pages' rhythm. */
 const BLOCK = "py-8 first:pt-4 last:pb-2"
 
-function Facts({ status }: { status: AccountLinkStatus }) {
-  if (!status.enabled) return <span>Turned off by JD_ACCOUNT_LINK</span>
+/** The site's tile, at the Hub's size: the J on a sunken square. */
+function SiteTile() {
+  return (
+    <span
+      aria-hidden
+      className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-hairline bg-surface-sunken"
+    >
+      <LogoGlyph className="h-5 w-auto text-brand" />
+    </span>
+  )
+}
+
+/** What the link is, after its state: the state itself is said once, beside the name. */
+function linkFacts(status: AccountLinkStatus) {
+  if (!status.enabled) return <Fact>turned off by JD_ACCOUNT_LINK</Fact>
   const link = status.state === "linked" ? status.link : undefined
   if (link) {
     return (
       <>
-        <span className="truncate">{link.owner}</span>
-        <FactDot />
-        <span>{scopeName(link.scope)} scope</span>
-        <FactDot />
-        <span>
+        <Fact className="truncate">{link.owner}</Fact>
+        <Fact>{scopeName(link.scope)} scope</Fact>
+        <Fact>
           linked {relativeTime(link.linkedAt)} by{" "}
           {link.linkedBy === "cli" ? "the terminal" : link.linkedBy}
-        </span>
+        </Fact>
       </>
     )
   }
-  return (
-    <>
-      <span>{status.state === "pending" ? "Waiting for approval" : "Not linked"}</span>
-      {status.fingerprint && (
-        <>
-          <FactDot />
-          <span>
-            this server <span className="font-mono text-foreground">{status.fingerprint}</span>
-          </span>
-        </>
-      )}
-    </>
-  )
+  return status.fingerprint ? (
+    <Fact>
+      this server <span className="font-mono text-foreground">{status.fingerprint}</span>
+    </Fact>
+  ) : null
 }
 
 /** The link's state, as the far end of the identity line. */

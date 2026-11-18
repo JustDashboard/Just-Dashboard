@@ -1,0 +1,17 @@
+const SWATCH = "size-2 rounded-[2px] bg-chart-1"
+
+export function Demo() {
+  return (
+    <div className="rounded-[inherit]">
+      <span className={SWATCH} />
+      <span className="rounded-[4px] border" />
+      <span className="rounded-tl-[0.25rem] first:rounded-t-[2px]" />
+      <span className="rounded-[0.625rem] p-[2px]" />
+      <span className="rounded-[0.875rem]" />
+      <span className="rounded-[1.125rem]" />
+      <span className="rounded-[3px]" />
+      <span className="rounded-[50%]" />
+      <span className="rounded-[12px] md:rounded-[6px]" />
+    </div>
+  )
+}

@@ -1,9 +1,10 @@
+import { grouped } from "@/lib/format"
 import type { LogLine, LogSource } from "@/lib/types"
-import { fieldsEqual, fieldsOf, highlightRanges, lineValue, type LogLevel } from "@/lib/log-filter"
-import { logLineKey } from "@/lib/log-line-key"
-import { READINGS_MINUTES, type ReadingFigure } from "@/lib/log-insights"
-import { eventMeta, lensFor, type LensReading, type LensView, type LogLens } from "@/lib/log-lenses"
-import { journalSource } from "@/lib/log-sources"
+import { fieldsEqual, fieldsOf, highlightRanges, lineValue, type LogLevel } from "@/lib/log/filter"
+import { logLineKey } from "@/lib/log/line-key"
+import { READINGS_MINUTES, type ReadingFigure } from "@/lib/log/insights"
+import { eventMeta, lensFor, type LensReading, type LensView, type LogLens } from "@/lib/log/lenses"
+import { journalSource } from "@/lib/log/sources"
 import type { LogFields, LogFilterState } from "@/components/logs/types"
 
 /*
@@ -115,8 +116,24 @@ export function readingShown(
   }
   return {
     value: figure.value,
-    text: `${figure.value.toLocaleString()}${figure.capped ? "+" : ""}`,
+    text: `${grouped(figure.value)}${figure.capped ? "+" : ""}`,
     decimals: 0,
+  }
+}
+
+/**
+ * How a lens reading with no look of its own is drawn as a line: in its tone
+ * once its figure is above zero, so the line that needs looking at is the
+ * amber or red one, and its window's shape on a series hue (§10: a danger
+ * reading's line is `--chart-3`, never the status red).
+ */
+export function readingLook(
+  reading: Pick<LensReading, "tone">,
+  value: number,
+): { tone?: LensReading["tone"]; hue: string } {
+  return {
+    tone: value > 0 ? reading.tone : undefined,
+    hue: reading.tone === "danger" ? "var(--chart-3)" : "var(--chart-1)",
   }
 }
 

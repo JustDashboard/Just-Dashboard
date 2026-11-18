@@ -1,13 +1,14 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useMemo } from "react"
 import { ClockRewind, FirewallCheck, Route, Servers, type Icon } from "@/components/icons"
 import { get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
-import { bytes, duration, plural, relativeTime } from "@/lib/format"
+import { clockAt, duration, plural, relativeTime } from "@/lib/format"
 import type { FirewallStatus, NetworkPath, Peer, PortRange } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { flowBytes, flowOwnerName, type FlowReport } from "@/lib/network-flows"
+import { flowOwnerName, type FlowReport } from "@/lib/network/flows"
 import {
   foldHistoricalFlows,
   hourBounds,
@@ -15,12 +16,12 @@ import {
   sourceCovers,
   type AddressBlock,
   type ConnectionDetail,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import { usePoll, type PollState } from "@/hooks/use-poll"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import { WireHost, WireMark } from "@/components/deploy/wire"
-import { useNow } from "@/components/deploy/vocabulary"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { WireHost, WireMark } from "@/components/wire/wire"
+import { useNow } from "@/hooks/use-now"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import {
   ProductGlyph,
@@ -29,7 +30,8 @@ import {
   processProduct,
 } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { toolHref } from "@/components/security/address-verbs"
 import {
@@ -39,7 +41,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { WireFlow, type WireLine } from "@/components/wire-flow"
+import { WireFlow, type WireLine } from "@/components/wire/wire-flow"
 import {
   beat,
   reached,
@@ -48,7 +50,7 @@ import {
   transportWords,
 } from "@/components/network/connections/model"
 import { HistoryOff } from "@/components/network/connections/recorded"
-import { Carried, PortLinks } from "@/components/network/connections/rows"
+import { PortLinks } from "@/components/network/connections/rows"
 
 const endpoint = (addr: string, port: number) =>
   addr.includes(":") ? `[${addr}]:${port}` : `${addr}:${port}`
@@ -232,7 +234,7 @@ export function AddressLive({
                 d && (
                   <span className="flex items-center gap-3 text-hint text-muted-foreground">
                     {/* What TCP carried over every socket of the address. */}
-                    {tcp.length > 0 && <Carried rx={bytes(rx)} tx={bytes(tx)} />}
+                    {tcp.length > 0 && <InOut rx={rx} tx={tx} unit="bytes" />}
                     <span className="numeric">{d.sockets.length}</span>
                   </span>
                 )
@@ -261,7 +263,7 @@ export function AddressLive({
                             {s.protocol === "udp" ? "no counters" : "—"}
                           </span>
                         ) : (
-                          <Carried rx={bytes(s.rxBytes)} tx={bytes(s.txBytes)} />
+                          <InOut rx={s.rxBytes} tx={s.txBytes} unit="bytes" />
                         )
                       }
                     />
@@ -294,7 +296,7 @@ export function AddressLive({
                       words={[
                         c.process || "owner unknown",
                         `open at least ${duration(c.observedSeconds)}`,
-                        `closed between ${new Date(c.lastSeen).toLocaleTimeString()} and ${new Date(c.goneBy).toLocaleTimeString()}`,
+                        `closed between ${clockAt(new Date(c.lastSeen))} and ${clockAt(new Date(c.goneBy))}`,
                       ]}
                     />
                   ))}
@@ -513,7 +515,7 @@ function Layers({
                     {/* The column the counters stand in is not there on a phone. */}
                     <span className="sm:hidden">
                       {" "}
-                      · TCP ↓ {flowBytes(retained.rxBytes)} ↑ {flowBytes(retained.txBytes)}
+                      · TCP <InOut rx={retained.rxBytes} tx={retained.txBytes} unit="bytes" plain />
                     </span>
                   </>
                 ) : (
@@ -523,9 +525,10 @@ function Layers({
             }
             trailing={
               retained && (
-                <Carried
-                  rx={flowBytes(retained.rxBytes)}
-                  tx={flowBytes(retained.txBytes)}
+                <InOut
+                  rx={retained.rxBytes}
+                  tx={retained.txBytes}
+                  unit="bytes"
                   className="max-sm:hidden"
                 />
               )
@@ -591,7 +594,7 @@ export function AddressPast({
         {report.data && !off && (
           <span className="flex items-center gap-3 text-hint text-muted-foreground">
             <span className="numeric">{plural(rows.length, "socket")}</span>
-            {folded && <Carried rx={flowBytes(folded.rxBytes)} tx={flowBytes(folded.txBytes)} />}
+            {folded && <InOut rx={folded.rxBytes} tx={folded.txBytes} unit="bytes" />}
           </span>
         )}
       </div>
@@ -630,7 +633,7 @@ export function AddressPast({
                   flowOwnerName(s.owner),
                   `seen ${relativeTime(row.firstSeen)} to ${relativeTime(row.lastSeen)}`,
                 ]}
-                carried={<Carried rx={flowBytes(row.rxBytes)} tx={flowBytes(row.txBytes)} />}
+                carried={<InOut rx={row.rxBytes} tx={row.txBytes} unit="bytes" />}
               />
             )
           })}

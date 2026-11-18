@@ -8,7 +8,7 @@ import {
   type EgressGroup,
   type EgressMemberView,
   type EgressPoint,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Notice } from "@/components/state"
@@ -48,44 +48,44 @@ export function EgressMembers({ group }: { group: EgressGroup }) {
           {advice}
         </Notice>
       )}
-      <Panel>
-        <PanelHeader
-          title="Members"
-          actions={
-            <span className="numeric text-hint text-muted-foreground">
-              every {egressDuration(group.thresholds.intervalSeconds)} · group table {group.table}
-            </span>
-          }
-        />
-        <PanelBody flush>
-          <div className="max-md:hidden">
-            <Table aria-label={`Members of ${group.name}`}>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Member</TableHead>
-                  <TableHead>State</TableHead>
-                  <TableHead className="text-right">Round trip</TableHead>
-                  <TableHead className="text-right">Loss</TableHead>
-                  <TableHead>Last {samples} samples</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {group.members.map((m) => (
-                  <MemberRow key={m.id} group={group} member={m} samples={samples} />
-                ))}
-              </TableBody>
-            </Table>
-          </div>
-          <ul
-            aria-label={`Members of ${group.name}`}
-            className="divide-y divide-hairline md:hidden"
-          >
-            {group.members.map((m) => (
-              <MemberItem key={m.id} group={group} member={m} samples={samples} />
-            ))}
-          </ul>
-        </PanelBody>
-      </Panel>
+      {/* The tab is already called Members: its first line says how they
+          are measured, and the table follows with no second title over it. */}
+      <div className="flex min-w-0 flex-col gap-2">
+        <p className="numeric text-hint text-muted-foreground">
+          Measured every {egressDuration(group.thresholds.intervalSeconds)} · group table{" "}
+          {group.table}
+        </p>
+        <Panel framed>
+          <PanelBody flush>
+            <div className="max-md:hidden">
+              <Table aria-label={`Members of ${group.name}`}>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Member</TableHead>
+                    <TableHead>State</TableHead>
+                    <TableHead className="text-right">Round trip</TableHead>
+                    <TableHead className="text-right">Loss</TableHead>
+                    <TableHead>Last {samples} samples</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {group.members.map((m) => (
+                    <MemberRow key={m.id} group={group} member={m} samples={samples} />
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+            <ul
+              aria-label={`Members of ${group.name}`}
+              className="divide-y divide-hairline md:hidden"
+            >
+              {group.members.map((m) => (
+                <MemberItem key={m.id} group={group} member={m} samples={samples} />
+              ))}
+            </ul>
+          </PanelBody>
+        </Panel>
+      </div>
       <Readiness group={group} />
       <Bindings group={group} />
       <HowItDecides group={group} />
@@ -242,7 +242,7 @@ function SampleStrip({ points }: { points: EgressPoint[] }) {
         <span
           key={p.at}
           title={`${new Date(p.at).toLocaleTimeString()} · ${p.good ? "good" : "bad"}${p.latencyMillis !== undefined ? ` · ${p.latencyMillis.toFixed(1)} ms` : ""} · loss ${Math.round(p.loss)}%`}
-          className={cn("h-full w-1 rounded-[1px]", p.good ? "bg-success/70" : "bg-destructive/80")}
+          className={cn("h-full w-1 rounded-xs", p.good ? "bg-success/70" : "bg-destructive/80")}
         />
       ))}
     </span>
@@ -251,13 +251,9 @@ function SampleStrip({ points }: { points: EgressPoint[] }) {
 
 function Readiness({ group }: { group: EgressGroup }) {
   const problems = group.readiness.filter((f) => f.level !== "ok")
-  if (problems.length === 0) {
-    return (
-      <p className="text-hint text-muted-foreground">
-        {group.readiness[0]?.text ?? "Readiness has not been read."}
-      </p>
-    )
-  }
+  // Nothing in the way is no news: the members' table already says each is
+  // up. Only what stands before relying on the paths is said.
+  if (problems.length === 0) return null
   return (
     <Notice
       tone={problems.some((f) => f.level === "error") ? "danger" : "warning"}

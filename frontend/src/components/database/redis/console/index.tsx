@@ -2,14 +2,11 @@
 
 import { useState } from "react"
 import { BookOpen, SidebarRightClose, SidebarRightOpen, Terminal, Trash } from "@/components/icons"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
-import { usePanelSize } from "@/lib/panel-size"
 import { forgetMemoryState, useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { PaneHeader } from "@/components/panel"
 import { PaneBar } from "@/components/phone-panes"
-import { ResizeHandle } from "@/components/resize-handle"
 import { EmptyState, Notice } from "@/components/state"
 import { tabClasses } from "@/components/tabs"
 import type { Verb } from "@/components/verbs"
@@ -22,9 +19,16 @@ import { CommandHelper } from "@/components/database/redis/console/helper"
 import { MonitorView } from "@/components/database/redis/console/monitor"
 import { PubSubView } from "@/components/database/redis/console/pubsub"
 import { DbPicker } from "@/components/database/redis/db-picker"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
-import { WORKBENCH_PAGE, WorkbenchFrame } from "@/components/database/workbench/chrome"
+import {
+  WORKBENCH_PAGE,
+  WorkbenchFrame,
+  WorkbenchSide,
+  sideVerbs,
+  useSideColumn,
+} from "@/components/database/workbench/chrome"
+import { useColumnWidth } from "@/hooks/use-column-width"
 
 const HELPER = { base: 320, min: 260, max: 520 }
 const NO_VERBS: Verb[] = []
@@ -47,7 +51,7 @@ export function RedisConsole() {
   const redis = useRedis()
   const { id, db, server, engine, param, select, canRun, admin } = redis
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const features = server.data?.features
 
   const views: { id: View; label: string }[] = [
@@ -63,15 +67,13 @@ export function RedisConsole() {
   const reference = usePoll((signal) => redisCommands(id, signal), 0, [id])
   const [line, setLine] = useState("")
 
-  const wide = useMediaQuery("(min-width: 1024px)")
+  // Every database workbench's rule for a side column (`useSideColumn`): the
+  // commands stand beside the console while the console keeps its room.
+  const [frame, frameWidth] = useColumnWidth<HTMLDivElement>()
+  const helper = useSideColumn("databases.redis.helper", frameWidth, HELPER)
   const [helperShown, setHelperShown] = useViewState(`databases.${id}.redis.helper`, true)
   const [helperOver, setHelperOver] = useState(false)
-  const helperVisible = view === "console" && (wide ? helperShown : helperOver)
-  const [helperWidth, setHelperWidth, resetHelperWidth] = usePanelSize(
-    "databases.redis.helper",
-    HELPER.base,
-  )
-  const helperPx = Math.min(Math.max(helperWidth, HELPER.min), HELPER.max)
+  const helperVisible = view === "console" && (helper.beside ? helperShown : helperOver)
 
   return (
     <SectionFrame section="query" className={WORKBENCH_PAGE}>
@@ -82,9 +84,9 @@ export function RedisConsole() {
         </Notice>
       )}
       <WorkbenchFrame
+        ref={frame}
         section="query"
         slot="redis-console"
-        style={{ "--jd-redis-helper": `${helperPx}px` } as React.CSSProperties}
         menu={
           view === "console"
             ? [
@@ -94,22 +96,19 @@ export function RedisConsole() {
                   icon: Trash,
                   run: () => forgetMemoryState(`databases.${id}.redis.console.log`),
                 },
-                ...(wide
-                  ? [
-                      {
-                        key: "helper",
-                        label: helperVisible ? "Hide the commands" : "Show the commands",
-                        icon: helperVisible ? SidebarRightClose : SidebarRightOpen,
-                        run: () => setHelperShown(!helperVisible),
-                      },
-                    ]
-                  : []),
+                // The commands stand at the right: the strip's icon says so.
+                ...sideVerbs(helper, helperVisible, "commands", () =>
+                  setHelperShown(!helperVisible),
+                ).map((verb) => ({
+                  ...verb,
+                  icon: helperVisible ? SidebarRightClose : SidebarRightOpen,
+                })),
               ]
             : NO_VERBS
         }
         bar={
           // The reference is the console's: the two feeds have no second pane.
-          !wide &&
+          !helper.beside &&
           view === "console" && (
             <PaneBar<"console" | "commands">
               label="Console"
@@ -174,28 +173,18 @@ export function RedisConsole() {
           )}
         </div>
         {helperVisible && (
-          <div className="relative flex shrink-0 border-hairline max-lg:absolute max-lg:inset-0 max-lg:z-20 lg:w-(--jd-redis-helper) lg:border-l">
-            <ResizeHandle
-              side="right"
-              label="Commands panel width"
-              value={helperPx}
-              min={HELPER.min}
-              max={HELPER.max}
-              onChange={(px, commit) => setHelperWidth(px, commit)}
-              onReset={resetHelperWidth}
-              className="absolute inset-y-0 -left-1 z-20"
-            />
+          <WorkbenchSide side="right" column={helper} label="Commands panel width">
             <CommandHelper
               reference={reference.data}
               error={reference.error}
               onRetry={reference.refresh}
               onInsert={(command) => {
                 setLine(accept(command))
-                if (!wide) setHelperOver(false)
+                if (!helper.beside) setHelperOver(false)
               }}
-              onClose={() => (wide ? setHelperShown(false) : setHelperOver(false))}
+              onClose={() => (helper.beside ? setHelperShown(false) : setHelperOver(false))}
             />
-          </div>
+          </WorkbenchSide>
         )}
       </WorkbenchFrame>
     </SectionFrame>

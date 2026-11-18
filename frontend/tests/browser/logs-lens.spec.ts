@@ -8,7 +8,7 @@ import { risen } from "./risen"
  * a record's continuation folded under it, a repeat counted rather than
  * printed, the lens's questions one press each and sent to the server, a line
  * opened where it is, and Insights ranking what the window adds up to. The
- * lens's own rules are unit-tested (`src/lib/log-lenses.test.js`,
+ * lens's own rules are unit-tested (`src/lib/log/lenses.test.js`,
  * `log-insights.test.js`); this checks what reaches the reader and what
  * reaches the server.
  */
@@ -203,7 +203,13 @@ test("Insights ranks the window's values and a press narrows it in place", async
   await expect(page.getByRole("heading", { name: "Events", exact: true })).toBeVisible()
   // Each as figures and shares rather than a bar per row, as the request
   // record's lists are; the events and the levels each a whole, in one strip.
-  await expect(page.locator("[data-slot=rank-list]")).toHaveCount(7)
+  // A group of one or two values is ranked lines too, not a framed table over a row (D7):
+  // every table left holds three rows or more.
+  await expect(page.locator("[data-slot=rank-list]")).toHaveCount(11)
+  for (const rows of await page
+    .locator("table")
+    .evaluateAll((tables) => tables.map((table) => table.querySelectorAll("tbody tr").length)))
+    expect(rows).toBeGreaterThanOrEqual(3)
   await expect(page.locator("[data-slot=bar-list]")).toHaveCount(0)
   await expect(page.locator("[data-slot=split-bar]")).toHaveCount(3)
   await expect(page.getByRole("heading", { name: "Query shape" })).toHaveCount(0)
@@ -283,8 +289,11 @@ test("a filter changes Insights' figures in place, and its tiles keep their line
     expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
   }
   // A list's figures end on its head's right edge.
-  const events = page.getByRole("heading", { name: "Events", exact: true }).locator("../..")
-  const head = await events.locator("h3").locator("..").boundingBox()
+  // The facet is a section under a plain section head; the head's right edge is the header's.
+  const events = page
+    .getByRole("heading", { name: "Events", exact: true })
+    .locator("xpath=ancestor::section[1]")
+  const head = await events.locator("header").first().boundingBox()
   const share = await events.locator("[data-slot=rank-share]").first().boundingBox()
   expect(Math.abs(share!.x + share!.width - (head!.x + head!.width))).toBeLessThanOrEqual(1)
 

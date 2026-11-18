@@ -6,6 +6,7 @@ import { ProductGlyph } from "@/components/product-logo"
 import { Well } from "@/components/panel"
 import { serviceLane } from "@/components/docker/stack-service-readings"
 import { diffHunks } from "@/components/docker/stack-views"
+import { DiffCount } from "@/components/diff-count"
 
 /**
  * A service named the way every view of the stack names it: its lane down
@@ -39,16 +40,6 @@ export function ServiceLabel({
       >
         {name}
       </span>
-    </span>
-  )
-}
-
-/** A count of added and removed lines, in the colours the lines are drawn in. */
-export function DiffCount({ added, removed }: { added: number; removed: number }) {
-  return (
-    <span className="numeric flex shrink-0 items-center gap-1.5 font-mono text-hint">
-      <span className="text-success">+{added}</span>
-      <span className="text-destructive">−{removed}</span>
     </span>
   )
 }

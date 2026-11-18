@@ -38,7 +38,7 @@ import type {
   DeploymentTriggerOutcome,
 } from "@/lib/types"
 import { ChoiceGrid, ProductCard } from "@/components/choice-card"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Disclosure,
   Field,
@@ -53,11 +53,11 @@ import { Modal } from "@/components/modal"
 import { OutcomeStrip } from "@/components/outcome-strip"
 import { Panel, Well } from "@/components/panel"
 import { ProductGlyph, ProductGlyphs, ProductLogo, hostProduct } from "@/components/product-logo"
-import { Row, RowList } from "@/components/row-list"
+import { Row, RowList, RowsSkeleton } from "@/components/row-list"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -70,8 +70,8 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Textarea } from "@/components/ui/textarea"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { SettingSection } from "@/components/settings/setting-card"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { humanize, isActiveRun } from "@/components/deploy/vocabulary"
 import { useProject } from "@/components/deploy/project-context"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
@@ -376,7 +376,7 @@ export function Webhooks({
     >
       <div ref={column} className="min-w-0">
         {triggers.loading && !triggers.data ? (
-          <LoadingRows rows={2} />
+          <ChoiceListSkeleton rows={2} />
         ) : triggers.error && !triggers.data ? (
           <ErrorState error={triggers.error} onRetry={triggers.refresh} />
         ) : list.length === 0 ? (
@@ -557,9 +557,11 @@ function WebhookCard({
       onSelect={onOpen}
       disabled={!onOpen}
       busy={Boolean(deploying)}
-      className={cn(!trigger.enabled && "opacity-80")}
+      // Disabled is said by its status and the name's muted ink (FND-07).
       leading={<TriggerMark trigger={trigger} />}
-      title={trigger.name}
+      title={
+        <span className={cn(!trigger.enabled && "text-muted-foreground")}>{trigger.name}</span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           {trigger.config.repository ? (
@@ -569,7 +571,7 @@ function WebhookCard({
           )}
           {trigger.config.ref && (
             <>
-              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <SourceBranch aria-hidden className="mx-1 glyph-inline size-3" />
               <span className="font-mono">{trigger.config.ref}</span>
             </>
           )}
@@ -762,9 +764,9 @@ function DeliveriesSheet({
     <SidePanel
       open={Boolean(trigger)}
       onOpenChange={(open) => !open && onClose()}
-      title={trigger ? `Deliveries · ${trigger.name}` : "Deliveries"}
+      title={trigger ? `${trigger.name} · history` : "History"}
       description="Recent events this webhook received and what happened to each."
-      width="md"
+      size="md"
       actions={
         trigger && <VerbBar verbs={verbs} menuLabel={`Actions for ${trigger.name} in its sheet`} />
       }
@@ -791,7 +793,7 @@ function DeliveriesSheet({
           {deliveries.error && !deliveries.data ? (
             <ErrorState error={deliveries.error} onRetry={deliveries.refresh} />
           ) : deliveries.loading && !deliveries.data ? (
-            <LoadingRows rows={4} />
+            <RowsSkeleton rows={4} />
           ) : log.length === 0 ? (
             <EmptyState
               icon={Inbox}
@@ -1111,7 +1113,7 @@ export function WebhookSheet({
           ? "Change what this webhook deploys and when."
           : "Add a sender that can start a deployment, or turn on pull request previews."
       }
-      width="md"
+      size="md"
       footer={
         created ? (
           <Button onClick={close}>Done</Button>
@@ -1431,7 +1433,7 @@ function TryAChange({
             >
               {current.matched ? (
                 <>
-                  <Check aria-hidden className="mr-1 inline size-3 align-[-1px]" />
+                  <Check aria-hidden className="mr-1 glyph-inline size-3" />
                   Would deploy
                 </>
               ) : (

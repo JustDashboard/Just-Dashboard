@@ -291,11 +291,12 @@ test("the ports page filters what it lists and names a database on a public addr
   await mockProxy(page, { included: true })
   await page.goto("/proxy/ports")
 
-  const table = page.getByRole("table")
-  await expect(table.getByText("PostgreSQL · Every interface")).toBeVisible()
+  // Ports is a list of socket cards now, not a table.
+  const sockets = page.locator("[data-slot='choice-list'][aria-label$='sockets']")
+  await expect(sockets.getByText("PostgreSQL · Every interface")).toBeVisible()
   await page.getByRole("button", { name: /^This server/ }).click()
-  await expect(table.getByText("node server.js")).toBeVisible()
-  await expect(table.getByText("nginx: master process")).toHaveCount(0)
+  await expect(sockets.getByText("node server.js")).toBeVisible()
+  await expect(sockets.getByText("nginx: master process")).toHaveCount(0)
   await page.getByPlaceholder("Port, process, user or address").fill("5432")
   // A search inside a filter that excludes the row finds nothing, honestly.
   await expect(page.getByText("No sockets match")).toBeVisible()
@@ -349,7 +350,7 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the expired one is first, saying so.
   await expect(installed.first()).toContainText("old.example.com")
-  await expect(row.getByText("expired", { exact: true })).toBeVisible()
+  await expect(row.getByText("Expired", { exact: true })).toBeVisible()
 })
 
 test("a stream is drawn as the service its port is", async ({ page }) => {

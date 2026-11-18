@@ -1,132 +1,19 @@
 "use client"
 
-import { useEffect, useRef, useState, type ReactNode } from "react"
-import { Clock, Inbox, LoaderCircle, Question, Slash, Warning } from "@/components/icons"
+import { useEffect, useRef, useState } from "react"
+import { Clock, Inbox, LockClosed, Question, Warning } from "@/components/icons"
 import { ApiError } from "@/lib/api"
 import { asSentence, plural, sentenceCase } from "@/lib/format"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
 import type { Tone } from "@/components/tone"
+import { absentFromError } from "@/components/missing-thing-model"
+// A cycle by design: `MissingOrError` there draws this, and this draws the
+// absence through `MissingScreen`. Both are read only while rendering, never
+// while the modules load, so either may load first.
+import { MissingScreen } from "@/components/missing-thing"
 
-export function Spinner({ className }: { className?: string }) {
-  return <LoaderCircle aria-hidden className={cn("size-4 animate-spin", className)} />
-}
-
-/**
- * Rows of skeleton. `hold` keeps what is written under them, and the blocks of
- * the page under the one they are in, off the page while they stand (`Hold`):
- * for a block with blocks under it whose answer is not the skeleton's height.
- */
-export function LoadingRows({
-  rows = 5,
-  className,
-  hold,
-}: {
-  rows?: number
-  className?: string
-  hold?: boolean
-}) {
-  return (
-    <>
-      <div className={cn("space-y-2", className)}>
-        {Array.from({ length: rows }).map((_, i) => (
-          <Skeleton key={i} className="h-9 w-full rounded-md" />
-        ))}
-      </div>
-      {hold && <Hold until={false} />}
-    </>
-  )
-}
-
-/** How long a block is held for the read above it: past this the page shows what it has. */
-export const HOLD_AT_MOST_MS = 4000
-
-/**
- * Holds what is written under it off the page until the read above it has had
- * its first answer, so that nothing already on the page moves when that answer
- * lands taller than its skeleton, or lands as a block that was not there.
- *
- *     {day.data && <DayReadings day={day.data} />}
- *     <Hold until={!day.loading} />
- *     <Panel>…</Panel>
- *
- * Its children are what stands there meanwhile, a skeleton, and go when it
- * lets go. What is held is mounted, so its own reads start with the page, and it is not
- * drawn (the rule beside `jd-rise` in globals.css). Put it after the block
- * that is still loading: in a page it holds every block of the page after the
- * one it stands in, and anywhere else what follows it in its own container.
- *
- * It lets go once and for good: a filter or a refresh that makes the read
- * above load again does not take the page under it away. It also lets go
- * after `HOLD_AT_MOST_MS`, because a read that hangs on a troubled host must
- * not keep the rest of the page from the person who came to look at it.
- */
-export function Hold({ until, children }: { until: boolean; children?: ReactNode }) {
-  const [open, setOpen] = useState(until)
-  if (until && !open) setOpen(true)
-  useEffect(() => {
-    if (open) return
-    const timer = setTimeout(() => setOpen(true), HOLD_AT_MOST_MS)
-    return () => clearTimeout(timer)
-  }, [open])
-  if (open) return null
-  return (
-    <>
-      {children}
-      <span data-hold="" hidden />
-    </>
-  )
-}
-
-/**
- * The skeleton for a panel that is about to hold a table.
- *
- * Its first row is heavier than the rest so the placeholder has the same
- * silhouette as the thing arriving — a header strip over rows — rather than
- * an undifferentiated stack of grey bars that jumps when the data lands.
- *
- * `plain` is the same silhouette with no frame, for a page whose blocks arrive
- * as plain panels (§2): a framed box that gives way to unframed rows is the
- * jump this placeholder exists to prevent, one edge later. Its title and rows
- * start on the page's own edge, where the plain block's will.
- *
- * `hold` is `LoadingRows`' own: what is under the panel waits for it.
- */
-export function LoadingPanel({
-  rows = 6,
-  plain,
-  className,
-  hold,
-}: {
-  rows?: number
-  plain?: boolean
-  className?: string
-  hold?: boolean
-}) {
-  const gutter = plain ? "px-0" : "px-5"
-  return (
-    <>
-      <div
-        className={cn("min-w-0 overflow-hidden", !plain && "rounded-xl border bg-card", className)}
-      >
-        <div className={cn("flex min-h-12 items-center border-b border-hairline py-3", gutter)}>
-          <Skeleton className="h-4 w-40" />
-        </div>
-        <div className="divide-y divide-hairline">
-          {Array.from({ length: rows }).map((_, i) => (
-            <div key={i} className={cn("flex items-center gap-3 py-3.5", gutter)}>
-              <Skeleton className="h-3.5 flex-1" style={{ maxWidth: `${34 + ((i * 13) % 26)}%` }} />
-              <Skeleton className="h-3.5 w-16" />
-              <Skeleton className="h-3.5 w-24" />
-            </div>
-          ))}
-        </div>
-      </div>
-      {hold && <Hold until={false} />}
-    </>
-  )
-}
+type Glyph = React.ComponentType<{ className?: string }>
 
 /**
  * "Nothing here" for a region that is already inside something — a rail's list
@@ -136,17 +23,59 @@ export function LoadingPanel({
  * already has a frame, so those places had each written their own sentence
  * instead: eleven of them, at four different sizes and five different paddings.
  * One sentence, centred in the space it was given.
+ *
+ * - `dense` is the size inside a rail or a picker, where the regular note's
+ *   48px of air above and below is most of what the rail shows: the hint
+ *   step, a third of the padding. The rails had five paddings between them.
+ * - `action` is the one way out, under the sentence: "Clear the search" for
+ *   a filter that matched nothing. A no-match line with no Clear left the
+ *   reader to find the field and empty it by hand.
+ * - `as` is the element: `li` for a note that stands in a list's place
+ *   inside the `<ul>`, `div` where the note sits in a block of its own.
  */
-export function EmptyNote({ className, ...props }: React.ComponentProps<"p">) {
+export function EmptyNote({
+  children,
+  action,
+  dense,
+  as: Element = "p",
+  className,
+  ...props
+}: React.HTMLAttributes<HTMLElement> & {
+  action?: { label: string; onClick: () => void }
+  dense?: boolean
+  as?: "p" | "li" | "div"
+}) {
   return (
-    <p
+    <Element
       data-slot="empty-note"
-      className={cn("px-3 py-6 text-center text-body text-muted-foreground", className)}
+      data-dense={dense ? "" : undefined}
+      className={cn(
+        "text-center text-muted-foreground",
+        dense ? "px-2 py-3 text-hint" : "px-3 py-6 text-body",
+        className,
+      )}
       {...props}
-    />
+    >
+      {children}
+      {action && (
+        <span className={cn("flex justify-center", dense ? "mt-1.5" : "mt-2")}>
+          <Button size="xs" variant="ghost" onClick={action.onClick}>
+            {action.label}
+          </Button>
+        </span>
+      )}
+    </Element>
   )
 }
 
+/**
+ * A list, a page or a section with nothing in it yet: the glyph, a title, a
+ * sentence and the verb that fills it.
+ *
+ * The glyph is drawn bare, at the height of the title's line: §14 took the
+ * 40px plate it stood on off every other surface, and here it was the last
+ * one, a box drawn inside the dashed box (PRM-21).
+ */
 export function EmptyState({
   title,
   description,
@@ -154,19 +83,19 @@ export function EmptyState({
   mark,
   action,
   className,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"div">, "title"> & {
   title: string
   description?: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
+  icon?: Glyph
   /**
-   * What the list would hold, drawn as itself in place of the glyph on its
-   * plate — the products a list of channels or credentials is built for, as
+   * What the list would hold, drawn as itself in place of the glyph — the
+   * products a list of channels or credentials is built for, as
    * `ProductLogos` (§14). An empty list that shows the Discord, Slack and
    * Telegram marks says what goes in it before the sentence under it does.
    */
   mark?: React.ReactNode
   action?: React.ReactNode
-  className?: string
 }) {
   return (
     <div
@@ -178,12 +107,9 @@ export function EmptyState({
         "in-data-[slot=flow-panel]:border-0",
         className,
       )}
+      {...props}
     >
-      {mark ?? (
-        <span className="flex size-10 items-center justify-center rounded-xl border border-hairline bg-surface-header text-muted-foreground">
-          <Icon className="size-4.5" />
-        </span>
-      )}
+      {mark ?? <Icon aria-hidden className="size-5 shrink-0 text-muted-foreground" />}
       <div className="space-y-1">
         <p className="text-body font-medium">{title}</p>
         {description && (
@@ -195,6 +121,53 @@ export function EmptyState({
       {action}
     </div>
   )
+}
+
+/**
+ * A section an account without the administrator role may not open: one
+ * phrase, "<What> needs an administrator", and one glyph, the lock. The pages
+ * said it three ways ("requires the admin capability", "needs the admin
+ * capability", "needs an administrator") under six glyphs.
+ *
+ * It is drawn under the page's own identity header, so the page keeps its
+ * shape for the reader who cannot use it. `why` is one sentence where the
+ * closed door is not obvious; `action` is the way out.
+ */
+export function NeedsAdmin({
+  what,
+  why,
+  icon = LockClosed,
+  action,
+  className,
+  ...props
+}: Omit<React.ComponentProps<"div">, "title"> & {
+  /** What is closed, as the sentence's subject: "Packet captures". */
+  what: string
+  why?: React.ReactNode
+  icon?: Glyph
+  action?: React.ReactNode
+}) {
+  return (
+    <EmptyState
+      data-slot="needs-admin"
+      icon={icon}
+      title={`${what} ${needsVerb(what)} an administrator`}
+      description={why}
+      action={action}
+      className={className}
+      {...props}
+    />
+  )
+}
+
+/**
+ * "need" after a plural subject the caller names ("Server diagnostics"), and
+ * "needs" after anything else. A subject is plural when its last word ends on
+ * an s that is not a double s ("Access" stays one thing).
+ */
+export function needsVerb(what: string): "need" | "needs" {
+  const last = what.trim().split(/\s+/).pop() ?? ""
+  return /[^s]s$/i.test(last) && !/(ss|us|is)$/i.test(last) ? "need" : "needs"
 }
 
 /** How long a throttled read waits to ask again when the answer did not say. */
@@ -210,10 +183,19 @@ const THROTTLE_GRACE_MS = 1_500
  * Renders a fetch failure.
  *
  * A module that is simply not present on this host (no Docker socket, no
- * systemd, no fail2ban) is shown as information rather than an error, because
- * on a given machine that is a normal state and not something broken. It is
- * the same block either way so the page's shape does not change with the
- * severity — only its colour and its title do.
+ * systemd, a program not installed, no proxy) is not a failure: it is drawn as
+ * the designed absence, `MissingThing` at block size, with the step that
+ * fixes it (`absentFromError`). It was a calm box reading "Not available on
+ * this host", which said less than the screen written for it.
+ *
+ * A read names itself with `what`: the headline is "Could not read <what>"
+ * where the server did not say what it was attempting, the server's words go
+ * under it as a sentence, and Try again is offered whether or not the server
+ * marked the failure worth repeating — a reader looking at a hole in the page
+ * has no other way to fill it than to reload everything around it. `every`
+ * says how often the page asks again by itself. A press stays pending until
+ * the read it started settles: a new failure is a new error, and a success
+ * takes this block away.
  *
  * Two more answers are things that happen, not things that broke, and are
  * drawn as calmly. An item that is not there (404): an old link to a project,
@@ -232,31 +214,30 @@ export function ErrorState({
   className,
   onRetry,
   retryable,
-}: {
+  what,
+  every,
+  ...props
+}: Omit<React.ComponentProps<"div">, "children"> & {
   error: Error
-  className?: string
-  /** Offered only when the server said the failure is worth trying again. */
+  /**
+   * Offered when the server said the failure is worth trying again, when the
+   * read names itself with `what`, or when `retryable` says so.
+   */
   onRetry?: () => void
   /** Safe read operations can explicitly offer another attempt after transport failure. */
   retryable?: boolean
+  /** What the block would have shown, for the headline: "the busiest statements". */
+  what?: string
+  /** How often the page asks again by itself: "30 seconds". */
+  every?: string
 }) {
   const api = error instanceof ApiError ? error : undefined
-  const unavailable =
-    api?.code === "docker_unavailable" ||
-    api?.code === "not_installed" ||
-    api?.code === "no_proxy" ||
-    api?.code === "terminal_disabled"
-  const missing = !unavailable && api?.status === 404
-  const throttled = !unavailable && api?.status === 429
-  const kind = unavailable
-    ? "unavailable"
-    : missing
-      ? "missing"
-      : throttled
-        ? "throttled"
-        : "failed"
+  const absent = absentFromError(error)
+  const missing = !absent && api?.status === 404
+  const throttled = !absent && api?.status === 429
+  const kind = missing ? "missing" : throttled ? "throttled" : "failed"
   const calm = kind !== "failed"
-  const Glyph = unavailable ? Slash : missing ? Question : throttled ? Clock : Warning
+  const Glyph = missing ? Question : throttled ? Clock : Warning
 
   // The pause ends by itself. The latest `onRetry` is kept beside the timer so
   // that a parent drawing again does not start the wait over.
@@ -271,11 +252,43 @@ export function ErrorState({
     return () => clearTimeout(timer)
   }, [throttled, wait, error])
 
+  const [asked, setAsked] = useState<Error>()
+  const offered =
+    onRetry !== undefined &&
+    (throttled || (retryable ?? (what !== undefined || api?.retryable === true)))
+  const again = offered && (
+    <Button
+      size={absent ? "sm" : "xs"}
+      variant="outline"
+      pending={asked === error}
+      onClick={() => {
+        setAsked(error)
+        onRetry()
+      }}
+    >
+      Try again
+    </Button>
+  )
+
+  if (absent) {
+    return <MissingScreen missing={absent} size="block" retry={again} className={className} />
+  }
+
+  const headline =
+    api?.operation && api?.resource
+      ? `Could not ${api.operation} ${api.resource}`
+      : what
+        ? `Could not read ${what}`
+        : api?.message
+          ? sentenceCase(api.message)
+          : "Something went wrong"
+
   return (
     <div
       role="alert"
       data-slot="error-state"
       data-kind={kind}
+      {...props}
       className={cn(
         // A notice's anatomy (§14): the fence step, and the glyph on the
         // banner's own ground — the tinted plate it stood on was a fourth
@@ -299,16 +312,8 @@ export function ErrorState({
           is shown — and the subsystem's own words go behind a disclosure so
           they are available without being the first thing read.
         */}
-        <p className="text-body font-medium">
-          {unavailable
-            ? "Not available on this host"
-            : api?.operation && api?.resource
-              ? `Could not ${api.operation} ${api.resource}`
-              : api?.message
-                ? sentenceCase(api.message)
-                : "Something went wrong"}
-        </p>
-        {(api?.operation || !api) && error.message && (
+        <p className="text-body font-medium">{headline}</p>
+        {(api?.operation || !api || what) && error.message && (
           <p className="text-xs leading-relaxed break-words text-muted-foreground">
             {asSentence(error.message)}
           </p>
@@ -341,10 +346,11 @@ export function ErrorState({
               </pre>
             </details>
           )}
-          {onRetry && (throttled || (retryable ?? api?.retryable)) && (
-            <Button size="xs" variant="outline" onClick={onRetry}>
-              Try again
-            </Button>
+          {again}
+          {again && every && !throttled && (
+            <span className="text-hint text-muted-foreground">
+              It is asked again by itself every {every}.
+            </span>
           )}
         </div>
       </div>
@@ -369,22 +375,32 @@ export function ErrorState({
  * at the size of the title's own line, and `rounded-lg` puts the banner on
  * §9's fence step beside `Group`, which is what it is, rather than on the
  * block step beside `Panel`, which it is not.
+ *
+ * `live` makes the banner its own live region — `status` for news that can
+ * wait for a pause, `alert` for a failure the reader has to hear now — so a
+ * caller no longer wraps it in a `<div role="alert">` or puts a role inside
+ * its title. Other props reach the root, which carries `data-slot="notice"`.
  */
 export function Notice({
   title,
   icon: Icon,
   tone = "default",
+  live,
   children,
   className,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"div">, "title"> & {
   title: React.ReactNode
-  icon?: React.ComponentType<{ className?: string }>
+  icon?: Glyph
   tone?: Tone
-  children?: React.ReactNode
-  className?: string
+  live?: "status" | "alert"
 }) {
   return (
     <div
+      role={live}
+      data-slot="notice"
+      data-tone={tone}
+      {...props}
       className={cn(
         "flex min-w-0 items-start gap-2.5 rounded-lg border p-3",
         tone === "default" && "border-hairline bg-card",

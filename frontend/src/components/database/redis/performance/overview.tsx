@@ -4,12 +4,13 @@ import { useMemo } from "react"
 import Link from "next/link"
 import { bytes, duration, rate, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import { ChartReadings, SeriesReading } from "@/components/metrics/chart-reading"
 import type { Series } from "@/components/metrics/metric-chart"
-import { RowLink } from "@/components/page"
+import { RowLink } from "@/components/row-link"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import {
   Table,
   TableBody,
@@ -24,7 +25,7 @@ import {
   perSecond,
   type StatRow,
 } from "@/components/database/redis/performance/samples"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
 // Module constants: `ChartPanel` is memoised on its props, and a series or a

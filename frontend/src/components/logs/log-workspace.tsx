@@ -14,7 +14,7 @@ import {
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { errorMessage, get } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { grouped, localInputValue, plural } from "@/lib/format"
 import type {
   LogLine,
   LogRetention,
@@ -32,9 +32,9 @@ import {
   isFilterActive,
   resolveRange,
   TIME_RANGES,
-} from "@/lib/log-filter"
-import { LOG_FIELDS } from "@/lib/log-fields"
-import { STACK_LENS, lensFor, type LogLens } from "@/lib/log-lenses"
+} from "@/lib/log/filter"
+import { LOG_FIELDS } from "@/lib/log/fields"
+import { STACK_LENS, lensFor, type LogLens } from "@/lib/log/lenses"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import type { Tone } from "@/components/tone"
 import type { Verb } from "@/components/verbs"
@@ -55,9 +55,11 @@ import { oneService, unitJournalLens } from "@/components/logs/logs-model"
 import { RetentionNote } from "@/components/logs/retention-note"
 import { resumeFrom, unseen, type Resume } from "@/components/logs/resume"
 import { TimeWindow } from "@/components/logs/time-window"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Pane } from "@/components/panel"
+import { useDebounced } from "@/hooks/use-debounced"
 
 /** How many lines the live pane holds before the oldest fall off the top. */
 const LIVE_BUFFER = 4000
@@ -67,12 +69,6 @@ const TAIL_LINES = 500
 
 /** The most keys one search may rank (`facets=`), the server's limit. */
 const FACET_LIMIT = 12
-
-/** datetime-local wants the browser's own clock, not an ISO string in UTC. */
-function toLocalInput(date: Date) {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 23)
-}
 
 /** The presets the time window offers; a custom span is the popover's own fields. */
 const WINDOW_PRESETS = TIME_RANGES.filter((r) => r.id !== "custom")
@@ -367,7 +363,11 @@ export function LogWorkspace(props: WorkspaceProps) {
   }
   const pickSpan = (from: Date, to: Date) => {
     props.onCustomRange(from, to)
-    const at = { range: "custom" as const, since: toLocalInput(from), until: toLocalInput(to) }
+    const at = {
+      range: "custom" as const,
+      since: localInputValue(from),
+      until: localInputValue(to),
+    }
     const left = leaveLive()
     const target = left ? windowTarget : mode
     if (target === "search") search.run(at)
@@ -559,7 +559,7 @@ export function LogWorkspace(props: WorkspaceProps) {
                     v.countTone === "warning" && "text-warning opacity-100",
                   )}
                 >
-                  {v.count.toLocaleString()}
+                  {grouped(v.count)}
                 </ChipCount>
               )}
             </button>
@@ -680,7 +680,11 @@ export function LogWorkspace(props: WorkspaceProps) {
               lens={lensId}
               onZoom={(from, to) => {
                 props.onCustomRange(from, to)
-                search.run({ range: "custom", since: toLocalInput(from), until: toLocalInput(to) })
+                search.run({
+                  range: "custom",
+                  since: localInputValue(from),
+                  until: localInputValue(to),
+                })
               }}
             />
           )}
@@ -775,19 +779,6 @@ function requirementOf(lens: LogLens | undefined, filter: LogFilterState) {
     (view) =>
       view.requires && Object.keys(fields).length > 0 && fieldsEqual(fields, view.fields ?? {}),
   )?.requires
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [settled, setSettled] = useState(value)
-  const key = JSON.stringify(value)
-  useEffect(() => {
-    const timer = setTimeout(() => setSettled(value), delay)
-    return () => clearTimeout(timer)
-    // The value is an object rebuilt on every keystroke, so the identity is
-    // useless as a dependency and its content is what actually changed.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [key, delay])
-  return settled
 }
 
 /**
@@ -1077,8 +1068,8 @@ function SearchSummary({ result, loading }: { result: LogSearchResult | null; lo
   if (!result) return <span className="shrink-0 pl-1 text-hint text-muted-foreground">History</span>
   return (
     <span className="numeric shrink-0 pl-1 text-hint whitespace-nowrap text-muted-foreground">
-      <span className="font-medium text-foreground">{result.matched.toLocaleString()}</span>{" "}
-      {result.matched === 1 ? "match" : "matches"} in {result.scanned.toLocaleString()} lines ·{" "}
+      <span className="font-medium text-foreground">{grouped(result.matched)}</span>{" "}
+      {result.matched === 1 ? "match" : "matches"} in {grouped(result.scanned)} lines ·{" "}
       {result.tookMillis}ms
     </span>
   )
@@ -1113,7 +1104,7 @@ function SearchNotes({ result }: { result: LogSearchResult }) {
   const notes: string[] = []
   if (result.truncated) {
     notes.push(
-      `Showing the most recent ${result.lines.length.toLocaleString()} of ${result.matched.toLocaleString()} matches — narrow the window to see the rest.`,
+      `Showing the most recent ${grouped(result.lines.length)} of ${grouped(result.matched)} matches — narrow the window to see the rest.`,
     )
   }
   if (!result.complete) {
@@ -1131,8 +1122,7 @@ function SearchNotes({ result }: { result: LogSearchResult }) {
         files.map((file) => (
           <span key={file.path} className="numeric" title={file.path}>
             {file.name}
-            {file.archive && " (archive)"}:{" "}
-            {file.error ?? `${file.matched.toLocaleString()} matched`}
+            {file.archive && " (archive)"}: {file.error ?? `${grouped(file.matched)} matched`}
           </span>
         ))}
     </>
@@ -1303,8 +1293,8 @@ function SearchEmpty({
       title="No matches in that window"
       description={
         requirement
-          ? `Scanned ${result.scanned.toLocaleString()} lines. These lines are written only when ${requirement} is set on the server.`
-          : `Scanned ${result.scanned.toLocaleString()} lines in ${result.tookMillis}ms. Widen the window, relax the level filter, or look further back.`
+          ? `Scanned ${grouped(result.scanned)} lines. These lines are written only when ${requirement} is set on the server.`
+          : `Scanned ${grouped(result.scanned)} lines in ${result.tookMillis}ms. Widen the window, relax the level filter, or look further back.`
       }
       action={
         hasArchives && !archives ? (

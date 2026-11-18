@@ -166,9 +166,8 @@ test("an open pull request is checked out from the Git tab to try it", async ({ 
   await expect(current).toContainText("checked out")
   await expect(current.getByRole("button", { name: "Check out" })).toHaveCount(0)
   await expect(list.locator('[data-pull="141"]')).toContainText("draft")
-  await expect(
-    list.locator('[data-pull="141"]').getByRole("img", { name: "Checks failed" }),
-  ).toBeVisible()
+  // Git's own checks mark: the cross, with its word said to a screen reader.
+  await expect(list.locator('[data-pull="141"]')).toContainText("checks failed")
   await toolsEvidence(page, "terminal-git-pull-requests.png")
 
   await list.locator('[data-pull="144"]').getByRole("button", { name: "Check out" }).click()
@@ -295,8 +294,11 @@ test("on a phone Files and Git are stops on the bar, with the changed files coun
   await mockWorkbench(page, "files")
   await page.goto("/terminal")
   const bar = page.getByRole("navigation", { name: "Terminal" })
-  const git = bar.getByRole("tab", { name: "Git" })
-  await expect(bar.getByRole("tab", { name: "Terminal" })).toHaveAttribute("aria-selected", "true")
+  const git = bar.getByRole("button", { name: "Git" })
+  await expect(bar.getByRole("button", { name: "Terminal" })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
   await page.waitForTimeout(500)
   expect(asked).toEqual([])
@@ -309,10 +311,14 @@ test("on a phone Files and Git are stops on the bar, with the changed files coun
   await expect(git).toHaveAttribute("aria-description", "4")
   await expect(page.getByRole("link", { name: "Open in Git" })).toBeVisible()
   // The bar says which half is up; the column's own strip would say it twice.
-  await expect(page.getByRole("button", { name: "Files", exact: true })).toBeHidden()
+  // The bar's stop is a button too, so the one Files button shown is the bar's.
+  await expect(
+    page.getByRole("button", { name: "Files", exact: true }).filter({ visible: true }),
+  ).toHaveCount(1)
+  await expect(bar.getByRole("button", { name: "Files", exact: true })).toBeVisible()
 
-  await bar.getByRole("tab", { name: "Files" }).click()
-  await expect(bar.getByRole("tab", { name: "Files" })).toHaveAttribute("aria-selected", "true")
+  await bar.getByRole("button", { name: "Files" }).click()
+  await expect(bar.getByRole("button", { name: "Files" })).toHaveAttribute("aria-current", "page")
   await page
     .getByRole("button", { name: /README\.md/ })
     .first()
@@ -325,7 +331,7 @@ test("on a phone Files and Git are stops on the bar, with the changed files coun
   await expect(page.getByRole("group", { name: "Git view" })).toBeVisible()
 
   // Back at the shell the count stays on the bar.
-  await bar.getByRole("tab", { name: "Terminal" }).click()
+  await bar.getByRole("button", { name: "Terminal" }).click()
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
   await expect(git).toHaveAttribute("aria-description", "4")
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)

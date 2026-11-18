@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useSyncExternalStore } from "react"
 import { appendLive, CONTAINER_STALE_MS } from "@/lib/container-usage"
-import type { ContainerRow } from "@/lib/metrics-range"
+import type { ContainerRow } from "@/lib/metrics/range"
 import type { ContainerStats } from "@/lib/types"
 import { useSocket, type SocketState } from "@/hooks/use-socket"
 

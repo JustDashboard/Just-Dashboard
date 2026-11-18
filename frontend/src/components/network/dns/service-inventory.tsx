@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState, type ReactNode } from "react"
 import { useAuth } from "@/hooks/use-auth"
 import { errorMessage, post } from "@/lib/api"
+import { dayMinuteAt } from "@/lib/format"
 import {
   DNS_SERVICE_BASE,
   readDNSChange,
@@ -12,11 +13,12 @@ import {
   type DNSNativeReading,
   type DNSServiceChange,
   type DNSServiceView,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
+import { Explain } from "@/components/explain"
 import { Field, OptionRow } from "@/components/form"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -65,6 +67,32 @@ function Reading({ label, value }: { label: string; value: DNSNativeReading }) {
       <p className="text-hint break-words text-muted-foreground">Basis: {value.basis}</p>
       <p className="break-words text-muted-foreground">{value.summary}</p>
     </div>
+  )
+}
+
+/**
+ * One fact of the Overview: what it is on the left, what it says on the
+ * right, as a line of words rather than "Label: value".
+ */
+function Line({ label, children }: { label: string; children: ReactNode }) {
+  return (
+    <div className="grid min-w-0 gap-x-4 gap-y-0.5 py-2 text-body sm:grid-cols-[10rem_minmax(0,1fr)]">
+      <dt className="text-muted-foreground">{label}</dt>
+      <dd className="min-w-0 break-words">{children}</dd>
+    </div>
+  )
+}
+
+/** A native reading as a line: its state, what it says, and what it rests on behind a tip. */
+function ReadingFact({ label, value }: { label: string; value: DNSNativeReading }) {
+  return (
+    <Line label={label}>
+      <span className="inline-flex items-center gap-1.5">
+        <span className="font-medium">{value.state}</span>
+        <Explain label={`What the ${label.toLowerCase()} reading rests on`}>{value.basis}</Explain>
+      </span>
+      <span className="block text-hint text-muted-foreground">{value.summary}</span>
+    </Line>
   )
 }
 
@@ -117,7 +145,7 @@ function Groups({ groups }: { groups: DNSNativeGroup[] }) {
       ))}
     </ul>
   ) : (
-    <p className="text-body text-muted-foreground">No group rows in this native reading.</p>
+    <EmptyNote>No group rows in this native reading.</EmptyNote>
   )
 }
 /** The views of an engine's page that are read straight from its native snapshot. */
@@ -151,30 +179,30 @@ export function DNSEngineReadings({
     <div className="flex min-w-0 flex-col gap-8" aria-label="Native DNS service inventory">
       {tab === "overview" && (
         <>
-          <InventorySection title="Native owner and transport">
-            <p className="text-body break-words">
-              Connection: {view.connection.ownership} · generation {view.connection.generation}
-            </p>
-            <p className="text-hint text-muted-foreground">
-              Native version {snapshot.version || "Unknown"} · observed{" "}
-              <time dateTime={snapshot.observedAt}>
-                {new Date(snapshot.observedAt).toLocaleString()}
-              </time>
-            </p>
-            <p className="text-body break-words">
-              Roles: {snapshot.roles.join(" · ") || "No roles declared"}
-            </p>
-            <Reading label="Runtime" value={snapshot.runtime} />
-            <Reading label="Transport" value={snapshot.transport} />
-            {snapshot.process && (
-              <p className="text-body break-words">
-                Native PID {snapshot.process.pid} · startup interval{" "}
-                {new Date(snapshot.process.startedAt).toLocaleString()} →{" "}
-                {new Date(snapshot.process.startedBefore).toLocaleString()}
-              </p>
-            )}
+          <InventorySection title="Owner and transport">
+            <dl className="min-w-0 divide-y divide-hairline">
+              <Line label="Connection">
+                {view.connection.ownership}, generation {view.connection.generation}
+              </Line>
+              <Line label="Version">
+                {snapshot.version || "not said"}, read{" "}
+                <time dateTime={snapshot.observedAt}>
+                  {dayMinuteAt(new Date(snapshot.observedAt))}
+                </time>
+              </Line>
+              <Line label="Roles">{snapshot.roles.join(", ") || "none declared"}</Line>
+              <ReadingFact label="Runtime" value={snapshot.runtime} />
+              <ReadingFact label="Transport" value={snapshot.transport} />
+              {snapshot.process && (
+                <Line label="Process">
+                  PID {snapshot.process.pid}, started between{" "}
+                  {dayMinuteAt(new Date(snapshot.process.startedAt))} and{" "}
+                  {dayMinuteAt(new Date(snapshot.process.startedBefore))}
+                </Line>
+              )}
+            </dl>
           </InventorySection>
-          <InventorySection title="Configured listeners" count={snapshot.listeners.length}>
+          <InventorySection title="Listeners" count={snapshot.listeners.length}>
             <ul className="min-w-0 divide-y divide-hairline">
               {snapshot.listeners.map((listener, index) => (
                 <li key={index} className="min-w-0 py-3 text-body">
@@ -194,28 +222,30 @@ export function DNSEngineReadings({
               </p>
             )}
           </InventorySection>
-          <InventorySection title="Native upstreams" count={snapshot.upstreams.length}>
-            <p className="text-body">
-              Native upstream protocol: {snapshot.upstreamProtocol || "Unspecified"}
-            </p>
+          <InventorySection title="Upstreams" count={snapshot.upstreams.length}>
+            <dl className="min-w-0 divide-y divide-hairline">
+              <Line label="Protocol">{snapshot.upstreamProtocol?.toUpperCase() || "not said"}</Line>
+              <Line label="Protection">
+                {snapshot.protection ? "on" : "off"}
+                {snapshot.protectionTemporary && ", for now"}
+              </Line>
+            </dl>
             <Values
               values={snapshot.upstreams}
               empty="No upstream entries in this native reading."
             />
-            <p className="text-body">
-              Native protection {snapshot.protection ? "enabled" : "disabled"}
-              {snapshot.protectionTemporary && " · temporary setting"}
-            </p>
           </InventorySection>
-          <InventorySection title="Native limitations" count={snapshot.limitations.length}>
-            <ul className="min-w-0 list-inside list-disc space-y-2 text-body text-muted-foreground">
-              {snapshot.limitations.map((limitation, index) => (
-                <li key={index} className="break-words">
-                  {limitation}
-                </li>
-              ))}
-            </ul>
-          </InventorySection>
+          {snapshot.limitations.length > 0 && (
+            <InventorySection title="Limitations" count={snapshot.limitations.length}>
+              <ul className="min-w-0 divide-y divide-hairline text-body text-muted-foreground">
+                {snapshot.limitations.map((limitation, index) => (
+                  <li key={index} className="py-2 break-words">
+                    {limitation}
+                  </li>
+                ))}
+              </ul>
+            </InventorySection>
+          )}
         </>
       )}
       {tab === "clients" && (

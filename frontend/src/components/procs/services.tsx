@@ -8,15 +8,19 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
-import { HUE } from "@/components/overview/readings"
-import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { IdentityHeader, platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { HUE } from "@/components/live-figure"
+import { Page, PageContext } from "@/components/page"
+import { RowLink } from "@/components/row-link"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductLogo, platformProduct, unitProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, LoadingPanel } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { EmptyState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
@@ -247,10 +251,10 @@ export function Services() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         {header}
 
-        <HostIdentity
+        <IdentityHeader
           mark={platformProduct(host?.platform)}
           fallback={Servers}
           title={host?.hostname ?? "Services"}
@@ -259,68 +263,60 @@ export function Services() {
               {/* The host's facts arrive on their own read, and an install
                   that cannot say its distribution still lists its services. */}
               {host?.platform && (
-                <>
-                  <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-                  <FactDot />
-                </>
+                <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
               )}
-              {version && (
-                <>
-                  <span>systemd {version}</span>
-                  <FactDot />
-                </>
-              )}
-              <span className="numeric">
+              {version && <Fact>systemd {version}</Fact>}
+              <Fact className="numeric">
                 {counts.bucket.active} of {plural(installed.length, "service")} active
-              </span>
-              <FactDot />
-              <span className="numeric">{counts.boot.enabled ?? 0} start on boot</span>
+              </Fact>
+              <Fact className="numeric">{counts.boot.enabled ?? 0} start on boot</Fact>
               {manager?.bootedAt && (
-                <>
-                  <FactDot />
-                  <span
-                    className="numeric"
-                    title={new Date(manager.bootedAt * 1000).toLocaleString()}
-                  >
-                    booted {ago(manager.bootedAt, now)}
-                  </span>
-                </>
+                <Fact
+                  className="numeric"
+                  title={new Date(manager.bootedAt * 1000).toLocaleString()}
+                >
+                  booted {ago(manager.bootedAt, now)}
+                </Fact>
               )}
             </>
           }
-          aside={
-            <div className="flex flex-wrap items-center gap-3">
-              {failed > 0 ? (
-                <button
-                  type="button"
-                  aria-pressed={state === "failed"}
-                  onClick={() => setState(state === "failed" ? "" : "failed")}
-                  className="rounded-md px-1.5 py-1 focus-ring transition-colors hover:bg-row-hover"
+          // The verdict is the page's state, beside its name, as Docker's
+          // pages say theirs; the right end is the page's command. It stood
+          // at the far right beside Reload unit files.
+          state={
+            failed > 0 ? (
+              <button
+                type="button"
+                aria-pressed={state === "failed"}
+                onClick={() => setState(state === "failed" ? "" : "failed")}
+                className="-mx-1.5 rounded-md px-1.5 py-0.5 focus-ring transition-colors hover:bg-row-hover"
+              >
+                <Status tone="danger" label={`${plural(failed, "service")} failed`} />
+              </button>
+            ) : restarting > 0 ? (
+              <Status tone="warning" label={`${plural(restarting, "service")} restarting`} />
+            ) : (
+              <Status tone="running" label="Nothing failed" />
+            )
+          }
+          command={
+            <span className="flex items-center gap-1">
+              {can("system.admin") && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={reloading}
+                  title="systemctl daemon-reload: re-read every unit file after editing one"
+                  onClick={() => void daemonReload()}
                 >
-                  <Status tone="danger" label={`${plural(failed, "service")} failed`} />
-                </button>
-              ) : restarting > 0 ? (
-                <Status tone="warning" label={`${plural(restarting, "service")} restarting`} />
-              ) : (
-                <Status tone="running" label="Nothing failed" />
+                  <RefreshClockwise className="size-3.5" />
+                  {reloading ? "Reloading…" : "Reload unit files"}
+                </Button>
               )}
-              <div className="flex items-center gap-1">
-                {can("system.admin") && (
-                  <Button
-                    size="xs"
-                    variant="ghost"
-                    className="text-muted-foreground"
-                    disabled={reloading}
-                    title="systemctl daemon-reload: re-read every unit file after editing one"
-                    onClick={() => void daemonReload()}
-                  >
-                    <RefreshClockwise className="size-3.5" />
-                    {reloading ? "Reloading…" : "Reload unit files"}
-                  </Button>
-                )}
-                <WorkspaceHelp compact />
-              </div>
-            </div>
+              <span className="max-sm:hidden">
+                <WorkspaceHelp />
+              </span>
+            </span>
           }
         />
 
@@ -339,7 +335,7 @@ export function Services() {
             title={
               <>
                 Services
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                   {installed.length}
                 </span>
               </>
@@ -448,11 +444,11 @@ export function Services() {
                 ? `Showing ${ROWS} of ${visible.length} matching — search to narrow`
                 : `${plural(visible.length, "service")} matching`}
             </span>
-            <span className="text-muted-foreground/40">·</span>
+            <span className="text-faint">·</span>
             <span>failed first, then by name</span>
             {missing > 0 && (
               <>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span
                   className="numeric"
                   title="Named by another unit, with no unit file on this host"
@@ -463,7 +459,7 @@ export function Services() {
             )}
             {!list.data.ratesReady && (
               <>
-                <span className="text-muted-foreground/40">·</span>
+                <span className="text-faint">·</span>
                 <span>processor shares arrive with the second read</span>
               </>
             )}
@@ -500,7 +496,7 @@ function UnitRows({ rows, ...rest }: RowsProps & { rows: SystemdUnit[] }) {
   return (
     <>
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead>Service</TableHead>
@@ -750,7 +746,7 @@ function CpuReading({ unit }: { unit: SystemdUnit }) {
   const value = unit.cpuPercent ?? 0
   const tone = cpuTone(value)
   if (!unit.cpuReady) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return (
     <div className="flex items-center justify-end gap-2">
@@ -779,7 +775,7 @@ function CpuReading({ unit }: { unit: SystemdUnit }) {
 function MemoryReading({ unit, heaviest }: { unit: SystemdUnit; heaviest: number }) {
   const memory = unit.memoryBytes ?? 0
   if (memory === 0) {
-    return <p className="text-right font-mono text-muted-foreground/60">—</p>
+    return <p className="text-right font-mono text-faint">—</p>
   }
   return (
     <div

@@ -12,14 +12,16 @@ import {
   Warning,
 } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { bytes, duration, percent, plural, timestamp } from "@/lib/format"
+import { bytes, compactCount, duration, percent, plural, timestamp } from "@/lib/format"
 import type { ProcessInspect, ProcessLink, ProcessRow, ProcessTree } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ShellWords } from "@/components/deploy/run-evidence"
-import { useNow } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
+import { ShellWords } from "@/components/code"
+import { useNow } from "@/hooks/use-now"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { IconAction } from "@/components/icon-action"
-import { Detail, DetailList, Section } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import {
   ProductGlyph,
@@ -83,6 +85,15 @@ export type OverviewProps = {
 }
 
 /**
+ * Shows the list under the picture: glided to, or at once when motion is
+ * reduced, and with the keyboard, so the next Tab goes into the list and not
+ * on along the picture.
+ */
+function showChildren() {
+  scrollIntoViewRespectingMotion(document.getElementById(CHILDREN_LIST), { focus: true })
+}
+
+/**
  * The process's Overview, one scroll in the order it is asked about: what is
  * wrong, what it is using now, where it sits — what supervises it, what
  * started it, what it started and what it listens on, as one wired picture —
@@ -99,12 +110,14 @@ export function ProcessOverview(props: OverviewProps) {
       <ProcessPicture {...props} />
       {(childGroups(children).length > CHILDREN_DRAWN ||
         childGroups(children).some((group) => group.length > 1)) && (
-        <div id={CHILDREN_LIST} className="scroll-mt-4">
+        // Focusable by script only: a press on the folded children in the
+        // picture takes the keyboard here with the scroll (`showChildren`).
+        <div id={CHILDREN_LIST} tabIndex={-1} className="scroll-mt-4 outline-none">
           <Section
             title={
               <>
                 Started by it
-                <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                   {children.length}
                 </span>
               </>
@@ -228,7 +241,13 @@ function ProcessNotices({ process: row, gone, inspect, onOpen, onTab }: Overview
     )
   }
   if (notices.length === 0) return null
-  return <div className="grid min-w-0 gap-3 lg:grid-cols-2">{notices}</div>
+  // As many to a row as fit at 20rem each, so a lone callout takes the row
+  // rather than half of it beside nothing.
+  return (
+    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))] gap-3">
+      {notices}
+    </div>
+  )
 }
 
 /**
@@ -265,7 +284,7 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
           <span className="numeric">
             PID {parent.pid}
             {chain.length > 0 && (
-              <span className="text-muted-foreground/70">
+              <span className="text-faint">
                 {" "}
                 · under {chain.map((link) => link.name).join(" › ")}
               </span>
@@ -338,10 +357,7 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
             · {bytes(rss)}
           </span>
         ),
-        open: () =>
-          document
-            .getElementById(CHILDREN_LIST)
-            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        open: showChildren,
         label: `Show the ${group.length} ${link.name} processes it started`,
         wire: {
           tone: group.some((l) => l.state === "zombie") ? "danger" : "default",
@@ -362,10 +378,7 @@ function ProcessPicture({ process: row, gone, tree, inspect, onOpen, onTab }: Ov
         eyebrow: "Started by it",
         title: `${plural(rest, "more process", "more processes")}`,
         hint: "Listed under the picture",
-        open: () =>
-          document
-            .getElementById(CHILDREN_LIST)
-            ?.scrollIntoView({ behavior: "smooth", block: "start" }),
+        open: showChildren,
         label: "Show every process it started",
         wire: { tone: "default", dashed: true, carries: false },
       })
@@ -861,9 +874,8 @@ function HowItIsScheduled({
 }
 
 /** A counter that runs to millions, as a figure that fits its cell: 1.2M. */
-const COMPACT = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 })
 function count(value: number) {
-  return value < 10_000 ? value.toLocaleString("en-US") : COMPACT.format(value)
+  return compactCount(value, { exactBelow: 10_000 })
 }
 
 const MEMORY_COLORS: Record<string, string> = {

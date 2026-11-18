@@ -9,7 +9,8 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDNSRecordPlan } from "@/lib/types"
 import { Well } from "@/components/panel"
 import { SidePanel } from "@/components/side-panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -103,7 +104,7 @@ export function DNSRecordPanel({
       onOpenChange={close}
       title={hostname ?? "DNS record"}
       description="The DNS record this domain needs, what its zone holds, and the press that writes it."
-      width="md"
+      size="md"
       initialFocus="body"
       footer={
         <>

@@ -4,18 +4,11 @@ import { useEffect, useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { duration } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote } from "@/components/state"
 import { DbClientMark } from "@/components/database/client-mark"
 import { clientOf } from "@/components/database/clients"
-import {
-  BlockLink,
-  CardsSkeleton,
-  NotUpdating,
-  Read,
-  staleOf,
-} from "@/components/database/home/blocks"
 import {
   concernOf,
   orderSessions,
@@ -31,6 +24,8 @@ import {
 import type { DbActivity } from "@/components/database/ops/performance-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useKnownClients } from "@/components/database/use-known-clients"
+import { Read, Stale } from "@/components/database/kit/read"
+import { SectionLink } from "@/components/section-link"
 
 /** How often the sessions are read while the view is on screen: Performance's own pace. */
 const SESSIONS_POLL = 5000
@@ -76,16 +71,22 @@ export function AccountSessions({
         title="Sessions"
         actions={
           <>
-            {staleOf(activity) && <NotUpdating error={staleOf(activity)!} />}
+            <Stale poll={activity} />
             {count !== undefined && count > 0 && (
               <span className="numeric text-hint text-muted-foreground">{count}</span>
             )}
-            <BlockLink href={href("performance", { view: "sessions" })}>Every session</BlockLink>
+            <SectionLink href={href("performance", { view: "sessions" })}>
+              Every session
+            </SectionLink>
           </>
         }
       />
       <PanelBody>
-        <Read poll={activity} what="the sessions" skeleton={<CardsSkeleton count={2} />}>
+        <Read
+          poll={activity}
+          what="the sessions"
+          skeleton={<ChoiceListSkeleton rows={2} lines={2} />}
+        >
           {(data) =>
             !data.supported ? (
               <NotAvailable title="The sessions cannot be listed" reason={data.reason} />

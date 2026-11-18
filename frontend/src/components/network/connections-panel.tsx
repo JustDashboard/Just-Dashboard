@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { Fact } from "@/components/fact-line"
 import { NetworkDevice } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -14,17 +15,22 @@ import { useHeldList } from "@/components/workspace/held-list"
 import { usePoll } from "@/hooks/use-poll"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
-import { PageContext, SearchInput } from "@/components/page"
-import { ChoiceList } from "@/components/flow"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
+import { ChoiceList } from "@/components/choice-row"
+import { IdentityHeader } from "@/components/identity-header"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabs } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
+import { Explain } from "@/components/explain"
+import { Toolbar } from "@/components/toolbar"
+import { TabsContent } from "@/components/ui/tabs"
 import { addressVerbs } from "@/components/security/address-verbs"
 import { Button } from "@/components/ui/button"
 import { portsHref } from "@/components/proxy/ports-list"
-import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { recentHours, type AddressBlock } from "@/lib/network-traffic"
+import { recentHours, type AddressBlock } from "@/lib/network/traffic"
 import { BlockDialog } from "@/components/network/connections/block-dialog"
 import { BlocksPanel } from "@/components/network/connections/blocks-panel"
 import { ConnectionsPicture } from "@/components/network/connections/picture"
@@ -121,7 +127,6 @@ export function ConnectionsPanel() {
 
   const search = (
     <SearchInput
-      dense
       data-workspace-search
       aria-label="Filter connections"
       placeholder="Address, port or process"
@@ -129,6 +134,117 @@ export function ConnectionsPanel() {
       onChange={(e) => setQuery(e.target.value)}
       containerClassName="sm:w-64"
     />
+  )
+
+  const picture = (data || !error) && (
+    <ConnectionsPicture
+      data={data}
+      loading={loading}
+      internetOnly={scope === "public"}
+      onInternet={() => setScope(scope === "public" ? "all" : "public")}
+      onProgram={(name) => {
+        setFilters((previous) => ({ ...previous, q: name, when: "live" }), true)
+      }}
+    />
+  )
+  const liveView =
+    !data && error ? (
+      // A first read that failed has no shape to draw: the Live view says so
+      // where its list would be, and a past hour is still a press away.
+      <ErrorState error={error} onRetry={refresh} retryable />
+    ) : (
+      <>
+        {picture}
+        <section aria-label="Remote addresses" className="flex min-w-0 flex-col gap-4">
+          <Toolbar>
+            {/* One choice, so it is named as one; `contents` keeps the two
+                chips items of the toolbar's own wrap, as they were before
+                they had a group. */}
+            <div role="group" aria-label="Which peers to show" className="contents">
+              <FilterChip selected={scope === "all"} onClick={() => setScope("all")}>
+                Everything
+                {data && <ChipCount>{data.peers.length}</ChipCount>}
+              </FilterChip>
+              <FilterChip selected={scope === "public"} onClick={() => setScope("public")}>
+                From the internet
+                {data && <ChipCount>{fromInternet}</ChipCount>}
+              </FilterChip>
+            </div>
+            {search}
+          </Toolbar>
+          {!data ? (
+            <LoadingRows rows={4} />
+          ) : peers.length === 0 ? (
+            query.trim() ? (
+              <EmptyNote>No connection matches &ldquo;{query.trim()}&rdquo;.</EmptyNote>
+            ) : (
+              <EmptyState
+                icon={NetworkDevice}
+                title={
+                  scope === "public" ? "Nothing connected from the internet" : "No connections"
+                }
+                description={
+                  scope === "public"
+                    ? "Every caller is on a private network or the tailnet."
+                    : undefined
+                }
+                action={
+                  <Link
+                    href={portsHref({})}
+                    className="text-body font-medium text-brand hover:underline"
+                  >
+                    What is listening
+                  </Link>
+                }
+              />
+            )
+          ) : (
+            <ChoiceList aria-label="Live addresses">
+              {peers.map((peer) => (
+                <PeerRow
+                  key={peer.address}
+                  peer={peer}
+                  blocked={blocked.has(peer.address)}
+                  range={range}
+                  verbs={addressVerbs({
+                    ip: peer.address,
+                    block:
+                      admin && blockable(peer.address, peer.private) && !blocked.has(peer.address)
+                        ? () => setBlockFor({ address: peer.address, context: blockContext(peer) })
+                        : undefined,
+                    blocking: blockFor?.address === peer.address,
+                    navigate: (href) => router.push(href),
+                  }).map((verb) => ({ ...verb, inline: false }))}
+                />
+              ))}
+            </ChoiceList>
+          )}
+          {data && data.peers.length > 0 && (
+            <p className="flex items-center gap-1.5 text-hint text-muted-foreground">
+              <span className="numeric">
+                {peers.length} of {plural(data.peers.length, "address", "addresses")}
+              </span>
+              {data.quality && (
+                <Explain label="What this read cannot see">
+                  {data.quality.intervalSeconds > 0
+                    ? `Read ${Math.round(data.quality.intervalSeconds)}s after the last; connections shorter than that may be missing. `
+                    : "The first read of this table; nothing is known of what came before. "}
+                  {data.quality.closedSinceLast > 0 &&
+                    `${plural(data.quality.closedSinceLast, "connection")} closed since the last read. `}
+                  {data.quality.unconnectedUdp > 0 &&
+                    `${plural(data.quality.unconnectedUdp, "unconnected UDP socket")} have no peer to list. `}
+                  Socket counts include connections still opening or closing.
+                </Explain>
+              )}
+            </p>
+          )}
+        </section>
+      </>
+    )
+  const pending = when === "live" && held.pending > 0 && (
+    <Button size="xs" aria-label={`Show ${held.pending} new addresses`} onClick={held.reveal}>
+      <span role="status">{held.pending} new addresses</span> · Show
+    </Button>
   )
 
   return (
@@ -146,21 +262,20 @@ export function ConnectionsPanel() {
       }}
     >
       <PageContext eyebrow="Network" title="Connections" />
-      <HostIdentity
+      <IdentityHeader
         className="animate-rise"
         fallback={NetworkDevice}
         title="Connections"
         facts={
           data ? (
             <>
-              <span className="numeric text-foreground">{plural(data.total, "socket")}</span>
-              <FactDot />
-              <span className="numeric">
+              <Fact className="numeric text-foreground">{plural(data.total, "socket")}</Fact>
+              <Fact className="numeric">
                 {plural(data.peers.length, "remote address", "remote addresses")},{" "}
                 <span className={cn(fromInternet > 0 && "text-warning")}>
                   {fromInternet} from the internet
                 </span>
-              </span>
+              </Fact>
             </>
           ) : (
             <span>
@@ -187,167 +302,50 @@ export function ConnectionsPanel() {
         lastSuccess={lastSuccess}
       />
 
-      {/* A first read that failed has no shape to draw: the Live view says
-          so where its list would be, and a past hour is still a press away. */}
-      {(data || !error) && (
-        <ConnectionsPicture
-          data={data}
-          loading={loading}
-          internetOnly={scope === "public"}
-          onInternet={() => setScope(scope === "public" ? "all" : "public")}
-          onProgram={(name) => {
-            setFilters((previous) => ({ ...previous, q: name, when: "live" }), true)
-          }}
-        />
-      )}
-
-      <section aria-label="Remote addresses" className="flex min-w-0 flex-col gap-3">
-        {/* The section's title line: the two views as the strip, the held
-            rows and the shortcuts at its end. */}
-        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 border-b border-hairline">
-          {admin ? (
-            <div role="tablist" aria-label="Which connections" className="flex gap-1">
-              {(
-                [
-                  ["live", "Live", data ? matches.length : undefined],
-                  ["recorded", "A past hour", undefined],
-                ] as const
-              ).map(([value, label, count]) => (
-                <button
-                  key={value}
-                  type="button"
-                  role="tab"
-                  aria-selected={when === value}
-                  onClick={() => setWhen(value)}
-                  className={tabClasses(when === value, "h-10")}
-                >
-                  {label}
-                  {count !== undefined && (
-                    <span className="numeric text-micro tabular-nums opacity-80">{count}</span>
-                  )}
-                </button>
-              ))}
-            </div>
-          ) : (
+      {admin ? (
+        <ViewTabs
+          label="Which connections"
+          views={[
+            { key: "live", label: "Live", count: data ? matches.length : undefined },
+            { key: "recorded", label: "A past hour" },
+          ]}
+          value={when}
+          onValueChange={setWhen}
+          trailing={
+            <>
+              {pending}
+              <WorkspaceHelp compact />
+            </>
+          }
+          rootClassName="gap-0"
+        >
+          <TabsContent value="live" className="flex min-w-0 flex-col gap-4 pt-6">
+            {when === "live" && liveView}
+          </TabsContent>
+          <TabsContent value="recorded" className="flex min-w-0 flex-col gap-4 pt-6">
+            {when === "recorded" && (
+              <RecordedConnections
+                hours={hours}
+                hour={filters.hour}
+                onHour={setHour}
+                query={query}
+                search={search}
+              />
+            )}
+          </TabsContent>
+        </ViewTabs>
+      ) : (
+        <div className="flex min-w-0 flex-col gap-4">
+          <div className="flex min-w-0 items-center justify-between gap-4 border-b border-hairline">
             <p className="flex h-10 items-center text-title font-medium">Live connections</p>
-          )}
-          <span className="flex items-center gap-3 pb-1">
-            {when === "live" && held.pending > 0 && (
-              <Button
-                size="xs"
-                aria-label={`Show ${held.pending} new addresses`}
-                onClick={held.reveal}
-              >
-                <span role="status">{held.pending} new addresses</span> · Show
-              </Button>
-            )}
-            <WorkspaceHelp compact />
-          </span>
+            <span className="flex items-center gap-3">
+              {pending}
+              <WorkspaceHelp compact />
+            </span>
+          </div>
+          {liveView}
         </div>
-
-        {when === "recorded" ? (
-          <RecordedConnections
-            hours={hours}
-            hour={filters.hour}
-            onHour={setHour}
-            query={query}
-            search={search}
-          />
-        ) : !data && error ? (
-          <ErrorState error={error} onRetry={refresh} retryable />
-        ) : (
-          <>
-            <div className="flex min-w-0 flex-wrap items-center gap-2">
-              <ToggleGroup
-                type="single"
-                value={scope}
-                onValueChange={(next) => next && setScope(next as "all" | "public")}
-                variant="outline"
-                size="sm"
-                aria-label="Which peers to show"
-              >
-                <ToggleGroupItem value="all" className="px-2.5 text-hint">
-                  Everything
-                </ToggleGroupItem>
-                <ToggleGroupItem value="public" className="px-2.5 text-hint">
-                  From the internet {data && fromInternet}
-                </ToggleGroupItem>
-              </ToggleGroup>
-              <span className="flex-1" />
-              {search}
-            </div>
-            {!data ? (
-              <LoadingRows rows={4} />
-            ) : peers.length === 0 ? (
-              query.trim() ? (
-                <EmptyNote>No connection matches &ldquo;{query.trim()}&rdquo;.</EmptyNote>
-              ) : (
-                <EmptyState
-                  icon={NetworkDevice}
-                  title={
-                    scope === "public" ? "Nothing connected from the internet" : "No connections"
-                  }
-                  description={
-                    scope === "public"
-                      ? "Every caller is on a private network or the tailnet."
-                      : undefined
-                  }
-                  action={
-                    <Link
-                      href={portsHref({})}
-                      className="text-body font-medium text-brand hover:underline"
-                    >
-                      What is listening
-                    </Link>
-                  }
-                />
-              )
-            ) : (
-              <ChoiceList aria-label="Live addresses">
-                {peers.map((peer) => (
-                  <PeerRow
-                    key={peer.address}
-                    peer={peer}
-                    blocked={blocked.has(peer.address)}
-                    range={range}
-                    verbs={addressVerbs({
-                      ip: peer.address,
-                      block:
-                        admin && blockable(peer.address, peer.private) && !blocked.has(peer.address)
-                          ? () =>
-                              setBlockFor({ address: peer.address, context: blockContext(peer) })
-                          : undefined,
-                      blocking: blockFor?.address === peer.address,
-                      navigate: (href) => router.push(href),
-                    }).map((verb) => ({ ...verb, inline: false }))}
-                  />
-                ))}
-              </ChoiceList>
-            )}
-            {data && (
-              <p className="text-hint text-muted-foreground">
-                {data.peers.length > 0 && (
-                  <>
-                    {peers.length} of {data.peers.length} addresses · grouped by remote address ·
-                    socket counts include connections still opening or closing.
-                  </>
-                )}
-                {data.quality && (
-                  <span className="block" aria-label="What this read cannot see">
-                    {data.quality.intervalSeconds > 0
-                      ? `Read ${Math.round(data.quality.intervalSeconds)}s after the last; connections shorter than that may be missing. `
-                      : "The first read of this table; nothing is known of what came before. "}
-                    {data.quality.closedSinceLast > 0 &&
-                      `${plural(data.quality.closedSinceLast, "connection")} closed since the last read. `}
-                    {data.quality.unconnectedUdp > 0 &&
-                      `${plural(data.quality.unconnectedUdp, "unconnected UDP socket")} have no peer to list.`}
-                  </span>
-                )}
-              </p>
-            )}
-          </>
-        )}
-      </section>
+      )}
 
       <BlocksPanel
         blocks={blocks.data}

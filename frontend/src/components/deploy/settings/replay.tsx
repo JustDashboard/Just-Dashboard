@@ -15,8 +15,8 @@ import {
   replayPolicyLine,
   type ReplayDraft,
 } from "@/components/deploy/replay-model"
-import { FactsLine } from "@/components/deploy/settings/facts-line"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { FactsLine } from "@/components/settings/facts-line"
+import { SettingSection } from "@/components/settings/setting-card"
 
 /** The Runtime form's field ids for the replay's terms, as the server's refusal names them. */
 export const REPLAY_FIELD_IDS: Record<string, string> = {

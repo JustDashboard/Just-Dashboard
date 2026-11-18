@@ -5,7 +5,7 @@ import type { InterfaceReading, ProtectionSetting } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { FormSection, InfoTip } from "@/components/form"
 import { Row, RowList } from "@/components/row-list"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { choiceWord } from "@/components/network/protection/reading"
 
 type Which = "differ" | "every"
@@ -47,24 +47,25 @@ export function InterfaceValues({
       data-slot="setting"
       className="border-t border-hairline pt-8"
       title="Per-interface values"
-      hint={
-        <span className="numeric">
-          {differing.length > 0
-            ? `${differing.length} ${differing.length === 1 ? "device differs" : "devices differ"} from all`
-            : "every device follows all"}
-          {reading.omitted > 0 && ` · ${reading.omitted} container devices left out`}
-        </span>
-      }
       actions={
-        <Segments
-          label="Which devices"
-          value={which}
-          options={[
-            { value: "differ", label: "That differ" },
-            { value: "every", label: "Every device" },
-          ]}
-          onChange={setWhich}
-        />
+        <>
+          {/* The section's state reading, before its control. */}
+          <span className="numeric text-hint text-muted-foreground">
+            {differing.length > 0
+              ? `${differing.length} ${differing.length === 1 ? "device differs" : "devices differ"} from all`
+              : "every device follows all"}
+            {reading.omitted > 0 && ` · ${reading.omitted} container devices left out`}
+          </span>
+          <Segments
+            label="Which devices"
+            value={which}
+            options={[
+              { value: "differ", label: "That differ" },
+              { value: "every", label: "Every device" },
+            ]}
+            onChange={setWhich}
+          />
+        </>
       }
     >
       {lines.length === 0 ? (

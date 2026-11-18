@@ -15,6 +15,7 @@ import type {
   DbGraphTable,
   DbSchemaGraph,
 } from "@/components/database/diagram/types"
+import { saveBlob } from "@/lib/download"
 
 /**
  * The diagram, taken away.
@@ -322,19 +323,6 @@ export function toJson(graph: DbSchemaGraph, doc: DiagramDocument): string {
   )
 }
 
-export function downloadBlob(name: string, blob: Blob) {
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement("a")
-  a.href = url
-  a.download = name
-  a.click()
-  URL.revokeObjectURL(url)
-}
-
-export function downloadText(name: string, text: string, type: string) {
-  downloadBlob(name, new Blob([text], { type }))
-}
-
 /**
  * The SVG rasterised through an `<img>` and a canvas, at twice the size so
  * the text survives being pasted into a document and scaled.
@@ -364,7 +352,7 @@ export function downloadPng(name: string, svg: string, scale = 2): Promise<void>
           reject(new Error("could not encode the image"))
           return
         }
-        downloadBlob(name, blob)
+        saveBlob(name, blob)
         resolve()
       }, "image/png")
     }

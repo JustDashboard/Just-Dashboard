@@ -7,9 +7,10 @@ import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { CodeEditor } from "@/components/code-editor"
-import { Segments } from "@/components/deploy/settings/segments"
-import { Field, FieldCheck, FormFact, FormFacts } from "@/components/form"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
+import { Segments } from "@/components/segments"
+import { Field, FieldCheck, FieldChecks, FormFact, FormFacts } from "@/components/form"
+import { EmptyState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { useUnloadGuard } from "@/components/database/data/guard"
 import { EngineMark } from "@/components/database/kit"
@@ -31,7 +32,7 @@ import type {
   MongoValidationLevel,
 } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 const LEVEL_HINT: Record<MongoValidationLevel, string> = {
   strict: "Every insert and every update is checked.",
@@ -299,13 +300,17 @@ export function ValidationView({ mongo, catalog, collection: info, confirm }: Wo
                 }}
               />
             </div>
-            <div aria-live="polite" className="min-h-5">
+            <div className="min-h-5">
               {problem ? (
-                <p className="text-hint text-destructive">{problem}</p>
+                <p role="alert" className="text-hint text-destructive">
+                  {problem}
+                </p>
               ) : (
-                <FieldCheck met={!empty}>
-                  {empty ? "No rule: every document is accepted" : "Reads as one document"}
-                </FieldCheck>
+                <FieldChecks>
+                  <FieldCheck met={!empty}>
+                    {empty ? "No rule: every document is accepted" : "Reads as one document"}
+                  </FieldCheck>
+                </FieldChecks>
               )}
             </div>
           </div>

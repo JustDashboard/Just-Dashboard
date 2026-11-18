@@ -22,14 +22,14 @@ import type { NotificationChannel, TrafficAlert, TrafficAlertKind } from "@/lib/
 import { ALERT_KINDS, latency } from "@/lib/requests"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Meter } from "@/components/meter"
 import { ProductLogo } from "@/components/product-logo"
 import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
@@ -41,8 +41,9 @@ import {
 } from "@/components/ui/input-group"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
 import type { Automation } from "@/components/deploy/settings/automation/use-automation"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Traffic alerts: the request record, watched.
@@ -120,7 +121,7 @@ export function ChannelNames({
       {told.map((channel) => (
         <span key={channel.id} className="inline-flex min-w-0 items-center gap-1">
           <ChannelGlyph channel={channel} />
-          <span className="truncate text-foreground/85">{channel.name}</span>
+          <span className="truncate text-foreground">{channel.name}</span>
         </span>
       ))}
     </span>
@@ -295,7 +296,7 @@ export function TrafficAlerts({
       }
     >
       {alerts.loading && !alerts.data ? (
-        <LoadingRows rows={2} />
+        <ChoiceListSkeleton rows={2} />
       ) : alerts.error && !alerts.data ? (
         <ErrorState error={alerts.error} onRetry={alerts.refresh} />
       ) : rules.length === 0 ? (
@@ -318,6 +319,7 @@ export function TrafficAlerts({
           rules={rules}
           channels={shared ? undefined : channelList}
           verbsFor={canAdmin ? verbsFor : undefined}
+          onEdit={canAdmin ? (rule) => setEditing({ rule }) : undefined}
         />
       )}
 
@@ -326,7 +328,7 @@ export function TrafficAlerts({
         onOpenChange={(open) => !open && setEditing(undefined)}
         title={editing?.rule ? "Edit alert" : "Add alert"}
         description="A rule over this deployment's request record, told to your notification channels once when it crosses its line and once when it comes back."
-        width="md"
+        size="md"
       >
         {editing && (
           <AlertForm
@@ -348,32 +350,35 @@ export function TrafficAlerts({
 }
 
 /**
- * The rules, as rows you read. The list rises once as it first appears; after
- * that only a rule that was not in it a moment ago does — one just added from
- * the sheet — and a poll that merely re-sorts them moves nothing.
+ * The rules, as cards. The list rises once as it first appears; after that
+ * only a rule that was not in it a moment ago does — one just added from the
+ * sheet — and a poll that merely re-sorts them moves nothing.
  */
 function AlertRules({
   rules,
   channels,
   verbsFor,
+  onEdit,
 }: {
   rules: TrafficAlert[]
   channels?: NotificationChannel[]
   verbsFor?: (rule: TrafficAlert) => Verb[]
+  onEdit?: (rule: TrafficAlert) => void
 }) {
   const arrived = useArrivals(rules.map((rule) => String(rule.id)))
   return (
-    <ul aria-label="Alert rules" className="min-w-0 animate-rise divide-y divide-hairline">
+    <ChoiceList aria-label="Alert rules" className="animate-rise">
       {rules.map((rule) => (
         <AlertRow
           key={rule.id}
           rule={rule}
           channels={channels}
           verbs={verbsFor?.(rule)}
+          onEdit={onEdit && (() => onEdit(rule))}
           className={cn(arrived.has(String(rule.id)) && "animate-rise")}
         />
       ))}
-    </ul>
+    </ChoiceList>
   )
 }
 
@@ -402,118 +407,118 @@ function StarterCard({ kind, onClick }: { kind: TrafficAlertKind; onClick: () =>
 }
 
 /**
- * One rule, read as its sentence, whole — it wraps rather than truncates,
- * because on a phone the sentence *is* the rule. Under it, the last reading
- * against the rule's line on a meter, the channels it tells and when it was
- * last checked. The state sits at the right of the sentence when there is
- * room, and leads the second line on a phone; it rises into a new state —
- * firing, quiet again, paused — rather than being repainted.
+ * One rule, as the card a configured thing in a list is (D5): its kind's tile,
+ * its kind's name over its sentence, and the state it is in. The sentence is
+ * whole on a phone — it wraps there rather than truncating, because there the
+ * sentence *is* the rule — and the card holds one height in every state.
  *
- * The sentence is set in the foreground, not muted after the kind: it holds
- * the line the rule is drawn at, which is the one thing on the row that was
- * set by hand. The reading is said once. While the rule runs, its state says
- * it ("Firing · 4.2% failing"), so the meter carries no figure of its own —
- * it printed "4.2% against 1%" a line under "4.2% failing", with the 1% in
- * the sentence above both. A paused rule's state is only "Paused", so there
- * the last reading is spelled out beside the meter, or counted for a silence
- * rule, which has no line to draw.
+ * The state is said once. While the rule runs it says the last reading
+ * ("Firing · 4.2% failing"); beside it on a wider screen a meter draws that
+ * reading against the rule's line, with the line across it. A paused rule says
+ * "Paused" and is not faded: the three inks carry it, not an opacity.
+ *
+ * It was a bare row with a second band — the meter, the channels, when it was
+ * last checked — under a sentence set in a faded ink, among cards. The card
+ * opens the rule's sheet; Send test, Pause and Remove are in its menu.
  */
 function AlertRow({
   rule,
   channels,
   verbs,
+  onEdit,
   className,
 }: {
   rule: TrafficAlert
   /** The channels to name this rule's among; absent when the head names them for every rule. */
   channels?: NotificationChannel[]
   verbs?: Verb[]
+  /** Opens the rule's sheet; absent for a reader who may not change it. */
+  onEdit?: () => void
   className?: string
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const words = ALERT_KINDS[rule.kind]
   const tone = standing(rule)
+  const sentence = words.describe(rule.threshold, rule.windowMinutes)
+  const firing = rule.enabled && rule.state === "firing"
   const status = !rule.enabled ? (
     <Status key="paused" tone="stopped" label="Paused" className="animate-rise" />
-  ) : rule.state === "firing" ? (
+  ) : firing ? (
     <Status
       key="firing"
       tone="danger"
-      label={`Firing · ${words.read(rule.observed)}${rule.stateSince ? ` since ${relativeTime(rule.stateSince)}` : ""}`}
+      label={
+        wide
+          ? `Firing · ${words.read(rule.observed)}${rule.stateSince ? ` since ${relativeTime(rule.stateSince)}` : ""}`
+          : "Firing"
+      }
       className="animate-rise"
     />
   ) : (
     <Status
       key={rule.checkedAt ? "quiet" : "waiting"}
       tone="running"
-      label={rule.checkedAt ? `Quiet · ${words.read(rule.observed)}` : "Waiting for a reading"}
+      label={
+        rule.checkedAt
+          ? wide
+            ? `Quiet · ${words.read(rule.observed)}`
+            : "Quiet"
+          : wide
+            ? "Waiting for a reading"
+            : "Waiting"
+      }
       className="animate-rise"
     />
   )
   const scale = Math.max(rule.threshold * 2, rule.observed * 1.1, 1)
   return (
-    <li
-      className={cn(
-        "grid min-w-0 grid-cols-[2rem_minmax(0,1fr)_auto] items-start gap-x-3 gap-y-2 py-3 first:pt-0 last:pb-0",
-        !rule.enabled && "opacity-80",
-        className,
-      )}
-    >
-      <KindTile kind={rule.kind} className={cn(!rule.enabled && "opacity-60")} />
-      <p className="min-w-0 pt-1.5 text-body leading-snug text-pretty">
-        <span className="font-medium">{words.label}</span>{" "}
-        <span className="text-foreground/85">
-          {words.describe(rule.threshold, rule.windowMinutes)}
+    <ChoiceRow
+      verb={`Edit ${words.label}, ${sentence}`}
+      onSelect={onEdit}
+      disabled={!onEdit}
+      className={className}
+      leading={<KindTile kind={rule.kind} />}
+      title={words.label}
+      description={
+        <span className={cn(!wide && "whitespace-normal")}>
+          {sentence}
+          {channels && (
+            <>
+              {" · "}
+              <ChannelNames
+                ids={rule.channels}
+                channels={channels}
+                className="flex-nowrap align-bottom"
+              />
+            </>
+          )}
         </span>
-      </p>
-      {/* The state stands on the sentence's first line, not centred on the
-          menu's taller button a line lower. */}
-      <span className="flex items-start gap-3">
-        {wide && <span className="flex pt-1.5">{status}</span>}
-        {verbs && (
+      }
+      trailing={
+        <span className="flex items-center gap-3">
+          {wide && rule.kind !== "silence" && rule.checkedAt && (
+            <Meter
+              value={(rule.observed / scale) * 100}
+              mark={(rule.threshold / scale) * 100}
+              tone={tone}
+              label={`${words.read(rule.observed)} against a ${limitWords(rule)} line`}
+              className="w-24 shrink-0"
+            />
+          )}
+          {status}
+        </span>
+      }
+      actions={
+        verbs && (
           <VerbActions
             dim
             verbs={verbs}
             // Two rules of one kind are told apart by their sentence.
-            menuLabel={`Actions for ${words.label}, ${words.describe(rule.threshold, rule.windowMinutes)}`}
+            menuLabel={`Actions for ${words.label}, ${sentence}`}
           />
-        )}
-      </span>
-      <div className="col-span-2 col-start-2 flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-hint text-muted-foreground">
-        {!wide && status}
-        {rule.kind === "silence"
-          ? !rule.enabled && (
-              <span className="numeric whitespace-nowrap">
-                {rule.checkedAt
-                  ? `${plural(rule.observed, "request")} in ${rule.windowMinutes} min`
-                  : "no reading yet"}
-              </span>
-            )
-          : rule.checkedAt && (
-              <span className="inline-flex items-center gap-2.5">
-                <Meter
-                  value={(rule.observed / scale) * 100}
-                  mark={(rule.threshold / scale) * 100}
-                  tone={tone}
-                  label={`${words.read(rule.observed)} against a ${limitWords(rule)} line`}
-                  className="w-28 shrink-0 sm:w-40"
-                />
-                {!rule.enabled && (
-                  <span className="numeric whitespace-nowrap">
-                    {rule.kind === "latency"
-                      ? latency(rule.observed)
-                      : `${rule.observed.toFixed(1)}%`}{" "}
-                    <span className="text-muted-foreground">against {limitWords(rule)}</span>
-                  </span>
-                )}
-              </span>
-            )}
-        {channels && <ChannelNames ids={rule.channels} channels={channels} />}
-        {rule.checkedAt && (
-          <span className="whitespace-nowrap">checked {relativeTime(rule.checkedAt)}</span>
-        )}
-      </div>
-    </li>
+        )
+      }
+    />
   )
 }
 
@@ -597,37 +602,38 @@ export function AlertForm({
       }}
     >
       <Field label="Watch for">
-        <div role="group" aria-label="Alert kind">
-          <ChoiceGrid columns={3} className="grid-cols-1 sm:grid-cols-3 lg:grid-cols-3">
-            {(Object.keys(ALERT_KINDS) as TrafficAlertKind[]).map((option) => {
-              const Glyph = KIND_GLYPH[option]
-              return (
-                <ChoiceCard
-                  key={option}
-                  selected={kind === option}
-                  onClick={() => choose(option)}
-                  className="min-h-0 gap-1 p-2.5"
-                >
-                  <span className="flex min-w-0 items-center gap-2">
-                    <Glyph
-                      aria-hidden
-                      className={cn(
-                        "size-4 shrink-0",
-                        kind === option ? "text-brand" : "text-muted-foreground",
-                      )}
-                    />
-                    <ChoiceCardTitle className="truncate">
-                      {ALERT_KINDS[option].label}
-                    </ChoiceCardTitle>
-                  </span>
-                  <ChoiceCardHint className="line-clamp-2">
-                    {ALERT_KINDS[option].hint}
-                  </ChoiceCardHint>
-                </ChoiceCard>
-              )
-            })}
-          </ChoiceGrid>
-        </div>
+        <ChoiceGrid
+          mode="single"
+          label="Alert kind"
+          columns={3}
+          className="grid-cols-1 sm:grid-cols-3 lg:grid-cols-3"
+        >
+          {(Object.keys(ALERT_KINDS) as TrafficAlertKind[]).map((option) => {
+            const Glyph = KIND_GLYPH[option]
+            return (
+              <ChoiceCard
+                key={option}
+                selected={kind === option}
+                onClick={() => choose(option)}
+                className="min-h-0 gap-1 p-2.5"
+              >
+                <span className="flex min-w-0 items-center gap-2">
+                  <Glyph
+                    aria-hidden
+                    className={cn(
+                      "size-4 shrink-0",
+                      kind === option ? "text-brand" : "text-muted-foreground",
+                    )}
+                  />
+                  <ChoiceCardTitle className="truncate">
+                    {ALERT_KINDS[option].label}
+                  </ChoiceCardTitle>
+                </span>
+                <ChoiceCardHint className="line-clamp-2">{ALERT_KINDS[option].hint}</ChoiceCardHint>
+              </ChoiceCard>
+            )
+          })}
+        </ChoiceGrid>
       </Field>
 
       {/* A hint here is what is read while typing: the limit spoken back in

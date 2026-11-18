@@ -3,8 +3,8 @@
 import { Connection } from "@/components/icons"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, ProductLogo, hasProductLogo } from "@/components/product-logo"
-import { WireMark } from "@/components/deploy/wire"
-import { ProjectFavicon, ProjectMarkOf } from "@/components/deploy/project-mark"
+import { WireMark } from "@/components/wire/wire"
+import { ProjectFavicon, ProjectMarkOf } from "@/components/project-mark"
 
 /**
  * A database client drawn as the program it is (`clientProduct`): Grafana as

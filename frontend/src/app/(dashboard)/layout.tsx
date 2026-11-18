@@ -5,15 +5,16 @@ import { usePathname, useRouter } from "next/navigation"
 import { useAuth } from "@/hooks/use-auth"
 import { MetricsStream, useHostName } from "@/hooks/use-metrics"
 import { SelfUpdateProvider } from "@/hooks/use-self-update"
-import { AppSidebar } from "@/components/app-sidebar"
+import { IconAction } from "@/components/icon-action"
+import { AppSidebar } from "@/components/shell/app-sidebar"
 import { Logo, LogoStacked } from "@/components/logo"
-import { tabTitle } from "@/components/nav"
-import { useTabName } from "@/components/tab-title"
+import { tabTitle } from "@/components/shell/nav"
+import { useTabName } from "@/components/shell/tab-title"
 import { SidebarInset, SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar"
-import { CommandPaletteProvider, useCommandPalette } from "@/components/command-palette"
+import { CommandPaletteProvider, useCommandPalette } from "@/components/shell/command-palette"
 import { MagnifyingGlass } from "@/components/icons"
-import { Button } from "@/components/ui/button"
-import { NavScopeProvider } from "@/components/nav-scope"
+import { Sweep } from "@/components/loading"
+import { NavScopeProvider } from "@/components/shell/nav-scope"
 import { SavedFolderColours } from "@/components/files/folder-colour"
 import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
@@ -34,7 +35,7 @@ import { ServerSwitcher } from "@/components/hub-link/server-switcher"
  *
  * The address names the page and the page names the item: a detail page's
  * heading, or what it says with `useTabTitle`, goes before the section, so two
- * tabs on two containers read differently (`tabTitle`, `components/tab-title.tsx`).
+ * tabs on two containers read differently (`tabTitle`, `components/shell/tab-title.tsx`).
  *
  * The hub link's provider sits above the title because a linked server names
  * itself in the tab, and above the shell because the rail, the phone's strip
@@ -118,47 +119,58 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                 desktopCollapsible={false}
                 style={{ "--sidebar-width": "15.5rem" } as React.CSSProperties}
               >
+                <SkipToContent />
                 {/* Owns the metrics socket for the whole shell, so the Overview and
               Metrics charts keep filling while you are on another page. Renders
               nothing. */}
                 <MetricsStream />
                 <AppSidebar />
-                <SidebarInset className="h-svh min-w-0 overflow-hidden">
-                  {/* The bar that used to run across the top of every page is gone —
-              `components/top-bar.tsx` is still there if it has to come back.
-              It carried a breadcrumb every page already states in its own
-              header. Below `md` the rail is a sheet with nothing left to open
-              it, so this one strip stays: the trigger, and the name of the
-              product it belongs to — or, on a server linked to a hub, the
-              server it is, which is the switcher to the others. */}
-                  <header className="flex h-12 shrink-0 items-center gap-2 border-b px-3 md:hidden">
-                    <SidebarTrigger className="-ml-0.5 size-8 text-muted-foreground" />
+                <div className="relative flex h-svh w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+                  {/* The bar that used to run across the top of every page is gone
+              (git history has it, as `components/top-bar.tsx`). It carried a
+              breadcrumb every page already states in its own header. Below
+              `md` the rail is a sheet with nothing left to open it, so this
+              one strip stays: the trigger, and the name of the product it
+              belongs to — or, on a server linked to a hub, the server it is,
+              which is the switcher to the others.
+
+              It stands beside `<main>`, not in it: it is the phone's banner,
+              as the rail's head is the desk's, and a screen reader asked for
+              the main content used to be handed the product's name first.
+
+              Its three controls are the only navigation a phone has, so each
+              is a finger's 44px box in a 48px strip; the strip's own padding
+              is cut to keep the glyphs where a 32px control put them. */}
+                  <header className="flex h-12 shrink-0 items-center gap-0.5 border-b px-1 md:hidden">
+                    <SidebarTrigger className="size-11 text-muted-foreground" />
                     {hub ? <ServerSwitcher hub={hub} strip /> : <Logo />}
                     {/* A phone has no ⌘K and the rail's search field is inside
                       a closed sheet, so search had no way in at all here; nor
                       had asking the assistant about the page. */}
-                    <div className="ml-auto flex items-center gap-1">
-                      <AskAboutPage />
+                    <div className="ml-auto flex items-center">
+                      <AskAboutPage className="h-11" />
                       <MobileSearch />
                     </div>
                   </header>
-                  {/* The scroll lives here rather than on the document, which lets a
+                  <SidebarInset id={CONTENT_ID} className="min-h-0 overflow-hidden">
+                    {/* The scroll lives here rather than on the document, which lets a
               page ask for the remaining height (`<Page fill>`) instead of
               growing past the viewport. */}
-                  <div
-                    data-workspace-shell-scroll
-                    className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
-                  >
-                    {/* A folder coloured in Files is that colour on every page
+                    <div
+                      data-workspace-shell-scroll
+                      className="min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto"
+                    >
+                      {/* A folder coloured in Files is that colour on every page
                   that draws it, not only on the one that coloured it. */}
-                    <NetworkChangeConfirmation />
-                    <SavedFolderColours>{children}</SavedFolderColours>
-                    <HeldSessionsHost />
-                    {/* The way back to a conversation with the assistant, from
+                      <NetworkChangeConfirmation />
+                      <SavedFolderColours>{children}</SavedFolderColours>
+                      <HeldSessionsHost />
+                      {/* The way back to a conversation with the assistant, from
                       whatever page a shortcut of its led to. */}
-                    <AgentDock />
-                  </div>
-                </SidebarInset>
+                      <AgentDock />
+                    </div>
+                  </SidebarInset>
+                </div>
               </SidebarProvider>
             </HeldSessionsProvider>
           </NavScopeProvider>
@@ -171,15 +183,59 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
 function MobileSearch() {
   const palette = useCommandPalette()
   return (
-    <Button
+    <IconAction
       variant="ghost"
-      size="icon-sm"
-      aria-label="Search"
-      className="text-muted-foreground"
+      size="icon"
+      label="Search"
+      className="size-11 text-muted-foreground [&_svg:not([class*='size-'])]:size-4"
       onClick={palette.open}
     >
       <MagnifyingGlass className="size-4" />
-    </Button>
+    </IconAction>
+  )
+}
+
+/** The `<main>` every page under the shell is drawn in. */
+const CONTENT_ID = "content"
+
+/**
+ * The first stop on every page: past the rail's fifty links to the page
+ * itself. A keyboard had no way round the rail, so reaching a page's first
+ * control was a walk through all of it on every navigation (WCAG 2.4.1).
+ *
+ * Out of sight above the window until the keyboard is on it, then a popover
+ * at the window's corner over whatever is there. It moves the focus rather than the address:
+ * a `#content` left in the URL would be carried into every link copied from
+ * the page.
+ *
+ * The focus goes to the page's heading, so a screen reader says which page
+ * this is and the next Tab is the page's first control. The heading can hold
+ * it only for that moment: `<main>` is never made focusable, because a click
+ * anywhere in a focusable `<main>` would move the focus to it, and the
+ * browser scrolls with the keyboard from the focused element outwards, which
+ * would take Page Down away from the pane that was clicked.
+ */
+function SkipToContent() {
+  return (
+    <a
+      href={`#${CONTENT_ID}`}
+      data-slot="skip-link"
+      onClick={(event) => {
+        const main = document.getElementById(CONTENT_ID)
+        const target = main?.querySelector<HTMLElement>("h1") ?? main
+        if (!target) return
+        event.preventDefault()
+        target.tabIndex = -1
+        target.addEventListener("blur", () => target.removeAttribute("tabindex"), { once: true })
+        target.focus()
+      }}
+      // Held above the window's edge rather than clipped to a pixel, so it is
+      // its real size when the focus brings it down: a finger's height, since
+      // a phone with a keyboard attached reaches it too.
+      className="fixed top-2 left-2 z-overlay inline-flex h-11 -translate-y-16 items-center rounded-md border bg-popover px-4 text-body font-medium text-popover-foreground shadow-md focus-ring focus:translate-y-0"
+    >
+      Skip to content
+    </a>
   )
 }
 
@@ -197,19 +253,16 @@ function MobileSearch() {
  */
 function ShellSplash({ waiting }: { waiting?: string }) {
   return (
-    <div className="auth-backdrop flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
+    <main className="auth-backdrop flex min-h-svh flex-col items-center justify-center gap-4 bg-background">
       <div className="flex flex-col items-center gap-2.5">
         <LogoStacked className="h-18" />
-        <div className="h-0.5 w-24 overflow-hidden rounded-full bg-muted">
-          <div className="h-full w-1/3 animate-[loading_1.2s_ease-in-out_infinite] rounded-full bg-primary" />
-        </div>
+        <Sweep rounded label="Starting the dashboard" className="h-0.5 w-24" />
       </div>
       {waiting && (
         <p role="status" className="max-w-xs px-4 text-center text-sm text-muted-foreground">
           {waiting}
         </p>
       )}
-      <style>{`@keyframes loading{0%{transform:translateX(-100%)}100%{transform:translateX(300%)}}`}</style>
-    </div>
+    </main>
   )
 }

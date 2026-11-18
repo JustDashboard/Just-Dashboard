@@ -797,7 +797,7 @@ test.describe("the control center", () => {
     server.answer("GET /databases/fleet", async () => {
       await held.until
     })
-    await page.getByRole("link", { name: "Control center", exact: true }).click()
+    await page.getByRole("link", { name: "Databases", exact: true }).click()
     await expect(card(page, "shop")).toBeVisible()
     await expect(page.getByRole("status", { name: "Loading databases" })).toHaveCount(0)
     held.release()
@@ -924,7 +924,12 @@ test.describe("found on this server", () => {
       "/docker/containers/c-mc",
     )
     await expect(foundRow(page, "sales.duckdb")).toContainText("no driver for DuckDB")
-    await expect(found.getByText("2 directories are outside the file roots")).toBeVisible()
+    // What the scan left out is behind an (i) on the title line, not a
+    // sentence over the list.
+    await expect(found.getByText("2 directories are outside the file roots")).toHaveCount(0)
+    await found.getByRole("button", { name: "What the scan left out" }).click()
+    await expect(page.getByText("2 directories are outside the file roots")).toBeVisible()
+    await page.keyboard.press("Escape")
 
     // Servers stand in the order they can be connected: a press, a password,
     // a start, and last what nothing here can open.
@@ -944,6 +949,30 @@ test.describe("found on this server", () => {
     await found.getByRole("button", { name: /^Other programs/ }).click()
     await expect(foundRow(page, "vpsd.db")).toContainText("never connected")
     await expect(found.getByRole("button", { name: "Open vpsd.db" })).toHaveCount(0)
+  })
+
+  test("a connect that fails is the row's state, and the row keeps its height", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    server.answer("POST /databases/inventory/connect", ({ body }) => {
+      if (body.key !== "docker:orders-db") return
+      return refusal(502, "dial_failed", "dial tcp 172.18.0.4:5432: connection refused")
+    })
+    await page.goto("/databases")
+
+    const row = foundRow(page, "orders-db")
+    const before = await row.boundingBox()
+    await page.getByRole("button", { name: "Connect orders-db" }).click()
+    const why = row.getByRole("button", { name: "Why orders-db did not connect" })
+    await expect(why).toHaveText("Failed")
+    // What the server said is behind the state, not a paragraph under the row.
+    await expect(row).not.toContainText("connection refused")
+    expect((await row.boundingBox())?.height).toBe(before?.height)
+    await why.click()
+    await expect(page.locator("[data-slot=found-failure]")).toHaveText(
+      "dial tcp 172.18.0.4:5432: connection refused",
+    )
   })
 
   test("connects by key, asks for a password only when the server refuses what it states", async ({
@@ -1137,13 +1166,17 @@ test.describe("found on this server", () => {
       { key: "file:/srv/app/data.db" },
     ])
 
-    await page.getByRole("button", { name: "Ignore sessions" }).click()
+    // Ignore is a word in the row's menu, not an eye named only for a screen reader.
+    await page.getByRole("button", { name: "Actions for sessions" }).click()
+    await page.getByRole("menuitem", { name: "Ignore", exact: true }).click()
     await expect
       .poll(() => server.bodies("POST /databases/inventory/ignore"))
       .toEqual([{ key: "docker:sessions", ignored: true }])
     await page.getByText("Set aside", { exact: true }).click()
     await page.getByRole("button", { name: /^Ignored/ }).click()
-    await expect(page.getByRole("button", { name: "Stop ignoring sessions" })).toBeVisible()
+    await page.getByRole("button", { name: "Actions for sessions" }).click()
+    await expect(page.getByRole("menuitem", { name: "Stop ignoring" })).toBeVisible()
+    await page.keyboard.press("Escape")
     // Keys whose server is gone are counted, not listed, and forgotten together.
     await expect(page.getByText("1 ignored item is no longer on this server.")).toBeVisible()
     await page.getByRole("button", { name: "Forget it" }).click()
@@ -1257,10 +1290,9 @@ test.describe("the map", () => {
       ["Redis", ["cache"]],
       ["SQLite", ["notes"]],
     ] as const) {
-      const section = rail(page).locator("section", {
-        has: page.getByRole("heading", { name: engine }),
-      })
-      for (const name of names) await expect(section.getByRole("button", { name })).toBeVisible()
+      // An engine's name labels its list; a rail's group is not a heading.
+      const list = rail(page).getByRole("list", { name: engine, exact: true })
+      for (const name of names) await expect(list.getByRole("button", { name })).toBeVisible()
     }
     for (const id of [1, 2, 4, 5, 7]) await expect(frame(page, `system:db:${id}`)).toHaveCount(1)
     await expect(rail(page).getByRole("button", { name: /notes/ })).toContainText(
@@ -1407,8 +1439,8 @@ test.describe("the map", () => {
       await page.goto("/databases/map?database=1")
       await expect(page.locator(".react-flow__node").first()).toBeVisible()
       const bar = page.locator("[data-slot=pane-bar]")
-      await expect(bar.getByRole("tab")).toHaveText(["Databases", "Map", "Inspector"])
-      await expect(bar.getByRole("tab", { name: "Map" })).toHaveAttribute("aria-selected", "true")
+      await expect(bar.getByRole("button")).toHaveText(["Databases", "Map", "Inspector"])
+      await expect(bar.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
       // The canvas is the whole width and stands on the bar, which is at the very foot.
       await expect(rail(page)).toHaveCount(0)
       await expect(inspector(page)).toHaveCount(0)
@@ -1424,29 +1456,33 @@ test.describe("the map", () => {
       )
 
       // The inspector names the links of what was tapped, as it does at a desk.
-      await bar.getByRole("tab", { name: "Inspector" }).tap()
+      await bar.getByRole("button", { name: "Inspector" }).tap()
       await expect(inspector(page)).toBeVisible()
       await expect(inspector(page)).toContainText("shop")
       expect((await inspector(page).boundingBox())!.width).toBe(390)
 
       // The rail lists every database by engine; picking one shows it on the canvas.
-      await bar.getByRole("tab", { name: "Databases" }).tap()
+      await bar.getByRole("button", { name: "Databases" }).tap()
       await expect(rail(page)).toBeVisible()
       await expect(inspector(page)).toHaveCount(0)
       await expect(rail(page).getByRole("button")).toHaveCount(5)
       await rail(page).locator('[data-system="system:db:4"]').tap()
       await expect(rail(page)).toHaveCount(0)
-      await expect(bar.getByRole("tab", { name: "Map" })).toHaveAttribute("aria-selected", "true")
+      await expect(bar.getByRole("button", { name: "Map" })).toHaveAttribute("aria-current", "page")
       await expect(frame(page, "system:db:4")).toBeInViewport()
       // Nothing is wider than the phone in any of the three.
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
       ).toBe(true)
 
-      // The server map shares the canvas and did not ask for the bar: it is as it was.
+      // The server map shares the canvas and has a bar of its own, over systems, opening on the map.
       await page.goto("/map")
       await expect(page.locator(".react-flow__node").first()).toBeVisible()
-      await expect(page.locator("[data-slot=pane-bar]")).toHaveCount(0)
+      await expect(page.locator("[data-slot=pane-bar]").getByRole("button")).toHaveText([
+        "Systems",
+        "Map",
+        "Inspector",
+      ])
       await expect(page.locator("[data-slot=map-pane]")).toHaveCount(0)
     })
   })

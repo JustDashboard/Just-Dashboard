@@ -6,7 +6,6 @@ import { get } from "@/lib/api"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { InputGroupInput } from "@/components/ui/input-group"
-import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   DropdownMenu,
@@ -14,7 +13,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { rowReveal } from "@/components/icon-action"
+import { IconAction } from "@/components/icon-action"
 import { useDropTarget, type DropMode } from "@/components/files/dnd"
 import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
 
@@ -147,20 +146,17 @@ export function PathBar({
         ))}
       </div>
 
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <Button
-            size="icon-xs"
-            variant="ghost"
-            className={cn("size-7 shrink-0 text-muted-foreground", rowReveal("path"))}
-            onClick={() => setEditing(true)}
-            aria-label="Type a path"
-          >
-            <Pencil />
-          </Button>
-        </TooltipTrigger>
-        <TooltipContent>Type a path (Ctrl+L)</TooltipContent>
-      </Tooltip>
+      <IconAction
+        size="icon-xs"
+        label="Type a path"
+        tooltip="Type a path (Ctrl+L)"
+        className="size-7 shrink-0 text-muted-foreground [&_svg:not([class*='size-'])]:size-3"
+        reveal
+        revealGroup="path"
+        onClick={() => setEditing(true)}
+      >
+        <Pencil />
+      </IconAction>
     </div>
   )
 }
@@ -221,7 +217,7 @@ function SiblingMenu({ dir, onNavigate }: { dir: string; onNavigate: (path: stri
       <DropdownMenuTrigger asChild>
         <button
           type="button"
-          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-muted-foreground/70 focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground"
+          className="flex size-5 shrink-0 items-center justify-center rounded-sm text-faint focus-ring-inset transition-colors hover:bg-accent hover:text-accent-foreground"
           aria-label={`Folders in ${dir}`}
         >
           <ChevronRight className="size-3.5" />
@@ -359,7 +355,7 @@ function PathInput({
       {matches.length > 0 && (
         <div
           data-path-suggestions
-          className="absolute top-full right-0 left-0 z-50 mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
+          className="absolute top-full right-0 left-0 z-overlay mt-1 max-h-72 overflow-y-auto rounded-lg border bg-popover p-1 shadow-md"
         >
           {matches.map((entry, i) => (
             <button

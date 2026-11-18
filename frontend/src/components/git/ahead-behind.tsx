@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { ChevronDoubleDown, ChevronDoubleUp } from "@/components/icons"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 
@@ -31,7 +32,7 @@ export function AheadBehind({
               {ahead}
             </span>
           </TooltipTrigger>
-          <TooltipContent>{`${ahead} commit${ahead === 1 ? "" : "s"} to push`}</TooltipContent>
+          <TooltipContent>{`${plural(ahead, "commit")} to push`}</TooltipContent>
         </Tooltip>
       )}
       {behind > 0 && (
@@ -42,7 +43,7 @@ export function AheadBehind({
               {behind}
             </span>
           </TooltipTrigger>
-          <TooltipContent>{`${behind} commit${behind === 1 ? "" : "s"} to pull`}</TooltipContent>
+          <TooltipContent>{`${plural(behind, "commit")} to pull`}</TooltipContent>
         </Tooltip>
       )}
     </span>

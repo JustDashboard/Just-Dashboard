@@ -1,13 +1,6 @@
-import { percent } from "@/lib/format"
+import { compactCount, percent } from "@/lib/format"
 import type { Tone } from "@/components/tone"
 import type { SiteTrafficReading, SiteTrafficSummary, TrafficPoint } from "@/lib/types"
-
-const COMPACT = new Intl.NumberFormat("en", { notation: "compact", maximumFractionDigits: 1 })
-
-/** A request count as a route row reads it: 1.2k rather than 1,187. */
-export function compactCount(n: number): string {
-  return COMPACT.format(n).toLowerCase()
-}
 
 /** A share of 0–1 as the percentage the readings print. */
 export function share(rate: number): string {

@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { cn } from "@/lib/utils"
+import { useState } from "react"
+import { useNow } from "@/hooks/use-now"
 import { duration } from "@/lib/format"
+import { Sweep } from "@/components/loading"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 
 export type OperationReading = {
@@ -19,7 +20,9 @@ export type OperationReading = {
  * buttons, and the footer's top hairline becomes the track. The track is
  * positioned against the footer, so this only makes sense rendered there.
  *
- * A wait is not a percentage: only a measured count fills the track.
+ * A wait is not a percentage: only a measured count fills the track. Anything
+ * else is the product's one indeterminate bar, `Sweep`, with its one answer
+ * to reduced motion.
  */
 export function OperationProgress({
   label,
@@ -30,11 +33,7 @@ export function OperationProgress({
   showCount = true,
 }: OperationReading & { startedAt?: number | string }) {
   const [mountedAt] = useState(() => Date.now())
-  const [now, setNow] = useState(mountedAt)
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000)
-    return () => clearInterval(timer)
-  }, [])
+  const now = useNow()
   const parsed = typeof startedAt === "string" ? Date.parse(startedAt) : startedAt
   const since = parsed !== undefined && Number.isFinite(parsed) ? parsed : mountedAt
   const measured = total !== undefined && total > 0 && completed !== undefined
@@ -68,24 +67,24 @@ export function OperationProgress({
           </>
         )}
       </p>
-      <div
-        role="progressbar"
-        aria-label={label}
-        aria-valuemin={measured ? 0 : undefined}
-        aria-valuemax={measured ? total : undefined}
-        aria-valuenow={measured ? Math.max(0, Math.min(total, completed)) : undefined}
-        className="absolute inset-x-0 -top-px h-0.5 overflow-hidden"
-      >
-        <span
-          className={cn(
-            "block h-full bg-brand",
-            measured
-              ? "transition-[width]"
-              : "absolute inset-y-0 left-0 w-1/3 animate-sweep motion-reduce:w-full motion-reduce:animate-none",
-          )}
-          style={measured ? { width: `${percent}%` } : undefined}
-        />
-      </div>
+      {measured ? (
+        <div
+          role="progressbar"
+          aria-label={label}
+          aria-valuemin={0}
+          aria-valuemax={total}
+          aria-valuenow={Math.max(0, Math.min(total, completed))}
+          className="absolute inset-x-0 -top-px h-0.5 overflow-hidden"
+        >
+          <span
+            className="block h-full bg-brand transition-[width]"
+            style={{ width: `${percent}%` }}
+          />
+        </div>
+      ) : (
+        // The footer's hairline is the track, so the bar runs on its own.
+        <Sweep label={label} track={false} className="absolute inset-x-0 -top-px h-0.5" />
+      )}
     </div>
   )
 }

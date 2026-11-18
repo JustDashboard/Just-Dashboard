@@ -1079,7 +1079,7 @@ test("Cancel takes Run's place while a statement is out, and stops it by its nam
   await write(page, "select slow from customers")
   await page.keyboard.press("ControlOrMeta+Enter")
 
-  const cancel = commands(page).getByRole("button", { name: "Cancel" })
+  const cancel = commands(page).getByRole("button", { name: "Stop", exact: true })
   await expect(cancel).toBeVisible()
   await expect(runButton(page)).toHaveCount(0)
   await expect(commands(page).getByRole("status")).toContainText(/Running…\s*0:0\d/)
@@ -1432,16 +1432,12 @@ test("every generator the server lists is reachable, and the request carries wha
   ).toHaveCount(1)
   await expect(page.getByRole("region", { name: "Schema" }).getByRole("button")).toHaveCount(1)
   // Each is drawn as the project it writes for, or as its language where that has no mark.
-  await expect(page.locator("[data-target=prisma] img")).toHaveAttribute("src", "/logos/prisma.svg")
-  await expect(page.locator("[data-target=typeorm] img")).toHaveAttribute(
-    "src",
-    "/logos/typeorm.svg",
-  )
-  await expect(page.locator("[data-target=zod] img")).toHaveAttribute("src", "/logos/zod.svg")
-  await expect(page.locator("[data-target=diesel] img")).toHaveAttribute(
-    "src",
-    "/logos/diesel.webp",
-  )
+  // The card's mark is its first picture; its language tag carries the language's own after it.
+  const mark = (id: string) => page.locator(`[data-target=${id}] img`).first()
+  await expect(mark("prisma")).toHaveAttribute("src", "/logos/prisma.svg")
+  await expect(mark("typeorm")).toHaveAttribute("src", "/logos/typeorm.svg")
+  await expect(mark("zod")).toHaveAttribute("src", "/logos/zod.svg")
+  await expect(mark("diesel")).toHaveAttribute("src", "/logos/diesel.webp")
   // Nothing is asked of the server until the reader asks: the generator's
   // own mark, two words and the command, with what it writes behind an (i).
   const empty = page.locator("[data-slot=empty-state]")
@@ -1974,7 +1970,7 @@ test("a search of ticked tables reads those tables and no others, and says which
   const { sent } = await mockWork(page)
   await page.goto("/databases/1/search")
   // The scope is chosen before the scan: which of this schema's tables are read.
-  await page.getByRole("button", { name: "Every table (3)" }).click()
+  await page.getByRole("button", { name: "Every table 3" }).click()
   const list = page.getByRole("list", { name: "The tables read" })
   await expect(list.getByRole("listitem")).toHaveCount(3)
   // The view is left out, as a search of the whole schema leaves it out.
@@ -2979,6 +2975,9 @@ test("Run is the page's one command: the row limit is in its menu, Format and Sa
   await expect(page.getByRole("menuitemradio", { name: "500", exact: true })).toBeChecked()
   await page.getByRole("menuitemradio", { name: "1,000" }).click()
   await page.keyboard.press("Escape")
+  // The menu hands focus back to its button when it has gone; a click before
+  // that loses the editor's focus to the button, and Ctrl+Enter opens the menu.
+  await expect(page.getByRole("menu")).toHaveCount(0)
   await editor(page).click()
   await page.keyboard.press("ControlOrMeta+Enter")
   await expect.poll(() => sent.query.at(-1)?.maxRows).toBe(1000)
@@ -3008,9 +3007,9 @@ test("on a phone the query page is one pane at a time: the statement, what it re
   })
   await openEditor(page)
   const selected = (name: string) =>
-    expect(paneBar(page).getByRole("tab", { name, exact: true })).toHaveAttribute(
-      "aria-selected",
-      "true",
+    expect(paneBar(page).getByRole("button", { name, exact: true })).toHaveAttribute(
+      "aria-current",
+      "page",
     )
 
   // The statement has the frame; the bar is at the very foot of the screen.

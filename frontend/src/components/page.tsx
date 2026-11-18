@@ -1,8 +1,9 @@
+import Link from "next/link"
 import { cn } from "@/lib/utils"
-import { Input } from "@/components/ui/input"
-import { MagnifyingGlass } from "@/components/icons"
-import { ErrorState, LoadingPanel } from "@/components/state"
-import { TabHeading } from "@/components/tab-title"
+import { ArrowLeft } from "@/components/icons"
+import { ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
+import { TabHeading } from "@/components/shell/tab-title"
 
 /**
  * The frame every page renders into.
@@ -28,19 +29,44 @@ import { TabHeading } from "@/components/tab-title"
  * definite height, and `overflow-hidden` keeps that promise: a fill page is
  * exactly the space it was handed, and the scrolling happens inside the pane
  * that owns the content.
+ *
+ * `fill="workspace"` is the workbench's frame (Files, Git, the terminal, the
+ * map, the boards): the same definite height, the whole width, no gap between
+ * its parts, and an inset only from `lg`, where the shell has room around it.
+ * Those pages each spelled that with their own overrides — twelve spellings,
+ * so their insets drifted by 4 to 8px and a loading branch framed differently
+ * from its loaded one. `bleed` drops the inset too, for a remote screen that
+ * runs edge to edge.
+ *
+ * `rise` is the page arriving (the `rise` animation), said once here rather
+ * than as `className="animate-rise"` on each page.
+ *
+ * The gutter is named `--page-inset` (20, 32 from `md`) on the page element,
+ * so what bleeds to the screen's edge inside it (a `ChipStrip` on a phone)
+ * bleeds by the page's own gutter rather than a copy of the number. The
+ * padding is said again at `md` as it was with `md:px-8`, so a page that
+ * overrides only the base padding (`p-0 lg:px-3`) keeps the same inset from
+ * `md` that it had.
  */
 export function Page({
   className,
   fill,
+  bleed,
+  rise,
   register = "reading",
   ...props
 }: React.ComponentProps<"div"> & {
   /**
    * `"xl"` holds the page to the window only where its columns sit side by
    * side — a flow page decided in one view (§17 pass 8) that stacks and
-   * scrolls like any other page below that width.
+   * scrolls like any other page below that width. `"workspace"` is a
+   * workbench's frame (above).
    */
-  fill?: boolean | "xl"
+  fill?: boolean | "xl" | "workspace"
+  /** With `fill="workspace"`: no inset at any width. */
+  bleed?: boolean
+  /** The page rises into place as it arrives. */
+  rise?: boolean
   /**
    * Which register this page is drawn in (§16).
    *
@@ -62,15 +88,43 @@ export function Page({
       data-slot="page"
       data-register={register}
       className={cn(
-        "group/page mx-auto flex w-full max-w-[1440px] min-w-0 flex-col gap-6 px-5 py-6 md:gap-8 md:px-8 md:py-8",
+        "group/page mx-auto flex w-full min-w-0 flex-col",
+        fill === "workspace"
+          ? cn("h-full min-h-0 max-w-none overflow-hidden", !bleed && "lg:p-3")
+          : "max-w-[1440px] gap-6 px-(--page-inset) py-6 [--page-inset:1.25rem] md:gap-8 md:px-(--page-inset) md:py-8 md:[--page-inset:2rem]",
         fill === true && "h-full min-h-0 overflow-hidden",
         fill === "xl" && "xl:h-full xl:min-h-0 xl:overflow-hidden",
+        rise && "animate-rise",
         className,
       )}
       {...props}
     />
   )
 }
+
+/**
+ * The way back to the list a page sits under: "← Containers". One drawing for
+ * every page, where 24 files each kept the same link in a constant of their
+ * own. `PageContext` draws it from `back`; a flow's header and `PageState`
+ * take the same prop, and `DetailPage` draws it at the head of an item's
+ * page. A long list name ends in an ellipsis rather than pushing the walk
+ * arrows off the row. `components/detail-page.tsx` kept a copy of its own,
+ * which is a deprecated name for this one now.
+ */
+export function BackLink({ href, children }: { href: string; children: React.ReactNode }) {
+  return (
+    <Link
+      href={href}
+      className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
+    >
+      <ArrowLeft aria-hidden className="size-3 shrink-0" />{" "}
+      <span className="truncate">{children}</span>
+    </Link>
+  )
+}
+
+/** Where a page's back link leads, and the list's name it says. */
+export type Back = { href: string; label: string }
 
 /**
  * The accessible name and contextual controls of a reading page.
@@ -80,26 +134,44 @@ export function Page({
  * are drawn here. The h1 still names the page for assistive technology, and
  * the same words name its tab where the nav cannot: on an item's own page the
  * address says only "Containers", and the heading says which one
- * (`components/tab-title.tsx`).
+ * (`components/shell/tab-title.tsx`).
+ *
+ * An item page one level under a list carries `back`, the one way back; a
+ * pane a row opened inside a workspace is `PaneBack`'s, which is a switch of
+ * panes and not a link. `actions` hold the walk (Alt+arrows) and the help;
+ * a thing's verbs go on its identity line (`IdentityVerbs`), so on a phone the
+ * row under the shell is the way back and nothing that wraps.
  */
 export function PageContext({
+  back,
   eyebrow,
   title,
   actions,
   className,
 }: {
+  back?: Back
+  /**
+   * @deprecated use `back`. A link passed here is drawn as before; words
+   * alone are not drawn (they named a section the rail already names) and
+   * say so in development, so the page pass removes them.
+   */
   eyebrow?: React.ReactNode
   title: React.ReactNode
   actions?: React.ReactNode
   className?: string
 }) {
-  const back = typeof eyebrow === "string" ? null : eyebrow
+  if (typeof eyebrow === "string") droppedEyebrow(eyebrow)
+  const link = back ? (
+    <BackLink href={back.href}>{back.label}</BackLink>
+  ) : typeof eyebrow === "string" ? null : (
+    eyebrow
+  )
 
   return (
     <>
       <h1 className="sr-only">{title}</h1>
       <TabHeading title={title} />
-      {(back || actions) && (
+      {(link || actions) && (
         <div
           data-slot="page-context"
           className={cn(
@@ -107,9 +179,11 @@ export function PageContext({
             className,
           )}
         >
-          {back && <div className="text-body text-muted-foreground">{back}</div>}
+          {link && (
+            <div className="flex min-w-0 items-center text-body text-muted-foreground">{link}</div>
+          )}
           {actions && (
-            <div className={cn("flex max-w-full flex-wrap items-center gap-2", back && "ml-auto")}>
+            <div className={cn("flex max-w-full flex-wrap items-center gap-2", link && "ml-auto")}>
               {actions}
             </div>
           )}
@@ -119,211 +193,14 @@ export function PageContext({
   )
 }
 
-/**
- * A labelled group of panels inside a page, for the pages that hold more than
- * one idea (account, certificates, the dashboard's own configuration).
- */
-export function Section({
-  title,
-  actions,
-  className,
-  children,
-}: {
-  title: React.ReactNode
-  actions?: React.ReactNode
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <section className={cn("flex min-w-0 flex-col gap-4", className)}>
-      <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <div className="min-w-0">
-          <h2 className="flex min-w-0 items-center gap-1.5 text-base font-semibold tracking-tight">
-            <span className="truncate">{title}</span>
-          </h2>
-        </div>
-        {actions}
-      </div>
-      {children}
-    </section>
-  )
-}
+const said = new Set<string>()
 
-/** A row of filters and actions that stands on its own, outside a panel. */
-export function Toolbar({ className, ...props }: React.ComponentProps<"div">) {
-  return <div className={cn("flex min-w-0 flex-wrap items-center gap-2", className)} {...props} />
-}
-
-/**
- * The filter box, which appeared in six pages as the same three elements
- * assembled slightly differently each time — a different width, a different
- * icon offset, sometimes no icon at all.
- *
- * On a phone it is a field like any other: 40px, beside the 40px `Select
- * size="sm"` it usually shares a toolbar with, and at `Input`'s own 16px so
- * iOS does not zoom the page when it takes focus. It also takes the first
- * line of a wrapping toolbar to itself — a call site's `flex-1` had squeezed
- * the projects search to 95px beside its chips at 390. From `sm` it is the
- * 32px box it always was. The dense one is a pane's chrome and keeps its size.
- */
-export function SearchInput({
-  dense,
-  trailing,
-  className,
-  containerClassName,
-  ...props
-}: React.ComponentProps<typeof Input> & {
-  /** The filter box inside a pane's own chrome, where 32px is too tall. */
-  dense?: boolean
-  /** Controls pinned inside the box — a clear button, a regex toggle. */
-  trailing?: React.ReactNode
-  containerClassName?: string
-}) {
-  return (
-    <div
-      className={cn(
-        "relative flex w-full min-w-0 items-center sm:w-72",
-        !dense && "max-sm:basis-full",
-        containerClassName,
-      )}
-    >
-      <MagnifyingGlass
-        className={cn(
-          "pointer-events-none absolute top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground",
-          dense ? "left-2" : "left-2.5",
-        )}
-      />
-      <Input
-        // A page's own filter, not one inside a pane's chrome, is what `/` focuses.
-        data-page-search={dense ? undefined : ""}
-        className={cn(dense ? "h-7 pl-7 text-xs" : "h-10 pl-8 sm:h-8", className)}
-        {...props}
-      />
-      {trailing && <div className="absolute right-1 flex items-center gap-0.5">{trailing}</div>}
-    </div>
-  )
-}
-
-/**
- * One figure with its name, for a strip of them under a chart or in a card
- * header. The name goes above the number, small and quiet: a column of these
- * scans as a table of values rather than a paragraph of labels.
- */
-export function Metric({
-  label,
-  value,
-  hint,
-  className,
-}: {
-  label: React.ReactNode
-  value: React.ReactNode
-  hint?: React.ReactNode
-  className?: string
-}) {
-  return (
-    <div className={cn("min-w-0", className)}>
-      <p className="eyebrow truncate">{label}</p>
-      <p className="numeric mt-0.5 truncate text-sm font-medium">{value}</p>
-      {hint && <p className="truncate text-hint text-muted-foreground">{hint}</p>}
-    </div>
-  )
-}
-
-/**
- * A horizontal run of Metrics, separated by rules rather than by gap alone.
- *
- * Two columns on a phone rather than a wrapping row: wrapped, the first
- * metric of each new line kept the rule and the indent that belonged beside
- * its neighbour on the line above, and a date took whatever width was left of
- * the line and truncated in it. In a grid every rule is between two cells and
- * every value has half the width to itself.
- */
-export function MetricStrip({ className, ...props }: React.ComponentProps<"div">) {
-  return (
-    <div
-      className={cn(
-        "grid grid-cols-2 gap-x-4 gap-y-3 [&>*]:min-w-0",
-        "max-sm:[&>*:nth-child(2n)]:border-l max-sm:[&>*:nth-child(2n)]:border-hairline max-sm:[&>*:nth-child(2n)]:pl-4",
-        "sm:flex sm:flex-wrap sm:gap-x-6 sm:[&>*+*]:border-l sm:[&>*+*]:border-hairline sm:[&>*+*]:pl-6",
-        className,
-      )}
-      {...props}
-    />
-  )
-}
-
-/**
- * A table cell's primary column, rendered as the row's way into its detail
- * view — default text colour, underline only on hover.
- *
- * `Button`'s `variant="link"` doesn't fit here: it colours the text primary
- * and always underlines, which reads as navigation rather than "this is the
- * name of the thing the row is about". Thirteen tables across the app were
- * each retyping the same three classes for exactly this button before this
- * existed.
- */
-export function RowLink({
-  onClick,
-  mono,
-  title,
-  className,
-  children,
-}: {
-  onClick: () => void
-  mono?: boolean
-  /** For a title long enough to ellipse — the secondary line beside it has one. */
-  title?: string
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      title={title}
-      className={cn(
-        // `truncate` alone does nothing on a button: it is inline-block, so it
-        // sizes to its text and a process whose name is a 200-character command
-        // line paints straight across Owner, CPU and Memory. `max-w-full` binds
-        // it to the title column's cap, `min-w-0` lets it shrink where the row
-        // lays its title out with flex.
-        "max-w-full min-w-0 truncate text-left text-body font-medium hover:underline",
-        mono && "font-mono text-xs",
-        className,
-      )}
-    >
-      {children}
-    </button>
-  )
-}
-
-/**
- * A label/value pair in a stacked list — the replacement for the `<dl>` grids
- * that each card used to hand-roll with its own column widths.
- */
-export function DetailList({ className, ...props }: React.ComponentProps<"dl">) {
-  return (
-    <dl
-      className={cn("grid grid-cols-[minmax(0,auto)_minmax(0,1fr)] gap-x-4 gap-y-1.5", className)}
-      {...props}
-    />
-  )
-}
-
-export function Detail({
-  label,
-  children,
-  className,
-}: {
-  label: React.ReactNode
-  children: React.ReactNode
-  className?: string
-}) {
-  return (
-    <>
-      <dt className="text-xs text-muted-foreground">{label}</dt>
-      <dd className={cn("min-w-0 text-xs", className)}>{children}</dd>
-    </>
+/** A string eyebrow is not drawn; in development it says so, once per string. */
+function droppedEyebrow(words: string) {
+  if (process.env.NODE_ENV === "production" || said.has(words)) return
+  said.add(words)
+  console.warn(
+    `PageContext: the eyebrow "${words}" is not drawn. Pass back={{ href, label }} for a way back, or remove it.`,
   )
 }
 
@@ -343,12 +220,15 @@ export function Detail({
  * get `LoadingPanel`.
  */
 export function PageState({
+  back,
   eyebrow,
   title,
   error,
   onRetry,
   skeleton,
 }: {
+  back?: Back
+  /** @deprecated use `back`; see `PageContext`. */
   eyebrow?: React.ReactNode
   title: React.ReactNode
   /** When set, the page failed; otherwise it is still loading. */
@@ -358,7 +238,7 @@ export function PageState({
 }) {
   return (
     <Page>
-      <PageContext eyebrow={eyebrow} title={title} />
+      <PageContext back={back} eyebrow={eyebrow} title={title} />
       {error ? <ErrorState error={error} onRetry={onRetry} /> : (skeleton ?? <LoadingPanel />)}
     </Page>
   )

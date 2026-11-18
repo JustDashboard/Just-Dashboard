@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import { CloudUpload, FileText, RefreshClockwise, ShieldCheck, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
 import { renewalReading } from "@/lib/certificates"
@@ -13,15 +14,19 @@ import { cn } from "@/lib/utils"
 import type { Certificate, CertificateCoverage, Job } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { RecentJobs } from "@/components/job-console"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogos } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
+import { ListToolbar } from "@/components/toolbar"
+import { SearchInputSkeleton } from "@/components/search-input"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -159,7 +164,7 @@ export function CertificatesPage() {
   }
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext eyebrow="Proxy" title="Certificates" />
       <CertificatesIdentity />
       <CertificateRun />
@@ -381,7 +386,7 @@ function CertificatesIdentity() {
   )
 
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise border-b-0 pb-0"
       logo={
         marks.length > 0 ? (
@@ -404,31 +409,24 @@ function CertificatesIdentity() {
             {/* On a phone the line keeps to what fits on one, so it is the
                 height it was while it loaded: which certbot is the Renewal
                 view's, and how soon is the list's first row. */}
-            <span className="contents max-sm:hidden">
-              {certbot.data ? (
-                <HostFact product="lets-encrypt">
-                  certbot
-                  {certbot.data.version
-                    ? ` ${certbot.data.version.replace(/^certbot\s*/i, "")}`
-                    : ""}
-                </HostFact>
-              ) : certbotGone ? (
-                <span>no certbot</span>
-              ) : null}
-              {(certbot.data || certbotGone) && <FactDot />}
-            </span>
-            <span className="numeric">{plural(counts.all, "certificate")}</span>
+            {certbot.data ? (
+              <Fact product="lets-encrypt" className="max-sm:hidden">
+                certbot
+                {certbot.data.version ? ` ${certbot.data.version.replace(/^certbot\s*/i, "")}` : ""}
+              </Fact>
+            ) : certbotGone ? (
+              <Fact className="max-sm:hidden">no certbot</Fact>
+            ) : null}
+            <Fact className="numeric">{plural(counts.all, "certificate")}</Fact>
             {counts.expiring > 0 && counts.refused > 0 && (
-              <>
-                <FactDot />
+              <Fact>
                 <ExpiringWords counts={counts} />
-              </>
+              </Fact>
             )}
+            {/* Its reading in a word, with what the record says behind it
+                on the Renewal view, where the run and its reason are. */}
             {certbot.data && !certbotGone && (
-              <>
-                <FactDot />
-                {/* Its reading in a word, with what the record says behind it
-                    on the Renewal view, where the run and its reason are. */}
+              <Fact>
                 <Link
                   href={certificatesHref("renewal")}
                   title={renewal.hint}
@@ -441,7 +439,7 @@ function CertificatesIdentity() {
                 >
                   renewal {renewal.value.toLowerCase()}
                 </Link>
-              </>
+              </Fact>
             )}
           </>
         )
@@ -502,11 +500,15 @@ function countCertificates(all: Certificate[]) {
 function InventoryLoading() {
   return (
     <div className="min-w-0 space-y-4" aria-busy="true" data-slot="cert-list-loading">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <Skeleton className="h-8 w-full sm:w-72" />
-        <Skeleton className="h-8 w-[10.5rem]" />
-      </div>
-      <Skeleton className="h-7 w-24" />
+      <ListToolbar
+        search={<SearchInputSkeleton />}
+        sort={
+          // Marked as the select it stands for, so the toolbar gives it the
+          // select's phone height and the list lands where this stands.
+          <Skeleton data-slot="select-trigger" className="h-8 w-44 rounded-md max-sm:h-10" />
+        }
+        chips={<Skeleton className="h-7 w-24" />}
+      />
       <ul className="min-w-0 space-y-2">
         {[0, 1, 2].map((i) => (
           <li key={i}>

@@ -9,13 +9,14 @@ import type { FileEntry, GitStatus, StackDetail } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { LG_BESIDE_RAIL } from "@/components/docker/beside-rail"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { FileEditorSheet } from "@/components/files/file-editor"
-import { FileIcon } from "@/components/files/file-icon"
+import { FileIcon } from "@/components/file-icon"
 import { FileBrowser } from "@/components/files/inline-browser"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ago } from "@/components/procs/units"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import {
   Table,
@@ -167,7 +168,12 @@ export function StackFiles({
 
   return (
     <div className="flex h-full min-h-0 min-w-0 animate-rise flex-col gap-6 pb-4">
-      <Panel aria-label="What compose reads here" className="shrink-0">
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        aria-label="What compose reads here"
+        className="shrink-0"
+      >
         <PanelHeader
           title="What compose reads here"
           actions={<span className="font-mono text-hint text-muted-foreground">{root}</span>}

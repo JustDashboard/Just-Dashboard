@@ -14,22 +14,18 @@ import type {
   DeploymentOperations,
   DockerVolume,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { ProductLogo } from "@/components/product-logo"
 import { EmptyNote } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { MOUNT_STATUS, MountMark } from "@/components/deploy/vocabulary"
 import { volumeProduct } from "@/components/deploy/service-product"
-import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import { useConfiguration, useSettingDraft } from "@/components/deploy/settings/use-configuration"
 import { emptyMount, MountRows, type MountValue } from "@/components/deploy/settings/mounts"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { volumeBackup } from "@/components/deploy/settings/volume-backup"
 import { useProject } from "@/components/deploy/project-context"
 

@@ -11,11 +11,13 @@ import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { CredentialSelect } from "@/components/deploy/credentials-page"
 import type { DeploymentDraftSource, GitHubAppRepository, GitHubRepoSummary } from "@/lib/types"
 import { Disclosure, Field, OptionList, OptionRow } from "@/components/form"
-import { ChoiceList, ChoiceRow, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Row, RowList } from "@/components/row-list"
-import { SearchInput } from "@/components/page"
-import { EmptyNote, EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { SearchInput } from "@/components/search-input"
+import { EmptyNote, EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
@@ -298,7 +300,7 @@ export function SourceGit({
     // The list and the ways around it, each the height of the window: the
     // rows scroll inside the panel that holds them and everything else stays
     // put, which is what the Git page's list does for the checkouts on disk.
-    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-[minmax(0,1fr)]">
+    <div className="grid min-w-0 gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_22rem] xl:grid-rows-fill">
       {/* The one surface on this screen that carries depth (§16): choosing a
           repository is what the reader came here to do, and the paste field
           beside it is the fallback for when this list has not got it. Two
@@ -413,7 +415,7 @@ export function SourceGit({
               {/* Padded by the rows' own bleed. A scroll container over rows
                   that bleed grows a sideways scrollbar otherwise, which is
                   what it had. */}
-              <div className="-mx-3 max-h-[min(60vh,42rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1">
+              <div className="-mx-3 max-h-[min(60svh,42rem)] overflow-y-auto px-3 xl:max-h-none xl:min-h-0 xl:flex-1">
                 {!listing &&
                   groups.map((group) => (
                     <div key={group.key} className="animate-rise space-y-2 pt-3 first:pt-0">
@@ -663,7 +665,7 @@ export function SourceGit({
                 there is nothing to choose and this field is the way forward,
                 so it takes the command face. */}
             <Button
-              className="h-11 w-full sm:h-9"
+              className="w-full"
               variant={pickable.length > 0 ? "outline" : "default"}
               pending={busy === "manual"}
               disabled={!manualUrl.trim()}

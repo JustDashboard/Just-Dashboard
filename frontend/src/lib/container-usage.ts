@@ -1,6 +1,6 @@
 import type { ContainerNetworkCounters, ContainerStats } from "@/lib/types"
 import { clock, rate, timestamp } from "@/lib/format"
-import { containerGapRow, type ContainerRow } from "@/lib/metrics-range"
+import { containerGapRow, type ContainerRow } from "@/lib/metrics/range"
 
 export const CONTAINER_STALE_MS = 10_000
 

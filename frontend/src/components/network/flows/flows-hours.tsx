@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import { cn } from "@/lib/utils"
-import type { FlowCoverageHour } from "@/lib/network-flows"
+import type { FlowCoverageHour } from "@/lib/network/flows"
 import { ObserverQualityReading } from "@/components/network/kernel-observer"
 import { UTCTime, dayWords } from "@/components/network/flows/marks"
 

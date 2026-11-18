@@ -7,13 +7,15 @@ import { notify } from "@/lib/toast"
 import type { DNSAddress, DNSReport, ResolverView } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { RowList, Row } from "@/components/row-list"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
 import { InputGroup, InputGroupInput } from "@/components/ui/input-group"
 import { Disclosure, Field } from "@/components/form"
+import { Section } from "@/components/section"
 
 /**
  * The DNS behind a scan: each address with its TTL and whose it is, the alias
@@ -68,8 +70,7 @@ export function TLSDNSPanel({ domain, openAtFirst }: { domain: string; openAtFir
 
           {dns.source && (
             <>
-              <section className="space-y-2">
-                <h3 className="text-body font-medium">Addresses</h3>
+              <Section level={3} title="Addresses" className="gap-3">
                 {dns.addresses.length === 0 && dns.cnameChain.length === 0 ? (
                   <p className="text-hint text-muted-foreground">
                     No A or AAAA record
@@ -101,10 +102,9 @@ export function TLSDNSPanel({ domain, openAtFirst }: { domain: string; openAtFir
                     ))}
                   </RowList>
                 )}
-              </section>
+              </Section>
 
-              <section className="space-y-2">
-                <h3 className="text-body font-medium">CAA</h3>
+              <Section level={3} title="CAA" className="gap-3">
                 <Status
                   verdict={dns.caa.error ? "critical" : dns.caa.letsEncrypt ? "ok" : "critical"}
                   label={
@@ -140,10 +140,9 @@ export function TLSDNSPanel({ domain, openAtFirst }: { domain: string; openAtFir
                     Asked, from the name up: {dns.caa.checked.join(", ")}.
                   </p>
                 )}
-              </section>
+              </Section>
 
-              <section className="space-y-2">
-                <h3 className="font-mono text-xs font-medium">_acme-challenge.{dns.domain}</h3>
+              <Section level={3} title={<span className="font-mono text-body">_acme-challenge.{dns.domain}</span>} className="gap-3">
                 {dns.acmeError ? (
                   <p className="text-hint break-words text-muted-foreground">
                     The lookup failed: {dns.acmeError}
@@ -167,12 +166,11 @@ export function TLSDNSPanel({ domain, openAtFirst }: { domain: string; openAtFir
                     ))}
                   </RowList>
                 )}
-              </section>
+              </Section>
             </>
           )}
 
-          <section className="space-y-2">
-            <h3 className="text-body font-medium">Propagation</h3>
+          <Section level={3} title="Propagation" className="gap-3">
             <RowList>
               {dns.propagation.map((view) => (
                 <Row
@@ -200,7 +198,7 @@ export function TLSDNSPanel({ domain, openAtFirst }: { domain: string; openAtFir
                 : "The resolvers disagree. A record changed recently is still cached somewhere; each resolver keeps the old answer until its TTL runs out."}
             </p>
             <ResolverSetting saved={dns.resolvers} onSaved={report.refresh} />
-          </section>
+          </Section>
         </div>
       )}
     </Disclosure>

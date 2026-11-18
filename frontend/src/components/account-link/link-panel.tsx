@@ -1,21 +1,21 @@
 "use client"
 
 import { useState } from "react"
-import { Check, Copy, External, Warning } from "@/components/icons"
+import { External, Warning } from "@/components/icons"
 import { countdown, REQUEST_LIFETIME, scopeName, siteHost } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
-import { useCopy } from "@/hooks/use-copy"
 import { useNow } from "@/hooks/use-now"
 import { ScopeCards } from "@/components/account-link/scope-cards"
 import { ShellWords } from "@/components/deploy/run-evidence"
 import { Meter } from "@/components/meter"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import { Notice } from "@/components/state"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
+import { CopyButton } from "@/components/copy"
 
 /** The same flow from a terminal; one code path on the backend, so the same approval below. */
 const TERMINAL_COMMAND = "sudo ./scripts/manage.sh link"
@@ -87,7 +87,7 @@ function Choose({
           <span className="text-xs text-muted-foreground">or from a terminal</span>
           <Well className="flex min-w-0 items-center gap-3 py-1.5 pr-1.5 pl-3">
             <span className="min-w-0 truncate">
-              <span aria-hidden className="text-muted-foreground/60 select-none">
+              <span aria-hidden className="text-faint select-none">
                 ${" "}
               </span>
               <ShellWords command={TERMINAL_COMMAND} />
@@ -203,12 +203,5 @@ function Waiting({
   )
 }
 
-export function CopyButton({ label, text }: { label: string; text: string }) {
-  const { copy, copied } = useCopy()
-  return (
-    <Button size="xs" variant="outline" onClick={() => void copy(text)} aria-label={label}>
-      {copied ? <Check /> : <Copy />}
-      {copied ? "Copied" : "Copy"}
-    </Button>
-  )
-}
+/** @deprecated import `CopyButton` from components/copy. */
+export { CopyButton }

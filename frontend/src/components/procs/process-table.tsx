@@ -7,9 +7,12 @@ import { useArrivals } from "@/hooks/use-arrivals"
 import { useMetrics } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { FactDot, HostFact, HostIdentity, platformName } from "@/components/metrics/host-identity"
-import { HUE, LiveBytes, LiveFigure } from "@/components/overview/readings"
-import { Page, PageContext, RowLink, SearchInput } from "@/components/page"
+import { IdentityHeader, platformName } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
+import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
+import { Page, PageContext } from "@/components/page"
+import { RowLink } from "@/components/row-link"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import {
   ProductGlyph,
@@ -19,8 +22,10 @@ import {
   processProduct,
 } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
-import { EmptyState, ErrorState, LoadingPanel } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
+import { Meter } from "@/components/meter"
 import { Status, StatusDot } from "@/components/status-dot"
 import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -67,6 +72,7 @@ import {
 } from "@/components/procs/shared"
 import { WorkloadBand } from "@/components/procs/workloads"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
+import { useDebounced } from "@/hooks/use-debounced"
 
 export type ProcessSort = "auto" | "cpu" | "memory" | "io" | "uptime"
 
@@ -245,7 +251,7 @@ export function LiveProcesses() {
         {paused ? <Play className="size-3.5" /> : <Pause className="size-3.5" />}
         {paused ? "Resume" : "Pause"}
       </Button>
-      <WorkspaceHelp compact />
+      <WorkspaceHelp />
     </div>
   )
 
@@ -276,41 +282,30 @@ export function LiveProcesses() {
         },
       ]}
     >
-      <Page className="animate-rise" {...inspection.bindings}>
+      <Page rise {...inspection.bindings}>
         <PageContext eyebrow="Processes" title="Live" />
 
         {/* Held open before the metrics socket lands, so the band under it does
             not move when it does. */}
-        <HostIdentity
+        <IdentityHeader
           mark={host && platformProduct(host.platform)}
           title={host?.hostname ?? <TextShimmer>Reading this host…</TextShimmer>}
           facts={
             known ? (
               <>
-                <HostFact product={platformProduct(host.platform)}>{platformName(host)}</HostFact>
-                <FactDot />
-                <HostFact product={cpuProduct(host.cpuModel, host.kernelArch)}>
-                  <span className="numeric">
-                    <LiveFigure value={snapshot.cpu.totalPercent} unit="%" /> CPU
-                  </span>
-                </HostFact>
-                <FactDot />
-                <span className="numeric">
+                <Fact product={platformProduct(host.platform)}>{platformName(host)}</Fact>
+                <Fact product={cpuProduct(host.cpuModel, host.kernelArch)} className="numeric">
+                  <LiveFigure value={snapshot.cpu.totalPercent} unit="%" /> CPU
+                </Fact>
+                <Fact className="numeric">
                   load <LiveFigure value={snapshot.cpu.loadAvg1} decimals={2} />
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   <LiveBytes value={snapshot.memory.available} /> available
-                </span>
-                <FactDot />
-                <span className="numeric">up {duration(snapshot.uptimeSeconds)}</span>
+                </Fact>
+                <Fact className="numeric">up {duration(snapshot.uptimeSeconds)}</Fact>
                 {data && (
-                  <>
-                    <FactDot />
-                    <span className="numeric">
-                      {plural(data.available, "process", "processes")}
-                    </span>
-                  </>
+                  <Fact className="numeric">{plural(data.available, "process", "processes")}</Fact>
                 )}
               </>
             ) : (
@@ -338,7 +333,7 @@ export function LiveProcesses() {
               <>
                 Processes
                 {data && (
-                  <span className="numeric ml-2 text-body font-normal text-muted-foreground">
+                  <span className="numeric ml-2 text-body leading-none font-normal text-muted-foreground">
                     {data.available}
                   </span>
                 )}
@@ -472,7 +467,7 @@ export function LiveProcesses() {
                   ? `Showing the ${data.processes.length} heaviest of ${data.total} matching`
                   : `${plural(data.total, "process", "processes")} matching`}
               </span>
-              <span className="text-muted-foreground/40">·</span>
+              <span className="text-faint">·</span>
               <span>
                 sorted by {SORT_LABEL[data.focus.sort]}
                 {data.focus.reason && ` because ${data.focus.reason}`}
@@ -484,7 +479,7 @@ export function LiveProcesses() {
               )}
               {!data.ratesReady && (
                 <>
-                  <span className="text-muted-foreground/40">·</span>
+                  <span className="text-faint">·</span>
                   <span>rates arrive with the second sample</span>
                 </>
               )}
@@ -551,7 +546,7 @@ function ProcessRows({ rows, ratesReady, ...rest }: RowsProps & { ratesReady: bo
       {/* The outer columns take the gutter from their own cell padding, so
         the first column starts in the title's column. */}
       <div className="hidden min-w-0 xl:block">
-        <Table className="table-fixed" containerClassName="max-h-[calc(100svh-13rem)]">
+        <Table className="table-fixed" containerClassName="max-h-rail">
           <TableHeader className={stickyTableHeader}>
             <TableRow>
               <TableHead className="w-24">PID</TableHead>
@@ -825,14 +820,8 @@ function MemoryReading({
 
 /** A reading's bar inside a cell, shared by Live, PM2 and Services for the same scale. */
 export function MiniBar({ value, color }: { value: number; color: string }) {
-  return (
-    <span aria-hidden className="h-1 w-8 shrink-0 overflow-hidden rounded-full bg-meter-track">
-      <span
-        className="block h-full rounded-full transition-[width] duration-700 ease-out"
-        style={{ width: `${Math.max(0, Math.min(value, 100))}%`, background: color }}
-      />
-    </span>
-  )
+  // The shared meter at a cell's size; the figure beside it says the value.
+  return <Meter size="cell" decorative value={value} color={color} />
 }
 
 /** The process as the product it is; a name this cannot place keeps a glyph. */
@@ -983,13 +972,4 @@ function ProcessTableSettings({
       </DropdownMenuContent>
     </DropdownMenu>
   )
-}
-
-function useDebounced<T>(value: T, delay: number): T {
-  const [settled, setSettled] = useState(value)
-  useEffect(() => {
-    const timer = window.setTimeout(() => setSettled(value), delay)
-    return () => window.clearTimeout(timer)
-  }, [value, delay])
-  return settled
 }

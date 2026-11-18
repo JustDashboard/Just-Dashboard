@@ -4,9 +4,10 @@ import { useEffect, useState } from "react"
 import { errorMessage } from "@/lib/api"
 import { bytes, duration, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingPanel } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
@@ -20,7 +21,7 @@ import {
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { redisSave } from "@/components/database/redis/api"
 import { scheduleWords } from "@/components/database/redis/performance/schedule"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { Redis } from "@/components/database/redis/use-redis"
 
 /**

@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { Check, ChevronDown, Cross, MagnifyingGlass, SettingsSliders } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import type { LogJournalUnit, LogSource } from "@/lib/types"
 import {
   LEVEL_DOT,
@@ -12,10 +13,10 @@ import {
   LOG_LEVELS,
   withFieldTokens,
   type LogLevel,
-} from "@/lib/log-filter"
-import { LENS_CHOICES, lensFor } from "@/lib/log-lenses"
+} from "@/lib/log/filter"
+import { LENS_CHOICES, lensFor } from "@/lib/log/lenses"
 import type { LogFilterState, LogMode } from "@/components/logs/types"
-import { ChipCount, FilterChip } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
@@ -222,18 +223,19 @@ export function FilterBar({
           />
           {filter.q && (
             <InputGroupAddon align="inline-end" className="border-l-0 px-1">
-              <Button
+              <IconAction
                 type="button"
                 size="icon-xs"
                 variant="ghost"
-                aria-label="Clear the search"
+                className="[&_svg:not([class*='size-'])]:size-3"
+                label="Clear the search"
                 onClick={() => {
                   set({ q: "" })
                   queryRef.current?.focus()
                 }}
               >
                 <Cross />
-              </Button>
+              </IconAction>
             </InputGroupAddon>
           )}
           <InputGroupAddon align="inline-end" className="gap-0 p-0">
@@ -283,7 +285,7 @@ export function FilterBar({
           <Button
             size="sm"
             variant="outline"
-            className="h-8 shrink-0 gap-1.5 px-2.5 font-normal max-sm:h-10"
+            className="shrink-0 gap-1.5 px-2.5 font-normal"
             aria-label="Options"
           >
             <SettingsSliders className="size-3.5 text-muted-foreground" />
@@ -444,7 +446,7 @@ export function LevelChips({
                 {LEVEL_LABEL[level]}
                 {counts[level] > 0 && (
                   <ChipCount className={cn(COUNT_TONE[level], COUNT_TONE[level] && "opacity-100")}>
-                    {counts[level].toLocaleString()}
+                    {grouped(counts[level])}
                   </ChipCount>
                 )}
               </FilterChip>
@@ -568,7 +570,7 @@ function UnitPicker({
         <Button
           variant="outline"
           size="sm"
-          className="h-8 w-48 justify-between font-normal max-sm:h-10"
+          className="w-48 justify-between font-normal"
           aria-label="Unit"
         >
           <span className="truncate text-body">{value || "Every unit"}</span>

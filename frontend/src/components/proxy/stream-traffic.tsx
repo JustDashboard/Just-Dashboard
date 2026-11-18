@@ -5,7 +5,7 @@ import Link from "next/link"
 import { ArrowLeftRight, ChartActivity, Clock, ShieldOff, Users, Warning } from "@/components/icons"
 import { post } from "@/lib/api"
 import { notify } from "@/lib/toast"
-import { bytes, plural } from "@/lib/format"
+import { bytes, plural, sharePercent } from "@/lib/format"
 import type {
   StreamEntry,
   StreamResult,
@@ -23,18 +23,19 @@ import {
   withClientRule,
 } from "@/lib/streams"
 import type { PollState } from "@/hooks/use-poll"
-import { RankList, RankSkeleton, SplitBar, percent, type RankItem } from "@/components/rank-list"
+import { RankList, RankSkeleton, SplitBar, type RankItem } from "@/components/rank-list"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChartPanel } from "@/components/metrics/chart-panel"
+import { ChartPanel } from "@/components/chart-panel"
 import type { ChartRowLike, Series } from "@/components/metrics/metric-chart"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HUE } from "@/components/overview/readings"
+import { TileTrend } from "@/components/sparkline"
+import { HUE } from "@/components/live-figure"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { Row, RowList } from "@/components/row-list"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { lengthWords, sessionsWords, streamHref } from "@/components/proxy/stream-facts"
 
 /**
@@ -157,10 +158,13 @@ export function StreamReadings({
   const series = (key: "sessions" | "denied" | "failed") =>
     traffic?.buckets.map((b) => b[key]) ?? []
   const share = (n: number) =>
-    traffic && traffic.sessions > 0 ? `${percent(n / traffic.sessions)} of sessions` : words
+    traffic && traffic.sessions > 0 ? `${sharePercent(n / traffic.sessions)} of sessions` : words
   const length = traffic && traffic.sessions > 0 ? lengthWords(traffic.duration) : undefined
   return (
-    <ReadingLines aria-label={`What ${name} carried`} className="xl:grid-cols-1 2xl:grid-cols-2">
+    // Two columns from `xl`, as every other page's readings, so each line's
+    // mark sits beside its words: one column beside the rail pinned the
+    // sparklines 400px from what they draw.
+    <ReadingLines aria-label={`What ${name} carried`}>
       <ReadingLine
         mark={
           <WireMark size="md" hue={HUE.cpu}>

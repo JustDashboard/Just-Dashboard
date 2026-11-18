@@ -1,7 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FieldRow, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
 import { Input } from "@/components/ui/input"
 import {

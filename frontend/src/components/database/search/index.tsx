@@ -1,37 +1,29 @@
 "use client"
 
-import { MenuItemText } from "@/components/ui/menu-item-text"
-
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { ChevronDown, Cross, MagnifyingGlass, StopCircle } from "@/components/icons"
+import { Cross, MagnifyingGlass, StopCircle } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { useMemoryState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import { SearchInput } from "@/components/page"
-import { EmptyState, Notice } from "@/components/state"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { SearchInput } from "@/components/search-input"
+import { Sweep } from "@/components/loading"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { encodeFilters } from "@/components/database/data/filters"
 import { KindGlyph } from "@/components/database/data/kinds"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import { KIND_HUE } from "@/components/database/grid"
-import { nameHue } from "@/components/database/home/kinds"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
-import { ReadError } from "@/components/database/redis/read-error"
+import { SchemaChips } from "@/components/database/kit/schema-chips"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
   PER_TABLE,
@@ -283,8 +275,6 @@ export function SqlSearch() {
   const scopeWord = scope || (scoped ? `every ${engine.nouns.container}` : "this database")
   const whereWord =
     tables.length > 0 ? `${plural(tables.length, engine.nouns.object)} of ${scopeWord}` : scopeWord
-  const chips = schemas.slice(0, CHIPS)
-  const rest = schemas.slice(CHIPS)
   // Another schema has other tables: the ticks do not follow.
   const pick = (name: string) => select({ schema: name, scope: null, tables: null })
   const ticked = ticking ?? tables
@@ -327,25 +317,12 @@ export function SqlSearch() {
               form's submit under the very press that stopped the scan, and the
               browser then submitted the form — a second scan. */}
           {busy ? (
-            <Button
-              key="stop"
-              type="button"
-              size="sm"
-              variant="outline"
-              className="max-sm:h-10"
-              onClick={stop}
-            >
+            <Button key="stop" type="button" size="sm" variant="outline" onClick={stop}>
               <StopCircle />
               Stop
             </Button>
           ) : (
-            <Button
-              key="search"
-              type="submit"
-              size="sm"
-              className="max-sm:h-10"
-              disabled={!draft.trim()}
-            >
+            <Button key="search" type="submit" size="sm" disabled={!draft.trim()}>
               <MagnifyingGlass />
               Search
             </Button>
@@ -355,61 +332,19 @@ export function SqlSearch() {
         {/* Where it looks, said before it looks: the schema, then the tables of it. */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           {scoped && (
-            <ChipStrip role="group" aria-label={`Which ${engine.nouns.container} is read`}>
-              {chips.map((schema) => (
-                <FilterChip
-                  key={schema.name}
-                  selected={!everywhere && schema.name === own}
-                  onClick={() => pick(schema.name)}
-                >
-                  <SchemaMark name={schema.name} />
-                  <span className="font-mono">{schema.name}</span>
-                  {schema.tables >= 0 && <ChipCount>{schema.tables}</ChipCount>}
-                </FilterChip>
-              ))}
-              {rest.length > 0 && (
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <FilterChip
-                      selected={!everywhere && rest.some((schema) => schema.name === own)}
-                    >
-                      {!everywhere && rest.some((schema) => schema.name === own) ? (
-                        <span className="font-mono">{own}</span>
-                      ) : (
-                        `${rest.length} more`
-                      )}
-                      <ChevronDown className="size-3" />
-                    </FilterChip>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="start" className="max-h-72 w-60 overflow-y-auto">
-                    {rest.map((schema) => (
-                      <DropdownMenuItem key={schema.name} onSelect={() => pick(schema.name)}>
-                        <SchemaMark name={schema.name} />
-                        <MenuItemText
-                          hint={
-                            schema.tables >= 0 && (
-                              <span className="numeric text-hint text-muted-foreground">
-                                {schema.tables}
-                              </span>
-                            )
-                          }
-                        >
-                          <span className="min-w-0 flex-1 truncate font-mono text-xs">
-                            {schema.name}
-                          </span>
-                        </MenuItemText>
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
-              )}
-              <FilterChip
-                selected={everywhere}
-                onClick={() => select({ scope: EVERYWHERE, tables: null })}
-              >
-                Every {engine.nouns.container}
-              </FilterChip>
-            </ChipStrip>
+            <SchemaChips
+              mode="one"
+              schemas={schemas}
+              value={own}
+              onChange={pick}
+              every={{
+                chosen: everywhere,
+                onPick: () => select({ scope: EVERYWHERE, tables: null }),
+              }}
+              label={`Which ${engine.nouns.container} is read`}
+              noun={{ one: engine.nouns.container, many: engine.nouns.containers }}
+              visible={CHIPS}
+            />
           )}
           <TablePicker
             names={tableNames}
@@ -432,7 +367,7 @@ export function SqlSearch() {
           progress={tables.length > 0 ? { done: progress, of: tables.length } : undefined}
         />
       ) : failed ? (
-        <ReadError error={failed} onRetry={() => setAgain((n) => n + 1)} />
+        <ErrorState retryable error={failed} onRetry={() => setAgain((n) => n + 1)} />
       ) : halted ? (
         <Notice tone="warning" title="Stopped before it finished">
           <p>
@@ -671,23 +606,11 @@ function Needle({ children }: { children: string }) {
   return <span className="rounded-sm bg-mark px-1 font-mono">{children}</span>
 }
 
-function SchemaMark({ name }: { name: string }) {
-  return (
-    <span
-      aria-hidden
-      className="size-2 shrink-0 rounded-sm"
-      style={{ background: nameHue(name) }}
-    />
-  )
-}
-
 /** The scan is out: what is being read, and the shape of what will come. */
 function Searching({ word, progress }: { word: string; progress?: { done: number; of: number } }) {
   return (
     <div role="status" className="min-w-0 space-y-4">
-      <div aria-hidden className="h-0.5 overflow-hidden rounded-full bg-meter-track">
-        <div className="h-full w-1/3 animate-sweep bg-primary" />
-      </div>
+      <Sweep rounded className="h-0.5" />
       <p className="flex items-center gap-2 text-body">
         <TextShimmer>{`Reading ${progress ? "the" : "every table of"} ${word}…`}</TextShimmer>
         {progress && (
@@ -698,9 +621,7 @@ function Searching({ word, progress }: { word: string; progress?: { done: number
       </p>
       <div aria-hidden className="space-y-2">
         <Skeleton className="h-3 w-40" />
-        {[0, 1, 2].map((row) => (
-          <Skeleton key={row} className="h-14 w-full rounded-xl" />
-        ))}
+        <ChoiceListSkeleton rows={3} mark={false} aside={false} />
       </div>
     </div>
   )
@@ -836,8 +757,8 @@ function instantText(text: string): string {
 }
 
 const CELL_HUE: Record<OtherCell["kind"], string> = {
-  text: "text-foreground/85",
-  number: cn("text-foreground/85", KIND_HUE.number),
+  text: "text-foreground",
+  number: cn("text-foreground", KIND_HUE.number),
   instant: KIND_HUE.datetime,
   flag: KIND_HUE.boolean,
   token: KIND_HUE.uuid,

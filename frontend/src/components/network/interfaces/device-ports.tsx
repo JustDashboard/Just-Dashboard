@@ -3,10 +3,11 @@
 import { get } from "@/lib/api"
 import type { NetworkBridgeView, NetworkLink } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { Detail, DetailList } from "@/components/page"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import {
@@ -191,7 +192,7 @@ export function DevicePorts({ link, links }: { link: NetworkLink; links: Network
             {v.fdbRead.state !== "ok" ? (
               <ReadingWords reading={v.fdbRead} />
             ) : v.fdb.length === 0 ? (
-              <p className="py-2 text-body text-muted-foreground">Nothing learned or configured.</p>
+              <EmptyNote>Nothing learned or configured.</EmptyNote>
             ) : (
               <div className="overflow-hidden rounded-xl border">
                 <Table aria-label="Forwarding database" containerClassName="max-h-72">

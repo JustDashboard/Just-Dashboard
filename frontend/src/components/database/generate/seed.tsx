@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { useEffect, useId, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   ChevronDown,
   CheckCircle,
@@ -19,8 +19,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { FormNote, Statement } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, LoadingRows, Notice } from "@/components/state"
-import { tabClasses } from "@/components/tabs"
+import { EmptyState, Notice } from "@/components/state"
+import { LoadingRows, Sweep } from "@/components/loading"
+import { ViewTabs } from "@/components/tabs"
+import { TabsContent } from "@/components/ui/tabs"
 import { Tag } from "@/components/tag"
 import { BorderBeam } from "@/components/ui/border-beam"
 import { Button } from "@/components/ui/button"
@@ -48,7 +50,7 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { SqlReview } from "@/components/database/kit/sql-review"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { TablePicker } from "@/components/database/generate/table-picker"
 import {
@@ -441,8 +443,6 @@ function SeedOutput({
   onRows: (key: string, value: number | string) => void
   onChoose: (table: SeedTable, column: SeedColumn, generator: string) => void
 }) {
-  const ids = useId()
-  const strip = useRef<HTMLDivElement>(null)
   const [openKey, setOpenKey] = useState("")
   const tables = plan?.tables ?? []
   const at = Math.max(
@@ -464,9 +464,7 @@ function SeedOutput({
   if (!plan || !open) {
     return reading ? (
       <div role="status" aria-label="Reading the tables" className="space-y-3">
-        <div aria-hidden className="h-0.5 overflow-hidden rounded-full bg-meter-track">
-          <div className="h-full w-1/3 animate-sweep bg-primary" />
-        </div>
+        <Sweep rounded className="h-0.5" />
         <LoadingRows rows={8} />
       </div>
     ) : (
@@ -481,25 +479,6 @@ function SeedOutput({
     )
   }
 
-  const onTabKey = (event: React.KeyboardEvent) => {
-    const to =
-      event.key === "ArrowRight"
-        ? (at + 1) % tables.length
-        : event.key === "ArrowLeft"
-          ? (at + tables.length - 1) % tables.length
-          : event.key === "Home"
-            ? 0
-            : event.key === "End"
-              ? tables.length - 1
-              : -1
-    if (to < 0) return
-    event.preventDefault()
-    setOpenKey(seedKey(tables[to].schema, tables[to].name))
-    const tab = strip.current?.querySelector<HTMLElement>(`[data-table="${to}"]`)
-    tab?.focus()
-    tab?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }
-
   const key = seedKey(open.schema, open.name)
   return (
     <section aria-label="The rows planned" className="min-w-0 animate-rise space-y-2">
@@ -509,78 +488,59 @@ function SeedOutput({
         </Notice>
       )}
       {plan.warnings.length > 0 && <FormNote tone="warning">{plan.warnings.join(" ")}</FormNote>}
-      {/* eslint-disable-next-line jsx-a11y/interactive-supports-focus -- a composite that moves focus among its own items: it hears their arrow keys and is never focused itself */}
-      <div
-        ref={strip}
-        role="tablist"
-        aria-label="Tables seeded"
-        className="scroll-affordance flex min-w-0 [scrollbar-width:none] items-stretch overflow-x-auto border-b border-hairline [--panel-ground:var(--background)] [&::-webkit-scrollbar]:hidden"
-        onKeyDown={onTabKey}
+      {/* A tab for each table, in the order they are written; the rows are its panel. */}
+      <ViewTabs
+        label="Tables seeded"
+        views={tables.map((t) => ({
+          key: seedKey(t.schema, t.name),
+          label: tableLabel(t, several),
+          count: t.problem ? undefined : t.rows,
+          dot: t.problem ? { tone: "warning" as const, label: "left out" } : undefined,
+        }))}
+        value={key}
+        onValueChange={setOpenKey}
+        size="sm"
+        mono
       >
-        {tables.map((t, index) => (
-          <button
-            key={seedKey(t.schema, t.name)}
-            type="button"
-            role="tab"
-            id={`${ids}-tab-${index}`}
-            data-table={index}
-            aria-selected={index === at}
-            aria-controls={index === at ? `${ids}-panel` : undefined}
-            tabIndex={index === at ? 0 : -1}
-            className={cn(tabClasses(index === at, "h-9"), "shrink-0 font-mono text-xs")}
-            onClick={() => setOpenKey(seedKey(t.schema, t.name))}
-          >
-            {t.problem && <Warning aria-hidden className="size-3.5 text-warning" />}
-            {tableLabel(t, several)}
-            {t.problem && <span className="sr-only">, left out</span>}
-            {!t.problem && (
-              <span className="numeric font-sans text-hint text-muted-foreground">
-                {t.rows.toLocaleString("en-US")}
-              </span>
-            )}
-          </button>
-        ))}
-      </div>
-      <div
-        role="tabpanel"
-        id={`${ids}-panel`}
-        aria-labelledby={`${ids}-tab-${at}`}
-        className={cn("relative space-y-3 transition-opacity", problem && "opacity-60")}
-      >
-        <TableFacts
-          table={open}
-          rows={Object.hasOwn(perTable, key) ? perTable[key] : rows}
-          typed={Object.hasOwn(badRows, key) ? badRows[key] : undefined}
-          onRows={(value) => onRows(key, value)}
-        />
-        {open.problem ? (
-          <Notice tone="warning" icon={Warning} title="Left out of this seed">
-            {open.problem}
-          </Notice>
-        ) : (
-          <>
-            {open.notes.length > 0 && (
-              <ul aria-label="What the rows are written with" className="space-y-1">
-                {open.notes.map((note, index) => (
-                  <li key={index}>
-                    <FormNote>{note}</FormNote>
-                  </li>
-                ))}
-              </ul>
-            )}
-            <PreviewGrid
-              table={open}
-              onChoose={(column, generator) => onChoose(open, column, generator)}
-            />
-            <Statement label="Each row is inserted with" sql={open.statement} placeholder="" />
-          </>
-        )}
-        {reading && (
-          <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
-            <BorderBeam size={120} duration={4} />
-          </span>
-        )}
-      </div>
+        <TabsContent
+          value={key}
+          className={cn("relative mt-2 space-y-3 transition-opacity", problem && "opacity-60")}
+        >
+          <TableFacts
+            table={open}
+            rows={Object.hasOwn(perTable, key) ? perTable[key] : rows}
+            typed={Object.hasOwn(badRows, key) ? badRows[key] : undefined}
+            onRows={(value) => onRows(key, value)}
+          />
+          {open.problem ? (
+            <Notice tone="warning" icon={Warning} title="Left out of this seed">
+              {open.problem}
+            </Notice>
+          ) : (
+            <>
+              {open.notes.length > 0 && (
+                <ul aria-label="What the rows are written with" className="space-y-1">
+                  {open.notes.map((note, index) => (
+                    <li key={index}>
+                      <FormNote>{note}</FormNote>
+                    </li>
+                  ))}
+                </ul>
+              )}
+              <PreviewGrid
+                table={open}
+                onChoose={(column, generator) => onChoose(open, column, generator)}
+              />
+              <Statement label="Each row is inserted with" sql={open.statement} placeholder="" />
+            </>
+          )}
+          {reading && (
+            <span aria-hidden className="pointer-events-none absolute -inset-px rounded-xl">
+              <BorderBeam size={120} duration={4} />
+            </span>
+          )}
+        </TabsContent>
+      </ViewTabs>
     </section>
   )
 }
@@ -670,7 +630,7 @@ function PreviewGrid({
         aria-label={`The first rows of ${table.name}`}
         containerClassName="max-h-[calc(100svh-26rem)] min-h-40"
       >
-        <TableHeader className="sticky top-0 z-10 bg-card [&_tr]:border-b">
+        <TableHeader className="sticky top-0 z-raised bg-card [&_tr]:border-b">
           <TableRow className="hover:bg-transparent">
             {table.columns.map((column) => (
               <TableHead key={column.name} className="h-auto px-3 pt-2 pb-1 align-top">

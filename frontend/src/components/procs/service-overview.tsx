@@ -8,10 +8,12 @@ import {
   Cpu,
   Crosshair,
   FolderOpen,
+  Gauge,
   Globe,
   GridSquare,
   Layers,
   Logs,
+  RefreshClockwise,
   Servers,
   Warning,
   type Icon,
@@ -26,13 +28,14 @@ import type {
   SystemdUnit,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ShellWords } from "@/components/deploy/run-evidence"
-import { useNow } from "@/components/deploy/vocabulary"
-import { WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
+import { ShellWords } from "@/components/code"
+import { useNow } from "@/hooks/use-now"
+import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { IconAction } from "@/components/icon-action"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HUE, LiveBytes, LiveFigure, SeriesKey } from "@/components/overview/readings"
-import { Detail, DetailList, Section } from "@/components/page"
+import { TileTrend } from "@/components/sparkline"
+import { HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Section } from "@/components/section"
 import { Well } from "@/components/panel"
 import {
   ProductGlyph,
@@ -40,7 +43,7 @@ import {
   processProduct,
   unitProduct,
 } from "@/components/product-logo"
-import { StatGrid, StatTile } from "@/components/stat-tile"
+import { NoReading, ReadingLine, ReadingLines, ReadingMark } from "@/components/reading-line"
 import { Notice } from "@/components/state"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -173,7 +176,13 @@ function ServiceNotices({ unit, properties: p, onTab, onDaemonReload }: ServiceO
     )
   }
   if (notices.length === 0) return null
-  return <div className="grid min-w-0 gap-3 lg:grid-cols-2">{notices}</div>
+  // As many to a row as fit at 20rem each, so a lone callout takes the row
+  // rather than half of it beside nothing.
+  return (
+    <div className="grid min-w-0 grid-cols-[repeat(auto-fit,minmax(min(20rem,100%),1fr))] gap-3">
+      {notices}
+    </div>
+  )
 }
 
 /**
@@ -203,7 +212,13 @@ function FailureStory({ unit, now }: { unit: SystemdUnit; now: number }) {
   )
 }
 
-/** Four live readings over the unit's recent windows, from its cgroup. */
+/**
+ * Four live readings over the unit's recent windows, from its cgroup, said as
+ * sentences on a mark (`ReadingLine`) the way a PM2 application's are: they
+ * were a row of four tiles, one more shape for the same readings beside a
+ * sibling page that already read in words. A reading past its line takes its
+ * tone on the mark.
+ */
 function ServiceReadings({
   unit,
   properties: p,
@@ -222,24 +237,26 @@ function ServiceReadings({
   const tasks = unit.tasks ?? 0
   const taskShare = tasksMax ? (tasks / tasksMax) * 100 : undefined
   const cpuUsed = limit(p.CPUUsageNSec)
+  const memoryTone =
+    memShare === undefined
+      ? "default"
+      : memShare >= 90
+        ? "danger"
+        : memShare >= 75
+          ? "warning"
+          : "default"
   return (
-    <StatGrid columns={4} dense data-testid="service-readings">
-      <StatTile
-        label={
-          <>
-            <SeriesKey color={HUE.cpu} />
-            CPU
-          </>
+    <ReadingLines data-testid="service-readings" className="xl:grid-cols-1 2xl:grid-cols-2">
+      <ReadingLine
+        mark={
+          <ReadingMark
+            glyph={Cpu}
+            hue={HUE.cpu}
+            tone={unit.cpuReady ? cpuTone(unit.cpuPercent ?? 0) : "default"}
+          />
         }
-        tone={unit.cpuReady ? cpuTone(unit.cpuPercent ?? 0) : "default"}
-        value={
-          unit.cpuReady ? (
-            <LiveFigure value={unit.cpuPercent ?? 0} decimals={1} unit="%" />
-          ) : (
-            <span className="text-muted-foreground">—</span>
-          )
-        }
-        trailing={unit.cpuReady ? "of a core" : "measuring"}
+        name="CPU"
+        hint={cpuUsed ? `${duration(cpuUsed / 1e9)} of CPU this run` : "every process it started"}
         trend={
           <TileTrend
             values={history.map((point) => point.cpu)}
@@ -247,60 +264,59 @@ function ServiceReadings({
             label="CPU over the last minutes"
           />
         }
-        hint={cpuUsed ? `${duration(cpuUsed / 1e9)} of CPU this run` : "every process it started"}
-      />
-      <StatTile
-        label={
-          <>
-            <SeriesKey color={HUE.mem} />
-            Memory
-          </>
-        }
-        tone={
-          memShare === undefined
-            ? "default"
-            : memShare >= 90
-              ? "danger"
-              : memShare >= 75
-                ? "warning"
-                : "default"
-        }
-        value={<LiveBytes value={memory} />}
-        trailing={memoryMax ? `of ${bytes(memoryMax)}` : undefined}
-        meter={memShare}
-        meterLabel="Memory against its limit"
-        trend={
-          memShare === undefined ? (
-            <TileTrend
-              values={history.map((point) => point.memory)}
-              color={HUE.mem}
-              label="Memory over the last minutes"
-            />
-          ) : undefined
-        }
+      >
+        {unit.cpuReady ? (
+          <span className="numeric">
+            <LiveFigure value={unit.cpuPercent ?? 0} decimals={1} unit="%" /> of a core
+          </span>
+        ) : (
+          <NoReading>measuring</NoReading>
+        )}
+      </ReadingLine>
+      <ReadingLine
+        mark={<ReadingMark glyph={Gauge} hue={HUE.mem} tone={memoryTone} />}
+        name="Memory"
         hint={peak ? `peak ${bytes(peak)}` : "page cache included"}
-      />
-      <StatTile
-        label="Tasks"
-        tone={taskShare !== undefined && taskShare >= 90 ? "warning" : "default"}
-        value={<LiveFigure value={tasks} />}
-        trailing={tasksMax ? `of ${tasksMax}` : undefined}
-        meter={taskShare}
-        meterLabel="Tasks against their limit"
+        trend={
+          <TileTrend
+            values={history.map((point) => point.memory)}
+            color={HUE.mem}
+            label="Memory over the last minutes"
+          />
+        }
+      >
+        <span className="numeric">
+          <LiveBytes value={memory} />
+          {memoryMax ? ` of ${bytes(memoryMax)}` : ""}
+        </span>
+      </ReadingLine>
+      <ReadingLine
+        mark={
+          <ReadingMark
+            glyph={Layers}
+            tone={taskShare !== undefined && taskShare >= 90 ? "warning" : "default"}
+          />
+        }
+        name="Tasks"
         hint="processes and threads"
-      />
-      <StatTile
-        label="Restarts"
-        tone={restarts >= 3 ? "warning" : "default"}
-        value={<LiveFigure value={restarts} />}
-        trailing="automatic"
+      >
+        <span className="numeric">
+          <LiveFigure value={tasks} />
+          {tasksMax ? ` of ${tasksMax}` : ""}
+        </span>
+      </ReadingLine>
+      <ReadingLine
+        mark={<ReadingMark glyph={RefreshClockwise} tone={restarts >= 3 ? "warning" : "default"} />}
+        name="Restarts"
         hint={
           restart.policy === "no"
             ? "stays down if it exits"
             : `${restart.label}${p.RestartUSec ? `, after ${p.RestartUSec}` : ""}`
         }
-      />
-    </StatGrid>
+      >
+        <span className="numeric">{plural(restarts, "automatic restart")}</span>
+      </ReadingLine>
+    </ReadingLines>
   )
 }
 

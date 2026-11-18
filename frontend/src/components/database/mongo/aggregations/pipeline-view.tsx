@@ -16,13 +16,13 @@ import {
 } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { relativeTime } from "@/lib/format"
+import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { Segments } from "@/components/deploy/settings/segments"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Segments } from "@/components/segments"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { EmptyState, Notice } from "@/components/state"
@@ -38,8 +38,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import type { Verb } from "@/components/verbs"
+import { RunningCommand } from "@/components/database/kit/running-command"
 import { useGridLayout } from "@/components/database/grid"
-import { EngineMark, downloadText } from "@/components/database/kit"
+import { EngineMark } from "@/components/database/kit"
 import {
   STAGES,
   enabledStages,
@@ -75,15 +76,16 @@ import {
 } from "@/components/database/mongo/documents/views"
 import { ExplainDialog, type ExplainSubject } from "@/components/database/mongo/explain"
 import {
-  StopButton,
   Stopped,
-  useElapsed,
+  useSecondsRunning,
   useStoppable,
   worthShowing,
-} from "@/components/database/mongo/in-flight"
+} from "@/components/database/kit/in-flight"
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
 import type { MongoAggregateResult, MongoDoc } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
+import { OBJECT_HEAD } from "@/components/database/workbench/chrome"
+import { saveText } from "@/lib/download"
 
 const LIMITS = ["100", "500", "1000"] as const
 type Limit = (typeof LIMITS)[number]
@@ -143,7 +145,7 @@ export function PipelineView({
   const [limit, setLimit] = useViewState<Limit>(`databases.${id}.mongo.aggregate.limit`, "100")
   const [ran, setRan] = useState<Ran | null>(null)
   const [running, setRunning] = useState(false)
-  const seconds = useElapsed(running)
+  const seconds = useSecondsRunning(running)
   const [resultView, setResultView] = useViewState<ResultView>(
     `databases.${id}.mongo.aggregate.view`,
     "list",
@@ -275,7 +277,7 @@ export function PipelineView({
 
   return (
     <div data-slot="mongo-pipeline" className="flex min-h-0 min-w-0 flex-1 flex-col">
-      <div className="flex min-h-10 shrink-0 flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline px-3 py-1">
+      <div className={OBJECT_HEAD}>
         <h2 className="flex min-w-0 items-center gap-1.5">
           <CollectionMark kind={markKind} />
           <span className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
@@ -312,7 +314,7 @@ export function PipelineView({
                     <MenuItemText
                       hint={
                         <span className="numeric text-hint text-muted-foreground">
-                          {entry.stages.length} {entry.stages.length === 1 ? "stage" : "stages"}
+                          {plural(entry.stages.length, "stage")}
                         </span>
                       }
                     >
@@ -357,7 +359,7 @@ export function PipelineView({
                 Copy as shell text
               </DropdownMenuItem>
               <DropdownMenuItem
-                onSelect={() => downloadText(`${shell}\n`, `${collection}-pipeline.js`)}
+                onSelect={() => saveText(`${collection}-pipeline.js`, `${shell}\n`)}
               >
                 <Download className="size-3.5" />
                 Download as a file
@@ -418,7 +420,7 @@ export function PipelineView({
           )}
           {canRun &&
             (running && worthShowing(seconds) ? (
-              <StopButton size="xs" seconds={seconds} onStop={flight.stop} />
+              <RunningCommand size="xs" seconds={seconds} onStop={flight.stop} />
             ) : (
               <Button
                 size="xs"
@@ -705,8 +707,7 @@ function Result({
           ))}
         </div>
         <span className="numeric min-w-0 flex-1 truncate text-hint text-muted-foreground">
-          {result.returned.toLocaleString("en-US")}{" "}
-          {result.returned === 1 ? "document" : "documents"}
+          {plural(result.returned, "document")}
           {result.hasMore ? ", and more past the limit" : ""}
           {result.truncated ? " · cut at 8 MiB" : ""}
           {` · ${result.durationMs.toLocaleString("en-US")} ms`}
@@ -849,7 +850,7 @@ function TextDialog({
         <>
           <p className="mr-auto min-w-0 text-hint text-muted-foreground">
             {parsed.ok
-              ? `${parsed.stages.length} ${parsed.stages.length === 1 ? "stage" : "stages"}. Stages that are switched off are not part of the text.`
+              ? `${plural(parsed.stages.length, "stage")}. Stages that are switched off are not part of the text.`
               : ""}
           </p>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

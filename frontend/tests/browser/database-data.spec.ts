@@ -455,6 +455,9 @@ const applied = (sent: { changes: Record<string, unknown>[] }) =>
 const card = (page: Page, row: number) => page.locator("[data-slot=row-card]").nth(row)
 /** The rows, as a grid or as a phone's cards. */
 const rows = (page: Page) => page.locator("[data-slot=data-grid], [data-slot=row-cards]")
+/** The landing where a table would be: it is headed by the schema it stands for. */
+const landingHead = (page: Page) =>
+  page.locator("[data-slot=schema-head]").getByRole("heading", { name: "public", exact: true })
 
 /** Stages one value of a row from its card: open the row, write the field, back to the rows. */
 async function editCard(page: Page, row: number, name: string, text: string) {
@@ -490,7 +493,7 @@ test("the rail lists what holds rows by kind, and a table is a link and a step o
     "href",
     "/databases/1/data?schema=public&table=items",
   )
-  await expect(page.getByText("Pick a table")).toBeVisible()
+  await expect(landingHead(page)).toBeVisible()
   // The largest are figures in a column with their share of the schema, not a
   // bar of a different length under every name, and every row is one height.
   const largest = page.getByRole("region", { name: "Largest in public" })
@@ -1438,9 +1441,14 @@ test("the views of a table are one stop of the keyboard, moved along with the ar
   await mockEditor(page)
   await page.goto(ITEMS)
   const tab = (name: string) => page.getByRole("tab", { name })
-  await expect(tab("Data")).toHaveAttribute("tabindex", "0")
+  // One stop for the keyboard: the strip, then the arrows along it.
+  await expect(page.getByRole("tablist", { name: "View of the table" })).toHaveAttribute(
+    "tabindex",
+    "0",
+  )
   await expect(tab("Structure")).toHaveAttribute("tabindex", "-1")
   await tab("Data").focus()
+  await expect(tab("Data")).toHaveAttribute("tabindex", "0")
   await page.keyboard.press("ArrowRight")
   await expect(tab("Structure")).toBeFocused()
   await expect(tab("Structure")).toHaveAttribute("aria-selected", "true")
@@ -1827,7 +1835,7 @@ for (const [label, viewport] of [
     const sort = JSON.stringify([{ column: "id", desc: true }])
 
     await page.goto(`${DATA}?schema=public`)
-    await expect(page.getByText("Pick a table")).toBeVisible()
+    await expect(landingHead(page)).toBeVisible()
     await keepsTheRules(page, "no table open")
 
     const phone = viewport.width < 640
@@ -2076,7 +2084,7 @@ test("what a schema and a table amount to is one line of words, not a strip of f
     details: { items: { size: 3355443, dataSize: 2411725, indexSize: 1015808, owner: "app" } },
   })
   await page.goto(`${DATA}?schema=public`)
-  await expect(page.getByText("Pick a table")).toBeVisible()
+  await expect(landingHead(page)).toBeVisible()
   const line = page.locator("[data-slot=facts-line]")
   await expect(line).toContainText("2 tables")
   await expect(line).toContainText("1 view")
@@ -2084,7 +2092,7 @@ test("what a schema and a table amount to is one line of words, not a strip of f
 
   await page.goto(`${ITEMS}&view=structure`)
   await expect(line).toHaveText(
-    "~250 rows·3.2 MB·2.3 MB data·992.0 KB indexes·4 columns·owned by app",
+    "~250 rows · 3.2 MB · 2.3 MB data · 992.0 KB indexes · 4 columns · owned by app",
   )
 })
 
@@ -2097,10 +2105,10 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
   await expect(card(page, 0)).toContainText("Item 1")
 
   // One pane, the height the head leaves, and the bar at the very foot.
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Tables", "Rows", "Details"])
-  await expect(paneBar(page).getByRole("tab", { name: "Rows" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Tables", "Rows", "Details"])
+  await expect(paneBar(page).getByRole("button", { name: "Rows" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
@@ -2123,9 +2131,9 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
 
   // The full row is a tap away, and what is written there is the card's.
   await card(page, 1).click()
-  await expect(paneBar(page).getByRole("tab", { name: "Details" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Details" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
   const panel = page.getByRole("complementary", { name: "Row" })
   await expect(panel).toContainText("Row 2")
@@ -2155,9 +2163,9 @@ test("on a phone the table editor is one pane with a bar at its foot, and a row 
   const rail = page.getByRole("navigation", { name: "tables of this schema" })
   await rail.getByRole("link", { name: /^other/ }).click()
   await expect(title(page)).toContainText("other")
-  await expect(paneBar(page).getByRole("tab", { name: "Rows" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Rows" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
 })
 
@@ -2178,7 +2186,7 @@ test("the table editor, state by state @shots", async ({ page }) => {
       await page.screenshot({ path: `${shots}/after-data-${name}-${width}.png` })
     }
     await page.goto(`${DATA}?schema=public`)
-    await expect(page.getByText("Pick a table")).toBeVisible()
+    await expect(landingHead(page)).toBeVisible()
     if (phone) {
       await shot("tables")
       await showPane(page, "Rows")

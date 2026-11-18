@@ -1,9 +1,8 @@
 import { Archive, CloudUpload, Layers, Servers } from "@/components/icons"
-import { cn } from "@/lib/utils"
 import type { BackupJob, BackupResource, Container } from "@/lib/types"
 import { useProjects } from "@/hooks/use-projects"
-import { LogoGlyph } from "@/components/logo"
-import { ProjectMark, ProjectMarkOf } from "@/components/deploy/project-mark"
+import { DashboardMark } from "@/components/logo"
+import { ProjectMark, ProjectMarkOf } from "@/components/project-mark"
 import {
   ProductGlyph,
   ProductLogo,
@@ -180,21 +179,6 @@ export function ResourceMark({
     />
   )
   return <ProjectMarkOf projectId={project} size="sm" fallback={tile} />
-}
-
-/** The dashboard itself, on the tile a product's logo takes. */
-export function DashboardMark({ className }: { className?: string }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "flex size-8 shrink-0 items-center justify-center rounded-lg border border-hairline bg-background",
-        className,
-      )}
-    >
-      <LogoGlyph small className="h-4 w-auto text-brand" />
-    </span>
-  )
 }
 
 /**

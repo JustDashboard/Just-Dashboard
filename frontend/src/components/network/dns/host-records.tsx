@@ -2,6 +2,7 @@
 
 import { useAuth } from "@/hooks/use-auth"
 import { useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { Plus, Trash } from "@/components/icons"
 import { ApiError, get, post, put, refusedIndex } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -14,11 +15,7 @@ import type {
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Panel, PanelBody } from "@/components/panel"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -252,7 +249,7 @@ export function HostRecordsEditor({
               return (
                 <li
                   key={row.key}
-                  className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-2 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] sm:items-start"
+                  className="grid min-w-0 grid-cols-main-end gap-2 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)_auto] sm:items-start"
                 >
                   <Input
                     aria-label={`Address of record ${index + 1}`}
@@ -277,15 +274,16 @@ export function HostRecordsEditor({
                     onChange={(event) => change(row.key, { names: event.target.value })}
                   />
                   {!locked && (
-                    <Button
+                    <IconAction
                       type="button"
                       size="icon"
                       variant="ghost"
-                      aria-label={`Remove record ${index + 1}`}
+                      className="[&_svg:not([class*='size-'])]:size-4"
+                      label={`Remove record ${index + 1}`}
                       onClick={() => update(rows.filter((r) => r.key !== row.key))}
                     >
                       <Trash aria-hidden />
-                    </Button>
+                    </IconAction>
                   )}
                   {bad && (
                     <p
@@ -343,7 +341,7 @@ export function HostRecordsEditor({
             </span>
           }
         >
-          <Panel>
+          <Panel framed>
             <PanelBody flush>
               <Table containerClassName="max-h-80">
                 <TableHeader>

@@ -2470,13 +2470,15 @@ for (const width of [1280, 390]) {
     await expect(reload).toHaveAttribute("data-variant", "default")
     await expect(identity.getByRole("button")).toHaveCount(2)
     await expect(identity.getByRole("link", { name: "Alerts" })).toHaveCount(0)
-    // The command stands on the name's row, at a phone's width too.
+    // The command stands on the name's row, at a phone's width too, where it
+    // is drawn as its icon after the name.
     await risen(page)
     const name = await identity.getByText("nginx", { exact: true }).boundingBox()
     const command = await reload.boundingBox()
     expect(Math.abs(command!.y + command!.height / 2 - (name!.y + name!.height / 2))).toBeLessThan(
       12,
     )
+    expect(name!.x + name!.width).toBeLessThanOrEqual(command!.x)
     // The picture is the first block under it; the tiles that carry the
     // hour's trends come after.
     const picture = await page.locator("[data-slot='route-picture']").boundingBox()

@@ -4,15 +4,15 @@ import { useCallback, useEffect, useId, useMemo, useState } from "react"
 import { useRouter } from "next/navigation"
 import { Key, Trash } from "@/components/icons"
 import { ApiError, errorMessage, put } from "@/lib/api"
-import { calendarDate, timestamp } from "@/lib/format"
+import { calendarDate, plural, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { SettingForm, SettingSection } from "@/components/deploy/settings/setting-card"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { SettingForm, SettingSection } from "@/components/settings/setting-card"
 import { Field, FieldRow, FormNote, FormSections, OptionList, OptionRow } from "@/components/form"
-import { HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -21,7 +21,6 @@ import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { CouldNotRead } from "@/components/database/home/blocks"
 import { read } from "@/components/database/home/read"
 import { ProtectedTag } from "@/components/database/kit"
 import { dropAccountRequest } from "@/components/database/ops/access-drop"
@@ -62,8 +61,9 @@ import {
   type AccountView,
 } from "@/components/database/ops/account-frame"
 import { ServerDown, isDown } from "@/components/database/ops/performance-parts"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
+import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { ErrorState } from "@/components/state"
 
 const SHOW_WORDS: Record<AccountShow, string> = {
   "": "",
@@ -109,7 +109,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
   const { confirm, dialog } = useConfirm()
   // Every dialog here is opened by state: this hands the keyboard back to
   // the control that opened one.
-  useFocusReturn()
+  useFocusTrail()
   const down = isDown(status.state)
   const filter = useAccessFilter(id)
   const show = filter.show as AccountShow
@@ -195,6 +195,8 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       sessions: role.connections,
     })),
     loading: roles.loading && !down,
+    error: roles.data ? undefined : roles.error,
+    onRetry: roles.refresh,
     search: {
       value: filter.search,
       onChange: filter.setSearch,
@@ -205,7 +207,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       : roles.data
         ? show || filter.search
           ? `${shown.length} of ${accountCounts(all).all}${show ? ` · ${SHOW_WORDS[show]}` : ""}`
-          : `${accountCounts(all).all} ${accountCounts(all).all === 1 ? "account" : "accounts"}`
+          : `${plural(accountCounts(all).all, "account")}`
         : "Reading the accounts…",
     filtered: Boolean(show),
     onClearFilters: () => filter.setShow(""),
@@ -247,7 +249,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
   const title = <AccountName name={name} host={host} className="text-title" />
   const summary = data ? grantSummary(data, data.grants) : ""
   const identity = data ? (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${key}`}
       slot="account-identity"
       className="animate-rise border-b-0 pb-0"
@@ -286,7 +288,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       menu={verbs.length > 0 ? <VerbMenu verbs={verbs} label={`Actions for ${key}`} /> : false}
     />
   ) : (
-    <HostIdentity
+    <IdentityHeader
       slot="account-identity"
       className="border-b-0 pb-0"
       logo={mark}
@@ -324,7 +326,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
                   It may have been dropped, or the name in the link is misspelt.
                 </NoSuchAccount>
               ) : detail.error ? (
-                <CouldNotRead what="the account" error={detail.error} onRetry={detail.refresh} />
+                <ErrorState what="the account" error={detail.error} onRetry={detail.refresh} />
               ) : (
                 <GrantsSkeleton />
               )

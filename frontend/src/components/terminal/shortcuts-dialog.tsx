@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Cross, RotateCounterClockwise, Warning } from "@/components/icons"
 import { Modal } from "@/components/modal"
+import { ShortcutList } from "@/components/keycaps"
 import { cn } from "@/lib/utils"
 import {
   SHORTCUTS,
@@ -15,7 +16,7 @@ import {
   resetAllShortcuts,
   resetShortcut,
   useKeymap,
-} from "@/lib/terminal-keymap"
+} from "@/lib/terminal/keymap"
 import { Button } from "@/components/ui/button"
 import { rowReveal } from "@/components/icon-action"
 
@@ -111,10 +112,10 @@ export function ShortcutsDialog({
         </p>
       )}
 
-      <div className="max-h-[55vh] space-y-4 overflow-y-auto pr-1">
+      <div className="max-h-[55svh] space-y-4 overflow-y-auto pr-1">
         {groups.map(([group, specs]) => (
           <section key={group}>
-            <p className="eyebrow mb-1.5">{group}</p>
+            <h3 className="mb-1 text-body font-medium">{group}</h3>
             <div className="space-y-0.5">
               {specs.map((spec) => {
                 const chord = map[spec.action]
@@ -151,7 +152,7 @@ export function ShortcutsDialog({
                       className={cn(
                         "min-w-28 shrink-0 rounded-md border px-2 py-0.5 text-center font-mono text-hint transition-colors",
                         isRecording
-                          ? "animate-pulse border-primary bg-plot-primary text-primary"
+                          ? "border-primary bg-plot-primary text-primary"
                           : chord
                             ? "border-hairline bg-control text-foreground hover:border-rule-primary"
                             : "border-dashed border-hairline text-muted-foreground hover:border-rule-primary",
@@ -167,26 +168,28 @@ export function ShortcutsDialog({
         ))}
       </div>
 
-      {/* The familiar terminal conventions that are not rebindable. */}
-      <section className="rounded-md border border-hairline bg-surface-sunken p-2.5">
-        <p className="eyebrow mb-1.5">Mouse &amp; clipboard</p>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-3 gap-y-1 text-xs">
-          {[
-            ["Wheel", "Scroll back through the session's history"],
-            ["Click", "Focus the terminal"],
-            ["Drag", "Select text"],
-            ["Ctrl + C", "Copy the selection — or interrupt, when nothing is selected"],
-            ["Ctrl + V", "Paste"],
-            ["Middle click", "Paste"],
-            ["Ctrl + wheel", "Text size"],
-          ].map(([keys, what]) => (
-            <div key={keys} className="contents">
-              <dt className="font-mono text-hint whitespace-nowrap text-foreground">{keys}</dt>
-              <dd className="text-muted-foreground">{what}</dd>
-            </div>
-          ))}
-        </dl>
-      </section>
+      {/* The familiar terminal conventions that are not rebindable, drawn as
+          every other shortcut list is. Ctrl stays Ctrl on a Mac: the shell
+          hears Ctrl+C, whatever the keyboard. */}
+      <ShortcutList
+        className="mt-4"
+        groups={[
+          {
+            title: "Mouse and clipboard",
+            items: [
+              { does: "Scroll back through the session's history", keys: "wheel" },
+              { does: "Focus the terminal", keys: "click" },
+              { does: "Select text", keys: "drag" },
+              {
+                does: "Copy the selection, or interrupt when nothing is selected",
+                keys: "Ctrl+C",
+              },
+              { does: "Paste", keys: "Ctrl+V · middle click" },
+              { does: "Text size", keys: "Ctrl+wheel" },
+            ],
+          },
+        ]}
+      />
     </Modal>
   )
 }

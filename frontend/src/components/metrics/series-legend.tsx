@@ -2,7 +2,7 @@
 
 import { memo, useMemo, useSyncExternalStore } from "react"
 import { cn } from "@/lib/utils"
-import { getCrosshair, getServerCrosshair, subscribeCrosshair } from "@/lib/metrics-crosshair"
+import { getCrosshair, getServerCrosshair, subscribeCrosshair } from "@/lib/metrics/crosshair"
 import { seriesFormat, type ChartRowLike, type Series } from "@/components/metrics/metric-chart"
 
 /**
@@ -93,9 +93,7 @@ export const SeriesLegend = memo(function SeriesLegend({
                     </span>
                   </span>
                 </td>
-                <td className="numeric py-px pl-3 text-right text-muted-foreground/70">
-                  {render(stat.min)}
-                </td>
+                <td className="numeric py-px pl-3 text-right text-faint">{render(stat.min)}</td>
                 <td className="numeric py-px pl-3 text-right text-muted-foreground">
                   {render(stat.mean)}
                 </td>

@@ -4,12 +4,13 @@ import { useMemo, useState } from "react"
 import { Cross, Plus } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { TerminalActivity, TerminalWorkspace } from "@/lib/types"
-import { sessionLabel, sessionProgram, sessionWorking } from "@/lib/terminal-activity"
-import { SearchInput } from "@/components/page"
+import { sessionLabel, sessionProgram, sessionWorking } from "@/lib/terminal/activity"
+import { SearchInput } from "@/components/search-input"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
-import { Button } from "@/components/ui/button"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Pane, PaneHeader } from "@/components/panel"
+import { ProductGlyph } from "@/components/product-logo"
+import { EmptyNote } from "@/components/state"
 
 type RowHandlers = {
   activeId: string | null
@@ -56,7 +57,10 @@ export function SessionRail({
 
   return (
     <Pane flush aria-label="Terminal sessions" className={cn("w-full shrink-0", className)}>
-      <PaneHeader className="h-10 gap-1 py-0 pl-3">
+      {/* The workbench's mark heads its rail, as the board's and Git's head
+          their strips: the terminal draws no page header to carry it. */}
+      <PaneHeader className="h-10 gap-2 py-0 pl-3">
+        <ProductGlyph id="terminal" className="size-4" />
         <span className="text-body font-medium">Sessions</span>
         <span className="flex-1" />
         <IconAction label="New session" className="size-7" onClick={onNew}>
@@ -84,13 +88,11 @@ export function SessionRail({
         ))}
         {/* On a phone the list is a pane of its own, and an empty one with
             nothing in it reads as a page that did not load. */}
-        {sessions.length === 0 && (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">No sessions yet.</p>
-        )}
+        {sessions.length === 0 && <EmptyNote dense>No sessions yet.</EmptyNote>}
         {matches.length === 0 && filter && (
-          <p className="px-2 py-4 text-center text-xs text-muted-foreground">
-            No session matches <span className="font-medium text-foreground">{filter}</span>.
-          </p>
+          <EmptyNote dense action={{ label: "Clear the filter", onClick: () => setFilter("") }}>
+            Nothing matches “{filter}”.
+          </EmptyNote>
         )}
       </div>
     </Pane>
@@ -140,15 +142,15 @@ function SessionRow({
         </span>
         <ActivityMark working={working} disconnected={dropped} className="pr-1" />
       </button>
-      <Button
+      <IconAction
         size="icon-sm"
         variant="ghost"
-        aria-label={`Close ${label}`}
+        label={`Close ${label}`}
         className={cn("size-6 shrink-0 text-muted-foreground hover:text-destructive", rowReveal())}
         onClick={() => onClose(session)}
       >
         <Cross className="size-3.5" />
-      </Button>
+      </IconAction>
     </div>
   )
 }

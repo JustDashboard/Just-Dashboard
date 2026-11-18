@@ -54,7 +54,7 @@ describe("the views a chart offers", () => {
 
 test("each unit prints its numbers its own way", () => {
   expect(CHART_UNITS.rate.format(2.5)).toBe("2.5/s")
-  expect(CHART_UNITS.count.format(12_345)).toBe("12.3K")
+  expect(CHART_UNITS.count.format(12_345)).toBe("12.3k")
   expect(CHART_UNITS.bytes.format(2048)).toBe("2.0 KB")
   expect(CHART_UNITS.bytes.axisFormat(2048)).toBe("2 KB")
   expect(CHART_UNITS.bytesRate.format(2048)).toBe("2.0 KB/s")

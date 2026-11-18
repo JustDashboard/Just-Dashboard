@@ -1,11 +1,11 @@
 "use client"
 
 import { Key, LockClosed, LockOpen, Shield } from "@/components/icons"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { accountHref, reachesRoot, rootSummary, whyClosed } from "@/components/system-users/access"
 import { AccountWireMark } from "@/components/system-users/wire-marks"
-import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { plural } from "@/lib/format"
 import type { SystemUser } from "@/lib/types"
 

@@ -3,7 +3,7 @@
 import { createRef, useRef, type RefObject } from "react"
 import { cn } from "@/lib/utils"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireHost, WireMark } from "@/components/deploy/wire"
+import { WireHost, WireMark } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
 
 // One product for each thing the first-run question offers, in the order the
@@ -69,7 +69,7 @@ export function ProductOrbit({
         {left.map((id) => (
           <Mark key={id} id={id} markRef={markOf(id)} size="sm" />
         ))}
-        <div ref={hub} className="relative z-10 flex">
+        <div ref={hub} className="relative z-raised flex">
           <WireHost size="md" />
         </div>
         {right.map((id) => (
@@ -97,14 +97,14 @@ export function ProductOrbit({
       ))}
       <div
         ref={hub}
-        className="absolute top-1/2 left-1/2 z-10 flex -translate-x-1/2 -translate-y-1/2"
+        className="absolute top-1/2 left-1/2 z-raised flex -translate-x-1/2 -translate-y-1/2"
       >
         <WireHost />
       </div>
       {PRODUCTS.map((id, index) => (
         <div
           key={id}
-          className="absolute z-10 flex -translate-x-1/2 -translate-y-1/2"
+          className="absolute z-raised flex -translate-x-1/2 -translate-y-1/2"
           style={{
             left: `${50 + 38 * Math.cos(angleOf(index))}%`,
             top: `${50 + 38 * Math.sin(angleOf(index))}%`,
@@ -132,7 +132,7 @@ function Mark({
   size: "sm" | "md"
 }) {
   return (
-    <div ref={markRef} className="relative z-10 flex">
+    <div ref={markRef} className="relative z-raised flex">
       <WireMark tone="logo" size={size}>
         <ProductGlyph id={id} />
       </WireMark>

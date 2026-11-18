@@ -4,13 +4,13 @@ import {
   changeWords,
   deviceChanges,
   deviceHref,
-  deviceName,
   devicePicture,
   deviceState,
   deviceViews,
   groupDevices,
   listFacts,
 } from "./device-facts"
+import { decodeSegment } from "@/lib/route-params"
 
 const link = (over) => ({
   name: "eth0",
@@ -67,9 +67,9 @@ test("a device's page is its name, and a view other than traffic is in the addre
   expect(deviceHref("ens3")).toBe("/network/interfaces/ens3")
   expect(deviceHref("ens3", "traffic")).toBe("/network/interfaces/ens3")
   expect(deviceHref("br-9/x", "ports")).toBe("/network/interfaces/br-9%2Fx?tab=ports")
-  expect(deviceName("br-9%2Fx")).toBe("br-9/x")
-  expect(deviceName("100%")).toBe("100%")
-  expect(deviceName(undefined)).toBe("")
+  expect(decodeSegment("br-9%2Fx")).toBe("br-9/x")
+  expect(decodeSegment("100%")).toBe("100%")
+  expect(decodeSegment(undefined)).toBe("")
 })
 
 test("a tunnel with no carrier to lose is up, and a card with nothing plugged in is not", () => {

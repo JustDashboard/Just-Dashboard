@@ -2,7 +2,6 @@
 
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
 import { useAuth } from "@/hooks/use-auth"
 import { get } from "@/lib/api"
 import type { BGPView, NetworkLink, NetworkRoute, NetworkRouting } from "@/lib/types"
@@ -10,10 +9,10 @@ import { usePoll } from "@/hooks/use-poll"
 import { useViewState } from "@/lib/view-state"
 import { Page, PageContext } from "@/components/page"
 import { ErrorState } from "@/components/state"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
+import { SaveBarProvider } from "@/components/settings/save-bar"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { RoutingIdentity } from "@/components/network/routing/identity"
 import { DecisionMap, DecisionMapWaiting } from "@/components/network/routing/decision-map"
@@ -73,8 +72,6 @@ export default function NetworkRoutingPage() {
   )
 }
 
-const STRIP =
-  "flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
 const OVERVIEW = "flex min-w-0 flex-col gap-6 pt-6 md:gap-8"
 
 /** The first view before the first read: the picture and both tables at the size they had last. */
@@ -90,21 +87,16 @@ function OverviewWaiting({ shape }: { shape: Shape }) {
 
 function Waiting() {
   return (
-    <Page className="gap-5 md:gap-5">
-      <PageContext eyebrow="Network" title="Routing" />
+    <Page>
+      <PageContext title="Routing" />
       <RoutingIdentity onRefresh={() => {}} />
-      <div>
-        <div aria-hidden className={STRIP}>
-          {VIEWS.map((v) => (
-            <span key={v.key} className={tabClasses(v.key === "overview", "h-10")}>
-              {v.label}
-            </span>
-          ))}
-        </div>
+      {/* The strip the page lands with, before the address is known. */}
+      <Tabs value="overview" className="gap-0">
+        <ViewTabList label="Views of routing" views={[...VIEWS]} value="overview" />
         <div className={OVERVIEW}>
           <OverviewWaiting shape={FIRST_SHAPE} />
         </div>
-      </div>
+      </Tabs>
     </Page>
   )
 }
@@ -194,8 +186,8 @@ function Routing() {
   const failed = !data && routing.error
   return (
     <SaveBarProvider>
-      <Page className="animate-rise gap-5 md:gap-5">
-        <PageContext eyebrow="Network" title="Routing" />
+      <Page rise>
+        <PageContext title="Routing" />
         <RoutingIdentity
           routing={data}
           failed={Boolean(failed)}
@@ -212,17 +204,7 @@ function Routing() {
         )}
 
         <Tabs value={view} onValueChange={open} className="gap-0">
-          <TabsPrimitive.List aria-label="Views of routing" className={STRIP}>
-            {VIEWS.map((v) => (
-              <TabsPrimitive.Trigger
-                key={v.key}
-                value={v.key}
-                className={tabClasses(view === v.key, "h-10")}
-              >
-                {v.label}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
+          <ViewTabList label="Views of routing" views={[...VIEWS]} value={view} />
 
           <TabsContent value="overview" className={OVERVIEW}>
             {failed ? (

@@ -19,18 +19,19 @@ import { cronLineName, cronProgram, longClock } from "@/lib/schedule"
 import { notify } from "@/lib/toast"
 import type { CronJob, Crontab } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { TABLE_BLEED } from "@/components/row-list"
 import { useArrivals } from "@/hooks/use-arrivals"
 import { useAuth } from "@/hooks/use-auth"
 import type { PollState } from "@/hooks/use-poll"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { Field, FieldRow, FormNote, FormSection, OptionList, OptionRow } from "@/components/form"
-import type { ServiceLogSource } from "@/components/logs/service-logs"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -43,6 +44,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -53,7 +55,6 @@ import {
 } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
-import { CronJobSheet } from "@/components/procs/cron-job-sheet"
 import { Countdown } from "@/components/procs/schedule-band"
 import { WeekStrip } from "@/components/procs/schedule-sheet"
 import { RunAt } from "@/components/procs/timers"
@@ -76,9 +77,9 @@ type ConfirmFn = (request: ConfirmRequest) => void
  * operator's own keeps the clock. The head counts the jobs and the disabled
  * as chips that narrow the table, where the Cron jobs tile used to count them.
  *
- * A row opens the job's sheet (`cron-job-sheet.tsx`); Add job and Edit open
- * the job editor, a sheet as well, which draws the week the schedule being
- * written makes as it is written.
+ * A row opens the job's own page (`schedule-page.tsx`); Add job and Edit open
+ * the job editor, a sheet, which draws the week the schedule being written
+ * makes as it is written.
  */
 export function CronJobsPanel({
   user,
@@ -88,9 +89,7 @@ export function CronJobsPanel({
   confirm,
   adding,
   onAddingChange,
-  open,
   onOpen,
-  cron,
   zone,
 }: {
   /** The host's zone, which a run's clock time is written in. */
@@ -102,10 +101,8 @@ export function CronJobsPanel({
   confirm: ConfirmFn
   adding: boolean
   onAddingChange: (open: boolean) => void
-  /** The job whose sheet is open, as its lane key (`cron:<line>`). */
-  open: string | null
-  onOpen: (key: string | null) => void
-  cron?: ServiceLogSource
+  /** Opens a job's page, by its lane key (`cron:<line>`). */
+  onOpen: (key: string) => void
 }) {
   const { can } = useAuth()
   // The draft remembers whose crontab it is, so switching accounts cannot
@@ -131,31 +128,7 @@ export function CronJobsPanel({
     null,
   )
   const [shown, setShown] = useSessionState<"" | "enabled" | "disabled">("processes.cron.shown", "")
-  const [saving, setSaving] = useState(false)
-
-  const save = async (
-    content: string,
-    done: string,
-    confirmText?: string,
-    expectedRevision = crontab.data?.revision,
-  ) => {
-    setSaving(true)
-    try {
-      if (!expectedRevision) throw new Error("Reload the crontab before saving this draft.")
-      await put(
-        `/cron/user/${encodeURIComponent(user)}`,
-        { content, expectedRevision },
-        { confirm: confirmText },
-      )
-      notify.success(done)
-      crontab.refresh()
-    } catch (err) {
-      notify.error("Could not update the crontab", err)
-      throw err
-    } finally {
-      setSaving(false)
-    }
-  }
+  const { save, saving } = useCrontabSave(user, crontab)
 
   const raw = crontab.data?.raw ?? ""
   const jobs = useMemo(() => crontab.data?.jobs ?? [], [crontab.data])
@@ -164,24 +137,9 @@ export function CronJobsPanel({
   const identities = cronRowKeys(jobs)
   const rowKeys = new Map(jobs.map((job, index) => [job, identities[index]]))
   const arrived = useArrivals(identities)
-  const opened = open ? jobs.find((job) => `cron:${job.line}` === open) : undefined
   const admin = can("system.admin")
-
-  const actions = (job: CronJob) => ({
-    onToggle: () =>
-      void save(
-        toggleJob(raw, job),
-        `${job.command} ${job.disabled ? "enabled" : "disabled"}`,
-      ).catch(() => undefined),
-    onEdit: () => {
-      onOpen(null)
-      setEditing(job)
-    },
-    onRemove: async (phrase: string) => {
-      await save(removeJob(raw, job), "Cron job removed", phrase)
-      if (open === `cron:${job.line}`) onOpen(null)
-    },
-  })
+  const actions = (job: CronJob) =>
+    cronJobActions({ raw, job, save, onEdit: () => setEditing(job) })
 
   return (
     <>
@@ -218,16 +176,7 @@ export function CronJobsPanel({
                   <span className="max-sm:hidden">Edit as text</span>
                 </Button>
               )}
-              {admin && (
-                <Button
-                  size="sm"
-                  disabled={!crontab.data?.revision}
-                  onClick={() => onAddingChange(true)}
-                >
-                  <Plus className="size-3.5" />
-                  Add job
-                </Button>
-              )}
+              {/* Add job is the page's command, on its identity line. */}
             </>
           }
         >
@@ -287,14 +236,16 @@ export function CronJobsPanel({
               ) : (
                 <Table
                   className="table-fixed"
-                  containerClassName="group-data-[plain]/panel:-mx-4 max-h-[calc(100svh-22rem)] w-auto"
+                  containerClassName={cn("max-h-[calc(100svh-22rem)] w-auto", TABLE_BLEED)}
                 >
                   <TableHeader className={stickyTableHeader}>
                     <TableRow>
                       <TableHead>Job</TableHead>
                       <TableHead className="hidden w-[30%] lg:table-cell">Schedule</TableHead>
                       <TableHead className="hidden w-36 md:table-cell">Next run</TableHead>
-                      <TableHead className="w-28 md:w-32" />
+                      {/* Under a finger each verb is a 40px target, so three of them need
+                          the wider column, or the ⋯ is cut off at the screen's edge. */}
+                      <TableHead label="Actions" className="w-28 md:w-32 pointer-coarse:w-44" />
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -381,15 +332,6 @@ export function CronJobsPanel({
           )}
       </Panel>
 
-      <CronJobSheet
-        job={opened}
-        zone={zone}
-        owner={`${user}'s crontab`}
-        verbs={opened ? cronJobVerbs({ job: opened, admin, confirm, ...actions(opened) }) : []}
-        cron={cron}
-        onOpenChange={(next) => !next && onOpen(null)}
-      />
-
       <CronJobEditor
         open={(adding || editing !== null) && !!crontab.data?.revision}
         job={editing}
@@ -418,7 +360,68 @@ export function CronJobsPanel({
 }
 
 /**
- * Every verb on one job, for its row and its sheet alike: Disable or Enable
+ * Writing one account's crontab back: the whole file, against the revision it
+ * was read at, so an edit made elsewhere since is refused rather than lost.
+ * The list and a job's own page both write through it.
+ */
+export function useCrontabSave(user: string, crontab: PollState<Crontab>) {
+  const [saving, setSaving] = useState(false)
+  const save = async (
+    content: string,
+    done: string,
+    confirmText?: string,
+    expectedRevision = crontab.data?.revision,
+  ) => {
+    setSaving(true)
+    try {
+      if (!expectedRevision) throw new Error("Reload the crontab before saving this draft.")
+      await put(
+        `/cron/user/${encodeURIComponent(user)}`,
+        { content, expectedRevision },
+        { confirm: confirmText },
+      )
+      notify.success(done)
+      crontab.refresh()
+    } catch (err) {
+      notify.error("Could not update the crontab", err)
+      throw err
+    } finally {
+      setSaving(false)
+    }
+  }
+  return { save, saving }
+}
+
+/** What a job's verbs do: switch it, open its editor, remove it, each by rewriting its lines. */
+export function cronJobActions({
+  raw,
+  job,
+  save,
+  onEdit,
+  onRemoved,
+}: {
+  raw: string
+  job: CronJob
+  save: ReturnType<typeof useCrontabSave>["save"]
+  onEdit: () => void
+  onRemoved?: () => void
+}) {
+  return {
+    onToggle: () =>
+      void save(
+        toggleJob(raw, job),
+        `${job.command} ${job.disabled ? "enabled" : "disabled"}`,
+      ).catch(() => undefined),
+    onEdit,
+    onRemove: async (phrase: string) => {
+      await save(removeJob(raw, job), "Cron job removed", phrase)
+      onRemoved?.()
+    },
+  }
+}
+
+/**
+ * Every verb on one job, for its row and its page alike: Disable or Enable
  * and Edit are pressed daily and sit inline, Copy and Remove are words in the
  * menu.
  */
@@ -561,9 +564,10 @@ export function JobCell({
         {onOpen ? (
           <button
             type="button"
+            {...ROW_NAME}
             onClick={onOpen}
             aria-label={`${name}: ${job.command}`}
-            className="block max-w-full truncate text-left text-body font-medium hover:underline"
+            className="block max-w-full truncate rounded-sm text-left text-body font-medium focus-ring hover:underline"
           >
             {name}
           </button>
@@ -629,7 +633,7 @@ const PRESET_WORDS: Record<CronPreset, string> = {
  * under the fields; the frequency is a row of toggles now, since nine choices
  * are read faster laid out than opened.
  */
-function CronJobEditor({
+export function CronJobEditor({
   open,
   job,
   user,

@@ -56,7 +56,7 @@ const computer = (id: string, name: string, extra: Record<string, unknown>) => (
   host: name,
   protocol: "rdp",
   port: 3389,
-  username: "wayy",
+  username: "operator",
   domain: "",
   hasPassword: true,
   security: "",

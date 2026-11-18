@@ -38,10 +38,17 @@ import type {
   DeploymentRouteHSTS,
   DeploymentTailnetAddress,
   Exposure,
-  ForwardAuthProvider,
 } from "@/lib/types"
 import { SSO_PROVIDERS, chooseSsoProvider, ssoPreset } from "@/lib/sso-providers"
-import { Field, FieldCheck, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
+import {
+  Field,
+  FieldCheck,
+  FieldChecks,
+  FieldRow,
+  FormNote,
+  OptionList,
+  OptionRow,
+} from "@/components/form"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, issuerProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
@@ -50,6 +57,7 @@ import { Status, type DotTone } from "@/components/status-dot"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
+import { Explain } from "@/components/explain"
 import { HoverTip } from "@/components/deploy/settings/hover-tip"
 import { Input } from "@/components/ui/input"
 import {
@@ -66,15 +74,18 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Segments } from "@/components/segments"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
-import { Tag } from "@/components/tag"
-import { CertificateStatus, ROUTE_LABEL, ROUTE_TONE, hostOf } from "@/components/deploy/vocabulary"
 import {
-  SettingForm,
-  SettingSection,
-  SettingsPage,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+  CERTIFICATE_LABEL,
+  CertificateStatus,
+  ROUTE_LABEL,
+  ROUTE_TONE,
+  hostOf,
+} from "@/components/deploy/vocabulary"
+import { INLINE_LINK } from "@/components/inline-link"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import {
   draftChanges,
   useConfiguration,
@@ -110,8 +121,9 @@ import {
   HSTS_MAX_AGES,
   HSTS_PRELOAD_MAX_AGE,
   HeaderListField,
-  ListField,
 } from "@/components/proxy/site-form"
+import { ListField } from "@/components/list-field"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import { siteHref } from "@/components/proxy/site-tabs"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -330,9 +342,15 @@ function TailnetForm({
             {value.on && (
               <div className="flex flex-col gap-4">
                 <TailnetAddress live={live} saved={Boolean(savedTailnet)} />
-                <TailnetAllowField
+                <ListField
+                  id="tailnet-allow"
+                  label="Who may open it"
+                  placeholder="alice@example.com or tag:ci"
                   values={value.allow}
                   onChange={(allow) => draft.set({ ...value, allow })}
+                  parse={readTailnetEntry}
+                  hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
+                  info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
                   disabled={!canAdmin}
                 />
                 <FormNote>
@@ -428,103 +446,6 @@ function TailnetAddress({
   )
 }
 
-/**
- * Who may open the environment: Tailscale logins and tags, each read the
- * way the server reads it as it is typed, so an entry that would be refused
- * never reaches the list. A login is kept in lower case, since providers do
- * not agree on one; a tag as written, since the tailnet's policy compares
- * tags exactly.
- */
-function TailnetAllowField({
-  values,
-  onChange,
-  disabled,
-}: {
-  values: string[]
-  onChange: (values: string[]) => void
-  disabled: boolean
-}) {
-  const [typed, setTyped] = useState("")
-  const [problem, setProblem] = useState<string>()
-  const add = () => {
-    const read = readTailnetEntry(typed, values)
-    if ("error" in read) {
-      setProblem(read.error)
-      return
-    }
-    onChange([...values, read.entry])
-    setTyped("")
-    setProblem(undefined)
-  }
-  return (
-    <Field
-      label="Who may open it"
-      htmlFor="tailnet-allow"
-      hint="Tailscale logins and tags. Empty lets everyone on the tailnet in."
-      info="A login is the account a person signs in to Tailscale with, alice@example.com or alice@github. A tag is a machine's ACL tag, tag:ci; a tagged machine is admitted by its tags alone."
-      error={problem}
-    >
-      <div className="space-y-2">
-        {values.length > 0 && (
-          <ul aria-label="Admitted on the tailnet" className="flex flex-wrap items-center gap-1.5">
-            {values.map((value) => (
-              <li key={value}>
-                <Tag mono className="gap-1.5 pr-0.5">
-                  {value}
-                  {!disabled && (
-                    <IconAction
-                      type="button"
-                      label={`Remove ${value}`}
-                      size="icon-xs"
-                      className="size-4 text-muted-foreground hover:text-destructive [&_svg:not([class*='size-'])]:size-2.5"
-                      onClick={() => onChange(values.filter((entry) => entry !== value))}
-                    >
-                      <Trash />
-                    </IconAction>
-                  )}
-                </Tag>
-              </li>
-            ))}
-          </ul>
-        )}
-        {!disabled && (
-          <div className="flex items-center gap-2">
-            <Input
-              id="tailnet-allow"
-              value={typed}
-              onChange={(event) => {
-                setTyped(event.target.value)
-                setProblem(undefined)
-              }}
-              onKeyDown={(event) => {
-                if (event.key === "Enter") {
-                  event.preventDefault()
-                  add()
-                }
-              }}
-              placeholder="alice@example.com or tag:ci"
-              autoComplete="off"
-              spellCheck={false}
-              aria-invalid={Boolean(problem)}
-              className="font-mono text-xs"
-            />
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={add}
-              disabled={!typed.trim()}
-              aria-label="Add to who may open it"
-            >
-              <Plus className="size-3.5" />
-            </Button>
-          </div>
-        )}
-      </div>
-    </Field>
-  )
-}
-
 function DomainsForm({
   configuration,
   save,
@@ -563,6 +484,9 @@ function DomainsForm({
     false,
   )
   const [rowError, setRowError] = useState<{ index: number; message: string }>()
+  // A name just turned into a redirect: its row opens the two choices, where
+  // the first target used to be chosen without a word.
+  const [redirecting, setRedirecting] = useState<string>()
   // The name whose DNS record sheet is open. A preflight finding's Create the
   // record opens the page on it (`?record=`), and the address is then dropped
   // so a reload does not open it again.
@@ -686,7 +610,10 @@ function DomainsForm({
         key: "redirect",
         label: "Redirect to another domain",
         icon: CornerUpRight,
-        run: () => setDomains(withRedirect(domains, domain.hostname)),
+        run: () => {
+          setDomains(withRedirect(domains, domain.hostname))
+          setRedirecting(domain.hostname)
+        },
       })
     if (canAdmin && domain.redirectTo)
       verbs.push({
@@ -798,6 +725,8 @@ function DomainsForm({
                   sharedWith={sharedUser(domains, passwords, domain.hostname)}
                   password={passwords[domain.hostname] ?? ""}
                   onPassword={(password) => typePassword(domain.hostname, password)}
+                  askRedirect={redirecting === domain.hostname}
+                  onRedirectAsked={() => setRedirecting(undefined)}
                 />
               ))}
               {leaving.map((route) => {
@@ -875,7 +804,15 @@ function DomainRow({
   sharedWith,
   password,
   onPassword,
+  askRedirect,
+  onRedirectAsked,
 }: {
+  /**
+   * The row was just made a redirect from its menu: open where it sends
+   * visitors and with which answer, both at once, as the press asked.
+   */
+  askRedirect?: boolean
+  onRedirectAsked?: () => void
   domain: DomainValue
   route?: DeploymentDomainRoute
   pending: boolean
@@ -929,6 +866,14 @@ function DomainRow({
       ? liveCertificate
       : undefined
   const renewal = certificateRead && certificateTip(certificateRead)
+  // A certificate that wants attention leads the line's facts, because the
+  // line cuts what does not fit: behind a redirect's target, "Certificate
+  // expired" was cut down to its dot.
+  const certificateUrgent =
+    certificateRead !== undefined &&
+    (certificateRead.certificate === "expired" ||
+      certificateRead.certificate === "expiring" ||
+      certificateRead.certificate === "missing")
 
   const issuer = tunnel ? "cloudflare" : issuerProduct(liveCertificate?.certificateIssuer)
 
@@ -943,6 +888,74 @@ function DomainRow({
   const passwordHeld = gated && !protection
   const tunnelHeld = !tunnel && (wildcard || fenced)
   const typedProblem = passwordProblem(password)
+  // The sign-in's fields open by themselves when Password is turned on, since
+  // that press is a request to set them; after that the row's fact opens them.
+  const [asking, setAsking] = useState(false)
+  // Where a redirecting name sends visitors, and with which answer, opened from its fact.
+  const [routing, setRouting] = useState(false)
+  // Asked for from the row's menu, the choices are open as soon as the row
+  // redirects, until the reader closes them.
+  const routeOpen = routing || Boolean(askRedirect && domain.redirectTo)
+  const onRouteOpen = (next: boolean) => {
+    setRouting(next)
+    if (askRedirect) onRedirectAsked?.()
+  }
+  const signInIncomplete = Boolean(
+    protection &&
+    (!protection.username ||
+      protectionUserProblem(protection.username) ||
+      (!protection.hash && !password) ||
+      (password && typedProblem)),
+  )
+
+  // One group, so turning HTTPS back on brings the live certificate's
+  // readings back together rather than popping in one by one. At the line's
+  // end it gives way with an ellipsis ("9 da…"), never a second line, and the
+  // whole of it is its explanation, opened by hover, focus or a press. The
+  // group's own ring is outside the box it cuts, so the cut never clips it.
+  const daysLeft =
+    certificateRead &&
+    typeof certificateRead.certificateDaysLeft === "number" &&
+    certificateRead.certificateDaysLeft > 0
+      ? certificateRead.certificateDaysLeft
+      : undefined
+  const certificateWords =
+    certificateRead &&
+    [
+      `${
+        certificateRead.certificate === "unavailable"
+          ? "Certificate not observed"
+          : CERTIFICATE_LABEL[certificateRead.certificate]
+      }${daysLeft !== undefined ? `, ${plural(daysLeft, "day")} left` : ""}.`,
+      renewal,
+    ]
+      .filter(Boolean)
+      .join(" ")
+  const certificateFacts = certificateRead && (
+    <Explain face="wrap" tip={certificateWords} label={`Certificate on ${host}`}>
+      <span
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that what the line cuts can be read without a pointer
+        tabIndex={0}
+        className={cn(
+          "block animate-rise truncate rounded-sm focus-ring",
+          // Whole when it leads; at the line's end it gives way.
+          certificateUrgent ? "shrink-0" : "min-w-0",
+        )}
+      >
+        <CertificateStatus domain={certificateRead} named />
+        {daysLeft !== undefined && (
+          <span
+            className={cn(
+              "numeric ml-3",
+              certificateRead.certificate === "expiring" ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {plural(daysLeft, "day")} left
+          </span>
+        )}
+      </span>
+    </Explain>
+  )
 
   return (
     <li className="grid min-w-0 animate-rise grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-x-3 gap-y-3 py-3 first:pt-0 @min-[44rem]:grid-cols-[2rem_minmax(0,1fr)_auto_auto_auto]">
@@ -975,10 +988,193 @@ function DomainRow({
             <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
           </a>
         )}
-        {/* One size along the line: the days left and who renews it were
-            11px beside 12px readings, two baselines for one row of facts. */}
-        <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs">
+        {/* One line, one size, in every state: a fact that does not fit is
+            cut at the line's end rather than wrapped onto a second, so the row
+            keeps its height with a password on or a redirect set (PGD-26).
+            What wants a press comes first, as marks that never clip: the
+            sign-in's key, then where a redirecting name sends its visitors.
+            A certificate that wants attention stands between the two, since a
+            danger at the end of a line that cuts is a danger not seen.
+            The days left and who renews it were 11px beside 12px readings,
+            two baselines for one row of facts. */}
+        <div className="flex h-4.5 min-w-0 items-center gap-x-3 overflow-x-clip text-xs whitespace-nowrap">
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
+          {/* The sign-in is a mark on the row and its two fields a layer over
+              it, so the list never grows under a row (PGD-26). The mark takes
+              the warning ink while the sign-in is incomplete. */}
+          {protection && (
+            <Popover open={asking} onOpenChange={setAsking}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  title={`Password · ${protection.username || "no user name"}`}
+                  className={cn(
+                    // 22px drawn, a finger's 44px pressed (hit-area).
+                    "hit-area -m-1 inline-flex shrink-0 animate-rise items-center rounded-sm p-1 focus-ring hover:bg-row-hover",
+                    // A user name shared with another password is said in
+                    // the popover; the mark carries its ink, or the row
+                    // showed nothing of it until the fact was pressed.
+                    signInIncomplete || sharedWith.length > 0
+                      ? "text-warning"
+                      : "text-muted-foreground",
+                  )}
+                >
+                  <Key aria-hidden className="size-3.5 shrink-0" />
+                  <span className="sr-only">
+                    Password · {protection.username || "no user name"} on {host}
+                  </span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 space-y-4">
+                <Field
+                  label="User name"
+                  htmlFor={`domain-user-${index}`}
+                  error={protectionUserProblem(protection.username)}
+                  hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
+                >
+                  <Input
+                    id={`domain-user-${index}`}
+                    value={protection.username}
+                    readOnly={!canAdmin}
+                    autoComplete="off"
+                    className="font-mono"
+                    onChange={(event) => setProtection({ username: event.target.value })}
+                  />
+                </Field>
+                {/* The rule is what is needed while typing, lit as it is met;
+                    that an empty field keeps the saved one is the placeholder's
+                    "Unchanged", and the rest is behind ⓘ. A password already
+                    saved has met it, so nothing is left to light. */}
+                <Field
+                  label="Password"
+                  htmlFor={`domain-password-${index}`}
+                  info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
+                  hint={
+                    (password || !protection.hash) && (
+                      <FieldChecks>
+                        <FieldCheck met={password.length > 0 && !typedProblem}>
+                          {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
+                        </FieldCheck>
+                      </FieldChecks>
+                    )
+                  }
+                >
+                  <Input
+                    id={`domain-password-${index}`}
+                    type="password"
+                    autoComplete="new-password"
+                    value={password}
+                    readOnly={!canAdmin}
+                    className="font-mono"
+                    placeholder={protection.hash ? "Unchanged" : ""}
+                    onChange={(event) => onPassword(event.target.value)}
+                  />
+                </Field>
+                {sharedWith.length > 0 && (
+                  <FormNote tone="warning">
+                    {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user
+                    name with another password, and the route keeps one password per user. Give each
+                    its own user name, or the same password.
+                  </FormNote>
+                )}
+              </PopoverContent>
+            </Popover>
+          )}
+          {certificateUrgent && certificateFacts}
+          {/* A redirecting name says where it sends visitors, and the two
+              choices are a layer over the row: they were a band under it,
+              which made the row taller than its siblings. Its target is whole
+              unless a certificate that wants attention stands before it; then
+              the target gives way, with an ellipsis. */}
+          {domain.redirectTo && (
+            <Popover open={routeOpen} onOpenChange={onRouteOpen}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Sends visitors from ${host} to ${domain.redirectTo}`}
+                  title={`Sends visitors to ${domain.redirectTo} · ${domain.redirectCode ?? 308}`}
+                  className={cn(
+                    "inline-flex max-w-48 min-w-0 animate-rise items-center gap-1 text-muted-foreground",
+                    // A fact that opens something is a link on the line, so
+                    // it is underlined at rest (INLINE_LINK), not on hover.
+                    INLINE_LINK,
+                    !certificateUrgent && "shrink-0",
+                  )}
+                >
+                  <CornerUpRight aria-hidden className="size-3 shrink-0" />
+                  <span className="truncate font-mono">{domain.redirectTo}</span>
+                  <span className="numeric shrink-0">· {domain.redirectCode ?? 308}</span>
+                </button>
+              </PopoverTrigger>
+              <PopoverContent
+                align="start"
+                className="w-80 space-y-4"
+                // The menu that asked for them hands the keyboard back to its
+                // trigger once it has gone. That is not the reader leaving
+                // the choices: the focus is taken into the first of them.
+                onFocusOutside={(event) => {
+                  const to = event.detail.originalEvent.target
+                  if (!askRedirect || !(to instanceof Element)) return
+                  if (!to.closest("[aria-haspopup='menu']")) return
+                  event.preventDefault()
+                  onRouteOpen(true)
+                  document.getElementById(`domain-redirect-${index}`)?.focus()
+                }}
+              >
+                <Field
+                  label="Sends visitors to"
+                  htmlFor={`domain-redirect-${index}`}
+                  info="Every path and query on this name is answered with a redirect to the same path on the other. It serves no application of its own."
+                >
+                  <Select
+                    value={domain.redirectTo}
+                    onValueChange={(redirectTo) => onChange({ redirectTo })}
+                    disabled={!canAdmin}
+                  >
+                    <SelectTrigger id={`domain-redirect-${index}`} className="w-full font-mono">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {/* The saved target stays listed even once it has stopped
+                          serving, so the field shows what the server refused. */}
+                      {[...new Set([domain.redirectTo, ...targets])].map((name) => (
+                        <SelectItem key={name} value={name} className="font-mono">
+                          {name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field
+                  label="Answer"
+                  htmlFor={`domain-redirect-code-${index}`}
+                  info="Browsers remember a permanent redirect, so use a temporary one while trying it out."
+                >
+                  <Select
+                    value={String(domain.redirectCode ?? 308)}
+                    onValueChange={(code) =>
+                      onChange({
+                        redirectCode:
+                          code === "308" ? undefined : (Number(code) as DeploymentRedirectCode),
+                      })
+                    }
+                    disabled={!canAdmin}
+                  >
+                    <SelectTrigger id={`domain-redirect-code-${index}`} className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {REDIRECT_CODES.map(([code, label]) => (
+                        <SelectItem key={code} value={String(code)}>
+                          {label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </PopoverContent>
+            </Popover>
+          )}
           {/* Each name is served on its own scheme, so a plain one says so
               whatever the others do. An HTTPS name is the expected answer, and
               what it does for plain visitors is the switch's tooltip. */}
@@ -997,35 +1193,7 @@ function DomainRow({
           {route && !unsaved && httpsChanging && (
             <Status key={nextScheme} tone="notice" label={nextScheme} className="animate-rise" />
           )}
-          {/* One group, so turning HTTPS back on brings the live certificate's
-              readings back together rather than popping in one by one. */}
-          {certificateRead && (
-            <span className="flex min-w-0 animate-rise flex-wrap items-center gap-x-3 gap-y-1">
-              {renewal ? (
-                <HoverTip tip={renewal}>
-                  {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its tooltip can be read without a pointer */}
-                  <span tabIndex={0} className="rounded-sm focus-ring">
-                    <CertificateStatus domain={certificateRead} named />
-                  </span>
-                </HoverTip>
-              ) : (
-                <CertificateStatus domain={certificateRead} named />
-              )}
-              {typeof certificateRead.certificateDaysLeft === "number" &&
-                certificateRead.certificateDaysLeft > 0 && (
-                  <span
-                    className={cn(
-                      "numeric",
-                      certificateRead.certificate === "expiring"
-                        ? "text-warning"
-                        : "text-muted-foreground",
-                    )}
-                  >
-                    {plural(certificateRead.certificateDaysLeft, "day")} left
-                  </span>
-                )}
-            </span>
-          )}
+          {!certificateUrgent && certificateFacts}
         </div>
       </div>
       <div className="col-span-full flex min-w-0 flex-wrap items-center gap-2 pl-11 @min-[44rem]:contents">
@@ -1047,7 +1215,11 @@ function DomainRow({
               protection: guarded ? (protection ?? savedProtection ?? { username: "" }) : undefined,
               tunnel: through || undefined,
             })
-            if (!guarded) onPassword("")
+            if (guarded && !protection) setAsking(true)
+            if (!guarded) {
+              onPassword("")
+              setAsking(false)
+            }
           }}
           disabled={!canAdmin}
           className="shrink-0"
@@ -1123,125 +1295,6 @@ function DomainRow({
       <div className="col-start-3 row-start-1 flex justify-end @min-[44rem]:col-start-5">
         {verbs.length > 0 && <VerbActions dim verbs={verbs} menuLabel={`Actions for ${host}`} />}
       </div>
-      {protection && (
-        <div className="col-span-full min-w-0 animate-rise pl-11">
-          <div className="ml-1 border-l border-hairline pl-4">
-            <FieldRow>
-              <Field
-                label="User name"
-                htmlFor={`domain-user-${index}`}
-                error={protectionUserProblem(protection.username)}
-                hint={!protection.username && <FieldCheck met={false}>Required</FieldCheck>}
-              >
-                <Input
-                  id={`domain-user-${index}`}
-                  value={protection.username}
-                  readOnly={!canAdmin}
-                  autoComplete="off"
-                  aria-invalid={Boolean(protectionUserProblem(protection.username))}
-                  className="font-mono"
-                  onChange={(event) => setProtection({ username: event.target.value })}
-                />
-              </Field>
-              {/* The rule is what is needed while typing, lit as it is met;
-                  that an empty field keeps the saved one is the placeholder's
-                  "Unchanged", and the rest is behind ⓘ. A password already
-                  saved has met it, so nothing is left to light. */}
-              <Field
-                label="Password"
-                htmlFor={`domain-password-${index}`}
-                info="Asked before every name this environment serves, whichever one it is set on; the application never sees it. Left empty, a saved password stays as it is."
-                hint={
-                  (password || !protection.hash) && (
-                    <span aria-live="polite">
-                      <FieldCheck met={password.length > 0 && !typedProblem}>
-                        {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
-                      </FieldCheck>
-                    </span>
-                  )
-                }
-              >
-                <Input
-                  id={`domain-password-${index}`}
-                  type="password"
-                  autoComplete="new-password"
-                  value={password}
-                  readOnly={!canAdmin}
-                  className="font-mono"
-                  placeholder={protection.hash ? "Unchanged" : ""}
-                  onChange={(event) => onPassword(event.target.value)}
-                />
-              </Field>
-            </FieldRow>
-            {sharedWith.length > 0 && (
-              <FormNote tone="warning" className="mt-3">
-                {sharedWith.join(", ")} {sharedWith.length === 1 ? "has" : "have"} this user name
-                with another password, and the route keeps one password per user. Give each its own
-                user name, or the same password.
-              </FormNote>
-            )}
-          </div>
-        </div>
-      )}
-      {domain.redirectTo && (
-        <div className="col-span-full min-w-0 animate-rise pl-11">
-          <div className="ml-1 border-l border-hairline pl-4">
-            <FieldRow>
-              <Field
-                label="Sends visitors to"
-                htmlFor={`domain-redirect-${index}`}
-                info="Every path and query on this name is answered with a redirect to the same path on the other. It serves no application of its own."
-              >
-                <Select
-                  value={domain.redirectTo}
-                  onValueChange={(redirectTo) => onChange({ redirectTo })}
-                  disabled={!canAdmin}
-                >
-                  <SelectTrigger id={`domain-redirect-${index}`} className="w-full font-mono">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {/* The saved target stays listed even once it has stopped
-                        serving, so the field shows what the server refused. */}
-                    {[...new Set([domain.redirectTo, ...targets])].map((name) => (
-                      <SelectItem key={name} value={name} className="font-mono">
-                        {name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-              <Field
-                label="Answer"
-                htmlFor={`domain-redirect-code-${index}`}
-                info="Browsers remember a permanent redirect, so use a temporary one while trying it out."
-              >
-                <Select
-                  value={String(domain.redirectCode ?? 308)}
-                  onValueChange={(code) =>
-                    onChange({
-                      redirectCode:
-                        code === "308" ? undefined : (Number(code) as DeploymentRedirectCode),
-                    })
-                  }
-                  disabled={!canAdmin}
-                >
-                  <SelectTrigger id={`domain-redirect-code-${index}`} className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {REDIRECT_CODES.map(([code, label]) => (
-                      <SelectItem key={code} value={String(code)}>
-                        {label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </Field>
-            </FieldRow>
-          </div>
-        </div>
-      )}
       {error && (
         <p role="alert" className="col-span-full animate-rise pl-11 text-hint text-destructive">
           {error}
@@ -1453,7 +1506,7 @@ function AddDomainPanel({
           ? "Route a name on Cloudflare through the tunnel."
           : "Point a record at this server and check it before adding it."
       }
-      width="md"
+      size="md"
       footer={
         <>
           {unsaved > 0 && (
@@ -1645,11 +1698,11 @@ function AddDomainPanel({
                 label="Password"
                 htmlFor="add-domain-password"
                 hint={
-                  <span aria-live="polite">
+                  <FieldChecks>
                     <FieldCheck met={password.length > 0 && !typedProblem}>
                       {typedProblem ?? `At least ${PASSWORD_MIN} characters`}
                     </FieldCheck>
-                  </span>
+                  </FieldChecks>
                 }
               >
                 <Input
@@ -2032,28 +2085,18 @@ function RouteSignIn({
       >
         {gate && (
           <div className="flex flex-col gap-3">
-            <ToggleGroup
-              type="single"
-              aria-label="Auth server"
+            <Segments
+              label="Auth server"
               value={gate.provider}
-              onValueChange={(value) =>
-                value && update(chooseSsoProvider(gate, value as ForwardAuthProvider))
-              }
-              variant="outline"
-              size="sm"
-              className="w-full flex-wrap"
+              options={SSO_PROVIDERS.map((provider) => ({
+                value: provider.value,
+                label: provider.label,
+              }))}
+              onChange={(value) => update(chooseSsoProvider(gate, value))}
+              fill
+              className="flex-wrap"
               disabled={disabled}
-            >
-              {SSO_PROVIDERS.map((provider) => (
-                <ToggleGroupItem
-                  key={provider.value}
-                  value={provider.value}
-                  className="flex-1 text-hint"
-                >
-                  {provider.label}
-                </ToggleGroupItem>
-              ))}
-            </ToggleGroup>
+            />
             <Field
               label="Check address"
               htmlFor="route-sso-verify"
@@ -2084,25 +2127,17 @@ function RouteSignIn({
                 disabled={disabled}
               />
             </Field>
-            <ToggleGroup
-              type="single"
-              aria-label="Who signs in"
+            <Segments
+              label="Who signs in"
               value={gate.previewsOnly ? "previews" : "everywhere"}
-              onValueChange={(value) =>
-                value && update({ previewsOnly: value === "previews" || undefined })
-              }
-              variant="outline"
-              size="sm"
-              className="w-full"
+              options={[
+                { value: "everywhere", label: "Here and on previews" },
+                { value: "previews", label: "Previews only" },
+              ]}
+              onChange={(value) => update({ previewsOnly: value === "previews" || undefined })}
+              fill
               disabled={disabled}
-            >
-              <ToggleGroupItem value="everywhere" className="flex-1 text-hint">
-                Here and on previews
-              </ToggleGroupItem>
-              <ToggleGroupItem value="previews" className="flex-1 text-hint">
-                Previews only
-              </ToggleGroupItem>
-            </ToggleGroup>
+            />
             <FormNote>
               The application is sent Remote-User and Remote-Email, taken from the server&apos;s{" "}
               {preset.sends}, and never the visitor&apos;s own. Names that redirect answer before

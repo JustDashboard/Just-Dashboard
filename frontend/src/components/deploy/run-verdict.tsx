@@ -1,6 +1,6 @@
 import { cn } from "@/lib/utils"
 import { Fact, FactLine } from "@/components/deploy/fact-line"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import type { Verdict } from "@/components/deploy/run-verdicts"
 
 /**

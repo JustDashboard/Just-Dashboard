@@ -9,12 +9,8 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { InfoTip } from "@/components/form"
 import { IconAction } from "@/components/icon-action"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
-import { Segments } from "@/components/deploy/settings/segments"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
+import { Segments } from "@/components/segments"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -303,15 +299,16 @@ export function TailscaleOffers({
               aria-label="A network to offer"
               className="h-9 min-w-0 flex-1 font-mono sm:max-w-xs"
             />
-            <Button
+            <IconAction
               size="icon"
               variant="outline"
               type="submit"
               disabled={busy || !draft.route.trim() || Boolean(problem)}
-              aria-label="Offer it"
+              className="[&_svg:not([class*='size-'])]:size-4"
+              label="Offer it"
             >
               <Plus aria-hidden />
-            </Button>
+            </IconAction>
           </div>
           {problem && (
             <p id="tailscale-route-problem" className="text-hint text-destructive">

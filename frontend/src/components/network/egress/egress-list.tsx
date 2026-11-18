@@ -2,7 +2,6 @@
 
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { plural } from "@/lib/format"
 import {
   egressDraftFromGroup,
@@ -10,16 +9,16 @@ import {
   type EgressDraft,
   type EgressGroup,
   type EgressView,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 import { cn } from "@/lib/utils"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { Fact } from "@/components/fact-line"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Lifebuoy, Plus } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbActions } from "@/components/verbs"
 import { NetworkReadWarning } from "@/components/network/read-warning"
@@ -33,6 +32,7 @@ import {
   egressRowLine,
 } from "@/components/network/egress/reading"
 import { useEgressLinks, useEgressView } from "@/components/network/egress/use-egress"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const TITLE = "Egress groups"
 
@@ -62,7 +62,7 @@ export function EgressListPage() {
     setForm({ draft: egressDraftFromGroup(group), editing: group, key: Date.now() })
 
   return (
-    <Page className="animate-rise">
+    <Page rise>
       <PageContext title={TITLE} />
       <ListIdentity
         data={data}
@@ -176,7 +176,7 @@ function ListIdentity({
   const failing = groups.filter((g) => egressCarrying(g).tone === "danger").length
   const proven = members.filter((m) => m.proven).length
   return (
-    <HostIdentity
+    <IdentityHeader
       slot="egress-identity"
       fallback={Lifebuoy}
       title={TITLE}
@@ -210,30 +210,27 @@ function ListIdentity({
           )
         ) : (
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {groups.length} of {data.capacity} groups
-            </span>
+            </Fact>
             {groups.length > 0 && (
               <>
-                <FactDot />
-                <span className="numeric">
+                <Fact className="numeric">
                   {groups.filter((g) => g.enabled).length} carrying traffic
-                </span>
-                <FactDot />
-                <span className="numeric">
+                </Fact>
+                <Fact className="numeric">
                   {groups.filter((g) => g.enabled && g.automation).length} automatic
-                </span>
+                </Fact>
                 {/* The state beside the title says a member is down; a phone
                     has one line for the facts. */}
-                <span className="contents max-sm:hidden">
-                  <FactDot />
+                <Fact className="max-sm:hidden">
                   <span
                     className={cn("numeric", down > 0 ? "text-destructive" : undefined)}
                     title="Members whose path answered its probes recently"
                   >
                     {proven} of {members.length} members proven
                   </span>
-                </span>
+                </Fact>
               </>
             )}
           </>
@@ -246,13 +243,10 @@ function ListIdentity({
 /** Two cards' worth of ground while the first read is out, at a card's height. */
 function LoadingCards() {
   return (
-    <ul aria-busy className="space-y-2" aria-label="Reading the egress groups">
-      {[0, 1].map((i) => (
-        <li key={i}>
-          <Skeleton className="h-14 w-full rounded-xl" />
-        </li>
-      ))}
-    </ul>
+    // The list the groups will be, busy: its name says what it is waiting for.
+    <div role="list" aria-busy aria-label="Reading the egress groups">
+      <ChoiceListSkeleton rows={2} />
+    </div>
   )
 }
 
@@ -272,7 +266,7 @@ function EgressRow({
   onChanged: () => void
   onEdit: (group: EgressGroup) => void
 }) {
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const { simulation, simulating, verbs, dialog } = useEgressVerbs({
     group,
     running,

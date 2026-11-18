@@ -1,6 +1,6 @@
 import { plural } from "@/lib/format"
 import type { LogDrain, LogDrainKind } from "@/lib/types"
-import type { WireLine } from "@/components/wire-flow-model"
+import type { WireLine } from "@/components/wire/wire-flow-model"
 import { shortAge } from "@/components/deploy/short-age"
 
 /**

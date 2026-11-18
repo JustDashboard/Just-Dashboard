@@ -11,7 +11,7 @@ import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { requestKey, type DdlRequest } from "@/components/database/schema/changes"
-import { useFocusReturn } from "@/components/database/schema/focus"
+import { useSurfaceFocusReturn } from "@/components/database/schema/focus"
 import type { DdlAnswer } from "@/components/database/schema/types"
 import { runChange, usePreview, type Preview } from "@/components/database/schema/use-ddl"
 
@@ -161,7 +161,7 @@ export function ChangeDialog({
   const [busy, setBusy] = useState(false)
   const [failure, setFailure] = useState<{ key: string; error: Error }>()
   const [asking, setAsking] = useState<Asking>(null)
-  useFocusReturn(true)
+  useSurfaceFocusReturn(true)
 
   const planned = preview.answer
   const key = requestKey(request)

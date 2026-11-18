@@ -1,6 +1,5 @@
 "use client"
 
-import { useEffect, useState } from "react"
 import {
   Box,
   Check,
@@ -15,11 +14,11 @@ import {
   type Icon,
 } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { plural } from "@/lib/format"
+import { duration, shortDigest } from "@/lib/format"
 import type { GitTone } from "@/lib/git-status"
-import { Status, StatusDot, type DotTone } from "@/components/status-dot"
+import { Status, StatusDot, type DotTone, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { FolderIcon } from "@/components/files/file-icon"
+import { FolderIcon } from "@/components/file-icon"
 import {
   ProductGlyph,
   ProductLogo,
@@ -61,6 +60,7 @@ import type {
   ReleaseListChange,
   WorkloadProfile,
 } from "@/lib/types"
+import { certificateTone, certificateWords, type CertificateFacts } from "@/lib/certificates"
 
 /**
  * The words and marks every deployment screen shares.
@@ -404,27 +404,15 @@ export function runDurationSeconds(
 }
 
 /** "42s", "1m 12s", "1h 03m" — the shape a build time is read in. */
+/**
+ * A run's time, on the one duration ladder the product reads ages and
+ * uptimes on: "45s", "1m 35s", "1m", "1h 3m", "2d 4h".
+ *
+ * @deprecated use `duration` from `@/lib/format`.
+ */
 export function formatDuration(seconds: number | undefined) {
   if (seconds === undefined) return "—"
-  const total = Math.max(0, Math.round(seconds))
-  if (total < 60) return `${total}s`
-  const minutes = Math.floor(total / 60)
-  if (minutes < 60) return `${minutes}m ${total % 60}s`
-  const hours = Math.floor(minutes / 60)
-  // Past two days, hours beside a relative time in days read as two units for one span.
-  if (hours >= 48) return `${Math.floor(hours / 24)}d ${hours % 24}h`
-  return `${hours}h ${String(minutes % 60).padStart(2, "0")}m`
-}
-
-/** A clock for a figure that ticks while something is in flight. */
-export function useNow(intervalMs = 1000, enabled = true) {
-  const [now, setNow] = useState(() => Date.now())
-  useEffect(() => {
-    if (!enabled) return
-    const timer = setInterval(() => setNow(Date.now()), intervalMs)
-    return () => clearInterval(timer)
-  }, [intervalMs, enabled])
-  return now
+  return duration(Math.max(0, Math.round(seconds)))
 }
 
 // ---------------------------------------------------------------------------
@@ -1073,9 +1061,14 @@ export function terminalLabel(code: string) {
   return sentence(code.replace(/_failed$/, ""))
 }
 
+/**
+ * An image id, a digest or a revision at the width the run header gives it.
+ *
+ * @deprecated use `shortDigest` from lib/format: twelve hex characters, no
+ * "sha256:" and no ellipsis, the one way a digest is shortened.
+ */
 export function shortIdentity(value: string) {
-  if (value.startsWith("sha256:")) return `sha256:${value.slice(7, 19)}…`
-  return value.length > 12 ? value.slice(0, 12) : value
+  return shortDigest(value)
 }
 
 export function shortRevision(value: string | undefined) {
@@ -1257,7 +1250,7 @@ export function ChangeTag({
 }) {
   const tone = CHANGE_TONE[change]
   return (
-    <Tag className={className} style={tone ? { color: `var(--git-${tone})` } : undefined}>
+    <Tag className={className} hue={tone ? `var(--git-${tone})` : undefined}>
       {change}
     </Tag>
   )
@@ -1347,13 +1340,43 @@ export const ROUTE_LABEL: Record<DeploymentDomainRoute["route"], string> = {
   unavailable: "Not observed",
 }
 
-const CERTIFICATE_TONE: Record<DeploymentDomainRoute["certificate"], DotTone> = {
-  valid: "running",
-  expiring: "warning",
-  expired: "danger",
+/** The states that are not a certificate's own: there is none to read a verdict from. */
+const NO_CERTIFICATE_TONE: Record<
+  Exclude<DeploymentDomainRoute["certificate"], "valid" | "expiring" | "expired">,
+  DotTone
+> = {
   missing: "warning",
   "not requested": "stopped",
   unavailable: "unknown",
+}
+
+/**
+ * A domain's certificate as the facts lib/certificates words every
+ * certificate from, so a project's domain and the proxy's Certificates page
+ * say the same state and the same days. A domain knows its days, not its end,
+ * so its last day is "under a day" rather than hours.
+ */
+export function domainCertificate(domain: DeploymentDomainRoute): CertificateFacts | undefined {
+  const state = domain.certificate
+  if (state !== "valid" && state !== "expiring" && state !== "expired") return undefined
+  return {
+    daysLeft: domain.certificateDaysLeft ?? 0,
+    expired: state === "expired",
+    expiring: state === "expiring",
+  }
+}
+
+const VERDICT_TONE: Record<Verdict, DotTone> = {
+  ok: "running",
+  notice: "notice",
+  warning: "warning",
+  critical: "danger",
+}
+
+function certificateDot(domain: DeploymentDomainRoute): DotTone {
+  const facts = domainCertificate(domain)
+  if (facts) return VERDICT_TONE[certificateTone(facts)]
+  return NO_CERTIFICATE_TONE[domain.certificate as keyof typeof NO_CERTIFICATE_TONE]
 }
 
 export const CERTIFICATE_LABEL: Record<DeploymentDomainRoute["certificate"], string> = {
@@ -1376,7 +1399,7 @@ export function CertificateStatus({
 }) {
   return (
     <Status
-      tone={CERTIFICATE_TONE[domain.certificate]}
+      tone={certificateDot(domain)}
       label={
         named && domain.certificate === "unavailable"
           ? "Certificate not observed"
@@ -1403,19 +1426,26 @@ export function CertificateReading({
   className?: string
 }) {
   const issuer = drawIssuer ? issuerProduct(domain.certificateIssuer) : undefined
-  const days = domain.certificateDaysLeft
+  const facts = domainCertificate(domain)
+  // The days beside the state word, the long form of what the proxy's status
+  // word says short ("12 days left" here, "12d left" there). None once expired,
+  // and none on a day count the server did not send.
+  const left =
+    facts && !facts.expired && typeof domain.certificateDaysLeft === "number" && facts.daysLeft > 0
+      ? certificateWords(facts, { form: "long" })
+      : undefined
   return (
     <span className={cn("inline-flex min-w-0 items-center gap-2", className)}>
       {issuer && <ProductGlyph id={issuer} />}
       <CertificateStatus domain={domain} />
-      {typeof days === "number" && days > 0 && (
+      {facts && left && (
         <span
           className={cn(
             "numeric shrink-0 text-hint",
-            domain.certificate === "expiring" ? "text-warning" : "text-muted-foreground",
+            certificateTone(facts) === "warning" ? "text-warning" : "text-muted-foreground",
           )}
         >
-          {plural(days, "day")} left
+          {left}
         </span>
       )}
       {domain.certificateRenewedBy === "caddy" && (

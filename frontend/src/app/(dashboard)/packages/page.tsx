@@ -17,12 +17,12 @@ import { bytes, relativeTime } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { HostInfo, InstalledPackage, Job, PackageInventory, UpdateReport } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { JobConsole, RecentJobs, useJobConsole } from "@/components/job-console"
-import { FactDot, HostIdentity, platformName } from "@/components/metrics/host-identity"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader, platformName } from "@/components/identity-header"
 import { InstallPanel } from "@/components/packages/install-panel"
 import { upgradeDescription } from "@/components/packages/upgrade-description"
 import { PackageLogView } from "@/components/packages/log-view"
@@ -30,19 +30,23 @@ import { OriginFact, PackageMark, VersionTo, managerProduct } from "@/components
 import { SoftwareBand } from "@/components/packages/software-band"
 import { packageHref, softwareName } from "@/components/packages/inventory"
 import { usePackageFilter } from "@/components/packages/use-package-filter"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { platformProduct } from "@/components/product-logo"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -51,6 +55,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * Reading register, design-system §15. The four summary tiles each moved to
@@ -133,7 +138,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
     setView(next)
   }
   // From here a table has room for its columns; narrower, each package is a card.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const open = (name: string) => router.push(packageHref(name))
 
   const inventory = usePoll(
@@ -290,7 +295,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
           after it, the index's age and the read as facts, and the index's
           verb as the one command, because it changes what the line says. */}
         {data?.available && (
-          <HostIdentity
+          <IdentityHeader
             className="animate-rise"
             mark={platformProduct(host?.platform) ?? managerProduct(data.manager)}
             fallback={Puzzle}
@@ -352,19 +357,15 @@ function PackagesPage({ asked }: { asked: string | null }) {
             }
             facts={
               <>
-                <span className="numeric font-medium text-foreground">
+                <Fact className="numeric font-medium text-foreground">
                   {data.packages.length.toLocaleString()} packages
-                </span>
+                </Fact>
                 {data.indexAge && (
-                  <>
-                    <FactDot />
-                    <span className={cn(indexStale && "text-warning")}>
-                      index refreshed {relativeTime(data.indexAge)}
-                    </span>
-                  </>
+                  <Fact className={cn(indexStale && "text-warning")}>
+                    index refreshed {relativeTime(data.indexAge)}
+                  </Fact>
                 )}
-                <FactDot />
-                <span>read {relativeTime(data.readAt)}</span>
+                <Fact>read {relativeTime(data.readAt)}</Fact>
               </>
             }
           />
@@ -374,11 +375,13 @@ function PackagesPage({ asked }: { asked: string | null }) {
           is drawn on, so nothing under it moves when it lands. A host with no
           package manager is the one answer that has nothing to draw here. */}
         {reading && (
-          <HostIdentity
+          <IdentityHeader
             mark={platformProduct(host?.platform)}
             fallback={Puzzle}
             title={<TextShimmer>Reading the package database…</TextShimmer>}
             state={<span className="text-body">&nbsp;</span>}
+            // The verbs' place, so on a phone the line holds the row they land on.
+            menu={false}
             facts={<span>&nbsp;</span>}
           />
         )}
@@ -668,7 +671,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
                           <TableHead className="w-[20%]">Installed</TableHead>
                           <TableHead className="w-[20%]">Available</TableHead>
                           <TableHead className="w-[28%]">Origin</TableHead>
-                          <TableHead className="w-24" />
+                          <TableHead label="Security" className="w-24" />
                         </TableRow>
                       </TableHeader>
                       <TableBody>
@@ -768,6 +771,7 @@ function PackageName({
       <PackageMark name={name} section={section} />
       <Link
         href={packageHref(name)}
+        {...ROW_NAME}
         className="max-w-full min-w-0 truncate rounded-sm font-mono text-body font-medium focus-ring hover:underline"
       >
         {name}
@@ -798,7 +802,7 @@ function PackageTable({
           <TableHead className="w-[22%]">Version</TableHead>
           <TableHead className="w-[22%]">Available</TableHead>
           <TableHead className="w-24 text-right">Size</TableHead>
-          <TableHead className="hidden w-40 xl:table-cell" />
+          <TableHead label="Marks" className="hidden w-40 xl:table-cell" />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -863,14 +867,7 @@ function PackageCards({ packages }: { packages: InstalledPackage[] }) {
           leading={
             <span className="relative flex">
               <PackageMark name={p.name} section={p.section} />
-              {p.upgradable && (
-                <span
-                  aria-hidden
-                  className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-                >
-                  <StatusDot tone={p.security ? "warning" : "notice"} className="size-1.5" />
-                </span>
-              )}
+              {p.upgradable && <StatusDot tone={p.security ? "warning" : "notice"} corner />}
             </span>
           }
           title={

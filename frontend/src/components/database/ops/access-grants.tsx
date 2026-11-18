@@ -7,11 +7,11 @@ import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { FormNote, OptionList, OptionRow, Statement } from "@/components/form"
-import { Modal } from "@/components/modal"
+import { FormNote, OptionList, OptionRow } from "@/components/form"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { StatusDot } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
@@ -22,7 +22,6 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
 import { nameHue } from "@/components/database/home/kinds"
 import { read } from "@/components/database/home/read"
@@ -49,6 +48,7 @@ import type {
   DbRoleDetail,
 } from "@/components/database/ops/access-types"
 import { useDatabase } from "@/components/database/shell/database-context"
+import { SqlReview } from "@/components/database/kit/sql-review"
 
 type ObjectLevel = Exclude<DbPrivilegeLevel["level"], "role">
 
@@ -397,7 +397,7 @@ export function GrantsMatrix({
                       run: () => pressMember(role),
                     }))}
                     trigger={
-                      <Button size="xs" variant="outline">
+                      <Button size="sm" variant="outline">
                         <Plus />
                         Add to a role
                       </Button>
@@ -723,7 +723,7 @@ export function GrantsMatrix({
         // The page's one floating thing while grants are staged, drawn as the
         // settings' save bar is: it holds to the foot of the view, over the
         // rows, so the command is where the eye is after a press far down.
-        <div className="pointer-events-none sticky bottom-4 z-10 flex justify-center">
+        <div className="pointer-events-none sticky bottom-4 z-raised flex justify-center">
           <div
             role="status"
             data-slot="grants-pending"
@@ -737,7 +737,6 @@ export function GrantsMatrix({
               <Button
                 variant="ghost"
                 size="sm"
-                className="max-sm:h-10"
                 onClick={() => {
                   setWanted({})
                   setMembers([])
@@ -745,7 +744,7 @@ export function GrantsMatrix({
               >
                 Discard
               </Button>
-              <Button size="sm" className="max-sm:h-10" onClick={() => setReviewing(true)}>
+              <Button size="sm" onClick={() => setReviewing(true)}>
                 Review…
               </Button>
             </div>
@@ -940,85 +939,52 @@ function GrantsReview({
   }
 
   return (
-    <Modal
+    <SqlReview
       open
       onOpenChange={(open) => !open && !running && onClose()}
-      size="lg"
       title={`Change what ${role.name} holds`}
       description="The statements the server will run for these grant changes"
-      initialFocus="body"
-      footer={
+      command="Apply"
+      onRun={() => void apply()}
+      pending={running}
+      danger={revokes > 0}
+      disabled={!ready || planned.length === 0}
+      loading={!previewed}
+      failure={failure}
+      note={
         <>
-          <p className="mr-auto min-w-0 text-hint text-muted-foreground">
-            {plural(planned.length, "request")}
-            {revokes > 0 ? `, ${revokes} of them taking something away` : ""}.
-          </p>
-          <Button variant="outline" onClick={onClose} disabled={running}>
-            Cancel
-          </Button>
-          <Button
-            variant={revokes > 0 ? "destructive" : "default"}
-            disabled={!ready || planned.length === 0}
-            pending={running}
-            onClick={() => void apply()}
-          >
-            Apply
-          </Button>
+          {plural(planned.length, "request")}
+          {revokes > 0 ? `, ${revokes} of them taking something away` : ""}.
         </>
       }
+      statements={(previewed ?? []).map((one) => ({
+        label: <PlannedLabel planned={one.planned} />,
+        sql: one.statements.join(";\n"),
+        placeholder: one.error
+          ? "No statement: the server could not plan this change."
+          : "The server runs no statement for it.",
+        error: one.error,
+        notes: one.notes,
+      }))}
     >
-      <div className="space-y-4">
-        {(offersGrantOption || (offersFuture && whole)) && (
-          <OptionList>
-            {offersFuture && whole && (
-              <OptionRow
-                title={`Also for what is created later in ${scopeName}`}
-                checked={future}
-                onCheckedChange={setFuture}
-              />
-            )}
-            {offersGrantOption && (
-              <OptionRow
-                title="Let it grant these on to other accounts"
-                checked={grantOption}
-                onCheckedChange={setGrantOption}
-              />
-            )}
-          </OptionList>
-        )}
-        {!previewed ? (
-          <p className="flex text-body" role="status">
-            <TextShimmer>Reading the statements from the server…</TextShimmer>
-          </p>
-        ) : (
-          previewed.map((one, index) => (
-            <div key={index} className="space-y-1.5">
-              <Statement
-                label={<PlannedLabel planned={one.planned} />}
-                sql={one.statements.join(";\n")}
-                placeholder={
-                  one.error
-                    ? "No statement: the server could not plan this change."
-                    : "The server runs no statement for it."
-                }
-              />
-              {one.error && (
-                <FormNote tone="danger" role="alert" className="break-words">
-                  {one.error}
-                </FormNote>
-              )}
-              {one.notes.map((note) => (
-                <FormNote key={note}>{note}</FormNote>
-              ))}
-            </div>
-          ))
-        )}
-        {failure && (
-          <FormNote tone="danger" role="alert" className="break-words">
-            {failure}
-          </FormNote>
-        )}
-      </div>
-    </Modal>
+      {(offersGrantOption || (offersFuture && whole)) && (
+        <OptionList>
+          {offersFuture && whole && (
+            <OptionRow
+              title={`Also for what is created later in ${scopeName}`}
+              checked={future}
+              onCheckedChange={setFuture}
+            />
+          )}
+          {offersGrantOption && (
+            <OptionRow
+              title="Let it grant these on to other accounts"
+              checked={grantOption}
+              onCheckedChange={setGrantOption}
+            />
+          )}
+        </OptionList>
+      )}
+    </SqlReview>
   )
 }

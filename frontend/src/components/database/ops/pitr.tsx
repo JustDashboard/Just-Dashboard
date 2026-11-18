@@ -5,13 +5,6 @@ import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
 import { sectionHref } from "@/components/database/engine"
-import {
-  CouldNotRead,
-  FactRow,
-  FactRows,
-  NotUpdating,
-  staleOf,
-} from "@/components/database/home/blocks"
 import { read, record } from "@/components/database/home/read"
 import { EngineMark } from "@/components/database/kit"
 import type { WatchedJob } from "@/components/database/ops/backups-job"
@@ -45,7 +38,7 @@ import type {
 import { TaskDialog, databaseSubject } from "@/components/database/ops/settings-dialog"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { useDatabases } from "@/components/database/shell/databases-context"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { Disclosure, Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
 import {
   ArrowLeftRight,
@@ -60,7 +53,8 @@ import {
 } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ScheduleBuilder, scheduleExpression, scheduleFields } from "@/components/schedule-builder"
-import { LoadingPanel, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -81,6 +75,9 @@ import { describeCron } from "@/lib/cron"
 import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { BackupJob, Job } from "@/lib/types"
+import { Stale } from "@/components/database/kit/read"
+import { Detail, DetailList } from "@/components/detail-list"
+import { FIT_COLUMN } from "@/components/database/ops/performance-parts"
 
 /** The width of the panel from which a base backup is a row of a table rather than a block of lines. */
 const TABLE_FROM = 600
@@ -343,13 +340,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
     )
 
   return (
-    <Panel
-      plain
-      aria-label="Point-in-time recovery"
-      ref={frame}
-      data-pitr=""
-      className="outline-none"
-    >
+    <Panel plain aria-label="Point-in-time recovery" ref={frame} data-pitr="">
       <PanelHeader
         title={
           <span className="flex flex-wrap items-baseline gap-x-2.5 gap-y-1">
@@ -359,7 +350,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
         }
         actions={
           <>
-            {staleOf(pitr) && <NotUpdating error={staleOf(pitr)!} />}
+            <Stale poll={pitr} />
             {roomy && commands}
           </>
         }
@@ -371,7 +362,7 @@ export function PointInTimeRecovery({ jobs }: { jobs: BackupJob[] }) {
       {!data ? (
         pitr.error ? (
           <div className="pt-4">
-            <CouldNotRead what="point-in-time recovery" error={pitr.error} onRetry={pitr.refresh} />
+            <ErrorState what="point-in-time recovery" error={pitr.error} onRetry={pitr.refresh} />
           </div>
         ) : (
           <LoadingPanel plain rows={3} />
@@ -602,8 +593,8 @@ function ArchiveReading({
         </Notice>
       )}
 
-      <FactRows aria-label="The archive">
-        <FactRow label="Archiving">
+      <DetailList ruled size="body" aria-label="The archive">
+        <Detail label="Archiving">
           <span className="flex flex-wrap items-baseline gap-x-2">
             <Status tone={health.tone} label={health.word} />
             {archiver?.lastArchived && (
@@ -620,8 +611,8 @@ function ArchiveReading({
               </span>
             )}
           </span>
-        </FactRow>
-        <FactRow label="Base backups">
+        </Detail>
+        <Detail label="Base backups">
           <span className="numeric">
             {plural(backups.length, "base backup")} · {bytes(stored)} ·{" "}
             {archive.schedule ? (
@@ -633,25 +624,25 @@ function ArchiveReading({
               "taken by hand only"
             )}
           </span>
-        </FactRow>
-        <FactRow label="Keeps">{keepsWords(archive.retentionDays)}</FactRow>
-        <FactRow label="Kept in" className="font-mono text-xs wrap-anywhere">
+        </Detail>
+        <Detail label="Keeps">{keepsWords(archive.retentionDays)}</Detail>
+        <Detail label="Kept in" className="font-mono text-xs wrap-anywhere">
           {locationWords(archive)}
-        </FactRow>
-        <FactRow label="Encrypted">
+        </Detail>
+        <Detail label="Encrypted">
           OpenPGP, to a key made for this archive{" "}
           <span className="font-mono text-xs text-muted-foreground" title={archive.keyFingerprint}>
             {archive.keyFingerprint.slice(-19)}
           </span>
-        </FactRow>
-      </FactRows>
+        </Detail>
+      </DetailList>
 
       {backups.length === 0 ? (
         <FormNote>
           The first base backup has not finished; until it has, no moment can be recovered to.
         </FormNote>
       ) : width >= TABLE_FROM || width === 0 ? (
-        <PanelBody flush className="group-data-[plain]/panel:-mx-4">
+        <PanelBody flush className={FIT_COLUMN}>
           <Table className="table-fixed" aria-label="Base backups">
             <colgroup>
               <col className="w-36" />
@@ -687,12 +678,9 @@ function ArchiveReading({
           </Table>
         </PanelBody>
       ) : (
-        <ul
-          aria-label="Base backups"
-          className="-mx-4 divide-y divide-hairline border-y border-hairline"
-        >
+        <ul aria-label="Base backups" className="divide-y divide-hairline border-y border-hairline">
           {backups.map((one) => (
-            <li key={one.name} className="px-4 py-2 text-xs">
+            <li key={one.name} className="py-2 text-xs">
               <p className="truncate font-mono">{one.name}</p>
               <p className="numeric flex flex-wrap gap-x-2.5 text-hint text-muted-foreground">
                 <span title={timestamp(one.finishedAt)}>{relativeTime(one.finishedAt)}</span>

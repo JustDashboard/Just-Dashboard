@@ -5,9 +5,10 @@ import { get } from "@/lib/api"
 import type { NetworkPath, NetworkRouting } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
+import { IconAction } from "@/components/icon-action"
 import { Cross, SettingsSliders } from "@/components/icons"
 import { Field, InfoTip } from "@/components/form"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -98,15 +99,16 @@ export function TargetField({
         autoCorrect="off"
         trailing={
           question.target && (
-            <Button
+            <IconAction
               type="button"
               size="icon-xs"
               variant="ghost"
-              aria-label="Clear the target"
+              className="[&_svg:not([class*='size-'])]:size-3"
+              label="Clear the target"
               onClick={() => onChange({ ...question, target: "" })}
             >
               <Cross aria-hidden />
-            </Button>
+            </IconAction>
           )
         }
       />

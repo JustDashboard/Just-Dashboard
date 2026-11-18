@@ -17,9 +17,9 @@ import type {
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { hostOf, humanize, releaseLabel, shortRevision } from "@/components/deploy/vocabulary"
-import { ProjectMark } from "@/components/deploy/project-mark"
-import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/deploy/wire"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { ProjectMark } from "@/components/project-mark"
+import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { SettingPicture } from "@/components/settings/setting-picture"
 import {
   actionOf,
   providerLabel,

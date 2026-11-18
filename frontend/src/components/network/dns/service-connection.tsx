@@ -11,7 +11,7 @@ import {
   type DNSConnection,
   type DNSEngine,
   type DNSServiceView,
-} from "@/lib/network-dns-services"
+} from "@/lib/network/dns-services"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { Field, FieldRow, FormSection, OptionRow } from "@/components/form"
 import { Notice } from "@/components/state"

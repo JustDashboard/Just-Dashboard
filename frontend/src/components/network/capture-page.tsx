@@ -3,26 +3,22 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  Crosshair,
-  Download,
-  StopCircle,
-} from "@/components/icons"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChevronDown, ChevronUp, Crosshair, Download, StopCircle } from "@/components/icons"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Detail, DetailList, Page, PageContext } from "@/components/page"
+import { IdentityHeader } from "@/components/identity-header"
+import { Bone } from "@/components/bone"
+import { Fact } from "@/components/fact-line"
+import { InfoTip } from "@/components/form"
+import { Page, PageContext } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, NeedsAdmin, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -33,7 +29,7 @@ import {
   captureReading,
   type CaptureList,
   type CaptureRun,
-} from "@/lib/network-captures"
+} from "@/lib/network/captures"
 import {
   captureFilter,
   captureLine,
@@ -41,7 +37,7 @@ import {
   familyWord,
   neighbours,
   startedApart,
-} from "@/lib/network-runs-view"
+} from "@/lib/network/runs-view"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import type { NetworkLink } from "@/lib/types"
 import {
@@ -52,22 +48,17 @@ import {
   useCaptureLinks,
 } from "./captures"
 import { CapturePicture } from "./capture-picture"
-import { StateTile, interfaceMark, toolGlyph } from "./diagnostic-marks"
+import { interfaceMark, toolGlyph } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 import { ItemRail } from "./item-rail"
 import { NetworkReadWarning } from "./read-warning"
 import { runHref } from "./saved-runs"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "facts"] as const
 type Tab = (typeof TABS)[number]
 
-const BACK = (
-  <Link
-    href="/network/captures"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Packet captures
-  </Link>
-)
+const BACK = { href: "/network/captures", label: "Packet captures" }
 
 /**
  * One packet capture, as a place of its own (the process page's shape):
@@ -80,7 +71,7 @@ export function CapturePage() {
   const { can } = useAuth()
   const admin = can("system.admin")
   const params = useParams<{ id: string }>()
-  const id = params.id ? decodeURIComponent(params.id) : ""
+  const id = decodeSegment(params.id)
   const search = useSearchParams()
   const router = useRouter()
   const requested = search.get("tab")
@@ -119,11 +110,10 @@ export function CapturePage() {
   if (!admin)
     return (
       <Page>
-        <PageContext eyebrow={BACK} title="Packet capture" />
-        <EmptyState
-          icon={Crosshair}
-          title="Packet captures require the admin capability"
-          description="Original packet bytes and private filter tuples are available only to server administrators."
+        <PageContext back={BACK} title="Packet capture" />
+        <NeedsAdmin
+          what="Packet captures"
+          why="Packet bytes and filter tuples are private to administrators."
         />
       </Page>
     )
@@ -171,7 +161,7 @@ export function CapturePage() {
               href: captureHref(run.id, tab),
               label: run.name,
               mark: (
-                <StateTile
+                <StateMark
                   {...interfaceMark(run.request.interface, links)}
                   tone={captureReading(run).tone}
                   size="sm"
@@ -239,7 +229,7 @@ function CaptureMain({
 
   const header = (
     <PageContext
-      eyebrow={BACK}
+      back={BACK}
       title={run?.name ?? "Packet capture"}
       actions={
         <span className="flex items-center">
@@ -276,11 +266,14 @@ function CaptureMain({
           <ErrorState error={poll.error} onRetry={poll.refresh} retryable />
         ) : (
           <>
-            <HostIdentity
+            {/* The loaded line's own parts, so it is as tall loading as loaded. */}
+            <IdentityHeader
+              loading
               fallback={Crosshair}
-              title={<TextShimmer>Reading the capture…</TextShimmer>}
-              state={<span>&nbsp;</span>}
-              facts={<span>&nbsp;</span>}
+              // The state is a body-size word once read, so its bone is too.
+              state={<Bone className="w-24 text-body" />}
+              command
+              menu={false}
             />
             <LoadingRows rows={4} />
           </>
@@ -312,23 +305,14 @@ function CaptureMain({
         />
       </div>
       <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of ${run.name}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {[
+        <ViewTabList
+          label={`Views of ${run.name}`}
+          views={[
             { key: "overview", label: "Overview" },
             { key: "facts", label: "Facts" },
-          ].map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(tab === view.key, "h-10")}
-            >
-              {view.label}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
+          ]}
+          value={tab}
+        />
         <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
           {tab === "overview" && <CaptureOverview run={run} links={links} />}
         </TabsContent>
@@ -361,10 +345,10 @@ function CaptureIdentity({
   const filter = captureFilter(run.request)
   return (
     <>
-      <HostIdentity
+      <IdentityHeader
         label={`About ${run.name}`}
         logo={
-          <StateTile
+          <StateMark
             {...interfaceMark(run.request.interface, links)}
             tone={reading.tone}
             size="lg"
@@ -374,21 +358,20 @@ function CaptureIdentity({
         state={<Status {...reading} className="text-body" />}
         facts={
           <>
-            <span className="font-mono text-foreground">{run.request.interface}</span>
-            <FactDot />
-            <span>{filter.title}</span>
+            <Fact mono className="text-foreground">
+              {run.request.interface}
+            </Fact>
+            <Fact>{filter.title}</Fact>
             {run.result && (
-              <>
-                <FactDot />
-                <span className="numeric">
-                  {plural(run.result.packets, "packet")} · {bytes(run.result.bytes)}
-                </span>
-              </>
+              <Fact className="numeric">
+                {plural(run.result.packets, "packet")} · {bytes(run.result.bytes)}
+              </Fact>
             )}
-            <FactDot />
-            <time dateTime={run.createdAt} title={timestamp(run.createdAt)} className="numeric">
-              {relativeTime(run.createdAt)}
-            </time>
+            <Fact>
+              <time dateTime={run.createdAt} title={timestamp(run.createdAt)} className="numeric">
+                {relativeTime(run.createdAt)}
+              </time>
+            </Fact>
           </>
         }
         command={
@@ -472,7 +455,15 @@ function RelatedRun({ id, capture }: { id: string; capture: CaptureRun }) {
   const diagnostic = poll.data
   return (
     <Panel plain aria-label="Related saved run">
-      <PanelHeader title="Related saved run" />
+      <PanelHeader
+        title="Related saved run"
+        actions={
+          <InfoTip label="What connects them">
+            The reference and the start times connect the two. They do not show the same flow or the
+            cause of an incident.
+          </InfoTip>
+        }
+      />
       <PanelBody className="space-y-2">
         {diagnostic ? (
           <>
@@ -485,7 +476,7 @@ function RelatedRun({ id, capture }: { id: string; capture: CaptureRun }) {
             <ChoiceList>
               <ChoiceRow
                 leading={
-                  <StateTile
+                  <StateMark
                     glyph={toolGlyph({
                       kind: diagnostic.kind,
                       request: diagnostic.request ?? { tool: "" },
@@ -504,15 +495,11 @@ function RelatedRun({ id, capture }: { id: string; capture: CaptureRun }) {
                 }
               />
             </ChoiceList>
-            <p className="text-hint text-muted-foreground">
-              The reference and timestamps connect the evidence. They do not establish the same flow
-              or the cause of an incident.
-            </p>
           </>
         ) : poll.error ? (
           <ErrorState error={poll.error} onRetry={poll.refresh} />
         ) : (
-          <LoadingRows rows={1} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={1} lines={2} />
         )}
       </PanelBody>
     </Panel>

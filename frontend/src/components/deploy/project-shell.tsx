@@ -34,12 +34,12 @@ import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/p
 import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
 import { projectCommand, useProjectVerbs } from "@/components/deploy/project-verbs"
-import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/nav"
-import { useNavScope, type NavScope } from "@/components/nav-scope"
+import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/shell/nav"
+import { useNavScope, type NavScope } from "@/components/shell/nav-scope"
 import { DeployVersionDialog } from "@/components/deploy/deploy-version-dialog"
 import { DuplicateProjectDialog } from "@/components/deploy/duplicate-dialog"
-import { HostIdentity } from "@/components/metrics/host-identity"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { IdentityHeader } from "@/components/identity-header"
+import { ProjectMark } from "@/components/project-mark"
 import { PullRequestPicker } from "@/components/deploy/pull-request-picker"
 import { EnvironmentSwitch } from "@/components/deploy/environment-switch"
 import { AddStagingDialog } from "@/components/deploy/add-staging-dialog"
@@ -90,6 +90,9 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   // rather than a page that scrolls: it fills what is left, down to the foot.
   const pathname = usePathname()
   const fill = pathname.endsWith("/assistant")
+  // The console is the window under the header from `xl`, the way Logs fills
+  // its page: a fixed offset left ground under the terminal at 1440x900.
+  const held = pathname.endsWith("/console")
   // Logs is one pane on a phone, the whole height under this header with its
   // views on a bar along the foot (`components/phone-panes.tsx`), so below
   // `md` its page is held to the window too. From `md` it flows like the rest.
@@ -174,16 +177,19 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
 
   return (
     <Page
-      fill={fill}
+      fill={fill || (held ? "xl" : undefined)}
       className={cn(
         "pt-4 md:pt-5",
         fill && "gap-0 pb-0 md:gap-0 md:pb-0",
         phonePane && "max-md:h-full max-md:min-h-0 max-md:gap-4 max-md:overflow-hidden max-md:pb-0",
       )}
     >
+      {/* No back link: the rail leads back to the fleet and the header is
+          the page's first line (deploy-header.spec). MOB-14 asks for one;
+          that is the operator's call, since this is the reference header. */}
       <PageContext title={record.name} />
 
-      <HostIdentity
+      <IdentityHeader
         label={`About ${record.name}`}
         slot="project-header"
         logo={<ProjectMark deployment={deployment} product={project.product} />}
@@ -381,7 +387,7 @@ function Address({
       <span className="truncate">
         Private service
         {deployment.internalPort && (
-          <span className="font-mono text-body font-normal text-muted-foreground">
+          <span className="font-mono text-body leading-none font-normal text-muted-foreground">
             {" "}
             :{deployment.internalPort}
           </span>
@@ -621,7 +627,9 @@ function AutoDeployFact({
   return (
     <Link
       href={href}
-      className="flex rounded-sm focus-ring"
+      // Auto-deploy on is the answer a project is expected to give: a phone's
+      // one line of facts leaves it out and keeps the ones that differ.
+      className={cn("flex rounded-sm focus-ring", reading.tone === "running" && "max-sm:hidden")}
       aria-label={`${reading.label} · automatic deployment settings`}
     >
       <Status tone={reading.tone} label={reading.label} />

@@ -3,16 +3,8 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import {
-  ArrowLeft,
-  ChevronDown,
-  ChevronUp,
-  Crosshair,
-  Inspect,
-  LockOpen,
-  Slash,
-} from "@/components/icons"
+import { Fact } from "@/components/fact-line"
+import { Crosshair, Inspect, LockOpen, Slash } from "@/components/icons"
 import { del, get } from "@/lib/api"
 import { networkOf } from "@/lib/clients"
 import { duration, plural } from "@/lib/format"
@@ -22,23 +14,21 @@ import {
   recentHours,
   type AddressBlock,
   type ConnectionDetail,
-} from "@/lib/network-traffic"
+} from "@/lib/network/traffic"
 import type { Connections, Peer, PortsMeta } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { DetailPage } from "@/components/detail-page"
+import { IdentityHeader } from "@/components/identity-header"
 import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { addressVerbs } from "@/components/security/address-verbs"
 import { useSecurity } from "@/components/security/security-context"
 import { NetworkReadWarning } from "@/components/network/read-warning"
@@ -64,14 +54,13 @@ import {
   type ConnectionsFilters,
 } from "@/components/network/connections/model"
 
-const BACK = (
-  <Link
-    href="/network/connections"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Connections
-  </Link>
-)
+const BACK = { href: "/network/connections", label: "Connections" }
+
+// One inset under the strip on every Network detail page.
+const VIEW_PANE = "pt-6"
+
+/** What the page hands the frame whatever it holds: the rail, the arrows and the way back. */
+type Frame = Omit<React.ComponentProps<typeof DetailPage>, "identity" | "children">
 
 /**
  * One remote address, as a place of its own.
@@ -145,92 +134,66 @@ export function AddressPage() {
   const previous = { disabled: order.length === 0 || at === 0, run: () => step(-1) }
   const next = { disabled: order.length === 0 || at === order.length - 1, run: () => step(1) }
 
-  return (
-    <Workspace
-      name="Remote address"
-      stateKey="connections.address"
-      refresh={list.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous address",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next address",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          {address && (
-            <AddressRail
-              className="hidden w-72 shrink-0 xl:flex"
-              rows={rows}
-              current={address}
-              loading={list.loading && !list.data}
-              query={filters.q}
-              onQuery={(q) => setFilters((previous) => ({ ...previous, q }))}
-              scope={scope}
-              onScope={(next) => setFilters((previous) => ({ ...previous, scope: next }))}
-              fromInternet={list.data?.peers.filter((p) => !p.private).length}
-              onOpen={open}
-            />
-          )}
-          {address ? (
-            <AddressMain
-              key={address}
-              address={address}
-              admin={admin}
-              list={list.data}
-              listError={list.error}
-              listLastSuccess={list.lastSuccess}
-              refreshList={list.refresh}
-              tab={tab}
-              setTab={setTab}
-              hours={hours}
-              hour={hour}
-              onHour={pickHour}
-              previous={previous}
-              next={next}
-            />
-          ) : (
-            <div className="flex min-w-0 flex-1 flex-col gap-5">
-              <PageContext eyebrow={BACK} title="Remote address" />
-              <EmptyState
-                title="That is not an address"
-                description="An address here is an IPv4 or IPv6 address, as the connections list writes it."
-                action={
-                  <Link
-                    href="/network/connections"
-                    className="text-body font-medium text-brand hover:underline"
-                  >
-                    Back to the connections
-                  </Link>
-                }
-              />
-            </div>
-          )}
-        </div>
-      </Page>
-    </Workspace>
+  const frame: Frame = {
+    name: "Remote address",
+    what: "address",
+    stateKey: "connections.address",
+    refresh: list.refresh,
+    steps: { previous, next },
+    rail: address ? (
+      <AddressRail
+        rows={rows}
+        current={address}
+        loading={list.loading && !list.data}
+        error={!list.data ? list.error : undefined}
+        onRetry={list.refresh}
+        query={filters.q}
+        onQuery={(q) => setFilters((previous) => ({ ...previous, q }))}
+        scope={scope}
+        onScope={(next) => setFilters((previous) => ({ ...previous, scope: next }))}
+        fromInternet={list.data?.peers.filter((p) => !p.private).length}
+      />
+    ) : null,
+    back: BACK,
+    title: address ?? "Remote address",
+  }
+
+  return address ? (
+    <AddressMain
+      key={address}
+      frame={frame}
+      address={address}
+      admin={admin}
+      list={list.data}
+      listError={list.error}
+      listLastSuccess={list.lastSuccess}
+      refreshList={list.refresh}
+      tab={tab}
+      setTab={setTab}
+      hours={hours}
+      hour={hour}
+      onHour={pickHour}
+    />
+  ) : (
+    <DetailPage {...frame}>
+      <EmptyState
+        title="That is not an address"
+        description="An address here is an IPv4 or IPv6 address, as the connections list writes it."
+        action={
+          <Link
+            href="/network/connections"
+            className="text-body font-medium text-brand hover:underline"
+          >
+            Back to the connections
+          </Link>
+        }
+      />
+    </DetailPage>
   )
 }
 
-type Step = { disabled: boolean; run: () => void }
-
 function AddressMain({
+  frame,
   address,
   admin,
   list,
@@ -242,9 +205,8 @@ function AddressMain({
   hours,
   hour,
   onHour,
-  previous,
-  next,
 }: {
+  frame: Frame
   address: string
   admin: boolean
   list: Connections | undefined
@@ -256,8 +218,6 @@ function AddressMain({
   hours: { from: string; to: string; label: string }[]
   hour: string
   onHour: (hour: string) => void
-  previous: Step
-  next: Step
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -340,57 +300,40 @@ function AddressMain({
   ) : undefined
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext
-          eyebrow={BACK}
-          title={address}
-          actions={
-            <>
-              <span className="flex items-center">
-                <IconAction
-                  label="Previous address"
-                  disabled={previous.disabled}
-                  onClick={previous.run}
-                >
-                  <ChevronUp />
-                </IconAction>
-                <IconAction label="Next address" disabled={next.disabled} onClick={next.run}>
-                  <ChevronDown />
-                </IconAction>
-                <span className="max-sm:hidden">
-                  <WorkspaceHelp compact />
-                </span>
-              </span>
-            </>
-          }
-        />
-        <AddressIdentity
-          address={address}
-          peer={peer}
-          listed={list !== undefined}
-          block={block}
-          oldest={oldestSocket(detail.data)}
-          command={command}
-          menu={<VerbMenu verbs={lookups} label={`Actions for ${address}`} />}
-        />
-        <NetworkReadWarning error={listError} refresh={refreshList} lastSuccess={listLastSuccess} />
-      </div>
-
+    <DetailPage
+      {...frame}
+      identity={
+        <>
+          <AddressIdentity
+            address={address}
+            peer={peer}
+            listed={list !== undefined}
+            block={block}
+            oldest={oldestSocket(detail.data)}
+            command={command}
+            menu={<VerbMenu verbs={lookups} label={`Actions for ${address}`} />}
+          />
+          <NetworkReadWarning
+            error={listError}
+            refresh={refreshList}
+            lastSuccess={listLastSuccess}
+          />
+        </>
+      }
+    >
       {admin ? (
-        <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-          <TabsPrimitive.List
-            aria-label={`Views of ${address}`}
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            <TabsPrimitive.Trigger value="live" className={tabClasses(tab === "live", "h-10")}>
-              Live
-            </TabsPrimitive.Trigger>
-            <TabsPrimitive.Trigger value="past" className={tabClasses(tab === "past", "h-10")}>
-              A past hour
-            </TabsPrimitive.Trigger>
-          </TabsPrimitive.List>
-          <TabsContent value="live" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <Tabs value={tab} onValueChange={setTab} className="gap-0">
+          <ViewTabList
+            label={`Views of ${address}`}
+            views={[
+              { key: "live", label: "Live" },
+              { key: "past", label: "A past hour" },
+            ]}
+            value={tab}
+            sticky
+            className="max-xl:static"
+          />
+          <TabsContent value="live" className={VIEW_PANE}>
             {tab === "live" && (
               <AddressLive
                 address={address}
@@ -403,7 +346,7 @@ function AddressMain({
               />
             )}
           </TabsContent>
-          <TabsContent value="past" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+          <TabsContent value="past" className={VIEW_PANE}>
             {tab === "past" && (
               <AddressPast address={address} hours={hours} hour={hour} onHour={onHour} />
             )}
@@ -433,7 +376,7 @@ function AddressMain({
         />
       )}
       {dialog}
-    </div>
+    </DetailPage>
   )
 }
 
@@ -472,7 +415,7 @@ function AddressIdentity({
   const now = useNow(30_000)
   const network = networkOf(address)
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise"
       logo={
         <AddressMark
@@ -485,20 +428,16 @@ function AddressIdentity({
       title={<span className="min-w-0 font-mono break-all">{address}</span>}
       facts={
         <>
-          <span>{network.label}</span>
-          {(peer || !listed) && <FactDot />}
+          <Fact>{network.label}</Fact>
           {peer ? (
             <>
-              <span className="numeric">
+              <Fact className="numeric">
                 {plural(peer.count, "socket")}, {peer.established} active
-              </span>
+              </Fact>
               {oldest && (
-                <>
-                  <FactDot />
-                  <span className="numeric" title={new Date(oldest).toLocaleString()}>
-                    seen for {duration(Math.max(0, (now - Date.parse(oldest)) / 1000))}
-                  </span>
-                </>
+                <Fact className="numeric" title={new Date(oldest).toLocaleString()}>
+                  seen for {duration(Math.max(0, (now - Date.parse(oldest)) / 1000))}
+                </Fact>
               )}
             </>
           ) : (

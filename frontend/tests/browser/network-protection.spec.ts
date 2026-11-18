@@ -101,7 +101,7 @@ test("it opens on its identity line and its picture, not on tiles", async ({ pag
     "15,654 networks in 3 lists · 3.1 MB dropped since load",
   )
   await expect(section(page, "limits")).toContainText(
-    /2 in force · 147\.5 KB refused since load · 12\.5K packets since/,
+    /2 in force · 147\.5 KB refused since load · 12\.5k packets since/,
   )
 })
 
@@ -110,11 +110,11 @@ test("the picture draws who is refused, the filter and what gets through", async
   const refused = page.getByRole("region", { name: "Refused" })
   const through = page.getByRole("region", { name: "Gets through" })
   await expect(refused.getByText("China and Russia")).toBeVisible()
-  await expect(refused.getByText("9,843 networks · 48.2K dropped")).toBeVisible()
+  await expect(refused.getByText("9,843 networks · 48.2k dropped")).toBeVisible()
   await expect(refused.getByText("fetch failed")).toBeVisible()
   await expect(refused.getByText("switched off")).toBeVisible()
   await expect(through.getByText("22/tcp")).toBeVisible()
-  await expect(through.getByText("10 a minute per address · 2.5K refused")).toBeVisible()
+  await expect(through.getByText("10 a minute per address · 2.5k refused")).toBeVisible()
   await expect(through.getByText("120 let through")).toBeVisible()
   await expect(through.getByText("5 addresses")).toBeVisible()
   await expect(through.getByText("yours among them")).toBeVisible()

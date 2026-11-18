@@ -1,5 +1,6 @@
+import { plural } from "@/lib/format"
 import type { Tone } from "@/components/tone"
-import type { WireLine } from "@/components/wire-flow-model"
+import type { WireLine } from "@/components/wire/wire-flow-model"
 import {
   egressNames,
   type EgressDecision,
@@ -7,7 +8,7 @@ import {
   type EgressMemberView,
   type EgressPolicy,
   type EgressSimulation,
-} from "@/lib/network-egress"
+} from "@/lib/network/egress"
 
 /**
  * The words and lines the list's cards, a group's page and its picture say,
@@ -21,16 +22,6 @@ export type EgressTab = (typeof EGRESS_TABS)[number]
 export function egressHref(name: string, tab?: string): string {
   const base = `/network/egress/${encodeURIComponent(name)}`
   return tab && tab !== "members" ? `${base}?tab=${tab}` : base
-}
-
-/** The route's segment as a group's name. */
-export function egressNameOf(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
 }
 
 /** The group a name opens: the server refuses two names that differ only in case. */
@@ -230,8 +221,4 @@ export function egressSibling<T extends Pick<EgressGroup, "name">>(
   const at = groups.findIndex((g) => g.name.toLowerCase() === name.toLowerCase())
   if (at < 0) return direction > 0 ? groups[0] : groups[groups.length - 1]
   return groups[at + direction]
-}
-
-function plural(n: number, word: string) {
-  return `${n} ${n === 1 ? word : `${word}s`}`
 }

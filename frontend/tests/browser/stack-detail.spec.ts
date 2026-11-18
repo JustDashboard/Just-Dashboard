@@ -479,16 +479,16 @@ test("the stacks stand beside the page, and Alt+↓ walks them with the view car
 
   const rail = page.locator("[data-slot=stack-rail]")
   await expect(rail).toBeVisible()
-  const names = rail.getByRole("list", { name: "Stacks to open" }).getByRole("button")
+  const names = rail.getByRole("list", { name: "Stacks to open" }).getByRole("link")
   await expect(names).toHaveCount(5)
   // The list's own order: running first by name, then stopped, then never deployed.
   expect(
     await names.evaluateAll((all) => all.map((each) => each.getAttribute("aria-label"))),
   ).toEqual(["analytics", "monitoring", "shop", "mailserver", "wiki"])
-  const current = rail.getByRole("button", { name: "shop", exact: true })
+  const current = rail.getByRole("link", { name: "shop", exact: true })
   await expect(current).toHaveAttribute("aria-current", "page")
   await expect(current).toContainText("4/6 up")
-  await expect(rail.getByRole("button", { name: "wiki", exact: true })).toContainText("2 defined")
+  await expect(rail.getByRole("link", { name: "wiki", exact: true })).toContainText("2 defined")
   await expect(rail.getByText("5 stacks · running first")).toBeVisible()
 
   // Every row is one height, whatever it has to say.
@@ -502,7 +502,7 @@ test("the stacks stand beside the page, and Alt+↓ walks them with the view car
   await expect(page).toHaveURL(/\/docker\/stacks\/mailserver\?tab=history$/, { timeout: 15_000 })
   await page.goBack()
   await expect(page).toHaveURL(/\/docker\/stacks\/shop\?tab=history$/)
-  await rail.getByRole("button", { name: "analytics", exact: true }).click()
+  await rail.getByRole("link", { name: "analytics", exact: true }).click()
   await expect(page).toHaveURL(/\/docker\/stacks\/analytics\?tab=history$/, { timeout: 15_000 })
 })
 
@@ -514,7 +514,7 @@ test("the rail keeps the list's search and state, and still names the stack on s
   await page.goto("/docker/stacks/shop")
 
   const rail = page.locator("[data-slot=stack-rail]")
-  const names = rail.getByRole("list", { name: "Stacks to open" }).getByRole("button")
+  const names = rail.getByRole("list", { name: "Stacks to open" }).getByRole("link")
   await expect(names).toHaveCount(5)
   await rail.getByPlaceholder("Stack, service or image").fill("grafana")
   await expect(names).toHaveCount(2)

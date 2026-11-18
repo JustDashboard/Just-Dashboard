@@ -8,15 +8,17 @@ import type { PortEvent, PortHistory } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
-import { Toolbar } from "@/components/page"
+import { Toolbar } from "@/components/toolbar"
+import { InfoTip } from "@/components/form"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
 import { ProductLogo, portProduct, processProduct } from "@/components/product-logo"
 import { ROW_BLEED } from "@/components/row-list"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Button } from "@/components/ui/button"
 import {
   dangerousService,
@@ -269,7 +271,21 @@ export function PortChanges({
   return (
     <Panel plain id="changes">
       <PanelHeader
-        title="Changes"
+        title={
+          history?.recordingSince ? (
+            // One line with a gap, as the firewall's "Rules" and its tip are:
+            // bare in the heading, the ⓘ touched the word and sat off its line.
+            <span className="inline-flex items-center gap-1.5">
+              Changes
+              <InfoTip label="How the changes are kept">
+                Compared once a minute, kept {history.retentionDays} days, recording since{" "}
+                {calendarDate(history.recordingSince)}.
+              </InfoTip>
+            </span>
+          ) : (
+            "Changes"
+          )
+        }
         actions={
           <Segments
             label="Changes from the last"
@@ -324,21 +340,14 @@ export function PortChanges({
         </Toolbar>
       )}
       <PanelBody flush>{body}</PanelBody>
-      {history?.recordingSince && (
+      {/* How the changes are kept is the title's ⓘ: as a footnote it said
+          again what the empty state above it had just said. */}
+      {history?.truncated && (
         <PanelFooter className="mt-3 text-hint text-muted-foreground">
           <span>
-            Compared once a minute, kept {history.retentionDays} days, recording since{" "}
-            {calendarDate(history.recordingSince)}
+            Only the newest {plural(history.events.length, "event")} of the {WINDOW_WORDS[hours]}{" "}
+            are listed
           </span>
-          {history.truncated && (
-            <>
-              <span className="text-muted-foreground/40">·</span>
-              <span>
-                Only the newest {plural(history.events.length, "event")} of the{" "}
-                {WINDOW_WORDS[hours]} are listed
-              </span>
-            </>
-          )}
         </PanelFooter>
       )}
     </Panel>

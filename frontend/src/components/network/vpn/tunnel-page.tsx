@@ -3,25 +3,24 @@
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChevronDown, ChevronUp, LockClosed } from "@/components/icons"
+import { Fact } from "@/components/fact-line"
+import { LockClosed } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import type { VPNView, WGArchived, WGInterface } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { IconAction } from "@/components/icon-action"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { DetailPage, useSiblingSteps, type Step } from "@/components/detail-page"
+import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
-import { EmptyState, ErrorState } from "@/components/state"
+import { EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList, type TabView } from "@/components/tabs"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { WireFlow } from "@/components/wire-flow"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
+import { WireFlow } from "@/components/wire/wire-flow"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { archivedLine, useArchive, useRestore } from "./archive"
 import { usePeerSheets } from "./peers"
@@ -33,17 +32,12 @@ import { TunnelPicture } from "./tunnel-picture"
 import { TunnelRail } from "./tunnel-rail"
 import { railTunnels, tunnelHref, type TunnelTab } from "./tunnel-reading"
 import { TunnelEndpoint, TunnelHistory, TunnelTraffic } from "./tunnel-views"
+import { decodeSegment } from "@/lib/route-params"
 
-const BACK = (
-  <Link
-    href="/network/vpn"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> VPN
-  </Link>
-)
+const BACK = { href: "/network/vpn", label: "VPN" }
 
-type Step = { disabled: boolean; run: () => void }
+/** What every state of the page hands the frame: the rail, the arrows and the way back. */
+type Frame = Omit<React.ComponentProps<typeof DetailPage>, "identity" | "children">
 
 /**
  * One WireGuard tunnel, as a place of its own.
@@ -70,7 +64,7 @@ export function TunnelPage() {
   const router = useRouter()
   const { can } = useAuth()
   const admin = can("system.admin")
-  const name = decodeName(params.tunnel)
+  const name = decodeSegment(params.tunnel)
   const [tab, setChosen] = useState(search.get("tab") ?? "")
   const setTab = useCallback((next: string, first: string) => {
     setChosen(next)
@@ -89,20 +83,15 @@ export function TunnelPage() {
   const archive = useArchive(admin)
   const live = vpn.data?.wireguard.interfaces
   const rail = useMemo(() => railTunnels(live ?? [], archive.data ?? []), [live, archive.data])
-  const at = rail.findIndex((t) => t.name === name)
   const open = useCallback(
     (next: string) => router.push(tunnelHref(next, tab || "overview")),
     [router, tab],
   )
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? rail[at + direction] : rail[direction > 0 ? 0 : -1]
-    if (next) open(next.name)
-  }
-  const previous: Step = { disabled: at <= 0, run: () => adjacent(-1) }
-  const next: Step = {
-    disabled: rail.length === 0 || at >= rail.length - 1,
-    run: () => adjacent(1),
-  }
+  const steps: { previous: Step; next: Step } = useSiblingSteps(
+    rail.map((t) => t.name),
+    name,
+    open,
+  )
   const refreshVPN = vpn.refresh
   const refreshArchive = archive.refresh
   const changed = useCallback(() => {
@@ -113,174 +102,113 @@ export function TunnelPage() {
   if (!admin) {
     return (
       <Page>
-        <PageContext eyebrow={BACK} title={name} />
-        <EmptyState
-          icon={LockClosed}
-          title="VPN needs the admin capability"
-          description="Tunnel peers and their client configurations are visible to administrators."
+        <PageContext back={BACK} title={name} />
+        <NeedsAdmin
+          what="VPN"
+          why="Tunnel peers and their client configurations are visible to administrators."
         />
       </Page>
     )
   }
 
   const tunnel = live?.find((t) => t.name === name)
-  const steps = (
-    <span className="flex items-center">
-      <IconAction label="Previous tunnel" disabled={previous.disabled} onClick={previous.run}>
-        <ChevronUp />
-      </IconAction>
-      <IconAction label="Next tunnel" disabled={next.disabled} onClick={next.run}>
-        <ChevronDown />
-      </IconAction>
-      <span className="max-sm:hidden">
-        <WorkspaceHelp compact />
-      </span>
-    </span>
-  )
-
-  return (
-    <Workspace
-      name="Tunnel"
-      stateKey="network.vpn.tunnel"
-      refresh={changed}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous tunnel",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next tunnel",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
-    >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the tunnel's line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          <TunnelRail
-            className="hidden w-64 shrink-0 xl:flex"
-            tunnels={rail}
-            current={name}
-            loading={!vpn.data && !vpn.error}
-            onOpen={open}
-          />
-          <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-            {!vpn.data ? (
-              <>
-                <PageContext eyebrow={BACK} title={name} actions={steps} />
-                {vpn.error ? (
-                  <ErrorState error={vpn.error} onRetry={vpn.refresh} retryable />
-                ) : (
-                  <>
-                    <IdentitySkeleton mark="wireguard" />
-                    <WireFlow
-                      loading
-                      start={{ title: "Devices", nodes: [] }}
-                      end={{ title: "Sites", nodes: [], loadingRows: 2 }}
-                      hub={{
-                        mark: (
-                          <WireMark tone="neutral" shape="square">
-                            <ProductGlyph id="wireguard" />
-                          </WireMark>
-                        ),
-                      }}
-                    />
-                  </>
-                )}
-              </>
-            ) : tunnel ? (
-              <LiveTunnel
-                key={name}
-                tunnel={tunnel}
-                stale={
-                  <NetworkReadWarning
-                    error={vpn.error}
-                    refresh={vpn.refresh}
-                    lastSuccess={vpn.lastSuccess}
-                  />
-                }
-                tab={tab}
-                setTab={setTab}
-                steps={steps}
-                onChanged={changed}
-              />
-            ) : (
-              <RemovedTunnel
-                key={name}
-                name={name}
-                archived={archive.data?.find((a) => a.name === name)}
-                reading={!archive.data && !archive.error}
-                tab={tab}
-                setTab={setTab}
-                steps={steps}
-                onChanged={changed}
-              />
-            )}
-          </div>
-        </div>
-      </Page>
-    </Workspace>
-  )
-}
-
-/** The route's segment as a tunnel name. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
+  const frame: Frame = {
+    name: "Tunnel",
+    what: "tunnel",
+    stateKey: "network.vpn.tunnel",
+    refresh: changed,
+    steps,
+    rail: (
+      <TunnelRail
+        tunnels={rail}
+        current={name}
+        loading={!vpn.data && !vpn.error}
+        error={!vpn.data ? vpn.error : undefined}
+        onRetry={vpn.refresh}
+      />
+    ),
+    back: BACK,
+    title: name,
   }
+
+  if (!vpn.data)
+    return (
+      <DetailPage {...frame} identity={!vpn.error && <IdentitySkeleton mark="wireguard" />}>
+        {vpn.error ? (
+          <ErrorState error={vpn.error} onRetry={vpn.refresh} retryable />
+        ) : (
+          <WireFlow
+            loading
+            start={{ title: "Devices", nodes: [] }}
+            end={{ title: "Sites", nodes: [], loadingRows: 2 }}
+            hub={{
+              mark: (
+                <WireMark tone="neutral" shape="square">
+                  <ProductGlyph id="wireguard" />
+                </WireMark>
+              ),
+            }}
+          />
+        )}
+      </DetailPage>
+    )
+  return tunnel ? (
+    <LiveTunnel
+      key={name}
+      frame={frame}
+      tunnel={tunnel}
+      stale={
+        <NetworkReadWarning error={vpn.error} refresh={vpn.refresh} lastSuccess={vpn.lastSuccess} />
+      }
+      tab={tab}
+      setTab={setTab}
+      onChanged={changed}
+    />
+  ) : (
+    <RemovedTunnel
+      key={name}
+      frame={frame}
+      name={name}
+      archived={archive.data?.find((a) => a.name === name)}
+      reading={!archive.data && !archive.error}
+      tab={tab}
+      setTab={setTab}
+      onChanged={changed}
+    />
+  )
 }
 
-type View = { key: TunnelTab; label: string; count?: number }
+type View = TabView<TunnelTab>
 
-/** The underlined strip of a tunnel's views. */
+/** The strip of a tunnel's views, directly under its line. */
 function ViewStrip({ name, views, shown }: { name: string; views: View[]; shown: string }) {
   return (
-    <TabsPrimitive.List
-      aria-label={`Views of ${name}`}
-      className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-    >
-      {views.map((view) => (
-        <TabsPrimitive.Trigger
-          key={view.key}
-          value={view.key}
-          className={tabClasses(shown === view.key, "h-10")}
-        >
-          {view.label}
-          {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
-        </TabsPrimitive.Trigger>
-      ))}
-    </TabsPrimitive.List>
+    <ViewTabList
+      label={`Views of ${name}`}
+      views={views}
+      value={shown}
+      sticky
+      className="max-xl:static"
+    />
   )
 }
 
-const VIEW = "min-h-0 flex-1 pt-6 xl:overflow-y-auto"
+// One inset under the strip on every Network detail page.
+const VIEW = "pt-6"
 
 function LiveTunnel({
+  frame,
   tunnel,
   stale,
   tab,
   setTab,
-  steps,
   onChanged,
 }: {
+  frame: Frame
   tunnel: WGInterface
   stale: React.ReactNode
   tab: string
   setTab: (next: string, first: string) => void
-  steps: React.ReactNode
   onChanged: () => void
 }) {
   const control = useTunnelControl(tunnel, onChanged)
@@ -306,22 +234,22 @@ function LiveTunnel({
   const shown = views.some((view) => view.key === tab) ? tab : "overview"
 
   return (
-    <>
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={tunnel.name} actions={steps} />
-        {stale}
-        <TunnelIdentity
-          tunnel={tunnel}
-          control={control}
-          onAdd={add}
-          className="animate-rise border-b-0 pb-0"
-        />
-      </div>
-      <Tabs
-        value={shown}
-        onValueChange={(next) => setTab(next, "overview")}
-        className="min-h-0 flex-1 gap-0"
-      >
+    <DetailPage
+      {...frame}
+      title={tunnel.name}
+      identity={
+        <>
+          {stale}
+          <TunnelIdentity
+            tunnel={tunnel}
+            control={control}
+            onAdd={add}
+            className="animate-rise border-b-0 pb-0"
+          />
+        </>
+      }
+    >
+      <Tabs value={shown} onValueChange={(next) => setTab(next, "overview")} className="gap-0">
         <ViewStrip name={tunnel.name} views={views} shown={shown} />
         <TabsContent value="overview" className={VIEW}>
           <div className="flex min-w-0 flex-col gap-8">
@@ -348,7 +276,7 @@ function LiveTunnel({
       </Tabs>
       {sheets}
       {control.dialog}
-    </>
+    </DetailPage>
   )
 }
 
@@ -358,21 +286,21 @@ function LiveTunnel({
  * shows the record; with neither it is a name nobody here answers to.
  */
 function RemovedTunnel({
+  frame,
   name,
   archived,
   reading,
   tab,
   setTab,
-  steps,
   onChanged,
 }: {
+  frame: Frame
   name: string
   archived: WGArchived | undefined
   /** The archive has not answered yet. */
   reading: boolean
   tab: string
   setTab: (next: string, first: string) => void
-  steps: React.ReactNode
   onChanged: () => void
 }) {
   const [span, setSpan] = useState<HistoryWindow>("24h")
@@ -390,15 +318,13 @@ function RemovedTunnel({
 
   if (!archived && (reading || (!history.data && !history.error)))
     return (
-      <>
-        <PageContext eyebrow={BACK} title={name} actions={steps} />
-        <IdentitySkeleton mark="wireguard" />
-      </>
+      <DetailPage {...frame} identity={<IdentitySkeleton mark="wireguard" />}>
+        {null}
+      </DetailPage>
     )
   if (unknown)
     return (
-      <>
-        <PageContext eyebrow={BACK} title={name} actions={steps} />
+      <DetailPage {...frame}>
         <EmptyState
           icon={LockClosed}
           title={`No tunnel named ${name || "that"} on this server`}
@@ -409,14 +335,14 @@ function RemovedTunnel({
             </Link>
           }
         />
-      </>
+      </DetailPage>
     )
 
   return (
-    <>
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext eyebrow={BACK} title={name} actions={steps} />
-        <HostIdentity
+    <DetailPage
+      {...frame}
+      identity={
+        <IdentityHeader
           label={`About ${name}`}
           slot="tunnel-identity"
           mark="wireguard"
@@ -435,20 +361,17 @@ function RemovedTunnel({
           facts={
             archived ? (
               <>
-                <HostFact>
+                <Fact>
                   <span className="block truncate font-mono">{archivedLine(archived)}</span>
-                </HostFact>
+                </Fact>
                 {archived.restorable && archived.endpoint && (
-                  <>
-                    <FactDot />
-                    <HostFact>
-                      <span className="block truncate font-mono">{archived.endpoint}</span>
-                    </HostFact>
-                  </>
+                  <Fact>
+                    <span className="block truncate font-mono">{archived.endpoint}</span>
+                  </Fact>
                 )}
               </>
             ) : (
-              <HostFact>its file is no longer in the archive</HostFact>
+              <Fact>its file is no longer in the archive</Fact>
             )
           }
           command={
@@ -459,12 +382,9 @@ function RemovedTunnel({
             ) : undefined
           }
         />
-      </div>
-      <Tabs
-        value={shown}
-        onValueChange={(next) => setTab(next, "history")}
-        className="min-h-0 flex-1 gap-0"
-      >
+      }
+    >
+      <Tabs value={shown} onValueChange={(next) => setTab(next, "history")} className="gap-0">
         <ViewStrip name={name} views={views} shown={shown} />
         <TabsContent value="history" className={VIEW}>
           {shown === "history" && <TunnelHistory name={name} history={history} />}
@@ -476,6 +396,6 @@ function RemovedTunnel({
         </TabsContent>
       </Tabs>
       {dialog}
-    </>
+    </DetailPage>
   )
 }

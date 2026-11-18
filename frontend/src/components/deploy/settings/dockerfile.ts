@@ -40,7 +40,7 @@ const INSTRUCTIONS = new Set([
 
 const FROM_ARGS = /^((?:--\S+\s+)*)(\S+)(?:(\s+)([Aa][Ss])(\s+)(\S+))?/
 const TOKEN =
-  /(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*"|'[^']*')|(\s--[a-z-]+(?==|\s|$))/g
+  /(\$\{[^}]*\}|\$[A-Za-z_][A-Za-z0-9_]*)|("(?:[^"\\]|\\.)*"|'[^']*')|((?:^|\s)--[a-z-]+(?==|\s|$))/g
 
 function pushPlain(pieces: DockerfilePiece[], text: string) {
   if (text) pieces.push({ kind: "plain", text })
@@ -62,7 +62,7 @@ function argumentPieces(rest: string): DockerfilePiece[] {
 
 /**
  * A Dockerfile as lines of coloured pieces, split by shape the way
- * `lib/log-tokens.ts` splits a log line. A line continued with a backslash
+ * `lib/log/tokens.ts` splits a log line. A line continued with a backslash
  * keeps the instruction it belongs to: its next line is arguments, not a new
  * instruction.
  */

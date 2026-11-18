@@ -10,10 +10,10 @@ import type { ContainerHistory, TrafficPulse } from "@/lib/types"
 import { utilisationTone } from "@/components/meter"
 import { NoReading, ReadingLine } from "@/components/reading-line"
 import { StatusDot } from "@/components/status-dot"
-import { TileTrend } from "@/components/metrics/sparkline"
-import { HUE } from "@/components/overview/readings"
+import { TileTrend } from "@/components/sparkline"
+import { HUE, LiveBytes } from "@/components/live-figure"
 import { NumberTicker } from "@/components/ui/number-ticker"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { failingTone } from "@/components/deploy/fleet"
 
 /*
@@ -153,8 +153,6 @@ export function UsageReadings({
     streamedCpu !== undefined && stats?.cpuLimit ? streamedCpu / stats.cpuLimit : undefined
   const cpu = streamedCpu ?? recorded?.cpu ?? undefined
   const memory = stats?.memUsage ?? recorded?.memBytes
-  const mib = memory !== undefined ? memory / 1024 / 1024 : 0
-  const gib = mib >= 1024
   const memoryShare = stats?.memLimited ? stats.memPercent : undefined
   const mark = (share: number | undefined, hue: string, glyph: React.ReactNode) => {
     const tone = share === undefined ? "default" : utilisationTone(share)
@@ -244,14 +242,7 @@ export function UsageReadings({
           <NoReading>No reading yet</NoReading>
         ) : (
           <span className="inline-block animate-rise">
-            {/* Keyed by the unit, so crossing a gibibyte counts up in the new
-                unit rather than springing from 1,023 down to 1.00. */}
-            <NumberTicker
-              key={gib ? "gib" : "mib"}
-              value={gib ? mib / 1024 : mib}
-              decimalPlaces={gib ? 2 : 0}
-            />{" "}
-            {gib ? "GB" : "MB"} in use
+            <LiveBytes value={memory} /> in use
           </span>
         )}
       </ReadingLine>

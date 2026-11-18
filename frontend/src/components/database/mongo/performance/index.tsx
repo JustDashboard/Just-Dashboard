@@ -15,12 +15,12 @@ import {
 } from "@/components/database/mongo/performance/samples"
 import type { MongoServer } from "@/components/database/mongo/types"
 import { useMongo } from "@/components/database/mongo/use-mongo"
-import { worthRetrying } from "@/components/database/redis/read-error"
-import { useFocusReturn } from "@/components/database/redis/use-focus-return"
-import { tabClasses } from "@/components/tabs"
+import { worthRetrying } from "@/components/database/kit/read-error"
+import { useFocusTrail } from "@/hooks/use-focus-return"
+import { ViewTabs } from "@/components/tabs"
+import { TabsContent } from "@/components/ui/tabs"
 import { usePoll } from "@/hooks/use-poll"
-import { cn } from "@/lib/utils"
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useMemo, useState } from "react"
 
 /** How often the counters are read: one `serverStatus` each time. */
 const EVERY_MS = 3000
@@ -52,7 +52,7 @@ export function MongoPerformance() {
   const mongo = useMongo()
   const { id, engine, param, select } = mongo
   const { confirm, dialog } = useConfirm()
-  useFocusReturn()
+  useFocusTrail()
   const stats = usePoll((signal) => mongoServer(id, signal), EVERY_MS, [id])
   const databases = usePoll((signal) => mongoDatabases(id, signal), 120_000, [id])
   const [samples, setSamples] = useState<MongoServer[]>([])
@@ -81,15 +81,6 @@ export function MongoPerformance() {
   const asked = param("view")
   const view: View = views.some((entry) => entry.id === asked) ? (asked as View) : "overview"
 
-  // On a phone the strip is wider than the page and scrolls sideways: the
-  // view on screen is kept in sight in it.
-  const strip = useRef<HTMLDivElement>(null)
-  useEffect(() => {
-    strip.current
-      ?.querySelector('[aria-pressed="true"]')
-      ?.scrollIntoView({ block: "nearest", inline: "nearest" })
-  }, [view])
-
   if (stats.error && samples.length === 0) {
     return (
       <SectionError
@@ -112,60 +103,47 @@ export function MongoPerformance() {
         </BlockedState>
       )}
 
-      <div className="min-w-0 space-y-6">
-        {/* A strip of pressed buttons, not a landmark: these are readings of
-            one page, and the rail is where the product navigates. The line
-            under it is where a failed reading is said, so the page does not
-            move when one fails. */}
-        <div className="relative">
-          <div
-            ref={strip}
-            role="group"
-            aria-label="Performance views"
-            // One view is no choice: the strip is drawn where there is another to go to.
-            className={cn(
-              "flex gap-1 overflow-x-auto border-b border-hairline",
-              views.length < 2 && "hidden",
-            )}
-          >
-            {views.map((entry) => (
-              <button
-                key={entry.id}
-                type="button"
-                aria-pressed={view === entry.id}
-                onClick={() => select({ view: entry.id === "overview" ? null : entry.id })}
-                className={tabClasses(view === entry.id, "h-10")}
+      <div className="min-w-0">
+        {/* The views of one page, as tabs: the strip scrolls the chosen one
+            into sight on a phone, and is not drawn where there is no other
+            view to go to. A failed reading is said at the head of the view,
+            so the strip does not move when one fails. */}
+        <ViewTabs
+          label="Performance views"
+          views={views.map((entry) => ({ key: entry.id, label: entry.label }))}
+          value={view}
+          onValueChange={(next) => select({ view: next === "overview" ? null : next })}
+          hideWhenSingle
+          rootClassName="gap-6"
+        >
+          <TabsContent value={view} className="relative min-w-0">
+            {stats.error && (
+              <p
+                role="status"
+                className="absolute inset-x-0 bottom-full mb-1.5 truncate text-hint text-warning"
               >
-                {entry.label}
-              </button>
-            ))}
-          </div>
-          {stats.error && (
-            <p
-              role="status"
-              className="absolute inset-x-0 top-full truncate pt-1 text-hint text-warning"
-            >
-              The last reading failed, so the figures are a few seconds old: {stats.error.message}
-            </p>
-          )}
-        </div>
-        {view === "operations" ? (
-          <OperationsView mongo={mongo} confirm={confirm} />
-        ) : view === "slow" ? (
-          <ProfilerView mongo={mongo} databases={databases} />
-        ) : view === "replication" ? (
-          <ReplicationView mongo={mongo} />
-        ) : (
-          <OverviewView
-            mongo={mongo}
-            rows={rows}
-            server={now}
-            databases={databases}
-            everyMs={EVERY_MS}
-            silent={silent}
-            recorded={(recorded.data?.length ?? 0) > 0}
-          />
-        )}
+                The last reading failed, so the figures are a few seconds old: {stats.error.message}
+              </p>
+            )}
+            {view === "operations" ? (
+              <OperationsView mongo={mongo} confirm={confirm} />
+            ) : view === "slow" ? (
+              <ProfilerView mongo={mongo} databases={databases} />
+            ) : view === "replication" ? (
+              <ReplicationView mongo={mongo} />
+            ) : (
+              <OverviewView
+                mongo={mongo}
+                rows={rows}
+                server={now}
+                databases={databases}
+                everyMs={EVERY_MS}
+                silent={silent}
+                recorded={(recorded.data?.length ?? 0) > 0}
+              />
+            )}
+          </TabsContent>
+        </ViewTabs>
       </div>
     </SectionFrame>
   )

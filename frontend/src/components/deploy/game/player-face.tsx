@@ -1,6 +1,6 @@
 import { LANES, hueFor } from "@/lib/hue"
 import { cn } from "@/lib/utils"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 
 /**
  * A player drawn the way their game draws them.

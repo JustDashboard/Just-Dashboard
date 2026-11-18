@@ -182,13 +182,13 @@ export function AddStagingDialog({
           <section aria-label="What staging gets" className="space-y-2">
             <p className="eyebrow">From production</p>
             <ul className="space-y-1.5 text-body">
-              <CopyLine copied>Build, runtime, health checks and release tasks</CopyLine>
-              <CopyLine copied>Plain variables and shared-variable references</CopyLine>
-              <CopyLine copied={secrets}>
+              <CopiedPart copied>Build, runtime, health checks and release tasks</CopiedPart>
+              <CopiedPart copied>Plain variables and shared-variable references</CopiedPart>
+              <CopiedPart copied={secrets}>
                 {secrets ? "Secrets, as production has them" : "Secrets: staging sets its own"}
-              </CopyLine>
-              <CopyLine>Database links: link a database of staging&apos;s own</CopyLine>
-              <CopyLine>Volumes: staging starts with new, empty ones</CopyLine>
+              </CopiedPart>
+              <CopiedPart>Database links: link a database of staging&apos;s own</CopiedPart>
+              <CopiedPart>Volumes: staging starts with new, empty ones</CopiedPart>
             </ul>
           </section>
 
@@ -207,7 +207,7 @@ export function AddStagingDialog({
   )
 }
 
-function CopyLine({ copied = false, children }: { copied?: boolean; children: React.ReactNode }) {
+function CopiedPart({ copied = false, children }: { copied?: boolean; children: React.ReactNode }) {
   const Mark = copied ? Check : Minus
   return (
     <li className="flex min-w-0 items-start gap-2">

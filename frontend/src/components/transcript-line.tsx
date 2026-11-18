@@ -4,7 +4,8 @@ import { useEffect, useState } from "react"
 import { useReducedMotion } from "motion/react"
 import { LogText } from "@/components/logs/log-text"
 import { LANES, hueFor } from "@/lib/hue"
-import { hitRanges, type TranscriptLine } from "@/lib/transcript"
+import { hitRanges, type LineKind, type TranscriptLine } from "@/lib/transcript"
+import type { JobLine } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 /**
@@ -14,6 +15,30 @@ import { cn } from "@/lib/utils"
  * itself, the step a line belongs to is coloured by the service it is
  * building, and a failure is washed where it happened.
  */
+
+/**
+ * What a console's stream makes a line: `status` is the runner's own voice,
+ * a heading in the stream (`note`); `stderr` is drawn as a warning, washed,
+ * since a command's complaints go there whether or not it then fails; the
+ * rest is the command's output. A job's runner and the Docker run console
+ * name their streams the same way.
+ */
+export function streamKind(stream: string): LineKind {
+  if (stream === "status") return "note"
+  if (stream === "stderr") return "warning"
+  return "output"
+}
+
+/**
+ * One line of a job — a certificate issuance, a package upgrade — as a
+ * transcript line, so a job's console numbers and washes its lines the way a
+ * restart's transcript does. The number is the job's own sequence, which
+ * counts from one and runs on past lines the buffer has dropped, so line 812
+ * is line 812 whether the console opened at the start or late.
+ */
+export function jobLineToTranscript(line: JobLine): TranscriptLine {
+  return { number: line.seq, text: line.text, kind: streamKind(line.stream) }
+}
 
 /**
  * The drip: a poll or a burst of events lands forty lines at once, and forty
@@ -95,6 +120,7 @@ export function TranscriptRow({
   trailing,
   anchor,
   marked,
+  gutter,
 }: {
   line: TranscriptLine
   wrap: boolean
@@ -118,6 +144,11 @@ export function TranscriptRow({
   anchor?: string
   /** The line a diagnosis points at: held out from the ones around it. */
   marked?: boolean
+  /**
+   * The number column's width in digits (`gutterCh`), as wide as the list's
+   * last number; absent, the fixed column the deploy consoles align to.
+   */
+  gutter?: number
 }) {
   if (line.kind === "blank") return <li aria-hidden className="h-3" />
   const lane = laneFor(line.service)
@@ -212,14 +243,14 @@ export function TranscriptRow({
             <span className="numeric mr-2 text-faint select-none">{line.time}</span>
           )}
           {tokens && line.kind === "output" ? (
-            <LogText text={rest} hits={hitRanges(rest, needle)} className="text-foreground/85" />
+            <LogText text={rest} hits={hitRanges(rest, needle)} className="text-foreground" />
           ) : (
             <span
               className={cn(
                 line.kind === "error" && "text-destructive",
                 line.kind === "warning" && "text-warning",
                 line.kind === "progress" && "text-muted-foreground",
-                line.kind === "output" && "text-foreground/85",
+                line.kind === "output" && "text-foreground",
               )}
             >
               {text(rest)}
@@ -255,7 +286,12 @@ export function TranscriptRow({
           style={{ background: lane }}
         />
       )}
-      <span aria-hidden className="numeric w-9 shrink-0 text-right text-faint select-none">
+      <span
+        aria-hidden
+        data-slot="code-gutter"
+        className={cn("numeric shrink-0 text-right text-faint select-none", !gutter && "w-9")}
+        style={gutter ? { width: `${gutter}ch` } : undefined}
+      >
         {line.number}
       </span>
       {stamp}

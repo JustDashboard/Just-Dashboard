@@ -1,5 +1,6 @@
 "use client"
 
+import { Fact, FactLine } from "@/components/fact-line"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { useAuth } from "@/hooks/use-auth"
 import { useCallback, useEffect, useState } from "react"
@@ -16,8 +17,9 @@ import type {
 import { useViewState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import { InfoTip } from "@/components/form"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, Section } from "@/components/page"
+import { IdentityHeader } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { Section } from "@/components/section"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -38,6 +40,7 @@ import {
 import { GatewayPicture, GatewayPictureLoading } from "@/components/network/gateway/picture"
 import { compact } from "@/components/network/gateway/reading"
 import { useGrowth } from "@/components/network/gateway/use-growth"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 
 type Sheet = { kind: "forward"; forward?: GatewayForward } | { kind: "nat"; entry?: GatewayNAT }
 
@@ -137,9 +140,9 @@ export default function NetworkGatewayPage() {
   const made = view?.nat.filter((n) => n.owner).length ?? 0
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Network" title="Gateway" />
-      <HostIdentity
+    <Page rise>
+      <PageContext title="Gateway" />
+      <IdentityHeader
         label="About the gateway"
         mark={firewallProduct(view?.capability.firewall)}
         fallback={Router}
@@ -157,8 +160,8 @@ export default function NetworkGatewayPage() {
         }
         facts={
           view ? (
-            <span className={FACTS}>
-              <span data-testid="gateway-forwarding">
+            <FactLine className={FACT_LINE}>
+              <Fact data-testid="gateway-forwarding">
                 <span
                   className={
                     !view.forwarding.ipv4 && view.forwards.length + view.nat.length > 0
@@ -170,23 +173,25 @@ export default function NetworkGatewayPage() {
                 </span>
                 {" · "}
                 IPv6 {view.forwarding.ipv6 ? "forwarding" : "off"}
-              </span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">
                 {view.forwards.filter((f) => inForce(f.enabled)).length} of{" "}
                 {plural(view.forwards.length, "forward")}
-              </span>
-              <FactDot />
-              <span className="numeric">
+              </Fact>
+              <Fact className="numeric">
                 {view.nat.filter((n) => inForce(n.enabled)).length} of {view.nat.length} NAT
                 {made > 0 && ` · ${made} made by the VPN page`}
-              </span>
-              <FactDot />
-              <PolicyEvidence
-                view={view}
-                onRepair={admission.offered ? admission.repair : undefined}
-              />
-            </span>
+              </Fact>
+              <Fact>
+                {/* Its trigger is an inline box: held to the line's top, as a run of the old line was. */}
+                <span className="inline-flex max-w-full min-w-0 align-top">
+                  <PolicyEvidence
+                    view={view}
+                    onRepair={admission.offered ? admission.repair : undefined}
+                  />
+                </span>
+              </Fact>
+            </FactLine>
           ) : failed ? (
             <span>The gateway could not be read.</span>
           ) : (
@@ -344,6 +349,9 @@ export default function NetworkGatewayPage() {
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-9"
 
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-9 [&>span]:gap-y-1"
+
 /**
  * A section's own total, at the far end of its title line: how many entries,
  * what they have carried since the table was loaded and, where the server
@@ -400,13 +408,5 @@ function Carried({
 /** A section's rows while the first read is out: as many as it held last time, at their height. */
 function Rows({ count }: { count: number }) {
   if (count === 0) return <Skeleton aria-hidden className="h-9 w-full rounded-lg" />
-  return (
-    <ul aria-hidden className="space-y-2">
-      {Array.from({ length: count }, (_, i) => (
-        <li key={i}>
-          <Skeleton className="h-14 w-full rounded-xl" />
-        </li>
-      ))}
-    </ul>
-  )
+  return <ChoiceListSkeleton rows={count} />
 }

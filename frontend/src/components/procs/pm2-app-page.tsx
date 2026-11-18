@@ -1,31 +1,31 @@
 "use client"
 
 import { useCallback, useMemo, useState } from "react"
+import { createPortal } from "react-dom"
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
-import { ArrowLeft, ChartActivity, ChevronDown, ChevronUp } from "@/components/icons"
+import { ChartActivity } from "@/components/icons"
 import { get } from "@/lib/api"
 import { duration, plural } from "@/lib/format"
 import type { PM2Daemon, PM2Inventory, PM2Process, ProcessRow } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { useConfirm } from "@/components/confirm-dialog"
-import { useNow } from "@/components/deploy/vocabulary"
-import { IconAction } from "@/components/icon-action"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext } from "@/components/page"
+import { useNow } from "@/hooks/use-now"
+import { DetailPage, useDetailTab, useSiblingSteps } from "@/components/detail-page"
+import { IdentityHeader } from "@/components/identity-header"
+import { Fact } from "@/components/fact-line"
 import { ProductLogo, ProductLogos, hasProductLogo, pm2Product } from "@/components/product-logo"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { EmptyState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList, type TabView } from "@/components/tabs"
 import { VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useInspectionOrder } from "@/components/procs/inspection-order"
 import { useDaemonVerbs, usePM2Control } from "@/components/procs/pm2-actions"
 import { usePM2AppControl, usePM2AppVerbs } from "@/components/procs/pm2-app-actions"
@@ -48,7 +48,7 @@ import {
   pm2Resolve,
   type PM2StateFilter,
 } from "@/components/procs/pm2-facts"
-import { PM2FactsLine, PM2Missing, PM2Unanswered } from "@/components/procs/pm2-missing"
+import { PM2Missing, PM2Unanswered } from "@/components/procs/pm2-missing"
 import { PM2ScaleDialog } from "@/components/procs/pm2-scale-dialog"
 import {
   isCluster,
@@ -57,6 +57,7 @@ import {
   savedDrift,
   type PM2App,
 } from "@/components/procs/pm2-shared"
+import { decodeSegment } from "@/lib/route-params"
 
 const TABS = ["overview", "instances", "logs", "environment", "control"] as const
 type Tab = (typeof TABS)[number]
@@ -70,14 +71,7 @@ const WORKERS_READ = 16
 /** A start this recent is the restart the counter just counted. */
 const RECENT_START = 5 * 60
 
-const BACK = (
-  <Link
-    href="/processes/pm2"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> PM2
-  </Link>
-)
+const BACK = { href: "/processes/pm2", label: "PM2" }
 
 /**
  * One PM2 application, as a place of its own.
@@ -106,27 +100,21 @@ export function PM2AppPage() {
   const params = useParams<{ app: string }>()
   const search = useSearchParams()
   const router = useRouter()
-  const name = decodeName(params.app)
+  const name = decodeSegment(params.app)
   const account = search.get("account") || undefined
   const worker = search.get("worker")
-  const requested = search.get("tab")
-  const [remembered, remember] = useViewState<string>("processes.pm2.app.tab", "overview")
-  const [chosen, setChosen] = useState<string>(requested ?? remembered)
-  const tab: Tab = (TABS as readonly string[]).includes(chosen) ? (chosen as Tab) : "overview"
+  const [tab, chooseTab] = useDetailTab(TABS, { remember: "processes.pm2.app.tab" })
   const setTab = useCallback(
     (next: string) => {
-      setChosen(next)
-      remember(next)
-      // The address says which view, so a link to an application's log opens
-      // on it; replaced rather than pushed, because the view is not a place
-      // Back should step through.
-      const url = new URL(window.location.href)
-      if (next === "overview") url.searchParams.delete("tab")
-      else url.searchParams.set("tab", next)
-      if (next !== "logs") url.searchParams.delete("worker")
-      window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+      chooseTab(next)
+      // A worker's log is asked for in the address; another view lets it go.
+      if (next !== "logs" && new URL(window.location.href).searchParams.has("worker")) {
+        const url = new URL(window.location.href)
+        url.searchParams.delete("worker")
+        window.history.replaceState(null, "", `${url.pathname}${url.search}`)
+      }
     },
-    [remember],
+    [chooseTab],
   )
 
   const inventory = usePoll((signal) => get<PM2Inventory>("/pm2/", undefined, signal), POLL)
@@ -144,101 +132,88 @@ export function PM2AppPage() {
 
   const rail = useRail(processes)
   const current = resolved.kind === "found" ? resolved.app.key : null
-  const at = rail.apps.findIndex((app) => app.key === current)
-  const adjacent = (direction: number) => {
-    const next = at >= 0 ? rail.apps[at + direction] : rail.apps[direction > 0 ? 0 : -1]
-    if (next) open(next)
-  }
-  const previous = { disabled: at <= 0, run: () => adjacent(-1) }
-  const next = {
-    disabled: rail.apps.length === 0 || at >= rail.apps.length - 1,
-    run: () => adjacent(1),
-  }
+  const steps = useSiblingSteps(
+    rail.apps,
+    rail.apps.find((app) => app.key === current),
+    open,
+  )
   const installed = inventory.data?.available !== false
 
+  // The line's place in the shared frame. The frame is drawn once, here, and
+  // the view below fills its line, so the page that was reading PM2 is the
+  // page that shows the application: two frames, one per state, made the
+  // workspace start again when the list landed, scroll and all.
+  const [slot, setSlot] = useState<HTMLDivElement | null>(null)
+  const title = resolved.kind === "found" ? resolved.app.name : name || "Application"
+
   return (
-    <Workspace
+    <DetailPage
       name="Application"
+      what="application"
       stateKey="pm2.app.page"
       refresh={inventory.refresh}
-      commands={[
-        {
-          id: "previous",
-          label: "Previous application",
-          keys: "Alt+↑",
-          chord: "Alt+ArrowUp",
-          disabled: previous.disabled,
-          run: previous.run,
-        },
-        {
-          id: "next",
-          label: "Next application",
-          keys: "Alt+↓",
-          chord: "Alt+ArrowDown",
-          disabled: next.disabled,
-          run: next.run,
-        },
-      ]}
+      steps={steps}
+      back={BACK}
+      title={title}
+      // Nothing stands beside a server that has no PM2.
+      rail={
+        installed && (
+          <PM2AppRail
+            apps={rail.apps}
+            current={current}
+            several={daemons.length > 1}
+            loading={inventory.loading}
+            error={inventory.data ? undefined : inventory.error}
+            onRetry={inventory.refresh}
+            query={rail.query}
+            onQuery={rail.setQuery}
+            filtered={rail.filtered}
+            onClearFilters={rail.clearFilters}
+            caption={inventory.data ? rail.caption : "Reading PM2…"}
+            onOpen={open}
+            bindings={rail.bindings}
+          />
+        )
+      }
+      identity={<div ref={setSlot} className="contents" />}
     >
-      {/* Held to the window where the rail stands beside it, so the list and
-          the identity line stay put while a view scrolls; narrower, the page
-          is the one pane and scrolls as a whole. */}
-      <Page fill="xl" className="gap-0 md:gap-0">
-        <div className="flex min-w-0 flex-1 gap-6 xl:min-h-0">
-          {/* No list to stand beside a server that has no PM2. */}
-          {installed && (
-            <PM2AppRail
-              className="hidden w-72 shrink-0 xl:flex"
-              apps={rail.apps}
-              current={current}
-              several={daemons.length > 1}
-              loading={inventory.loading}
-              query={rail.query}
-              onQuery={rail.setQuery}
-              filtered={rail.filtered}
-              onClearFilters={rail.clearFilters}
-              caption={inventory.data ? rail.caption : "Reading PM2…"}
-              onOpen={open}
-              bindings={rail.bindings}
-            />
-          )}
-          {resolved.kind === "found" ? (
-            <AppMain
-              key={resolved.app.key}
-              app={resolved.app}
-              processes={processes}
-              daemons={daemons}
-              tab={tab}
-              setTab={setTab}
-              worker={worker && /^\d+$/.test(worker) ? Number(worker) : null}
-              onChanged={inventory.refresh}
-              previous={previous}
-              next={next}
-            />
-          ) : (
-            <AppAbsent
-              name={name}
-              inventory={inventory}
-              resolved={resolved}
-              tab={tab}
-              previous={previous}
-              next={next}
-            />
-          )}
-        </div>
-      </Page>
-    </Workspace>
+      {resolved.kind === "found" ? (
+        // Keyed, so another application opens on its own state: its log's
+        // worker, its scale dialog and its pending verb start clean.
+        <AppMain
+          key={resolved.app.key}
+          slot={slot}
+          app={resolved.app}
+          processes={processes}
+          daemons={daemons}
+          tab={tab}
+          setTab={setTab}
+          worker={worker && /^\d+$/.test(worker) ? Number(worker) : null}
+          onChanged={inventory.refresh}
+        />
+      ) : (
+        <AppAbsent slot={slot} name={name} inventory={inventory} resolved={resolved} tab={tab} />
+      )}
+    </DetailPage>
   )
 }
 
-/** The route's segment as an application's name. */
-function decodeName(segment: string | undefined): string {
-  if (!segment) return ""
-  try {
-    return decodeURIComponent(segment)
-  } catch {
-    return segment
-  }
+/** A view's part of the frame: its identity line, drawn into the frame's place for it. */
+function AppFrame({
+  slot,
+  identity,
+  children,
+}: {
+  slot: HTMLElement | null
+  identity?: React.ReactNode
+  children: React.ReactNode
+}) {
+  return (
+    <>
+      {identity && slot && createPortal(identity, slot)}
+      {children}
+    </>
+  )
 }
 
 /**
@@ -278,25 +253,6 @@ function useRail(processes: PM2Process[]) {
   }
 }
 
-type Step = { disabled: boolean; run: () => void }
-
-/** The two arrows that walk the list from the page, and the shortcuts beside them. */
-function Steps({ previous, next }: { previous: Step; next: Step }) {
-  return (
-    <span className="flex items-center">
-      <IconAction label="Previous application" disabled={previous.disabled} onClick={previous.run}>
-        <ChevronUp />
-      </IconAction>
-      <IconAction label="Next application" disabled={next.disabled} onClick={next.run}>
-        <ChevronDown />
-      </IconAction>
-      <span className="max-sm:hidden">
-        <WorkspaceHelp compact />
-      </span>
-    </span>
-  )
-}
-
 /**
  * What the page says when the address names no application it can open: the
  * list still being read, PM2 not answering, PM2 not installed, a name two
@@ -305,66 +261,61 @@ function Steps({ previous, next }: { previous: Step; next: Step }) {
  * open and no word about why.
  */
 function AppAbsent({
+  slot,
   name,
   inventory,
   resolved,
   tab,
-  previous,
-  next,
 }: {
+  slot: HTMLElement | null
   name: string
   inventory: ReturnType<typeof usePoll<PM2Inventory>>
   resolved: Exclude<ReturnType<typeof pm2Resolve>, { kind: "found" }>
   tab: Tab
-  previous: Step
-  next: Step
 }) {
-  // The same title line as the page proper, arrows and all: it is where the
-  // line under it stands, and the way off a name that opens nothing.
-  const context = (
-    <PageContext
-      eyebrow={BACK}
-      title={name || "Application"}
-      actions={<Steps previous={previous} next={next} />}
-    />
-  )
+  // The same frame as the page proper, arrows and all: it is where the line
+  // under it stands, and the way off a name that opens nothing.
   if (!inventory.data) {
     if (inventory.error) {
       return (
-        <div className="flex min-w-0 flex-1 flex-col gap-5">
-          {context}
+        <AppFrame slot={slot}>
           <PM2Unanswered error={inventory.error} onRetry={inventory.refresh} />
-        </div>
+        </AppFrame>
       )
     }
     return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        {context}
-        <HostIdentity
-          slot="pm2-app-identity"
-          mark="pm2"
-          fallback={ChartActivity}
-          title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
-          state={<span className="text-xs">&nbsp;</span>}
-          facts={<PM2FactsLine />}
-          className="border-b-0 pb-0"
-        />
+      <AppFrame
+        slot={slot}
+        identity={
+          // The line's final shape while PM2 is read, the command's and the
+          // menu's places held, so nothing under it moves when it lands (D11).
+          <IdentityHeader
+            loading
+            className="border-b-0 pb-0"
+            slot="pm2-app-identity"
+            mark="pm2"
+            fallback={ChartActivity}
+            title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+            state
+            command
+            menu={false}
+          />
+        }
+      >
         <LoadingRows />
-      </div>
+      </AppFrame>
     )
   }
   if (!inventory.data.available) {
     return (
-      <div className="flex min-w-0 flex-1 flex-col gap-5">
-        {context}
+      <AppFrame slot={slot}>
         <PM2Missing />
-      </div>
+      </AppFrame>
     )
   }
   const mark = hasProductLogo("pm2") ? <ProductLogos ids={["pm2"]} /> : undefined
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-5">
-      {context}
+    <AppFrame slot={slot}>
       {resolved.kind === "ambiguous" ? (
         <EmptyState
           icon={ChartActivity}
@@ -396,11 +347,12 @@ function AppAbsent({
           }
         />
       )}
-    </div>
+    </AppFrame>
   )
 }
 
 function AppMain({
+  slot,
   app,
   processes,
   daemons,
@@ -408,9 +360,8 @@ function AppMain({
   setTab,
   worker,
   onChanged,
-  previous,
-  next,
 }: {
+  slot: HTMLElement | null
   app: PM2App
   processes: PM2Process[]
   daemons: PM2Daemon[]
@@ -419,8 +370,6 @@ function AppMain({
   /** The worker a link asked the log for. */
   worker: number | null
   onChanged: () => void
-  previous: Step
-  next: Step
 }) {
   const { can } = useAuth()
   const router = useRouter()
@@ -497,7 +446,7 @@ function AppMain({
   const uptime = online && started !== undefined ? Math.max(0, (now - started) / 1000) : 0
 
   const controllable = can("service.control") || can("destructive")
-  const views: { key: Tab; label: string; count?: number }[] = [
+  const views: TabView<Tab>[] = [
     { key: "overview", label: "Overview" },
     // A fork is one process, and the picture already draws it.
     ...(cluster
@@ -520,13 +469,9 @@ function AppMain({
           : { word: `${app.name} comes back after a reboot`, ok: true }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-5">
-      <div className="flex min-w-0 shrink-0 flex-col gap-5">
-        <PageContext
-          eyebrow={BACK}
-          title={app.name}
-          actions={<Steps previous={previous} next={next} />}
-        />
+    <AppFrame
+      slot={slot}
+      identity={
         <AppIdentity
           app={app}
           lead={lead}
@@ -544,26 +489,12 @@ function AppMain({
           }
           menu={menu.length > 0 && <VerbMenu verbs={menu} label={`More for ${app.name}`} />}
         />
-      </div>
+      }
+    >
+      <Tabs value={shown} onValueChange={setTab} className="gap-0">
+        <ViewTabList label={`Views of ${app.name}`} views={views} value={shown} sticky />
 
-      <Tabs value={shown} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-        <TabsPrimitive.List
-          aria-label={`Views of ${app.name}`}
-          className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-        >
-          {views.map((view) => (
-            <TabsPrimitive.Trigger
-              key={view.key}
-              value={view.key}
-              className={tabClasses(shown === view.key, "h-10")}
-            >
-              {view.label}
-              {view.count !== undefined && view.count > 0 && <ChipCount>{view.count}</ChipCount>}
-            </TabsPrimitive.Trigger>
-          ))}
-        </TabsPrimitive.List>
-
-        <TabsContent value="overview" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="overview" className="pt-6">
           <PM2AppOverview
             app={app}
             lead={lead}
@@ -576,7 +507,7 @@ function AppMain({
             onSave={save}
           />
         </TabsContent>
-        <TabsContent value="instances" className="min-h-0 flex-1 pt-4 xl:overflow-y-auto">
+        <TabsContent value="instances" className="pt-4">
           {shown === "instances" && (
             <PM2AppInstances
               app={app}
@@ -594,20 +525,17 @@ function AppMain({
             />
           )}
         </TabsContent>
-        <TabsContent value="logs" className="flex min-h-0 flex-1 flex-col pt-4 xl:overflow-y-auto">
+        <TabsContent value="logs" className="flex flex-col pt-4">
           {/* Keyed on the worker asked for, so "Logs" pressed on another worker's
               row starts on that worker's stream with a clean buffer. */}
           {shown === "logs" && (
             <PM2AppLogs key={logWorker ?? "lead"} app={app} worker={logWorker} />
           )}
         </TabsContent>
-        <TabsContent
-          value="environment"
-          className="flex min-h-0 flex-1 flex-col pt-4 xl:overflow-y-auto"
-        >
+        <TabsContent value="environment" className="flex flex-col pt-4">
           {shown === "environment" && <PM2AppEnvironment app={app} row={leadRow} />}
         </TabsContent>
-        <TabsContent value="control" className="min-h-0 flex-1 pt-6 xl:overflow-y-auto">
+        <TabsContent value="control" className="pt-6">
           {shown === "control" && (
             <PM2AppControl
               app={app}
@@ -624,7 +552,7 @@ function AppMain({
         <PM2ScaleDialog process={lead} onClose={() => setScaling(false)} onChanged={changed} />
       )}
       {dialog}
-    </div>
+    </AppFrame>
   )
 }
 
@@ -649,7 +577,7 @@ function useHeldStart(process: PM2Process, now: number): number | undefined {
 
 /**
  * The line the page opens on, laid out as a project's header is
- * (`HostIdentity` with a state and a command): the application as what runs
+ * (`IdentityHeader` with a state and a command): the application as what runs
  * it — Node, Bun, Python — its name with its state beside it, then the facts
  * an application is opened to check: its script, how it runs, how often PM2
  * has restarted it and how long it has been up (ticking), and whose daemon
@@ -679,7 +607,7 @@ function AppIdentity({
   const restarts = app.instances.reduce((n, p) => n + p.restarts, 0)
   const unstable = app.instances.reduce((n, p) => n + p.unstableRestarts, 0)
   return (
-    <HostIdentity
+    <IdentityHeader
       label={`About ${app.name}`}
       slot="pm2-app-identity"
       className="animate-rise border-b-0 pb-0"
@@ -706,55 +634,39 @@ function AppIdentity({
       command={command}
       menu={menu}
       facts={
-        <PM2FactsLine>
-          <span className="max-w-full min-w-0 truncate font-mono" title={lead.scriptPath}>
+        // One FactLine (drawn by the header from these Facts): each fact
+        // carries its dot, so a wrapped line leaves none at its end.
+        <>
+          <Fact mono title={lead.scriptPath}>
             {lead.scriptPath}
-          </span>
-          <FactDot />
-          <span className="text-foreground">{pm2ModeWords(app)}</span>
-          <FactDot />
-          <span className="numeric">
+          </Fact>
+          <Fact className="text-foreground">{pm2ModeWords(app)}</Fact>
+          <Fact className="numeric">
             {plural(restarts, "restart")}
             {unstable > 0 && <span className="text-destructive"> ({unstable} unstable)</span>}
-          </span>
+          </Fact>
           {uptime > 0 && (
-            <>
-              <FactDot />
-              <span
-                className={cn(
-                  "numeric",
-                  uptime < RECENT_START && restarts > 0 ? "text-warning" : "text-foreground",
-                )}
-              >
-                up {duration(uptime)}
-              </span>
-            </>
+            <Fact
+              className={cn(
+                "numeric",
+                uptime < RECENT_START && restarts > 0 ? "text-warning" : "text-foreground",
+              )}
+            >
+              up {duration(uptime)}
+            </Fact>
           )}
           {/* Whose daemon, only where there is more than one to tell apart. */}
-          {several && (
-            <>
-              <FactDot />
-              <span className="font-mono">{app.daemonId}</span>
-            </>
-          )}
-          {lead.watching && (
-            <>
-              <FactDot />
-              <span className="text-warning">restarts on file change</span>
-            </>
-          )}
+          {several && <Fact mono>{app.daemonId}</Fact>}
+          {lead.watching && <Fact className="text-warning">restarts on file change</Fact>}
           {unsaved && (
-            <>
-              <FactDot />
-              <span
-                className="text-warning"
-                title="Started since the startup list was saved: a reboot would not bring it back"
-              >
-                not in the saved list
-              </span>
-            </>
+            <Fact
+              className="text-warning"
+              title="Started since the startup list was saved: a reboot would not bring it back"
+            >
+              not in the saved list
+            </Fact>
           )}
-        </PM2FactsLine>
+        </>
       }
     />
   )

@@ -9,8 +9,10 @@ import type {
   DeploymentDatabaseConnectionFormat,
 } from "@/lib/types"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { ErrorState, Notice, Spinner } from "@/components/state"
-import { ChoiceGrid, EngineCard } from "@/components/choice-card"
+import { ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
+import { ChoiceGrid } from "@/components/choice-card"
+import { EngineCard } from "@/components/database/engine-card"
 import { engineOf } from "@/components/database/engine"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { RunPhases, phaseStates } from "@/components/run-phases"
@@ -18,7 +20,6 @@ import { SidePanelFooter, useInSidePanel } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { DatabaseReady } from "@/components/deploy/database-ready"
-import { cn } from "@/lib/utils"
 
 /**
  * The compact creation form inside a project's Add database sheet. It waits
@@ -49,7 +50,6 @@ export function DatabaseQuickDeploy({
   /** The connection shape the application parses when it is not a URL. */
   format?: DeploymentDatabaseConnectionFormat
 }) {
-  const inSheet = useInSidePanel()
   const alive = useRef(true)
   const provisioning = useRef(false)
   const [startedContainer, setStartedContainer] = useState<string | undefined>(resume?.container)
@@ -206,7 +206,7 @@ export function DatabaseQuickDeploy({
     options &&
     (startedContainer ? (
       <Notice tone="danger" icon={Warning} title="Database container already created">
-        <p className="text-foreground/85">{failure.message}</p>
+        <p className="text-foreground">{failure.message}</p>
         <p className="mt-1">
           Retry continues setup for {startedContainer}. You can also open it in Docker.
         </p>
@@ -295,14 +295,7 @@ export function DatabaseQuickDeploy({
             Retry loading database engines
           </Button>
         ) : (
-          <Button
-            // A thumb's height where it stands alone at the panel's foot; in a
-            // sheet's footer it is the size of the Cancel beside it.
-            className={cn(!inSheet && "h-11 sm:h-9")}
-            disabled={!selected || inFlight}
-            pending={inFlight}
-            onClick={() => void create()}
-          >
+          <Button disabled={!selected || inFlight} pending={inFlight} onClick={() => void create()}>
             <Database className="size-4" />
             {inFlight
               ? "Starting…"

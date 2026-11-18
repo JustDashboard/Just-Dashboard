@@ -4,6 +4,8 @@ import {
   afterReload,
   authorityName,
   certbotRunning,
+  certificateTone,
+  certificateWords,
   expiredAgo,
   hookFailureText,
   lineageActivity,
@@ -21,6 +23,7 @@ import {
   stillServingTest,
   testCertificateReplaced,
   testRunPassed,
+  timeLeftWords,
 } from "./certificates"
 
 const now = Date.parse("2026-09-27T12:00:00Z")
@@ -440,5 +443,54 @@ describe("a certificate with no dates", () => {
     const undated = { name: "aaa", path: "/etc/ssl/aaa.pem", daysLeft: 0 }
     const sorted = [undated, later, unreadable, soon].sort(CERT_SORTS.expiry)
     expect(sorted.map((c) => c.name)).toEqual(["soon", "later", "aaa", "broken"])
+  })
+})
+
+describe("a certificate's words", () => {
+  const now = Date.parse("2026-09-28T00:00:00Z")
+  const cert = (over) => ({ daysLeft: 29, expired: false, expiring: false, ...over })
+
+  test("short in a status word, long in a sentence", () => {
+    expect(certificateWords(cert({}), { form: "short", now })).toBe("29d left")
+    expect(certificateWords(cert({}), { form: "long", now })).toBe("29 days left")
+    expect(certificateWords(cert({ daysLeft: 2 }), { form: "long", now })).toBe("2 days left")
+  })
+
+  test("the last day is counted in hours, not 0d", () => {
+    const tenHours = cert({ daysLeft: 0, expiring: true, notAfter: "2026-09-28T10:30:00Z" })
+    expect(certificateWords(tenHours, { form: "short", now })).toBe("10h left")
+    expect(certificateWords(tenHours, { form: "long", now })).toBe("10 hours left")
+    const oneHour = cert({ daysLeft: 0, expiring: true, notAfter: "2026-09-28T01:10:00Z" })
+    expect(certificateWords(oneHour, { form: "long", now })).toBe("1 hour left")
+    const minutes = cert({ daysLeft: 0, expiring: true, notAfter: "2026-09-28T00:20:00Z" })
+    expect(certificateWords(minutes, { form: "short", now })).toBe("<1h left")
+    expect(certificateWords(minutes, { form: "long", now })).toBe("Under an hour left")
+    // A day and a half is hours too: "1d" would hide twelve of them.
+    const dayAndAHalf = cert({ daysLeft: 1, notAfter: "2026-09-29T12:00:00Z" })
+    expect(certificateWords(dayAndAHalf, { form: "short", now })).toBe("36h left")
+  })
+
+  test("without an end date the last day is a day count", () => {
+    expect(timeLeftWords({ daysLeft: 1 }, { form: "long", now })).toBe("1 day")
+    expect(timeLeftWords({ daysLeft: 0 }, { form: "long", now })).toBe("under a day")
+    expect(timeLeftWords({ daysLeft: 0 }, { form: "short", now })).toBe("<1d")
+  })
+
+  test("a refused certificate says why before anything about its days", () => {
+    expect(certificateWords(cert({ error: "bad pem" }), { form: "short", now })).toBe("Unreadable")
+    expect(certificateWords(cert({ staging: true }), { form: "short", now })).toBe(
+      "Test certificate",
+    )
+    expect(certificateWords(cert({ expired: true, daysLeft: 0 }), { form: "long", now })).toBe(
+      "Expired",
+    )
+  })
+
+  test("the tone is critical once refused and a warning in the renewal window", () => {
+    expect(certificateTone(cert({}))).toBe("ok")
+    expect(certificateTone(cert({ expiring: true }))).toBe("warning")
+    expect(certificateTone(cert({ expired: true }))).toBe("critical")
+    expect(certificateTone(cert({ staging: true }))).toBe("critical")
+    expect(certificateTone(cert({ error: "x" }))).toBe("critical")
   })
 })

@@ -5,10 +5,10 @@ import { plural, rate } from "@/lib/format"
 import type { Container, DockerNetwork } from "@/lib/types"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, containerProduct, hasProductLogo } from "@/components/product-logo"
-import { WireHost, WireMark } from "@/components/deploy/wire"
+import { WireHost, WireMark } from "@/components/wire/wire"
 import { LinkGlyph, pulseDuration } from "@/components/network/marks"
 import { RX, TX } from "@/components/network/rate-pair"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import type { ContainerTraffic } from "@/components/docker/network-members"
 import {
   bareAddress,

@@ -3,10 +3,10 @@
 import Link from "next/link"
 import { useEffect } from "react"
 import { usePathname } from "next/navigation"
-import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useReducedMotion } from "motion/react"
 import { ArrowLeft, Cross } from "@/components/icons"
+import { Dock } from "@/components/dock"
 import { IconAction } from "@/components/icon-action"
-import { useHeldSessions } from "@/components/remote-desktop/held-sessions"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useAuth } from "@/hooks/use-auth"
@@ -34,13 +34,14 @@ const EASE = [0.16, 1, 0.3, 1] as const
  * waits on you, and one press goes back to the chat. It is in the shell, so the
  * conversation it stands for goes on behind any page. It rises in when there is a
  * chat to go back to and sinks away when there is not; a row joining or leaving it
- * eases rather than jumping the rows beside it.
+ * eases rather than jumping the rows beside it. Its frame and its place are the
+ * bottom stack's (`components/dock.tsx`): above Remote Desktop's dock, which has
+ * the corner first, and above an open save bar.
  */
 export function AgentDock() {
   const { can } = useAuth()
   const sessions = useAgentSessions()
   const pathname = usePathname()
-  const { held } = useHeldSessions()
   const reduced = useReducedMotion()
   const settings = useAssistantSettings(can("service.control"))
   const shown = sessions.filter(
@@ -57,92 +58,74 @@ export function AgentDock() {
   // Signing out, which remounts the shell for the next account, ends them.
   useEffect(() => endAgentSessions, [])
   const product = assistantProduct(settings.data)
-  // Remote Desktop's dock has this corner first; this sits above it.
-  const heldOpen = held.filter((session) => pathname !== `/remote-desktop/${session.id}`).length
   return (
-    <MotionConfig reducedMotion="user">
-      <AnimatePresence>
-        {shown.length > 0 && (
-          <motion.aside
-            key="dock"
-            aria-label="Assistant conversations"
-            data-slot="agent-dock"
-            initial={{ opacity: 0, y: 12 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: 12 }}
-            transition={{ duration: 0.22, ease: EASE }}
-            style={heldOpen > 0 ? { bottom: `${1 + heldOpen * 3.75 + 0.75}rem` } : undefined}
-            className="fixed right-4 bottom-4 z-40 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col gap-1 rounded-xl border border-border-strong bg-popover/95 p-2 text-popover-foreground shadow-xl backdrop-blur"
-          >
-            <AnimatePresence initial={false}>
-              {shown.map((session) => {
-                const status = agentStatus(session.transcript)
-                const busy = agentBusy(session)
-                const changes = changesOf(session.transcript).length
-                return (
-                  <motion.div
-                    key={session.key}
-                    layout="position"
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: reduced ? 0 : 0.2, ease: EASE }}
-                    data-slot="agent-dock-row"
-                    data-tone={status.tone}
-                    className="overflow-hidden"
+    <Dock open={shown.length > 0} label="Assistant conversations" slot="agent-dock" order={1}>
+      <AnimatePresence initial={false}>
+        {shown.map((session) => {
+          const status = agentStatus(session.transcript)
+          const busy = agentBusy(session)
+          const changes = changesOf(session.transcript).length
+          return (
+            <motion.div
+              key={session.key}
+              layout="position"
+              initial={{ opacity: 0, height: 0 }}
+              animate={{ opacity: 1, height: "auto" }}
+              exit={{ opacity: 0, height: 0 }}
+              transition={{ duration: reduced ? 0 : 0.2, ease: EASE }}
+              data-slot="agent-dock-row"
+              data-tone={status.tone}
+              className="overflow-hidden"
+            >
+              <div className="flex min-w-0 items-center gap-3 rounded-lg p-1.5">
+                <AssistantMark product={product} working={agentWorking(session)} size="sm" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-body font-medium">{session.scope.name}</p>
+                  <p
+                    className={cn(
+                      "truncate text-hint transition-colors duration-300",
+                      status.tone === "asking"
+                        ? "text-warning"
+                        : status.tone === "failed"
+                          ? "text-destructive"
+                          : status.tone === "done"
+                            ? "text-success"
+                            : "text-muted-foreground",
+                    )}
                   >
-                    <div className="flex min-w-0 items-center gap-3 rounded-lg p-1.5">
-                      <AssistantMark product={product} working={agentWorking(session)} size="sm" />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-body font-medium">{session.scope.name}</p>
-                        <p
-                          className={cn(
-                            "truncate text-hint transition-colors duration-300",
-                            status.tone === "asking"
-                              ? "text-warning"
-                              : status.tone === "failed"
-                                ? "text-destructive"
-                                : status.tone === "done"
-                                  ? "text-success"
-                                  : "text-muted-foreground",
-                          )}
-                        >
-                          {status.tone === "working" ? (
-                            <TextShimmer className="max-w-full truncate align-bottom">
-                              {status.text}
-                            </TextShimmer>
-                          ) : (
-                            status.text
-                          )}
-                          {changes > 0 && status.tone === "working" && ` · ${changes} changed`}
-                        </p>
-                      </div>
-                      <Button
-                        asChild
-                        size="xs"
-                        variant={status.tone === "asking" ? "default" : "outline"}
-                      >
-                        <Link href={agentHref(session)}>
-                          <ArrowLeft />
-                          Back to chat
-                        </Link>
-                      </Button>
-                      {!busy && (
-                        <IconAction
-                          label={`Hide the conversation about ${session.scope.name}`}
-                          onClick={() => dismissAgent(session)}
-                        >
-                          <Cross />
-                        </IconAction>
-                      )}
-                    </div>
-                  </motion.div>
-                )
-              })}
-            </AnimatePresence>
-          </motion.aside>
-        )}
+                    {status.tone === "working" ? (
+                      <TextShimmer className="max-w-full truncate align-bottom">
+                        {status.text}
+                      </TextShimmer>
+                    ) : (
+                      status.text
+                    )}
+                    {changes > 0 && status.tone === "working" && ` · ${changes} changed`}
+                  </p>
+                </div>
+                <Button
+                  asChild
+                  size="xs"
+                  variant={status.tone === "asking" ? "default" : "outline"}
+                >
+                  <Link href={agentHref(session)}>
+                    <ArrowLeft />
+                    Back to chat
+                  </Link>
+                </Button>
+                {!busy && (
+                  <IconAction
+                    label={`Hide the conversation about ${session.scope.name}`}
+                    onClick={() => dismissAgent(session)}
+                  >
+                    <Cross />
+                  </IconAction>
+                )}
+              </div>
+            </motion.div>
+          )
+        })}
       </AnimatePresence>
-    </MotionConfig>
+    </Dock>
   )
 }

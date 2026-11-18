@@ -4,11 +4,11 @@ import { Bug, Globe } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { BlocksView } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { WireHost, WireMark, WirePlaceholder } from "@/components/deploy/wire"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
 import { ProductGlyph } from "@/components/product-logo"
 import type { EngineId, EngineStanding } from "@/components/security/intrusion-model"
-import { useMediaQuery } from "@/hooks/use-mobile"
-import { WireFlow, type WireFlowNode } from "@/components/wire-flow"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** What each engine reads, which is what tells the three apart. */
 const READS: Record<EngineId, string> = {
@@ -69,7 +69,7 @@ export function IntrusionPicture({
   // On a phone the picture is its marks and the hub's one line: the engines
   // are named again by the views under it, and a second line under the hub
   // would arrive with the read and move them.
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const held = blocks?.engines
     .filter((engine) => engine.read)
     .map((engine) => `${HOLDER[engine.engine]} ${engine.count}`)

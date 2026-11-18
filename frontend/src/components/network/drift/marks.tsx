@@ -3,7 +3,7 @@
 import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { FileText } from "@/components/icons"
-import { driftReading, type DriftRow, type DriftStatus } from "@/lib/network-drift"
+import { driftReading, type DriftRow, type DriftStatus } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 
 /** A comparison's status as a fill: the state hues, and the meter's track for nothing to compare. */
@@ -35,7 +35,7 @@ export function DriftBlocks({ rows, className }: { rows: DriftRow[]; className?:
         <span
           key={row.id}
           title={`${row.label} · ${driftReading(row.status).label}`}
-          className={cn("size-2.5 rounded-[2px]", STATUS_FILL[row.status] ?? STATUS_FILL.unknown)}
+          className={cn("size-2.5 rounded-xs", STATUS_FILL[row.status] ?? STATUS_FILL.unknown)}
         />
       ))}
     </span>

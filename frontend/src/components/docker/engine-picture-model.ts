@@ -1,13 +1,13 @@
 import { bytes, plural } from "@/lib/format"
 import type { ComposeStack, Container, DockerNetwork, VolumeDetail } from "@/lib/types"
-import type { WireState } from "@/components/wire-flow-model"
+import type { WireState } from "@/components/wire/wire-flow-model"
 import {
   containerBucket,
   exitCodeOf,
   exitedWhen,
-  exitWords,
   type ContainerBucket,
 } from "@/components/docker/containers"
+import { exitWords } from "@/components/docker/words"
 import { networkHref } from "@/components/docker/networks"
 
 /**

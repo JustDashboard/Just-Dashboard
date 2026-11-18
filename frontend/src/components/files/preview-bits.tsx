@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react"
 import { bytes } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FilePreview } from "@/lib/types"
-import { LoadingRows } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Well } from "@/components/panel"
+import { Notice } from "@/components/state"
+import { CodeLines } from "@/components/code"
 import { fetchResponse } from "@/lib/api"
 
 /**
@@ -17,22 +19,7 @@ import { fetchResponse } from "@/lib/api"
 /** The head, with line numbers, because "line 42" is how errors are reported. */
 export function TextHead({ text, className }: { text: string; className?: string }) {
   const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text])
-  return (
-    <div className={cn("grid grid-cols-[auto_1fr] gap-x-3 p-2", className)}>
-      <div className="numeric shrink-0 text-right text-muted-foreground/60 select-none">
-        {lines.map((_, i) => (
-          <div key={i}>{i + 1}</div>
-        ))}
-      </div>
-      <div className="min-w-0">
-        {lines.map((line, i) => (
-          <div key={i} className="whitespace-pre">
-            {line || " "}
-          </div>
-        ))}
-      </div>
-    </div>
-  )
+  return <CodeLines lines={lines} wrap={false} className={cn("p-2", className)} />
 }
 
 /**
@@ -73,9 +60,9 @@ export function PdfPreview({
 
   if (failed) {
     return (
-      <p className="rounded-lg border border-dashed border-hairline p-4 text-center text-xs text-muted-foreground">
-        This PDF could not be loaded for preview. Download it to read it.
-      </p>
+      <Notice tone="warning" title="This PDF could not be previewed">
+        Download it to read it.
+      </Notice>
     )
   }
   if (!url) return <LoadingRows rows={2} />

@@ -822,15 +822,24 @@ test.describe("keys", () => {
 
     // The old browser showed db0 selected over the keys of whichever database
     // the connection was made to.
-    await expect(page.getByRole("combobox", { name: "Logical database" })).toHaveText("db3")
+    await expect(page.getByRole("button", { name: "database: db3" })).toHaveText("db3")
+    // Whole, beside the rail's other controls: it was cut to its first letter.
+    await expect
+      .poll(() =>
+        page
+          .getByRole("button", { name: "database: db3" })
+          .getByText("db3", { exact: true })
+          .evaluate((name) => name.scrollWidth <= name.clientWidth),
+      )
+      .toBe(true)
     await expect(rail(page).getByRole("button", { name: /^session/ })).toBeVisible()
     for (const call of redis.asked("/keys/tree")) expect(call.query.has("db")).toBe(false)
 
     // Database 0 can be reached, and is asked for by its number.
-    await page.getByRole("combobox", { name: "Logical database" }).click()
-    await expect(page.getByRole("option", { name: /^db3/ })).toContainText("connects here")
-    await expect(page.getByRole("option", { name: /^db7/ })).toContainText("41 keys")
-    await page.getByRole("option", { name: /^db0/ }).click()
+    await page.getByRole("button", { name: "database: db3" }).click()
+    await expect(page.getByRole("menuitem", { name: /^db3/ })).toContainText("connects here")
+    await expect(page.getByRole("menuitem", { name: /^db7/ })).toContainText("41 keys")
+    await page.getByRole("menuitem", { name: /^db0/ }).click()
     await expect(page).toHaveURL(/[?&]db=0(&|$)/)
     await expect.poll(() => redis.asked("/keys/tree").at(-1)?.query.get("db")).toBe("0")
   })
@@ -1267,14 +1276,14 @@ test.describe("keys", () => {
     // The whole database is emptied from Settings, with its name typed.
     await dialog.getByLabel("Pattern").fill("*")
     await expect(dialog.getByText("That pattern is every key")).toBeVisible()
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(dialog.locator("[data-slot=redis-bulk-count]")).toContainText("9 keys match")
     await expect(dialog.getByRole("button", { name: /^Delete/ })).toHaveCount(0)
 
     await dialog.getByLabel("Pattern").fill("session:*")
     // A changed pattern has not been counted: there is nothing to delete yet.
     await expect(dialog.getByRole("button", { name: /^Delete/ })).toHaveCount(0)
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(dialog.locator("[data-slot=redis-bulk-count]")).toContainText("2 keys match")
     await expect(dialog.locator("[data-slot=redis-bulk-count]")).toContainText("session:1")
     expect(
@@ -1407,7 +1416,7 @@ test.describe("keys", () => {
     const dialog = page.getByRole("dialog", { name: "Bulk actions" })
     await dialog.getByLabel("Pattern").fill("session:*")
     await dialog.getByRole("radio", { name: "Remove expiries" }).click()
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await expect(
       dialog.getByText("The next step names the count and asks once more."),
     ).toBeVisible()
@@ -1430,7 +1439,7 @@ test.describe("keys", () => {
     await page.getByRole("menuitem", { name: "Bulk actions…" }).click()
     await dialog.getByLabel("Pattern").fill("session:*")
     await dialog.getByRole("radio", { name: "Remove expiries" }).click()
-    await dialog.getByRole("button", { name: "Count the keys" }).click()
+    await dialog.getByRole("button", { name: "Count", exact: true }).click()
     await dialog.getByRole("button", { name: "Remove the expiry of 2 keys…" }).click()
     await confirm.getByRole("button", { name: "Remove the expiry of 2 keys" }).click()
     await expect(page.getByText("2 keys no longer set to expire")).toBeVisible()
@@ -1802,10 +1811,9 @@ test.describe("keys", () => {
     await mockRedis(page, { idleClock: true })
     // A pasted link to a key nothing has read for 38 minutes.
     await page.goto(`${KEYS}?key=user%3A2%3Aprofile`)
-    const idle = pane(page)
-      .locator("div")
-      .filter({ hasText: /^Idle when opened/ })
-      .last()
+    // The fact is said inline, "Idle when opened 38m 3s": its label and value
+    // are one FormFact.
+    const idle = pane(page).getByText("idle when opened", { exact: true }).locator("..")
     await expect(idle).toContainText("38m")
     await pane(page).getByRole("button", { name: "Refresh", exact: true }).click()
     await expect(pane(page).getByRole("heading", { name: "user:2:profile" })).toBeVisible()
@@ -2174,7 +2182,7 @@ test.describe("performance", () => {
     await page.getByRole("dialog").getByRole("button", { name: "Empty the slow log" }).click()
     await expect.poll(() => redis.asked("/redis/slowlog/reset").length).toBe(1)
 
-    await page.getByRole("button", { name: /^Clients/ }).click()
+    await page.getByRole("tab", { name: /^Clients/ }).click()
     await expect(page).toHaveURL(/view=clients/)
     // The connection this request used is marked and cannot be cut.
     await expect(page.getByRole("row").filter({ hasText: "this dashboard" })).toBeVisible()
@@ -2189,7 +2197,7 @@ test.describe("performance", () => {
     await page.goto(`${PERFORMANCE}?view=slowlog`)
     await expect(page.getByRole("row").filter({ hasText: "KEYS" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Empty the log" })).toHaveCount(0)
-    await page.getByRole("button", { name: /^Clients/ }).click()
+    await page.getByRole("tab", { name: /^Clients/ }).click()
     await expect(page.getByRole("row").filter({ hasText: "worker" })).toBeVisible()
     await expect(page.getByRole("button", { name: /^Disconnect / })).toHaveCount(0)
   })
@@ -2208,7 +2216,7 @@ test.describe("performance", () => {
     await page.getByRole("button", { name: "Time per call" }).click()
     await expect.poll(names).toEqual(["KEYS", "SET", "GET"])
 
-    await page.getByRole("button", { name: "Persistence & replication" }).click()
+    await page.getByRole("tab", { name: "Persistence & replication" }).click()
     await expect(page.getByText("after 1h if 1 key changed")).toBeVisible()
     await page.getByRole("button", { name: "Save now" }).click()
     await expect.poll(() => redis.asked("/redis/save").at(-1)?.body).toEqual({ mode: "bgsave" })
@@ -2491,7 +2499,7 @@ test("on a phone the keys and the open key are two panes, and what the database 
   await mockRedis(page)
   await page.goto(KEYS)
   await expect(rail(page)).toBeVisible()
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Keys", "Keyspace"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Keys", "Keyspace"])
   const foot = (await paneBar(page).boundingBox())!
   expect(Math.round(foot.y + foot.height)).toBe(844)
 
@@ -2505,15 +2513,15 @@ test("on a phone the keys and the open key are two panes, and what the database 
   await rail(page).getByRole("button", { name: "Open leaderboard" }).click()
   await expect(pane(page).getByRole("heading", { name: "leaderboard" })).toBeVisible()
   await expect(rail(page)).toHaveCount(0)
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Keys", "Key"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Keys", "Key"])
 
   // The console and its reference are two panes too.
   await page.goto(CONSOLE)
-  await expect(paneBar(page).getByRole("tab")).toHaveText(["Console", "Commands"])
+  await expect(paneBar(page).getByRole("button")).toHaveText(["Console", "Commands"])
   await showPane(page, "Commands")
-  await expect(paneBar(page).getByRole("tab", { name: "Commands" })).toHaveAttribute(
-    "aria-selected",
-    "true",
+  await expect(paneBar(page).getByRole("button", { name: "Commands" })).toHaveAttribute(
+    "aria-current",
+    "page",
   )
 })
 

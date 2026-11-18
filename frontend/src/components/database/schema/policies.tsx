@@ -4,12 +4,12 @@ import { useId, useState } from "react"
 import { Pencil, Plus, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
-import { Segments } from "@/components/deploy/settings/segments"
+import { useColumnWidth } from "@/hooks/use-column-width"
+import { Segments } from "@/components/segments"
 import { Field, FormFact, FormNote, OptionList, OptionRow } from "@/components/form"
-import { EmptyNote } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -32,7 +32,6 @@ import {
 } from "@/components/ui/table"
 import { VerbActions, VerbMenu } from "@/components/verbs"
 import { read } from "@/components/database/home/read"
-import { ReadFailed } from "@/components/database/fleet/read-failed"
 import type { DbRole, DbRoles } from "@/components/database/ops/access-types"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { ChangeDialog, type Risk } from "@/components/database/schema/change-dialog"
@@ -320,7 +319,7 @@ export function PoliciesPlaceholder({
   if (error) {
     return (
       <div className="p-4">
-        <ReadFailed error={error} onRetry={onRetry} />
+        <ErrorState error={error} onRetry={onRetry} retryable />
       </div>
     )
   }
@@ -440,7 +439,7 @@ function RolePicker({
       {chosen.length === 0 ? (
         <span className="text-hint text-muted-foreground">Everybody</span>
       ) : (
-        <ChipStrip role="group" aria-label={label} className="max-sm:mx-0 max-sm:px-0">
+        <ChipStrip role="group" aria-label={label} bleed={false}>
           {chosen.map((role) => (
             <FilterChip
               key={role}
@@ -571,7 +570,7 @@ export function PolicyDialog({
           label="Start from"
           hint="Fills the form below. The statement is shown before it runs."
         >
-          <ChipStrip role="group" aria-label="Templates" className="max-sm:mx-0 max-sm:px-0">
+          <ChipStrip role="group" aria-label="Templates" bleed={false}>
             {TEMPLATES.map((one) => (
               <FilterChip
                 key={one.id}

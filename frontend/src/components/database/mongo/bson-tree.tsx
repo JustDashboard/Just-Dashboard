@@ -15,6 +15,7 @@ import {
 } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
+import { IconAction } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -268,9 +269,9 @@ function said(node: BsonNode): string {
 
 /** A value's staged state, as the hue of its gutter mark. */
 const STATE_MARK = {
-  changed: "bg-(--git-modified)",
-  added: "bg-(--git-added)",
-  removed: "bg-(--git-deleted)",
+  changed: "bg-git-modified",
+  added: "bg-git-added",
+  removed: "bg-git-deleted",
 } as const
 
 function Row({ name, value, path, depth, expand, root, editing, added, leads }: RowProps) {
@@ -384,7 +385,7 @@ function Row({ name, value, path, depth, expand, root, editing, added, leads }: 
         data-state={state}
         className={cn(
           "group/row relative flex min-h-6 min-w-0 items-center gap-1 rounded-sm pr-1 focus-ring-inset hover:bg-row-hover [@media(hover:none)]:min-h-8",
-          state === "removed" && "text-muted-foreground line-through decoration-(--git-deleted)",
+          state === "removed" && "text-muted-foreground line-through decoration-git-deleted",
           leads && tree.leadClassName,
         )}
         style={indent(depth)}
@@ -420,11 +421,11 @@ function Row({ name, value, path, depth, expand, root, editing, added, leads }: 
         {name !== undefined && (
           <span className="shrink-0 text-muted-foreground">
             {name}
-            <span className="text-muted-foreground/50">:</span>
+            <span className="text-faint">:</span>
           </span>
         )}
         {container ? (
-          <span className="min-w-0 truncate text-muted-foreground/70">
+          <span className="min-w-0 truncate text-faint">
             {shown.type === "array" ? "[ ]" : "{ }"} {sizeWord(shown)}
           </span>
         ) : (
@@ -686,9 +687,9 @@ export function BsonValue({
         <span className={hue}>{JSON.stringify(clamp(node.text))}</span>
       ) : call && node.type !== "javascript" ? (
         <>
-          <span className="text-muted-foreground/70">{call[1]}</span>
+          <span className="text-faint">{call[1]}</span>
           <span className={hue}>{clamp(call[2])}</span>
-          <span className="text-muted-foreground/70">{call[3]}</span>
+          <span className="text-faint">{call[3]}</span>
         </>
       ) : (
         <span className={hue}>{clamp(shellScalar(node))}</span>
@@ -818,7 +819,7 @@ function ValueForm({
           </SelectContent>
         </Select>
         {type === "null" ? (
-          <span className="flex h-7 items-center text-muted-foreground/70">null</span>
+          <span className="flex h-7 items-center text-faint">null</span>
         ) : type === "bool" ? (
           <Select value={text === "true" ? "true" : "false"} onValueChange={setText}>
             <SelectTrigger
@@ -868,15 +869,15 @@ function ValueForm({
           <Check />
           {creating ? "Add" : "Set"}
         </Button>
-        <Button
+        <IconAction
           size="icon-xs"
           variant="ghost"
-          aria-label="Cancel"
-          className="size-7"
+          label="Cancel"
+          className="size-7 [&_svg:not([class*='size-'])]:size-3"
           onClick={onCancel}
         >
           <Cross />
-        </Button>
+        </IconAction>
       </div>
       {tried && problem && (
         <p role="alert" className="pt-1 pl-5 font-sans text-hint text-destructive">

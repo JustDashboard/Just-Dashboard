@@ -20,19 +20,19 @@ import {
   type DNSConnection,
   type DNSServiceChange,
   type DNSServiceProvision,
-} from "@/lib/network-dns-services"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+} from "@/lib/network/dns-services"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
 import { Globe, RefreshClockwise } from "@/components/icons"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingPanel, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { useHubSession } from "@/components/network/hub-session"
 import { engineHref } from "./engine-views"
-import { GhostRows } from "./ghost"
 import { DNSServiceConnectionForm } from "./service-connection"
 import type { DNSConnectionSeed } from "./service-form"
 import { DNSServiceProvisionForm } from "./service-provision"
@@ -145,7 +145,7 @@ function DNSServiceAdmin({ account, request }: { account: number; request?: DNSS
             <ErrorState error={connections.error} onRetry={connections.refresh} />
           )}
           {!connections.data ? (
-            !connections.error && <GhostRows rows={1} />
+            !connections.error && <ChoiceListSkeleton rows={1} />
           ) : connections.data.length === 0 ? (
             <EmptyState
               mark={<ProductLogos ids={["adguard", "pihole"]} size="md" />}

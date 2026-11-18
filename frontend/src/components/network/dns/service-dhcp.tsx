@@ -1,9 +1,10 @@
 "use client"
 
+import { PanelHeader } from "@/components/panel"
 import { useState } from "react"
 import { get } from "@/lib/api"
-import { readDNSDHCPView, type DNSDHCPView } from "@/lib/network-dns-dhcp"
-import { DNS_SERVICE_BASE, type DNSConnection } from "@/lib/network-dns-services"
+import { readDNSDHCPView, type DNSDHCPView } from "@/lib/network/dns-dhcp"
+import { DNS_SERVICE_BASE, type DNSConnection } from "@/lib/network/dns-services"
 import { plural } from "@/lib/format"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -45,12 +46,21 @@ export function DNSServiceDHCP({
   const inventory = view?.inventory
   return (
     <section className="min-w-0 space-y-4" aria-label="Native DHCP server">
-      <div className="flex min-w-0 flex-wrap items-baseline justify-between gap-3 border-b border-hairline pb-3">
-        <h3 className="text-base font-semibold">Native DHCP</h3>
-        <Button variant="outline" onClick={() => void read()} pending={busy} disabled={ownerStale}>
-          Read native DHCP
-        </Button>
-      </div>
+      <PanelHeader
+        plain
+        title="DHCP"
+        actions={
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={() => void read()}
+            pending={busy}
+            disabled={ownerStale}
+          >
+            Read native DHCP
+          </Button>
+        }
+      />
       {error && (
         <p role="alert" className="text-body text-destructive">
           {error}

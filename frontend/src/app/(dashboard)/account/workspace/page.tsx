@@ -2,18 +2,19 @@
 
 import { useState } from "react"
 import Link from "next/link"
+import { Fact } from "@/components/fact-line"
 import { GridSquare } from "@/components/icons"
 import { PURPOSES, purposeShown } from "@/lib/sidebar-sections"
 import { notify } from "@/lib/toast"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { hideableSections } from "@/components/nav"
+import { IdentityHeader } from "@/components/identity-header"
+import { hideableSections } from "@/components/shell/nav"
 import { Page, PageContext } from "@/components/page"
 import { PurposePicker, SidebarEditor, useSectionCount } from "@/components/account/workspace"
-import { SaveBarProvider, useSaveBarEntry } from "@/components/deploy/settings/save-bar"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { EditedTag, SettingsColumn } from "@/components/settings-column"
+import { SaveBarProvider, useSaveBarEntry } from "@/components/settings/save-bar"
+import { SettingSection } from "@/components/settings/setting-card"
+import { EditedTag, SettingsColumn } from "@/components/settings/settings-column"
 import { Button } from "@/components/ui/button"
 
 /**
@@ -82,22 +83,21 @@ function Workspace() {
   )
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Account" title="Workspace" />
-      <HostIdentity
+    <Page rise>
+      <PageContext title="Workspace" />
+      <IdentityHeader
         fallback={GridSquare}
         title="Your sidebar"
         facts={
           <>
-            <span className="numeric">
+            <Fact className="numeric">
               {shown} of {total} shown
-            </span>
-            <FactDot />
-            <span className="numeric">
+            </Fact>
+            <Fact className="numeric">
               {purposes === PURPOSES.length
                 ? `${purposes} purposes`
                 : `${purposes} of ${PURPOSES.length} purposes`}
-            </span>
+            </Fact>
           </>
         }
         command={

@@ -6,11 +6,12 @@ import { errorMessage, get } from "@/lib/api"
 import { unavailableReason } from "@/lib/pull-requests"
 import { usePoll } from "@/hooks/use-poll"
 import type { GitPullRequest, ProjectPullRequests } from "@/lib/types"
-import { ChoiceList } from "@/components/flow"
+import { ChoiceList } from "@/components/choice-row"
 import { PullRequestRow } from "@/components/git/pull-request-row"
 import { TestPullDialog } from "@/components/git/test-pull-dialog"
 import { Modal } from "@/components/modal"
-import { EmptyNote, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 
 /**
  * The header's way to a preview: which of the repository's open pull

@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { json, mockNetwork } from "./network-fixture"
-import type { DiagnosticRun } from "../../src/lib/network-diagnostics"
-import type { PathRequest } from "../../src/lib/network-investigator-types"
+import type { DiagnosticRun } from "../../src/lib/network/diagnostics"
+import type { PathRequest } from "../../src/lib/network/investigator-types"
 
 const containerId = "a".repeat(64)
 const stamp = "2026-10-08T13:00:00Z"

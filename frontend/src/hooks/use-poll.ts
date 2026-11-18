@@ -4,8 +4,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore
 import { pollLoop, type PollHandle } from "@/hooks/poll-loop"
 import { NO_SHARED_ANSWER, sharedPoll, type SharedReader } from "@/hooks/poll-share"
 
-export { pollLoop, type PollFailure, type PollHandle } from "@/hooks/poll-loop"
-
 export type PollState<T> = {
   data: T | undefined
   error: Error | undefined

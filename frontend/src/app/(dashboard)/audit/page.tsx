@@ -1,14 +1,14 @@
 "use client"
 
 import { Fragment, useMemo, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { useFilterHistory } from "@/components/workspace/history"
 import { useHeldList } from "@/components/workspace/held-list"
 import { CrossCircle, Download, FileText, Notes, RefreshClockwise } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
-import { calendarDate, clock, plural, relativeTime, timestamp } from "@/lib/format"
-import { downloadText } from "@/lib/metrics-export"
-import type { MetricsState } from "@/lib/metrics-store"
+import { calendarDate, clock, grouped, plural, relativeTime, timestamp } from "@/lib/format"
+import type { MetricsState } from "@/lib/metrics/store"
 import { notify } from "@/lib/toast"
 import type { AuditEntry } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -30,18 +30,18 @@ import {
   keyTitle,
   keyWords,
 } from "@/components/audit/marks"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { Page, PageContext, SearchInput } from "@/components/page"
+import { IdentityHeader } from "@/components/identity-header"
+import { Page, PageContext } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Panel, PanelBody, PanelFooter, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ProductGlyph, platformProduct } from "@/components/product-logo"
-import { ROW_BLEED } from "@/components/row-list"
+import { ROW_BLEED, TABLE_BLEED } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { FaceRun } from "@/components/system-users/marks"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
@@ -54,6 +54,8 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import { VerbMenu, type Verb } from "@/components/verbs"
+import { saveText } from "@/lib/download"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const PAGE_SIZE = 100
 const DAY_MS = 24 * 60 * 60 * 1000
@@ -69,6 +71,9 @@ type AuditPage = { entries: AuditEntry[]; total: number }
  * when the day's read lands.
  */
 const FACTS = "flex min-w-0 flex-wrap content-start items-center gap-x-3 gap-y-1 max-sm:min-h-14"
+
+/** The same room once the facts are read: a `FactLine` lays itself out. */
+const FACT_LINE = "max-sm:min-h-14 [&>span]:gap-y-1"
 
 const hostOf = (state: MetricsState) => state.host
 
@@ -177,6 +182,9 @@ export default function AuditPage() {
   if (data && data.total !== total) setTotal(data.total)
 
   const filtered = username !== "" || action !== "" || onlyFailed
+  // Below `sm` the trail is rows, not a table, so it is a section rather than
+  // a frame: the frame's own padding cut the rows and the chip strip short.
+  const phone = !useBreakpoint("sm")
   const held = useHeldList(data?.entries, (entry) => String(entry.id), JSON.stringify(filters))
   const entries = held.rows
   const arrived = useArrivals(entries.map((entry) => String(entry.id)))
@@ -222,11 +230,15 @@ export default function AuditPage() {
         )
         return
       }
-      downloadText(exportName({ username, action, failed: onlyFailed }, new Date()), auditCsv(rows))
+      saveText(
+        exportName({ username, action, failed: onlyFailed }, new Date()),
+        auditCsv(rows),
+        "text/csv",
+      )
       notify.success(`Exported ${plural(rows.length, "entry", "entries")}`, {
         description:
           matching > rows.length
-            ? `The newest ${rows.length.toLocaleString()} of ${matching.toLocaleString()}. Narrow the trail to export the rest.`
+            ? `The newest ${grouped(rows.length)} of ${grouped(matching)}. Narrow the trail to export the rest.`
             : undefined,
       })
     } catch (err) {
@@ -253,8 +265,8 @@ export default function AuditPage() {
     failure instanceof ApiError && failure.status === 403
   if (!admin || refused(error) || refused(day.error)) {
     return (
-      <Page className="animate-rise">
-        <PageContext eyebrow="Advanced" title="Audit log" />
+      <Page rise>
+        <PageContext title="Audit log" />
         <EmptyState
           icon={Notes}
           title="The audit log is for administrators"
@@ -274,8 +286,8 @@ export default function AuditPage() {
         return true
       }}
     >
-      <Page className="animate-rise">
-        <PageContext eyebrow="Advanced" title="Audit log" />
+      <Page rise>
+        <PageContext title="Audit log" />
 
         {/* The line and the day under it are one block: what happened, then
             when. Both stand at their final height before the day is read. */}
@@ -290,10 +302,11 @@ export default function AuditPage() {
         </div>
 
         {/* The table is the whole of the trail, and it is framed: a grid that
-          owns its own scrolling takes an edge (§2). The filters stay mounted
+          owns its own scrolling takes an edge (§2). On a phone the trail is a
+          list of rows and the section has no frame. The filters stay mounted
           across a filter change so the box being typed into never loses its
           caret to a skeleton. */}
-        <Panel>
+        <Panel framed={!phone}>
           <PanelHeader title="Recorded requests" className="gap-x-3">
             <span className="mr-auto flex min-w-0 items-center gap-3">
               {total !== undefined && (
@@ -301,12 +314,10 @@ export default function AuditPage() {
                   key={total}
                   className="numeric animate-rise text-hint text-muted-foreground"
                   aria-label={
-                    filtered
-                      ? `${total.toLocaleString()} matching`
-                      : `${total.toLocaleString()} recorded`
+                    filtered ? `${grouped(total)} matching` : `${grouped(total)} recorded`
                   }
                 >
-                  {total.toLocaleString()}
+                  {grouped(total)}
                   {filtered && " matching"}
                 </span>
               )}
@@ -331,13 +342,13 @@ export default function AuditPage() {
                 placeholder="User"
                 aria-label="User"
               />
-              <Input
+              <SearchInput
+                containerClassName="max-sm:basis-0 max-sm:flex-[1.4] sm:w-60"
                 value={action}
                 onChange={(e) => narrow(() => setAction(e.target.value))}
                 data-workspace-search
                 placeholder="Action, e.g. docker.container"
                 aria-label="Action"
-                className="h-10 min-w-0 flex-[1.4] text-body sm:h-8 sm:w-60 sm:flex-none"
               />
             </div>
           </PanelHeader>
@@ -385,7 +396,7 @@ export default function AuditPage() {
                 {/* The outer columns take the gutter from their own cell padding,
                   so the first column starts in the title's column; the `-mx`
                   bleed that does the same on a plain panel is gated to it (§2). */}
-                <div className="hidden min-w-0 group-data-[plain]/panel:-mx-4 lg:block">
+                <div className={cn("hidden min-w-0 lg:block", TABLE_BLEED)}>
                   <Table containerClassName="max-h-[calc(100svh-21rem)]">
                     <TableHeader className={stickyTableHeader}>
                       <TableRow>
@@ -498,7 +509,12 @@ export default function AuditPage() {
                                   {(entry.target || entry.detail) && (
                                     <>
                                       {" · "}
-                                      <span className={cn(entry.target && "font-mono")}>
+                                      {/* Mono sits lower on the line than the sans
+                                          beside it and grew the line a pixel; on
+                                          no line of its own, it cannot. */}
+                                      <span
+                                        className={cn(entry.target && "font-mono leading-none")}
+                                      >
                                         {entry.target || entry.detail}
                                       </span>
                                     </>
@@ -541,7 +557,7 @@ export default function AuditPage() {
                   ? filtered
                     ? "No matching entries"
                     : "Nothing recorded yet"
-                  : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${data.total.toLocaleString()}`}
+                  : `${offset + 1}–${Math.min(offset + PAGE_SIZE, data.total)} of ${grouped(data.total)}`}
             </span>
             <div className="flex gap-2">
               <Button
@@ -593,7 +609,7 @@ function AuditIdentity({
   const who = reading && peopleWords(reading.people, reading.machines)
   const last = reading?.signIns.last
   return (
-    <HostIdentity
+    <IdentityHeader
       label="About the audit log"
       className="border-b-0 pb-0"
       fallback={Notes}
@@ -626,41 +642,38 @@ function AuditIdentity({
             <Skeleton className="my-0.5 h-3 w-96 max-w-full" />
           </span>
         ) : (
-          <span className={FACTS}>
+          <FactLine className={FACT_LINE}>
             {host?.hostname && (
-              <>
-                <HostFact product={platformProduct(host.platform)}>{host.hostname}</HostFact>
-                <FactDot />
-              </>
+              <Fact product={platformProduct(host.platform)}>{host.hostname}</Fact>
             )}
-            <span className="numeric">
-              <span className="text-foreground">{day.total.toLocaleString()}</span>{" "}
+            <Fact className="numeric">
+              <span className="text-foreground">{grouped(day.total)}</span>{" "}
               {day.total === 1 ? "change" : "changes"} in the last day
-            </span>
+            </Fact>
             {who && (
-              <>
-                <FactDot />
-                <span className="inline-flex min-w-0 items-center gap-1.5">
+              <Fact>
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
                   <FaceRun names={reading.people} />
                   <span className="truncate">{who}</span>
                 </span>
-              </>
+              </Fact>
             )}
-            <FactDot />
-            {last ? (
-              <span className="inline-flex min-w-0 items-center gap-1.5">
-                <span className="shrink-0">
-                  {plural(reading.signIns.ok, "sign-in")}, the last by{" "}
-                  <span className="text-foreground">{last.username || "someone"}</span>
-                  {last.ip && " from"}
+            <Fact>
+              {last ? (
+                <span className="inline-flex min-w-0 items-center gap-1.5 align-top">
+                  <span className="shrink-0">
+                    {plural(reading.signIns.ok, "sign-in")}, the last by{" "}
+                    <span className="text-foreground">{last.username || "someone"}</span>
+                    {last.ip && " from"}
+                  </span>
+                  {last.ip && <Address ip={last.ip} className="min-w-0" />}
+                  <span className="numeric shrink-0">{relativeTime(last.ts)}</span>
                 </span>
-                {last.ip && <Address ip={last.ip} className="min-w-0" />}
-                <span className="numeric shrink-0">{relativeTime(last.ts)}</span>
-              </span>
-            ) : (
-              <span>nobody signed in</span>
-            )}
-          </span>
+              ) : (
+                <span>nobody signed in</span>
+              )}
+            </Fact>
+          </FactLine>
         )
       }
       command={

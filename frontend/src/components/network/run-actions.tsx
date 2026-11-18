@@ -17,10 +17,11 @@ import {
   diagnosticNameProblem,
   diagnosticReading,
   type DiagnosticRun,
-} from "@/lib/network-diagnostics"
-import { runRequestLine, runTool } from "@/lib/network-runs-view"
+} from "@/lib/network/diagnostics"
+import { runRequestLine, runTool } from "@/lib/network/runs-view"
 import { notify } from "@/lib/toast"
-import { StateTile, toolGlyph } from "./diagnostic-marks"
+import { toolGlyph } from "./diagnostic-marks"
+import { StateMark } from "@/components/product-logo"
 
 /**
  * What can be done to a saved run, declared once for its row and its page
@@ -131,7 +132,7 @@ export function useRunActions(
         confirm({
           title: "Delete saved run",
           subject: {
-            mark: <StateTile glyph={toolGlyph(run)} tone={diagnosticReading(run).tone} size="sm" />,
+            mark: <StateMark glyph={toolGlyph(run)} tone={diagnosticReading(run).tone} size="sm" />,
             name: run.name,
             facts: (
               <span>

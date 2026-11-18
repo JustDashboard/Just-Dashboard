@@ -19,7 +19,8 @@ import { usePoll } from "@/hooks/use-poll"
 import { useMediaQuery } from "@/hooks/use-mobile"
 import { WIDE_BESIDE_RAIL } from "@/components/docker/beside-rail"
 import { Panel, PanelBody, PanelFooter, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -32,7 +33,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { ComposeDiff, DiffCount, ServiceLabel } from "@/components/docker/stack-diff"
+import { ComposeDiff, ServiceLabel } from "@/components/docker/stack-diff"
+import { DiffCount } from "@/components/diff-count"
 import { bucketTone, type ServiceReading } from "@/components/docker/stack-service-readings"
 import { diffCounts, splitImage } from "@/components/docker/stack-views"
 
@@ -54,7 +56,7 @@ const KIND: Record<
     text: "text-warning",
     icon: RefreshClockwise,
   },
-  create: { word: "Create", color: "var(--chart-2)", text: "text-[var(--chart-2)]", icon: Plus },
+  create: { word: "Create", color: "var(--chart-2)", text: "text-chart-2", icon: Plus },
   start: { word: "Start", color: "var(--success)", text: "text-success", icon: Play },
   unchanged: {
     word: "Unchanged",
@@ -213,17 +215,12 @@ export function StackPreview({
         </ul>
       </section>
 
-      <Panel aria-label="Services">
-        <PanelHeader
-          title={
-            <>
-              Services
-              <span className="numeric ml-2 text-body font-normal text-muted-foreground">
-                {services.length}
-              </span>
-            </>
-          }
-        />
+      <Panel
+        // Framed: a table: the frame is the edge of its scroll (§2).
+        framed
+        aria-label="Services"
+      >
+        <PanelHeader title="Services" count={services.length} />
         <PanelBody flush>
           {wide ? (
             <Table className="table-fixed">

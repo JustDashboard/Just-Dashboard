@@ -10,6 +10,8 @@ import {
   Servers,
 } from "@/components/icons"
 import { IconAction } from "@/components/icon-action"
+import { Explain } from "@/components/explain"
+import { PaneSection } from "@/components/panel"
 import { KEYCAP } from "@/components/command-search/keycaps"
 import { ProductGlyph } from "@/components/product-logo"
 import { ComputerMark } from "@/components/remote-desktop/marks"
@@ -36,6 +38,7 @@ import {
   type StreamStats,
 } from "@/lib/remote-desktop"
 import { notify } from "@/lib/toast"
+import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 
 export type Transfer = {
@@ -246,6 +249,11 @@ function ModeCard({
 }
 
 /** One block of the column: a plain title, an optional aside, and its controls. */
+/**
+ * A titled group in the session's side column: the shared `PaneSection`, so
+ * the column's heads are the files inspector's and the map's. It was a
+ * semibold h2 over a rule at its own padding.
+ */
 export function PanelSection({
   title,
   aside,
@@ -256,13 +264,9 @@ export function PanelSection({
   children: React.ReactNode
 }) {
   return (
-    <section aria-label={title} className="flex flex-col gap-3 border-b border-hairline px-4 py-4">
-      <div className="flex min-h-5 items-center justify-between gap-2">
-        <h2 className="text-body font-semibold">{title}</h2>
-        {aside}
-      </div>
+    <PaneSection title={title} aside={aside} level={2} className="flex flex-col gap-3 space-y-0">
       {children}
-    </section>
+    </PaneSection>
   )
 }
 
@@ -582,7 +586,15 @@ export function ControlSections({
       )}
 
       {computer.protocol === "rdp" && (
-        <PanelSection title="Picture">
+        <PanelSection
+          title="Picture"
+          aside={
+            <Explain label="What Sharp costs" align="end">
+              Sharp asks {computer.name} for a screen of this display&apos;s pixels: on a 2x display
+              four times as many to encode and decode, and that many fewer frames a second.
+            </Explain>
+          }
+        >
           <div role="radiogroup" aria-label="Picture density" className="grid grid-cols-2 gap-1.5">
             {(
               [
@@ -612,10 +624,6 @@ export function ControlSections({
               )
             })}
           </div>
-          <p className="text-hint text-muted-foreground">
-            Sharp asks {computer.name} for a screen of this display&apos;s pixels: on a 2x display
-            four times as many to encode and decode, and that many fewer frames a second.
-          </p>
         </PanelSection>
       )}
 
@@ -647,10 +655,9 @@ export function ControlSections({
             </div>
             <IconAction
               label="Copy what the computer copied"
-              onClick={() => {
-                void navigator.clipboard?.writeText(remoteClip)
-                notify.success("Copied")
-              }}
+              // Said as copied only once the browser took it: over plain HTTP
+              // on a LAN address there is no clipboard, and copyText says so.
+              onClick={() => void copyText(remoteClip, "Copied")}
             >
               <Copy />
             </IconAction>

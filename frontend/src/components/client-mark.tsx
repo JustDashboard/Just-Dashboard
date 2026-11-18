@@ -104,7 +104,7 @@ export function NetworkFact({
         glyph && <Glyph aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />
       )}
       <span className="shrink-0">{network.label}</span>
-      {address ?? <span className="truncate font-mono text-muted-foreground/80">{ip}</span>}
+      {address ?? <span className="truncate font-mono text-faint">{ip}</span>}
     </span>
   )
 }

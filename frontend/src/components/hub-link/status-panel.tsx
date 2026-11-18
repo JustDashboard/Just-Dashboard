@@ -3,7 +3,6 @@
 import { useState } from "react"
 import Link from "next/link"
 import {
-  Archive,
   ArrowRight,
   ArrowUpRight,
   Heart,
@@ -24,9 +23,14 @@ import {
 } from "@/lib/hub-link"
 import { notify } from "@/lib/toast"
 import type { HubLinkNotice, HubLinkStatus } from "@/lib/types"
-import { MarkTile, type Mark } from "@/components/account-link/marks"
+import {
+  ACTIVITY_ROW as ROW,
+  COMMAND_STATUS,
+  MarkTile,
+  commandMark,
+} from "@/components/account-link/marks"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Section } from "@/components/page"
+import { Section } from "@/components/section"
 import { Row, RowList } from "@/components/row-list"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
@@ -35,23 +39,8 @@ import { cn } from "@/lib/utils"
 
 type LinkState = NonNullable<NonNullable<HubLinkStatus["admin"]>["link"]>
 
-/** On the section's own edge, under its title: the rows open nothing, so they take no bleed. */
-const ROW = "px-0 py-2.5"
 
-const COMMAND_STATUS = {
-  succeeded: { tone: "running", label: "Succeeded" },
-  failed: { tone: "danger", label: "Failed" },
-  refused: { tone: "warning", label: "Refused" },
-} as const
 
-/** A command drawn as what it acts on, as Settings → Connect draws the site's. */
-function commandMark(kind: string): Mark {
-  if (kind.startsWith("dashboard.")) return { brand: true }
-  if (kind.startsWith("container.")) return { product: "docker" }
-  if (kind.startsWith("stack.")) return { product: "docker-compose" }
-  if (kind.startsWith("backup.")) return { glyph: Archive, hue: "var(--tag-violet)" }
-  return { glyph: RefreshClockwise, hue: "var(--tag-blue)" }
-}
 
 /** Who the hub says asked; "rollout" is a step of an update rollout, not a person. */
 function askedBy(issuedBy: string) {

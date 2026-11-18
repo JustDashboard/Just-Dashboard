@@ -193,16 +193,19 @@ test("each reading is a sentence that carries its last hour", async ({ page }) =
   await expect(page.getByRole("img", { name: "Network over the last hour" })).toBeVisible()
   // The panel of sparklines that repeated the readings is gone.
   await expect(page.getByRole("heading", { name: "Last hour" })).toHaveCount(0)
-  // Every core from the same frame, beside the figure they add up to.
-  await expect(cpu.getByRole("img", { name: "4 cores, the busiest at 31%" })).toBeVisible()
+  // Every core from the same frame, beside the figure they add up to. The figure is the link's
+  // description, outside its name, so the picture is read there rather than as an image of its own.
+  await expect(cpu.locator("[aria-label='4 cores, the busiest at 31%']")).toBeVisible()
+  await expect(cpu).toHaveAccessibleDescription(/4 cores, the busiest at 31%/)
 
   const lines = page.locator("[data-slot=resources] [data-slot=reading-line]")
+  // A live figure keeps its unit with a no-break space (`\s` matches it).
   await expect(lines).toHaveText([
     /CPU.*23\.4% busy/,
-    /Memory.*6\.5 GB free.*56% used · 4\.0 GB cached/,
+    /Memory.*6\.5\sGB free.*56% used · 4\.0 GB cached/,
     /Load.*0\.92, 0\.23 a core.*0\.71 · 0\.60 over 5 and 15 min/,
-    /Network.*2\.3 MB\/s in.*420\.0 KB\/s out · 312 TCP sockets/,
-    /Disk I\/O.*5\.1 MB\/s.*1\.2 MB\/s read · 3\.9 MB\/s write/,
+    /Network.*2\.3\sMB\/s in.*420\.0 KB\/s out · 312 TCP sockets/,
+    /Disk I\/O.*5\.1\sMB\/s.*1\.2 MB\/s read · 3\.9 MB\/s write/,
   ])
   // Every line is one height, and each is a way to the page that records it.
   await risen(page)
@@ -753,10 +756,8 @@ test("the drawings edited last are each drawn as themselves", async ({ page }) =
   const list = page.getByRole("list", { name: "Recent drawings" })
   const cards = list.locator(":scope > li")
   await expect(cards).toHaveText([/Production map/])
-  await expect(cards.first().getByRole("link", { name: "Open Production map" })).toHaveAttribute(
-    "href",
-    "/excalidraw/4",
-  )
+  // An OpenCard: its name is the button a keyboard opens it by.
+  await expect(cards.first().getByRole("button", { name: "Production map" })).toBeVisible()
   // The picture is the drawing's own shapes.
   await expect(cards.first().locator("svg text", { hasText: "caddy" })).toBeAttached()
   await cards.first().click()

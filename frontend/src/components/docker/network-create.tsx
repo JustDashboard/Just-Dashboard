@@ -13,10 +13,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
-import { Hint } from "./explain"
+import { FormNote } from "@/components/form"
 import { EMPTY_NETWORK, networkCreation, type NetworkDraft } from "./network-create-reading"
 import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
-import type { IPAMReservation } from "@/lib/network-ipam"
+import type { IPAMReservation } from "@/lib/network/ipam"
 
 export function NewNetworkDialog({
   open,
@@ -178,7 +178,7 @@ export function NewNetworkDialog({
       />
       <label htmlFor={`network-${key}`} className="cursor-pointer">
         <span className="block text-xs font-medium">{label}</span>
-        <Hint>{hint}</Hint>
+        <FormNote>{hint}</FormNote>
       </label>
     </Group>
   )
@@ -231,10 +231,10 @@ export function NewNetworkDialog({
           "Containers on an internal network can reach its other members. Containers attached to additional networks may still use those paths.",
         )}
         {field("subnet", "Subnet (optional)", "Docker picks an IPv4 range")}
-        <Hint>
+        <FormNote>
           Choose an unused range. The preview checks the listed Docker networks; host, VPN and
           provider ranges also need to be considered.
-        </Hint>
+        </FormNote>
         <Button
           variant="ghost"
           size="sm"
@@ -266,10 +266,10 @@ export function NewNetworkDialog({
                 />
               </>
             ) : (
-              <Hint>
+              <FormNote>
                 This account creates bridge networks. Other drivers and driver options need
                 administrator permission.
-              </Hint>
+              </FormNote>
             )}
             <div className="grid gap-3 sm:grid-cols-2">
               {field("gateway", "IPv4 gateway (optional)", "192.0.2.1")}
@@ -310,12 +310,12 @@ export function NewNetworkDialog({
                   }
                   onChange={(event) => update(key as "labels" | "options", event.target.value)}
                 />
-                <Hint>
+                <FormNote>
                   One key=value per line.{" "}
                   {key === "labels"
                     ? "Compose and dashboard ownership labels are reserved."
                     : "Use options supported by the selected driver."}
-                </Hint>
+                </FormNote>
               </div>
             ))}
           </div>
@@ -357,14 +357,14 @@ function DriverReading({
   unread: boolean
   onRetry: () => void
 }) {
-  if (loading) return <Hint>Reading this Engine&apos;s network drivers…</Hint>
+  if (loading) return <FormNote>Reading this Engine&apos;s network drivers…</FormNote>
   if (unread || !reading.known) {
     return (
       <div className="space-y-1.5">
-        <Hint>
+        <FormNote>
           This Engine&apos;s network drivers could not be read. A bridge network is created as
           usual; any other driver is refused until they can be.
-        </Hint>
+        </FormNote>
         <Button size="xs" variant="outline" onClick={onRetry}>
           Read drivers again
         </Button>
@@ -383,17 +383,17 @@ function DriverReading({
           {reading.name} cannot create a network here: {found.reason}
         </p>
       ) : found.source === "plugin" ? (
-        <Hint>
+        <FormNote>
           {reading.name} is an installed plugin&apos;s driver. Its options are the plugin&apos;s own
           and are passed through unchecked; the plugin decides what they do.
-        </Hint>
+        </FormNote>
       ) : (
-        <Hint>
+        <FormNote>
           {reading.name} is built into Docker
           {found.options.length > 0 &&
             `; it documents ${found.options.map((option) => option.key).join(", ")}`}
           .
-        </Hint>
+        </FormNote>
       )}
       {reading.ignored.length > 0 && (
         <p role="alert" className="text-xs text-warning">

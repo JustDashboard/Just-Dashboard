@@ -4,7 +4,7 @@ import { relativeTime, timestamp } from "@/lib/format"
 import type { AuditEntry } from "@/lib/types"
 import { ActionMark, ActionName, actorName, keyTitle, keyWords } from "@/components/audit/marks"
 import { MethodWord, RequestPath, StatusCode } from "@/components/deploy/request-marks"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Address } from "@/components/security/marks"
 import { Status } from "@/components/status-dot"
 

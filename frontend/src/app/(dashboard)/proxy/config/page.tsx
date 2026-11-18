@@ -3,7 +3,6 @@
 import { Suspense, useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
-import { Tabs as TabsPrimitive } from "radix-ui"
 import { Box, FileText, ListOrdered, Play, RefreshClockwise } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -13,15 +12,17 @@ import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useSessionState } from "@/lib/view-state"
 import { Page, PageContext, PageState } from "@/components/page"
-import { ErrorState, LoadingRows } from "@/components/state"
+import { ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { useNow } from "@/components/deploy/vocabulary"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
+import { useNow } from "@/hooks/use-now"
 import { useProxy } from "@/components/proxy/proxy-context"
 import { ConfigEditor, type EditorView } from "@/components/proxy/config-editor"
 import { ConfigFilesView } from "@/components/proxy/config-files"
@@ -31,7 +32,7 @@ import { EffectiveConfigView } from "@/components/proxy/config-search"
 import { ConfigSettingsView } from "@/components/proxy/settings-panel"
 import { ConfigLintView } from "@/components/proxy/lint-panel"
 import { EngineSetup } from "@/components/proxy/engine-setup"
-import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
+import { MissingThing } from "@/components/missing-thing"
 import type { ConfigTest } from "@/components/proxy/test-result"
 import { testedLabel, warningCount } from "@/components/proxy/config-test"
 import { folderOf, includeMap, readCount, unreadCount } from "@/components/proxy/config-tree"
@@ -193,32 +194,38 @@ function ConfigurationPage() {
 
   if (!nginx) {
     return (
-      <Page className="animate-rise">
+      <Page rise>
         {header}
         {status.caddy ? (
-          <OverviewEmpty
-            mark={<EmptyMark product="caddy" corner={FileText} />}
+          // nginx's directory is the thing this page reads, and it is not
+          // there: the section's absence screen, not an empty block (PRX-04).
+          <MissingThing
+            size="block"
+            thing="caddy"
+            icon={FileText}
             title="This server's proxy is Caddy"
-            action={
+            step={
               <Button asChild size="sm" variant="outline">
                 <Link href="/proxy/sites">Open Sites</Link>
               </Button>
             }
           >
             Its one Caddyfile opens from Sites; this page reads nginx&apos;s directory.
-          </OverviewEmpty>
+          </MissingThing>
         ) : status.ingressContainer || status.ingressState ? (
-          <OverviewEmpty
-            mark={<EmptyMark product="docker" corner={FileText} />}
+          <MissingThing
+            size="block"
+            thing="docker"
+            icon={FileText}
             title="Deployments configure the Caddy ingress"
-            action={
+            step={
               <Button asChild size="sm" variant="outline">
                 <Link href="/deploy">Deployments</Link>
               </Button>
             }
           >
             It has no files on this server to read; each project&apos;s Domains settings write it.
-          </OverviewEmpty>
+          </MissingThing>
         ) : (
           <EngineSetup status={status} admin={admin} onInstalled={refreshStatus} />
         )}
@@ -242,22 +249,7 @@ function ConfigurationPage() {
       />
 
       <Tabs value={tab} onValueChange={setTab} className="min-w-0 gap-0">
-        {admin && (
-          <TabsPrimitive.List
-            aria-label="Configuration views"
-            className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-          >
-            {VIEWS.map((view) => (
-              <TabsPrimitive.Trigger
-                key={view.key}
-                value={view.key}
-                className={tabClasses(tab === view.key, "h-10")}
-              >
-                {view.label}
-              </TabsPrimitive.Trigger>
-            ))}
-          </TabsPrimitive.List>
-        )}
+        {admin && <ViewTabList label="Configuration views" value={tab} views={[...VIEWS]} />}
 
         <TabsContent value="files" className="min-w-0 space-y-6 pt-6">
           {files.error ? (
@@ -403,7 +395,7 @@ function ConfigIdentity({
   }
 
   return (
-    <HostIdentity
+    <IdentityHeader
       // The view strip under the line draws the rule: the line's own under it
       // made two.
       className="border-b-0 pb-0"
@@ -418,12 +410,9 @@ function ConfigIdentity({
           <TextShimmer>Reading the directory…</TextShimmer>
         ) : (
           <>
-            <span title={`${counts.files} files in ${plural(counts.folders, "folder")}`}>
-              <span className="numeric font-medium text-foreground">{counts.files}</span>{" "}
-              {counts.files === 1 ? "file" : "files"} in {plural(counts.folders, "folder")}
-            </span>
-            <FactDot />
-            <HostFact product="nginx">
+            {/* What nginx reads first: an include it cannot follow is the
+                fact that wants action, and a phone shows one line. */}
+            <Fact product="nginx">
               <span className="numeric font-medium text-foreground">{counts.read}</span> read
               {!tree.includesKnown ? (
                 <span className="font-medium text-warning">, not every include followed</span>
@@ -432,7 +421,11 @@ function ConfigIdentity({
               ) : (
                 ", every file"
               )}
-            </HostFact>
+            </Fact>
+            <Fact title={`${counts.files} files in ${plural(counts.folders, "folder")}`}>
+              <span className="numeric font-medium text-foreground">{counts.files}</span>{" "}
+              {counts.files === 1 ? "file" : "files"} in {plural(counts.folders, "folder")}
+            </Fact>
           </>
         )
       }

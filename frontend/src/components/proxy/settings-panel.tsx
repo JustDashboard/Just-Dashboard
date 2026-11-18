@@ -9,17 +9,16 @@ import type { ProxySetting, ProxySettingEdit, ProxySettings, ProxyValidation } f
 import { usePoll } from "@/hooks/use-poll"
 import { Field, OptionList, OptionRow } from "@/components/form"
 import { Well } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Segments } from "@/components/deploy/settings/segments"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import {
-  SettingForm,
-  SettingSection,
-  settingStatus,
-} from "@/components/deploy/settings/setting-card"
+import { Segments } from "@/components/segments"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { useAuth } from "@/hooks/use-auth"
+import { DefaultSiteSection } from "@/components/proxy/default-site"
+import { SettingForm, SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { relativePath } from "@/components/proxy/config-tree"
 import { refusalOf } from "@/components/proxy/engine-lifecycle"
 import { RefusedConfig } from "@/components/proxy/config-search"
@@ -66,6 +65,7 @@ export function ConfigSettingsView({
   onOpen: (path: string, line?: number) => void
   onChanged: () => void
 }) {
+  const admin = useAuth().can("system.admin")
   const settings = usePoll((signal) => get<ProxySettings>("/proxy/settings", undefined, signal), 0)
   const refusal = refusalOf(settings.error)
   const report = settings.error ? undefined : settings.data
@@ -85,18 +85,24 @@ export function ConfigSettingsView({
         ) : !report ? (
           <LoadingRows rows={7} />
         ) : (
-          <SettingsForm
-            key={report.settings.map((s) => `${s.name}=${s.value}@${s.file}:${s.line}`).join("|")}
-            report={report}
-            root={root}
-            reading={settings.loading}
-            onReadAgain={settings.refresh}
-            onOpen={onOpen}
-            onSaved={() => {
-              settings.refresh()
-              onChanged()
-            }}
-          />
+          <>
+            <SettingsForm
+              key={report.settings.map((s) => `${s.name}=${s.value}@${s.file}:${s.line}`).join("|")}
+              report={report}
+              root={root}
+              reading={settings.loading}
+              onReadAgain={settings.refresh}
+              onOpen={onOpen}
+              onSaved={() => {
+                settings.refresh()
+                onChanged()
+              }}
+            />
+            {/* What nginx answers a Host it has no site for: an engine
+                setting, so it is here and saved by the same bar, not a
+                panel with its own Apply in the middle of the Sites list. */}
+            <DefaultSiteSection admin={admin} />
+          </>
         )}
       </div>
     </SaveBarProvider>

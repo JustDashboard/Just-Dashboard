@@ -1,4 +1,4 @@
-import type { IPAMOwner, IPAMPool, IPAMView } from "@/lib/network-ipam"
+import type { IPAMOwner, IPAMPool, IPAMView } from "@/lib/network/ipam"
 
 /**
  * A prefix as the first address and the count of addresses it covers, exact

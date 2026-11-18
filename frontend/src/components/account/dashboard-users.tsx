@@ -1,6 +1,7 @@
 "use client"
 
 import { useRef, useState } from "react"
+import { Fact } from "@/components/fact-line"
 import { Fingerprint, Pencil, Trash, UserPlus, Users } from "@/components/icons"
 import { del, get, patch, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
@@ -8,14 +9,14 @@ import { plural, relativeTime } from "@/lib/format"
 import type { DashboardUser, Role } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow, FormNote } from "@/components/form"
 import { DimActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -29,7 +30,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { ROLE_HUE, ROLE_MARK, ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_SUMMARY } from "@/components/account/capabilities"
+import { ROLE_HUE, ROLE_MARK, ROLE_NAME } from "@/components/account/role"
 import {
   ROLES,
   inUserScope,
@@ -37,11 +39,12 @@ import {
   peopleVerdict,
   type UserScope,
 } from "@/components/account/access"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { IdentityHeader } from "@/components/identity-header"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
-import { AvatarRun, UserAvatar, displayNameOf } from "@/components/account/user-avatar"
+import { AvatarRun, UserAvatar, displayNameOf } from "@/components/user-avatar"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 export function useDashboardUsers(enabled = true) {
   return usePoll(
@@ -70,14 +73,14 @@ function RolePicker({
   const Mark = ROLE_MARK[value]
   return (
     <Select value={value} onValueChange={(v) => onChange(v as Role)}>
-      <SelectTrigger size="sm" className="w-32 text-xs" aria-label={label}>
+      <SelectTrigger size="sm" className="w-36 text-xs" aria-label={label}>
         <Mark aria-hidden className="size-3.5" style={{ color: ROLE_HUE[value] }} />
         <SelectValue />
       </SelectTrigger>
       <SelectContent className="w-72">
         {ROLES.map((r) => (
           <SelectItem key={r} value={r} hint={ROLE_SUMMARY[r]}>
-            {r}
+            {ROLE_NAME[r]}
           </SelectItem>
         ))}
       </SelectContent>
@@ -113,7 +116,7 @@ function UserCard({
   onUpdate: (body: Record<string, unknown>) => void
   verbs: Verb[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const name = displayNameOf(user)
   const readings = (
     <span className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2">
@@ -144,11 +147,13 @@ function UserCard({
     <ChoiceRow
       verb={`Edit ${name}`}
       onSelect={onEdit}
-      className={user.disabled ? "opacity-60" : undefined}
       leading={<UserAvatar user={user} scope="admin" size="md" />}
       title={
         <span className="inline-flex max-w-full min-w-0 items-center gap-2">
-          <span className="truncate">{name}</span>
+          {/* An account that cannot sign in is said in words on the line
+              under it and set in the faint ink here — not faded, which took
+              its readings under 4.5:1. */}
+          <span className={cn("truncate", user.disabled && "text-faint")}>{name}</span>
           {me && <Tag>you</Tag>}
         </span>
       }
@@ -159,15 +164,23 @@ function UserCard({
           {user.mustChangePassword && " · chooses a new password at next sign-in"}
         </>
       }
-      trailing={wide ? readings : undefined}
+      // The switch is an inline control, so it stands before the arrow and
+      // the menu after it: → then ⋯, the order every card ends in.
+      trailing={
+        <>
+          {wide && readings}
+          <DimActions>
+            <Switch
+              checked={!user.disabled}
+              disabled={me}
+              aria-label={`${name} can sign in`}
+              onCheckedChange={(v) => onUpdate({ disabled: !v })}
+            />
+          </DimActions>
+        </>
+      }
       actions={
-        <DimActions className="gap-2">
-          <Switch
-            checked={!user.disabled}
-            disabled={me}
-            aria-label={`${name} can sign in`}
-            onCheckedChange={(v) => onUpdate({ disabled: !v })}
-          />
+        <DimActions>
           <VerbMenu verbs={verbs} label={`More actions for ${name}`} />
         </DimActions>
       }
@@ -214,30 +227,28 @@ function PeopleIdentity({
     .sort((a, b) => (b.lastLoginAt ?? "").localeCompare(a.lastLoginAt ?? ""))[0]
   const verdict = peopleVerdict(users, require2fa)
   return (
-    <HostIdentity
+    <IdentityHeader
       logo={<FaceStack users={[...admins, ...active.filter((u) => u.role !== "admin")]} />}
       title={plural(users.length, "account")}
       facts={
         <>
-          <span>
+          <Fact>
             {require2fa
               ? plural(active.length, "enabled account")
               : active.length === users.length
                 ? "every one can sign in"
                 : `${active.length} can sign in`}
-          </span>
-          <FactDot />
-          <span className="inline-flex items-center gap-1.5">
-            <AvatarRun users={admins} />
-            {plural(admins.length, "administrator")}
-          </span>
+          </Fact>
+          <Fact>
+            <span className="inline-flex items-center gap-1.5 align-top">
+              <AvatarRun users={admins} />
+              {plural(admins.length, "administrator")}
+            </span>
+          </Fact>
           {latest && (
-            <>
-              <FactDot />
-              <span>
-                last sign-in {displayNameOf(latest)} {relativeTime(latest.lastLoginAt)}
-              </span>
-            </>
+            <Fact>
+              last sign-in {displayNameOf(latest)} {relativeTime(latest.lastLoginAt)}
+            </Fact>
           )}
         </>
       }
@@ -544,7 +555,7 @@ function EditUserDialog({
           <div className="min-w-0">
             <p className="truncate text-body font-medium">{displayNameOf(user)}</p>
             <p className="truncate text-hint text-muted-foreground">
-              @{user.username} · {user.role}
+              @{user.username} · {ROLE_NAME[user.role]}
             </p>
           </div>
         </div>

@@ -3,12 +3,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
+import { IconAction } from "@/components/icon-action"
 import { Workspace } from "@/components/workspace/workspace"
 import {
-  ArrowLeft,
   Archive,
-  ChevronDown,
-  ChevronUp,
   ChevronDoubleDown,
   ChevronDoubleUp,
   CloudUpload,
@@ -25,6 +23,7 @@ import {
   UserSettings,
 } from "@/components/icons"
 import { get, post } from "@/lib/api"
+import { breakpointQuery } from "@/lib/breakpoints"
 import { forgeRepository } from "@/lib/git-repos"
 import { cn } from "@/lib/utils"
 import type {
@@ -70,12 +69,13 @@ import { useGitRun } from "@/components/git/run"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { ResizeHandle } from "@/components/resize-handle"
 import { Page } from "@/components/page"
-import { IconAction } from "@/components/icon-action"
-import { PaneHeader } from "@/components/panel"
+import { WorkbenchHeader } from "@/components/workbench-header"
 import { PaneBar } from "@/components/phone-panes"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
+import { Tabs as TabsPrimitive } from "radix-ui"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { VerbMenu, type Verb } from "@/components/verbs"
@@ -83,13 +83,16 @@ import { VerbMenu, type Verb } from "@/components/verbs"
 type Tab = "changes" | "history" | "branches" | "github"
 
 // Where the three columns stop fitting: `lg`, the breakpoint their widths use.
-const onePane = () => window.matchMedia("(max-width: 1023.98px)").matches
+const onePane = () => window.matchMedia(breakpointQuery("lg", "below")).matches
 
 // The preview is the column that needs the room — a diff is wider than a
 // file name or a commit subject — so the other two start narrow and can be
-// dragged wider; at 1280 with the sidebar open the diff still gets 400px.
+// dragged wider; at 1280 with the sidebar open the diff still gets 360px.
+// The middle column starts at the width its four views need whole, counts
+// included, at the shared strip's spacing: at 392 "Branches" sat under the
+// strip's fade and "GitHub" was reached only by scrolling it.
 const TREE = { min: 208, max: 480, base: 240 }
-const WORK = { min: 300, max: 640, base: 392 }
+const WORK = { min: 300, max: 640, base: 424 }
 // What the preview column may never be dragged below. A per-panel maximum is
 // not a layout constraint: two panes each inside their own limit still add up
 // to more than a 1280 row has, and the preview — `flex-1 min-w-0`, so it
@@ -539,7 +542,7 @@ export function RepoWorkspace({
       ]}
     >
       <CommitAuthors.Provider value={authors.data}>
-        <Page fill className="gap-3 p-0 lg:px-3 lg:py-3">
+        <Page fill="workspace" className="gap-3">
           {operation && (
             <Notice tone="warning" title={`A ${operation} is in progress`}>
               {operation === "bisect"
@@ -627,91 +630,80 @@ export function RepoWorkspace({
             menu and the account at its end, then where HEAD is stretched
             beside the sync verbs. The path goes when there is a remote to
             name instead; it stays on the title's tooltip. */}
-            <PaneHeader
-              className={cn("@container h-auto min-h-12 px-2 py-1.5", reading && "max-lg:hidden")}
-            >
-              <div className="grid w-full min-w-0 grid-cols-[minmax(0,1fr)_auto] items-center gap-x-2 gap-y-1.5 @4xl:flex">
-                <div className="flex min-w-0 items-center gap-2 @4xl:flex-1">
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="icon-sm"
-                        variant="ghost"
-                        className="shrink-0 text-muted-foreground hover:text-foreground"
-                        aria-label="Back to repositories"
-                        onClick={onBack}
-                      >
-                        <ArrowLeft className="size-4" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>Back to all repositories</TooltipContent>
-                  </Tooltip>
-                  <RepoMark repo={repo} size="sm" />
-                  {Object.keys(fileDrafts).length > 0 && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="text-warning"
-                      title="Drafts stay in this tab until saved or discarded"
-                      onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
-                    >
-                      {Object.keys(fileDrafts).length} unsaved{" "}
-                      {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
-                    </Button>
-                  )}
-                  <div className="min-w-0 shrink">
-                    <p className="flex min-w-0 items-center gap-2">
-                      <span className="truncate text-body font-semibold" title={repo.path}>
-                        {repo.name}
-                      </span>
-                      {repo.worktree && <Tag className="shrink-0">worktree</Tag>}
-                    </p>
-                    <p className="flex min-w-0 items-center gap-1.5 text-micro text-muted-foreground">
-                      {forge && forgeMark && (
-                        <>
-                          <ProductGlyph id={forgeMark} className="size-3" />
-                          {forge.url ? (
-                            <a
-                              href={forge.url}
-                              target="_blank"
-                              rel="noreferrer"
-                              className="max-w-[14rem] truncate text-foreground/75 hover:text-foreground hover:underline"
-                            >
-                              {forge.slug}
-                            </a>
-                          ) : (
-                            <span className="max-w-[14rem] truncate">{forge.slug}</span>
-                          )}
-                          <span
-                            aria-hidden
-                            className={cn(!(repo.worktree && repo.main) && "hidden")}
-                          >
-                            ·
-                          </span>
-                        </>
-                      )}
-                      {repo.worktree && repo.main ? (
-                        <button
-                          type="button"
-                          onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
-                          className="truncate font-mono hover:text-foreground hover:underline"
-                          title={`Open the main checkout at ${repo.main}`}
+            <WorkbenchHeader
+              className={cn(reading && "max-lg:hidden")}
+              back={{
+                label: "Back to repositories",
+                hint: "Back to all repositories",
+                onClick: onBack,
+              }}
+              heading={repo.name}
+              mark={<RepoMark repo={repo} size="sm" />}
+              name={
+                <>
+                  <span className="truncate" title={repo.path}>
+                    {repo.name}
+                  </span>
+                  {repo.worktree && <Tag className="shrink-0 font-normal">worktree</Tag>}
+                </>
+              }
+              state={
+                Object.keys(fileDrafts).length > 0 && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="text-warning"
+                    title="Drafts stay in this tab until saved or discarded"
+                    onClick={() => setPreview({ kind: "file", path: Object.keys(fileDrafts)[0] })}
+                  >
+                    {Object.keys(fileDrafts).length} unsaved{" "}
+                    {Object.keys(fileDrafts).length === 1 ? "file" : "files"}
+                  </Button>
+                )
+              }
+              subline={
+                <>
+                  {forge && forgeMark && (
+                    <>
+                      <ProductGlyph id={forgeMark} className="size-3" />
+                      {forge.url ? (
+                        <a
+                          href={forge.url}
+                          target="_blank"
+                          rel="noreferrer"
+                          className="max-w-[14rem] truncate text-muted-foreground hover:text-foreground hover:underline"
                         >
-                          worktree of {repo.main}
-                        </button>
+                          {forge.slug}
+                        </a>
                       ) : (
-                        <span
-                          className={cn("truncate font-mono", forge && forgeMark && "hidden")}
-                          title={repo.path}
-                        >
-                          {repo.path}
-                        </span>
+                        <span className="max-w-[14rem] truncate">{forge.slug}</span>
                       )}
-                    </p>
-                  </div>
-                </div>
-
-                <div className="order-1 col-span-2 flex min-w-0 items-center gap-2 @4xl:order-none">
+                      <span aria-hidden className={cn(!(repo.worktree && repo.main) && "hidden")}>
+                        ·
+                      </span>
+                    </>
+                  )}
+                  {repo.worktree && repo.main ? (
+                    <button
+                      type="button"
+                      onClick={() => router.push(`/git?repo=${encodeURIComponent(repo.main!)}`)}
+                      className="truncate font-mono hover:text-foreground hover:underline"
+                      title={`Open the main checkout at ${repo.main}`}
+                    >
+                      worktree of {repo.main}
+                    </button>
+                  ) : (
+                    <span
+                      className={cn("truncate font-mono", forge && forgeMark && "hidden")}
+                      title={repo.path}
+                    >
+                      {repo.path}
+                    </span>
+                  )}
+                </>
+              }
+              tools={
+                <>
                   {/* Where HEAD is: a button into Branches, carrying how far it has
                 drifted. What it tracks is the tooltip, because "will this push
                 go where I think" is decided there and nowhere else. */}
@@ -752,6 +744,26 @@ export function RepoWorkspace({
                               : "No upstream yet — push publishes it"}
                     </TooltipContent>
                   </Tooltip>
+
+                  {/* The graph beside where HEAD is: it draws the whole
+                repository's branches, not a view of the middle column, and
+                on that column's strip it pushed the last of the four views
+                out of sight. Below `lg` it is in the menu. */}
+                  <IconAction
+                    variant="outline"
+                    aria-pressed={graphOpen}
+                    label="Branch graph"
+                    tooltip="See every branch and where it forked"
+                    className={cn(
+                      "shrink-0 max-lg:hidden",
+                      graphOpen
+                        ? "bg-accent text-foreground"
+                        : "text-muted-foreground hover:text-foreground",
+                    )}
+                    onClick={() => setGraphOpen((v) => !v)}
+                  >
+                    <SourceFork className="size-3.5" />
+                  </IconAction>
 
                   {/* Fetch, pull and push as one control: three verbs on one
                 remote, read as a set. Push keeps the command face — it is
@@ -837,9 +849,10 @@ export function RepoWorkspace({
                       </>
                     )}
                   </div>
-                </div>
-
-                <div className="flex items-center gap-2">
+                </>
+              }
+              menu={
+                <>
                   <VerbMenu
                     verbs={more}
                     label="More git actions"
@@ -853,9 +866,9 @@ export function RepoWorkspace({
                   <span aria-hidden className="mx-0.5 hidden h-5 w-px bg-hairline @4xl:block" />
 
                   <GitHubAccountControl repoPath={repo.path} status={github} compact="fit" />
-                </div>
-              </div>
-            </PaneHeader>
+                </>
+              }
+            />
 
             {/* The three columns. Side by side they share the frame's height and
             each scrolls inside itself. On a small screen each takes the whole
@@ -893,92 +906,85 @@ export function RepoWorkspace({
                   max={TREE.max}
                   onChange={(px, commit) => setTreeWidth(clamp(px, TREE.min, TREE.max), commit)}
                   onReset={resetTreeWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-sticky"
                 />
               </div>
 
-              <div
+              {/* The column's views as real tabs: arrow keys move along the
+                  strip and each tab names the panel it shows. They were
+                  role=tab buttons with no tablist, axe's critical on /git. */}
+              <TabsPrimitive.Root
+                value={shown}
+                onValueChange={(next) => pick(next as Tab)}
                 className={cn(
                   "relative flex min-h-0 flex-1 flex-col lg:w-(--jd-work) lg:flex-none lg:shrink-0 lg:border-r",
                   (treeShown || reading) && "max-lg:hidden",
                 )}
               >
-                <div className="flex h-9 shrink-0 [scrollbar-width:none] items-center overflow-x-auto border-b border-hairline px-1 max-lg:hidden">
-                  <TabButton
-                    active={shown === "changes"}
-                    onClick={() => pick("changes")}
-                    icon={<Pencil />}
-                  >
-                    Changes
-                    {changeCount > 0 && (
-                      <ChipCount className="text-(--git-modified) opacity-100">
-                        {changeCount}
-                      </ChipCount>
-                    )}
-                  </TabButton>
-                  <TabButton
-                    active={shown === "history"}
-                    onClick={() => pick("history")}
-                    icon={<SourceCommit />}
-                  >
-                    History
-                  </TabButton>
-                  <TabButton
-                    active={shown === "branches"}
-                    onClick={() => pick("branches")}
-                    icon={<SourceBranch />}
-                  >
-                    Branches
-                  </TabButton>
-                  <TabButton
-                    active={shown === "github"}
-                    onClick={() => pick("github")}
-                    icon={<GitHubMark />}
-                  >
-                    GitHub
-                    {openPulls > 0 && (
-                      <ChipCount className="inline-flex items-center gap-0.5 text-(--pull-open) opacity-100">
-                        <SourcePull aria-hidden className="size-3" />
-                        {openPulls}
-                      </ChipCount>
-                    )}
-                  </TabButton>
-                  <span className="flex-1" />
-                  {shown === "changes" && (
-                    <>
-                      <IconAction
-                        label="Previous changed file (Alt+↑)"
-                        onClick={() => changeBy(-1)}
-                      >
-                        <ChevronUp />
-                      </IconAction>
-                      <IconAction label="Next changed file (Alt+↓)" onClick={() => changeBy(1)}>
-                        <ChevronDown />
-                      </IconAction>
-                    </>
-                  )}
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        aria-pressed={graphOpen}
-                        aria-label="Branch graph"
-                        className={cn(
-                          "size-7 shrink-0 p-0",
-                          graphOpen
-                            ? "bg-accent text-foreground"
-                            : "text-muted-foreground hover:text-foreground",
-                        )}
-                        onClick={() => setGraphOpen((v) => !v)}
-                      >
-                        <SourceFork className="size-3.5" />
-                      </Button>
-                    </TooltipTrigger>
-                    <TooltipContent>See every branch and where it forked</TooltipContent>
-                  </Tooltip>
-                </div>
-                {shown === "changes" && (
+                <ViewTabList
+                  label="Repository views"
+                  size="sm"
+                  value={shown}
+                  views={[
+                    {
+                      key: "changes",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <Pencil />
+                          </TabGlyph>
+                          Changes
+                          {changeCount > 0 && (
+                            <ChipCount className="text-git-modified opacity-100">
+                              {changeCount}
+                            </ChipCount>
+                          )}
+                        </>
+                      ),
+                    },
+                    {
+                      key: "history",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <SourceCommit />
+                          </TabGlyph>
+                          History
+                        </>
+                      ),
+                    },
+                    {
+                      key: "branches",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <SourceBranch />
+                          </TabGlyph>
+                          Branches
+                        </>
+                      ),
+                    },
+                    {
+                      key: "github",
+                      label: (
+                        <>
+                          <TabGlyph>
+                            <GitHubMark />
+                          </TabGlyph>
+                          GitHub
+                          {openPulls > 0 && (
+                            <ChipCount className="inline-flex items-center gap-0.5 text-pull-open opacity-100">
+                              <SourcePull aria-hidden className="size-3" />
+                              {openPulls}
+                            </ChipCount>
+                          )}
+                        </>
+                      ),
+                    },
+                  ]}
+                  className="px-1 max-lg:hidden"
+                />
+                <TabsPrimitive.Content value="changes" className={PANEL}>
                   <ChangesPanel
                     repoPath={repo.path}
                     status={status}
@@ -992,8 +998,8 @@ export function RepoWorkspace({
                     active={activeKey}
                     onChanged={onChanged}
                   />
-                )}
-                {shown === "history" && (
+                </TabsPrimitive.Content>
+                <TabsPrimitive.Content value="history" className={PANEL}>
                   <HistoryPanel
                     // A commit, a reset or a switch changes what history is, so the
                     // list is keyed on the tip and remounts when it moves.
@@ -1011,8 +1017,8 @@ export function RepoWorkspace({
                     active={activeKey}
                     onChanged={onChanged}
                   />
-                )}
-                {shown === "branches" && (
+                </TabsPrimitive.Content>
+                <TabsPrimitive.Content value="branches" className={PANEL}>
                   <BranchesPanel
                     key={`${head.head ?? ""}:${head.branch}`}
                     repoPath={repo.path}
@@ -1025,8 +1031,8 @@ export function RepoWorkspace({
                     onSelect={setPreview}
                     onChanged={onChanged}
                   />
-                )}
-                {shown === "github" && (
+                </TabsPrimitive.Content>
+                <TabsPrimitive.Content value="github" className={PANEL}>
                   <GitHubPanel
                     repoPath={repo.path}
                     branch={branch}
@@ -1042,7 +1048,7 @@ export function RepoWorkspace({
                     activePull={activePull}
                     onChanged={onChanged}
                   />
-                )}
+                </TabsPrimitive.Content>
                 <ResizeHandle
                   side="left"
                   label="Changes panel width"
@@ -1051,9 +1057,9 @@ export function RepoWorkspace({
                   max={WORK.max}
                   onChange={(px, commit) => setWorkWidth(clamp(px, WORK.min, WORK.max), commit)}
                   onReset={resetWorkWidth}
-                  className="absolute inset-y-0 -right-1 z-20"
+                  className="absolute inset-y-0 -right-1 z-sticky"
                 />
-              </div>
+              </TabsPrimitive.Root>
 
               <div
                 data-slot="git-preview"
@@ -1082,7 +1088,7 @@ export function RepoWorkspace({
                     label: "Changes",
                     icon: <Pencil />,
                     count: changeCount,
-                    countClassName: "bg-(--git-modified)",
+                    countClassName: "bg-git-modified",
                   },
                   { key: "history", label: "History", icon: <SourceCommit /> },
                   { key: "branches", label: "Branches", icon: <SourceBranch /> },
@@ -1091,7 +1097,7 @@ export function RepoWorkspace({
                     label: "GitHub",
                     icon: <GitHubMark />,
                     count: openPulls,
-                    countClassName: "bg-(--pull-open)",
+                    countClassName: "bg-pull-open",
                   },
                   { key: "files", label: "Files", icon: <FolderOpen /> },
                 ]}
@@ -1181,37 +1187,21 @@ function previewKey(p: GitPreview | null): string | undefined {
 }
 
 /**
- * A tab of the middle column, with the glyph of what it holds — the edit
- * pencil, the commit on its line, the branch, GitHub's own mark — in the
- * location blue while it is the one open (§3), so four words in one grey are
- * found by their marks before they are read.
+ * The glyph of what a tab of the middle column holds — the edit pencil, the
+ * commit on its line, the branch, GitHub's own mark — in the location blue
+ * while it is the one open (§3), so four words in one grey are found by their
+ * marks before they are read.
  */
-function TabButton({
-  active,
-  onClick,
-  icon,
-  children,
-}: {
-  active: boolean
-  onClick: () => void
-  icon: React.ReactNode
-  children: React.ReactNode
-}) {
+function TabGlyph({ children }: { children: React.ReactNode }) {
   return (
-    <button
-      type="button"
-      role="tab"
-      aria-selected={active}
-      onClick={onClick}
-      className={tabClasses(active, "h-9 gap-1.5 px-2")}
+    <span
+      aria-hidden
+      className="flex text-muted-foreground in-data-[state=active]:text-brand [&_svg]:size-3.5"
     >
-      <span
-        aria-hidden
-        className={cn("flex [&_svg]:size-3.5", active ? "text-brand" : "text-muted-foreground")}
-      >
-        {icon}
-      </span>
       {children}
-    </button>
+    </span>
   )
 }
+
+/** A view of the middle column, filling it as the list it holds did. */
+const PANEL = "flex min-h-0 flex-1 flex-col focus-ring-inset"

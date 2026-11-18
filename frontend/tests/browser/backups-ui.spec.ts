@@ -124,7 +124,7 @@ test("the picture draws each kind by its products and each destination as its se
 
   const goes = picture(page, "Where the archives go")
   await expect(goes).toContainText("Backblaze B2")
-  await expect(goes).toContainText("wayy-backups")
+  await expect(goes).toContainText("operator-backups")
   await expect(goes).toContainText("This server's disk")
   // An S3 job with no endpoint is Amazon's, because that is where it writes.
   await expect(goes).toContainText("Amazon S3")
@@ -341,12 +341,21 @@ test("closing the detail edit discards its draft and reopening uses the saved de
   page,
 }) => {
   await page.goto("/backups/1")
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  // Edit is behind the identity line's menu; Run now is its command.
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Discard this edit")
   await page.keyboard.press("Escape")
   await expect(dialog).toHaveCount(0)
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(jobs[0].name)
 })
 
@@ -382,7 +391,11 @@ test("two editors keep the stale draft and keys until an explicit review resolve
       return route.fulfill({ contentType: "application/json", body: JSON.stringify(current) })
     })
     await tab.goto("/backups/2")
-    await tab.getByRole("button", { name: "Edit", exact: true }).click()
+    await tab
+      .locator("[data-slot='host-identity']")
+      .getByRole("button", { name: /^More actions for/ })
+      .click()
+    await tab.getByRole("menuitem", { name: "Edit", exact: true }).click()
   }
   const first = page.getByRole("dialog")
   const stale = other.getByRole("dialog")
@@ -430,7 +443,11 @@ test("two editors keep the stale draft and keys until an explicit review resolve
     retention: 10,
     secrets: { accessKeyId: "fixture-new-key", secretAccessKey: "fixture-new-secret" },
   })
-  await other.getByRole("button", { name: "Edit", exact: true }).click()
+  await other
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await other.getByRole("menuitem", { name: "Edit", exact: true }).click()
   await expect(stale.getByLabel("Secret access key", { exact: true })).toHaveValue("")
   await other.close()
 })
@@ -454,7 +471,11 @@ test("a held backup draft keeps its original revision after dashboard navigation
     return route.fulfill({ contentType: "application/json", body: JSON.stringify(current) })
   })
   await page.goto("/backups/2")
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   const dialog = page.getByRole("dialog")
   await dialog.getByRole("textbox", { name: "Name", exact: true }).fill("Held draft")
   await dialog.getByLabel("Secret access key", { exact: true }).fill("fixture-held-secret")
@@ -470,14 +491,22 @@ test("a held backup draft keeps its original revision after dashboard navigation
   await page.getByRole("link", { name: "Databases nightly", exact: true }).click()
   await expect(page).toHaveURL(/\/backups\/2$/)
   await expect(page.getByRole("heading", { name: "Databases nightly", exact: true })).toBeVisible()
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue("Held draft")
   await dialog.getByRole("button", { name: "Save", exact: true }).click()
   await expect(dialog.getByText("This job changed while you were editing")).toBeVisible()
   expect(saves[0].expectedRevision).toBe(1)
   await page.evaluate(() => window.dispatchEvent(new Event("jd-working-state-cleared")))
   await expect(dialog).toHaveCount(0)
-  await page.getByRole("button", { name: "Edit", exact: true }).click()
+  await page
+    .locator("[data-slot='host-identity']")
+    .getByRole("button", { name: /^More actions for/ })
+    .click()
+  await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
   await expect(dialog.getByLabel("Secret access key", { exact: true })).toHaveValue("")
   await expect(dialog.getByRole("textbox", { name: "Name", exact: true })).toHaveValue(current.name)
 })
@@ -527,14 +556,14 @@ test("a job's page opens on its identity, its picture and the run it last took",
   await expect(page.getByRole("heading", { name: "Databases nightly" })).toBeAttached()
   const identity = page.locator("[data-slot=host-identity]")
   await expect(identity).toContainText("2 database dumps")
-  await expect(identity).toContainText("Backblaze B2 · wayy-backups")
+  await expect(identity).toContainText("Backblaze B2 · operator-backups")
   await expect(identity).toContainText("failed")
 
   const takes = picture(page, "What Databases nightly takes")
   await expect(takes).toContainText("LOL")
   await expect(takes).toContainText("Main")
   await expect(takes.locator('img[src="/logos/postgresql.svg"]')).toHaveCount(2)
-  await expect(picture(page, "Where its archives go")).toContainText("wayy-backups")
+  await expect(picture(page, "Where its archives go")).toContainText("operator-backups")
 
   // What it holds is one sentence with its trend, not four tiles. How the
   // last run went is the identity line's end, and when it runs next is the

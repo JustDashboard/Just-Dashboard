@@ -1,5 +1,6 @@
 "use client"
 
+import { plural } from "@/lib/format"
 import { useRef } from "react"
 import { DesktopDevice, Globe, Terminal, type Icon } from "@/components/icons"
 import { describeClient, parseAgent } from "@/lib/clients"
@@ -7,7 +8,7 @@ import type { DashboardConfigReport } from "@/lib/types"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import { cn } from "@/lib/utils"
 
 /**
@@ -19,7 +20,7 @@ import { cn } from "@/lib/utils"
  * The list said what the stack is made of but not how it fits, and the one
  * fact a reader comes to this page with — *why can I (or can't I) reach it
  * from here* — is a path, so it is drawn as one in the wiring vocabulary the
- * deployment and database maps already speak (`deploy/wire`). Every mark is
+ * deployment and database maps already speak (`components/wire/wire`). Every mark is
  * the product itself: the browser this tab is, Tailscale when the address is
  * a tailnet name, the certificate's issuer on the proxy.
  *
@@ -104,9 +105,7 @@ export function RequestPath({
                       {network.hint}
                     </span>
                   )}
-                  <span className="block">
-                    {allowed} {allowed === 1 ? "network" : "networks"} allowed
-                  </span>
+                  <span className="block">{plural(allowed, "network")} allowed</span>
                 </>
               }
             />
@@ -119,7 +118,7 @@ export function RequestPath({
               eyebrow="Proxy"
               title={
                 <>
-                  Caddy <span className="numeric font-mono text-[var(--tag-pink)]">:{s.port}</span>
+                  Caddy <span className="numeric font-mono text-tag-pink">:{s.port}</span>
                 </>
               }
               hint={
@@ -190,7 +189,7 @@ function Loopback({ port }: { port: number }) {
       {/* Two to a row on a phone leaves no room for the address every
           service shares; the port is the part that differs. */}
       <span className="text-muted-foreground max-sm:hidden">127.0.0.1</span>
-      <span className="text-[var(--tag-pink)]">:{port}</span>
+      <span className="text-tag-pink">:{port}</span>
     </span>
   )
 }
@@ -255,7 +254,7 @@ export function EndpointText({ url, className }: { url: string; className?: stri
     <span className={cn("min-w-0 truncate font-mono", className)}>
       <span className="text-muted-foreground">{scheme}</span>
       <span className="text-foreground">{host}</span>
-      {port && <span className="numeric text-[var(--tag-pink)]">{port}</span>}
+      {port && <span className="numeric text-tag-pink">{port}</span>}
       {rest && <span className="text-muted-foreground">{rest}</span>}
     </span>
   )

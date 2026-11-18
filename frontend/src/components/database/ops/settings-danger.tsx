@@ -8,10 +8,10 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
+import { DangerRow, DangerRows } from "@/components/settings/danger-row"
+import { SettingSection } from "@/components/settings/setting-card"
 import { FormFact } from "@/components/form"
 import { LogoGlyph } from "@/components/logo"
-import { Panel } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
 import { EngineMark } from "@/components/database/kit"
@@ -35,45 +35,6 @@ type Dropped = {
   warnings?: string[]
 }
 
-/**
- * One act: what it is done to, drawn as itself — the dashboard's own record,
- * the database as its engine, the container as Docker's — then its name, one
- * sentence, and its button beside them. With no button it is an act that
- * cannot be taken, and its title goes quiet.
- */
-function DangerRow({
-  mark,
-  title,
-  sentence,
-  facts,
-  action,
-}: {
-  mark: React.ReactNode
-  title: string
-  sentence: React.ReactNode
-  facts?: React.ReactNode
-  action?: React.ReactNode
-}) {
-  return (
-    <div className="min-w-0 px-5 py-4">
-      <div className="grid min-w-0 grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-3 sm:grid-cols-[auto_minmax(0,1fr)_auto] sm:items-center">
-        {mark}
-        <div className="min-w-0 space-y-1">
-          {/* Under the section's own "Danger zone" heading, not beside it. */}
-          <h4 className={cn("text-sm font-medium", !action && "text-muted-foreground")}>{title}</h4>
-          <p className="max-w-prose text-xs leading-relaxed text-muted-foreground">{sentence}</p>
-          {facts && (
-            <p className="pt-0.5 text-hint leading-relaxed text-muted-foreground">{facts}</p>
-          )}
-        </div>
-        {action && (
-          <div className="col-span-2 flex sm:col-span-1 max-sm:[&>*]:w-full">{action}</div>
-        )}
-      </div>
-    </div>
-  )
-}
-
 /** The dashboard's own mark, for the one act that touches only what the dashboard keeps. */
 function DashboardGlyph({ className }: { className?: string }) {
   return <LogoGlyph small className={cn(className, "w-auto text-brand")} />
@@ -83,9 +44,10 @@ function DashboardGlyph({ className }: { className?: string }) {
  * The acts that end a connection or a database: forget the connection, delete
  * the database it names, remove the container that runs its server.
  *
- * One frame, in the danger rule, around all of them — the page's only framed
- * block, so the edge says "careful" once. Each act is a row with its sentence
- * and its button beside it. Forgetting is asked with the ordinary
+ * One frame, in the danger rule, around all of them (`DangerRows`), each act
+ * a `DangerRow` with its sentence and its button beside it, as a
+ * deployment's danger zone draws them. No line under the heading: each
+ * sentence says what its own act cannot undo. Forgetting is asked with the ordinary
  * confirmation; deleting the database is the one act of the section that is
  * typed for, and its phrase is the name of what goes. A connection that names
  * no database offers no delete at all — there is no dialog to open without a
@@ -275,14 +237,8 @@ export function DangerSection({ confirm }: { confirm: (request: ConfirmRequest) 
 
   if (rows.length === 0) return null
   return (
-    <SettingSection
-      id="danger"
-      tone="danger"
-      title="Danger zone"
-      state="Nothing here can be undone from the dashboard."
-    >
-      {/* Framed in the danger rule: the one edge on the page, around what cannot be undone. */}
-      <Panel className="divide-y divide-hairline border-rule-danger">{rows}</Panel>
+    <SettingSection id="danger" tone="danger" title="Danger zone">
+      <DangerRows>{rows}</DangerRows>
     </SettingSection>
   )
 }

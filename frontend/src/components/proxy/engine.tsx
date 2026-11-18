@@ -32,10 +32,11 @@ import { useAuth } from "@/hooks/use-auth"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Status, type DotTone } from "@/components/status-dot"
 import { JobConsole, useJobConsole } from "@/components/job-console"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
 import { engineProduct } from "@/components/proxy/marks"
 import type { Verb } from "@/components/verbs"
-import { useNow } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
@@ -160,6 +161,7 @@ export function EngineIdentity({
   serviceBusy,
   certbotVersion,
   renewSource,
+  urgent,
   inventory,
   verdict,
   modules,
@@ -183,6 +185,12 @@ export function EngineIdentity({
   serviceBusy?: EngineAction
   certbotVersion?: string
   renewSource?: string | null
+  /**
+   * The facts of what it serves that want action ("2 certificates, 2 not
+   * valid"), as `Fact`s: they lead the line, so a phone that shows one line
+   * of facts still shows them.
+   */
+  urgent?: React.ReactNode
   /** What the engine serves — its sites, certificates, streams and open ports — after its own facts. */
   inventory?: React.ReactNode
   /**
@@ -209,7 +217,7 @@ export function EngineIdentity({
     status.nginx ? status.nginxVersion : status.caddy ? status.caddyVersion : undefined
   )?.replace(/^(nginx|caddy)\//i, "")
   return (
-    <HostIdentity
+    <IdentityHeader
       mark={engineProduct(status)}
       fallback={Globe}
       title={
@@ -229,7 +237,7 @@ export function EngineIdentity({
           {version && (
             <>
               {" "}
-              <span className="font-mono text-body font-normal text-muted-foreground">
+              <span className="font-mono text-body leading-none font-normal text-muted-foreground">
                 {version}
               </span>
             </>
@@ -262,44 +270,34 @@ export function EngineIdentity({
       }
       facts={
         <>
+          {/* What wants action first: a renewal nobody schedules, then what
+              the caller says is wrong with what it serves. */}
+          {renewSource === null && status.certbot && (
+            <Fact className="font-medium text-warning">renewal not scheduled</Fact>
+          )}
+          {urgent}
           {status.ingressContainer && (
-            <>
-              <HostFact product="docker">
-                ingress <span className="font-mono text-[0.9em]">{status.ingressContainer}</span>
-              </HostFact>
-              <FactDot />
-            </>
+            <Fact product="docker">
+              ingress <span className="code-inline">{status.ingressContainer}</span>
+            </Fact>
           )}
           {status.ingressState === "provisionable" && (
-            <>
-              <HostFact product="docker">a Caddy ingress starts with the first deployment</HostFact>
-              <FactDot />
-            </>
+            <Fact product="docker">a Caddy ingress starts with the first deployment</Fact>
           )}
           {/* certbot is Let's Encrypt's client, and the mark says what it
-              issues rather than who wrote it. */}
-          {/* Who renews is said with certbot rather than as a fact of its
-              own; only a renewal nobody schedules stands apart, in warning. */}
+              issues rather than who wrote it. Its version and who renews are
+              the expected answers, so they are its tooltip. */}
           {status.certbot ? (
-            <HostFact product="lets-encrypt">
-              {/* Its version and who renews are the expected answers, so they
-                  are its tooltip; only a renewal nobody schedules is said. */}
-              <span
-                title={[certbotVersion, renewSource && `renews via ${renewSource}`]
-                  .filter(Boolean)
-                  .join(", ")}
-              >
-                certbot
-              </span>
-            </HostFact>
+            <Fact
+              product="lets-encrypt"
+              title={[certbotVersion, renewSource && `renews via ${renewSource}`]
+                .filter(Boolean)
+                .join(", ")}
+            >
+              certbot
+            </Fact>
           ) : (
-            <span>no certbot</span>
-          )}
-          {renewSource === null && status.certbot && (
-            <>
-              <FactDot />
-              <span className="font-medium text-warning">renewal not scheduled</span>
-            </>
+            <Fact>no certbot</Fact>
           )}
           {inventory}
         </>
@@ -923,10 +921,7 @@ export function ModulesFact({
       <Popover open={open} onOpenChange={setOpen}>
         <PopoverTrigger
           className={cn(
-            // A button takes the browser's own text-rendering, not the body's
-            // geometric precision, and at 12px on Linux "2 modules" read as
-            // "2modules".
-            "ml-1 rounded-sm align-middle text-xs font-normal text-muted-foreground focus-ring transition-colors [text-rendering:inherit] hover:text-foreground hover:underline",
+            "ml-1 rounded-sm align-middle text-xs font-normal text-muted-foreground focus-ring transition-colors hover:text-foreground hover:underline",
             "font-medium text-warning",
           )}
         >

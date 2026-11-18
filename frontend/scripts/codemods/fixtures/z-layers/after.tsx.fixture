@@ -1,0 +1,16 @@
+import { cn } from "@/lib/utils"
+
+export function Demo({ immersive }: { immersive: boolean }) {
+  return (
+    <div className={cn("relative", immersive && "fixed inset-0 z-immersive p-3")}>
+      <div className="sticky top-0 z-sticky">head</div>
+      <div className="absolute z-raised focus-visible:z-raised">chip</div>
+      <div className="absolute inset-0 z-pane max-lg:z-sticky">pane</div>
+      <div className="fixed bottom-4 z-float">save</div>
+      <div className="fixed inset-0 z-overlay bg-black/50">dialog</div>
+      <div className="z-0">base</div>
+      <div className="z-[1]">odd</div>
+      <div className="-z-10">behind</div>
+    </div>
+  )
+}

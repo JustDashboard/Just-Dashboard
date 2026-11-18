@@ -7,13 +7,15 @@ import { ApiError, errorMessage, get, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { DbConnection, DbDriverInfo, Job, JobLine } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
-import { ChoiceGrid, EngineCard } from "@/components/choice-card"
-import { Segments } from "@/components/deploy/settings/segments"
+import { ChoiceGrid } from "@/components/choice-card"
+import { EngineCard } from "@/components/database/engine-card"
+import { Segments } from "@/components/segments"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { Disclosure, Field, FieldRow, FormNote, OptionList, OptionRow } from "@/components/form"
 import { JobConsole } from "@/components/job-console"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -322,7 +324,7 @@ export function DatabaseCreation({
     // The catalogue and the chosen engine's settings side by side, each the
     // height of the window with its own scroll: choosing an engine never
     // scrolls the catalogue away.
-    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_26rem] xl:grid-rows-[minmax(0,1fr)] xl:items-stretch">
+    <div className="grid min-w-0 items-start gap-x-6 gap-y-6 xl:h-full xl:min-h-0 xl:grid-cols-[minmax(0,1fr)_26rem] xl:grid-rows-fill xl:items-stretch">
       <Panel plain id={`${id}-catalogue`} tabIndex={-1} className="min-w-0 scroll-mt-4 xl:min-h-0">
         <PanelHeader
           title="Engines"
@@ -708,7 +710,7 @@ export function DatabaseCreation({
                 </Button>
               }
             >
-              <Button className="h-11 sm:h-9" disabled={blocked} onClick={() => void create()}>
+              <Button disabled={blocked} onClick={() => void create()}>
                 <Play />
                 {container ? "Retry connection setup" : "Create"}
               </Button>

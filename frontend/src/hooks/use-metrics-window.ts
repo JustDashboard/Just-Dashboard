@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
 import { useRangePreference } from "@/hooks/use-metrics-history"
-import type { MetricsWindow, RangeKey } from "@/lib/metrics-range"
+import type { MetricsWindow, RangeKey } from "@/lib/metrics/range"
 
 export type WindowControls = {
   window: MetricsWindow

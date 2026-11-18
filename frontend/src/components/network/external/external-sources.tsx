@@ -1,7 +1,7 @@
 "use client"
 
 import { Key, Location, Play, Plus, Trash } from "@/components/icons"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { Status } from "@/components/status-dot"
@@ -9,10 +9,10 @@ import { EmptyNote } from "@/components/state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { VerbActions, type Verb } from "@/components/verbs"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { relativeTime } from "@/lib/format"
-import type { ExternalVantage } from "@/lib/network-external"
+import type { ExternalVantage } from "@/lib/network/external"
 import { sourceState } from "@/components/network/external/reading"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The controlled sources, one card each: where the operator says it is, how
@@ -46,7 +46,7 @@ export function ExternalSources({
 }) {
   // From `sm` a card is one line; narrower, its placement and last poll take
   // a second line under its name on every card alike.
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   return (
     <Panel plain aria-label="Sources">
       <PanelHeader

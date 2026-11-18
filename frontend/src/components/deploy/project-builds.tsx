@@ -2,12 +2,13 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { ArrowUpRight, Wrench } from "@/components/icons"
+import { ArrowUpRight } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { relativeTime, timestamp } from "@/lib/format"
 import type { DeploymentEngineRun } from "@/lib/types"
-import { FactDot } from "@/components/metrics/host-identity"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { Fact, FactLine } from "@/components/fact-line"
+import { ProjectEmpty } from "@/components/deploy/project-empty"
+import { LoadingRows } from "@/components/loading"
 import {
   Select,
   SelectContent,
@@ -16,7 +17,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { BuildConsole } from "@/components/deploy/build-console"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { RunActorMark } from "@/components/deploy/run-marks"
 import { useRunTranscript } from "@/components/deploy/run-stream"
 import {
@@ -26,8 +27,8 @@ import {
   runDurationSeconds,
   runSubject,
   runTitle,
-  useNow,
 } from "@/components/deploy/vocabulary"
+import { useNow } from "@/hooks/use-now"
 
 /**
  * What the builds said, beside what the running release says.
@@ -75,10 +76,9 @@ export function ProjectBuilds({
           <LoadingRows rows={6} className="min-w-0 flex-1 p-3" />
         ) : (
           <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center p-6">
-            <EmptyState
-              icon={Wrench}
+            <ProjectEmpty
               title="Nothing has been built yet"
-              description="A deployment's first run writes its transcript here — every command the build ran and what it printed."
+              reason="A deployment's first run writes its transcript here — every command the build ran and what it printed."
             />
           </div>
         )}
@@ -155,11 +155,12 @@ const RAIL_FROM = 900
 /** How a run in the picker ended, and when it was asked for. */
 function RunHint({ run }: { run: DeploymentEngineRun }) {
   return (
-    <span className="flex items-center gap-1.5">
-      <RunStatus state={run.state} operation={run.operation} className="shrink-0" />
-      <FactDot />
-      <span className="numeric">{relativeTime(run.requestedAt)}</span>
-    </span>
+    <FactLine nowrap>
+      <Fact>
+        <RunStatus state={run.state} operation={run.operation} className="shrink-0" />
+      </Fact>
+      <Fact className="numeric">{relativeTime(run.requestedAt)}</Fact>
+    </FactLine>
   )
 }
 
@@ -197,24 +198,17 @@ function BuildRow({
           </span>
           {subject && <span className="truncate text-hint text-muted-foreground">{subject}</span>}
         </span>
-        <span className="flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-          <RunStatus
-            state={run.state}
-            operation={run.operation}
-            live={active}
-            className="shrink-0"
-          />
-          <FactDot />
-          <span className="numeric shrink-0">{formatDuration(runDurationSeconds(run, now))}</span>
-          <FactDot />
-          <time
-            dateTime={run.requestedAt}
-            title={timestamp(run.requestedAt)}
-            className="numeric truncate"
-          >
-            {relativeTime(run.requestedAt)}
-          </time>
-        </span>
+        <FactLine nowrap className="text-hint text-muted-foreground">
+          <Fact>
+            <RunStatus state={run.state} operation={run.operation} live={active} />
+          </Fact>
+          <Fact className="numeric">{formatDuration(runDurationSeconds(run, now))}</Fact>
+          <Fact className="numeric">
+            <time dateTime={run.requestedAt} title={timestamp(run.requestedAt)}>
+              {relativeTime(run.requestedAt)}
+            </time>
+          </Fact>
+        </FactLine>
       </span>
     </button>
   )

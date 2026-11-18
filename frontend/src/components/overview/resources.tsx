@@ -1,17 +1,22 @@
 "use client"
 
-import { Connection, Cpu, Database, Gauge, Layers, type Icon } from "@/components/icons"
+import { cpuModes } from "@/components/metrics/cpu-modes"
+import { Connection, Cpu, Database, Gauge, Layers } from "@/components/icons"
 import { bytes, percent, rate } from "@/lib/format"
 import type { MountStats, Snapshot } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Meter, utilisationTone } from "@/components/meter"
-import { TileTrend } from "@/components/metrics/sparkline"
+import { TileTrend } from "@/components/sparkline"
 import { Bone } from "@/components/bone"
-import { ReadingLine, ReadingLines } from "@/components/reading-line"
+import {
+  ReadingLine,
+  ReadingLines,
+  ReadingMark,
+  readingLineHeight,
+} from "@/components/reading-line"
 import type { Tone } from "@/components/tone"
-import { WireMark } from "@/components/deploy/wire"
 import { Skeleton } from "@/components/ui/skeleton"
-import { CoreBars, HUE, LiveBytes, LiveFigure } from "./readings"
+import { CoreBars, HUE, LiveBytes, LiveFigure } from "@/components/live-figure"
 import { Filesystem } from "./storage"
 
 /**
@@ -79,14 +84,16 @@ export function ResourceReadings({
           href="/metrics"
           label="CPU on Metrics"
           mark={
-            <Mark tone={utilisationTone(snapshot.cpu.totalPercent)} hue={HUE.cpu} glyph={Cpu} />
+            <ReadingMark
+              tone={utilisationTone(snapshot.cpu.totalPercent)}
+              hue={HUE.cpu}
+              glyph={Cpu}
+            />
           }
           name="CPU"
           hint={
             <>
-              {modes
-                ? `${modes.user.toFixed(0)}% user · ${modes.system.toFixed(0)}% sys · ${modes.iowait.toFixed(0)}% wait`
-                : `load ${snapshot.cpu.loadAvg1.toFixed(2)}`}
+              {modes ? cpuModes(modes) : `load ${snapshot.cpu.loadAvg1.toFixed(2)}`}
               {modes && modes.steal >= 1 && (
                 <span className="numeric font-medium text-destructive">
                   {" · "}
@@ -115,7 +122,7 @@ export function ResourceReadings({
         <ReadingLine
           href="/metrics"
           label="Memory on Metrics"
-          mark={<Mark tone={memTone} hue={HUE.mem} glyph={Layers} />}
+          mark={<ReadingMark tone={memTone} hue={HUE.mem} glyph={Layers} />}
           name="Memory"
           hint={`${percent(snapshot.memory.usedPercent, 0)} used · ${bytes(snapshot.memory.cached)} cached`}
           trend={
@@ -133,7 +140,7 @@ export function ResourceReadings({
           href="/metrics"
           label="Load on Metrics"
           mark={
-            <Mark
+            <ReadingMark
               tone={utilisationTone((snapshot.cpu.loadAvg5 / cores) * 100)}
               hue={HUE.load}
               glyph={Gauge}
@@ -157,7 +164,7 @@ export function ResourceReadings({
         <ReadingLine
           href="/metrics"
           label="Network on Metrics"
-          mark={<Mark hue={HUE.net} glyph={Connection} />}
+          mark={<ReadingMark hue={HUE.net} glyph={Connection} />}
           name="Network"
           hint={`${rate(tx)} out · ${snapshot.sockets?.tcpInUse ?? 0} TCP sockets`}
           trend={recorded && hour(trends.net, "Network", HUE.net)}
@@ -170,7 +177,7 @@ export function ResourceReadings({
         <ReadingLine
           href="/metrics"
           label="Disk I/O on Metrics"
-          mark={<Mark hue={HUE.disk} glyph={Database} />}
+          mark={<ReadingMark hue={HUE.disk} glyph={Database} />}
           name="Disk I/O"
           hint={`${rate(read)} read · ${rate(write)} write`}
           trend={recorded && hour(trends.disk, "Disk I/O", HUE.disk)}
@@ -182,7 +189,10 @@ export function ResourceReadings({
         {/* A line's own height, so a server with one disk is six cells of one
             height and the bones that stand for them are too. */}
         {shown.length <= 1 && (
-          <Filesystems mounts={shown} className="flex min-h-17 flex-col justify-center px-2" />
+          <Filesystems
+            mounts={shown}
+            className={cn("flex flex-col justify-center px-2", readingLineHeight)}
+          />
         )}
       </ReadingLines>
       {shown.length > 1 && (
@@ -230,21 +240,6 @@ function Filesystems({
         </ul>
       )}
     </div>
-  )
-}
-
-/** A reading's glyph on its own hue, or on its tone once it is past a line. */
-function Mark({ tone = "default", hue, glyph: Glyph }: { tone?: Tone; hue: string; glyph: Icon }) {
-  if (tone === "default")
-    return (
-      <WireMark size="md" hue={hue}>
-        <Glyph aria-hidden />
-      </WireMark>
-    )
-  return (
-    <WireMark size="md" tone={tone === "danger" ? "danger" : "warning"}>
-      <Glyph aria-hidden />
-    </WireMark>
   )
 }
 

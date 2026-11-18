@@ -4,17 +4,20 @@ import { useState } from "react"
 import { Copy, Eye, Minus, Plus, Trash } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { duration, plural, timestamp } from "@/lib/format"
+import { duration, grouped, plural, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { usePoll } from "@/hooks/use-poll"
 import { cn } from "@/lib/utils"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Disclosure, Field, FormFact, FormNote } from "@/components/form"
 import { IconAction, RowActions } from "@/components/icon-action"
 import { Modal } from "@/components/modal"
-import { Detail, DetailList, Metric, MetricStrip } from "@/components/page"
-import { EmptyNote, EmptyState, LoadingRows } from "@/components/state"
-import { ChipCount, FilterChip, tabClasses } from "@/components/tabs"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Fact, FactLine } from "@/components/fact-line"
+import { EmptyNote, EmptyState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -44,7 +47,7 @@ import type { KeyEditorProps } from "@/components/database/redis/keys/key-pane"
 import { MemberDialog } from "@/components/database/redis/keys/member-dialog"
 import { MemberTable, type MemberColumn } from "@/components/database/redis/keys/member-table"
 import { useMembers } from "@/components/database/redis/keys/members"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import { entryMoment, localMoment } from "@/components/database/redis/ttl"
 import type { RedisBytes, RedisRow, RedisStreamGroup } from "@/components/database/redis/types"
 
@@ -203,7 +206,7 @@ function Entries({
           {(row.fields ?? []).map(([field, value], index) => (
             <span key={index} className="flex min-w-0 shrink-0 items-center">
               <span className="text-muted-foreground">{bytesLabel(field)}</span>
-              <span className="text-muted-foreground/50">=</span>
+              <span className="text-faint">=</span>
               <span className="max-w-64 truncate">{bytesLabel(value)}</span>
             </span>
           ))}
@@ -647,20 +650,26 @@ function Groups({
           <LoadingRows rows={4} className="p-3" />
         ) : (
           <div className="space-y-5 p-3">
-            <MetricStrip>
-              <Metric label="Entries" value={stream.length.toLocaleString()} />
-              {stream.entriesAdded !== undefined && (
-                <Metric label="Ever added" value={stream.entriesAdded.toLocaleString()} />
-              )}
-              <Metric
-                label="First entry"
-                value={<span className="font-mono text-xs">{stream.firstId ?? "—"}</span>}
-              />
-              <Metric
-                label="Last entry"
-                value={<span className="font-mono text-xs">{stream.lastId ?? "—"}</span>}
-              />
-            </MetricStrip>
+            <p className="min-w-0 text-body text-muted-foreground">
+              <FactLine>
+                <Fact>
+                  <span className="numeric text-foreground">
+                    {plural(stream.length, "entry", "entries")}
+                  </span>
+                </Fact>
+                {stream.entriesAdded !== undefined && (
+                  <Fact>
+                    <span className="numeric text-foreground">{grouped(stream.entriesAdded)}</span>{" "}
+                    ever added
+                  </Fact>
+                )}
+                <Fact title="First and last entry">
+                  <span className="font-mono text-xs text-foreground">{stream.firstId ?? "—"}</span>{" "}
+                  to{" "}
+                  <span className="font-mono text-xs text-foreground">{stream.lastId ?? "—"}</span>
+                </Fact>
+              </FactLine>
+            </p>
             {stream.groups.length === 0 ? (
               <EmptyState
                 title="No consumer group reads this stream"
@@ -709,17 +718,31 @@ function Groups({
                         <VerbActions verbs={verbs} menuLabel={`Actions for group ${label}`} />
                       )}
                     </div>
-                    <MetricStrip>
-                      <Metric
-                        label="Read up to"
-                        value={<span className="font-mono text-xs">{group.lastDeliveredId}</span>}
-                      />
-                      <Metric label="Pending" value={group.pending.toLocaleString()} />
-                      {group.lag !== undefined && (
-                        <Metric label="Not yet read" value={group.lag.toLocaleString()} />
-                      )}
-                      <Metric label="Consumers" value={group.consumers.length.toLocaleString()} />
-                    </MetricStrip>
+                    <p className="min-w-0 text-body text-muted-foreground">
+                      <FactLine>
+                        <Fact>
+                          read up to{" "}
+                          <span className="font-mono text-xs text-foreground">
+                            {group.lastDeliveredId}
+                          </span>
+                        </Fact>
+                        <Fact>
+                          <span className="numeric text-foreground">{grouped(group.pending)}</span>{" "}
+                          pending
+                        </Fact>
+                        {group.lag !== undefined && (
+                          <Fact>
+                            <span className="numeric text-foreground">{grouped(group.lag)}</span>{" "}
+                            not yet read
+                          </Fact>
+                        )}
+                        <Fact>
+                          <span className="numeric text-foreground">
+                            {plural(group.consumers.length, "consumer")}
+                          </span>
+                        </Fact>
+                      </FactLine>
+                    </p>
                     {group.consumers.length > 0 && (
                       <Table>
                         <TableHeader>

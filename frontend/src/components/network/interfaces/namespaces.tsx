@@ -7,7 +7,7 @@ import { del, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkLink, NetworkNamespace } from "@/lib/types"
 import { plural } from "@/lib/format"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Modal } from "@/components/modal"
 import { Field, FieldRow } from "@/components/form"
@@ -26,7 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { useConfirm } from "@/components/confirm-dialog"
-import { Cidr } from "@/components/network/address"
+import { Cidr } from "@/components/address"
 import { SECOND_LINE } from "./device-list"
 
 const NONE = "__none"

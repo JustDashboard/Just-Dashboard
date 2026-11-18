@@ -10,7 +10,7 @@ import { SourceBranch, SourceCommit } from "@/components/git/glyphs"
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { githubAvatarUrl } from "@/hooks/use-github"
-import { InitialsMark } from "@/components/account/user-avatar"
+import { InitialsMark } from "@/components/user-avatar"
 
 /**
  * The four marks a git surface repeats everywhere, drawn once.
@@ -83,7 +83,7 @@ export function BranchChip({
       title={title}
       className={cn(
         "inline-flex min-w-0 items-center gap-1 rounded-sm bg-surface-sunken px-1.5 py-px font-mono text-micro leading-[1.6]",
-        detached ? "text-destructive" : "text-foreground/85",
+        detached ? "text-destructive" : "text-foreground",
         className,
       )}
     >
@@ -121,7 +121,7 @@ export function WorkingTreeBar({ repo, className }: { repo: GitRepo; className?:
             <span
               key={i}
               aria-hidden
-              className="size-2 rounded-[2px]"
+              className="size-2 rounded-xs"
               style={{ background: PART_COLOUR[part] }}
             />
           ))}
@@ -296,7 +296,7 @@ export function CommitLine({
       <ShortSha sha={sha} />
       {/* The subject takes the slack, so a wide row spends it on the message
           and the attribution keeps a column of its own at the right. */}
-      <span className="min-w-0 flex-1 truncate text-hint text-foreground/80" title={subject}>
+      <span className="min-w-0 flex-1 truncate text-hint text-foreground" title={subject}>
         {subject}
       </span>
       {/* On a phone the subject is what the line is for: the name drops and

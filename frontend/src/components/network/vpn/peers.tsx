@@ -1,8 +1,9 @@
 "use client"
 
+import { InOut } from "@/components/in-out"
 import { useCallback, useState } from "react"
 import { del, get, post } from "@/lib/api"
-import { bytes, relativeTime } from "@/lib/format"
+import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { NetworkOverview, WGInterface, WGPeer, WGPeerCreated } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -10,7 +11,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { Modal } from "@/components/modal"
 import { SidePanel } from "@/components/side-panel"
 import { Field, FieldRow } from "@/components/form"
-import { Detail, DetailList } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -384,9 +385,7 @@ export function PeerSheet({
               </Detail>
             )}
             <Detail label="Moved">
-              <span className="numeric">
-                ↓ {bytes(peer.rxBytes)} · ↑ {bytes(peer.txBytes)}
-              </span>
+              <InOut rx={peer.rxBytes} tx={peer.txBytes} unit="bytes" />
             </Detail>
             <Detail label="Public key">
               <span className="font-mono break-all">{peer.publicKey}</span>

@@ -11,7 +11,7 @@ import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { WireMark, WireNode } from "@/components/deploy/wire"
+import { WireMark, WireNode } from "@/components/wire/wire"
 import {
   asleepShare,
   sleepLead,
@@ -95,9 +95,7 @@ export function SleepPanel({
               <WireMark tone="logo" size="md">
                 <ProductGlyph id="docker" />
               </WireMark>
-              <span className="absolute -right-0.5 -bottom-0.5 flex size-3.5 items-center justify-center rounded-full bg-background">
-                <StatusDot tone="notice" live={wakingNow} />
-              </span>
+              <StatusDot tone="notice" live={wakingNow} corner="md" />
             </span>
           }
           title={lead.title}

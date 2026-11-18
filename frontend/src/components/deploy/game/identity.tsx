@@ -2,17 +2,16 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Copy } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import type { GameOverview, GameReach } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import { FormNote } from "@/components/form"
-import { IconAction } from "@/components/icon-action"
+import { CopyAction } from "@/components/copy"
+import { Fact, FactLine } from "@/components/fact-line"
 import { Meter } from "@/components/meter"
-import { FactDot, HostFact } from "@/components/metrics/host-identity"
+import { humanize } from "@/components/deploy/vocabulary"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { NumberTicker } from "@/components/ui/number-ticker"
@@ -120,24 +119,21 @@ function GameIdentityLine({ overview, aside }: { overview: GameOverview; aside: 
     // No rule of its own: it hangs from the header's, and a second hairline
     // here stacked three within a few lines of the block title's below it.
     <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-6 gap-y-2">
-      <p className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
+      <FactLine className="text-xs text-muted-foreground">
         {overview.address && (
-          <span className="inline-flex min-w-0 items-center gap-0.5">
-            <HostFact>
-              <span className="font-mono text-foreground">{overview.address}</span>
-            </HostFact>
-            <IconAction
-              label="Copy the join address"
-              className="size-6"
-              onClick={() => void copyText(overview.address!, "Join address copied")}
-            >
-              <Copy />
-            </IconAction>
-          </span>
+          <Fact>
+            <span className="inline-flex min-w-0 items-center gap-0.5">
+              <span className="truncate font-mono text-foreground">{overview.address}</span>
+              <CopyAction
+                text={overview.address}
+                label="Copy the join address"
+                className="size-6"
+              />
+            </span>
+          </Fact>
         )}
-        {overview.address && overview.edition && <FactDot />}
-        {overview.edition && <HostFact>{titleCase(overview.edition)} edition</HostFact>}
-      </p>
+        {overview.edition && <Fact>{humanize(overview.edition)} edition</Fact>}
+      </FactLine>
       {aside && <div className="shrink-0">{aside}</div>}
     </div>
   )
@@ -227,13 +223,4 @@ function ReachNote({
       )}
     </div>
   )
-}
-
-/** `java` as "Java", for an edition nothing else names. */
-function titleCase(value: string) {
-  return value
-    .split(/[-_\s]+/)
-    .filter(Boolean)
-    .map((word) => word[0].toUpperCase() + word.slice(1))
-    .join(" ")
 }

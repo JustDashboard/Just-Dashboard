@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState } from "react"
+import { Fact, FactLine } from "@/components/fact-line"
 import { CheckCircle, ChevronRight, ClockRewind, Warning } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { ApiError, errorMessage, get } from "@/lib/api"
@@ -15,27 +16,27 @@ import {
   type ContainerHealth,
   type EventEntry,
 } from "@/lib/docker-events"
-import { dockerSource } from "@/lib/log-sources"
-import { useLogView } from "@/lib/log-view"
+import { dockerSource } from "@/lib/log/sources"
+import { useLogView } from "@/lib/log/view"
 import type { DockerEvent, DockerEventFeed, LogLine, LogSearchResult } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import type { ServiceLogsContext, ServiceLogsView } from "@/components/logs/service-logs"
 import { LogRow, eventColumnFor } from "@/components/logs/log-console"
 import { laneStyle } from "@/components/logs/log-text"
 import { EventMark, EventWho } from "@/components/docker/event-marks"
-import { GroupRule } from "@/components/flow"
+import { GroupRule } from "@/components/choice-row"
 import { InfoTip } from "@/components/form"
-import { FactDot } from "@/components/metrics/host-identity"
 import { PaneFooter } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { WrapDot, socketReading } from "@/components/deploy/request-marks"
 import { isCleanExit } from "@/components/deploy/traffic-strip"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /** How many of the newest failures open onto their last lines by themselves. */
 const OPEN_FAILURES = 3
@@ -92,7 +93,7 @@ export function ContainerEvents({
     () => (containerId ? { container: containerId } : { stack }),
     [containerId, stack],
   )
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
 
   // Polled as well as followed: the polled copy is the one the server laid
   // against the audit log, so "this dashboard" replaces "docker itself" once
@@ -394,19 +395,16 @@ function EventItem({
         <EventMark event={event} product={product} loop={Boolean(loop)} />
         <div className="min-w-0 flex-1">
           <p className="truncate text-body leading-5 font-medium">{title}</p>
-          <p className="flex min-w-0 flex-wrap items-center gap-x-1.5 text-hint text-muted-foreground">
-            <span className="numeric" title={timestamp(loop ? loop.since : event.time)}>
+          <FactLine className="text-hint text-muted-foreground">
+            <Fact className="numeric" title={timestamp(loop ? loop.since : event.time)}>
               {loop ? `${clock(loop.since)}–${clock(loop.until)}` : clock(event.time)}
-            </span>
+            </Fact>
             {named && name && (
-              <>
-                <FactDot />
-                <span className="truncate font-mono" style={laneStyle(name)}>
-                  {name}
-                </span>
-              </>
+              <Fact className="truncate font-mono" style={laneStyle(name)}>
+                {name}
+              </Fact>
             )}
-          </p>
+          </FactLine>
           {!wide && <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">{edge}</div>}
           {exited && (
             <div className="mt-1 flex flex-wrap items-center gap-x-1 gap-y-1">

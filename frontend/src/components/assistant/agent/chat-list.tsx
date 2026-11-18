@@ -286,6 +286,8 @@ function ChatRow({
                   transition={{ duration: 0.18 }}
                 >
                   <span className="absolute inset-0 animate-breathe rounded-full bg-signal" />
+                  {/* The assistant's own signal hue, said in words beside it: not a state tone. */}
+                  {/* eslint-disable-next-line retired-apis/retired */}
                   <span className="relative size-1.5 rounded-full bg-signal" />
                 </motion.span>
               )}

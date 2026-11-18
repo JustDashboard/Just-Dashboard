@@ -121,7 +121,7 @@ export function LogoStacked({ className }: { className?: string }) {
  * footnote to the name and should look like one. Tabular digits so it does
  * not shift when 0.5 becomes 0.10.
  */
-export function LogoVersion({ className }: { className?: string }) {
+function LogoVersion({ className }: { className?: string }) {
   return (
     <span className={cn("numeric shrink-0 text-hint text-muted-foreground", className)}>
       {VERSION}
@@ -137,6 +137,34 @@ export function LogoVersion({ className }: { className?: string }) {
 export function LogoMark({ className }: { className?: string }) {
   return (
     <LogoGlyph label="Just Dashboard" className={cn("h-[1.3rem] w-auto text-brand", className)} />
+  )
+}
+
+/**
+ * The dashboard as a thing on a list — its own stack, its own listener, the
+ * actor of an audit entry, the Settings row — on the tile a product's logo
+ * takes (`ProductLogo`), at the same two sizes, so it lines up with the
+ * products around it. The glyph is the brand's blue, as the logo is.
+ */
+export function DashboardMark({
+  size = "sm",
+  className,
+}: {
+  size?: "sm" | "md"
+  className?: string
+}) {
+  return (
+    <span
+      aria-hidden
+      data-slot="dashboard-mark"
+      className={cn(
+        "flex shrink-0 items-center justify-center rounded-lg border border-hairline bg-background text-brand",
+        size === "sm" ? "size-8" : "size-10",
+        className,
+      )}
+    >
+      <LogoGlyph small className={cn("w-auto", size === "sm" ? "h-4" : "h-5")} />
+    </span>
   )
 }
 

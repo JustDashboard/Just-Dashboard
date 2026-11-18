@@ -4,14 +4,16 @@ import { useState } from "react"
 import { ChevronDown, ChevronRight, SidebarRightClose } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { IconAction } from "@/components/icon-action"
-import { Detail, DetailList, SearchInput } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { SearchInput } from "@/components/search-input"
 import { Pane, PaneHeader } from "@/components/panel"
-import { EmptyNote, LoadingRows } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { ClassTag } from "@/components/database/redis/console/console-view"
 import { groupCommands } from "@/components/database/redis/console/complete"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 import type { RedisCommandRef, RedisCommandReference } from "@/components/database/redis/types"
 
 /**
@@ -42,6 +44,7 @@ export function CommandHelper({
   const [shown, setShown] = useState("")
   const groups = reference ? groupCommands(reference.commands, query) : []
   const searching = query.trim() !== ""
+  const detail = shown ? reference?.commands.find((command) => command.name === shown) : undefined
 
   return (
     <Pane flush data-slot="redis-command-helper" className="min-w-0 flex-1">
@@ -101,10 +104,8 @@ export function CommandHelper({
                     <CommandRow
                       key={command.name}
                       command={command}
-                      documented={reference.documented}
                       open={shown === command.name}
                       onToggle={() => setShown(shown === command.name ? "" : command.name)}
-                      onInsert={() => onInsert(command)}
                     />
                   ))}
               </div>
@@ -112,6 +113,13 @@ export function CommandHelper({
           })
         )}
       </div>
+      {detail && reference && (
+        <CommandDetail
+          command={detail}
+          documented={reference.documented}
+          onInsert={() => onInsert(detail)}
+        />
+      )}
       {reference && !reference.documented && (
         <p className="shrink-0 border-t border-hairline px-2.5 py-2 text-hint text-pretty text-muted-foreground">
           This server lists its commands without describing them, so there is no summary or syntax
@@ -122,65 +130,85 @@ export function CommandHelper({
   )
 }
 
+const DETAIL_ID = "redis-command-detail"
+
+/**
+ * A command of the reference: one row of one height. Pressing it shows the
+ * command in the pane's foot, and the list does not move under the reader —
+ * the details used to unfold beneath the row and push every row after it down.
+ */
 function CommandRow({
   command,
-  documented,
   open,
   onToggle,
+}: {
+  command: RedisCommandRef
+  open: boolean
+  onToggle: () => void
+}) {
+  return (
+    <button
+      type="button"
+      aria-pressed={open}
+      aria-controls={open ? DETAIL_ID : undefined}
+      onClick={onToggle}
+      className={cn(
+        "flex h-7 w-full min-w-0 items-center gap-2 pr-2 pl-7 text-left focus-ring-inset transition-colors hover:bg-row-hover",
+        open && "bg-accent hover:bg-accent",
+      )}
+    >
+      <span className="min-w-0 flex-1 truncate font-mono text-xs">{command.name}</span>
+      <span className="flex shrink-0 items-center gap-1.5">
+        {command.deprecated && <Tag>deprecated</Tag>}
+        <ClassTag value={command.class} admin={command.admin} />
+      </span>
+    </button>
+  )
+}
+
+/** The pressed command, at the foot of the pane: what it does, how it is written, and the way into the prompt. */
+function CommandDetail({
+  command,
+  documented,
   onInsert,
 }: {
   command: RedisCommandRef
   documented: boolean
-  open: boolean
-  onToggle: () => void
   onInsert: () => void
 }) {
   return (
-    <div className={cn(open && "bg-surface-header/50")}>
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={onToggle}
-        className="flex h-7 w-full min-w-0 items-center gap-2 pr-2 pl-7 text-left focus-ring-inset transition-colors hover:bg-row-hover"
-      >
-        <span className="min-w-0 flex-1 truncate font-mono text-xs">{command.name}</span>
-        <span className="flex shrink-0 items-center gap-1.5">
-          {command.deprecated && <Tag>deprecated</Tag>}
-          <ClassTag value={command.class} admin={command.admin} />
-        </span>
-      </button>
-      {open && (
-        <div className="space-y-2 pt-1 pr-2.5 pb-3 pl-7">
-          {command.summary && (
-            <p className="text-xs leading-relaxed text-pretty">{command.summary}</p>
-          )}
-          {command.syntax && (
-            <p className="rounded-sm bg-surface-sunken px-2 py-1.5 font-mono text-hint leading-relaxed break-words">
-              <span className="text-foreground">{command.name}</span>{" "}
-              <span className="text-muted-foreground">{command.syntax}</span>
-            </p>
-          )}
-          <DetailList>
-            {command.since && <Detail label="Since">{command.since}</Detail>}
-            {command.complexity && <Detail label="Cost">{command.complexity}</Detail>}
-            {!documented && (
-              <Detail label="Arguments">
-                {command.arity < 0
-                  ? `at least ${Math.abs(command.arity) - 1}`
-                  : String(command.arity - 1)}
-              </Detail>
-            )}
-            {command.flags.length > 0 && (
-              <Detail label="Flags" className="font-mono text-hint">
-                {command.flags.join(" ")}
-              </Detail>
-            )}
-          </DetailList>
-          <Button size="xs" variant="outline" onClick={onInsert}>
-            Put it in the prompt
-          </Button>
-        </div>
+    <section
+      id={DETAIL_ID}
+      aria-label={command.name}
+      className="max-h-[45%] shrink-0 space-y-2 overflow-auto border-t border-hairline px-2.5 pt-2 pb-3"
+    >
+      <p className="font-mono text-xs font-medium">{command.name}</p>
+      {command.summary && <p className="text-xs leading-relaxed text-pretty">{command.summary}</p>}
+      {command.syntax && (
+        <p className="rounded-sm bg-surface-sunken px-2 py-1.5 font-mono text-hint leading-relaxed break-words">
+          <span className="text-foreground">{command.name}</span>{" "}
+          <span className="text-muted-foreground">{command.syntax}</span>
+        </p>
       )}
-    </div>
+      <DetailList>
+        {command.since && <Detail label="Since">{command.since}</Detail>}
+        {command.complexity && <Detail label="Cost">{command.complexity}</Detail>}
+        {!documented && (
+          <Detail label="Arguments">
+            {command.arity < 0
+              ? `at least ${Math.abs(command.arity) - 1}`
+              : String(command.arity - 1)}
+          </Detail>
+        )}
+        {command.flags.length > 0 && (
+          <Detail label="Flags" className="font-mono text-hint">
+            {command.flags.join(" ")}
+          </Detail>
+        )}
+      </DetailList>
+      <Button size="xs" variant="outline" onClick={onInsert}>
+        Put it in the prompt
+      </Button>
+    </section>
   )
 }

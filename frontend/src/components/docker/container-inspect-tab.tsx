@@ -22,9 +22,10 @@ import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Pane, PaneHeader } from "@/components/panel"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { CODE } from "@/components/deploy/run-evidence"
 import {
@@ -371,7 +372,7 @@ function Entry({
               <span className="text-muted-foreground"> … </span>
               <span className={CODE.punct}>{list ? "]" : "}"}</span>
               {comma}
-              <span className="ml-2 font-sans text-hint text-muted-foreground/70">
+              <span className="ml-2 font-sans text-hint text-faint">
                 {size} {list ? (size === 1 ? "item" : "items") : size === 1 ? "key" : "keys"}
               </span>
             </>

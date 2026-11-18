@@ -128,7 +128,7 @@ export function EditorToolbar({
           aria-label="File language"
           // One height with the faces beside it: a select alone grows to a
           // thumb's 40px on a phone, and the row is 32px like the Files strip.
-          className="h-8 w-32 min-w-0 shrink text-body max-lg:w-36 max-sm:h-8 max-sm:text-body"
+          className="h-8 w-32 min-w-0 shrink text-body max-lg:w-36 max-sm:h-8"
         >
           <SelectValue />
         </SelectTrigger>

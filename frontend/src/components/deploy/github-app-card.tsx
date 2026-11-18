@@ -7,7 +7,6 @@ import { del, errorMessage, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { calendarDate, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import { useMediaQuery } from "@/hooks/use-mobile"
 import { githubAppStage, useGitHubApp, type GitHubAppStage } from "@/hooks/use-github"
 import type {
   DeploymentCredential,
@@ -19,7 +18,8 @@ import { cn } from "@/lib/utils"
 import { Field, FormFact } from "@/components/form"
 import { ProductLogo } from "@/components/product-logo"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { ForgeFace } from "@/components/git/marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
@@ -41,7 +41,8 @@ import {
   WireMark,
   WireNode,
   WirePlaceholder,
-} from "@/components/deploy/wire"
+} from "@/components/wire/wire"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 /**
  * The dashboard's own identity on GitHub. Created once through GitHub's
@@ -182,7 +183,7 @@ function Picture({
   admin: boolean
   credentials?: DeploymentCredential[]
 }) {
-  const wide = useMediaQuery("(min-width: 1024px)")
+  const wide = useBreakpoint("lg")
   const container = useRef<HTMLDivElement>(null)
   const appMark = useRef<HTMLDivElement>(null)
   const serverMark = useRef<HTMLDivElement>(null)
@@ -520,6 +521,8 @@ function SetupPath({ stage, deploying }: { stage: GitHubAppStage; deploying: boo
                   aria-hidden
                   className="mt-px flex size-3.5 shrink-0 items-center justify-center"
                 >
+                  {/* The step being done, in the brand hue a step list draws. */}
+                  {/* eslint-disable-next-line retired-apis/retired */}
                   <span className="size-1.5 rounded-full bg-brand" />
                 </span>
               ) : (

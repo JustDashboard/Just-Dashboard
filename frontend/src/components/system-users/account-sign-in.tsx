@@ -13,15 +13,16 @@ import {
   Users,
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
-import { SecretField } from "@/components/database/ops/access-parts"
-import { generatePassword } from "@/components/database/connect/rules"
+import { SecretField } from "@/components/secret-field"
+import { generatePassword } from "@/lib/password"
 import { Field, FieldRow, FormNote, OptionRow } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph, ProductLogo } from "@/components/product-logo"
 import { Row, RowList } from "@/components/row-list"
 import { Address } from "@/components/security/marks"
-import { EmptyNote, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyNote, ErrorState, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status, type DotTone } from "@/components/status-dot"
 import { useAccount } from "@/components/system-users/account-page"
 import {
@@ -31,7 +32,7 @@ import {
   writeRestrictions,
   type KeyRestrictions,
 } from "@/components/system-users/access"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"

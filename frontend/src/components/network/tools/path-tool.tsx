@@ -17,8 +17,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { errorMessage, get, post } from "@/lib/api"
-import { pathDraftFromQuery, pathRequest, type PathDraft } from "@/lib/network-investigator"
-import type { PathResult, PathSources } from "@/lib/network-investigator-types"
+import { pathDraftFromQuery, pathRequest, type PathDraft } from "@/lib/network/investigator"
+import type { PathResult, PathSources } from "@/lib/network/investigator-types"
 import { cn } from "@/lib/utils"
 import { ToolEmpty, ToolHead } from "./tool-frame"
 import { PATH_TOOL } from "./tool-links"
@@ -198,9 +198,11 @@ export function PathTool({
                 className="w-24 font-mono"
               />
             </Field>
-            {/* The verbs stand before everything optional, so a field that
-                arrives with a report (the DNS answers) never moves them. */}
-            <div className="flex flex-wrap items-center gap-3 sm:ml-auto">
+            {/* The verbs follow the last field, as on every tool's form (Ping's
+                follow its target), and stand before everything optional, so a
+                field that arrives with a report (the DNS answers) never moves
+                them. */}
+            <div className="flex flex-wrap items-center gap-3">
               <Button onClick={() => void submit()} pending={busy} disabled={!request || busy}>
                 <Play />
                 Run

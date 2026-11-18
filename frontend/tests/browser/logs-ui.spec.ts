@@ -3,7 +3,7 @@ import { json, mockHost } from "./host-fixture"
 
 /**
  * The logs console, coloured. The shapes themselves are unit-tested in
- * `src/lib/log-tokens.test.js`; this checks what a reader sees: the failure
+ * `src/lib/log/tokens.test.js`; this checks what a reader sees: the failure
  * and the status found without reading, a structured line drawn as its message
  * and fields, the line's own timestamp and this host's name not repeated
  * beside the time column, the sources drawn as their products — and all of it
@@ -41,11 +41,11 @@ const LINES: Record<string, object[]> = {
   ],
   "docker:api": [
     {
-      text: '{"time":"2026-09-23T05:11:01Z","level":"INFO","msg":"audit","user":"wayy","status":204}',
+      text: '{"time":"2026-09-23T05:11:01Z","level":"INFO","msg":"audit","user":"operator","status":204}',
       timestamp: "2026-09-23T05:11:01Z",
       level: "info",
       message: "audit",
-      fields: { user: "wayy", status: "204" },
+      fields: { user: "operator", status: "204" },
     },
   ],
   "file:/var/log/nginx/access.log": [
@@ -95,7 +95,7 @@ test("a structured line is its message and fields, and the raw line is one click
 }) => {
   await page.goto("/logs?source=docker:api")
   // The sentence, then its fields in the order that tells the most.
-  await expect(page.getByText(/^audit\s+status=204 user=wayy$/)).toBeVisible()
+  await expect(page.getByText(/^audit\s+status=204 user=operator$/)).toBeVisible()
   await expect(page.getByText("204", { exact: true })).toHaveClass(/text-success/)
   await expect(page.getByText('"msg"')).toHaveCount(0)
 

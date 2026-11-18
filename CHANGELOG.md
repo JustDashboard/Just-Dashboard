@@ -4,6 +4,43 @@ Every release of Just Dashboard, newest first.
 
 **This file is generated.** The source is [`backend/internal/selfupdate/changelog.json`](backend/internal/selfupdate/changelog.json), which is the same file the dashboard reads — both the copy compiled into your build and the one it fetches to find out whether a newer version exists. Edit that, then run `scripts/release.sh <version>`.
 
+## 0.9.0 — 18 November 2026
+
+**One design system across every page, and a calmer phone**
+
+Every page now draws from the same set of parts, and a test opens every page and checks it for accessibility problems. On a phone, each page has one header row, its commands are icons, and pages that show several panels show one at a time with a bar at the bottom. Arrow keys now move around the server map, the database diagram and a drawing, and animations can be paused from the account menu.
+
+### Added
+
+- Arrow keys on the map, the diagram and drawings
+  - Arrows slide the canvas, and move the box you have picked. Shift takes a longer step. Typing in a field never moves anything.
+- Pause animations
+  - One switch in the account menu stops every moving thing in the dashboard, the same as a device set to reduce motion.
+
+### Changed
+
+- A phone's header is one row
+  - The page's state and its facts stand on a single line, danger and warnings first, and a command is its icon with a tooltip. Terminate, Kill and other destructive commands sit behind the ⋯ menu and are never the page's main button.
+- One panel at a time on a phone
+  - A run's logs, the server map, the assistant and similar pages fill the screen with a bar at the bottom to switch between their parts, instead of stacking them.
+- Shortcuts are drawn as keys, and single-key shortcuts can be turned off
+  - A shortcut shows one cap per key, and is hidden on touch screens. Links inside a sentence are underlined.
+- Errors stay until you close them
+  - A failure's message no longer disappears after a few seconds, and the terminal has a screen reader mode.
+- Easier to press and to read on a touch screen
+  - Small controls have a finger-sized press area, hints and small text are larger on touch screens, the menu closes when you open a page, and form fields have a clearer edge.
+- Tables sort and tab alike
+  - Every sortable table has one sort control in its head and one keyboard stop per row.
+- Pictures of how things connect fit a phone
+  - The proxy, ports, tunnels, remote desktop and alerts pictures keep their names whole on a narrow screen.
+
+### Fixed
+
+- A domain's expired certificate is never cut off
+  - A domain row keeps one height whether a password or a redirect is set, and a certificate that is expired or missing is always shown whole.
+- Shortcuts' ? on the page header
+  - Firewall, Git and Logs show the shortcuts button at the end of their header line, not on a row of its own, and Git's four views fit their tab strip.
+
 ## 0.8.7 — 14 November 2026
 
 **Every page reads like the deployment pages, and HTTPS works on older nginx**

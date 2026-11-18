@@ -18,7 +18,8 @@ import { cn } from "@/lib/utils"
 import type { FileEntry, FileListing } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { EmptyNote, ErrorState, LoadingRows } from "@/components/state"
+import { EmptyNote, ErrorState } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { IconAction } from "@/components/icon-action"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
@@ -87,6 +88,11 @@ type BrowserProps = {
   goTo?: { path: string; key: number }
   /** What the page knows about a path that the listing cannot: drawn after its name. */
   notes?: Record<string, React.ReactNode>
+  /**
+   * The toolbar's "Open in Files". Off where the page's own header already
+   * offers it for the same place (a volume's), so the page has one.
+   */
+  openInFiles?: boolean
 }
 
 function Browser({
@@ -97,6 +103,7 @@ function Browser({
   fill,
   goTo,
   notes,
+  openInFiles = true,
 }: BrowserProps) {
   const { can } = useAuth()
   const base = cleanPath(root)
@@ -223,12 +230,14 @@ function Browser({
           </IconAction>
           {/* The button the operator asked to keep: the same directory, in the
               manager that can move, delete and upload into it. */}
-          <Button size="xs" variant="outline" asChild className="ml-1">
-            <Link href={`/files?path=${encodeURIComponent(dir)}`}>
-              <FolderOpen className="size-3" />
-              Open in Files
-            </Link>
-          </Button>
+          {openInFiles && (
+            <Button size="xs" variant="outline" asChild className="ml-1">
+              <Link href={`/files?path=${encodeURIComponent(dir)}`}>
+                <FolderOpen className="size-3" />
+                Open in Files
+              </Link>
+            </Button>
+          )}
         </span>
       </PaneHeader>
 

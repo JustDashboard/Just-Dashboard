@@ -14,7 +14,7 @@ import { portProblem } from "../tools/tool-input"
 import { wireGuardIPv6Payload, wireGuardIPv6Problem } from "./ipv6-input"
 import { mtuProblem, networkList, resolversProblem } from "./record-logic"
 import { IPAMReservationPicker } from "@/components/network/ipam-reservation-picker"
-import type { IPAMReservation } from "@/lib/network-ipam"
+import type { IPAMReservation } from "@/lib/network/ipam"
 
 /** What a client is told to resolve names with: a public resolver, or one that also blocks ads. */
 const RESOLVERS = [

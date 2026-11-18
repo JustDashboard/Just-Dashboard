@@ -1,5 +1,5 @@
 import type { LogSource, LogSourceIndex, ProcessGroup, ProcessRow } from "@/lib/types"
-import { journalIdSource, journalSource } from "@/lib/log-sources"
+import { journalIdSource, journalSource } from "@/lib/log/sources"
 import type { Tone } from "@/components/tone"
 import { processProduct, unitProduct } from "@/components/product-logo"
 
@@ -52,6 +52,31 @@ export function uncontrollable(
   if (process.state === "zombie") return "zombie"
   if (process.manager === "kernel") return "kernel"
   return null
+}
+
+/**
+ * Whether what runs the process keeps a log of what it prints: a systemd
+ * unit, a PM2 application or a container. Known from the row alone, so a
+ * process's Logs view and its command are there from the first read rather
+ * than arriving once the owner is read (a PM2 app's read lands later).
+ */
+export function ownerKeepsLogs(process: Pick<ProcessRow, "manager" | "managerName">): boolean {
+  if (!process.managerName) return false
+  return (
+    process.manager === "systemd" || process.manager === "pm2" || process.manager === "container"
+  )
+}
+
+/**
+ * Whether a process's identity line has a command: a zombie's Open parent,
+ * or Logs where its owner keeps them. Decided from the row alone, so the
+ * loading line holds a command's place only for a process that will fill it,
+ * and no slot appears or leaves under the reader.
+ */
+export function processHasCommand(
+  process: Pick<ProcessRow, "state" | "manager" | "managerName" | "ppid">,
+): boolean {
+  return (process.state === "zombie" && process.ppid > 0) || ownerKeepsLogs(process)
 }
 
 /**
@@ -109,9 +134,14 @@ export function cores(percentOfOneCore: number): string {
   return "idle"
 }
 
-/** A process state as the one status vocabulary reads it. */
+/**
+ * A process state as the one status vocabulary reads it. Blocked (in disk
+ * wait) and zombie read amber, as their filter chips do: a process waiting on
+ * a disk or not yet reaped is something to look at, not a failure, and since
+ * "failed" became red it would have drawn them in the danger ink.
+ */
 export function processStateTone(state: ProcessRow["state"]): string {
-  if (state === "blocked" || state === "zombie") return "failed"
+  if (state === "blocked" || state === "zombie") return "paused"
   if (state === "sleeping") return "inactive"
   return state
 }

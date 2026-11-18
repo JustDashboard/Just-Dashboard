@@ -1,3 +1,4 @@
+import { plural } from "@/lib/format"
 import { LANES } from "@/lib/hue"
 import type { DbFleetEntry } from "@/lib/types"
 import {
@@ -143,9 +144,8 @@ export function fleetVerdict(
 ): FleetVerdict | undefined {
   const { total, failing, stopped } = readings
   if (total === 0) return undefined
-  const databases = (n: number) => (n === 1 ? "1 database" : `${n} databases`)
-  if (failing > 0) return { tone: "danger", label: `${databases(failing)} not answering` }
-  if (stopped > 0) return { tone: "warning", label: `${databases(stopped)} stopped` }
+  if (failing > 0) return { tone: "danger", label: `${plural(failing, "database")} not answering` }
+  if (stopped > 0) return { tone: "warning", label: `${plural(stopped, "database")} stopped` }
   return { tone: "running", label: total === 1 ? "Answering" : `All ${total} answering` }
 }
 

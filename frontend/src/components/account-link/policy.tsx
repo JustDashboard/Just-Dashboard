@@ -2,8 +2,8 @@
 
 import { policyWords, scopeName } from "@/lib/account-link"
 import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
-import { Reading, ReadingList } from "@/components/account-link/reading"
-import { Section } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
+import { Section } from "@/components/section"
 
 /**
  * The automatic-update policy, read-only. The site — or, on Settings → Hub, the hub — stores and
@@ -28,10 +28,10 @@ export function Policy({
   const words = policyWords(policy)
   return (
     <Section title="Automatic updates" className={className}>
-      <ReadingList>
-        <Reading label="Installs">{words.auto}</Reading>
-        {words.window && <Reading label="When">{words.window}</Reading>}
-      </ReadingList>
+      <DetailList ruled labelWidth="fixed" size="body">
+        <Detail label="Installs">{words.auto}</Detail>
+        {words.window && <Detail label="When">{words.window}</Detail>}
+      </DetailList>
       <p className="text-xs text-muted-foreground">
         Set from {site}.{" "}
         {scope === "maintain"

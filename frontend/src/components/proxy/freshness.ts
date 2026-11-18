@@ -1,4 +1,4 @@
-import { duration } from "@/lib/format"
+import { ago } from "@/lib/format"
 
 /**
  * How old what the overview shows is, and whether a refresh it asked for has
@@ -33,10 +33,13 @@ export function oldestReading(times: (number | undefined)[]): number | undefined
   return known.length > 0 ? Math.min(...known) : undefined
 }
 
-/** "Updated 14s ago". The first seconds read as now rather than as a counter starting at 0s. */
+/**
+ * "Updated 14s ago", "Updated 2m 30s ago": lib/format's `ago` in two units.
+ *
+ * @deprecated use `<Ago at verb="Updated" units={2} />` (components/ago), or `ago` for the words.
+ */
 export function updatedLabel(at: number, now: number): string {
-  const age = Math.max(0, (now - at) / 1000)
-  return age < 5 ? "Updated just now" : `Updated ${duration(age)} ago`
+  return `Updated ${ago(at, now, { units: 2 })}`
 }
 
 /**

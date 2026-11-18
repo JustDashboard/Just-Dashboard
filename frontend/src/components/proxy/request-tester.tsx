@@ -10,18 +10,21 @@ import type { RequestHeader, RequestHop, RequestResult, RequestTest, VHost } fro
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { useCopy } from "@/hooks/use-copy"
-import { Detail, DetailList, Page, PageContext } from "@/components/page"
+import { Page, PageContext } from "@/components/page"
+import { Detail, DetailList } from "@/components/detail-list"
 import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
-import { ErrorState, Notice, Spinner } from "@/components/state"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
+import { Fact } from "@/components/fact-line"
+import { IdentityHeader } from "@/components/identity-header"
+import { ErrorState, Notice } from "@/components/state"
+import { Spinner } from "@/components/loading"
 import { Status, type Verdict } from "@/components/status-dot"
 import { tabClasses } from "@/components/tabs"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import { useProxy, useProxyRead } from "@/components/proxy/proxy-context"
 import { sitePath } from "@/components/proxy/site-verbs"
 import { TLSServedBy } from "@/components/proxy/tls-served-by"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Field, FieldRow } from "@/components/form"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -173,9 +176,9 @@ export function RequestTester() {
   const missing = status !== undefined && !hasNginx
 
   return (
-    <Page className="animate-rise">
-      <PageContext eyebrow="Proxy" title="Request tester" />
-      <HostIdentity
+    <Page rise>
+      <PageContext title="Request tester" />
+      <IdentityHeader
         // The view strip under the line draws the rule: the line's own under
         // it made two.
         className="border-b-0 pb-0"
@@ -185,7 +188,7 @@ export function RequestTester() {
           <span
             role="heading"
             aria-level={2}
-            className={cn("break-all", (hop || url) && "font-mono text-[0.92em]")}
+            className={cn("break-all", (hop || url) && "code-inline")}
           >
             {hop?.url ?? (url || "Request tester")}
           </span>
@@ -403,7 +406,7 @@ export function RequestTester() {
                           {index + 1}
                         </span>
                       }
-                      title={<span className="font-mono text-[0.92em]">{entry.url}</span>}
+                      title={<span className="code-inline">{entry.url}</span>}
                       description={`${entry.method} · site ${entry.site}`}
                       trailing={<Status verdict={hopVerdict(entry)} label={hopLabel(entry)} />}
                     />
@@ -452,37 +455,36 @@ function TesterFacts({
   const facts: React.ReactNode[] = []
   // How it was answered is the line's state; these are the answer's figures.
   if (hop && !busy) {
-    if (hop.proto) facts.push(<span key="proto">{hop.proto}</span>)
+    if (hop.proto) facts.push(<Fact key="proto">{hop.proto}</Fact>)
     if (hop.tls)
       facts.push(
-        <span key="tls">
+        <Fact key="tls">
           {hop.tls.version}
           {hop.tls.alpn ? ` · ALPN ${hop.tls.alpn}` : ""}
-        </span>,
+        </Fact>,
       )
     if (hop.timings.firstByte)
-      facts.push(<span key="first">first byte {millis(hop.timings.firstByte)}</span>)
-    facts.push(<span key="total">total {millis(hop.timings.total)}</span>)
-    if (hop.status !== undefined) facts.push(<span key="read">{bytes(hop.bodyBytes)} read</span>)
+      facts.push(<Fact key="first">first byte {millis(hop.timings.firstByte)}</Fact>)
+    facts.push(<Fact key="total">total {millis(hop.timings.total)}</Fact>)
+    if (hop.status !== undefined) facts.push(<Fact key="read">{bytes(hop.bodyBytes)} read</Fact>)
   } else if (missing) {
-    facts.push(<span key="missing">no nginx on this host</span>)
+    facts.push(<Fact key="missing">no nginx on this host</Fact>)
   } else {
     facts.push(
-      <HostFact key="to" product="nginx">
+      <Fact key="to" product="nginx">
         nginx on <span className="font-mono">{connectTo}</span>
-      </HostFact>,
-      <span key="dns">DNS not asked</span>,
+      </Fact>,
+      <Fact key="dns">DNS not asked</Fact>,
     )
   }
+  // What stops the reader leads, so a phone's one line of facts keeps it.
   if (!admin)
-    facts.push(
-      <span key="admin" className="font-medium text-warning">
+    facts.unshift(
+      <Fact key="admin" className="font-medium text-warning">
         sending requests needs an administrator
-      </span>,
+      </Fact>,
     )
-  return facts.flatMap((fact, index) =>
-    index === 0 ? [fact] : [<FactDot key={`dot-${index}`} />, fact],
-  )
+  return facts
 }
 
 function HopDetail({

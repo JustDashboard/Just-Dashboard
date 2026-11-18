@@ -8,7 +8,7 @@ import type { EntryFlow, GatewayForward, NetworkLink } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { useConfirm } from "@/components/confirm-dialog"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Field, FieldRow } from "@/components/form"
 import { SidePanel } from "@/components/side-panel"
 import { Notice } from "@/components/state"
@@ -24,7 +24,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 import { Endpoint, Port, TargetLogo } from "@/components/network/gateway/marks"
 import { ImpactList, useGatewayPreview } from "@/components/network/gateway/impacts"
 import { flowOf } from "@/components/network/gateway/evidence"
@@ -47,7 +47,7 @@ import {
   type ForwardRequest,
 } from "@/components/network/gateway/reading"
 import { useAuth } from "@/hooks/use-auth"
-import { useMediaQuery } from "@/hooks/use-mobile"
+import { useBreakpoint } from "@/lib/breakpoints"
 
 const ANY = "__any"
 
@@ -93,7 +93,7 @@ export function ForwardList({
 }) {
   const { confirm, dialog } = useConfirm()
   const { can } = useAuth()
-  const wide = useMediaQuery("(min-width: 640px)")
+  const wide = useBreakpoint("sm")
   const [busy, setBusy] = useState<number>()
   const setEnabled = async (f: GatewayForward, enabled: boolean) => {
     setBusy(f.id)

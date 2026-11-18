@@ -1,19 +1,20 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
+import { IconAction } from "@/components/icon-action"
 import { Check, Copy, Plus } from "@/components/icons"
 import { get } from "@/lib/api"
 import { useCopy } from "@/hooks/use-copy"
 import { usePoll } from "@/hooks/use-poll"
 import type { NetworkOverview, VPNView } from "@/lib/types"
 import { Field, FieldRow, InfoTip } from "@/components/form"
-import { SettingSection, settingStatus } from "@/components/deploy/settings/setting-card"
+import { SettingSection, settingStatus } from "@/components/settings/setting-card"
 import { Well } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { useSecurity } from "@/components/security/security-context"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
-import { ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 
@@ -406,15 +407,15 @@ function Snippet({ label, caption, text }: { label: string; caption?: string; te
         <pre data-slot="snippet" className="break-all whitespace-pre-wrap">
           {text}
         </pre>
-        <Button
+        <IconAction
           variant="ghost"
           size="icon-xs"
-          className="absolute top-2 right-2"
-          aria-label={`Copy the ${label}`}
+          className="absolute top-2 right-2 [&_svg:not([class*='size-'])]:size-3"
+          label={`Copy the ${label}`}
           onClick={() => void copy(text)}
         >
           {copied ? <Check aria-hidden /> : <Copy aria-hidden />}
-        </Button>
+        </IconAction>
       </Well>
     </div>
   )

@@ -5,7 +5,7 @@ import { Copy, External, Key, Play, Warning } from "@/components/icons"
 import { SourceBranch, SourcePull } from "@/components/git/glyphs"
 import { get, post } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
-import { relativeTime } from "@/lib/format"
+import { duration, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
@@ -16,27 +16,26 @@ import type {
   DeploymentRunsPage,
   DeploymentTrigger,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { Field, FormFact, FormFacts, FormNote } from "@/components/form"
 import { ForgeFace } from "@/components/git/marks"
 import { Modal } from "@/components/modal"
 import { Well } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { useConfirm } from "@/components/confirm-dialog"
 import { VerbActions, VerbBar, type Verb } from "@/components/verbs"
-import { SettingSection } from "@/components/deploy/settings/setting-card"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { SettingSection } from "@/components/settings/setting-card"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { VariablesPanel } from "@/components/deploy/settings/variables"
 import { RunStrip } from "@/components/deploy/run-marks"
 import {
   RunStatus,
-  formatDuration,
   hostOf,
   humanize,
   isActiveRun,
@@ -166,7 +165,7 @@ function AddressLine({ url, published }: { url: string; published: boolean }) {
       href={url}
       target="_blank"
       rel="noreferrer"
-      className="font-mono text-foreground/85 underline-offset-2 hover:underline"
+      className="font-mono text-foreground underline-offset-2 hover:underline"
     >
       {host}
       <External aria-hidden className="ml-1 inline-block size-3 align-[-1px]" />
@@ -331,7 +330,7 @@ export function Previews({
         previewTriggers.length === 0
           ? "Off — no webhook creates them"
           : patterns.length > 0 && (
-              <span className="font-mono text-foreground/85">{patterns.join(", ")}</span>
+              <span className="font-mono text-foreground">{patterns.join(", ")}</span>
             )
       }
       actions={
@@ -371,7 +370,7 @@ export function Previews({
         )}
 
         {previews.loading && !previews.data ? (
-          <LoadingRows rows={2} />
+          <ChoiceListSkeleton rows={2} />
         ) : previews.error && !previews.data ? (
           <ErrorState error={previews.error} onRetry={previews.refresh} />
         ) : list.length === 0 ? (
@@ -439,7 +438,7 @@ export function Previews({
         onOpenChange={(open) => !open && setVariablesFor(undefined)}
         title={`Preview ${variablesFor?.providerRef ?? ""} variables`}
         description="Configure values used only by this preview before deploying."
-        width="lg"
+        size="lg"
       >
         {variablesFor && (
           <VariablesPanel
@@ -505,7 +504,7 @@ function ApprovalCard({
       index={index}
       onSelect={onReview}
       disabled={rejected || !canReview}
-      className={cn(rejected && "opacity-80")}
+      // Rejected is said by its status and the muted ink (FND-07).
       leading={
         <AuthorFace
           login={approval.author}
@@ -513,14 +512,16 @@ function ApprovalCard({
           className={cn(rejected && "grayscale")}
         />
       }
-      title={`PR ${approval.providerRef}`}
+      title={
+        <span className={cn(rejected && "text-muted-foreground")}>PR {approval.providerRef}</span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           {approval.author || "unknown author"} ·{" "}
           <span className="font-mono">{approval.headRepository || approval.repository}</span>
           {approval.headRef && (
             <>
-              <SourceBranch aria-hidden className="mx-1 inline size-3 align-[-2px]" />
+              <SourceBranch aria-hidden className="mx-1 glyph-inline size-3" />
               <span className="font-mono">{approval.headRef}</span>
             </>
           )}
@@ -780,9 +781,13 @@ function PreviewCard({
       index={index}
       onSelect={onOpen}
       busy={deploying || Boolean(active)}
-      className={cn(!open && "opacity-80")}
+      // A closed preview is said by its state and the name's muted ink (FND-07).
       leading={<AuthorFace login={author} trigger={trigger} />}
-      title={<span className="font-mono">{preview.environmentSlug}</span>}
+      title={
+        <span className={cn("font-mono", !open && "text-muted-foreground")}>
+          {preview.environmentSlug}
+        </span>
+      }
       description={
         <span className={cn(!wide && "whitespace-normal")}>
           PR #{preview.providerRef}
@@ -872,7 +877,7 @@ function PreviewSheet({
       onOpenChange={(open) => !open && onClose()}
       title={<span className="font-mono">{preview?.environmentSlug ?? "Preview"}</span>}
       description="A pull request's own environment, its revision and its runs."
-      width="md"
+      size="md"
       actions={
         preview &&
         verbs.length > 0 && (
@@ -929,7 +934,7 @@ function PreviewSheet({
           {runs.error && !runs.data ? (
             <ErrorState error={runs.error} onRetry={runs.refresh} />
           ) : runs.loading && !runs.data ? (
-            <LoadingRows rows={3} />
+            <ChoiceListSkeleton rows={3} />
           ) : list.length === 0 ? (
             <FormNote>
               Nothing has run here yet — deploy the preview to build its revision.
@@ -950,7 +955,7 @@ function PreviewSheet({
                       <>
                         <RunStatus state={run.state} />
                         <span className="numeric w-16 text-right text-hint whitespace-nowrap text-muted-foreground">
-                          {formatDuration(runDurationSeconds(run))}
+                          {duration(runDurationSeconds(run))}
                         </span>
                       </>
                     }

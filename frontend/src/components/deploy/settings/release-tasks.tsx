@@ -13,13 +13,13 @@ import type {
   DeploymentRunSnapshot,
   DeploymentVariable,
 } from "@/lib/types"
-import { ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Disclosure, Field, FieldRow, FormNote } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo, programProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { Status } from "@/components/status-dot"
-import { FilterChip } from "@/components/tabs"
+import { FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import {
@@ -331,7 +331,7 @@ export function ReleaseTasks({
         onOpenChange={(next) => !next && setOpen(undefined)}
         title={editing ? editing.name.trim() || `Release task ${(open ?? 0) + 1}` : "Release task"}
         description="What this task runs, where, and how long it may take."
-        width="sm"
+        size="sm"
         // A named task's name is not what the reader came to change, and
         // landing in it would select it.
         initialFocus={editing?.name.trim() ? "body" : "first"}

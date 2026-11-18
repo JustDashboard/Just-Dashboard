@@ -4,7 +4,7 @@ import { Servers } from "@/components/icons"
 import type { FileBookmark, FilePlace, FilePlaces } from "@/lib/types"
 import { useMetrics } from "@/hooks/use-metrics"
 import { platformProduct, ProductGlyph } from "@/components/product-logo"
-import { FolderIcon } from "@/components/files/file-icon"
+import { FolderIcon } from "@/components/file-icon"
 import { baseOf } from "@/components/files/media"
 import { cn } from "@/lib/utils"
 import {

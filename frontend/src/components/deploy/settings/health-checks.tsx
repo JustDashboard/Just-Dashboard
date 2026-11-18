@@ -4,7 +4,7 @@ import { useState } from "react"
 import { Connection, Globe, Heart, Plus, Terminal, Trash } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { DeploymentConfiguration } from "@/lib/types"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { Field, FieldRow, FormNote, OptionRow } from "@/components/form"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { ProductGlyph, ProductLogo, programProduct } from "@/components/product-logo"
@@ -21,7 +21,7 @@ import {
 } from "@/components/ui/input-group"
 import { Textarea } from "@/components/ui/textarea"
 import { formatDuration } from "@/components/deploy/vocabulary"
-import { Segments } from "@/components/deploy/settings/segments"
+import { Segments } from "@/components/segments"
 
 export type Check = DeploymentConfiguration["checks"][number]
 type CheckKind = "http" | "tcp" | "docker_health" | "command"
@@ -323,7 +323,7 @@ export function HealthChecks({
         onOpenChange={(next) => !next && setOpen(undefined)}
         title={editing ? editing.name || `Health check ${(open ?? 0) + 1}` : "Health check"}
         description="What this check probes, when it runs and how long it keeps trying."
-        width="sm"
+        size="sm"
         // The name already holds a sensible value; landing in it would select it.
         initialFocus="body"
         footer={
@@ -422,7 +422,7 @@ function CheckEditor({
       </div>
 
       <p className="min-w-0 font-mono text-xs break-words text-muted-foreground">
-        <span className="text-foreground/80">{checkSummary(check, port)}</span> · gives up after{" "}
+        <span className="text-muted-foreground">{checkSummary(check, port)}</span> · gives up after{" "}
         <span className="whitespace-nowrap">~{formatDuration(givesUpAfter(check))}</span>
       </p>
 

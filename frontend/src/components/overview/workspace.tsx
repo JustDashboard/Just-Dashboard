@@ -3,25 +3,23 @@
 import { useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight } from "@/components/icons"
-import type { BoardSummary } from "@/lib/boards"
+import type { BoardSummary } from "@/lib/board/boards"
 import { plural, relativeTime } from "@/lib/format"
 import type { TerminalList } from "@/lib/types"
 import type { PollState } from "@/hooks/use-poll"
-import { sessionLabel, sessionProgram } from "@/lib/terminal-activity"
+import { sessionLabel, sessionProgram } from "@/lib/terminal/activity"
 import { ExcalidrawGlyph } from "@/components/boards/glyphs"
 import { DrawingPreview } from "@/components/boards/drawing-preview"
-import { CONTROL, ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductLogo, programProduct } from "@/components/product-logo"
-import { EmptyState, LoadingRows } from "@/components/state"
+import { EmptyState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
-import { BlurFade } from "@/components/ui/blur-fade"
+import { OpenCard } from "@/components/open-card"
 import { Skeleton } from "@/components/ui/skeleton"
-import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { recentDrawings, shellOrder } from "./order"
-import { SectionLink } from "./section-link"
+import { SectionLink } from "@/components/section-link"
 
 /** Enough to go back to what was open this morning without becoming the terminal's rail. */
 const SHOWN_SHELLS = 4
@@ -63,7 +61,7 @@ export function ShellsPanel({ read }: { read: PollState<TerminalList> }) {
       />
       <PanelBody flush>
         {loading && !data ? (
-          <LoadingRows rows={3} className="[&>*]:h-14 [&>*]:rounded-xl" />
+          <ChoiceListSkeleton rows={3} />
         ) : !data ? (
           <p className="py-2 text-body text-muted-foreground">
             {error ? "The sessions could not be read." : "Nothing to show."}
@@ -187,49 +185,34 @@ export function RecentWorkPanel({ drawings }: { drawings: PollState<BoardSummary
   )
 }
 
-/** One drawing: its picture over its name, the tool it lives in and when it changed. */
+/**
+ * One drawing: its picture over its name, the tool it lives in and when it
+ * changed. An `OpenCard`, as every card that opens something is, so a
+ * modified press opens it in a new tab.
+ */
 function WorkCard({ drawing, index }: { drawing: BoardSummary; index: number }) {
   const router = useRouter()
   const href = `/excalidraw/${drawing.id}`
   return (
     <li className="min-w-0">
-      <BlurFade delay={index * 0.04} className="h-full">
-        <SpotlightBorder className="h-full">
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
-          <div
-            onClick={(event) => {
-              const target = event.target as HTMLElement
-              if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
-              router.push(href)
-            }}
-            className="group/choice flex h-full min-w-0 cursor-pointer flex-col rounded-xl"
-          >
-            <DrawingPreview
-              preview={drawing.preview}
-              className="h-24 w-full overflow-hidden rounded-t-xl border-b border-hairline sm:h-28"
-            />
-            <div className="flex min-w-0 items-start gap-2 px-3 py-2.5">
-              <div className="min-w-0 flex-1">
-                <Link
-                  href={href}
-                  aria-label={`Open ${drawing.name}`}
-                  className="block max-w-full truncate rounded-sm text-body font-medium focus-ring"
-                >
-                  {drawing.name}
-                </Link>
-                <p className="mt-0.5 flex min-w-0 items-center gap-1.5 text-hint text-muted-foreground">
-                  <ExcalidrawGlyph aria-hidden className="size-3 shrink-0" />
-                  <span className="truncate">edited {relativeTime(drawing.updatedAt)}</span>
-                </p>
-              </div>
-              <ArrowRight
-                aria-hidden
-                className="mt-1 size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-              />
-            </div>
-          </div>
-        </SpotlightBorder>
-      </BlurFade>
+      <OpenCard
+        index={index}
+        href={href}
+        onOpen={() => router.push(href)}
+        title={drawing.name}
+        media={
+          <DrawingPreview
+            preview={drawing.preview}
+            className="h-24 w-full overflow-hidden rounded-t-xl border-b border-hairline sm:h-28"
+          />
+        }
+        subtitle={
+          <p className="mt-0.5 flex min-w-0 items-center gap-1.5 pb-0.5 text-hint text-muted-foreground">
+            <ExcalidrawGlyph aria-hidden className="size-3 shrink-0" />
+            <span className="truncate">edited {relativeTime(drawing.updatedAt)}</span>
+          </p>
+        }
+      />
     </li>
   )
 }

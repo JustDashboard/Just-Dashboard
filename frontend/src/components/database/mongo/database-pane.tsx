@@ -1,19 +1,19 @@
 "use client"
 
+import { PanelHeader } from "@/components/panel"
 import { RankList, RankSkeleton, type RankItem } from "@/components/rank-list"
-import { grouped } from "@/components/database/data/view"
 import type { SectionId } from "@/components/database/engine"
 import { EngineMark } from "@/components/database/kit"
+import { NameMark } from "@/components/database/kit/marks"
 import { CollectionMark, collectionKind } from "@/components/database/mongo/kinds"
-import { DatabaseMark } from "@/components/database/mongo/rail"
 import type { Catalog, Mongo } from "@/components/database/mongo/use-mongo"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ObjectHead } from "@/components/database/workbench/chrome"
 import { Plus } from "@/components/icons"
-import { EmptyState } from "@/components/state"
+import { EmptyState, ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
-import { bytes } from "@/lib/format"
+import { bytes, grouped } from "@/lib/format"
 import Link from "next/link"
 
 /** How many collections the ranked list draws; the rail has all of them. */
@@ -39,14 +39,11 @@ export function DatabasePane({
   mongo,
   catalog,
   section,
-  leading,
   onNew,
 }: {
   mongo: Mongo
   catalog: Catalog
   section: SectionId
-  /** The control that brings the rail back, when it is hidden. */
-  leading?: React.ReactNode
   onNew?: () => void
 }) {
   const { engine, database, conn, goto, href } = mongo
@@ -55,21 +52,21 @@ export function DatabasePane({
   const place = engine.section(section)?.title ?? "Documents"
 
   const head = (
-    <div className="flex min-h-10 shrink-0 items-center gap-2 border-b border-hairline bg-surface-header px-3 py-1.5">
-      {leading}
-      <DatabaseMark name={database} />
-      <h2 className="min-w-0 truncate font-mono text-sm leading-6 font-medium">
-        {database || "No database"}
-      </h2>
-      {database && database === conn.database && <Tag>connects here</Tag>}
-      <span className="min-w-0 flex-1" />
-      {onNew && database && !RESERVED.has(database) && (
-        <Button size="xs" variant="outline" onClick={onNew}>
-          <Plus />
-          New {engine.nouns.object}
-        </Button>
-      )}
-    </div>
+    <ObjectHead
+      mark={<NameMark name={database} />}
+      name={database || "No database"}
+      kind={database && database === conn.database ? <Tag>connects here</Tag> : undefined}
+      verbs={
+        onNew &&
+        database &&
+        !RESERVED.has(database) && (
+          <Button size="xs" variant="outline" onClick={onNew}>
+            <Plus />
+            New {engine.nouns.object}
+          </Button>
+        )
+      }
+    />
   )
 
   const all = databases.data ?? []
@@ -82,7 +79,7 @@ export function DatabasePane({
   const elsewhere: RankItem[] = others.map((entry) => ({
     key: entry.name,
     label: entry.name,
-    mark: <DatabaseMark name={entry.name} />,
+    mark: <NameMark name={entry.name} />,
     value: entry.statsKnown ? bytes(entry.dataSize) : "—",
     share: serverData > 0 ? entry.dataSize / serverData : undefined,
     hint: entry.statsKnown
@@ -92,10 +89,13 @@ export function DatabasePane({
     onClick: () => goto(section, { db: entry.name, collection: null }),
   }))
   const elsewhereBlock = elsewhere.length > 0 && (
-    <section aria-labelledby="mongo-pane-databases" className="space-y-2">
-      <Heading id="mongo-pane-databases" title="Other databases on this server">
-        {grouped(elsewhere.length)}
-      </Heading>
+    <section aria-label="Other databases on this server" className="space-y-2">
+      <PanelHeader
+        plain
+        level={3}
+        title="Other databases on this server"
+        count={grouped(elsewhere.length)}
+      />
       <RankList items={elsewhere} />
     </section>
   )
@@ -110,7 +110,7 @@ export function DatabasePane({
               The connection string names no database. Choose one of the server&rsquo;s below.
             </p>
             {databases.error && !databases.data ? (
-              <ReadError error={databases.error} onRetry={databases.refresh} />
+              <ErrorState retryable error={databases.error} onRetry={databases.refresh} />
             ) : (
               <div className="max-w-2xl">{elsewhereBlock}</div>
             )}
@@ -238,11 +238,16 @@ export function DatabasePane({
             </div>
           ) : (
             <div className="grid items-start gap-x-10 gap-y-7 @3xl:grid-cols-2 [&>*]:min-w-0">
-              <section aria-labelledby="mongo-pane-collections" className="space-y-2">
-                <Heading id="mongo-pane-collections" title="By the data they hold">
-                  {own.length > rows.length &&
-                    `${grouped(own.length - rows.length)} smaller ones are in the list`}
-                </Heading>
+              <section aria-label="By the data they hold" className="space-y-2">
+                <PanelHeader
+                  plain
+                  level={3}
+                  title="By the data they hold"
+                  count={
+                    own.length > rows.length &&
+                    `${grouped(own.length - rows.length)} smaller ones are in the list`
+                  }
+                />
                 <RankList items={rows} />
               </section>
               {elsewhereBlock}
@@ -250,28 +255,6 @@ export function DatabasePane({
           )}
         </div>
       </div>
-    </div>
-  )
-}
-
-/** A block's name on the pane, with what qualifies it at the far end of the line. */
-function Heading({
-  id,
-  title,
-  children,
-}: {
-  id: string
-  title: string
-  children?: React.ReactNode
-}) {
-  return (
-    <div className="flex min-h-7 min-w-0 flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline pb-2">
-      <h3 id={id} className="text-body font-medium">
-        {title}
-      </h3>
-      <span className="numeric ml-auto flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-        {children}
-      </span>
     </div>
   )
 }

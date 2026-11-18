@@ -15,9 +15,9 @@ import {
   levelsFromParam,
   readLogWindow,
   resolveRange,
-} from "@/lib/log-filter"
-import { STACK_LENS, lensFor, withLensDefaults } from "@/lib/log-lenses"
-import { journalSource } from "@/lib/log-sources"
+} from "@/lib/log/filter"
+import { STACK_LENS, lensFor, withLensDefaults } from "@/lib/log/lenses"
+import { journalSource } from "@/lib/log/sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
@@ -60,6 +60,7 @@ import {
   queryParams,
   type RequestQuery,
 } from "@/components/deploy/logs-model"
+import { localInputValue } from "@/lib/format"
 
 const RAIL = { min: 208, max: 420, base: 272 }
 
@@ -102,11 +103,6 @@ function detectedLensOf(
   if (!source) return undefined
   if (source.kind === "journal" && unit) return units.find((u) => u.name === unit)?.lens
   return source.lens
-}
-
-function toLocalInput(date: Date) {
-  const offset = date.getTimezoneOffset() * 60_000
-  return new Date(date.getTime() - offset).toISOString().slice(0, 23)
 }
 
 /**
@@ -452,7 +448,7 @@ function LogsScreen() {
     setFilter(next)
   }
   const identity = record
-    ? found && <RecordIdentity key={record} record={found} aside={<WorkspaceHelp compact />} />
+    ? found && <RecordIdentity key={record} record={found} aside={<WorkspaceHelp />} />
     : viewSource &&
       selected &&
       !windowError && (
@@ -482,7 +478,7 @@ function LogsScreen() {
                   lens={lens}
                 />
               )}
-              <WorkspaceHelp compact />
+              <WorkspaceHelp />
             </div>
           }
         />
@@ -525,11 +521,10 @@ function LogsScreen() {
       }}
     >
       <Page fill className="gap-4 md:gap-5 md:max-lg:h-auto md:max-lg:overflow-visible">
-        <PageContext
-          eyebrow="Server"
-          title="Logs"
-          actions={identity ? undefined : <WorkspaceHelp />}
-        />
+        {/* The shortcuts' `?` closes the identity line (its `aside`), never
+            a row of its own (16 Nov): with no line drawn — no source read
+            yet, or a window that failed — the `?` key still opens them. */}
+        <PageContext title="Logs" />
         {identity}
 
         {/* One frame around the whole workbench. The rail and the lines are
@@ -583,7 +578,7 @@ function LogsScreen() {
                 max={RAIL.max}
                 onChange={(px, commit) => setRailWidth(px, commit)}
                 onReset={resetRailWidth}
-                className="absolute inset-y-0 -right-1 z-20"
+                className="absolute inset-y-0 -right-1 z-sticky"
               />
             </div>
           )}
@@ -680,8 +675,8 @@ function LogsScreen() {
               until={until}
               onCustomRange={(from, to) => {
                 setRange("custom")
-                setSince(toLocalInput(from))
-                setUntil(toLocalInput(to))
+                setSince(localInputValue(from))
+                setUntil(localInputValue(to))
               }}
               context={context}
               onContextChange={setContext}

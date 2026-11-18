@@ -1,10 +1,9 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import Link from "next/link"
 import { useSearchParams } from "next/navigation"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { ArrowLeft, Box, Clock, Database, GitHubMark, GridMasonry, Trash } from "@/components/icons"
+import { Box, Clock, Database, GitHubMark, GridMasonry, Trash } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -12,11 +11,13 @@ import { useMemoryState, useSessionState } from "@/lib/view-state"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentDraftSummary } from "@/lib/types"
 import { Page, PageContext, PageState } from "@/components/page"
-import { ChoiceList, ChoiceRow, FlowHeader, FlowSteps } from "@/components/flow"
+import { FlowHeader, FlowSteps } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { DimActions, IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { Tag } from "@/components/tag"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { tabClasses } from "@/components/tabs"
+import { ChipCount } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CREATION_STEPS, humanize } from "@/components/deploy/vocabulary"
@@ -116,14 +117,7 @@ function expiringSoon(iso: string | undefined) {
   return !Number.isNaN(at) && at - Date.now() < 3 * 24 * 60 * 60 * 1000
 }
 
-const Eyebrow = (
-  <Link
-    href="/deploy"
-    className="inline-flex items-center gap-1 rounded-sm focus-ring hover:underline"
-  >
-    <ArrowLeft className="size-3" /> Deployments
-  </Link>
-)
+const BACK = { href: "/deploy", label: "Deployments" }
 
 /**
  * One page, two states: choose a source, then configure it. The old
@@ -360,11 +354,11 @@ export function NewProject({
     else if (box.right > edge.right) row.scrollLeft += box.right - edge.right + 20
   }, [tab, choosing, resuming])
 
-  if (resuming) return <PageState eyebrow={Eyebrow} title="New project" />
+  if (resuming) return <PageState back={BACK} title="New project" />
   if (resumeError)
     return (
       <Page>
-        <PageContext eyebrow={Eyebrow} title="New project" />
+        <PageContext back={BACK} title="New project" />
         <ErrorState error={resumeError} />
       </Page>
     )
@@ -383,23 +377,25 @@ export function NewProject({
       search={false}
       rows={false}
     >
-      <Page register="flow" fill="xl" className="animate-rise">
-        <div className="flex shrink-0 justify-end">
-          <WorkspaceHelp />
-        </div>
+      <Page rise register="flow" fill="xl">
         {choosing ? (
           <>
             {/* The screen asks something, and the question is the page's own
               rank — not a sentence under a title, which is the caption §5
               removed from every page in the product. */}
             <FlowHeader
-              eyebrow={Eyebrow}
+              back={BACK}
               question="What are you deploying?"
               // Unfinished work is a way back, not a step of this one: a button
               // that says how much there is, beside the question, rather than a
               // block pushing the sources down the screen.
+              // The shortcuts' `?` ends the head, as on every page, rather than
+              // standing on a row of its own above it; a touch screen has none.
               actions={
-                pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />
+                <>
+                  {pending.length > 0 && <UnfinishedSetups drafts={pending} onDiscard={discard} />}
+                  <WorkspaceHelp />
+                </>
               }
               steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
             />
@@ -463,8 +459,9 @@ export function NewProject({
               screen — and why splitting Configure into four changed the spine
               rather than adding a second one inside it. */}
             <FlowHeader
-              eyebrow={Eyebrow}
+              back={BACK}
               question={QUESTIONS[step]}
+              actions={<WorkspaceHelp />}
               steps={<FlowSteps steps={CREATION_STEPS} current={creationStepIndex(step)} />}
             />
             <div className="min-w-0 xl:min-h-0 xl:flex-1">

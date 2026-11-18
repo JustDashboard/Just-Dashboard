@@ -3,7 +3,6 @@
 import { useState } from "react"
 import { useRouter } from "next/navigation"
 import {
-  ArrowRight,
   External,
   FolderOpen,
   Play,
@@ -27,13 +26,12 @@ import { MergePullDialog } from "@/components/git/merge-pull-dialog"
 import { PullRequestRow } from "@/components/git/pull-request-row"
 import { TestPullDialog } from "@/components/git/test-pull-dialog"
 import { WORKTREES_SECTION } from "@/components/git/worktree-list"
-import { CONTROL, ChoiceList, ChoiceRow } from "@/components/flow"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Modal } from "@/components/modal"
+import { OpenCard } from "@/components/open-card"
 import { ProductGlyph, hostProduct } from "@/components/product-logo"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { BlurFade } from "@/components/ui/blur-fade"
-import { SpotlightBorder } from "@/components/ui/spotlight-border"
 import { VerbMenu, type Verb } from "@/components/verbs"
 
 type Deployment = RepoPulls["deployments"][number]
@@ -243,222 +241,185 @@ export function RepoCard({
     <li className="min-w-0" data-workspace-item={repo.path} data-workspace-name={repo.name}>
       {/* Each card lands a beat after the one before it, capped so a shelf
           of forty does not take two seconds. */}
-      <BlurFade delay={Math.min(index, 11) * 0.03} className="h-full">
-        <SpotlightBorder className="h-full">
-          {/* eslint-disable-next-line jsx-a11y/click-events-have-key-events, jsx-a11y/no-static-element-interactions -- the pointer's larger target: the card's name is the link or button a keyboard opens it by */}
-          <div
-            onClick={(event) => {
-              // React carries a press inside an open menu — a group label, a
-              // separator — up through its portal to here, though it landed
-              // nowhere on the card.
-              const target = event.target as HTMLElement
-              if (!event.currentTarget.contains(target) || target.closest(CONTROL)) return
-              onOpen(repo.path)
-            }}
-            className="group group/choice flex h-full min-w-0 cursor-pointer flex-col rounded-xl"
-          >
-            {/* What it is, where it lives, and how far it has drifted. */}
-            <div className="flex min-w-0 items-start gap-3 px-3.5 pt-3.5">
-              <RepoMark repo={repo} />
-              <div className="min-w-0 flex-1">
-                <div className="flex min-w-0 items-center gap-2">
-                  <button
-                    data-workspace-primary
-                    type="button"
-                    title={repo.path}
-                    // The card's own handler already fires on the pointer; this
-                    // one is for the keyboard and must not open it twice.
-                    onClick={(event) => {
-                      event.stopPropagation()
-                      onOpen(repo.path)
-                    }}
-                    className="min-w-0 truncate rounded-sm text-left text-title leading-5 font-semibold focus-ring"
-                  >
-                    {repo.name}
-                  </button>
-                  <span className="flex-1" />
-                  <AheadBehind ahead={repo.ahead} behind={repo.behind} />
-                </div>
-                <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                  {forge && forgeMark ? (
-                    <>
-                      <ProductGlyph id={forgeMark} className="size-3.5" />
-                      <span className="truncate">{forge.slug}</span>
-                    </>
-                  ) : (
-                    <span className="truncate">no remote — only on this server</span>
-                  )}
-                </p>
-                <p
-                  className="mt-0.5 truncate font-mono text-hint text-muted-foreground/70"
-                  title={repo.path}
-                >
-                  {repo.path}
-                </p>
-              </div>
-              <div className="-mt-1 -mr-1.5 flex shrink-0 items-center">
-                <VerbMenu verbs={menu} label={`More for ${repo.name}`} />
-                <ArrowRight
-                  aria-hidden
-                  className="size-3.5 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-                />
-              </div>
-            </div>
-
-            {/* What it is made of. The strip's room is kept when there is
-                nothing to measure, so every card is the same shape. */}
-            <div className="mt-3 space-y-1.5 px-3.5">
-              {repo.languages && repo.languages.length > 0 ? (
+      <OpenCard
+        index={index}
+        onOpen={() => onOpen(repo.path)}
+        href={`/git?repo=${encodeURIComponent(repo.path)}`}
+        primary
+        title={repo.name}
+        titleHint={repo.path}
+        mark={<RepoMark repo={repo} />}
+        aside={<AheadBehind ahead={repo.ahead} behind={repo.behind} />}
+        menu={<VerbMenu verbs={menu} label={`More for ${repo.name}`} />}
+        subtitle={
+          <>
+            <p className="mt-1 flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+              {forge && forgeMark ? (
                 <>
-                  <LanguageBar languages={repo.languages} />
-                  <LanguageList languages={repo.languages} className="h-4" />
+                  <ProductGlyph id={forgeMark} className="size-3.5" />
+                  <span className="truncate">{forge.slug}</span>
                 </>
               ) : (
-                <>
-                  <span aria-hidden className="block h-1.5 rounded-full bg-meter-track" />
-                  <p className="h-4 text-xs leading-4 text-muted-foreground">
-                    {repo.empty ? "no commits yet" : "no source files to measure"}
-                  </p>
-                </>
+                <span className="truncate">no remote — only on this server</span>
               )}
-            </div>
-
-            {/* Where HEAD is, the shape of the tree on it, and what last
-                happened there. */}
-            <div className="mt-3 border-t border-hairline px-3.5 py-2.5">
-              <div className="flex min-w-0 items-center gap-2">
-                {/* One line: a long branch name gives way before a card grows. */}
-                <span className="flex min-w-0 flex-1 items-center gap-2">
-                  <BranchChip
-                    className="text-xs"
-                    branch={repo.branch}
-                    detached={repo.detached}
-                    title={
-                      repo.detached
-                        ? "Detached HEAD"
-                        : repo.upstream
-                          ? `tracks ${repo.upstream}`
-                          : "no upstream — pushing publishes this branch"
-                    }
-                  />
-                  {/* Only the states that change what the next push does get a
-                      word. "tracks origin/main" is the normal case and is
-                      already on the branch chip's tooltip. */}
-                  {repo.detached && (
-                    <Tag tone="danger" className="shrink-0">
-                      detached
-                    </Tag>
-                  )}
-                  {repo.gone && (
-                    <Tag tone="danger" className="shrink-0">
-                      upstream gone
-                    </Tag>
-                  )}
-                  {!repo.detached && !repo.empty && !repo.upstream && (
-                    <Tag className="shrink-0">not published</Tag>
-                  )}
-                </span>
-                {worktrees > 0 && (
-                  <button
-                    type="button"
-                    onClick={() =>
-                      document.getElementById(WORKTREES_SECTION)?.scrollIntoView({ block: "start" })
-                    }
-                    title="Listed under Worktrees, below the repositories"
-                    className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground focus-ring hover:bg-accent hover:text-foreground"
-                  >
-                    <SourceFork aria-hidden className="size-3.5" />
-                    {plural(worktrees, "worktree")}
-                  </button>
-                )}
-                <TreeState repo={repo} />
-              </div>
-              {/* The subject on a line of its own, at the size of what is
-                  read: squeezed between the sha and the attribution it kept
-                  thirty characters of a card four hundred pixels wide. Who
-                  and when go under it, quieter, and the sha to the right
-                  under the tree's state. Both lines keep their height when
-                  there is nothing to say, so every card is one shape. */}
-              <p
-                className={cn(
-                  "mt-2 h-5 truncate text-body leading-5",
-                  repo.subject && !repo.empty
-                    ? "text-foreground/90"
-                    : "text-muted-foreground italic",
-                )}
-                title={repo.subject}
+            </p>
+            <p className="mt-0.5 truncate font-mono text-hint text-faint" title={repo.path}>
+              {repo.path}
+            </p>
+          </>
+        }
+        // What is waiting to be merged, on one line of one height whatever it
+        // holds — the first request, the rest counted — so a card with ten
+        // requests is the height of one with none and never stretches the row
+        // it stands in.
+        foot={
+          <div className="border-t border-hairline px-2 pt-2 pb-2">
+            {first ? (
+              // The container swallows the press: the row and each verb in
+              // it is a control of its own, and none of them is "open the
+              // repository".
+              <div
+                role="presentation"
+                onClick={(event) => event.stopPropagation()}
+                className="flex h-[2.875rem] min-w-0 items-center gap-1"
               >
-                {repo.empty ? "no commits yet" : repo.subject || "—"}
+                <ChoiceList aria-label={`Pull requests in ${repo.name}`} className="flex-1">
+                  <PullRequestRow
+                    compact
+                    pull={first}
+                    verbs={verbsFor(first)}
+                    onOpen={onOpenPull ? () => onOpenPull(repo.path, first.number) : undefined}
+                  />
+                </ChoiceList>
+                {open.length > 1 && onOpenPull && (
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    className="numeric shrink-0 text-muted-foreground"
+                    aria-label={more}
+                    title={more}
+                    onClick={() => onOpenPull(repo.path)}
+                  >
+                    +{open.length - 1}
+                  </Button>
+                )}
+              </div>
+            ) : (
+              <p
+                className="flex h-[2.875rem] min-w-0 items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
+                // gh could not answer for this checkout — not signed in as
+                // its owner, most often: its own sentence is a hover away.
+                title={pulls?.error}
+              >
+                {quiet && <SourcePull aria-hidden className="size-3.5 shrink-0 opacity-70" />}
+                <span className="truncate">{quiet}</span>
               </p>
-              <p className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
-                {repo.subject && !repo.empty && (
+            )}
+          </div>
+        }
+      >
+        {/* What it is made of. The strip's room is kept when there is
+            nothing to measure, so every card is the same shape. */}
+        <div className="mt-3 space-y-1.5 px-3.5">
+          {repo.languages && repo.languages.length > 0 ? (
+            <>
+              <LanguageBar languages={repo.languages} />
+              <LanguageList languages={repo.languages} className="h-4" />
+            </>
+          ) : (
+            <>
+              <span aria-hidden className="block h-1.5 rounded-full bg-meter-track" />
+              <p className="h-4 text-xs leading-4 text-muted-foreground">
+                {repo.empty ? "no commits yet" : "no source files to measure"}
+              </p>
+            </>
+          )}
+        </div>
+
+        {/* Where HEAD is, the shape of the tree on it, and what last
+            happened there. */}
+        <div className="mt-3 border-t border-hairline px-3.5 py-2.5">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* One line: a long branch name gives way before a card grows. */}
+            <span className="flex min-w-0 flex-1 items-center gap-2">
+              <BranchChip
+                className="text-xs"
+                branch={repo.branch}
+                detached={repo.detached}
+                title={
+                  repo.detached
+                    ? "Detached HEAD"
+                    : repo.upstream
+                      ? `tracks ${repo.upstream}`
+                      : "no upstream — pushing publishes this branch"
+                }
+              />
+              {/* Only the states that change what the next push does get a
+                  word. "tracks origin/main" is the normal case and is
+                  already on the branch chip's tooltip. */}
+              {repo.detached && (
+                <Tag tone="danger" className="shrink-0">
+                  detached
+                </Tag>
+              )}
+              {repo.gone && (
+                <Tag tone="danger" className="shrink-0">
+                  upstream gone
+                </Tag>
+              )}
+              {!repo.detached && !repo.empty && !repo.upstream && (
+                <Tag className="shrink-0">not published</Tag>
+              )}
+            </span>
+            {worktrees > 0 && (
+              <button
+                type="button"
+                onClick={() =>
+                  document.getElementById(WORKTREES_SECTION)?.scrollIntoView({ block: "start" })
+                }
+                title="Listed under Worktrees, below the repositories"
+                className="flex shrink-0 items-center gap-1 rounded-sm px-1 text-xs text-muted-foreground focus-ring hover:bg-accent hover:text-foreground"
+              >
+                <SourceFork aria-hidden className="size-3.5" />
+                {plural(worktrees, "worktree")}
+              </button>
+            )}
+            <TreeState repo={repo} />
+          </div>
+          {/* The subject on a line of its own, at the size of what is
+              read: squeezed between the sha and the attribution it kept
+              thirty characters of a card four hundred pixels wide. Who
+              and when go under it, quieter, and the sha to the right
+              under the tree's state. Both lines keep their height when
+              there is nothing to say, so every card is one shape. */}
+          <p
+            className={cn(
+              "mt-2 h-5 truncate text-body leading-5",
+              repo.subject && !repo.empty ? "text-foreground" : "text-muted-foreground italic",
+            )}
+            title={repo.subject}
+          >
+            {repo.empty ? "no commits yet" : repo.subject || "—"}
+          </p>
+          <p className="mt-0.5 flex h-4 min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+            {repo.subject && !repo.empty && (
+              <>
+                <AuthorMark name={repo.author} />
+                <span className="truncate">{repo.author}</span>
+                {repo.commitAt && (
                   <>
-                    <AuthorMark name={repo.author} />
-                    <span className="truncate">{repo.author}</span>
-                    {repo.commitAt && (
-                      <>
-                        <span aria-hidden>·</span>
-                        <span className="shrink-0 whitespace-nowrap">
-                          {relativeTime(repo.commitAt)}
-                        </span>
-                      </>
-                    )}
-                    <ShortSha sha={repo.head} className="ml-auto text-hint leading-4" />
+                    <span aria-hidden>·</span>
+                    <span className="shrink-0 whitespace-nowrap">
+                      {relativeTime(repo.commitAt)}
+                    </span>
                   </>
                 )}
-              </p>
-            </div>
-
-            {/* What is waiting to be merged, on one line of one height
-                whatever it holds — the first request, the rest counted — so
-                a card with ten requests is the height of one with none and
-                never stretches the row it stands in. */}
-            <div className="mt-auto border-t border-hairline px-2 pt-2 pb-2">
-              {first ? (
-                // The container swallows the press: the row and each verb in
-                // it is a control of its own, and none of them is "open the
-                // repository".
-                <div
-                  role="presentation"
-                  onClick={(event) => event.stopPropagation()}
-                  className="flex h-[2.875rem] min-w-0 items-center gap-1"
-                >
-                  <ChoiceList aria-label={`Pull requests in ${repo.name}`} className="flex-1">
-                    <PullRequestRow
-                      compact
-                      pull={first}
-                      verbs={verbsFor(first)}
-                      onOpen={onOpenPull ? () => onOpenPull(repo.path, first.number) : undefined}
-                    />
-                  </ChoiceList>
-                  {open.length > 1 && onOpenPull && (
-                    <Button
-                      size="xs"
-                      variant="ghost"
-                      className="numeric shrink-0 text-muted-foreground"
-                      aria-label={more}
-                      title={more}
-                      onClick={() => onOpenPull(repo.path)}
-                    >
-                      +{open.length - 1}
-                    </Button>
-                  )}
-                </div>
-              ) : (
-                <p
-                  className="flex h-[2.875rem] min-w-0 items-center gap-1.5 px-1.5 text-xs text-muted-foreground"
-                  // gh could not answer for this checkout — not signed in as
-                  // its owner, most often: its own sentence is a hover away.
-                  title={pulls?.error}
-                >
-                  {quiet && <SourcePull aria-hidden className="size-3.5 shrink-0 opacity-70" />}
-                  <span className="truncate">{quiet}</span>
-                </p>
-              )}
-            </div>
-          </div>
-        </SpotlightBorder>
-      </BlurFade>
+                <ShortSha sha={repo.head} className="ml-auto text-hint leading-4" />
+              </>
+            )}
+          </p>
+        </div>
+      </OpenCard>
 
       {/* The dialogs stand beside the card, not inside it: a press in a
           portal still bubbles through the React tree, and inside the card

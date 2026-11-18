@@ -1,31 +1,27 @@
 "use client"
 
-import { useEffect, useRef } from "react"
-import Link from "next/link"
 import { ShieldCheck } from "@/components/icons"
 import { plural } from "@/lib/format"
 import type { Certificate } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
-import { LoadingRows } from "@/components/state"
-import { StatusDot, type DotTone } from "@/components/status-dot"
-import { CertificateSearch } from "@/components/proxy/certificate-inventory"
-import { expiryTone } from "@/components/proxy/expiry-status"
+import { certificateTone, certificateWords } from "@/lib/certificates"
+import { StatusDot } from "@/components/status-dot"
+import { VERDICT_TONE } from "@/components/tone"
+import { Rail, RailFigure, RailLine, RailName, RailRow, railInk } from "@/components/rail"
 import { certificateProduct } from "@/components/proxy/marks"
 
 const SORT_WORDS = { urgency: "most urgent first", expiry: "soonest to expire", name: "by name" }
 
-/** A certificate's days, as its row's reading: the word where days say nothing. */
-function daysWord(cert: Certificate): string {
-  if (cert.error) return "unreadable"
-  if (cert.staging) return "test"
-  if (cert.expired) return "expired"
-  return `${cert.daysLeft}d`
-}
-
-function dotTone(cert: Certificate): DotTone {
-  const tone = expiryTone(cert)
-  return tone === "danger" ? "danger" : tone === "warning" ? "warning" : "running"
+/**
+ * A certificate's time left as its row's reading, in the words every
+ * certificate reading shares (lib/certificates): "29d", "10h" in its last
+ * day, and the state where days say nothing ("Expired", "Test certificate").
+ */
+function railWord(cert: Certificate): string {
+  // The figure column is a few characters wide: a test certificate is
+  // "Test" there, and the row's name says the rest.
+  if (cert.staging && !cert.error) return "Test"
+  return certificateWords(cert, { form: "short" }).replace(/ left$/, "")
 }
 
 /**
@@ -41,6 +37,8 @@ export function CertificateRail({
   rows,
   current,
   loading,
+  error,
+  onRetry,
   filters,
   hrefFor,
   className,
@@ -49,6 +47,9 @@ export function CertificateRail({
   rows: Certificate[]
   current?: Certificate
   loading: boolean
+  /** The list could not be read: said in place of the rows. */
+  error?: Error
+  onRetry?: () => void
   filters: {
     query: string
     setQuery: (value: string) => void
@@ -59,125 +60,79 @@ export function CertificateRail({
   hrefFor: (cert: Certificate) => string
   className?: string
 }) {
-  const listed = rows.some((row) => row.path === current?.path)
-  const pinned = !listed ? current : undefined
-  const list = useRef<HTMLOListElement>(null)
-  // The certificate on screen is kept in view: opened from a deep link or by
-  // Alt+↓ past the column's edge, it would otherwise be off its own list.
-  useEffect(() => {
-    list.current
-      ?.querySelector<HTMLElement>("[aria-current='page']")
-      ?.scrollIntoView({ block: "nearest" })
-  }, [current?.path])
-  const filtered = filters.source !== "all"
-
   return (
-    <nav
-      aria-label="Certificates"
-      data-slot="certificate-rail"
-      className={cn("min-h-0 flex-col border-r border-hairline pr-4", className)}
-    >
-      <div className="flex shrink-0 flex-col gap-2 pb-3">
-        <CertificateSearch
-          value={filters.query}
-          onChange={filters.setQuery}
-          className="sm:w-full"
-        />
-        <p className="flex min-w-0 items-center justify-between gap-2 text-hint text-muted-foreground">
-          <span className="truncate">
-            {certs
-              ? `${plural(rows.length, "certificate")} · ${SORT_WORDS[filters.sort]}`
-              : "Reading the certificates…"}
-          </span>
-          {filtered && (
-            <button
-              type="button"
-              onClick={() => filters.setSource("all")}
-              className="shrink-0 rounded-sm font-medium focus-ring hover:text-foreground"
-            >
-              Clear filters
-            </button>
-          )}
-        </p>
-      </div>
-      <ol
-        ref={list}
-        aria-label="Certificates to open"
-        className="-mx-2 min-h-0 flex-1 [scrollbar-width:thin] space-y-0.5 overflow-y-auto px-2 pb-2"
-      >
-        {pinned && <RailRow cert={pinned} current href={hrefFor(pinned)} />}
-        {pinned && rows.length > 0 && (
-          <li aria-hidden className="mx-3 my-1.5 border-t border-hairline" />
-        )}
-        {rows.map((cert) => (
-          <RailRow
-            key={cert.path}
-            cert={cert}
-            current={cert.path === current?.path}
-            href={hrefFor(cert)}
-          />
-        ))}
-        {loading && rows.length === 0 && <LoadingRows rows={6} />}
-        {!loading && rows.length === 0 && !pinned && (
-          <li className="px-3 py-4 text-hint text-muted-foreground">No certificate matches.</li>
-        )}
-      </ol>
-    </nav>
+    <Rail
+      slot="certificate-rail"
+      label="Certificates"
+      search={{
+        placeholder: "Name, a host it covers, or issuer",
+        query: filters.query,
+        onQuery: filters.setQuery,
+      }}
+      caption={
+        certs
+          ? `${plural(rows.length, "certificate")} · ${SORT_WORDS[filters.sort]}`
+          : error
+            ? undefined
+            : "Reading the certificates…"
+      }
+      rows={rows}
+      keyOf={(cert) => cert.path}
+      current={(cert) => cert.path === current?.path}
+      pinned={current}
+      row={(cert, on) => <CertificateRow cert={cert} current={on} href={hrefFor(cert)} />}
+      loading={loading}
+      error={certs ? undefined : error}
+      onRetry={onRetry}
+      empty="No certificate matches."
+      filtered={filters.source !== "all"}
+      onClearFilters={() => filters.setSource("all")}
+      className={className}
+    />
   )
 }
 
-function RailRow({ cert, current, href }: { cert: Certificate; current: boolean; href: string }) {
-  const tone = expiryTone(cert)
+function CertificateRow({
+  cert,
+  current,
+  href,
+}: {
+  cert: Certificate
+  current: boolean
+  href: string
+}) {
+  const verdict = certificateTone(cert)
+  const word = railWord(cert)
   return (
-    <li className="min-w-0">
-      <Link
-        href={href}
-        data-workspace-item={cert.path}
-        data-workspace-name={cert.name}
-        aria-current={current ? "page" : undefined}
-        aria-label={`${cert.name}, ${daysWord(cert)}`}
-        className={cn(
-          "flex h-12 w-full min-w-0 items-center gap-2.5 rounded-lg px-2 text-left focus-ring-inset transition-colors",
-          current ? "bg-accent" : "hover:bg-row-hover",
-        )}
-      >
-        <span className="relative flex shrink-0">
-          <ProductLogo
-            id={certificateProduct(cert)}
-            size="sm"
-            fallback={ShieldCheck}
-            className="size-7 rounded-md [&_img]:size-4"
-          />
-          <span
-            aria-hidden
-            className="absolute -right-0.5 -bottom-0.5 flex size-2.5 items-center justify-center rounded-full bg-background"
-          >
-            <StatusDot tone={dotTone(cert)} className="size-1.5" />
-          </span>
-        </span>
-        <span className="min-w-0 flex-1">
-          <span
-            className={cn("block truncate text-body", current ? "font-semibold" : "font-medium")}
-          >
-            {cert.name}
-          </span>
-          <span className="block truncate font-mono text-micro text-muted-foreground">
-            {cert.domains.join(", ") || "no names"}
-          </span>
-        </span>
-        <span
-          className={cn(
-            "numeric shrink-0 font-mono text-hint",
-            tone === "danger"
+    <RailRow
+      item={cert.path}
+      name={cert.name}
+      label={`${cert.name}, ${certificateWords(cert, { form: "long" })}`}
+      current={current}
+      href={href}
+      mark={
+        <ProductLogo
+          id={certificateProduct(cert)}
+          size="sm"
+          fallback={ShieldCheck}
+          className="size-7 rounded-md [&_img]:size-4"
+        />
+      }
+      dot={<StatusDot tone={VERDICT_TONE[verdict]} className="size-1.5" />}
+      end={
+        <RailFigure
+          ink={
+            verdict === "critical"
               ? "font-medium text-destructive"
-              : tone === "warning"
-                ? "text-warning"
-                : "text-muted-foreground",
-          )}
+              : railInk(verdict === "warning" ? "warning" : undefined)
+          }
         >
-          {daysWord(cert)}
-        </span>
-      </Link>
-    </li>
+          {word}
+        </RailFigure>
+      }
+    >
+      <RailName current={current}>{cert.name}</RailName>
+      <RailLine className="font-mono">{cert.domains.join(", ") || "no names"}</RailLine>
+    </RailRow>
   )
 }

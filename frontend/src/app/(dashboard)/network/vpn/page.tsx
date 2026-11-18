@@ -3,6 +3,7 @@
 import { Suspense, useCallback, useEffect, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Tabs as TabsPrimitive } from "radix-ui"
+import { Fact } from "@/components/fact-line"
 import { LockClosed, RefreshClockwise } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -10,21 +11,22 @@ import type { VPNView, WGInterface, WGPeer, WireGuardView } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { SaveBarProvider } from "@/components/deploy/settings/save-bar"
-import { FactDot, HostFact, HostIdentity } from "@/components/metrics/host-identity"
+import { SaveBarProvider } from "@/components/settings/save-bar"
+import { IdentityHeader } from "@/components/identity-header"
 import { Modal } from "@/components/modal"
 import { Page, PageContext } from "@/components/page"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireMark } from "@/components/deploy/wire"
+import { WireMark } from "@/components/wire/wire"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyState, ErrorState, LoadingRows, Notice } from "@/components/state"
+import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
+import { LoadingRows } from "@/components/loading"
 import { Status } from "@/components/status-dot"
-import { ChipCount, tabClasses } from "@/components/tabs"
+import { ViewTabList } from "@/components/tabs"
 import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu } from "@/components/verbs"
-import { WireFlow } from "@/components/wire-flow"
+import { WireFlow } from "@/components/wire/wire-flow"
 import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
-import { InstallFollowUp, InstallHandoff } from "@/components/network/install"
+import { InstallFollowUp, InstallHandoff } from "@/components/install-handoff"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { ArchivedTunnels } from "@/components/network/vpn/archive"
 import { usePeerSheets } from "@/components/network/vpn/peers"
@@ -139,10 +141,9 @@ function NetworkVPNContent() {
     return (
       <Page>
         <PageContext eyebrow="Network" title="VPN" />
-        <EmptyState
-          icon={LockClosed}
-          title="VPN needs the admin capability"
-          description="Tunnel peers and their client configurations are visible to administrators."
+        <NeedsAdmin
+          what="VPN"
+          why="Tunnel peers and their client configurations are visible to administrators."
         />
       </Page>
     )
@@ -159,7 +160,7 @@ function NetworkVPNContent() {
 
   return (
     <SaveBarProvider>
-      <Page className="animate-rise">
+      <Page rise>
         <PageContext eyebrow="Network" title="VPN" />
         {/* One block, as on a process's page: the strip's hairline is the line
             under the identity, rather than a second one a band of ground away. */}
@@ -173,22 +174,20 @@ function NetworkVPNContent() {
             />
           )}
           <Tabs value={view} onValueChange={show} className="min-w-0 gap-0">
-            <TabsPrimitive.List
-              aria-label="Kinds of VPN"
-              className="flex shrink-0 [scrollbar-width:none] gap-1 overflow-x-auto border-b border-hairline [&::-webkit-scrollbar]:hidden"
-            >
-              {vpnViews(headscale).map((key) => (
-                <TabsPrimitive.Trigger
-                  key={key}
-                  value={key}
-                  className={tabClasses(view === key, "h-10")}
-                >
-                  {GLYPH[key] && <ProductGlyph id={GLYPH[key]} />}
-                  {VPN_VIEW_NAME[key]}
-                  {(count[key] ?? 0) > 0 && <ChipCount>{count[key]}</ChipCount>}
-                </TabsPrimitive.Trigger>
-              ))}
-            </TabsPrimitive.List>
+            <ViewTabList
+              label="Kinds of VPN"
+              views={vpnViews(headscale).map((key) => ({
+                key,
+                label: (
+                  <>
+                    {GLYPH[key] && <ProductGlyph id={GLYPH[key]} />}
+                    {VPN_VIEW_NAME[key]}
+                  </>
+                ),
+                count: count[key],
+              }))}
+              value={view}
+            />
 
             {failed ? (
               <TabsPrimitive.Content value={view} className={PANEL}>
@@ -272,7 +271,7 @@ function Identity({
   )
   if (!vpn)
     return (
-      <HostIdentity
+      <IdentityHeader
         fallback={LockClosed}
         className="border-b-0 pb-0"
         label="About the VPNs"
@@ -280,7 +279,7 @@ function Identity({
         state={failed ? <Status tone="danger" label="Not read" /> : <IdentityStateLoading />}
         facts={
           <IdentityFacts loading={!failed}>
-            <HostFact>WireGuard and Tailscale on this server</HostFact>
+            <Fact>WireGuard and Tailscale on this server</Fact>
           </IdentityFacts>
         }
         menu={menu}
@@ -291,7 +290,7 @@ function Identity({
   const peers = tunnels.flatMap((tunnel) => tunnel.peers)
   const tailnet = tailnetState(vpn.tailscale)
   return (
-    <HostIdentity
+    <IdentityHeader
       fallback={LockClosed}
       className="border-b-0 pb-0"
       label="About the VPNs"
@@ -299,24 +298,20 @@ function Identity({
       state={<Status tone={reading.tone} label={reading.label} />}
       facts={
         <IdentityFacts>
-          <HostFact product="wireguard">
+          <Fact product="wireguard">
             {!vpn.wireguard.installed
               ? "not installed"
               : tunnels.length === 0
                 ? "no tunnel yet"
                 : `${plural(tunnels.length, "tunnel")} · ${peers.filter((p) => p.online).length} of ${plural(peers.length, "peer")} online`}
-          </HostFact>
-          <FactDot />
-          <HostFact product="tailscale">
+          </Fact>
+          <Fact product="tailscale">
             {!vpn.tailscale.installed
               ? "not installed"
               : `${vpn.tailscale.tailnet || "tailnet"} · ${tailnet.label.toLowerCase()}`}
-          </HostFact>
+          </Fact>
           {headscale && (
-            <>
-              <FactDot />
-              <HostFact product="headscale">{plural(vpn.headscale.nodes.length, "node")}</HostFact>
-            </>
+            <Fact product="headscale">{plural(vpn.headscale.nodes.length, "node")}</Fact>
           )}
         </IdentityFacts>
       }
@@ -391,7 +386,7 @@ function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChang
         />
       ) : wireguard.interfaces.length === 0 ? (
         <>
-          <HostIdentity
+          <IdentityHeader
             label="About WireGuard"
             slot="tunnel-identity"
             mark="wireguard"
@@ -399,16 +394,11 @@ function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChang
             state={<Status tone="stopped" label="No tunnel yet" />}
             facts={
               <>
-                <HostFact>
+                <Fact>
                   <span className="font-mono">{wireguard.package || "wireguard-tools"}</span>{" "}
                   installed
-                </HostFact>
-                {wireguard.kernel && (
-                  <>
-                    <FactDot />
-                    <HostFact>in this kernel</HostFact>
-                  </>
-                )}
+                </Fact>
+                {wireguard.kernel && <Fact>in this kernel</Fact>}
               </>
             }
           />

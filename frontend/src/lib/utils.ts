@@ -6,9 +6,8 @@ import { extendTailwindMerge } from "tailwind-merge"
  *
  * This is not a nicety. tailwind-merge decides which of two classes wins by
  * looking each one up in a table of class *groups*, and it builds that table
- * from stock Tailwind. `--text-micro`, `--text-hint`, `--text-body`,
- * `--text-title` and the wordmark's three steps are named in `@theme` and exist
- * only in this product — so `text-micro` did not match the font-size group, fell
+ * from stock Tailwind. `--text-micro`, `--text-hint`, `--text-body` and
+ * `--text-title` are named in `@theme` and exist only in this product — so `text-micro` did not match the font-size group, fell
  * through to the generic `text-{colour}` matcher, and was treated as a colour.
  *
  * The consequence was silent and everywhere: any element whose classes carried
@@ -20,13 +19,44 @@ import { extendTailwindMerge } from "tailwind-merge"
  * `LogoMark`, the per-core readouts, and every other call site that put a size
  * and a colour in one `cn()`.
  *
- * Registering the six names is the entire fix. The classes were always correct;
- * the merger was throwing them away.
+ * Registering the four names is the entire fix. The classes were always
+ * correct; the merger was throwing them away.
+ *
+ * The same holds for every other name the theme adds (globals.css): a layer
+ * (`z-raised`), a radius (`rounded-xs`, `rounded-tile-md`), a length or curve
+ * of motion (`duration-fast`, `ease-arrive`), a tracking (`tracking-code`), a
+ * control height, a named layout value and the safe-area padding. Each is put
+ * in the group whose stock members it conflicts with, so `cn("z-10",
+ * "z-overlay")` keeps the overlay and `cn("rounded-md", "rounded-tile-md")`
+ * keeps the tile, as a caller's override should.
  */
+const CONTROL = ["control-dense", "control-compact", "control-regular", "control-large"]
+
 const twMerge = extendTailwindMerge({
   extend: {
+    theme: {
+      radius: ["tile-md", "tile-lg"],
+      ease: ["arrive", "standard"],
+      tracking: ["code"],
+    },
     classGroups: {
-      "font-size": [{ text: ["micro", "hint", "body", "title", "mark-sm", "mark-md", "mark-lg"] }],
+      "font-size": [{ text: ["micro", "hint", "body", "title"] }],
+      z: [{ z: ["raised", "sticky", "pane", "float", "immersive", "overlay", "tooltip"] }],
+      duration: [{ duration: ["fast", "base", "slow", "fill"] }],
+      transition: [{ transition: ["fill"] }],
+      "grid-cols": [{ "grid-cols": ["main-end", "start-main", "start-main-end"] }],
+      "grid-rows": [{ "grid-rows": ["fill"] }],
+      w: [{ w: ["rail", "inspector"] }],
+      h: [{ h: ["workbench", ...CONTROL] }],
+      "min-h": [{ "min-h": CONTROL }],
+      "max-h": [{ "max-h": ["rail", "workbench"] }],
+      size: [{ size: CONTROL }],
+      pt: [{ pt: ["safe"] }],
+      pb: [{ pb: ["safe"] }],
+      pl: [{ pl: ["safe"] }],
+      pr: [{ pr: ["safe"] }],
+      px: [{ px: ["safe"] }],
+      mb: [{ mb: ["safe"] }],
     },
   },
 })

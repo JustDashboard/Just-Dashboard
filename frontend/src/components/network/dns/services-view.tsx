@@ -4,7 +4,7 @@ import { useAuth } from "@/hooks/use-auth"
 import type { DNSView } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { Adblock } from "@/components/network/dns/adblock"
-import { GhostRows } from "@/components/network/dns/ghost"
+import { ChoiceListSkeleton } from "@/components/choice-row"
 import {
   DNSServiceManager,
   type DNSServiceAsk,
@@ -60,7 +60,7 @@ export function ServicesView({
                 onUpstreams={onUpstreams}
               />
             ) : (
-              <GhostRows rows={1} />
+              <ChoiceListSkeleton rows={1} />
             )}
           </PanelBody>
         </Panel>

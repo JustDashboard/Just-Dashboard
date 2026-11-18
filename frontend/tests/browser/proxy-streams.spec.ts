@@ -1133,9 +1133,21 @@ test("a page opened while the module installs shows that install and starts no s
   // The install already running is on screen, and the button waits for it.
   await expect(page.getByText(/Unpacking libnginx-mod-stream/)).toBeVisible()
   await expect(page.getByRole("button", { name: "Installing libnginx-mod-stream…" })).toBeDisabled()
-  await expect(
-    page.getByText("This keeps running if you close the page — reopen it from the recent list."),
-  ).toBeVisible()
+  // A phone's console head is one row, and the tag is left off it so the
+  // job's name has the room: whole, beside its state and Stop.
+  await expect(page.getByText("Keeps running if you leave", { exact: true })).toBeHidden()
+  const head = page
+    .locator("[data-slot=pane]", {
+      has: page.getByRole("log", { name: "Installing libnginx-mod-stream" }),
+    })
+    .locator("[data-slot=pane-header]")
+  const name = head.getByText("Installing libnginx-mod-stream", { exact: true })
+  await expect(name).toBeVisible()
+  await expect(head.getByRole("button", { name: "Stop" })).toBeVisible()
+  expect(await name.evaluate((node) => node.scrollWidth <= node.clientWidth)).toBe(true)
+  const row = (await name.boundingBox())!
+  const stop = (await head.getByRole("button", { name: "Stop" }).boundingBox())!
+  expect(Math.abs(row.y + row.height / 2 - (stop.y + stop.height / 2))).toBeLessThanOrEqual(1)
   // The recent list the console names is beside the button.
   const steps = page.getByRole("list", { name: "Before a stream can forward" })
   await expect(steps.getByRole("button", { name: "htop", exact: true })).toBeVisible()
@@ -1986,6 +1998,33 @@ for (const width of [1280, 390]) {
     const loaded = await identity.boundingBox()
     expect(Math.abs(loaded!.y - loading!.y)).toBeLessThan(1)
     expect(Math.abs(loaded!.x - loading!.x)).toBeLessThan(1)
+    // The loading line keeps the command's place, so it is as tall as the
+    // line it becomes and the picture under it does not move.
+    expect(Math.abs(loaded!.height - loading!.height)).toBeLessThan(1)
+  })
+
+  test(`a stream's own line is one height loading and loaded at ${width}`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 })
+    await mockProxy(page, { included: true })
+    let release: () => void = () => {}
+    const held = new Promise<void>((resolve) => (release = resolve))
+    await page.route("**/api/v1/proxy/streams/", async (route) => {
+      await held
+      return json(route, { ...streamStatus({ streams: carrying }) })
+    })
+    await page.goto("/proxy/streams/postgres-replica")
+    const identity = page.locator("[data-slot='host-identity']")
+    await expect(identity).toContainText("Reading postgres-replica…")
+    await risen(page)
+    const loading = await identity.boundingBox()
+    release()
+    await expect(page.getByRole("region", { name: "About postgres-replica" })).toBeVisible()
+    await risen(page)
+    const loaded = await identity.boundingBox()
+    expect(Math.abs(loaded!.y - loading!.y)).toBeLessThan(1)
+    // On a phone too: the loading line keeps a place for the state and the
+    // verbs the loaded line has, so the views under it do not jump.
+    expect(Math.abs(loaded!.height - loading!.height)).toBeLessThan(1)
   })
 }
 
@@ -2052,9 +2091,14 @@ test("a stream's page reads what it carried in words, with no tiles and no p-num
   await expect(lines.filter({ hasText: /^Turned away/ })).toContainText("3 denied")
   await expect(lines.filter({ hasText: /^Not forwarded/ })).toContainText("2 not forwarded")
   await expect(lines.filter({ hasText: /^Session length/ })).toContainText("half inside 2.4 s")
-  await expect(lines.filter({ hasText: /^Session length/ })).toContainText(
-    "9 in 10 inside 31.0 s · 99 in 100 inside 6m 50s · longest 2h 1m",
-  )
+  const length = lines
+    .filter({ hasText: /^Session length/ })
+    .getByText("9 in 10 inside 31.0 s · longest 2h 1m", { exact: true })
+  await expect(length).toBeVisible()
+  // Beside the rail the readings stand in two columns, and the detail still
+  // fits its line rather than being cut.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await expect.poll(() => length.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
   await expect(page.locator("[data-slot='page']")).not.toContainText(/\bp(50|90|99)\b/)
   const outcome = page.getByRole("heading", { name: "How sessions ended" }).locator("../../..")
   await expect(outcome.locator("[data-slot='rank-row']")).toHaveCount(3)

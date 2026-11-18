@@ -8,7 +8,8 @@
  * relative re-export here would reach none of them and run no browser spec.
  */
 export { BlockedState } from "@/components/database/kit/blocked-state"
-export { CodeView, downloadText } from "@/components/database/kit/code-view"
+export { CodeView } from "@/components/database/kit/code-view"
+export { ConnectionString } from "@/components/database/kit/connection-string"
 export { EngineGlyph, EngineMark } from "@/components/database/kit/engine-mark"
 export {
   EnvironmentTag,

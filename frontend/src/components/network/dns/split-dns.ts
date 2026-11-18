@@ -1,5 +1,5 @@
-import { dnsLiteralAddress } from "@/lib/network-dns-service-policy"
-import type { NativeFamily, NativeIntent } from "@/lib/network-native-profile"
+import { dnsLiteralAddress } from "@/lib/network/dns-service-policy"
+import type { NativeFamily, NativeIntent } from "@/lib/network/native-profile"
 
 /**
  * A link's split DNS, as the native profile carries it. resolved keeps one

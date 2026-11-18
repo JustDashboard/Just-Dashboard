@@ -13,9 +13,9 @@ import {
 import { plural } from "@/lib/format"
 import type { SSHDConfig } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { InitialsMark } from "@/components/account/user-avatar"
-import { WireMark, WireNode } from "@/components/deploy/wire"
-import { SettingPicture } from "@/components/deploy/settings/setting-picture"
+import { InitialsMark } from "@/components/user-avatar"
+import { WireMark, WireNode } from "@/components/wire/wire"
+import { SettingPicture } from "@/components/settings/setting-picture"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 
 /** More accounts than this and the rest are a count beside the faces. */
@@ -164,7 +164,7 @@ export function SSHPicture({
                 {ports.map((port) => (
                   <span key={port}>
                     <span className="text-muted-foreground">:</span>
-                    <span className="text-[var(--tag-pink)]">{port}</span>{" "}
+                    <span className="text-tag-pink">{port}</span>{" "}
                   </span>
                 ))}
               </span>

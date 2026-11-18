@@ -2,10 +2,11 @@
 
 import { bytes, duration, relativeTime } from "@/lib/format"
 import { usePoll } from "@/hooks/use-poll"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { Meter } from "@/components/meter"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { EmptyNote, LoadingPanel } from "@/components/state"
+import { EmptyNote } from "@/components/state"
+import { LoadingPanel } from "@/components/loading"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import {
@@ -21,7 +22,7 @@ import { uptimeWords } from "@/components/database/mongo/performance/samples"
 import type { MongoMember } from "@/components/database/mongo/types"
 import type { Mongo } from "@/components/database/mongo/use-mongo"
 import { Fig, FigureLine } from "@/components/database/ops/performance-words"
-import { ReadError } from "@/components/database/redis/read-error"
+import { ReadError } from "@/components/database/kit/read-error"
 
 /** How far behind the primary a member is before the figure is a reading worth a hue. */
 const LAG_SECONDS = 10

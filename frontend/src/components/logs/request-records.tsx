@@ -3,7 +3,7 @@
 import { useMemo } from "react"
 import { cn } from "@/lib/utils"
 import { get } from "@/lib/api"
-import { dockerSource } from "@/lib/log-sources"
+import { dockerSource } from "@/lib/log/sources"
 import type {
   DeploymentFleet,
   DeploymentRelease,
@@ -14,8 +14,9 @@ import type {
   VHost,
 } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
+import { Fact } from "@/components/fact-line"
 import { Globe } from "@/components/icons"
-import { FactDot, HostIdentity } from "@/components/metrics/host-identity"
+import { IdentityHeader } from "@/components/identity-header"
 import type { LogWindow } from "@/components/logs/service-logs"
 import { Pane } from "@/components/panel"
 import { tabClasses } from "@/components/tabs"
@@ -30,7 +31,7 @@ import {
 import { containerAt, type Lead } from "@/components/deploy/logs-model"
 import type { ProjectDetail } from "@/components/deploy/project-context"
 import { serviceProduct } from "@/components/deploy/service-product"
-import { ProjectMark } from "@/components/deploy/project-mark"
+import { ProjectMark } from "@/components/project-mark"
 import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { FailedRequestLines } from "@/components/proxy/site-logs"
 import { requestRecords, type RequestRecord } from "@/components/logs/service-views-model"
@@ -168,7 +169,7 @@ export function RecordIdentity({
   aside?: React.ReactNode
 }) {
   return (
-    <HostIdentity
+    <IdentityHeader
       className="animate-rise pb-4"
       mark={record.product}
       logo={
@@ -180,18 +181,16 @@ export function RecordIdentity({
       title={record.label}
       facts={
         <>
-          <Tag>{record.deployment ? "deployment" : "nginx site"}</Tag>
+          <Fact>
+            <Tag>{record.deployment ? "deployment" : "nginx site"}</Tag>
+          </Fact>
           {record.detail && (
-            <>
-              <FactDot />
-              <span className="min-w-0 truncate font-mono" title={record.detail}>
-                {record.detail}
-              </span>
-            </>
+            <Fact className="min-w-0 truncate font-mono" title={record.detail}>
+              {record.detail}
+            </Fact>
           )}
           {record.figure && (
-            <>
-              <FactDot />
+            <Fact>
               <span
                 className={cn(
                   "numeric whitespace-nowrap",
@@ -202,7 +201,7 @@ export function RecordIdentity({
               >
                 {record.figure}
               </span>
-            </>
+            </Fact>
           )}
         </>
       }

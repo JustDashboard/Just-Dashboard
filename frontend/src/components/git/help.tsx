@@ -1,8 +1,6 @@
 "use client"
 
-import { Question } from "@/components/icons"
-import { cn } from "@/lib/utils"
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Explain } from "@/components/explain"
 
 /**
  * The teaching layer for git, in the shape docker/explain.tsx established: the
@@ -94,24 +92,20 @@ export const GIT_GLOSSARY: Record<string, { title: string; body: string }> = {
   },
 }
 
-/** The same definition behind a small icon, for a label with no sentence to hold it. */
+/**
+ * The same definition behind the product's one toggletip (`Explain`), for a
+ * label with no sentence to hold it: a `?` that opens on a hover, a focus or
+ * a tap. It was a hover card, which ignores touch, so on a phone the
+ * definition was behind nothing.
+ */
 export function GitExplain({ name, className }: { name: string; className?: string }) {
   const entry = GIT_GLOSSARY[name]
   return (
-    <HoverCard openDelay={150}>
-      <HoverCardTrigger asChild>
-        <button
-          type="button"
-          aria-label={`What is ${entry?.title ?? name}?`}
-          className={cn("text-muted-foreground transition-colors hover:text-foreground", className)}
-        >
-          <Question className="size-3.5" />
-        </button>
-      </HoverCardTrigger>
-      <HoverCardContent className="w-80 text-xs leading-relaxed">
-        <p className="mb-1 text-body font-medium">{entry?.title ?? name}</p>
-        <p className="text-muted-foreground">{entry?.body ?? "No description available."}</p>
-      </HoverCardContent>
-    </HoverCard>
+    <Explain
+      glyph="question"
+      label={`What is ${entry?.title ?? name}?`}
+      entry={{ title: entry?.title ?? name, body: entry?.body ?? "No description available." }}
+      className={className}
+    />
   )
 }

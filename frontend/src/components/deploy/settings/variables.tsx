@@ -21,9 +21,9 @@ import type {
   DeploymentVariable,
 } from "@/lib/types"
 import { browserInlined, pointsAtLocalhost } from "@/components/deploy/deployment-defaults"
-import { InitialsMark } from "@/components/account/user-avatar"
-import { FileIcon } from "@/components/files/file-icon"
-import { ChoiceList, ChoiceRow, GroupRule } from "@/components/flow"
+import { InitialsMark } from "@/components/user-avatar"
+import { FileIcon } from "@/components/file-icon"
+import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import {
   Field,
   FormFact,
@@ -33,13 +33,13 @@ import {
   OptionList,
   OptionRow,
 } from "@/components/form"
-import { SearchInput } from "@/components/page"
+import { SearchInput } from "@/components/search-input"
 import { Well } from "@/components/panel"
 import { ProductGlyph, ProductLogo, variableProduct } from "@/components/product-logo"
 import { SidePanel } from "@/components/side-panel"
 import { EmptyNote, EmptyState, Notice } from "@/components/state"
 import { Status, type DotTone } from "@/components/status-dot"
-import { ChipCount, ChipStrip, FilterChip } from "@/components/tabs"
+import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
@@ -83,11 +83,12 @@ import {
   readDotenv,
   REFUSAL_WORD,
 } from "@/components/deploy/settings/dotenv"
-import { useColumnWidth } from "@/components/deploy/settings/use-column-width"
+import { useColumnWidth } from "@/hooks/use-column-width"
 import { RevealedValue, ValueType, VariableMark } from "@/components/deploy/settings/variable-type"
 import { SharedReferencePicker, SharedVariables } from "@/components/deploy/shared-variables"
 import { StoreReferenceLabel, StoreReferencePicker } from "@/components/deploy/secret-store-picker"
-import { SettingSection, SettingsPage } from "@/components/deploy/settings/setting-card"
+import { SettingSection } from "@/components/settings/setting-card"
+import { SettingsPage } from "@/components/settings/settings-page"
 import {
   ConfigurationState,
   useConfiguration,
@@ -690,7 +691,7 @@ function VariablesBody({
           at localhost — is news about what was just typed, so it rises in
           once, keyed on which hint it is, rather than on every keystroke. */}
       <div className="min-w-0 space-y-4">
-        <div className="grid min-w-0 gap-4 sm:grid-cols-[minmax(0,1fr)_auto]">
+        <div className="grid min-w-0 gap-4 sm:grid-cols-main-end">
           {!editingName && (
             <Field
               label="Variable name"
@@ -1069,7 +1070,7 @@ function VariablesBody({
             ? "Change this variable's value, its type or who can read it."
             : "Name a value and choose who can read it."
         }
-        width="md"
+        size="md"
         footer={
           <>
             <FormNote className="mr-auto max-sm:hidden">Applies on your next deployment</FormNote>
@@ -1259,11 +1260,11 @@ function ValueLine({
             {compact ? (
               // A preview environment's links are not the project's
               // Databases page, and leaving the sheet mid-review loses it.
-              <span className="text-foreground/90">{link.name}</span>
+              <span className="text-foreground">{link.name}</span>
             ) : (
               <Link
                 href={`/deploy/${projectId}/settings/databases`}
-                className="rounded-sm text-foreground/90 focus-ring hover:underline"
+                className="rounded-sm text-foreground focus-ring hover:underline"
               >
                 {link.name}
               </Link>
@@ -1277,7 +1278,7 @@ function ValueLine({
         <>
           <Linked className="inline-block size-3 align-[-1px]" />{" "}
           {compact ? (
-            <span className="font-mono text-foreground/90">
+            <span className="font-mono text-foreground">
               {reference.kind}.{reference.target}
             </span>
           ) : (
@@ -1287,7 +1288,7 @@ function ValueLine({
                   ? "/deploy/variables"
                   : `/deploy/${projectId}/settings/variables#project-variables`
               }
-              className="rounded-sm font-mono text-foreground/90 focus-ring hover:underline"
+              className="rounded-sm font-mono text-foreground focus-ring hover:underline"
             >
               {reference.kind}.{reference.target}
             </Link>
@@ -1315,12 +1316,11 @@ function ValueLine({
 
 /**
  * The three places a variable can reach, always in the same three slots: the
- * ones it reaches in the foreground, the ones it does not faint, so a column
- * of rows reads down as a matrix. A reader hears the reached ones by name.
+ * ones it reaches in the foreground, the ones it does not in the tag's own
+ * faint ink (never faded by opacity, which failed contrast), so a column of
+ * rows reads down as a matrix. A reader hears the reached ones by name.
  * A slot is keyed on whether it is lit, so the one an edit just turned on or
- * off lands in its new state instead of blinking into it. The rise is on a
- * wrapper: the keyframe ends on full opacity and holds it, which on the tag
- * itself would light every faint slot.
+ * off lands in its new state instead of blinking into it.
  */
 function Reach({ scopes }: { scopes: Scope[] }) {
   return (
@@ -1330,7 +1330,7 @@ function Reach({ scopes }: { scopes: Scope[] }) {
         const lit = scopes.includes(item.scope)
         return (
           <span key={`${item.scope}-${lit}`} aria-hidden className="inline-flex animate-rise">
-            <Tag className={lit ? "text-foreground/85" : "opacity-25"}>{item.slot}</Tag>
+            <Tag className={cn(lit && "text-foreground")}>{item.slot}</Tag>
           </span>
         )
       })}
@@ -1651,7 +1651,7 @@ function ImportSheet({
       onOpenChange={(next) => (next ? onOpenChange(true) : close())}
       title="Import a .env"
       description="Paste or choose a dotenv file; every name in it is listed with what importing it does."
-      width="lg"
+      size="lg"
       footer={
         <>
           {verdicts.length > 0 && (
