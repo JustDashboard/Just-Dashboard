@@ -532,7 +532,7 @@ daemon of the machine running them.
   deliberately carries no Tailscale client) and writes into `JD_DATA_DIR/certs`, which the proxy mounts
   read-only. Checked at boot and every 12 h, renewed with 30 days to spare, and the proxy is restarted
   afterwards because Caddy reads a file-based certificate once. `deploy/proxy-entrypoint.sh` turns
-  `JD_TLS` into the scheme and the `tls` directive: a Caddyfile cannot branch, and an installer that
+  `JD_TLS` into the scheme and the `tls` directive (and `JD_SITE` into whether HSTS is sent): a Caddyfile cannot branch, and an installer that
   edited a tracked one would make every later `git pull` a merge conflict.
 - Routes: `GET/PUT /api/v1/dashboard/config`, `POST /api/v1/dashboard/restart`,
   `DELETE /api/v1/dashboard/config/run` and `GET /api/v1/dashboard/config/log` (the whole restart
