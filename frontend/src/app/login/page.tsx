@@ -331,15 +331,7 @@ export default function LoginPage() {
                           required
                         />
                       </Field>
-                      <Field
-                        label="Password"
-                        htmlFor="password"
-                        trailing={
-                          <TextButton expanded={forgot} onClick={() => setForgot((v) => !v)}>
-                            Forgot it?
-                          </TextButton>
-                        }
-                      >
+                      <Field label="Password" htmlFor="password">
                         <div className="relative">
                           <Input
                             id="password"
@@ -362,6 +354,15 @@ export default function LoginPage() {
                               <Eye className="size-4" />
                             )}
                           </button>
+                          {/* Drawn at the label row's right edge, where Field's `trailing` would
+                              put it, but after the password in the document: in the label row,
+                              Tab went from Username to "Forgot it?" before the field. bottom-full
+                              and the field's own gap (space-y-1.5) land it on that row. */}
+                          <div className="absolute right-0 bottom-full mb-1.5 flex h-(--text-body--line-height) items-center">
+                            <TextButton expanded={forgot} onClick={() => setForgot((v) => !v)}>
+                              Forgot it?
+                            </TextButton>
+                          </div>
                         </div>
                       </Field>
                       {forgot && <ForgotPassword username={username} />}
