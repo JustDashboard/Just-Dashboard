@@ -47,7 +47,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
@@ -102,7 +102,7 @@ export default function SystemUsersPage() {
 function SystemUsers() {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const { host } = useMetrics()
+  const host = useHost()
   const wide = useBreakpoint("xl")
   const [showSystem, setShowSystem] = useViewState("system-users.show-system", false)
   const [query, setQuery] = useSessionState("system-users.query", "")

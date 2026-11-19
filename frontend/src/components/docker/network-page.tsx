@@ -24,7 +24,7 @@ import { notify } from "@/lib/toast"
 import type { DockerNetwork, NetworkDetail } from "@/lib/types"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { IconAction } from "@/components/icon-action"
 import { IdentityHeader } from "@/components/identity-header"
@@ -266,7 +266,7 @@ function NetworkMain({
 }) {
   const router = useRouter()
   const { can } = useAuth()
-  const { host } = useMetrics()
+  const host = useHost()
   const [attaching, setAttaching] = useState(false)
   const [detaching, setDetaching] = useState<MemberReading | null>(null)
   const [removing, setRemoving] = useState<DockerNetwork | null>(null)

@@ -39,6 +39,20 @@ export function useMetricsValue<T>(
 }
 
 /**
+ * This server's description (`HostInfo`: its name, platform, kernel), for a page that names or
+ * draws the server rather than its live numbers. It re-renders when the stream reads the host again,
+ * not on every frame as `useMetrics()` does: a page that took `host` out of the whole state used to
+ * redraw every two seconds for a value that had not changed.
+ */
+export function useHost(): HostInfo | undefined {
+  return useMetricsValue(selectHost)
+}
+
+function selectHost(state: MetricsState): HostInfo | undefined {
+  return state.host
+}
+
+/**
  * This server's host name, as the dashboard reads it for its own pages (`/system/host`, the
  * Overview's title): `undefined` until the shell's metrics stream has it, `null` once its first
  * read failed with nothing to show. It re-renders on a new name, not on every frame.

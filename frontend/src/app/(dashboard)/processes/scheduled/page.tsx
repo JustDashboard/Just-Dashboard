@@ -5,7 +5,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { Plus } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { isExampleLine, type ScheduleLane } from "@/lib/schedule"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { useAuth } from "@/hooks/use-auth"
 import { useSessionState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -62,7 +62,7 @@ export default function ScheduledPage() {
  */
 function Scheduled() {
   const { confirm, dialog } = useConfirm()
-  const { host } = useMetrics()
+  const host = useHost()
   const { can } = useAuth()
   const router = useRouter()
   const search = useSearchParams()
