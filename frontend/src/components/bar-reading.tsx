@@ -521,7 +521,6 @@ function Line({
         onPress && "cursor-pointer hover:bg-row-hover",
       )}
     >
-      <span aria-hidden className="h-3 w-0.5 shrink-0 rounded-full" style={{ background: color }} />
       {/* The name gives way last: the detail truncates long before it does.
           Its cut is 24px tall, not the line's 20, so an Explain term in a
           name keeps a pointer's press box; the line does not grow. */}

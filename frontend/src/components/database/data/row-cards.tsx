@@ -20,7 +20,6 @@ import {
 import { grouped } from "@/lib/format"
 
 /** A clean row's edge: the same width as a changed one's, so the cards line up. */
-const CLEAN_EDGE = "border-l-transparent"
 
 /** How many of a row's first columns make its title. */
 const TITLE_COLUMNS = 2
@@ -173,8 +172,7 @@ function RowCard({
       className={cn(
         // One height in every state, and off-screen cards cost nothing: a
         // page can be a thousand of them.
-        "flex h-[52px] w-full items-center gap-2 border-b border-l-2 border-hairline pr-2 pl-2.5 text-left focus-ring-inset [contain-intrinsic-size:auto_52px] [content-visibility:auto] hover:bg-row-hover",
-        row.state === "clean" ? CLEAN_EDGE : CHANGE_STATE[row.state].edge,
+        "flex h-[52px] w-full items-center gap-2 border-b border-hairline pr-2 pl-3 text-left focus-ring-inset [contain-intrinsic-size:auto_52px] [content-visibility:auto] hover:bg-row-hover",
         active && "bg-row-hover",
       )}
     >

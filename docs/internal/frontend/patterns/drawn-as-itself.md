@@ -75,8 +75,8 @@ dolphin and Valkey is not Redis, on a fleet card, a home's identity tile, the st
 rail's head and every engine picker, which are one `EngineCard` (`choice-card.tsx`) rather than three
 shapes that had already drifted. A flavour with no artwork of its own draws the database glyph on
 the same tile and never borrows its driver's logo with its own name beside it.
-A network has no product of its own. Its row carries its lane colour down its leading edge and its
-members' products (`ProductLogos`), and its page draws its bridge as Docker's mark.
+A network has no product of its own. Its row carries its members' products (`ProductLogos`), and its
+page draws its bridge as Docker's mark.
 
 **What a backup covers is a product, and so is what a terminal runs.** A coverage row is drawn as
 the thing it protects — a saved database as its engine, the proxy's configuration as nginx or Caddy,

@@ -28,7 +28,6 @@ import { crawlerOf, networkOf, refererProduct } from "@/lib/clients"
 import type { RequestBlockState } from "@/components/deploy/request-blocks"
 import type { RequestEntry, RequestSummary } from "@/lib/types"
 import {
-  CLASS_EDGE,
   latency,
   latencyBracket,
   latencyShare,
@@ -259,8 +258,7 @@ export function RequestConsole({
               // Padded above as well as below, so once it sticks to the top
               // of the pane its labels stay centred in the band rather than
               // pressed against the band's top edge.
-              <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken px-0 py-1 pr-4 font-sans text-hint font-medium text-muted-foreground">
-                <span aria-hidden className="w-0.5 shrink-0" />
+              <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken py-1 pr-4 pl-3 font-sans text-hint font-medium text-muted-foreground">
                 <span className="w-16 shrink-0">Time</span>
                 <span className="w-12 shrink-0">Method</span>
                 <span className="w-9 shrink-0 text-right">Code</span>
@@ -277,7 +275,7 @@ export function RequestConsole({
               const face = cn(
                 "flex cursor-default transition-colors hover:bg-row-hover",
                 // A failed request is washed the way the log console washes an
-                // error line. A 4xx keeps its edge only: it is usually the
+                // error line. A 4xx keeps its coloured code only: it is usually the
                 // caller's, and a scanner's forty refusals washed amber would
                 // bury the one 500 among them.
                 klass === "5xx" && !plain && "bg-wash-danger",
@@ -308,13 +306,9 @@ export function RequestConsole({
                       {...opener}
                       className={cn(
                         face,
-                        "w-full items-center gap-3 py-px pr-4 text-left focus-ring-inset",
+                        "w-full items-center gap-3 py-px pr-4 pl-3 text-left focus-ring-inset",
                       )}
                     >
-                      <span
-                        aria-hidden
-                        className={cn("w-0.5 shrink-0 self-stretch", CLASS_EDGE[klass])}
-                      />
                       <span
                         title={timestamp(entry.time)}
                         className="numeric w-16 shrink-0 text-faint select-none"
@@ -349,12 +343,8 @@ export function RequestConsole({
                   ) : (
                     <button
                       {...opener}
-                      className={cn(face, "w-full gap-3 pr-3 text-left focus-ring-inset")}
+                      className={cn(face, "w-full gap-3 pr-3 pl-3 text-left focus-ring-inset")}
                     >
-                      <span
-                        aria-hidden
-                        className={cn("w-0.5 shrink-0 self-stretch", CLASS_EDGE[klass])}
-                      />
                       <span className="block min-w-0 flex-1 py-1">
                         <span className="flex min-w-0 items-center gap-3">
                           <StatusCode

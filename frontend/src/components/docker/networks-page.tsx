@@ -27,7 +27,7 @@ import { cn } from "@/lib/utils"
 import { membersKnown } from "@/lib/docker-networks"
 import { useSessionState } from "@/lib/view-state"
 import { DockerIdentity, VerdictButton } from "@/components/docker/docker-identity"
-import { HueKey, NetworkBand, type NetworkRate } from "@/components/docker/network-band"
+import { NetworkBand, type NetworkRate } from "@/components/docker/network-band"
 import { NetworkRows } from "@/components/docker/network-table"
 import { ContainerNetworkRows, type Placement } from "@/components/docker/network-members"
 import { useContainersLive, useMemberCounts } from "@/components/docker/network-live"
@@ -42,7 +42,6 @@ import {
   isUnused,
   networkChanges,
   networkHref,
-  networkHue,
   networkOrder,
   networkOwner,
   shelfLabel,
@@ -530,7 +529,6 @@ export function Networks() {
                     aria-label={`Show containers on every network, not only ${focused.name}`}
                     onClick={() => setOnNetwork("")}
                   >
-                    <HueKey color={networkHue(focused.name)} />
                     on {focused.name}
                     <Cross aria-hidden className="size-3" />
                   </FilterChip>

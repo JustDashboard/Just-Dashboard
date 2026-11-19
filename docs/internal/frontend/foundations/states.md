@@ -13,7 +13,7 @@
 | The three never look alike, and a control in all three at once stays readable. | spec `design-system.spec.ts` (*hover, selection and focus are three different marks on a row*) |
 | One focus ring. No hand-written `focus-visible:ring` or outline. | lint `focus-ring`; widened to `focus` and bare `outline-none` (WP-39) |
 | Selection never borrows the ring's colour. | convention |
-| On the rail the current row is the selection fill with a brand bar, and hover is the menu's fill. | spec `shell-phone.spec.ts` (*the current page is said, and the pointer's fill is not the selection's*) |
+| On the rail the current row is the selection fill, with no bar on its edge, and hover is the menu's fill. | spec `shell-phone.spec.ts` (*the current page is said, and the pointer's fill is not the selection's*) |
 | A row's actions appear through `RowActions`, `IconAction reveal` or `rowReveal()`, are visible on touch and on keyboard focus, and are laid out, never overlaid. | lint `row-reveal`; spec `design-system.spec.ts` (*row actions … are visible without a pointer*) |
 
 ## 6. Three states, three mechanisms

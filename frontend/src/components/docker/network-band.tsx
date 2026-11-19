@@ -278,13 +278,6 @@ function addressParts(plan: AddressPlan): ReadingPart[] {
   })
 }
 
-/** A network's key: its colour as the 2×10 bar a legend draws. */
-export function HueKey({ color }: { color: string }) {
-  return (
-    <span aria-hidden className="h-2.5 w-0.5 shrink-0 rounded-full" style={{ background: color }} />
-  )
-}
-
 const VERB: Record<NetworkChange["action"], string> = {
   joined: "joined",
   left: "left",

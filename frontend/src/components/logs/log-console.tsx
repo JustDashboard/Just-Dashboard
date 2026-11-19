@@ -30,7 +30,6 @@ import { cn } from "@/lib/utils"
 import { grouped, plural, timestamp } from "@/lib/format"
 import type { LogLine } from "@/lib/types"
 import {
-  LEVEL_EDGE,
   LEVEL_MARK,
   LEVEL_TEXT,
   LEVEL_TONE,
@@ -772,13 +771,6 @@ export const LogRow = memo(function LogRow({
         line.context && "opacity-60",
       )}
     >
-      <span
-        aria-hidden
-        className={cn(
-          "absolute inset-y-0 left-0 w-0.5",
-          line.level ? LEVEL_EDGE[line.level] : "bg-transparent",
-        )}
-      />
       {showLineNumbers && (
         <span className="numeric w-12 shrink-0 text-right text-faint select-none @max-lg:hidden">
           {line.no ?? ""}

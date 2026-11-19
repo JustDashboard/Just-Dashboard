@@ -130,11 +130,7 @@ export const FileRow = memo(function FileRow({
       onKeyDown={onKeyDown}
     >
       <TableCell
-        className={cn(
-          "relative w-8",
-          active &&
-            "before:absolute before:inset-y-1.5 before:left-0 before:w-0.5 before:rounded-full before:bg-brand before:content-['']",
-        )}
+        className="w-8"
         onClick={(e) => e.stopPropagation()}
         onDoubleClick={(e) => e.stopPropagation()}
       >

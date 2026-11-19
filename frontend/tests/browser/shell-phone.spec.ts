@@ -257,13 +257,10 @@ test("the current page is said, and the pointer's fill is not the selection's", 
   expect(selected, "the current row has no fill").not.toBe(atRest)
   expect(hovered, "hover paints nothing").not.toBe(atRest)
   expect(hovered, "hover paints the selection's fill").not.toBe(selected)
-  // The bar on the leading edge is the second mark, in the brand's colour.
-  expect(
-    await current.evaluate((el) => {
-      const bar = getComputedStyle(el, "::before")
-      return bar.content !== "none" && parseFloat(bar.width) >= 2
-    }),
-  ).toBe(true)
+  // The fill is the only mark: no bar on the leading edge.
+  expect(await current.evaluate((el) => getComputedStyle(el, "::before").content === "none")).toBe(
+    true,
+  )
   // Under the pointer the current row keeps its own fill.
   await current.hover()
   expect(await fill("Containers")).toBe(selected)

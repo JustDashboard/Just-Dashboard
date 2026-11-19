@@ -117,15 +117,15 @@ export function CoreBars({ cores, color }: { cores: number[]; color: string }) {
 }
 
 /**
- * The key to a tile's hour, before its name: the 2×10 bar a chart's legend
- * draws, so a reading and the line under it are one colour and the four lines
- * read apart before a label is read.
+ * The key to a tile's hour, before its name: the dot a chart's legend draws,
+ * so a reading and the line under it are one colour and the four lines read
+ * apart before a label is read.
  */
 export function SeriesKey({ color }: { color: string }) {
   return (
     <span
       aria-hidden
-      className="mr-1.5 inline-block h-2.5 w-0.5 rounded-full align-[-1px]"
+      className="mr-1.5 inline-block size-2 rounded-full align-[0px]"
       style={{ background: color }}
     />
   )

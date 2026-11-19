@@ -11,11 +11,7 @@ import { Sparkline } from "@/components/sparkline"
 import { ServiceLogs, type LogAsk, type ServiceLogSource } from "@/components/logs/service-logs"
 import { StatusDot } from "@/components/status-dot"
 import { ServiceLabel } from "@/components/docker/stack-diff"
-import {
-  bucketTone,
-  serviceLane,
-  type ServiceReading,
-} from "@/components/docker/stack-service-readings"
+import { bucketTone, type ServiceReading } from "@/components/docker/stack-service-readings"
 
 /** How far back the strip counts, and how often it counts again. */
 const WINDOW_MS = 60 * 60_000
@@ -100,18 +96,7 @@ export function StackLogs({
               lines={sum(activity?.lines)}
               errors={sum(activity?.errors)}
             >
-              <span className="flex min-w-0 items-center gap-2">
-                <span aria-hidden className="flex h-4 gap-px">
-                  {names.slice(0, 6).map((name) => (
-                    <span
-                      key={name}
-                      className="w-0.5 rounded-full"
-                      style={{ background: serviceLane(name) }}
-                    />
-                  ))}
-                </span>
-                <span className="truncate text-body font-medium">Every service</span>
-              </span>
+              <span className="truncate text-body font-medium">Every service</span>
             </ServiceButton>
           </li>
           {readings

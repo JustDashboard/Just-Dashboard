@@ -276,8 +276,9 @@ export function SqlEditor({
                     ),
                     options: {
                       isWholeLine: true,
-                      // The brand is "where you are": the statement that will run.
-                      linesDecorationsClassName: "ml-1 border-l-2 border-brand",
+                      // The brand is "where you are": the statement that will run,
+                      // washed behind its lines rather than ruled down the gutter.
+                      className: "bg-wash-brand",
                     },
                   },
                 ]

@@ -21,7 +21,7 @@ import type { ComposeStack } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { crashed } from "@/components/docker/overview"
 import { stackLabel, stackTone } from "@/components/docker/stack-state"
-import { DASHBOARD_STACK, stackLane, type StackLine } from "@/components/docker/stack-readings"
+import { DASHBOARD_STACK, type StackLine } from "@/components/docker/stack-readings"
 
 /**
  * One compose stack as a card you open (`ChoiceRow`): what it is made of as
@@ -97,14 +97,6 @@ export function StackChoiceRow({
       }
       title={
         <span className="flex min-w-0 items-center gap-2">
-          {/* The project's hue as a stripe, as the networks list draws its
-              own: a round dot beside a name reads as a status dot, and the
-              stack already has one (PGH-26). */}
-          <span
-            aria-hidden
-            className="h-3.5 w-0.5 shrink-0 rounded-full"
-            style={{ background: stackLane(stack.name) }}
-          />
           <span className="truncate">{stack.name}</span>
           <StackTags stack={stack} />
           {/* A phone has no room for the columns: what the stack holds in

@@ -548,8 +548,7 @@ function QueryRows({
   return (
     <div className="animate-rise py-1 font-mono text-xs leading-relaxed">
       {wide && (
-        <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken pr-4 pb-1 font-sans text-hint font-medium text-muted-foreground">
-          <span aria-hidden className="w-0.5 shrink-0" />
+        <div className="sticky top-0 z-raised flex items-center gap-3 border-b border-hairline bg-surface-sunken pr-4 pb-1 pl-3 font-sans text-hint font-medium text-muted-foreground">
           <span className="w-16 shrink-0">Time</span>
           <span className="w-16 shrink-0 text-right">Took</span>
           <span className="min-w-0 flex-1 capitalize">{noun.one}</span>
@@ -567,15 +566,6 @@ function QueryRows({
           entry.error && !plain && "bg-wash-danger",
           open === key && "bg-accent hover:bg-accent",
         )
-        const edge = (
-          <span
-            aria-hidden
-            className={cn(
-              "w-0.5 shrink-0 self-stretch",
-              entry.error ? "bg-destructive" : slow ? "bg-warning/70" : "bg-transparent",
-            )}
-          />
-        )
         const took = (
           <span
             className={cn(
@@ -592,9 +582,8 @@ function QueryRows({
               type="button"
               aria-expanded={open === key}
               onClick={() => setOpen((current) => (current === key ? null : key))}
-              className={cn(face, wide ? "items-center gap-3 py-px pr-4" : "gap-3 pr-3")}
+              className={cn(face, wide ? "items-center gap-3 py-px pr-4 pl-3" : "gap-3 pr-3 pl-3")}
             >
-              {edge}
               {wide ? (
                 <>
                   <span

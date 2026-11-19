@@ -127,10 +127,7 @@ export function RowField({
     <div
       data-slot="row-field"
       data-edited={cell.edited || undefined}
-      className={cn(
-        "min-w-0 space-y-1 border-l-2 py-2 pr-3 pl-2.5",
-        cell.edited ? "border-l-git-modified" : "border-l-transparent",
-      )}
+      className="min-w-0 space-y-1 py-2 pr-3 pl-3"
     >
       <div className="flex min-w-0 items-center gap-2">
         <label htmlFor={id} className="min-w-0 truncate font-mono text-xs font-medium">

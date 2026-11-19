@@ -216,8 +216,8 @@ function Detail({ tone, children }: { tone: "warning" | "danger"; children: Reac
   return (
     <p
       className={cn(
-        "border-l-2 pl-3 font-mono text-hint leading-relaxed break-words whitespace-pre-wrap",
-        tone === "danger" ? "border-destructive text-destructive" : "border-warning text-warning",
+        "font-mono text-hint leading-relaxed break-words whitespace-pre-wrap",
+        tone === "danger" ? "text-destructive" : "text-warning",
       )}
     >
       {children}

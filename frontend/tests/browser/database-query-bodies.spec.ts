@@ -284,8 +284,8 @@ const editor = (page: Page) => page.locator("[data-slot=sql-editor] .monaco-edit
 const commands = (page: Page) => page.locator("[data-slot=query-commands]")
 const results = (page: Page) => page.locator("[data-slot=query-results]")
 const runButton = (page: Page) => commands(page).getByRole("button", { name: "Run", exact: true })
-/** The lines the gutter marks as what Run sends. */
-const marked = (page: Page) => page.locator("[data-slot=sql-editor] .margin .border-brand")
+/** The lines washed as what Run sends. */
+const marked = (page: Page) => page.locator("[data-slot=sql-editor] .view-overlays .bg-wash-brand")
 const editorText = (page: Page) =>
   page.locator("[data-slot=sql-editor] .view-lines").evaluate((el) =>
     [...el.querySelectorAll(".view-line")]

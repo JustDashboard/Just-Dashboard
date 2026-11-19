@@ -193,7 +193,7 @@ figure without counting, and **the space before a unit is a no-break space in th
 span**: as a plain text node it became an anonymous item of a flex parent and lost its space ("Held
 by 31.4GB"). `LandedFigures` marks figures that have already landed (a line that swaps which part it
 shows). `HUE` is each measure's colour wherever it is drawn; `SeriesKey` the key before a reading's
-name; `CoreBars` every core's share; `StreamState` whether the socket is live.
+name, a round dot in its series colour; `CoreBars` every core's share; `StreamState` whether the socket is live.
 
 **Enforced by** `live-figure.test.js`.
 
@@ -341,8 +341,9 @@ of one bar and keep their own shapes.
   a tile, which scales whole with its logo inside it so the logo keeps its margin. Words beside a
   dot, and a count drawn as a mark (`proxy/site-band.tsx`), keep the strip's hint size. Until 0.8.6 each mark sat on a short rule in its part's
   colour, which made the strip read as a row of tabs; it was removed at the operator's request. The
-  colour is the line's tick and the span's, and a pointed or pressed mark takes the row's hover or
-  accent ground.
+  colour is the span's alone: the line has no colour bar before its name (removed in 0.9.1, see
+  [*No colour bars*](../standard.md#the-operators-decisions)), and a pointed or pressed mark takes
+  the row's hover or accent ground.
 - **A band must not mount, unmount or change columns as data lands, and its page renders it during
   load.** Whether a block is drawn is decided by what the host is, never by what a read has said so
   far, so a page whose readings land does not move.

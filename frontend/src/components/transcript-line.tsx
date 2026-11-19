@@ -277,15 +277,6 @@ export function TranscriptRow({
         arrived && "animate-rise",
       )}
     >
-      {lane && (line.kind === "step" || line.kind === "resource") && (
-        // The lane, drawn once at the step's head: which image this braid of
-        // lines is building is read off the edge before the words.
-        <span
-          aria-hidden
-          className="absolute inset-y-1 left-0 w-0.5 rounded-sm"
-          style={{ background: lane }}
-        />
-      )}
       <span
         aria-hidden
         data-slot="code-gutter"

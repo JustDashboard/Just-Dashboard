@@ -345,8 +345,8 @@ service state. The pages that moved keep their behaviour:
   there with who may reach it, and the default for everything else. The firewall turns on and off
   from the line's `⋯` menu (Enable or Disable), and the shortcuts' `?` ends the line after the
   `⋯`. The rules are the working column, and the defaults are one settings section under them at
-  the page's width, staged and saved by the page's save bar (0.8.7). Each row carries its
-  action in a `--tag-*` hue down its edge and groups its destination service, port and comment;
+  the page's width, staged and saved by the page's save bar (0.8.7). Each row names its
+  action as a `--tag-*` tag and groups its destination service, port and comment;
   actions stay visible, and the table ends on the default as a row of its own. The rule dialog groups policy, destination and source, using source choice cards
   (Tailscale's own mark for a tailnet source) and service marks where the port identifies a product.
   Address-only deny/reject rules can be edited without inventing a destination port. Existing

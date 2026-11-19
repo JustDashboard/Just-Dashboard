@@ -361,7 +361,7 @@ function PromotionReview({
           </div>
         </div>
         <ArrowDown aria-hidden className="ml-2.5 size-4 text-muted-foreground" />
-        <div className="border-l-2 border-brand pl-3">
+        <div>
           <p className="text-body font-medium">{ends.Target}</p>
           <p className="text-hint text-muted-foreground">
             {live

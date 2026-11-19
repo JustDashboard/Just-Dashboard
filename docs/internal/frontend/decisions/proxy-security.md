@@ -19,7 +19,8 @@ and their states, not the reach of every port. The strip of seven posture checks
 0.7.5. Firewall's (`network/firewall-picture.tsx`) folds the rules by where they lead — in from the
 internet, through the firewall, out to each admitted port drawn as the product that answers there,
 or into the default (`firewall-reading.ts`, unit-tested) — and its rule table names each action in
-a `--tag-*` hue down the row's edge, ending on the default as its last row. SSH's
+a `--tag-*` hue (drawn down the row's edge as well until 0.9.1), ending on the default as its last
+row. SSH's
 (`ssh-picture.tsx`) draws the port, password authentication, root login and the keyed accounts as
 the doors a login can take, following the draft as it is edited; it replaced four tiles that said
 the same facts one at a time. Firewall's defaults are a settings section under its rule table,
