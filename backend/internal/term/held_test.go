@@ -119,7 +119,7 @@ func TestHeldWindowsSurviveManagerProcessExit(t *testing.T) {
 			name = "crash"
 		}
 		t.Run(name, func(t *testing.T) {
-			dir, err := os.MkdirTemp("", "jd-held-")
+			dir, err := os.MkdirTemp("/tmp", "jd-held-")
 			if err != nil {
 				t.Fatal(err)
 			}
@@ -247,7 +247,7 @@ func TestHolderSetupFailureStillAdoptsRunningWindows(t *testing.T) {
 	if os.Geteuid() != 0 {
 		t.Skip("holder setup requires root")
 	}
-	dir, err := os.MkdirTemp("", "jd-held-adopt-")
+	dir, err := os.MkdirTemp("/tmp", "jd-held-adopt-")
 	if err != nil {
 		t.Fatal(err)
 	}

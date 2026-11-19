@@ -95,8 +95,9 @@ func terminalServerWithShell(t *testing.T, tlsMode, shell string) (*Server, http
 	if err := s.modules.term.SetupShell(); err != nil {
 		t.Fatal(err)
 	}
-	// A short path fits Unix sockets even when the test's own name is long.
-	holders, err := os.MkdirTemp("", "jd-api-terminal-")
+	// Under /tmp, not $TMPDIR: a short path fits Unix sockets (about 108 bytes)
+	// even when the test's own name, or a runner's TMPDIR, is long.
+	holders, err := os.MkdirTemp("/tmp", "jd-api-terminal-")
 	if err != nil {
 		t.Fatal(err)
 	}

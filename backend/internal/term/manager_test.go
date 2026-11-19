@@ -50,7 +50,7 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "clear inherited tmux server:", err)
 		os.Exit(1)
 	}
-	dir, err := os.MkdirTemp("", "jdtmux")
+	dir, err := os.MkdirTemp("/tmp", "jdtmux")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "create private tmux directory:", err)
 		os.Exit(1)
