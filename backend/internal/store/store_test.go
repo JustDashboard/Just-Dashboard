@@ -274,3 +274,30 @@ func TestOpenAddsPullRequestPreviewColumnsToAPreExistingDatabase(t *testing.T) {
 		t.Fatal("immutable stored variable mode can be changed")
 	}
 }
+
+func TestOptimizeGivesThePlannerStatisticsForATableThatGrew(t *testing.T) {
+	st, err := Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	ctx := context.Background()
+	if _, err := st.DB.ExecContext(ctx, `CREATE TABLE grown (id INTEGER PRIMARY KEY, kind TEXT NOT NULL);
+		CREATE INDEX grown_kind ON grown(kind)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := st.DB.ExecContext(ctx, `WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i + 1 FROM n WHERE i < 2000)
+		INSERT INTO grown(kind) SELECT 'k' || (i % 7) FROM n`); err != nil {
+		t.Fatal(err)
+	}
+	if err := st.Optimize(ctx, true); err != nil {
+		t.Fatal(err)
+	}
+	var stats int
+	if err := st.DB.QueryRowContext(ctx, `SELECT count(*) FROM sqlite_stat1 WHERE tbl = 'grown'`).Scan(&stats); err != nil {
+		t.Fatalf("no sqlite_stat1 after Optimize: %v", err)
+	}
+	if stats == 0 {
+		t.Fatal("Optimize left the planner without statistics for a table of 2000 rows")
+	}
+}

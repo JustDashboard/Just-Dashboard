@@ -515,6 +515,11 @@ func (r *Recorder) loop(ctx context.Context) {
 				if err := r.prune(ctx); err != nil && ctx.Err() == nil {
 					r.log.Warn("metrics prune failed", "error", err)
 				}
+				if r.st != nil {
+					if err := r.st.Optimize(ctx, false); err != nil && ctx.Err() == nil {
+						r.log.Warn("store optimize failed", "error", err)
+					}
+				}
 			}
 		}
 	}

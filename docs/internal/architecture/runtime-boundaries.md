@@ -558,6 +558,13 @@ then writes inside one transaction keeps to that transaction on `DB`. And the ru
 pool as on any other: a cursor open on `Reader()` is closed before the next query on `Reader()`.
 `Store.Reader()` on a store that `Open` did not make answers with `DB`.
 
+**The planner has statistics.** `Store.Optimize` runs `PRAGMA optimize` on a `DB` connection with
+`analysis_limit` 400, so it analyses only the tables whose size has moved and reads a few hundred rows
+of each index. `Open` runs it once (`0x10002`, every table) and the metrics recorder after its hourly
+prune, the write that moves a table most. Without `sqlite_stat1` SQLite guesses between a table's
+indexes, and nothing else writes it; a failure is ignored at `Open` and logged by the recorder, since it
+costs only those guesses.
+
 **Which writes survive a power cut is a decision, and this is it.** The database is in WAL mode. With
 `synchronous=FULL` a commit returns once the write-ahead log is on disk; with `NORMAL` it returns once
 the operating system has it, and the log is synced at the next checkpoint or the next `FULL` commit,
