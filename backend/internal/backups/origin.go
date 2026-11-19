@@ -5,9 +5,10 @@ import (
 	"crypto/rand"
 	"database/sql"
 	"errors"
-	"os"
 	"strings"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // installIDSetting holds a random identity made once per install, which every
@@ -70,10 +71,10 @@ func (s *Store) InstallID(ctx context.Context) (string, error) {
 	return id, nil
 }
 
-// hostName is the name an origin is read by. The shipped Compose file runs the
-// backend on the host's network, where a container has the host's own name.
+// hostName is the name an origin is read by: the host's own, asked of the
+// host, since the container's copy of it does not follow a rename.
 func hostName() string {
-	name, err := os.Hostname()
+	name, err := hostexec.Hostname()
 	if err != nil {
 		return ""
 	}

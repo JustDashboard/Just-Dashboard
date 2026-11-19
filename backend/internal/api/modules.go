@@ -27,6 +27,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostname"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hublink"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
@@ -66,7 +67,9 @@ type moduleSet struct {
 	// read at GET /dashboard/health, never at /healthz (handlers_self.go).
 	storeHealth *storehealth.Monitor
 
-	sys          *sysinfo.Collector
+	sys *sysinfo.Collector
+	// hostname renames the server (handlers_system_hostname.go).
+	hostname     serverNamer
 	metrics      *metrics.Recorder
 	docker       *dockerx.Client
 	dockerStats  *dockerx.StatsSampler
@@ -252,6 +255,7 @@ func (s *Server) initModules() {
 		ReservePath: filepath.Join(s.Cfg.DataDir, "staging", storehealth.ReserveFile),
 	})
 	s.modules.sys = sysinfo.NewCollector()
+	s.modules.hostname = hostname.New()
 	s.modules.docker = dockerx.New(s.Cfg.DockerHost)
 	s.initFlowAccounting()
 	// Callers of the shared sampler arrive when a page asks, not on a cadence,

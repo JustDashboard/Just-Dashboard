@@ -19,6 +19,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -84,7 +85,7 @@ func (s *Server) handleServerMap(w http.ResponseWriter, r *http.Request) error {
 // are not asked for it.
 func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 	in := mapInputs{now: time.Now(), absent: map[string]bool{}}
-	in.hostname, _ = os.Hostname()
+	in.hostname, _ = hostexec.Hostname()
 	c := &s.mapSources
 	admin := p.Can(auth.CapSystemAdmin)
 	var wg sync.WaitGroup

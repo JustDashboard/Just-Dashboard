@@ -238,11 +238,116 @@ test("the machine's line says it is answering and carries its verbs", async ({ p
   await identity.getByRole("button", { name: "Server actions" }).click()
   await expect(page.getByRole("menuitem")).toHaveText([
     "Update 7 packages",
+    "Rename this server",
     "Restart the dashboard",
   ])
   // Restart is confirmed and followed on the page that owns it.
   await page.getByRole("menuitem", { name: "Restart the dashboard" }).click()
   await expect(page).toHaveURL(/\/dashboard\/configuration$/)
+})
+
+/** Opens the rename form from the machine's menu, once the menu has gone. */
+async function openRename(page: Page) {
+  await page
+    .locator('[data-slot="host-identity"]')
+    .getByRole("button", { name: "Server actions" })
+    .click()
+  await page.getByRole("menuitem", { name: "Rename this server" }).click()
+  // A closing menu hands focus back to its button after it has left.
+  await expect(page.getByRole("menu")).toHaveCount(0)
+  return page.getByRole("dialog", { name: "Rename this server" })
+}
+
+test("the server is renamed from its own menu, and its line follows", async ({ page }) => {
+  let named = "atlas"
+  const asked: unknown[] = []
+  await page.route("**/api/v1/system/host", (route) => json(route, { ...host, hostname: named }))
+  await page.route("**/api/v1/system/hostname/", async (route) => {
+    if (route.request().method() === "GET")
+      return json(route, { hostname: named, tailscaleName: "atlas" })
+    const body = route.request().postDataJSON() as { hostname: string }
+    asked.push(body)
+    const previous = named
+    named = body.hostname
+    return json(route, { hostname: named, previous, tailscaleName: "atlas" })
+  })
+  await page.goto("/")
+  const identity = page.locator('[data-slot="host-identity"]')
+  await expect(identity.getByText("atlas", { exact: true })).toBeVisible()
+
+  const dialog = await openRename(page)
+  const name = dialog.getByRole("textbox", { name: "Name" })
+  await expect(name).toHaveValue("atlas")
+  // What the tailnet calls it stays, and the form says so before the press.
+  await expect(dialog).toContainText("On your tailnet it stays atlas")
+
+  // A name no kernel takes is refused under the field, and never asked for.
+  await name.fill("my server")
+  await expect(dialog).toContainText("A name holds only letters, digits and hyphens.")
+  await expect(dialog.getByRole("button", { name: "Rename" })).toBeDisabled()
+
+  await name.fill("Zeus-01")
+  await dialog.getByRole("button", { name: "Rename" }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(asked).toEqual([{ hostname: "zeus-01" }])
+  await expect(identity.getByText("zeus-01", { exact: true })).toBeVisible()
+  await expect(identity.getByText("atlas", { exact: true })).toHaveCount(0)
+  await expect(page.getByText("Renamed to zeus-01")).toBeVisible()
+})
+
+test("a rename that leaves something undone says what, and stays said", async ({ page }) => {
+  await page.route("**/api/v1/system/hostname/", (route) =>
+    route.request().method() === "GET"
+      ? json(route, { hostname: "atlas" })
+      : json(route, {
+          hostname: "zeus",
+          previous: "atlas",
+          warnings: ["/etc/hosts could not be updated, so the server may not find itself."],
+        }),
+  )
+  await page.goto("/")
+  const dialog = await openRename(page)
+  // No tailnet, so the hint is only what a name may hold.
+  await expect(dialog).toContainText("Letters, digits and hyphens.")
+  await dialog.getByRole("textbox", { name: "Name" }).fill("zeus")
+  await dialog.getByRole("button", { name: "Rename" }).click()
+  await expect(dialog).toHaveCount(0)
+  await expect(page.getByText("/etc/hosts could not be updated")).toBeVisible()
+})
+
+test("a rename the host refuses keeps the form open with the host's reason", async ({ page }) => {
+  let asked = 0
+  await page.route("**/api/v1/system/hostname/", (route) => {
+    if (route.request().method() === "GET") return json(route, { hostname: "atlas" })
+    asked++
+    return route.fulfill({
+      status: 502,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "hostname_failed",
+          message: "The server could not be renamed: hostnamectl: Access denied",
+        },
+      }),
+    })
+  })
+  await page.goto("/")
+  const dialog = await openRename(page)
+
+  // The name it has is not a rename: the form closes and nothing is asked.
+  await dialog.getByRole("button", { name: "Rename" }).click()
+  await expect(dialog).toHaveCount(0)
+  expect(asked).toBe(0)
+
+  const again = await openRename(page)
+  await again.getByRole("textbox", { name: "Name" }).fill("zeus")
+  await again.getByRole("button", { name: "Rename" }).click()
+  await expect(again).toContainText("The server was not renamed")
+  await expect(again).toContainText("hostnamectl: Access denied")
+  await expect(again.getByRole("textbox", { name: "Name" })).toHaveValue("zeus")
+  await expect(
+    page.locator('[data-slot="host-identity"]').getByText("atlas", { exact: true }),
+  ).toBeVisible()
 })
 
 test("a version to take is offered from the machine's menu, in the dialog that installs it", async ({

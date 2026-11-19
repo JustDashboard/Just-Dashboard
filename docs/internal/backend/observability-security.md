@@ -142,6 +142,47 @@ state, the maintenance switch and the availability figure over 24 h, 7 d and 30 
 what each reads are tabled in
 [request observability](../deployments/request-observability.md#the-prometheus-exposition).
 
+## The server's name
+
+`internal/hostname` renames the server, from *Rename this server* behind the Overview's `⋯`.
+
+- **Routes**, both `system.admin`: `GET /system/hostname` (`{hostname, tailscaleName?}`: the name and
+  what the server is called on its tailnet, asked of `tailscale status --json` on the host) and
+  `PUT /system/hostname {hostname}` (`system.hostname.set`, with the previous name in the detail; the
+  answer adds `previous` and `warnings`). A name is refused with 400 `invalid_hostname` before
+  anything runs: lower-case letters, digits and hyphens in labels a dot may join, 64 characters at
+  most (the kernel's limit), never `localhost`. Upper case is folded. What the host itself refuses is
+  502 `hostname_failed` with the host's words.
+- **What a rename does**, in order: holds the tailnet name, sets the name, checks the kernel answers
+  to it, then records it in the hosts file. `hostnamectl set-hostname` sets it wherever systemd keeps
+  the name; a server without `hostnamectl`, or one whose `hostnamed` will not answer, gets
+  `/etc/hostname` written and `hostname <name>` run instead. Asking for the name the server has
+  changes nothing.
+- **The tailnet name is held, not followed.** Tailscale reports a new host name to its control
+  server and the node's MagicDNS name follows it, which would take the dashboard's own address, its
+  certificate and every address published on the tailnet away in one press. So before the name
+  moves, `tailscale set --hostname=<the node's current name>` tells Tailscale to go on asking for the
+  name it has. When that fails on a running node the rename is not made; on a stopped one it is a
+  warning. Renaming the node itself stays a decision made in Tailscale.
+- **The hosts file.** A server has to resolve its own name without the network, or `sudo` warns on
+  every command and some servers will not start. The dashboard keeps one line of `/etc/hosts`,
+  `127.0.1.1 <name> # Just Dashboard: server name`, found by its marker and replaced at the next
+  rename; it is left out when a line somebody else wrote already carries the name. No other line is
+  touched, and the file is edited as bytes. Where the file carries cloud-init's `manage_etc_hosts`
+  header, cloud-init regenerates it at every start from `/etc/cloud/templates/hosts.*.tmpl`, so the
+  same line goes into those templates. cloud-init leaves the name itself alone once it differs from
+  the one it set (`update_hostname`), so nothing of its configuration is changed. A hosts file that
+  is not an ordinary file is left as it is, and that, like any other failure here, is a warning on a
+  rename that has happened.
+- **Reading the name.** The backend's container has a UTS namespace of its own, holding a copy of
+  the host's name that Docker records when it creates the container, and a rename of the server
+  never reaches a running container's copy. `hostexec.Hostname` reads the name in PID 1's namespace
+  instead and sets the container's copy to match, so `/system/host` and every other reader (`os.Hostname` included) follow
+  a rename whoever made it, the dashboard or a shell.
+- **Tests.** `hostname/hostname_test.go` renames a host of fakes under a temporary `/etc`;
+  `api/handlers_system_hostname_test.go` covers the routes, the roles and the audit row. No test
+  renames the machine it runs on.
+
 ## Host alerts: told when the machine itself goes wrong
 
 The host's **Alerts** page (`/metrics/alerts`, under Monitoring beside Metrics, for administrators;

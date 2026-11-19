@@ -32,6 +32,8 @@ import (
 	"path/filepath"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // How long a freshly minted enrolment token stays usable. Long enough to paste
@@ -130,7 +132,7 @@ func (i *Identity) generate() error {
 	if err != nil {
 		return err
 	}
-	host, _ := os.Hostname()
+	host, _ := hostexec.Hostname()
 	if host == "" {
 		host = "just-dashboard-agent"
 	}
