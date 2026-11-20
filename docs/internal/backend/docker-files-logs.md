@@ -697,25 +697,25 @@ own save arriving back is neither. `watch_test.go` and `handlers_files_transfer_
 remove, rename, growth, coalescing, the limits and fallback, a path outside the roots, release and a
 moved folder; `files-transfer.spec.ts` the page.
 
-**Uploads in pieces** (`files/resumable.go`, `components/files/uploads.tsx`, `upload-pieces.ts`). A
-file over 32 MiB goes to `POST /files/uploads` (`file.write`, audited as `file.upload.begin`), which
+**Uploads in pieces** (`files/resumable.go`, `components/files/pieces.tsx`, `upload-pieces.ts`). A
+file over 32 MiB goes to `POST /files/pieces` (`file.write`, audited as `file.upload.begin`), which
 checks the destination as a one-request upload would and the disk's room for the whole file, and
 creates a staging file `.jd-part-<id>` (0600, root's) beside the destination, on its filesystem. Pieces
-of 8 MiB (at most 64 MiB) go to `PUT /files/uploads/{id}?offset=`, written at their offset; the session
+of 8 MiB (at most 64 MiB) go to `PUT /files/pieces/{id}?offset=`, written at their offset; the session
 keeps merged byte ranges, so a repeated piece is harmless, an out-of-order one is kept, and a piece cut
 off keeps what arrived: `next` is the first missing byte, where the page carries on. A landed piece is
 not audited (a large file is thousands), a refused one is. Each piece reaches the staging file through
 its folder found again by path and checked to be the same folder (device and inode) and the same file
 with one link, so a moved or swapped folder, a link or a hard link put in the staging name is a
-conflict, never a write elsewhere. `POST /files/uploads/{id}/complete` publishes through the code
+conflict, never a write elsewhere. `POST /files/pieces/{id}/complete` publishes through the code
 `UploadChecked` uses, now factored out of it in `staged.go` (`openUploadTarget`, `seal`,
 `publishStaged`): the parent pinned through the allowed root, the expected-revision check, the owner
 and mode, the no-replace rename or deliberate overwrite, all under the path lock. A refused completion
-keeps the staged bytes. `DELETE /files/uploads/{id}` removes them, following the folder held open
+keeps the staged bytes. `DELETE /files/pieces/{id}` removes them, following the folder held open
 since the upload began even if it moved. Sessions belong to the account, are kept as one 0600 JSON
 record each in `<JD_DATA_DIR>/file-uploads` (0700, made silently) so a restart or a reloaded page
 carries on, are bounded (64 an account, 512 in all), and are removed with their bytes after a day
-untouched (an hourly sweep). `GET /files/uploads` lists an account's, which a reloaded page shows as
+untouched (an hourly sweep). `GET /files/pieces` lists an account's, which a reloaded page shows as
 stopped with Cancel; dropping the same file again (same folder, name, size and the page's key of name,
 size and modification time) continues it. Every piece checks the room left against a reserve of two
 per cent of the disk, between 64 MiB and 1 GiB, and refuses in words (`507 no_space`). Staging names

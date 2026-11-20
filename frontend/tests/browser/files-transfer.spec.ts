@@ -132,7 +132,7 @@ async function mockFiles(
         group: "operator",
       })
     }
-    if (path === "/files/uploads" && route.request().method() === "GET")
+    if (path === "/files/pieces" && route.request().method() === "GET")
       return json(route, mock.uploads)
     if (path === "/files/fetches") return json(route, mock.fetches)
     if (path === "/files/changes") {
@@ -264,7 +264,7 @@ test.describe("uploads in pieces", () => {
     let holdNext: (() => void) | undefined
     let held = false
     let completed = false
-    await page.route("**/api/v1/files/uploads**", async (route) => {
+    await page.route("**/api/v1/files/pieces**", async (route) => {
       const request = route.request()
       const url = new URL(request.url())
       const session = {
@@ -343,7 +343,7 @@ test.describe("uploads in pieces", () => {
       },
     ]
     let cancelled = ""
-    await page.route("**/api/v1/files/uploads/**", async (route) => {
+    await page.route("**/api/v1/files/pieces/**", async (route) => {
       if (route.request().method() === "DELETE") {
         cancelled = new URL(route.request().url()).pathname
         return route.fulfill({ status: 204 })
@@ -354,7 +354,7 @@ test.describe("uploads in pieces", () => {
     const row = page.locator("[data-transfer='backup.tar']")
     await expect(row).toContainText("Stopped at 512.0 MB of 2.0 GB; add the file again to carry on")
     await row.getByRole("button", { name: "Cancel" }).click()
-    await expect.poll(() => cancelled).toBe("/api/v1/files/uploads/left")
+    await expect.poll(() => cancelled).toBe("/api/v1/files/pieces/left")
     await expect(row).toHaveCount(0)
   })
 })

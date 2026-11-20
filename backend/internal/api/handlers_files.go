@@ -21,7 +21,7 @@ import (
 
 // maxUploadBytes bounds one request of the one-request upload, which the page
 // uses for small files and the image editor for its saves. A larger file goes
-// in pieces (POST /files/uploads, handlers_files_transfer.go), with no limit
+// in pieces (POST /files/pieces, handlers_files_transfer.go), with no limit
 // but the disk's.
 const maxUploadBytes = 256 << 20
 

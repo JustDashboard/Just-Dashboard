@@ -92,7 +92,7 @@ type Running = {
  * One request per small file rather than one form for all of them: a single
  * multipart body carrying forty files is one progress bar that says nothing,
  * one failure that takes the other thirty-nine with it. A file over
- * `SINGLE_MAX` goes in pieces (`/files/uploads`), which is what lets it be of
+ * `SINGLE_MAX` goes in pieces (`/files/pieces`), which is what lets it be of
  * any size, be paused, and carry on by itself after a dropped connection or a
  * sleeping laptop: the server says where it stands and the next piece starts
  * there. A page reloaded halfway lists what the server still holds, and the
@@ -196,7 +196,7 @@ export function useUploads(onSettled: (dir: string) => void) {
       while (!session) {
         if (stopped()) return
         try {
-          session = await post<UploadSession>("/files/uploads", {
+          session = await post<UploadSession>("/files/pieces", {
             path: job.dir,
             name: job.name,
             size,
@@ -233,7 +233,7 @@ export function useUploads(onSettled: (dir: string) => void) {
           try {
             // Where the server stands is where to carry on: a piece cut off
             // halfway kept what arrived.
-            offset = (await get<UploadSession>(`/files/uploads/${session.id}`)).next
+            offset = (await get<UploadSession>(`/files/pieces/${session.id}`)).next
           } catch (lost) {
             if (lost instanceof ApiError && lost.code === "upload_not_found") {
               update(id, { status: "failed", error: "The server no longer holds this upload." })
@@ -248,7 +248,7 @@ export function useUploads(onSettled: (dir: string) => void) {
       for (;;) {
         if (stopped()) return
         try {
-          await post(`/files/uploads/${session.id}/complete`)
+          await post(`/files/pieces/${session.id}/complete`)
           update(id, { status: "done", retryAt: undefined })
           return
         } catch (err) {
@@ -289,7 +289,7 @@ export function useUploads(onSettled: (dir: string) => void) {
   // cancelled, and continued by dropping the same file again.
   useEffect(() => {
     const controller = new AbortController()
-    get<UploadSession[]>("/files/uploads", undefined, controller.signal)
+    get<UploadSession[]>("/files/pieces", undefined, controller.signal)
       .then((sessions) => {
         if (!Array.isArray(sessions)) return
         const held = new Set([...jobs.current.values()].map((run) => run.session))
@@ -369,7 +369,7 @@ export function useUploads(onSettled: (dir: string) => void) {
   const cancel = useCallback(
     (id: string) => {
       if (id.startsWith("server:")) {
-        void del(`/files/uploads/${id.slice("server:".length)}`).catch(() => undefined)
+        void del(`/files/pieces/${id.slice("server:".length)}`).catch(() => undefined)
         setItems((prev) => prev.filter((item) => item.id !== id))
         return
       }
@@ -379,7 +379,7 @@ export function useUploads(onSettled: (dir: string) => void) {
       run.xhr?.abort()
       run.wake?.()
       queue.current = queue.current.filter((queued) => queued !== id)
-      if (run.session) void del(`/files/uploads/${run.session}`).catch(() => undefined)
+      if (run.session) void del(`/files/pieces/${run.session}`).catch(() => undefined)
       update(id, { status: "cancelled" })
     },
     [update],
@@ -391,7 +391,7 @@ export function useUploads(onSettled: (dir: string) => void) {
     // it is letting them go.
     if (run?.session && !run.cancelled) {
       run.cancelled = true
-      void del(`/files/uploads/${run.session}`).catch(() => undefined)
+      void del(`/files/pieces/${run.session}`).catch(() => undefined)
     }
     jobs.current.delete(id)
     setItems((prev) => prev.filter((item) => item.id !== id))
@@ -406,7 +406,7 @@ export function useUploads(onSettled: (dir: string) => void) {
           const run = jobs.current.get(item.id)
           if (run?.session && !run.cancelled) {
             run.cancelled = true
-            void del(`/files/uploads/${run.session}`).catch(() => undefined)
+            void del(`/files/pieces/${run.session}`).catch(() => undefined)
           }
         }
       }

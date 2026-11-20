@@ -1,7 +1,7 @@
 import { API_BASE, ApiError, errorFromResponse, mutationHeaders } from "@/lib/api"
 
 /**
- * An upload in pieces (`/files/uploads`): what the server says about one, and
+ * An upload in pieces (`/files/pieces`): what the server says about one, and
  * the transport for a piece. The queue in `uploads.tsx` drives it.
  */
 export type UploadSession = {
@@ -85,7 +85,7 @@ export function sendPiece(
   hold: { xhr?: XMLHttpRequest },
 ): Promise<UploadSession> {
   return new Promise((resolve, reject) => {
-    const path = `/files/uploads/${encodeURIComponent(session)}`
+    const path = `/files/pieces/${encodeURIComponent(session)}`
     const xhr = new XMLHttpRequest()
     hold.xhr = xhr
     xhr.open("PUT", `${API_BASE}${path}?offset=${offset}`)
