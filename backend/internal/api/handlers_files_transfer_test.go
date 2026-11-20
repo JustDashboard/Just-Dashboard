@@ -169,3 +169,66 @@ func strconvQuote(s string) string {
 	b, _ := json.Marshal(s)
 	return string(b)
 }
+
+func TestFileFetchThroughTheRoutes(t *testing.T) {
+	site := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Cookie") != "" || r.Header.Get("X-JD-CSRF") != "" {
+			t.Errorf("the fetch carried the dashboard's headers: %v", r.Header)
+		}
+		w.Write([]byte("fetched bytes"))
+	}))
+	defer site.Close()
+	c, s := newClient(t)
+	root := s.modules.files.Roots()[0]
+	body := `{"path":` + strconvQuote(root) + `,"url":` + strconvQuote(site.URL+"/pkg/tool.deb?signature=secret") + `}`
+
+	reader := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "fetch-reader", auth.RoleReadOnly)}
+	if w := reader.do(http.MethodPost, "/api/v1/files/fetch", body, nil); w.Code != http.StatusForbidden {
+		t.Fatalf("a reader started a fetch: %d", w.Code)
+	}
+	w := c.do(http.MethodPost, "/api/v1/files/fetch", body, nil)
+	if w.Code != http.StatusAccepted || strings.Contains(w.Body.String(), "secret") {
+		t.Fatalf("start: %d %s", w.Code, w.Body.String())
+	}
+	var started struct {
+		ID   string `json:"id"`
+		Mine bool   `json:"mine"`
+	}
+	json.Unmarshal(w.Body.Bytes(), &started)
+	if !started.Mine {
+		t.Fatal("the fetch is not marked as this account's")
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		w := reader.do(http.MethodGet, "/api/v1/files/fetches", "", nil)
+		if strings.Contains(w.Body.String(), `"status":"done"`) {
+			if strings.Contains(w.Body.String(), "secret") || strings.Contains(w.Body.String(), `"mine":true`) {
+				t.Fatalf("list: %s", w.Body.String())
+			}
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("fetch did not finish: %s", w.Body.String())
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	if got, _ := os.ReadFile(filepath.Join(root, "tool.deb")); string(got) != "fetched bytes" {
+		t.Fatalf("saved %q", got)
+	}
+	if w := c.do(http.MethodPost, "/api/v1/files/fetch", `{"path":`+strconvQuote(root)+`,"url":"file:///etc/shadow"}`, nil); w.Code != http.StatusBadRequest {
+		t.Fatalf("a file link: %d %s", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodDelete, "/api/v1/files/fetches/"+started.ID, "", nil); w.Code != http.StatusOK {
+		t.Fatalf("dismiss: %d", w.Code)
+	}
+	if w := c.do(http.MethodDelete, "/api/v1/files/fetches/"+started.ID, "", nil); w.Code != http.StatusNotFound {
+		t.Fatalf("dismissed twice: %d", w.Code)
+	}
+	var detail string
+	if err := s.Store.DB.QueryRow(`SELECT detail FROM audit_log WHERE action = 'file.fetch' AND success = 1 ORDER BY id DESC LIMIT 1`).Scan(&detail); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(detail, "secret") || !strings.Contains(detail, "/pkg/tool.deb") {
+		t.Fatalf("audit detail %q", detail)
+	}
+}

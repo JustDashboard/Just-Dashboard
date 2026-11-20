@@ -16,10 +16,11 @@ import (
 )
 
 // fileTransfer is the Files page's state that outlives a request: the folders
-// being followed and the uploads arriving in pieces.
+// being followed, the uploads arriving in pieces and the links being fetched.
 type fileTransfer struct {
 	watches *files.WatchHub
 	uploads *files.Uploads
+	fetches *files.Fetches
 }
 
 func newFileTransfer(s *Server) *fileTransfer {
@@ -32,13 +33,16 @@ func newFileTransfer(s *Server) *fileTransfer {
 	return &fileTransfer{
 		watches: files.NewWatchHub(s.modules.hostFiles, files.DefaultWatchTotal, files.DefaultWatchPerOwner),
 		uploads: uploads,
+		fetches: files.NewFetches(s.modules.hostFiles),
 	}
 }
 
-// run removes uploads left untouched for a day, now and every hour.
+// run removes uploads left untouched for a day, now and every hour, and
+// stops the running fetches when the dashboard stops.
 func (t *fileTransfer) run(ctx context.Context) {
 	tick := time.NewTicker(time.Hour)
 	defer tick.Stop()
+	defer t.fetches.Close()
 	for {
 		t.uploads.Sweep()
 		select {
@@ -49,7 +53,8 @@ func (t *fileTransfer) run(ctx context.Context) {
 	}
 }
 
-// mountFilesTransferRoutes adds live folders to /files. It is called inside
+// mountFilesTransferRoutes adds live folders, uploads in pieces and fetched
+// links to /files. It is called inside
 // the /files route, so the read routes here are guarded as the other reads
 // are and the writes sit behind file.write.
 func (s *Server) mountFilesTransferRoutes(r chi.Router) {
@@ -57,12 +62,15 @@ func (s *Server) mountFilesTransferRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/changes", s.handle(s.handleFileChanges))
 	r.Method(http.MethodGet, "/uploads", s.handle(s.handleFileUploadList))
 	r.Method(http.MethodGet, "/uploads/{id}", s.handle(s.handleFileUploadGet))
+	r.Method(http.MethodGet, "/fetches", s.handle(s.handleFileFetchList))
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapFileWrite))
 		r.Method(http.MethodPost, "/uploads", s.handle(s.handleFileUploadBegin))
 		r.Method(http.MethodPut, "/uploads/{id}", s.handle(s.handleFileUploadPiece))
 		r.Method(http.MethodPost, "/uploads/{id}/complete", s.handle(s.handleFileUploadComplete))
 		r.Method(http.MethodDelete, "/uploads/{id}", s.handle(s.handleFileUploadCancel))
+		r.Method(http.MethodPost, "/fetch", s.handle(s.handleFileFetch))
+		r.Method(http.MethodDelete, "/fetches/{id}", s.handle(s.handleFileFetchCancel))
 	})
 }
 
@@ -188,6 +196,12 @@ func mapTransferError(err error) error {
 		return httpx.Err(http.StatusBadRequest, "bad_piece", err.Error())
 	case errors.Is(err, fs.ErrInvalid):
 		return httpx.Err(http.StatusBadRequest, "invalid_name", err.Error())
+	case errors.Is(err, files.ErrFetchScheme):
+		return httpx.Err(http.StatusBadRequest, "unsupported_link", err.Error())
+	case errors.Is(err, files.ErrFetchLimit):
+		return httpx.Err(http.StatusConflict, "too_many_fetches", err.Error())
+	case errors.Is(err, files.ErrFetchNotFound):
+		return httpx.Err(http.StatusNotFound, "fetch_not_found", err.Error())
 	}
 	return mapFileError(err)
 }
@@ -292,5 +306,67 @@ func validRevision(expected *string) error {
 			return httpx.BadRequest("expectedRevision must be a SHA-256 revision or empty for a new file")
 		}
 	}
+	return nil
+}
+
+// fetchView is a fetch as the page reads it: whether it is this account's
+// says whether its row offers Cancel.
+type fetchView struct {
+	files.Fetch
+	Mine bool `json:"mine"`
+}
+
+func viewFetch(f files.Fetch, owner string) fetchView {
+	return fetchView{Fetch: f, Mine: f.Owner == owner}
+}
+
+// handleFileFetch starts downloading a link into a folder, on the server. It
+// answers at once; the fetch carries on whether or not the page stays, and
+// GET /files/fetches is where its progress is read. The audit entry holds
+// the link without its query string or credentials.
+func (s *Server) handleFileFetch(w http.ResponseWriter, r *http.Request) error {
+	var req files.FetchRequest
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Dir == "" || req.URL == "" {
+		return httpx.BadRequest("path and url are both required")
+	}
+	shown := files.ShownURL(req.URL)
+	httpx.SetAudit(r, "file.fetch", req.Dir, map[string]any{"url": shown, "name": req.Name, "overwrite": req.Overwrite})
+	owner := transferOwner(r)
+	fetch, err := s.modules.fileTransfer.fetches.Start(owner, req)
+	if err != nil {
+		return mapTransferError(err)
+	}
+	httpx.JSON(w, http.StatusAccepted, viewFetch(fetch, owner))
+	return nil
+}
+
+func (s *Server) handleFileFetchList(w http.ResponseWriter, r *http.Request) error {
+	owner := transferOwner(r)
+	list := s.modules.fileTransfer.fetches.List()
+	out := make([]fetchView, 0, len(list))
+	for _, f := range list {
+		out = append(out, viewFetch(f, owner))
+	}
+	httpx.JSON(w, http.StatusOK, out)
+	return nil
+}
+
+// handleFileFetchCancel stops a running fetch, removing what it had staged,
+// or takes a finished one off the list.
+func (s *Server) handleFileFetchCancel(w http.ResponseWriter, r *http.Request) error {
+	id := chi.URLParam(r, "id")
+	current, err := s.modules.fileTransfer.fetches.Get(id)
+	if err != nil {
+		return mapTransferError(err)
+	}
+	httpx.SetAudit(r, "file.fetch.cancel", current.Dir, map[string]any{"url": current.URL, "status": current.Status})
+	fetch, err := s.modules.fileTransfer.fetches.Cancel(id)
+	if err != nil {
+		return mapTransferError(err)
+	}
+	httpx.JSON(w, http.StatusOK, viewFetch(fetch, transferOwner(r)))
 	return nil
 }

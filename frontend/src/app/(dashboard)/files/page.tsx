@@ -13,6 +13,7 @@ import {
   Check,
   ChevronDown,
   Clipboard,
+  CloudDownload,
   CloudUpload,
   Cross,
   Eye,
@@ -916,6 +917,21 @@ export default function FilesPage() {
       },
     })
 
+  // New → From a link: the server downloads it into this folder; its
+  // progress is in the uploads panel (`uploads.tsx`).
+  const fetchLink = () =>
+    prompt({
+      title: "Fetch a link",
+      placeholder: "https://example.com/release.tar.gz",
+      confirmLabel: "Fetch",
+      validate: (v) =>
+        /^https?:\/\/\S+$/i.test(v.trim()) ? undefined : "A link starts with http:// or https://.",
+      hint: () => `The server downloads it into ${path ?? "/"}`,
+      submit: async (url) => {
+        await uploads.fetchLink(path ?? "/", url.trim())
+      },
+    })
+
   const cutCopy = (mode: "cut" | "copy", paths: string[]) => {
     if (paths.length === 0) return
     setClip({ mode, paths })
@@ -1023,6 +1039,7 @@ export default function FilesPage() {
       ? [
           { id: "new-folder", label: "New folder", icon: FolderPlus, onSelect: newFolder },
           { id: "new-file", label: "New file", icon: PlusSquareSmall, onSelect: newFile },
+          { id: "fetch-link", label: "From a link…", icon: CloudDownload, onSelect: fetchLink },
           {
             id: "upload",
             label: "Upload files…",
@@ -1755,6 +1772,7 @@ export default function FilesPage() {
                     onFolder={newFolder}
                     onFile={newFile}
                     onSymlink={() => setSymlinkOpen(true)}
+                    onLink={fetchLink}
                   />
                   <UploadMenu
                     className="max-lg:hidden"
@@ -2378,10 +2396,12 @@ function NewMenu({
   onFolder,
   onFile,
   onSymlink,
+  onLink,
 }: {
   onFolder: () => void
   onFile: () => void
   onSymlink: () => void
+  onLink: () => void
 }) {
   return (
     <DropdownMenu>
@@ -2403,6 +2423,10 @@ function NewMenu({
         <DropdownMenuItem onSelect={onSymlink}>
           <Linked className="size-3.5" />
           Symlink
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onLink}>
+          <CloudDownload className="size-3.5" />
+          From a link…
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

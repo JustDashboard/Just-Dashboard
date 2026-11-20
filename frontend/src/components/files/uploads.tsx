@@ -34,6 +34,41 @@ export type UploadItem = TransferReading & {
 
 export type UploadJob = { file: File; dir: string; name: string; overwrite: boolean }
 
+/** A link the server is fetching into a folder (`/files/fetches`). */
+export type ServerFetch = {
+  id: string
+  url: string
+  dir: string
+  name?: string
+  size: number
+  received: number
+  status: "running" | "done" | "failed" | "cancelled"
+  error?: string
+  mine: boolean
+}
+
+const FETCH_POLL_MS = 1000
+
+function fetchItem(f: ServerFetch): UploadItem {
+  return {
+    id: `fetch:${f.id}`,
+    kind: "fetch",
+    name: f.name || f.url.split("/").filter(Boolean).pop() || f.url,
+    dir: f.dir,
+    size: f.size,
+    sent: f.received,
+    status:
+      f.status === "running"
+        ? "uploading"
+        : f.status === "done"
+          ? "done"
+          : f.status === "cancelled"
+            ? "cancelled"
+            : "failed",
+    error: f.error,
+  }
+}
+
 /** A file on its way in, with where it sits relative to the drop. */
 export type Incoming = { file: File; rel: string }
 
@@ -365,6 +400,8 @@ export function useUploads(onSettled: (dir: string) => void) {
   const clear = useCallback(() => {
     setItems((prev) => {
       for (const item of prev) {
+        if (item.status === "failed" && item.kind === "fetch")
+          void del(`/files/fetches/${item.id.slice("fetch:".length)}`).catch(() => undefined)
         if (item.status === "failed") {
           const run = jobs.current.get(item.id)
           if (run?.session && !run.cancelled) {
@@ -404,7 +441,91 @@ export function useUploads(onSettled: (dir: string) => void) {
     }
   }, [])
 
-  return { items, enqueue, cancel, dismiss, clear, pause: pauseUpload, resume }
+  // Links the server is fetching. They run on the server, so they are read
+  // back, not driven: once when the page opens (a fetch started before a
+  // navigation is still going) and every second while one is running.
+  const [fetchTick, setFetchTick] = useState(0)
+  const fetchingSome = items.some((item) => item.kind === "fetch" && isLive(item))
+  useEffect(() => {
+    let stopped = false
+    const controller = new AbortController()
+    const read = async () => {
+      try {
+        const list = await get<ServerFetch[]>("/files/fetches", undefined, controller.signal)
+        if (stopped || !Array.isArray(list)) return
+        setItems((prev) => {
+          const byId = new Map(list.map((f) => [`fetch:${f.id}`, f]))
+          const next: UploadItem[] = []
+          for (const item of prev) {
+            if (item.kind !== "fetch") {
+              next.push(item)
+              continue
+            }
+            const f = byId.get(item.id)
+            byId.delete(item.id)
+            if (!f) {
+              // Gone from the server's list: finished long enough ago, or
+              // dismissed in another tab.
+              if (isLive(item)) next.push({ ...item, status: "done" })
+              continue
+            }
+            const fresh = fetchItem(f)
+            if (isLive(item) && fresh.status === "done") settled.current(fresh.dir)
+            const rate =
+              fresh.status === "uploading" && fresh.sent > item.sent
+                ? ((fresh.sent - item.sent) * 1000) / FETCH_POLL_MS
+                : item.rate
+            next.push({ ...fresh, rate: item.rate ? item.rate * 0.6 + (rate ?? 0) * 0.4 : rate })
+          }
+          // Fetches this page did not start: those still running, and this
+          // account's failures, which nobody has read yet.
+          for (const f of byId.values()) {
+            if (f.status === "running" || (f.mine && f.status === "failed")) next.push(fetchItem(f))
+          }
+          return next
+        })
+      } catch {
+        // The next read says it again.
+      }
+    }
+    void read()
+    if (!fetchingSome) return () => void (stopped = true)
+    const timer = setInterval(read, FETCH_POLL_MS)
+    return () => {
+      stopped = true
+      controller.abort()
+      clearInterval(timer)
+    }
+  }, [fetchingSome, fetchTick])
+
+  const fetchLink = useCallback(async (dir: string, url: string) => {
+    const started = await post<ServerFetch>("/files/fetch", { path: dir, url })
+    setItems((prev) => [...prev, fetchItem(started)])
+    setFetchTick((tick) => tick + 1)
+  }, [])
+
+  const cancelOrDismiss = useCallback((id: string) => {
+    if (!id.startsWith("fetch:")) return false
+    const serverId = id.slice("fetch:".length)
+    setItems((prev) =>
+      prev.flatMap((item) =>
+        item.id !== id ? [item] : isLive(item) ? [{ ...item, status: "cancelled" as const }] : [],
+      ),
+    )
+    void del(`/files/fetches/${serverId}`).catch(() => undefined)
+    return true
+  }, [])
+
+  return {
+    items,
+    enqueue,
+    cancel: (id: string) => cancelOrDismiss(id) || cancel(id),
+    dismiss: (id: string) => cancelOrDismiss(id) || dismiss(id),
+    clear,
+    pause: pauseUpload,
+    resume,
+    fetchLink,
+  }
 }
 
 /** Still moving, or about to. */
