@@ -53,7 +53,9 @@ export function WireNode({
         aside && "xl:flex-1",
         align === "center" &&
           "lg:absolute lg:top-full lg:left-1/2 lg:mt-3 lg:w-44 lg:-translate-x-1/2 lg:text-center",
-        align === "under" && "lg:w-full lg:text-center",
+        // Balanced, so a hint that takes two lines does not leave one word
+        // on the second.
+        align === "under" && "lg:w-full lg:text-center lg:text-balance",
       )}
     >
       {eyebrow && <p className="eyebrow">{eyebrow}</p>}

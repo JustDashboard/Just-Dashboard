@@ -1682,10 +1682,7 @@ const HOLDING: Holding[] = [
     path: "/deploy/notifications",
     mock: (page) => mockProject(page, { showcase: true }),
     part: "row",
-    today: {
-      desk: "the list lands 4px under its ghosts: the picture's waiting rows are a hair short",
-      phone: MARKS,
-    },
+    today: { phone: MARKS },
   },
   {
     path: "/proxy/ports",

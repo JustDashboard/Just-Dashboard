@@ -156,10 +156,40 @@ export function columnStart(index: number, count: number, per: number, side: "st
 }
 
 /**
- * The order the lines are painted in. The lines of one row lie on each other
- * between the nearest mark and the hub, and the one painted last is the one
- * read there: a line that needs a look over one that works, and a line that
- * works over one that is down.
+ * The node between this one and the hub in its row, by its place in its
+ * side, or nothing for the one nearest the hub. A node's line runs to that
+ * neighbour's mark and no further, so the line at each mark says that mark's
+ * state alone. Every line ran the whole way to the hub at first, lying on
+ * the others of its row with the worst painted last, and one failing node
+ * coloured its row to the hub: the working nodes nearer in stood on a red
+ * line.
+ */
+export function nearerInRow(index: number, count: number, per: number, side: "start" | "end") {
+  const across = Math.max(1, per)
+  const row = (at: number) => Math.floor(at / across)
+  // The start side is read towards the hub, the end side away from it.
+  const next = side === "start" ? index + 1 : index - 1
+  return next >= 0 && next < count && row(next) === row(index) ? next : undefined
+}
+
+/**
+ * The nodes whose way to the hub runs through this one's line: the rest of
+ * its row beyond it. Pointing at one of them keeps this line lit too.
+ */
+export function beyondInRow(index: number, count: number, per: number, side: "start" | "end") {
+  const across = Math.max(1, per)
+  const row = Math.floor(index / across)
+  const all = Array.from({ length: count }, (_, at) => at)
+  return all.filter(
+    (at) => Math.floor(at / across) === row && (side === "start" ? at < index : at > index),
+  )
+}
+
+/**
+ * The order the lines are painted in. The rows of a side share the last of
+ * their way into the hub, and the line painted last is the one read there:
+ * a line that needs a look over one that works, and a line that works over
+ * one that is down.
  */
 export function paintOrder(line: WireLine | undefined) {
   const beam = beamOf(line)

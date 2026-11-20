@@ -13,6 +13,7 @@ import {
   CELL,
   PORT,
   beamOf,
+  beyondInRow,
   columnStart,
   fitColumn,
   flowForm,
@@ -21,6 +22,7 @@ import {
   levelDrops,
   loadingRows,
   middleRows,
+  nearerInRow,
   paintOrder,
   perRow,
   staggerOf,
@@ -237,8 +239,8 @@ export function WireFlow({
   const room = useHubRoom(root, hubRef)
   const hubWaits = hub.loadingLines && waitingDetail(hub.loadingLines, HUB_WIDTHS)
 
-  const startSide = useRef<HTMLElement>(null)
-  const endSide = useRef<HTMLElement>(null)
+  const startSide = useRef<HTMLDivElement>(null)
+  const endSide = useRef<HTMLDivElement>(null)
   const hubCell = useRef<HTMLDivElement>(null)
   const startGap = useRef<HTMLDivElement>(null)
   const endGap = useRef<HTMLDivElement>(null)
@@ -262,46 +264,57 @@ export function WireFlow({
   )
   const laidOut = `${form}:${per.start}:${per.end}:${drops.start}:${drops.hub}:${drops.end}`
 
-  const beams = all
-    .map((node, index) => {
+  const beamsOf = (nodes: Laid[], side: "start" | "end") =>
+    nodes.map((node, index) => {
       const ref = refs.get(node.id)
       if (!ref) return null
-      const into = node.side === "start"
+      const into = side === "start"
+      const across = into ? per.start : per.end
       const line = loading ? { state: "up" as const } : node.line
       const beam = beamOf(line)
+      // In rows a node's line runs to the mark between it and the hub, and
+      // only the nearest one's goes on into the hub.
+      const nearer = rows ? nearerInRow(index, nodes.length, across, side) : undefined
+      const from = nearer === undefined ? hubRef : refs.get(nodes[nearer].id)
+      const out = into ? -1 : 1
+      // The rest of the row reaches the hub along this line, so pointing at
+      // one of them keeps it lit.
+      const carries = rows ? beyondInRow(index, nodes.length, across, side) : []
+      const shown = lit(node.id) || carries.some((at) => lit(nodes[at].id) && focus !== null)
       return {
         order: paintOrder(line),
         beam: (
           <AnimatedBeam
             key={node.id}
             containerRef={container}
-            // Every line is drawn from the hub out, so the dashes of the
-            // lines that lie on each other in a row fall in the same places.
-            fromRef={hubRef}
+            // Drawn from the hub's end out, so the dashes of the rows' lines
+            // fall in the same places where they share the way in.
+            fromRef={from ?? hubRef}
             toRef={ref}
-            // In rows it leaves the hub level, bends in the gap beside it and
-            // runs level along its row, under the marks between it and its
-            // own. In a column it bends all the way from one to the other.
+            // In rows the nearest node's line leaves the hub level, bends in
+            // the gap beside it and runs level to its mark. In a column each
+            // bends all the way from the hub to its own.
             shape="s"
-            acrossRef={rows ? (into ? startGap : endGap) : undefined}
+            acrossRef={rows && nearer === undefined ? (into ? startGap : endGap) : undefined}
             redrawOn={laidOut}
-            startXOffset={into ? -PORT.lg : PORT.lg}
-            endXOffset={into ? port : -port}
+            startXOffset={out * (nearer === undefined ? PORT.lg : port)}
+            endXOffset={-out * port}
             reverse={node.line?.reverse}
             still={beam.still || held}
             dashed={beam.dashed}
             tone={beam.tone}
             duration={node.line?.duration}
-            delay={node.line?.delay ?? staggerOf(index)}
+            delay={node.line?.delay ?? staggerOf(into ? index : left.length + index)}
             className={cn(
               "transition-opacity",
               phone === "stack" && "max-lg:hidden",
-              !lit(node.id) && "opacity-15",
+              !shown && "opacity-15",
             )}
           />
         ),
       }
     })
+  const beams = [...beamsOf(left, "start"), ...beamsOf(right, "end")]
     .filter((drawn) => drawn !== null)
     .sort((a, b) => a.order - b.order)
     .map((drawn) => drawn.beam)
@@ -649,7 +662,7 @@ function Column({
   side: "start" | "end"
   /** Nothing to draw: the column says `empty` instead. */
   bare: boolean
-  sideRef: RefObject<HTMLElement | null>
+  sideRef: RefObject<HTMLDivElement | null>
   /** The wide picture is rows on level lines, not a column a side. */
   rows: boolean
   /** Nodes to a row, wide. */
@@ -673,9 +686,11 @@ function Column({
   )
   const body =
     bare && column.empty ? (
-      <p className={cn("text-body text-muted-foreground", rows && "lg:text-center")}>
+      // A div: a page's `empty` can be a node of its own, which a paragraph
+      // cannot hold.
+      <div className={cn("text-body text-muted-foreground", rows && "lg:text-center")}>
         {column.empty}
-      </p>
+      </div>
     ) : (
       <ol
         className={cn(
@@ -689,17 +704,22 @@ function Column({
     )
   return (
     <section
-      ref={sideRef}
       aria-label={column.title}
       data-side={side}
       className={cn("min-w-0", !rows && side === "start" && "lg:text-right")}
-      style={drop ? { marginTop: drop } : undefined}
     >
       {/* Hung above the rows wide rather than sharing their box: in the box it
           pushed the marks below the hub's, and every wire bent to meet them. */}
-      <div className={cn(always && "lg:relative")}>
+      {/* A flow root, so the nodes' drop stays inside it and does not carry
+          its top, and the heading hung from it, down with them. */}
+      <div className={cn("flow-root", always && "lg:relative")}>
         {heading}
-        {body}
+        {/* The nodes are dropped under the heading, not the heading with
+            them: two sides of different heights then keep their headings on
+            one line at the top of the picture. */}
+        <div ref={sideRef} style={drop ? { marginTop: drop } : undefined}>
+          {body}
+        </div>
       </div>
     </section>
   )

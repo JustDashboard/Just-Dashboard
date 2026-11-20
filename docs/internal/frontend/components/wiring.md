@@ -43,13 +43,14 @@ The wide picture takes one of two forms, chosen from the room a side has (`flowF
 
 - **Rows**, wherever a side holds its nodes in one row or has room for three across. Each side is
   rows of nodes, as many to a row as fit (`perRow`, evened out: five are three and two), a node's
-  words centred under its mark. A row is one level line into the hub that its marks stand on: every
-  node's own line runs along the row under the marks between it and the hub, bends in the gap and
-  arrives level (`AnimatedBeam`'s `acrossRef`). One row a side is a single line across the page.
-  With more, the sides are dropped until the hub stands on the middle of their rows (`useLevel`).
-  A short last row is pushed against the hub. The lines of a row lie on each other, so the one that
-  needs a look is painted last (`paintOrder`) and every line is drawn from the hub out, which puts
-  their dashes in the same places.
+  words centred under its mark. A row is one level line into the hub that its marks stand on: a
+  node's own line runs to the mark between it and the hub (`nearerInRow`), and the nearest node's
+  runs on, bends in the gap and arrives level (`AnimatedBeam`'s `acrossRef`). One row a side is a
+  single line across the page. With more, the sides are dropped until the hub stands on the middle
+  of their rows (`useLevel`), under headings that stay on one line at the top. A short last row is
+  pushed against the hub. The rows of a side share the last of their way in, where the line that
+  needs a look is painted last (`paintOrder`); every line is drawn from the hub's end out, which
+  puts their dashes in the same places.
 - **Column**, where a side has no room for three across (beside a rail, on a page with a narrow
   measure). Each side is one column, the start side's words before their marks and the end's after,
   and a line fans from each node to the hub. Words under a mark cost a row twice the height of
@@ -68,9 +69,9 @@ state (TLS on a domain whose lock is closed, a forward's protocol) goes to the `
 value set inline in a sans line stands 2px taller than the line: make it a `block`, or the hub
 lands taller than the grey line that waited for it.
 
-The lines of a row lie on each other, so a row with one node that needs a look is that colour all
-the way to the hub; which node it is, is read from the mark (its corner dot, its tone) and from
-pointing at it, which steps the other lines back.
+The line at a mark says that mark's state and no other's: a failing node at the far end of a row
+is red from its mark to the next, and the working nodes nearer the hub keep their own lines.
+Pointing at a node keeps its way to the hub lit (`beyondInRow`) and steps the rest back.
 
 **Props.**
 

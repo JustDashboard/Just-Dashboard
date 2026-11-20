@@ -2,6 +2,7 @@ import { expect, test } from "bun:test"
 import {
   CELL,
   beamOf,
+  beyondInRow,
   columnStart,
   fitColumn,
   flowTemplate,
@@ -9,6 +10,7 @@ import {
   levelDrops,
   loadingRows,
   middleRows,
+  nearerInRow,
   paintOrder,
   perRow,
   staggerOf,
@@ -129,6 +131,35 @@ test("the hub stands on the middle row, or between the two about the middle", ()
 test("each part is dropped to the lowest level among them", () => {
   expect(levelDrops({ start: 22, hub: 28, end: 22 })).toEqual({ start: 6, hub: 0, end: 6 })
   expect(levelDrops({ start: 150, hub: 28, end: 22 })).toEqual({ start: 0, hub: 122, end: 128 })
+})
+
+test("a node's line runs to the mark between it and the hub", () => {
+  // Eight in threes on the start side, read towards the hub: 0 1 2 / 3 4 5 / 6 7.
+  expect([0, 1, 2, 3, 6, 7].map((at) => nearerInRow(at, 8, 3, "start"))).toEqual([
+    1,
+    2,
+    undefined,
+    4,
+    7,
+    undefined,
+  ])
+  // The end side is read away from the hub: the first of a row is the nearest.
+  expect([0, 1, 2, 3, 7].map((at) => nearerInRow(at, 8, 3, "end"))).toEqual([
+    undefined,
+    0,
+    1,
+    undefined,
+    6,
+  ])
+  // A column a side: every line is its own way to the hub.
+  expect(nearerInRow(2, 5, 1, "start")).toBeUndefined()
+})
+
+test("the rest of a row reaches the hub through the nodes nearer in", () => {
+  expect(beyondInRow(2, 8, 3, "start")).toEqual([0, 1])
+  expect(beyondInRow(0, 8, 3, "start")).toEqual([])
+  expect(beyondInRow(3, 8, 3, "end")).toEqual([4, 5])
+  expect(beyondInRow(7, 8, 3, "end")).toEqual([])
 })
 
 test("the line that needs a look is painted over the ones that do not", () => {
