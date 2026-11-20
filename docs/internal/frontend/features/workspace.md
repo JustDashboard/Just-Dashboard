@@ -484,6 +484,12 @@ name and content search (`quick-open.tsx`, `search.ts`) and a preview and detail
 foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and the rest as words in
 `more-menu.tsx`
 
+Each row says the most telling thing the server knows about the entry after its name, with its logo
+("Postgres volume of shop-db", "Served at example.com by nginx"); a tile carries the logo in its
+corner; the details pane's *On this server* says everything known as linked sentences, including
+what the entry is inside and "Not backed up" for a folder that matters (`server-context.tsx`,
+`server-context-words.ts`, `GET /files/context`, checked by `tests/browser/files-context.spec.ts`).
+
 **Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
 

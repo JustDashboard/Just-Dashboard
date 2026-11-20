@@ -670,6 +670,62 @@ Overflow menus instantiate on first activation and remain mounted afterwards for
 The listing API still returns the complete directory; these rendering savings do not reduce its disk
 reads or response bytes.
 
+### Files that know the server
+
+`GET /files/context?path=&hidden=` (`handlers_files_context.go`, mounted by
+`mountFilesContextRoutes` in the `/files` read group) says what the folder on screen and each entry
+in it is to this server: a Docker volume and the containers using it, a container's bind mount, a
+Compose project's folder and file, a site's root, configuration and logs, a certificate and its
+folder, the backup jobs covering it (or "not backed up" on a folder that matters), a backup job's
+local destination, a Git checkout with its branch and uncommitted count, a deployment's source and
+data folders, a database server's data directory and configuration, a unit file, a PM2 app's folder,
+script and logs, and the dashboard's own data and install folder.
+
+- **No new probing.** Every source is the reading its own page already makes, held on the server
+  map's shelf (`map_sources.go`) under the map's keys, so the two pages share one read:
+  `containers`, `volumes`, `projects`, `vhosts`, `certificates`, `backups`, `repositories`, `units`,
+  `pm2` (the map's `mapReadProjects`, `mapReadVHosts` and `mapReadBackups` are named so both call
+  the same function). Two the map does not draw are held there too: `stacks` (`ListStacks` over
+  `JD_COMPOSE_ROOTS`) and `deployFolders` (a deployment's `bind_path` storage and legacy
+  `RepoPath`). The databases come from the inventory's kept reduced reading (`keptInventory(false)`,
+  no container environment), never waited on. Each source waits at most `contextBudget` (800 ms);
+  one with no answer is left out and named in `partial`, which the page writes as "Still reading
+  Git".
+- **One place matches.** `internal/filecontext` is pure: the handler turns each reading into
+  `Thing`s (a fact and its paths) and `Job`s (sources, excludes), and `Resolve` answers. A new source
+  is one more builder in `contextThings`. Matching is on whole segments (`/srv/app` is not inside
+  `/srv/app2`); a fact that `inherits` reaches what is inside its path, marked `from` that path and
+  said once, at the nearest. Children carry only their own facts plus their coverage where it
+  differs from the folder's (their own job, or `backup-excluded`); the page adds the folder's
+  inheriting facts itself, which keeps a folder of thousands of entries small on the wire.
+- **Resolved paths.** The folder goes through `Resolve` and its entries are read by
+  `files.ContextPaths` in one move into the host's mount namespace: a directory read without a
+  listing's stats and owner lookups, each symlinked entry resolved through the roots (one pointing
+  outside keeps its own path and matches nothing it points at), and every inventory path resolved
+  from its nearest existing ancestor. Inventory paths are only compared, never opened. At most 5,000
+  entries are matched (`truncated` past that) and 500 links followed.
+- **Bounded commands.** The only command is a checkout's `git` summary, for the checkout on screen
+  (or the one it is inside) and entries that are checkouts, at most six, each held 15 s on the same
+  shelf (`git-summary:<path>`); the repository list itself is held for five minutes.
+- **Who sees what.** `contextSourceNeeds` names the capability each source's own page requires
+  (every one is `read` today); a fact or a `partial` source the reader could not open is not sent.
+  No secret, environment value, bucket or URL is in a fact: a backup says its target's kind.
+- **Facts are data.** A fact is a kind, its names, product or image, state, a detail word, count,
+  times and the link to the page that owns it; the sentence is the page's
+  (`components/files/server-context-words.ts`). The route is read-only and not audited.
+
+On the page, `useServerContextFeed` (called once in `files/page.tsx`) asks after the listing is
+drawn and again whenever the listing is read again; a failure, a refusal or an answer of another
+shape is no facts, and the rows are drawn as they would be without it. `EntryContextPhrase` puts
+the most telling own fact after a row's name with its logo: it has no intrinsic width (`w-0 grow`),
+so it never widens the name column and is the first thing to go when there is no room.
+`TileContextMark` is the logo in a tile's top corner with the phrase as its tooltip.
+`ServerContextSection` ("On this server") is the details pane's account: own facts, then what the
+entry is inside, each a link, with "Not backed up" said there and for the folder on screen, never
+on a row. `files-context.spec.ts` checks the phrases, one row height at 1280 and 390, the tiles,
+the section's links, the phone pane and a listing drawn when the route fails or never answers;
+`server-context-words.test.js` holds the wording.
+
 ## Logs
 
 The host Logs frontend records sources, modes, run handoffs and settled searches in browser history.
