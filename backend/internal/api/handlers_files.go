@@ -19,9 +19,11 @@ import (
 	"github.com/go-chi/chi/v5"
 )
 
-// maxUploadBytes bounds a single uploaded file. Large transfers belong in the
-// terminal with scp or rsync, not in a browser form post.
-const maxUploadBytes = 2 << 30
+// maxUploadBytes bounds one request of the one-request upload, which the page
+// uses for small files and the image editor for its saves. A larger file goes
+// in pieces (POST /files/pieces, handlers_files_transfer.go), with no limit
+// but the disk's.
+const maxUploadBytes = 256 << 20
 
 func (s *Server) mountFileRoutes(r chi.Router) {
 	r.Route("/files", func(r chi.Router) {
@@ -41,6 +43,7 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 		s.mountFilesVersionsRoutes(r)
 		s.mountFilesContextRoutes(r)
 		s.mountFilesViewingRoutes(r)
+		s.mountFilesTransferRoutes(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapFileWrite))
@@ -278,7 +281,7 @@ func uploadError(err error) error {
 	var tooBig *http.MaxBytesError
 	if errors.As(err, &tooBig) {
 		return httpx.Err(http.StatusRequestEntityTooLarge, "too_large",
-			fmt.Sprintf("the upload exceeds the %d GiB limit for one request", maxUploadBytes>>30))
+			fmt.Sprintf("the upload exceeds the %s limit for one request; a larger file is sent in pieces", files.HumanBytes(maxUploadBytes)))
 	}
 	if mapped := mapFileError(err); mapped != nil {
 		if apiErr, ok := mapped.(*httpx.APIError); ok && apiErr.Code != "unknown" && apiErr.Status != http.StatusBadRequest {

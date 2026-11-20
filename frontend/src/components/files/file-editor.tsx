@@ -32,6 +32,7 @@ import { isImage, rawUrl } from "@/components/files/media"
 import { EditorSurface } from "./editor-surface"
 import { EditorToolbar } from "./editor-toolbar"
 import { ContentConflict } from "./content-conflict"
+import { useEditorFollow } from "./editor-follow"
 import { FileIcon } from "@/components/file-icon"
 import { handoffDraft, takeDraft } from "./editor-handoff"
 import { editorHref } from "./search"
@@ -195,6 +196,18 @@ function FileEditorPanel({
     load(controller.signal)
     return () => controller.abort()
   }, [load])
+  useEditorFollow({
+    path,
+    file,
+    draft,
+    saving,
+    onReload: (disk) => {
+      setFile(disk)
+      setDraft(disk.content)
+      setMode(disk.modeOctal)
+    },
+    onConflict: () => setConflict(true),
+  })
 
   const dirty = file !== undefined && draft !== file.content
   useEffect(() => {

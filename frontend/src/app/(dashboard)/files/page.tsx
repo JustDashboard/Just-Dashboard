@@ -13,6 +13,7 @@ import {
   Check,
   ChevronDown,
   Clipboard,
+  CloudDownload,
   CloudUpload,
   Cross,
   Eye,
@@ -117,6 +118,7 @@ import {
   useUploads,
   type Incoming,
 } from "@/components/files/uploads"
+import { useFolderFollow, useFollowedListing } from "@/components/files/live-folder"
 import {
   baseOf,
   cleanPath,
@@ -290,14 +292,18 @@ export default function FilesPage() {
   // operator navigated away and back. The hidden switch is a parameter of the
   // same resource, refetched in place, rather than a new resource that would
   // blank the rows for a skeleton on every flip.
-  const listing = usePoll(
+  // Followed, where the server can watch the folder (`live-folder.ts`): the
+  // rows that change arrive by themselves and the listing is not asked again.
+  const follow = useFolderFollow(path, showHidden)
+  const polled = usePoll(
     (signal) =>
       path === null
         ? Promise.resolve(null as unknown as FileListing)
         : get<FileListing>("/files/list", { path, hidden: showHidden }, signal),
-    20_000,
+    follow.mode === "off" ? 20_000 : 0,
     [path],
   )
+  const listing = useFollowedListing(polled, follow)
   const refreshListing = listing.refresh
   useServerContextFeed(path, showHidden, listing.data)
   const firstHidden = useRef(true)
@@ -903,6 +909,22 @@ export default function FilesPage() {
       },
     })
 
+  // New → From a link: the server downloads it into this folder; its
+  // progress is in the uploads panel (`uploads.tsx`).
+  const fetchLink = () =>
+    prompt({
+      title: "Fetch a link",
+      label: "Link",
+      placeholder: "https://example.com/release.tar.gz",
+      confirmLabel: "Fetch",
+      validate: (v) =>
+        /^https?:\/\/\S+$/i.test(v.trim()) ? undefined : "A link starts with http:// or https://.",
+      hint: () => `The server downloads it into ${path ?? "/"}`,
+      submit: async (url) => {
+        await uploads.fetchLink(path ?? "/", url.trim())
+      },
+    })
+
   const cutCopy = (mode: "cut" | "copy", paths: string[]) => {
     if (paths.length === 0) return
     setClip({ mode, paths })
@@ -1012,6 +1034,7 @@ export default function FilesPage() {
       ? [
           { id: "new-folder", label: "New folder", icon: FolderPlus, onSelect: newFolder },
           { id: "new-file", label: "New file", icon: PlusSquareSmall, onSelect: newFile },
+          { id: "fetch-link", label: "From a link…", icon: CloudDownload, onSelect: fetchLink },
           {
             id: "upload",
             label: "Upload files…",
@@ -1745,6 +1768,7 @@ export default function FilesPage() {
                     onFolder={newFolder}
                     onFile={newFile}
                     onSymlink={() => setSymlinkOpen(true)}
+                    onLink={fetchLink}
                   />
                   <UploadMenu
                     className="max-lg:hidden"
@@ -2050,6 +2074,8 @@ export default function FilesPage() {
                 onCancel={uploads.cancel}
                 onDismiss={uploads.dismiss}
                 onClear={uploads.clear}
+                onPause={uploads.pause}
+                onResume={uploads.resume}
               />
 
               <PaneFooter className="relative justify-between gap-3 px-3 text-hint text-muted-foreground">
@@ -2369,10 +2395,12 @@ function NewMenu({
   onFolder,
   onFile,
   onSymlink,
+  onLink,
 }: {
   onFolder: () => void
   onFile: () => void
   onSymlink: () => void
+  onLink: () => void
 }) {
   return (
     <DropdownMenu>
@@ -2394,6 +2422,10 @@ function NewMenu({
         <DropdownMenuItem onSelect={onSymlink}>
           <Linked className="size-3.5" />
           Symlink
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onLink}>
+          <CloudDownload className="size-3.5" />
+          From a link…
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
