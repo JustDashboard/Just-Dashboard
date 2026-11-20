@@ -85,6 +85,7 @@ import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
+import { useServerContextFeed } from "@/components/files/server-context"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import { homeFor } from "@/components/files/search"
 import {
@@ -293,6 +294,7 @@ export default function FilesPage() {
     [path],
   )
   const refreshListing = listing.refresh
+  useServerContextFeed(path, showHidden, listing.data)
   const firstHidden = useRef(true)
   useEffect(() => {
     if (firstHidden.current) {
