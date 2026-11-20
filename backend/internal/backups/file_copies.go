@@ -21,8 +21,11 @@ type FileCopy struct {
 	At          time.Time  `json:"at"`
 	TargetKind  TargetKind `json:"targetKind"`
 	Destination string     `json:"destination"`
-	Encrypted   bool       `json:"encrypted,omitempty"`
-	Imported    bool       `json:"imported,omitempty"`
+	// Endpoint is an S3-compatible destination's host, which names the
+	// provider the page draws it as.
+	Endpoint  string `json:"endpoint,omitempty"`
+	Encrypted bool   `json:"encrypted,omitempty"`
+	Imported  bool   `json:"imported,omitempty"`
 	// Local is whether reading the copy stays on this server: a local
 	// destination, or an imported run's copy kept here.
 	Local bool `json:"local"`
@@ -75,15 +78,16 @@ func (s *Store) FileCopies(ctx context.Context, path string, limit int) ([]FileC
 			if run.EndedAt != nil {
 				at = *run.EndedAt
 			}
-			kind, label := job.TargetKind, destinationLabel(job)
+			went := job
 			if run.Manifest.TargetKind.Valid() && !job.Imported {
 				// Where this run went, which a job edited since may no
 				// longer say.
-				kind, label = run.Manifest.TargetKind, destinationLabel(archiveJob(job, run))
+				went = archiveJob(job, run)
 			}
+			kind, label := went.TargetKind, destinationLabel(went)
 			out = append(out, FileCopy{
 				RunID: run.ID, JobID: job.ID, Job: job.Name, At: at,
-				TargetKind: kind, Destination: label,
+				TargetKind: kind, Destination: label, Endpoint: went.Target.Endpoint,
 				Encrypted: run.Manifest.Encryption != nil, Imported: run.Imported,
 				Local: kind == TargetLocal || run.LocalCopy != "",
 			})
