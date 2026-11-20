@@ -126,13 +126,21 @@ func TestWatchCoalescesABurst(t *testing.T) {
 		t.Fatalf("150 creations arrived in %d batches; a burst should be a few", batches)
 	}
 
-	// Past the batch bound the page is asked to read the listing once.
-	hub.maxBatch = 20
+	// Past the batch bound the page is asked to read the listing once. A
+	// hub of its own, set before its watch starts, with a settle long enough
+	// that the whole burst is in before the first batch on a loaded machine.
+	bounded := newTestHub(t, root, 8, 8)
+	bounded.settle, bounded.window, bounded.maxBatch = time.Second, time.Second, 20
+	b, err := bounded.Watch(root, "a", false, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer b.Close()
 	for i := range 50 {
 		os.Remove(filepath.Join(root, fmt.Sprintf("f%03d", i)))
 	}
 	select {
-	case change := <-w.C:
+	case change := <-b.C:
 		if !change.Resync {
 			t.Fatalf("an oversized batch was sent row by row: %d entries, %d removed", len(change.Entries), len(change.Removed))
 		}

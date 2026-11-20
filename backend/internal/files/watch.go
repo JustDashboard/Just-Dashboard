@@ -305,9 +305,14 @@ func (w *Watch) loop() {
 			return
 		case <-w.kick:
 		}
+		// A burst settles first; a batch never follows the last one sooner
+		// than the window. (The first batch has no last: time.Since of the
+		// zero time saturates, and adding to it would overflow.)
 		wait := w.hub.settle
-		if since := time.Since(last); since+wait < w.hub.window {
-			wait = w.hub.window - since
+		if !last.IsZero() {
+			if since := time.Since(last); since < w.hub.window-wait {
+				wait = w.hub.window - since
+			}
 		}
 		select {
 		case <-w.done:
