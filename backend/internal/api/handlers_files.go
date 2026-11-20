@@ -20,10 +20,11 @@ import (
 )
 
 // maxUploadBytes bounds one request of the one-request upload, which the page
-// uses for small files and the image editor for its saves. A larger file goes
-// in pieces (POST /files/pieces, handlers_files_transfer.go), with no limit
-// but the disk's.
-const maxUploadBytes = 256 << 20
+// uses for small files and the image editor for its saves. The page sends a
+// larger file in pieces (POST /files/pieces, handlers_files_transfer.go), with
+// no limit but the disk's; the bound here stays where it has always been, so
+// a script that posts a gigabyte in one request keeps working.
+const maxUploadBytes = 2 << 30
 
 func (s *Server) mountFileRoutes(r chi.Router) {
 	r.Route("/files", func(r chi.Router) {

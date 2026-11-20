@@ -379,7 +379,7 @@ if it is still free after the transfer; with overwrite, a rename replaces it. An
 never leaves a truncated file. An existing file keeps its owner and mode across the replacement
 (which is what lets the image editor save over a picture the web server owns), and `?overwrite=true`
 is what permits the replacement at all. The handler sends one
-request per file from the page, maps a body over `maxUploadBytes` (256 MiB per request; a larger file goes in pieces, below) to 413
+request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request; the page sends anything over 32 MiB in pieces, below) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
 
@@ -627,7 +627,9 @@ class, never following a link, reading a folder 4,096 entries at a time, and pub
 is built two minutes after start when missing or six hours old, and in the background when a search
 finds it more than an hour old. The walk leaves out `/proc`, `/sys`, `/dev`, `/run`, `/var/run`,
 Docker's and containerd's layer and container stores under `/var/lib/docker` and `/var/lib/containerd`,
-the index's own folder, Trash folders, the contents of the folders `find.go` never enters
+the index's own folder and the dashboard's other stores beside it (`file-versions`, `thumbnails`,
+`file-uploads`), Trash folders, a transfer still arriving under its staging name, the contents of the
+folders `find.go` never enters
 (`node_modules`, `.git`, `vendor` and the rest of `skipDirs`), and every mount of a pseudo or network
 filesystem (`proc`, `sysfs`, `cgroup`, `nfs`, `cifs`, `sshfs` and the rest of `pseudoFS` and
 `networkFS`); names containing a newline are left to the walk. A search streams the file through a

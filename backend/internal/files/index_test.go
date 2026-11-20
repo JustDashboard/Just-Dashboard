@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -199,6 +200,32 @@ func TestNameIndexSkipsWhatIsNotARealTree(t *testing.T) {
 	}
 	if !indexSkips(index.dir).paths[index.dir] {
 		t.Error("the index walks its own folder")
+	}
+}
+
+// The dashboard's own stores in the data directory, and a transfer still
+// arriving under its staging name, are not names anybody searches for.
+func TestNameIndexLeavesOutTheDashboardsOwnStoresAndStagedTransfers(t *testing.T) {
+	base := t.TempDir()
+	data := filepath.Join(base, "data")
+	svc := New([]string{base})
+	index := NewNameIndex(svc, data, time.Hour)
+	writeFile(t, filepath.Join(base, "kept", "needle-a.txt"), "x", 0o644)
+	writeFile(t, filepath.Join(base, "kept", stagePrefix+"needle0123"), "x", 0o600)
+	writeFile(t, filepath.Join(data, "other", "needle-data.txt"), "x", 0o644)
+	for _, store := range indexSkippedStores {
+		writeFile(t, filepath.Join(data, store, "needle-"+store), "x", 0o600)
+	}
+	if err := index.Build(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	got, _, _ := index.Find(context.Background(), FindOptions{Root: base, Query: "needle", Hidden: true})
+	want := []string{filepath.Join(data, "other", "needle-data.txt"), filepath.Join(base, "kept", "needle-a.txt")}
+	have := hitPaths(got)
+	sort.Strings(have)
+	sort.Strings(want)
+	if fmt.Sprint(have) != fmt.Sprint(want) {
+		t.Fatalf("hits: %v, want %v", have, want)
 	}
 }
 

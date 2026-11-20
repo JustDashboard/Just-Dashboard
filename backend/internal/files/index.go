@@ -291,12 +291,22 @@ var indexSkippedPaths = []string{
 	"/var/lib/containerd", "/var/snap/docker/common/var-lib-docker/overlay2",
 }
 
+// indexSkippedStores are the dashboard's own stores beside the index in the
+// data directory: kept contents named by their hash (file-versions), small
+// copies of pictures (thumbnails) and the records of uploads in progress
+// (file-uploads). None is a file anybody is looking for, and the first two
+// would bury a search for a few hex digits under thousands of names.
+var indexSkippedStores = []string{"file-versions", "thumbnails", "file-uploads"}
+
 func indexSkips(indexDir string) indexSkip {
 	skip := indexSkip{paths: map[string]bool{}, mounts: map[string]string{}}
 	for _, p := range indexSkippedPaths {
 		skip.paths[p] = true
 	}
 	skip.paths[indexDir] = true
+	for _, store := range indexSkippedStores {
+		skip.paths[filepath.Join(filepath.Dir(indexDir), store)] = true
+	}
 	mounts, _ := readMountTable()
 	for _, m := range mounts {
 		if pseudoFS[m.FSType] || networkFS[m.FSType] || m.FSType == "tmpfs" && strings.HasPrefix(m.Path, "/run") {
@@ -346,7 +356,9 @@ func (iw *indexWalker) walk(root string) error {
 					// Names that cannot be one line are left to the walk.
 					continue
 				}
-				if IsTrashFolderName(name) {
+				if IsTrashFolderName(name) || IsStagingName(name) {
+					// A transfer still arriving has no name of its own yet,
+					// as the listing, find and search already hold.
 					continue
 				}
 				kind := byte('f')
