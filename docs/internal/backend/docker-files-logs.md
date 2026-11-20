@@ -506,6 +506,39 @@ two-gigabyte log.
   never gets a thumbnail or a viewer, because the request would be refused. A video thumbnail is the
   browser's own first frame, fetched with the range requests `http.ServeContent` honours, so a poster
   for a two-gigabyte recording costs a few hundred kilobytes.
+- **`internal/thumbnail`** makes the small copy a listing draws of a picture, once, and keeps it.
+  `GET /files/thumbnail?path=&v=` is a read route beside `/files/raw` with the same posture: it
+  answers only for PNG, JPEG and GIF (`thumbnail.Decodable`, mirrored by `media.ts`'s
+  `hasServerThumbnail`; a WebP, SVG, AVIF or icon is still drawn from the raw route, as before),
+  only with a JPEG or a PNG it made itself (PNG where the picture has transparency), inline, with
+  `sandbox` and the 30-second private cache, and `Last-Modified` from the source. The path is opened
+  through `hostFiles.Open` (the resolver, in the host's namespace) on every request before the cache
+  is consulted, and the cache keys on what the *opened* file is — device, inode, size and
+  modification time, never the path — so a copy is never served for a path the caller could not
+  read through `/files/raw`, and a changed file is a new key. Making one is bounded: a canvas over
+  50 megapixels is refused from its header before any decode (`413 too_large`), at most 128 MiB of
+  the file is read, the decode reads through the request's 15-second context, two decodes run at
+  once across the server and concurrent asks for one new picture decode it once. The EXIF orientation
+  tag of a JPEG is read by hand (no EXIF library in `go.mod`) and applied, so a portrait photograph is
+  upright as the browser draws the original. Copies live in `<JD_DATA_DIR>/thumbnails` (made 0700 on
+  first use, files 0600 through a temporary sibling and a rename), at most 256 MiB in total; past that
+  the least recently used go first, down to nine tenths, and a use is written to the file's
+  modification time so the order survives a restart. `thumbnail_test.go` covers each format, the
+  pixel limit, truncated and hostile files, orientation, the bound and eviction and a changed file;
+  `handlers_files_viewing_test.go` the headers, the refusals and paths outside the roots.
+- **Text and media in the page** (`rendered-text.tsx`, `text-contents.tsx`, `text-view.ts`): a
+  Markdown file (`.md`, `.mdx`, `.markdown`, a `README` that reads as Markdown) is drawn through the
+  same reader as a pull request's description (`lib/markdown.ts`, never HTML), with
+  `parseMarkdown(source, { relative: true })` keeping a scheme-less reference as another file: a link
+  opens it in Files (`linked-file.ts`), a picture beside it is drawn through `/files/raw` and its
+  allowlist, and a picture from another site is named and not fetched. A CSV or TSV is a table and one-line JSON
+  is indented by walking its characters, so a head cut at 64 KiB still reads. All of it works on the
+  preview's bounded head and says when that head is not the whole file. Fenced code is coloured by
+  Monaco's own tokenizer, loaded from this origin (`code-highlight.tsx`). In the viewer a folder is a
+  gallery (`gallery.ts`, `gallery-strip.tsx`: position in words, a strip, swipe, two pictures fetched
+  ahead, a slideshow); audio plays through one page-wide queue (`audio-queue.tsx`) whose player is a
+  line in the listing's foot; and a video the browser cannot decode is a sentence and a Download
+  (`playable-video.tsx`). Nothing is transcoded: there is no ffmpeg in the stack.
 - **`find.go`** is the fuzzy finder (`search.go` is the literal/regex one, optionally grepping contents).
   Subsequence matching scored so the basename beats directories, a run beats scattered characters, a
   boundary beats mid-word and a shallow path beats a deep one; terms ANDed; positions as **UTF-16

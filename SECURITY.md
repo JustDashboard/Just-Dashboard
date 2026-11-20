@@ -119,6 +119,12 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   review the owner signs before turning it on is
   [docs/audits/2026-11-05-hub-signin/security-review.md](docs/audits/2026-11-05-hub-signin/security-review.md).
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
+- The Files page keeps small copies of pictures so a folder of photographs lists quickly. They are
+  made only of a file the person could already open in Files, kept in `thumbnails` under the data
+  directory (readable by root alone, at most 256 MiB, the least recently used removed first), and a
+  picture claiming more than 50 megapixels is never decoded. A Markdown file is shown rendered but
+  never as HTML: its script, styles and `javascript:` links are shown as text, and a picture from
+  another site in it is not fetched.
 
 ### Roles
 

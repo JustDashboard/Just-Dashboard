@@ -85,6 +85,8 @@ import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
 import { useServerContextFeed } from "@/components/files/server-context"
+import { useLinkedFile } from "@/components/files/linked-file"
+import { AudioQueueHost, PlayerLine } from "@/components/files/audio-queue"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import { homeFor } from "@/components/files/search"
 import {
@@ -626,6 +628,9 @@ export default function FilesPage() {
     },
     [viewable],
   )
+
+  // A link in a rendered file: a folder is entered, a file is shown where it lives.
+  const openPath = useLinkedFile({ path, viewable, viewing, navigate, setViewing, setActive })
 
   // What a double-click means: a folder is entered, media is looked at, and
   // everything else goes to the editor — which says so if the bytes turn out
@@ -1525,6 +1530,7 @@ export default function FilesPage() {
     <Page fill="workspace" data-files-workspace className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
+      <AudioQueueHost entries={entries} />
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
@@ -2046,7 +2052,7 @@ export default function FilesPage() {
                 onClear={uploads.clear}
               />
 
-              <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
+              <PaneFooter className="relative justify-between gap-3 px-3 text-hint text-muted-foreground">
                 <span aria-live="polite" aria-atomic="true" className="numeric min-w-0 truncate">
                   {listing.data
                     ? selected.size > 0
@@ -2056,6 +2062,7 @@ export default function FilesPage() {
                       : (folderSentence(folderCount, fileCount) ?? "Empty folder")
                     : ""}
                 </span>
+                <PlayerLine />
                 <IconAction
                   label="Files shortcuts"
                   className="size-6 shrink-0"
@@ -2099,6 +2106,7 @@ export default function FilesPage() {
                   onView={viewEntry}
                   onEditImage={(p) => setEditingImage(p)}
                   onNavigate={navigate}
+                  onOpenPath={openPath}
                   className="flex-1"
                 />
               </div>
@@ -2147,6 +2155,7 @@ export default function FilesPage() {
           setViewing(null)
           setEditing(p)
         }}
+        onOpenPath={openPath}
       />
       <FileEditorSheet
         grouped

@@ -122,6 +122,8 @@ type moduleSet struct {
 	fileTrash *files.Trash
 	// fileIndex is Find's index of names; nil with JD_FILES_INDEX=false.
 	fileIndex *files.NameIndex
+	// viewing is the Files page's thumbnail cache; see handlers_files_viewing.go.
+	viewing filesViewing
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())

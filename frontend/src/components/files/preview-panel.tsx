@@ -48,6 +48,10 @@ import { folderSentence } from "@/components/files/counts"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 import { VersionsDetail } from "@/components/files/versions-detail"
 import { ServerContextSection } from "@/components/files/server-context"
+import { TextContents } from "@/components/files/text-contents"
+import { renderedViewOf } from "@/components/files/rendered-text"
+import { PlayableVideo } from "@/components/files/playable-video"
+import { ListenSection } from "@/components/files/listen-section"
 
 export { rawUrl } from "@/components/files/media"
 
@@ -85,6 +89,7 @@ export function PreviewPanel({
   onView,
   onEditImage,
   onNavigate,
+  onOpenPath,
   className,
 }: {
   entry: FileEntry | null
@@ -98,6 +103,8 @@ export function PreviewPanel({
   onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
+  /** A link in a rendered file to another file on this server. */
+  onOpenPath?: (path: string, folder: boolean) => void
   className?: string
 }) {
   const shown = entry ?? folder
@@ -122,6 +129,7 @@ export function PreviewPanel({
       onView={onView}
       onEditImage={onEditImage}
       onNavigate={onNavigate}
+      onOpenPath={onOpenPath}
       className={className}
     />
   )
@@ -137,6 +145,7 @@ type PreviewProps = {
   onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
+  onOpenPath?: (path: string, folder: boolean) => void
   className?: string
 }
 
@@ -220,11 +229,12 @@ function Hero({
           />
         </button>
       ) : preview?.kind === "video" ? (
-        <video
-          src={rawUrl(entry.path, preview.modified)}
-          controls
-          preload="metadata"
-          className="h-44 w-full rounded-lg border border-hairline bg-black object-contain"
+        <PlayableVideo
+          path={entry.path}
+          name={entry.name}
+          modified={preview.modified}
+          className="h-44 rounded-lg border border-hairline"
+          videoClassName="h-44 w-full rounded-lg border border-hairline bg-black object-contain"
         />
       ) : (
         <FileIcon entry={entry} detail className="mx-auto mt-2 size-24" />
@@ -394,14 +404,11 @@ function Contents({
   canWrite,
   onOpen,
   onNavigate,
+  onOpenPath,
 }: PreviewProps & { preview: FilePreview }) {
   switch (preview.kind) {
     case "audio":
-      return (
-        <Section title="Listen">
-          <audio src={rawUrl(entry.path, preview.modified)} controls className="w-full" />
-        </Section>
-      )
+      return <ListenSection entry={entry} modified={preview.modified} />
     case "pdf":
       return (
         <Section title="Pages">
@@ -409,6 +416,16 @@ function Contents({
         </Section>
       )
     case "text":
+      if (renderedViewOf(preview)) {
+        return (
+          <TextContents
+            preview={preview}
+            openLabel={preview.editable && canWrite ? "Open in editor" : "Open"}
+            onOpen={() => onOpen(entry.path)}
+            onOpenPath={onOpenPath}
+          />
+        )
+      }
       return (
         <Section
           title={
