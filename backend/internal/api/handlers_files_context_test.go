@@ -2,6 +2,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -164,6 +165,23 @@ func TestFileContextLeavesOutASlowSource(t *testing.T) {
 	}
 	if !found {
 		t.Fatalf("partial = %v, want the deployments named", got.Partial)
+	}
+}
+
+// A source that failed is left out without being called partial: on a host
+// with no proxy the page must not say it is still reading one.
+func TestFileContextDoesNotCallAFailedSourcePartial(t *testing.T) {
+	c, s := newClient(t)
+	root := s.modules.files.Roots()[0]
+	holdEverything(s, nil)
+	s.mapSources.mu.Lock()
+	s.mapSources.entries["deployFolders"] = &mapEntry{err: errors.New("no store"), failedAt: time.Now()}
+	s.mapSources.mu.Unlock()
+	got := readContext(t, c, root)
+	for _, source := range got.Partial {
+		if source == fc.SourceDeploy {
+			t.Fatalf("a failed source was called partial: %v", got.Partial)
+		}
 	}
 }
 

@@ -689,8 +689,9 @@ script and logs, and the dashboard's own data and install folder.
   `JD_COMPOSE_ROOTS`) and `deployFolders` (a deployment's `bind_path` storage and legacy
   `RepoPath`). The databases come from the inventory's kept reduced reading (`keptInventory(false)`,
   no container environment), never waited on. Each source waits at most `contextBudget` (800 ms);
-  one with no answer is left out and named in `partial`, which the page writes as "Still reading
-  Git".
+  one still being read when the budget runs out is left out and named in `partial`, which the page
+  writes as "Still reading Git". A source that failed (no Docker socket, no proxy on the host) is
+  left out without being called partial, so the page never waits on something that will not answer.
 - **One place matches.** `internal/filecontext` is pure: the handler turns each reading into
   `Thing`s (a fact and its paths) and `Job`s (sources, excludes), and `Resolve` answers. A new source
   is one more builder in `contextThings`. Matching is on whole segments (`/srv/app` is not inside

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/url"
 	"path/filepath"
@@ -232,27 +233,33 @@ func (s *Server) readFileContext() contextInputs {
 		}
 	}
 
-	note := func(source string, asked bool, have bool) {
-		if !asked {
-			return
-		}
-		if have {
+	// A source with an answer is read. One still being read when the budget
+	// ran out is partial: this answer is missing it and the next one will
+	// not be. One that failed (no Docker socket, no proxy on this host) is
+	// left out without being called partial, or the page would say it is
+	// still reading something that is never going to answer.
+	note := func(source string, asked, have bool, err error) {
+		switch {
+		case !asked:
+		case have:
 			in.read[source] = true
-		} else {
+		case errors.Is(err, errMapReading):
 			in.partial[source] = true
 		}
 	}
-	note(fc.SourceDocker, m.docker != nil, in.containers.Have)
-	note(fc.SourceDocker, m.docker != nil, in.volumes.Have)
-	note(fc.SourceDocker, m.docker != nil, in.stacks.Have)
-	note(fc.SourceDeploy, m.deployRuns != nil, in.projects.Have)
-	note(fc.SourceDeploy, true, in.folders.Have)
-	note(fc.SourceProxy, m.proxy != nil, in.vhosts.Have)
-	note(fc.SourceProxy, m.proxy != nil, in.certs.Have)
-	note(fc.SourceBackups, m.backupStore != nil, in.backups.Have)
-	note(fc.SourceGit, m.git != nil && m.git.Available(), in.repos.Have)
-	note(fc.SourceProcesses, m.systemd != nil && m.systemd.Available(), in.units.Have)
-	note(fc.SourceProcesses, m.pm2 != nil && m.pm2.Available(), in.pm2.Have)
+	note(fc.SourceDocker, m.docker != nil, in.containers.Have, in.containers.Err)
+	note(fc.SourceDocker, m.docker != nil, in.volumes.Have, in.volumes.Err)
+	note(fc.SourceDocker, m.docker != nil, in.stacks.Have, in.stacks.Err)
+	note(fc.SourceDeploy, m.deployRuns != nil, in.projects.Have, in.projects.Err)
+	note(fc.SourceDeploy, true, in.folders.Have, in.folders.Err)
+	note(fc.SourceProxy, m.proxy != nil, in.vhosts.Have, in.vhosts.Err)
+	note(fc.SourceProxy, m.proxy != nil, in.certs.Have, in.certs.Err)
+	note(fc.SourceBackups, m.backupStore != nil, in.backups.Have, in.backups.Err)
+	note(fc.SourceGit, m.git != nil && m.git.Available(), in.repos.Have, in.repos.Err)
+	note(fc.SourceProcesses, m.systemd != nil && m.systemd.Available(), in.units.Have, in.units.Err)
+	note(fc.SourceProcesses, m.pm2 != nil && m.pm2.Available(), in.pm2.Have, in.pm2.Err)
+	// A source read in part (containers but not yet volumes) gives what it
+	// has and is still named partial.
 	in.read[fc.SourceDashboard] = in.dataDir != ""
 	// Coverage is said only from a complete list of jobs.
 	if !in.backups.Have {
