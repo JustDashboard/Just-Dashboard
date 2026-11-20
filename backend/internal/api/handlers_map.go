@@ -120,13 +120,7 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 	}
 	if m.deployRuns != nil {
 		run(func() {
-			in.projects = readMapSource(c, spec("projects", mapFast), func(ctx context.Context) ([]deploy.DeploymentSummary, error) {
-				fleet, err := m.deployRuns.Fleet(ctx, deploy.QueueBudget{Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots})
-				if err != nil || fleet == nil {
-					return nil, err
-				}
-				return fleet.Deployments, nil
-			})
+			in.projects = readMapSource(c, spec("projects", mapFast), s.mapReadProjects)
 		})
 	}
 	run(func() {
@@ -165,14 +159,7 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 		in.absent["proxy"] = true
 	} else {
 		run(func() {
-			in.vhosts = readMapSource(c, spec("vhosts", mapSteady), func(ctx context.Context) ([]proxysvc.VHost, error) {
-				hosts, err := m.proxy.ListVHosts(ctx)
-				if err != nil {
-					return nil, err
-				}
-				s.markDeploymentRoutes(ctx, hosts)
-				return hosts, nil
-			})
+			in.vhosts = readMapSource(c, spec("vhosts", mapSteady), s.mapReadVHosts)
 		})
 		run(func() {
 			in.certs = readMapSource(c, spec("certificates", mapSlow), m.proxy.CertificateInventory)
@@ -189,18 +176,7 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 	}
 	if m.backupStore != nil {
 		run(func() {
-			in.backups = readMapSource(c, spec("backups", mapSteady), func(ctx context.Context) ([]*backups.Job, error) {
-				jobs, err := m.backupStore.List(ctx)
-				if err != nil {
-					return nil, err
-				}
-				for _, j := range jobs {
-					if m.backupSched != nil {
-						j.NextRun = m.backupSched.NextRun(j.ID)
-					}
-				}
-				return jobs, nil
-			})
+			in.backups = readMapSource(c, spec("backups", mapSteady), s.mapReadBackups)
 		})
 	}
 	if m.systemd == nil || !m.systemd.Available() {
@@ -323,6 +299,39 @@ func (s *Server) readServerMap(p *httpx.Principal) mapInputs {
 		in.absent["vpn"] = true
 	}
 	return in
+}
+
+// mapReadProjects, mapReadVHosts and mapReadBackups are three of the map's
+// held readings, named because the Files page's server context holds the same
+// ones under the same keys: whichever asks first reads, and both are answered.
+func (s *Server) mapReadProjects(ctx context.Context) ([]deploy.DeploymentSummary, error) {
+	fleet, err := s.modules.deployRuns.Fleet(ctx, deploy.QueueBudget{Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots})
+	if err != nil || fleet == nil {
+		return nil, err
+	}
+	return fleet.Deployments, nil
+}
+
+func (s *Server) mapReadVHosts(ctx context.Context) ([]proxysvc.VHost, error) {
+	hosts, err := s.modules.proxy.ListVHosts(ctx)
+	if err != nil {
+		return nil, err
+	}
+	s.markDeploymentRoutes(ctx, hosts)
+	return hosts, nil
+}
+
+func (s *Server) mapReadBackups(ctx context.Context) ([]*backups.Job, error) {
+	jobs, err := s.modules.backupStore.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for _, j := range jobs {
+		if s.modules.backupSched != nil {
+			j.NextRun = s.modules.backupSched.NextRun(j.ID)
+		}
+	}
+	return jobs, nil
 }
 
 // mapDatabases is the database control center's own fleet read — where each

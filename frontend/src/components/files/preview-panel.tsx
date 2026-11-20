@@ -47,6 +47,7 @@ import { accessRows, accessSummary, type Access } from "@/components/files/acces
 import { folderSentence } from "@/components/files/counts"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 import { VersionsDetail } from "@/components/files/versions-detail"
+import { ServerContextSection } from "@/components/files/server-context"
 
 export { rawUrl } from "@/components/files/media"
 
@@ -163,6 +164,7 @@ function Preview({ className, ...props }: PreviewProps) {
       {!preview && !error && <LoadingRows rows={4} className="p-4" />}
       {preview && (
         <>
+          <ServerContextSection path={entry.path} current={props.current} />
           <Contents {...props} preview={preview} />
           <Details entry={entry} preview={preview} />
           <AccessSection preview={preview} isDir={entry.isDir} />

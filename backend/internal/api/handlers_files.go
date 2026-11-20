@@ -39,6 +39,7 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/checksum", s.handle(s.handleFileChecksum))
 		r.Method(http.MethodGet, "/archive", s.handle(s.handleFileArchive))
 		s.mountFilesVersionsRoutes(r)
+		s.mountFilesContextRoutes(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapFileWrite))

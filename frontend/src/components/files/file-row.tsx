@@ -16,6 +16,7 @@ import type { RowCaps } from "@/components/files/file-actions"
 import type { EntryHandlers } from "@/components/files/entry-handlers"
 import { mediaKind } from "@/components/files/media"
 import { useDropTarget } from "@/components/files/dnd"
+import { EntryContextPhrase } from "@/components/files/server-context"
 
 export { isArchive, type RowCaps } from "@/components/files/file-actions"
 
@@ -176,6 +177,7 @@ export const FileRow = memo(function FileRow({
               </p>
             )}
           </div>
+          <EntryContextPhrase path={entry.path} />
         </div>
       </TableCell>
       <TableCell className="numeric text-right font-mono whitespace-nowrap text-muted-foreground">
