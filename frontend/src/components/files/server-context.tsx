@@ -66,6 +66,19 @@ function useHeld(): Held | null {
   )
 }
 
+function isFileContext(value: unknown): value is FileContext {
+  const v = value as Partial<FileContext> | null
+  return (
+    !!v &&
+    typeof v === "object" &&
+    typeof v.path === "string" &&
+    Array.isArray(v.facts) &&
+    !!v.children &&
+    typeof v.children === "object" &&
+    Array.isArray(v.partial)
+  )
+}
+
 export function useServerContextFeed(path: string | null, hidden: boolean, listed: unknown) {
   useEffect(() => {
     if (!path || !listed) return
@@ -74,7 +87,11 @@ export function useServerContextFeed(path: string | null, hidden: boolean, liste
     // with drawing them.
     const timer = setTimeout(() => {
       get<FileContext>("/files/context", { path, hidden }, controller.signal)
-        .then((context) => publish({ path, hidden, context }))
+        .then((context) => {
+          // An answer of any other shape (an older server, a proxy's page) is
+          // no answer, never a row that cannot be drawn.
+          if (isFileContext(context)) publish({ path, hidden, context })
+        })
         // No facts is the whole of a failure here: the listing is the page.
         .catch(() => undefined)
     }, 0)
@@ -126,9 +143,11 @@ function FactMark({ fact, className }: { fact: ContextFact; className?: string }
 
 /**
  * The most telling fact about a row's entry, after its name and in the same
- * line. It gives way first: it shrinks a thousand times faster than the name
- * and ends in an ellipsis, so a long name keeps its room and the row keeps
- * its one height. A row with nothing known draws nothing here.
+ * line. It has no width of its own (`w-0`): it grows into whatever the name
+ * column has spare and ends in an ellipsis, so it never widens the column,
+ * never pushes the table past its frame, and gives way entirely before the
+ * name is cut. A row with nothing known draws nothing here, and the row keeps
+ * its one height either way.
  */
 export function EntryContextPhrase({ path }: { path: string }) {
   const fact = rowFact(useHeld()?.context.children[path])
@@ -138,7 +157,7 @@ export function EntryContextPhrase({ path }: { path: string }) {
     <span
       data-context-phrase
       title={words}
-      className="flex min-w-0 shrink-[1000] items-center gap-1.5 text-hint leading-none text-muted-foreground"
+      className="flex w-0 min-w-0 grow items-center gap-1.5 overflow-hidden text-hint leading-none text-muted-foreground"
     >
       <FactMark fact={fact} />
       <span className="truncate">{words}</span>
