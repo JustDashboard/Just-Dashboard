@@ -491,8 +491,12 @@ func (s *Service) Write(path, content string) error {
 // again before publishing, so a native edit during staging is also detected.
 // An empty expected revision requires a destination that does not yet exist.
 func (s *Service) WriteChecked(path, content string, expected *string) error {
+	return s.writeChecked(path, content, expected, nil)
+}
+
+func (s *Service) writeChecked(path, content string, expected *string, kept *Replaced) error {
 	if s.run != nil {
-		return hosted1(s, func(s *Service) error { return s.WriteChecked(path, content, expected) })
+		return hosted1(s, func(s *Service) error { return s.writeChecked(path, content, expected, kept) })
 	}
 	full, err := s.Resolve(path)
 	if err != nil {
@@ -555,6 +559,7 @@ func (s *Service) WriteChecked(path, content string, expected *string) error {
 	if err := checkFileRevision(full, expected); err != nil {
 		return err
 	}
+	kept.keepPath(full)
 	if expected != nil && *expected == "" {
 		if err := os.Link(tmpName, full); errors.Is(err, fs.ErrExist) {
 			return contentguard.ErrConflict
@@ -946,8 +951,12 @@ func (s *Service) Upload(path string, r io.Reader, overwrite bool) (int64, error
 // UploadChecked shares the Files/Compose path lock and checks the opened bytes
 // again after staging. Native edits made during the transfer refuse publication.
 func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expected *string) (int64, error) {
+	return s.uploadChecked(path, r, overwrite, expected, nil)
+}
+
+func (s *Service) uploadChecked(path string, r io.Reader, overwrite bool, expected *string, kept *Replaced) (int64, error) {
 	if s.run != nil {
-		return hosted2(s, func(s *Service) (int64, error) { return s.UploadChecked(path, r, overwrite, expected) })
+		return hosted2(s, func(s *Service) (int64, error) { return s.uploadChecked(path, r, overwrite, expected, kept) })
 	}
 	full, err := s.Resolve(path)
 	if err != nil {
@@ -1058,6 +1067,7 @@ func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expect
 	if err := checkUploadRevision(parent, name, expected); err != nil {
 		return n, err
 	}
+	kept.keepIn(parent, name, full)
 	if !overwrite || (expected != nil && *expected == "") {
 		// A network transfer leaves time for another writer to claim the
 		// destination. Publish only if the name is still free; a hard link
