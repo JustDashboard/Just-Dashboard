@@ -32,7 +32,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { get, put } from "@/lib/api"
 import { plural } from "@/lib/format"
@@ -74,7 +74,7 @@ export default function AccountDefaultsPage() {
 }
 
 function Defaults() {
-  const { host } = useMetrics()
+  const host = useHost()
   const { data, error, loading, refresh } = usePoll(
     (signal) => get<AccountDefaults>("/system-accounts/defaults", undefined, signal),
     0,

@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation"
 import { Fact } from "@/components/fact-line"
 import { ArrowCircleUp, Pencil, Plus, Puzzle, RotateClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
-import { duration } from "@/lib/format"
+import { duration, plural } from "@/lib/format"
 import type { BoardSummary } from "@/lib/board/boards"
 import type { RdOverview } from "@/lib/remote-desktop"
 import type {
@@ -177,7 +177,7 @@ export default function OverviewPage() {
               <Fact product={cpuProduct(ready.host.cpuModel, ready.host.kernelArch)}>
                 {ready.host.cpuModel || ready.host.kernelArch}
               </Fact>
-              <Fact className="numeric">{cores} cores</Fact>
+              <Fact className="numeric">{plural(cores, "core")}</Fact>
               {ready.host.virtualization && (
                 <Fact product={virtualizationProduct(ready.host.virtualization)}>
                   {ready.host.virtualization}
@@ -185,7 +185,11 @@ export default function OverviewPage() {
               )}
               <Fact className="numeric">up {duration(ready.snapshot.uptimeSeconds)}</Fact>
               <Fact className="numeric">
-                {ready.snapshot.procs?.total || ready.host.processes} processes
+                {plural(
+                  ready.snapshot.procs?.total || ready.host.processes,
+                  "process",
+                  "processes",
+                )}
               </Fact>
             </>
           }

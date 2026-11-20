@@ -56,6 +56,22 @@ esac
 # The installer records the tailnet IP in JD_BIND for exactly that reason.
 JD_BIND=${JD_BIND:-${JD_SITE:-localhost}}
 
-export JD_SCHEME JD_TLS_DIRECTIVE JD_BIND
+# Strict-Transport-Security only for a name the browser can be held to. Sent
+# for localhost (the default, reached through an SSH tunnel) it would pin
+# every http://localhost port on the operator's machine, their own dev servers
+# included, to HTTPS for a year; a browser keeps the policy per host, not per
+# port. An IP literal is never a valid HSTS host, and plain HTTP ignores the
+# header, so those get none either.
+JD_HSTS_DIRECTIVE=""
+if [ "$JD_SCHEME" = https ]; then
+	# localhost, *.localhost and IPv6 literals first; then anything that is
+	# not only digits and dots is a name, and what is left is an IPv4 literal.
+	case "${JD_SITE:-localhost}" in
+	localhost | *.localhost | *:*) ;;
+	*[!0-9.]*) JD_HSTS_DIRECTIVE="header Strict-Transport-Security max-age=31536000" ;;
+	esac
+fi
+
+export JD_SCHEME JD_TLS_DIRECTIVE JD_BIND JD_HSTS_DIRECTIVE
 
 exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile

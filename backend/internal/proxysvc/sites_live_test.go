@@ -272,8 +272,8 @@ func TestLiveSiteRoutingServesWhatTheFormSays(t *testing.T) {
 	upstream := httptest.NewServer(echo(""))
 	defer upstream.Close()
 	// A socket path has to fit in 108 bytes, which a test's own temporary
-	// directory does not always leave room for.
-	sockets, err := os.MkdirTemp("", "jds")
+	// directory does not always leave room for, nor a long $TMPDIR.
+	sockets, err := os.MkdirTemp("/tmp", "jds")
 	if err != nil {
 		t.Fatal(err)
 	}

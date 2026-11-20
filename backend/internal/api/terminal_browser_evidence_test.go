@@ -82,7 +82,7 @@ func TestTerminalBrowserEvidenceServer(t *testing.T) {
 	if err := manager.SetupShell(); err != nil {
 		t.Fatal(err)
 	}
-	holders, err := os.MkdirTemp("", "jd-browser-pty-")
+	holders, err := os.MkdirTemp("/tmp", "jd-browser-pty-")
 	if err != nil {
 		t.Fatal(err)
 	}

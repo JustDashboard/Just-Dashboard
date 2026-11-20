@@ -17,7 +17,7 @@ import {
 } from "@/lib/docker-events"
 import type { Container, DockerEvent, DockerEventFeed } from "@/lib/types"
 import { useSessionState } from "@/lib/view-state"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/hooks/use-now"
@@ -111,7 +111,7 @@ function isFailure(event: DockerEvent) {
  * moment after the socket delivered it.
  */
 export function EventsPage() {
-  const { host } = useMetrics()
+  const host = useHost()
   const [range, setRange] = useSessionState<string>("docker.events.window", "24h")
   const [kinds, setKinds] = useSessionState<string[]>("docker.events.kinds", [])
   const [search, setSearch] = useSessionState("docker.events.query", "")

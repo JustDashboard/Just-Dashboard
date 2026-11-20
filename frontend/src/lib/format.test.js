@@ -13,6 +13,7 @@ import {
   dayAt,
   dayHeading,
   dayMinuteAt,
+  duration,
   grouped,
   localInputValue,
   minuteAt,
@@ -319,6 +320,7 @@ test("an age in two units keeps the seconds", () => {
   const at = 1_700_000_000_000
   expect(ago(at, at + 150_000, { units: 2 })).toBe("2m 30s ago")
   expect(ago(at, at + 3_600_000, { units: 2 })).toBe("1h ago")
+  expect(ago(at, at + 3 * 3_600_000 + 1_000, { units: 2 })).toBe("3h ago")
   expect(ago(at, at + 2_000, { units: 2 })).toBe("just now")
 })
 
@@ -365,4 +367,16 @@ test("a share in whole percent never calls a sliver nothing or a near-whole all 
 test("a date as a datetime-local input holds it is the wall clock with no zone", () => {
   const date = new Date(2026, 10, 15, 14, 3, 7, 250)
   expect(localInputValue(date)).toBe("2026-11-15T14:03:07.250")
+})
+
+test("duration's second unit is the one beside the first, never one past an empty unit", () => {
+  expect(duration(59)).toBe("59s")
+  expect(duration(60)).toBe("1m")
+  expect(duration(125)).toBe("2m 5s")
+  expect(duration(3 * 3600 + 1)).toBe("3h")
+  expect(duration(50 * 60 + 1)).toBe("50m 1s")
+  expect(duration(3 * 3600 + 4 * 60 + 1)).toBe("3h 4m")
+  expect(duration(17 * 86400 + 16 * 3600 + 59)).toBe("17d 16h")
+  expect(duration(17 * 86400 + 59 * 60)).toBe("17d")
+  expect(duration(-1)).toBe("—")
 })

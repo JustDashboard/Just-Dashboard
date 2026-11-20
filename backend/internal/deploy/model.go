@@ -153,17 +153,15 @@ func ValidateSHA(sha string) error {
 	return nil
 }
 
-// mask keeps the shape of a secret visible without disclosing it, which is
-// enough for an operator to recognise a value they set earlier.
+// mask says a value is set and nothing else about it. It used to keep the
+// first characters and the exact length, which this list hands to every role
+// that can read the project while only /env/reveal is held to the stronger
+// capability; a short secret's length and first character is a good part of
+// it. It is the same placeholder the configuration and shared-variable lists
+// use for a secret.
 func mask(value string) string {
-	switch {
-	case value == "":
+	if value == "" {
 		return ""
-	case len(value) <= 4:
-		return strings.Repeat("•", len(value))
-	case len(value) <= 12:
-		return value[:1] + strings.Repeat("•", len(value)-1)
-	default:
-		return value[:2] + strings.Repeat("•", 8) + value[len(value)-2:]
 	}
+	return "••••••••"
 }

@@ -48,7 +48,7 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
@@ -110,7 +110,7 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  */
 export function ControlCenter() {
   const { admin, engineFor, newHref } = useDatabases()
-  const { host } = useMetrics()
+  const host = useHost()
   const inventory = useInventory(admin)
   // What a file weighs, where the engine reports no size and discovery
   // measured the file: by the connection it was found to belong to.

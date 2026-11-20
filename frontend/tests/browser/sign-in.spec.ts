@@ -63,6 +63,33 @@ test("a forgotten password points at the server's reset script", async ({ page }
   ).toBeVisible()
 })
 
+test("Tab reaches the password before the link for a forgotten one, still drawn on its label's row", async ({
+  page,
+}) => {
+  await mockSignIn(page, signedOut)
+  await page.goto("/login")
+  const username = page.getByLabel("Username", { exact: true })
+  const password = page.getByLabel("Password", { exact: true })
+  const forgot = page.getByRole("button", { name: "Forgot it?", exact: true })
+  await username.focus()
+  await page.keyboard.press("Tab")
+  await expect(password).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(page.getByRole("button", { name: "Show password", exact: true })).toBeFocused()
+  await page.keyboard.press("Tab")
+  await expect(forgot).toBeFocused()
+
+  const label = await page.locator("label[for=password]").boundingBox()
+  const link = await forgot.boundingBox()
+  const field = await password.boundingBox()
+  expect(label && link && field).toBeTruthy()
+  if (!label || !link || !field) return
+  // On the label's row, at the field's right edge, and above the field.
+  expect(Math.abs(link.y + link.height / 2 - (label.y + label.height / 2))).toBeLessThanOrEqual(1)
+  expect(Math.abs(link.x + link.width - (field.x + field.width))).toBeLessThanOrEqual(1)
+  expect(link.y + link.height).toBeLessThanOrEqual(field.y)
+})
+
 test("an account owing a new password is not asked again for the one it typed", async ({
   page,
 }) => {

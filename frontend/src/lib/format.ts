@@ -94,7 +94,11 @@ export function compactCount(n: number, opts: { exactBelow?: number } = {}): str
   return grouped(Math.round(n))
 }
 
-/** Compact duration for uptimes and ages: 3d 4h, 12m 5s. */
+/**
+ * Compact duration for uptimes and ages: 3d 4h, 12m 5s. The second unit is only ever the one
+ * next to the first, and only when it is not zero, so three hours and a second is "3h": skipping
+ * the empty minutes gave "3h 1s", a seconds part that ticked under a reading counted in hours.
+ */
 export function duration(seconds: number | undefined | null): string {
   if (seconds === undefined || seconds === null || seconds < 0) return "—"
   const s = Math.floor(seconds)
@@ -105,17 +109,12 @@ export function duration(seconds: number | undefined | null): string {
     [60, "m"],
     [1, "s"],
   ]
-  const parts: string[] = []
-  let rest = s
-  for (const [size, label] of units) {
-    const n = Math.floor(rest / size)
-    if (n > 0) {
-      parts.push(`${n}${label}`)
-      rest -= n * size
-    }
-    if (parts.length === 2) break
-  }
-  return parts.join(" ")
+  const first = units.findIndex(([size]) => s >= size)
+  const [size, label] = units[first]
+  const words = `${Math.floor(s / size)}${label}`
+  const [nextSize, nextLabel] = units[first + 1]
+  const next = Math.floor((s % size) / nextSize)
+  return next > 0 ? `${words} ${next}${nextLabel}` : words
 }
 
 /**

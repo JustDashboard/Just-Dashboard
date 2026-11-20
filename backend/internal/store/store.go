@@ -2196,7 +2196,35 @@ func Open(dataDir string) (*Store, error) {
 		return nil, fmt.Errorf("open the read pool: %w", err)
 	}
 	st.read.Store(read)
+	// Statistics for the planner from the start: without sqlite_stat1 it
+	// guesses between the indexes a table carries (deploy_runs has six), and
+	// nothing else ever writes them. A failure costs only the guesses.
+	_ = st.Optimize(context.Background(), true)
 	return st, nil
+}
+
+// Optimize brings the planner's statistics up to date with PRAGMA optimize,
+// which analyses only the tables whose contents have moved enough to need it,
+// and reads at most a few hundred rows of each index while it does. SQLite
+// asks this of a long-lived connection when it opens and every few hours; the
+// metrics recorder calls it after its hourly prune, the one write that moves a
+// table's size a great deal. opening says it is the first run on this store,
+// which also looks at tables nothing on this connection has queried yet.
+func (s *Store) Optimize(ctx context.Context, opening bool) error {
+	conn, err := s.DB.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	if _, err := conn.ExecContext(ctx, `PRAGMA analysis_limit = 400`); err != nil {
+		return err
+	}
+	pragma := `PRAGMA optimize`
+	if opening {
+		pragma = `PRAGMA optimize = 0x10002`
+	}
+	_, err = conn.ExecContext(ctx, pragma)
+	return err
 }
 
 // writerPragmas are what every connection that writes is opened with. See

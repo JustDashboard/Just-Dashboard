@@ -4,7 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import { Box, Cross, NetworkDevice, Plus, Trash } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { usePoll } from "@/hooks/use-poll"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { useNow } from "@/hooks/use-now"
@@ -105,7 +105,7 @@ const LENSES: { value: Exclude<Lens, "">; label: string; title: string; tone?: "
 export function Networks() {
   const router = useRouter()
   const { can } = useAuth()
-  const { host } = useMetrics()
+  const host = useHost()
   const [creating, setCreating] = useState(false)
   const [attachTo, setAttachTo] = useState<DockerNetwork | null>(null)
   const [removing, setRemoving] = useState<DockerNetwork | null>(null)

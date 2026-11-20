@@ -18,7 +18,7 @@ import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { del, put } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import {
@@ -69,7 +69,7 @@ const NEW_HREF = `${REMOTE_DESKTOP_HREF}/new`
  */
 export function RemoteDesktopOverview() {
   const { data, error, refresh } = useRemoteDesktop()
-  const { host } = useMetrics()
+  const host = useHost()
   const { confirm, dialog } = useConfirm()
   const [editing, setEditing] = useState<RdComputer | null>(null)
   const offered = useMemo(() => (data ? candidates(data.tailnet, data.computers) : []), [data])

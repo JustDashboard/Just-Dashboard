@@ -21,7 +21,7 @@ import { journalSource } from "@/lib/log/sources"
 import type { LogFilterState, LogMode, LogTimeRange } from "@/components/logs/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { usePanelSize } from "@/lib/panel-size"
 import { useSessionState, useViewState } from "@/lib/view-state"
 import { Page, PageContext } from "@/components/page"
@@ -134,7 +134,7 @@ function LogsScreen() {
     begin: beginQuestion,
   } = useQuestionHistory(() => setQuestion((value) => value + 1))
   const params = useSearchParams()
-  const { host } = useMetrics()
+  const host = useHost()
   const { can } = useAuth()
   const admin = can("system.admin")
   const sources = usePoll(

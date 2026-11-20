@@ -71,6 +71,11 @@
 	# certificate of your own.
 	{$JD_TLS_DIRECTIVE:tls internal}
 
+	# Strict-Transport-Security, or nothing: proxy-entrypoint.sh sends it only
+	# over HTTPS for a JD_SITE that is a real name, never for localhost or an
+	# IP, where a year's pin would outlast the tunnel it was meant for.
+	{$JD_HSTS_DIRECTIVE}
+
 	encode zstd gzip
 
 	# The API, including every WebSocket endpoint. Caddy upgrades these
@@ -107,9 +112,6 @@
 		# Autoplay is the dashboard's own: Remote Desktop's stream starts its
 		# (muted) video without a press, inside a frame of this origin.
 		Permissions-Policy "accelerometer=(), ambient-light-sensor=(), autoplay=(self), camera=(), display-capture=(), encrypted-media=(), fullscreen=(self), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), midi=(), payment=(), picture-in-picture=(), publickey-credentials-get=(self), screen-wake-lock=(), serial=(), usb=()"
-		# Only meaningful on the HTTPS configurations; a browser ignores it
-		# over plain HTTP, which is the one place it would be wrong to honour.
-		Strict-Transport-Security "max-age=31536000"
 		X-Content-Type-Options "nosniff"
 		# Only where the response has none: the backend sends DENY itself, and
 		# SAMEORIGIN for the few pages the dashboard frames (a deployment's

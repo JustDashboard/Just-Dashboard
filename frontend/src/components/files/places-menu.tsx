@@ -2,7 +2,7 @@
 
 import { Servers } from "@/components/icons"
 import type { FileBookmark, FilePlace, FilePlaces } from "@/lib/types"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { platformProduct, ProductGlyph } from "@/components/product-logo"
 import { FolderIcon } from "@/components/file-icon"
 import { baseOf } from "@/components/files/media"
@@ -104,7 +104,7 @@ export function PlaceMark({
   destination: Destination
   className?: string
 }) {
-  const { host } = useMetrics()
+  const host = useHost()
   const { place, path } = destination
   if (place?.kind === "root") {
     const product = platformProduct(host?.platform)

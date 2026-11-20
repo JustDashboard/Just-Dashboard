@@ -71,3 +71,20 @@ func TestProjectValidateRejectsComposeSymlinkOutsideDeploymentRoots(t *testing.T
 func validProject(repo string) *Project {
 	return &Project{Name: "example", RepoPath: repo, Branch: "main", ComposeFile: "compose.yml"}
 }
+
+func TestTheMaskSaysNothingAboutTheValueButThatItIsSet(t *testing.T) {
+	if got := mask(""); got != "" {
+		t.Fatalf("mask(\"\") = %q, want empty", got)
+	}
+	want := mask("x")
+	for _, value := range []string{"abc", "hunter2", "sk_live_0123456789abcdef", "postgres://u:p@db/app"} {
+		if got := mask(value); got != want {
+			t.Fatalf("mask(%q) = %q, want the same placeholder as every other value (%q)", value, got, want)
+		}
+	}
+	for _, r := range want {
+		if r != '•' {
+			t.Fatalf("placeholder %q carries a character other than •", want)
+		}
+	}
+}

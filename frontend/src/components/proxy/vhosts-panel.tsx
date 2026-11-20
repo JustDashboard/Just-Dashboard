@@ -30,7 +30,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useQuerySelection } from "@/hooks/use-query-selection"
 import { useAuth } from "@/hooks/use-auth"
 import { useArrivals } from "@/hooks/use-arrivals"
-import { useMetrics } from "@/hooks/use-metrics"
+import { useHost } from "@/hooks/use-metrics"
 import { useShortcuts } from "@/hooks/use-shortcuts"
 import { TextLink } from "@/components/inline-link"
 import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
@@ -257,7 +257,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // sites, and nothing drawn is never read as "fine".
   const certPoll = useProxyRead("certs")
   const portsPoll = useProxyRead("ports")
-  const { host } = useMetrics()
+  const host = useHost()
   const upstreamPoll = usePoll(
     (signal) => get<SiteUpstreams>("/proxy/upstreams", undefined, signal),
     30_000,

@@ -40,7 +40,10 @@ func withHeldTerminal(t *testing.T, f *assistantFixture) *term.Manager {
 	if err := m.SetupShell(); err != nil {
 		t.Fatal(err)
 	}
-	holders, err := os.MkdirTemp("", "jd-agent-term-")
+	// Under /tmp rather than $TMPDIR: the holders' Unix sockets live here, and
+	// a socket path is limited to about 108 bytes, which a long TMPDIR (a CI
+	// runner's, an agent's scratch directory) uses up before the file name.
+	holders, err := os.MkdirTemp("/tmp", "jd-agent-term-")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -58,6 +61,18 @@ func withHeldTerminal(t *testing.T, f *assistantFixture) *term.Manager {
 }
 
 func terminalCall(name string, input map[string]any) [2]any { return [2]any{name, input} }
+
+// terminalView is a call's terminal reading, or the test's failure with the
+// whole answer: a bare type assertion panicked on a missing reading and ended
+// every other test of the package with it.
+func terminalView(t *testing.T, called map[string]any) map[string]any {
+	t.Helper()
+	view, ok := called["terminal"].(map[string]any)
+	if !ok {
+		t.Fatalf("the call answered no terminal reading: %#v", called)
+	}
+	return view
+}
 
 func calledTerminal(t *testing.T, events []map[string]any) map[string]any {
 	t.Helper()
@@ -87,7 +102,7 @@ func TestAPasswordGoesFromThePersonToTheTerminalAlone(t *testing.T) {
 	)
 	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"Run it","mode":"full"}`))
 	called := calledTerminal(t, events)
-	view := called["terminal"].(map[string]any)
+	view := terminalView(t, called)
 	if view["state"] != "password" || view["prompt"] != "Password:" || called["said"] != "waiting for your password" {
 		t.Fatalf("called = %v", called)
 	}
@@ -117,7 +132,7 @@ func TestAPasswordGoesFromThePersonToTheTerminalAlone(t *testing.T) {
 	)
 	events = lines(t, f.do(http.MethodPost, "/assistant/chat", fmt.Sprintf(`{"conversation":%q,"question":"I typed it","mode":"full"}`, chat)))
 	called = calledTerminal(t, events)
-	if called["terminal"].(map[string]any)["state"] != "finished" || !strings.Contains(fmt.Sprint(called["output"]), fmt.Sprintf("length %d", len(secret))) {
+	if terminalView(t, called)["state"] != "finished" || !strings.Contains(fmt.Sprint(called["output"]), fmt.Sprintf("length %d", len(secret))) {
 		t.Fatalf("read on = %v", called)
 	}
 	for i, sent := range f.provider.raw {
@@ -149,7 +164,7 @@ func TestTheTerminalAnswersAQuestionAndStopsALongCommand(t *testing.T) {
 	if len(called) != 4 {
 		t.Fatalf("called = %v", called)
 	}
-	state := func(i int) string { return fmt.Sprint(called[i]["terminal"].(map[string]any)["state"]) }
+	state := func(i int) string { return fmt.Sprint(terminalView(t, called[i])["state"]) }
 	if state(0) != "input" || !strings.Contains(fmt.Sprint(called[0]["output"]), "ready\nProceed? [y/N]") || strings.Contains(fmt.Sprint(called[0]["output"]), "\x1b") {
 		t.Fatalf("the question = %q (%s)", called[0]["output"], state(0))
 	}
@@ -240,7 +255,7 @@ func TestALineTypedIntoARunningProgramWaits(t *testing.T) {
 	)
 	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"x","mode":"changes"}`))
 	called := ofType(events, "called")
-	if len(called) != 1 || called[0]["terminal"].(map[string]any)["state"] != "running" {
+	if len(called) != 1 || terminalView(t, called[0])["state"] != "running" {
 		t.Fatalf("cat was not left running: %v", called)
 	}
 	pending, _ := doneOf(t, events)["pending"].([]any)
@@ -267,7 +282,7 @@ func TestARunCommandLineTypedIntoTheWindowWaitsLikeATerminalLine(t *testing.T) {
 	)
 	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"x","mode":"changes"}`))
 	called := ofType(events, "called")
-	if len(called) != 1 || called[0]["terminal"].(map[string]any)["state"] != "running" {
+	if len(called) != 1 || terminalView(t, called[0])["state"] != "running" {
 		t.Fatalf("cat was not left running: %v", called)
 	}
 	pending, _ := doneOf(t, events)["pending"].([]any)
@@ -321,7 +336,7 @@ func TestRunCommandTypesAPackageChangeIntoTheWindow(t *testing.T) {
 	)
 	events := lines(t, f.do(http.MethodPost, "/assistant/chat", `{"question":"Install jq","mode":"full"}`))
 	called := calledTerminal(t, events)
-	if called["terminal"].(map[string]any)["state"] != "finished" || !strings.Contains(fmt.Sprint(called["output"]), "fake apt-get install -y jq") {
+	if terminalView(t, called)["state"] != "finished" || !strings.Contains(fmt.Sprint(called["output"]), "fake apt-get install -y jq") {
 		t.Fatalf("the install = %v", called)
 	}
 	if change, _ := called["change"].(map[string]any); change == nil || !strings.HasPrefix(fmt.Sprint(change["href"]), "/terminal?session=") {
@@ -361,7 +376,7 @@ func TestRunCommandTypesAPackageChangeIntoTheWindow(t *testing.T) {
 	)
 	events = lines(t, f.do(http.MethodPost, "/assistant/chat", fmt.Sprintf(`{"conversation":%q,"question":"Restart nginx","mode":"full"}`, chat)))
 	called = calledTerminal(t, events)
-	if view := called["terminal"].(map[string]any); view["state"] != "password" || called["said"] != "waiting for your password" {
+	if view := terminalView(t, called); view["state"] != "password" || called["said"] != "waiting for your password" {
 		t.Fatalf("a sudo = %v", called)
 	}
 }
