@@ -5,12 +5,13 @@ import { Play } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import type { FileEntry } from "@/lib/types"
 import { FileIcon } from "@/components/file-icon"
-import { rawUrl, thumbnailKind } from "@/components/files/media"
+import { hasServerThumbnail, rawUrl, thumbnailKind, thumbnailSrc } from "@/components/files/media"
 
 /**
  * What a file looks like, at the size of a row or a tile.
  *
- * A picture is drawn as itself and a video as its first frame, so a folder of
+ * A picture is drawn as its small copy (`thumbnailSrc`: the server's, or the
+ * file itself where the server makes none) and a video as its first frame, so a folder of
  * screenshots or recordings is recognisable without opening anything — which
  * is the whole of what a file manager is for when the files are media. Every
  * other kind is its folder or its page (`file-icon.tsx`).
@@ -32,22 +33,34 @@ export function Thumbnail({
   className,
 }: {
   entry: FileEntry
-  size: "row" | "sm" | "md" | "lg"
+  size: "row" | "strip" | "sm" | "md" | "lg"
   hoverPlay?: boolean
   className?: string
 }) {
   const [broken, setBroken] = useState(false)
+  const [copyFailed, setCopyFailed] = useState(false)
+  const src = thumbnailSrc(entry, copyFailed)
   const kind = broken ? null : thumbnailKind(entry)
   const box =
     size === "row"
       ? "size-7 rounded-sm"
-      : size === "sm"
-        ? "h-12 w-full rounded-md"
-        : size === "lg"
-          ? "h-24 w-full rounded-md"
-          : "h-16 w-full rounded-md"
+      : size === "strip"
+        ? "size-11 rounded-sm"
+        : size === "sm"
+          ? "h-12 w-full rounded-md"
+          : size === "lg"
+            ? "h-24 w-full rounded-md"
+            : "h-16 w-full rounded-md"
   const glyph =
-    size === "row" ? "size-6" : size === "sm" ? "size-10" : size === "lg" ? "size-20" : "size-14"
+    size === "row"
+      ? "size-6"
+      : size === "strip"
+        ? "size-8"
+        : size === "sm"
+          ? "size-10"
+          : size === "lg"
+            ? "size-20"
+            : "size-14"
 
   return (
     <span
@@ -58,25 +71,33 @@ export function Thumbnail({
         className,
       )}
     >
-      {kind === "image" && (
+      {kind === "image" && src && (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src={rawUrl(entry.path, entry.modified)}
+          src={src}
           alt=""
           loading="lazy"
           decoding="async"
           draggable={false}
-          onError={() => setBroken(true)}
+          // The server's copy can be refused (a canvas past its limit, bytes
+          // that are not a picture); the file itself is the next try.
+          onError={() =>
+            hasServerThumbnail(entry.name) && !copyFailed && thumbnailSrc(entry, true)
+              ? setCopyFailed(true)
+              : setBroken(true)
+          }
           className={cn(
             "max-h-full max-w-full",
-            size === "row" ? "size-full object-cover" : "object-contain",
+            size === "row" || size === "strip" ? "size-full object-cover" : "object-contain",
           )}
         />
       )}
       {kind === "video" && (
         <VideoPoster entry={entry} hoverPlay={hoverPlay} onBroken={() => setBroken(true)} />
       )}
-      {!kind && <FileIcon entry={entry} detail={size !== "row"} className={glyph} />}
+      {(!kind || (kind === "image" && !src)) && (
+        <FileIcon entry={entry} detail={size !== "row"} className={glyph} />
+      )}
     </span>
   )
 }

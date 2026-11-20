@@ -114,6 +114,8 @@ type moduleSet struct {
 	// someone reading the server's tree in the terminal beside it, while the
 	// other callers resolve a path and then open it themselves, from here.
 	hostFiles *files.Service
+	// viewing is the Files page's thumbnail cache; see handlers_files_viewing.go.
+	viewing filesViewing
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())

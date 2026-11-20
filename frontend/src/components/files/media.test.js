@@ -8,6 +8,7 @@ import {
   numberedName,
   parentOf,
   thumbnailKind,
+  thumbnailSrc,
   uniqueName,
 } from "./media"
 
@@ -30,13 +31,23 @@ describe("mediaKind", () => {
     expect(isArchive("site.7z")).toBe(false)
   })
 
-  test("a thumbnail is tried for a small image or any video, never a folder", () => {
+  test("a thumbnail is tried for any picture the server copies, a small other one, or any video", () => {
     const base = { isDir: false, size: 1024 }
     expect(thumbnailKind({ ...base, name: "a.png" })).toBe("image")
-    expect(thumbnailKind({ ...base, name: "a.png", size: 40 << 20 })).toBeNull()
+    expect(thumbnailKind({ ...base, name: "a.JPG", size: 40 << 20 })).toBe("image")
+    expect(thumbnailKind({ ...base, name: "a.webp", size: 40 << 20 })).toBeNull()
     expect(thumbnailKind({ ...base, name: "a.mp4", size: 40 << 20 })).toBe("video")
     expect(thumbnailKind({ ...base, name: "a.png", isDir: true })).toBeNull()
     expect(thumbnailKind({ ...base, name: "empty.png", size: 0 })).toBeNull()
+  })
+
+  test("a picture is drawn from the server's copy, else from the file while it is small", () => {
+    const photo = { name: "photo.jpg", path: "/p/photo.jpg", size: 12 << 20, modified: "" }
+    expect(thumbnailSrc(photo)).toMatch(/\/files\/thumbnail\?path=%2Fp%2Fphoto\.jpg/)
+    // The copy was refused and the file is too big to draw itself: nothing.
+    expect(thumbnailSrc(photo, true)).toBeNull()
+    expect(thumbnailSrc({ ...photo, size: 1024 }, true)).toMatch(/\/files\/raw\?/)
+    expect(thumbnailSrc({ ...photo, name: "logo.svg", size: 1024 })).toMatch(/\/files\/raw\?/)
   })
 })
 
