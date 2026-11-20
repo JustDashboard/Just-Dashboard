@@ -438,3 +438,66 @@ test("Find says how old the index is that answered it", async ({ page }) => {
   await expect(palette.getByText("notes-archive.md")).toBeVisible()
   await expect(palette.getByRole("status")).toContainText("index from 2 hours ago")
 })
+
+// Screenshots for review, only when asked for: JD_TRASH_SHOTS=<folder>.
+const shots = process.env.JD_TRASH_SHOTS
+for (const width of [1440, 390]) {
+  test(`screenshots of the Trash and its flows at ${width}px`, async ({ page }) => {
+    test.skip(!shots, "screenshots only when JD_TRASH_SHOTS names a folder")
+    await page.setViewportSize({ width, height: 900 })
+    await mockServer(page, {
+      trash: [
+        trashItem("a1", "nginx.conf"),
+        trashItem("b2", "old-release", {
+          isDir: true,
+          mode: "drwxr-xr-x",
+          modeOctal: "0755",
+          replaced: true,
+          size: 5 * 1024 * 1024,
+          deletedAt: iso(now - 3 * DAY),
+          expiresAt: iso(now + 27 * DAY),
+        }),
+        trashItem("c3", "backup.tar.gz", { size: 812 * 1024 * 1024, deletedBy: "deploy" }),
+      ],
+      findIndex: { ageSeconds: 2 * 60 * 60, complete: true },
+    })
+    await openFiles(page)
+    if (width < 1024) {
+      await row(page, "notes.md").locator("[data-file-name]").click()
+    } else {
+      await row(page, "notes.md").click()
+    }
+    await page.keyboard.press("Delete")
+    await expect(page.getByRole("dialog")).toBeVisible()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${shots}/confirm-${width}.png` })
+    await page.getByRole("dialog").getByRole("button", { name: "Move to Trash" }).click()
+    await expect(page.getByText("Moved notes.md to the Trash")).toBeVisible()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${shots}/undo-notice-${width}.png` })
+    await page.goto("/files/trash")
+    await expect(page.locator("tr[data-trash-item]")).toHaveCount(4)
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${shots}/trash-${width}.png` })
+    await page
+      .locator(`tr[data-trash-item='${"b2".padEnd(32, "0")}']`)
+      .getByRole("button", { name: "old-release", exact: true })
+      .click()
+    await expect(page.getByText(/Deleted 3 days ago/)).toBeVisible()
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${shots}/trash-details-${width}.png` })
+    if (width < 1024) {
+      await page
+        .getByRole("navigation", { name: "Trash" })
+        .getByRole("button", { name: "Places" })
+        .click()
+      await page.screenshot({ path: `${shots}/trash-places-${width}.png` })
+    }
+    await openFiles(page)
+    await page.keyboard.press("Control+p")
+    await page.getByRole("dialog").getByRole("combobox").fill("notes")
+    await expect(page.getByRole("dialog").getByRole("status")).toContainText("index from")
+    await page.waitForTimeout(400)
+    await page.screenshot({ path: `${shots}/find-${width}.png` })
+  })
+}

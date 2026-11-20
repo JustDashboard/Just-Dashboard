@@ -62,11 +62,14 @@ const PANES: PaneStop<TrashPane>[] = [
   { key: "details", label: "Details", icon: <Information /> },
 ]
 
-/** The columns a narrow list gives up, by the list's own width. */
+/**
+ * The columns a narrow list gives up, by the list's own width: where a thing
+ * came from is what the Trash is read for, so it is the last to go.
+ */
 const COLUMN = {
-  from: "hidden @2xl:table-cell",
+  from: "hidden @lg:table-cell",
   kept: "hidden @3xl:table-cell",
-  size: "hidden @lg:table-cell",
+  size: "hidden @2xl:table-cell",
 } as const
 
 /** A trashed item drawn as the entry it was, so its icon is the one the listing gave it. */
