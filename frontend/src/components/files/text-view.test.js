@@ -46,13 +46,19 @@ describe("indenting JSON that arrived on one line", () => {
   })
 
   test("a head cut part of the way through still indents what is there", () => {
-    expect(indentJson('{"a":[1,{"b":"cut her')).toBe('{\n  "a": [\n    1,\n    {\n      "b": "cut her\n')
+    expect(indentJson('{"a":[1,{"b":"cut her')).toBe(
+      '{\n  "a": [\n    1,\n    {\n      "b": "cut her\n',
+    )
   })
 })
 
 describe("reading CSV and TSV", () => {
   test("a header, quoted fields with delimiters, quotes and line breaks", () => {
-    const table = parseDelimited('name,note,total\n"Smith, J","said ""hi""\nthen left",12\n', ",", false)
+    const table = parseDelimited(
+      'name,note,total\n"Smith, J","said ""hi""\nthen left",12\n',
+      ",",
+      false,
+    )
     expect(table.header).toEqual(["name", "note", "total"])
     expect(table.rows).toEqual([["Smith, J", 'said "hi"\nthen left', "12"]])
     expect(table.cut).toBe(false)

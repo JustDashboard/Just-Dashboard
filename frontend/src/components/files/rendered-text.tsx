@@ -113,7 +113,10 @@ export function RenderedText({
   )
   const shown = table ? plural(table.rows.length, "row") : plural(preview.lines ?? 0, "line")
   return (
-    <div data-rendered={view} className="flex min-h-0 min-w-0 flex-col gap-2">
+    <div
+      data-rendered={view}
+      className={cn("flex min-h-0 min-w-0 flex-col gap-2", stage && "flex-1")}
+    >
       {view === "markdown" && (
         <div className={cn("min-h-0 overflow-auto", frame)}>
           <MarkdownFile path={preview.path} text={text} onOpenPath={onOpenPath} stage={stage} />
@@ -197,7 +200,7 @@ function DelimitedTable({ table, className }: { table: Delimited; className?: st
     <div
       data-file-table
       className={cn(
-        "min-h-0 max-w-full overflow-auto rounded-lg border border-hairline",
+        "min-h-0 w-fit max-w-full overflow-auto rounded-lg border border-hairline",
         className,
       )}
     >
