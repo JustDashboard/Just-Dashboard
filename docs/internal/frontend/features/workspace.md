@@ -484,6 +484,13 @@ name and content search (`quick-open.tsx`, `search.ts`) and a preview and detail
 foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and the rest as words in
 `more-menu.tsx`
 
+A text file reads as what it is in the details pane and the viewer: Markdown rendered with a press
+back to the source, a CSV or TSV as a table, one-line JSON indented (`rendered-text.tsx`). Pictures
+list as the server's small copies (`/files/thumbnail`); the viewer walks a folder as a gallery with
+a strip, swipe and a slideshow; audio plays as a queue whose player is one line in the listing's
+foot and keeps playing across folders (`audio-queue.tsx`); a video the browser cannot play says so
+and offers Download (`playable-video.tsx`). Checked by `tests/browser/files-viewing.spec.ts`
+
 **Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
 
