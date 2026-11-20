@@ -46,6 +46,8 @@ import { baseOf, parentOf, rawUrl } from "@/components/files/media"
 import { accessRows, accessSummary, type Access } from "@/components/files/access"
 import { folderSentence } from "@/components/files/counts"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
+import { TextContents } from "@/components/files/text-contents"
+import { renderedViewOf } from "@/components/files/rendered-text"
 
 export { rawUrl } from "@/components/files/media"
 
@@ -83,6 +85,7 @@ export function PreviewPanel({
   onView,
   onEditImage,
   onNavigate,
+  onOpenPath,
   className,
 }: {
   entry: FileEntry | null
@@ -96,6 +99,8 @@ export function PreviewPanel({
   onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
+  /** A link in a rendered file to another file on this server. */
+  onOpenPath?: (path: string, folder: boolean) => void
   className?: string
 }) {
   const shown = entry ?? folder
@@ -120,6 +125,7 @@ export function PreviewPanel({
       onView={onView}
       onEditImage={onEditImage}
       onNavigate={onNavigate}
+      onOpenPath={onOpenPath}
       className={className}
     />
   )
@@ -135,6 +141,7 @@ type PreviewProps = {
   onView: (entry: FileEntry) => void
   onEditImage: (path: string) => void
   onNavigate: (path: string) => void
+  onOpenPath?: (path: string, folder: boolean) => void
   className?: string
 }
 
@@ -391,6 +398,7 @@ function Contents({
   canWrite,
   onOpen,
   onNavigate,
+  onOpenPath,
 }: PreviewProps & { preview: FilePreview }) {
   switch (preview.kind) {
     case "audio":
@@ -406,6 +414,16 @@ function Contents({
         </Section>
       )
     case "text":
+      if (renderedViewOf(preview)) {
+        return (
+          <TextContents
+            preview={preview}
+            openLabel={preview.editable && canWrite ? "Open in editor" : "Open"}
+            onOpen={() => onOpen(entry.path)}
+            onOpenPath={onOpenPath}
+          />
+        )
+      }
       return (
         <Section
           title={

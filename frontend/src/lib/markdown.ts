@@ -121,9 +121,22 @@ function stripHtml(source: string): string {
   return out.join("\n")
 }
 
-export function parseMarkdown(source: string): Block[] {
+/**
+ * Whether a reference with no scheme is kept as one. Only for the length of a
+ * `parseMarkdown(source, { relative: true })`: the Files page reading a file on
+ * this server, where `docs/setup.md` and `./shot.png` name the files beside it.
+ * A description on a forge has nothing beside it, so there they stay words.
+ */
+let keepRelative = false
+
+export function parseMarkdown(source: string, options: { relative?: boolean } = {}): Block[] {
   const lines = stripHtml(source.replace(/\r\n?/g, "\n")).split("\n")
-  return parseBlocks(lines)
+  keepRelative = options.relative === true
+  try {
+    return parseBlocks(lines)
+  } finally {
+    keepRelative = false
+  }
 }
 
 function parseBlocks(lines: string[]): Block[] {
@@ -337,6 +350,22 @@ export function safeHref(href: string): string | undefined {
 }
 
 /**
+ * A reference to another file: a path with no scheme, which is never handed to
+ * the browser as it is. The caller resolves it against the file it was written
+ * in and draws it as an address of its own (`components/files/rendered-text.tsx`),
+ * so `javascript:` and `//elsewhere` are refused here rather than relied upon.
+ */
+export function relativeRef(ref: string): string | undefined {
+  const value = ref.trim()
+  if (!value || value.startsWith("#")) return undefined
+  if (/^[a-z][a-z0-9+.-]*:/i.test(value) || /^[\\/]{2}/.test(value)) return undefined
+  if (/[\u0000-\u001f\u007f\\]/.test(value)) return undefined
+  return value
+}
+
+const linkable = (href: string) => safeHref(href) ?? (keepRelative ? relativeRef(href) : undefined)
+
+/**
  * Whether the server will read this address for the page. The same rule as
  * `isForgeMedia` on the server, which is the one that decides: this only keeps
  * a request from being made to be refused.
@@ -406,7 +435,7 @@ export function parseInline(text: string): Inline[] {
     // A picture that is also a link, which is how a badge is written. The
     // picture is what the reader came for, and the lightbox links onwards.
     const linked = /^\[!\[([^\]]*)\]\(\s*<?([^()\s>]+)>?(?:\s+"[^"]*")?\s*\)\]\([^)]*\)/.exec(rest)
-    const linkedSrc = linked && safeHref(linked[2])
+    const linkedSrc = linked && linkable(linked[2])
     if (linked && linkedSrc) {
       flush()
       out.push({ t: "image", src: linkedSrc, alt: linked[1] })
@@ -420,7 +449,7 @@ export function parseInline(text: string): Inline[] {
         rest,
       )
     if (link) {
-      const href = safeHref(link[3])
+      const href = linkable(link[3])
       flush()
       const label = link[2] || (link[1] ? "image" : link[3])
       if (href && link[1]) out.push({ t: "image", src: href, alt: link[2] })

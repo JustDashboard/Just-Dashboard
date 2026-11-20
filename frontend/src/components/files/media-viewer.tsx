@@ -13,19 +13,19 @@ import {
   Pencil,
 } from "@/components/icons"
 import { downloadUrl, get } from "@/lib/api"
-import { bytes, plural, relativeTime, timestamp } from "@/lib/format"
+import { bytes, relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry, FilePreview } from "@/lib/types"
 import { copyText } from "@/lib/clipboard"
 import { Modal } from "@/components/modal"
-import { Well } from "@/components/panel"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
 import { ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { FileIcon } from "@/components/file-icon"
 import { mediaKind, rawUrl } from "@/components/files/media"
-import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
+import { ArchiveListing, PdfPreview } from "@/components/files/preview-bits"
+import { TextStage } from "@/components/files/text-contents"
 
 /**
  * The full-screen look at a file.
@@ -49,6 +49,7 @@ export function MediaViewer({
   onIndexChange,
   onEditImage,
   onOpenEditor,
+  onOpenPath,
 }: {
   /** The files of the folder being browsed, in the order the listing shows them. */
   items: FileEntry[]
@@ -58,6 +59,8 @@ export function MediaViewer({
   onIndexChange: (index: number) => void
   onEditImage: (path: string) => void
   onOpenEditor: (path: string) => void
+  /** A link in a rendered file to another file on this server. */
+  onOpenPath?: (path: string, folder: boolean) => void
 }) {
   const entry = index === null ? null : items[index]
   const open = entry !== undefined && entry !== null
@@ -202,6 +205,7 @@ export function MediaViewer({
           fit={fit}
           onFit={setFit}
           onDimensions={setDimensions}
+          onOpenPath={onOpenPath}
         />
       )}
     </Modal>
@@ -213,11 +217,13 @@ function Stage({
   fit,
   onFit,
   onDimensions,
+  onOpenPath,
 }: {
   entry: FileEntry
   fit: boolean
   onFit: (fit: boolean) => void
   onDimensions: (d: { w: number; h: number } | null) => void
+  onOpenPath?: (path: string, folder: boolean) => void
 }) {
   const kind = mediaKind(entry.name)
   const src = rawUrl(entry.path, entry.modified)
@@ -273,12 +279,18 @@ function Stage({
         </div>
       )
     default:
-      return <OtherStage entry={entry} />
+      return <OtherStage entry={entry} onOpenPath={onOpenPath} />
   }
 }
 
 /** Anything the browser cannot draw as itself: the head, the listing, or a note. */
-function OtherStage({ entry }: { entry: FileEntry }) {
+function OtherStage({
+  entry,
+  onOpenPath,
+}: {
+  entry: FileEntry
+  onOpenPath?: (path: string, folder: boolean) => void
+}) {
   const [preview, setPreview] = useState<FilePreview>()
   const [error, setError] = useState<Error>()
 
@@ -293,20 +305,7 @@ function OtherStage({ entry }: { entry: FileEntry }) {
   if (error) return <ErrorState error={error} className="m-4" />
   if (!preview) return <LoadingRows className="p-4" />
 
-  if (preview.kind === "text") {
-    return (
-      <div className="flex min-h-0 flex-1 flex-col gap-2 p-3">
-        <Well className="min-h-0 flex-1 p-0 whitespace-pre">
-          <TextHead text={preview.text ?? ""} />
-        </Well>
-        <p className="shrink-0 text-hint text-muted-foreground">
-          {preview.truncated
-            ? `First ${preview.lines} lines of ${bytes(preview.size)}. Open it in the editor for the rest.`
-            : plural(preview.lines ?? 0, "line")}
-        </p>
-      </div>
-    )
-  }
+  if (preview.kind === "text") return <TextStage preview={preview} onOpenPath={onOpenPath} />
   if (preview.kind === "archive") {
     return (
       <div className="flex min-h-0 flex-1 flex-col p-3">

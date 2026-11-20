@@ -85,6 +85,7 @@ import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
+import { useLinkedFile } from "@/components/files/linked-file"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import { homeFor } from "@/components/files/search"
 import {
@@ -621,6 +622,9 @@ export default function FilesPage() {
     },
     [viewable],
   )
+
+  // A link in a rendered file: a folder is entered, a file is shown where it lives.
+  const openPath = useLinkedFile({ path, viewable, viewing, navigate, setViewing, setActive })
 
   // What a double-click means: a folder is entered, media is looked at, and
   // everything else goes to the editor — which says so if the bytes turn out
@@ -2110,6 +2114,7 @@ export default function FilesPage() {
                   onView={viewEntry}
                   onEditImage={(p) => setEditingImage(p)}
                   onNavigate={navigate}
+                  onOpenPath={openPath}
                   className="flex-1"
                 />
               </div>
@@ -2158,6 +2163,7 @@ export default function FilesPage() {
           setViewing(null)
           setEditing(p)
         }}
+        onOpenPath={openPath}
       />
       <FileEditorSheet
         grouped
