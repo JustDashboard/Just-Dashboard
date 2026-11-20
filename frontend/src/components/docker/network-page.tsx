@@ -44,7 +44,7 @@ import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Cidr } from "@/components/address"
 import { linkGlyph } from "@/components/network/marks"
 import { useLiveTraffic } from "@/components/network/use-live-traffic"
-import { HueKey, type NetworkRate } from "@/components/docker/network-band"
+import { type NetworkRate } from "@/components/docker/network-band"
 import { NetworkChangeDialog } from "@/components/docker/network-conflicts"
 import { AttachDialog, RemoveNetworkDialog } from "@/components/docker/network-dialogs"
 import { useContainersLive, useMemberCounts } from "@/components/docker/network-live"
@@ -63,7 +63,6 @@ import {
   isSystem,
   memberReadings,
   networkHref,
-  networkHue,
   networkOrder,
   networkOwner,
   networkStanding,
@@ -416,7 +415,6 @@ function NetworkMain({
                 // The name is in the address, and its colour follows from it:
                 // the line is where it will be before anything is read.
                 <span className="inline-flex min-w-0 items-center gap-2">
-                  <HueKey color={networkHue(address)} />
                   <span className="truncate">{address}</span>
                 </span>
               )
@@ -640,7 +638,6 @@ function NetworkIdentity({
       }
       title={
         <span className="inline-flex min-w-0 items-center gap-2">
-          <HueKey color={networkHue(network.name)} />
           <span className="truncate">{network.name}</span>
         </span>
       }

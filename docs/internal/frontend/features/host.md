@@ -287,7 +287,7 @@ its colour sized by the blocks it holds, the first free block at the strip's end
 outside the pools in the figure's tooltip; **Recent**, Docker's network events followed live as
 ticks on the last day, each naming the container that joined or left. A press in Traffic or Recent
 opens that network's page. Then the networks as a framed
-table — the network's lane colour down its edge, who made it as counted chips that narrow (compose
+table — who made it as counted chips that narrow (compose
 project, this dashboard, standalone, Docker's own; the backend's reading of the labels where it has
 one, so a deployment's network and a database link are the dashboard's and name the deployment,
 otherwise the labels themselves), its subnet and gateway, its members as their products with how
@@ -883,7 +883,7 @@ that does something.
   behind, a link to the Git page), how many services run and how many ports it publishes — with the
   verdict at its end (*1 service failing*, *1 not created*, *All 5 running*), which narrows the table
   to those services. Its Services view is a framed table of every service (`stack-services-table.tsx`)
-  fed by the containers socket: the service as its image's product with its log lane down the row,
+  fed by the containers socket: the service as its image's product,
   its state read with the event log (out of memory, crashed or stopped by the exit status, a restart
   loop counted) and how long it has been in it, its processor's last hour beside this second's share,
   memory against its limit, network rates from 1536 and its published ports, under state chips that

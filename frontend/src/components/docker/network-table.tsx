@@ -29,7 +29,6 @@ import {
   attachRefusal,
   isUnused,
   networkHref,
-  networkHue,
   networkOwner,
   removeRefusal,
 } from "@/components/docker/networks"
@@ -131,8 +130,7 @@ function NetworkTableRow({
       )}
       onActivate={() => router.push(networkHref(network.name))}
     >
-      <TableCell className={cn("relative", CELL)}>
-        <HueEdge network={network} />
+      <TableCell className={CELL}>
         <NetworkTitle network={network} />
       </TableCell>
       <TableCell className={CELL}>
@@ -187,8 +185,7 @@ function NetworkNarrowRow({
         router.push(networkHref(network.name))
       }}
     >
-      <HueEdge network={network} />
-      <div className="min-w-0 flex-1 pl-3">
+      <div className="min-w-0 flex-1">
         <NetworkTitle network={network} />
         <p className="mt-1 flex min-w-0 items-center gap-x-3 text-hint">
           <SubnetReading network={network} inline />
@@ -207,20 +204,6 @@ function NetworkNarrowRow({
         </span>
       </div>
     </li>
-  )
-}
-
-/** The network's colour down the row's leading edge. */
-function HueEdge({ network }: { network: DockerNetwork }) {
-  return (
-    <span
-      aria-hidden
-      className={cn(
-        "absolute inset-y-2 left-0 w-0.5 rounded-full",
-        isUnused(network) && "opacity-40",
-      )}
-      style={{ background: networkHue(network.name) }}
-    />
   )
 }
 

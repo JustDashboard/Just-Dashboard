@@ -80,12 +80,9 @@ export const SeriesLegend = memo(function SeriesLegend({
               <tr key={s.key} className="group/legend">
                 <td className="py-px pr-2">
                   <span className="flex min-w-0 items-center gap-1.5">
-                    {/* A bar rather than a square. It is a key to a line, and
-                        at 2×10 it reads as a segment of that line instead of
-                        as a bullet the row has to be separated from. */}
                     <span
                       aria-hidden
-                      className="h-2.5 w-0.5 shrink-0 rounded-full"
+                      className="size-2 shrink-0 rounded-full"
                       style={{ background: s.color }}
                     />
                     <span className="truncate text-muted-foreground group-hover/legend:text-foreground">

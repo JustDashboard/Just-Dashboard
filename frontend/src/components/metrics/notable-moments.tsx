@@ -308,11 +308,11 @@ function IncidentRow({
               <span className="truncate text-body font-medium">{lead.title}</span>
             </span>
             {rest.length === 0 ? (
-              <span className="block truncate pl-2.5 text-hint text-muted-foreground">
+              <span className="block truncate pl-4 text-hint text-muted-foreground">
                 {lead.detail}
               </span>
             ) : (
-              <span className="flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 pl-2.5">
+              <span className="flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 pl-4">
                 <span className="text-hint text-muted-foreground">with</span>
                 {rest.map((signal) => (
                   <span
@@ -343,7 +343,7 @@ function Key({ color, small }: { color: string; small?: boolean }) {
   return (
     <span
       aria-hidden
-      className={cn("w-0.5 shrink-0 rounded-full", small ? "h-2" : "h-2.5")}
+      className={cn("shrink-0 rounded-full", small ? "size-1.5" : "size-2")}
       style={{ background: color }}
     />
   )

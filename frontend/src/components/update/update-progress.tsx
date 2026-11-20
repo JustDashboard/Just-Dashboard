@@ -89,7 +89,7 @@ export function UpdateProgress({
       )}
 
       {run.status === "failed" && run.error && (
-        <p className="border-l-2 border-destructive pl-3 font-mono text-hint leading-relaxed break-words whitespace-pre-wrap text-destructive">
+        <p className="font-mono text-hint leading-relaxed break-words whitespace-pre-wrap text-destructive">
           {run.error}
         </p>
       )}

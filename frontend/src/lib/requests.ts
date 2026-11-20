@@ -92,16 +92,6 @@ export const CLASS_DOT: Record<StatusClass, string> = {
   other: "bg-muted-foreground/40",
 }
 
-/** The rule down the left of a row. Only what needs finding draws one. */
-export const CLASS_EDGE: Record<StatusClass, string> = {
-  "5xx": "bg-destructive",
-  "4xx": "bg-warning/70",
-  "3xx": "bg-transparent",
-  "2xx": "bg-transparent",
-  "1xx": "bg-transparent",
-  other: "bg-transparent",
-}
-
 /**
  * A method is a word, drawn as one.
  *

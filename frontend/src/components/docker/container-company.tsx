@@ -4,7 +4,6 @@ import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Box } from "@/components/icons"
-import { hueFor, LANES } from "@/lib/hue"
 import type { Container, ContainerStats } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useArrivals } from "@/hooks/use-arrivals"
@@ -98,16 +97,7 @@ export function ContainerCompany({
     >
       <PanelHeader
         eyebrow={company.kind === "stack" ? "Compose project" : "On its network"}
-        title={
-          <span className="inline-flex items-center gap-2">
-            <span
-              aria-hidden
-              className="h-3.5 w-1 shrink-0 rounded-full"
-              style={{ background: hueFor(company.name, LANES) }}
-            />
-            {company.name}
-          </span>
-        }
+        title={<span className="inline-flex items-center gap-2">{company.name}</span>}
         count={`${running} of ${company.containers.length} running`}
         link={
           company.kind === "stack"

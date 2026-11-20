@@ -170,8 +170,8 @@ Alerts) is the landing page and is current on its own address alone, unless it i
 open under (`LIST_LANDINGS`: Live for `/processes/<pid>`, Projects for a project and `/deploy/new`,
 Databases for a database), which keeps the addresses no other row owns. A run is one of its
 project's Deployments. An address under a section that no row owns lights nothing. The lit row is
-drawn three ways: the selection fill (`bg-accent`), a 2px brand bar on its leading edge and the
-medium label. The pointer gets the menu's hover fill (`bg-menu-hover`), so the page you are on and
+drawn two ways: the selection fill (`bg-accent`) and the medium label, with no bar on its edge
+(removed in 0.9.1, [*No colour bars*](standard.md#the-operators-decisions)). The pointer gets the menu's hover fill (`bg-menu-hover`), so the page you are on and
 the row under the pointer never look alike. It is said, too: a page's row carries
 `aria-current="page"`, and a section or group you are inside, seen from a level above, carries
 `aria-current="true"`.
@@ -543,8 +543,8 @@ section's name and also answers to the name the rail gives it inside the section
 
 Every result is one line — its mark, its name, its second line in the hint size after it, and at
 the far end its state, when it was visited, *Previous*, *Current* or its shortcut — so a screen holds
-twice the rows the two-line list did. The highlighted result takes the menus' hover fill with a
-brand bar on its leading edge; it is where the keyboard is, not a selection. The mark is drawn as what the result is
+twice the rows the two-line list did. The highlighted result takes the menus' hover fill and nothing
+else; it is where the keyboard is, not a selection. The mark is drawn as what the result is
 (`command-search/marks.tsx`). An inventory row carries the product it is as a `ProductLogo` key — a
 container its image's, a database its flavour or driver, a site nginx or Caddy, a repository its forge
 or Git, a service the unit's program, a PM2 app its interpreter, a stack Compose's, a project

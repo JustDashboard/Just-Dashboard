@@ -811,14 +811,6 @@ function SettingRow({
       data-edited={changed || undefined}
       className="relative flex min-h-[4.25rem] min-w-0 items-center justify-between gap-4 py-2.5"
     >
-      {/* A staged change is marked down the row's edge in git's modified
-          hue, the colour §3 gives a change that is not applied yet. */}
-      {changed && (
-        <span
-          aria-hidden
-          className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
-        />
-      )}
       <div className="min-w-0 space-y-0.5">
         <div className="flex min-w-0 items-center gap-2">
           <label htmlFor={id} className="min-w-0 text-sm leading-snug font-medium">

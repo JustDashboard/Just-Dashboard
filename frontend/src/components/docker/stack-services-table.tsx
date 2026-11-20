@@ -126,21 +126,11 @@ function productOf(reading: ServiceReading) {
   return reading.service.image ? imageProduct(reading.service.image) : undefined
 }
 
-/**
- * The service as its product, with its lane down the edge: the hue its name
- * takes in the stack's log, so a row and its lines are found as one.
- */
+/** The service as its product. */
 function ServiceMark({ reading }: { reading: ServiceReading }) {
   return (
-    <span className="flex shrink-0 items-center gap-2.5">
-      <span
-        aria-hidden
-        className="h-8 w-0.5 shrink-0 rounded-full"
-        style={{ background: reading.lane }}
-      />
-      <span className={cn("flex", reading.bucket === "missing" && "opacity-50 grayscale")}>
-        <ProductLogo id={productOf(reading)} size="sm" />
-      </span>
+    <span className={cn("flex shrink-0", reading.bucket === "missing" && "opacity-50 grayscale")}>
+      <ProductLogo id={productOf(reading)} size="sm" />
     </span>
   )
 }

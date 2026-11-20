@@ -506,12 +506,11 @@ function TreeNode({ entry, depth, ...props }: LevelProps & { entry: FileEntry })
         {...drop.handlers}
         className={cn(
           "group relative flex items-center gap-1 py-[3px] pr-1 text-body hover:bg-row-hover",
-          // The tint and the rule down the edge are the same fact as the
-          // letter, said in a way that survives being scanned rather than
-          // read: a wall of filenames with one green line in it answers
-          // "what did I touch" without any of them being looked at.
-          tone &&
-            "bg-(--git-tint) before:absolute before:inset-y-0 before:left-0 before:w-[2px] before:bg-(--git-edge) before:content-['']",
+          // The tint is the same fact as the letter, said in a way that
+          // survives being scanned rather than read: a wall of filenames with
+          // one green row in it answers "what did I touch" without any of
+          // them being looked at.
+          tone && "bg-(--git-tint)",
           activeFile === entry.path && "bg-accent",
           entry.isDir && activeDir === entry.path && "bg-accent font-medium",
           drop.over && "bg-wash-brand",

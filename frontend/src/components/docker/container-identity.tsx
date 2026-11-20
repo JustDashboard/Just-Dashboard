@@ -4,7 +4,6 @@ import Link from "next/link"
 import { Box, Copy } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
 import { plural } from "@/lib/format"
-import { hueFor, LANES } from "@/lib/hue"
 import type { ContainerDetail } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { IdentityHeader } from "@/components/identity-header"
@@ -98,11 +97,6 @@ export function ContainerIdentity({
                 href={`/docker/stacks/${encodeURIComponent(stack)}`}
                 className="inline-flex min-w-0 items-center gap-1.5 rounded-sm focus-ring hover:text-foreground hover:underline"
               >
-                <span
-                  aria-hidden
-                  className="h-2.5 w-0.5 shrink-0 rounded-full"
-                  style={{ background: hueFor(stack, LANES) }}
-                />
                 <span className="truncate">
                   {stack}
                   {detail.composeService && (

@@ -253,10 +253,7 @@ export function RollbackDialog({
                 />
               )}
               <ArrowDown aria-hidden className="ml-2.5 size-4 text-muted-foreground" />
-              {/* Where you are going: the one row with a mark of place (§3). */}
-              <div className="border-l-2 border-brand pl-3">
-                <ReleaseLine release={release} run={runOf(release)} remote={remote} />
-              </div>
+              <ReleaseLine release={release} run={runOf(release)} remote={remote} />
             </div>
 
             <section aria-label="Domains" className="space-y-1.5">

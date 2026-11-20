@@ -551,15 +551,6 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
                       className="group focus-ring-inset"
                     >
                       <TableCell className="relative py-4">
-                        {/* The action's hue down the row's edge, so a
-                              column of thirty rules reads as where the
-                              fence opens and where it shuts before a word
-                              of it is. */}
-                        <span
-                          aria-hidden
-                          className="absolute inset-y-3 left-0 w-0.5 rounded-full"
-                          style={{ background: actionHue(rule.action) }}
-                        />
                         <div className="space-y-1.5">
                           <Tag hue={actionHue(rule.action)}>{rule.action}</Tag>
                           <span className="block font-mono text-hint text-muted-foreground">
@@ -689,10 +680,6 @@ function FirewallWorkspace({ status, loading, error, lastSuccess, refresh, hando
                   {!query.trim() && (
                     <TableRow className="hover:bg-transparent">
                       <TableCell className="relative py-4">
-                        <span
-                          aria-hidden
-                          className="absolute inset-y-3 left-0 w-0.5 rounded-full border-l border-dashed border-border-strong"
-                        />
                         <div className="space-y-1.5">
                           <Tag hue={actionHue(inbound)}>{inbound}</Tag>
                           <span className="block font-mono text-hint text-muted-foreground">
@@ -1131,14 +1118,6 @@ function FirewallDefaults({
                     data-edited={edited || undefined}
                     className="relative flex min-h-12 min-w-0 flex-wrap items-center justify-between gap-x-4 gap-y-2 py-2"
                   >
-                    {/* A staged change is marked down the row's edge in git's
-                  modified hue, the colour of a change not applied yet. */}
-                    {edited && (
-                      <span
-                        aria-hidden
-                        className="absolute inset-y-2.5 -left-3 w-0.5 rounded-full bg-git-modified"
-                      />
-                    )}
                     <span className="flex min-w-0 items-center gap-2 text-sm font-medium">
                       {row.label}
                       <InfoTip label={`About the ${row.label.toLowerCase()} default`}>

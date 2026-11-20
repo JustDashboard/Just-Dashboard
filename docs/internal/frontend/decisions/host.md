@@ -639,7 +639,8 @@ What made the four "alive" is the sanctioned motion and nothing new: each figure
 to each two-second frame, its unit held outside the count so 980 KB/s becoming 1.0 MB/s swaps
 rather than counting down; the CPU figure carries a bar per core from the same frame (the busiest of
 neighbours when there are more than 32), which says whether 90% is every core or one pinned; and
-each tile's name is keyed by the 2×10 bar a chart legend draws, in its sparkline's series colour.
+each tile's name is keyed by its sparkline's series colour (a 2×10 bar until 0.9.1, a round dot
+since, when the operator took every colour bar out).
 
 The 0.7.0 pass took two things off it that had been saying the same figure twice: a `MetricStrip`
 of uptime, processes and cores in the header's corner (facts about the machine, now in its identity
@@ -773,7 +774,8 @@ strip's figures went, and what took their place (`docker/stack-detail.tsx`):
   non-signal exit *Crashed*, a deliberate 0/130/137/143 *Stopped*, and a restart loop says how
   many times in how long. State chips count and narrow, the toned ones drawn only while something
   is in them. Each service keeps its lane (`hueFor(name, LANES)`, the hue its lines take in the
-  stack's log) as a stripe down its row, and its compose verbs are declared once per service —
+  stack's log) as a stripe down its row (removed in 0.9.1 with every colour bar; the lane still
+  colours its log lines and its sparklines), and its compose verbs are declared once per service —
   Restart and Stop inline, Recreate service and Pull & redeploy in its menu with Logs and Open a
   shell, each confirmation carrying the command as compose runs it.
 - **The band** (`docker/stack-usage-band.tsx`), bar readings (§10) like the Services page's:

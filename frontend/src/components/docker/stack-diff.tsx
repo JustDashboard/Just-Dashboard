@@ -4,7 +4,6 @@ import { cn } from "@/lib/utils"
 import type { DiffLine } from "@/lib/types"
 import { ProductGlyph } from "@/components/product-logo"
 import { Well } from "@/components/panel"
-import { serviceLane } from "@/components/docker/stack-service-readings"
 import { diffHunks } from "@/components/docker/stack-views"
 import { DiffCount } from "@/components/diff-count"
 
@@ -26,11 +25,6 @@ export function ServiceLabel({
 }) {
   return (
     <span className={cn("flex min-w-0 items-center gap-2", className)}>
-      <span
-        aria-hidden
-        className="h-4 w-0.5 shrink-0 rounded-full"
-        style={{ background: serviceLane(name) }}
-      />
       {product && <ProductGlyph id={product} className={cn(muted && "opacity-50 grayscale")} />}
       <span
         className={cn(

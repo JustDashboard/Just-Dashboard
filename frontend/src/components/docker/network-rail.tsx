@@ -7,8 +7,8 @@ import { cn } from "@/lib/utils"
 import { ProductLogo } from "@/components/product-logo"
 import { linkGlyph } from "@/components/network/marks"
 import { Rail, RailFigure, RailLine, RailName, RailRow } from "@/components/rail"
-import { HueKey, memberProducts } from "@/components/docker/network-band"
-import { isUnused, networkHref, networkHue, networkOwner } from "@/components/docker/networks"
+import { memberProducts } from "@/components/docker/network-band"
+import { isUnused, networkHref, networkOwner } from "@/components/docker/networks"
 
 /**
  * The Networks table, folded into a column beside the network it opened: its
@@ -119,7 +119,6 @@ function NetworkRow({
       }
     >
       <span className="flex min-w-0 items-center gap-1.5">
-        <HueKey color={networkHue(network.name)} />
         <RailName current={current} className={cn("min-w-0", unused && "text-muted-foreground")}>
           {network.name}
         </RailName>

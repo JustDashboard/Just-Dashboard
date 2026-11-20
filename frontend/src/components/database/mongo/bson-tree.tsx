@@ -267,11 +267,11 @@ function said(node: BsonNode): string {
   return text.length > 80 ? `${text.slice(0, 80)}…` : text
 }
 
-/** A value's staged state, as the hue of its gutter mark. */
-const STATE_MARK = {
-  changed: "bg-git-modified",
-  added: "bg-git-added",
-  removed: "bg-git-deleted",
+/** A value's staged state, as a faint wash of its git hue behind the row. */
+const STATE_WASH = {
+  changed: "bg-git-modified/10",
+  added: "bg-git-added/10",
+  removed: undefined,
 } as const
 
 function Row({ name, value, path, depth, expand, root, editing, added, leads }: RowProps) {
@@ -385,6 +385,7 @@ function Row({ name, value, path, depth, expand, root, editing, added, leads }: 
         data-state={state}
         className={cn(
           "group/row relative flex min-h-6 min-w-0 items-center gap-1 rounded-sm pr-1 focus-ring-inset hover:bg-row-hover [@media(hover:none)]:min-h-8",
+          state && STATE_WASH[state],
           state === "removed" && "text-muted-foreground line-through decoration-git-deleted",
           leads && tree.leadClassName,
         )}
@@ -398,12 +399,6 @@ function Row({ name, value, path, depth, expand, root, editing, added, leads }: 
           if (!event.currentTarget.contains(event.relatedTarget)) setHeld(false)
         }}
       >
-        {state && (
-          <span
-            aria-hidden
-            className={cn("absolute inset-y-0.5 left-0 w-0.5 rounded-full", STATE_MARK[state])}
-          />
-        )}
         {container ? (
           <button
             type="button"

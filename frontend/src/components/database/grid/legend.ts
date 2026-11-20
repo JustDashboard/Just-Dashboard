@@ -43,27 +43,24 @@ export type ChangeState = "inserted" | "updated" | "deleted"
  */
 export const CHANGE_STATE: Record<
   ChangeState,
-  { sign: string; short: string; long: string; hue: string; edge: string }
+  { sign: string; short: string; long: string; hue: string }
 > = {
   inserted: {
     sign: "+",
     short: "new",
     long: "New row",
     hue: "text-git-added",
-    edge: "border-l-git-added",
   },
   updated: {
     sign: "~",
     short: "edited",
     long: "Edited",
     hue: "text-git-modified",
-    edge: "border-l-git-modified",
   },
   deleted: {
     sign: "−",
     short: "to delete",
     long: "Marked for deletion",
     hue: "text-git-deleted",
-    edge: "border-l-git-deleted",
   },
 }

@@ -20,7 +20,6 @@ import { duration } from "@/lib/format"
 import { hueFor, LANES } from "@/lib/hue"
 import type { Container, DockerNetwork, NetworkEndpoint, NetworkLivePoint } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { HueKey } from "@/components/docker/network-band"
 import { answersTo, bareAddress, networkHue } from "@/components/docker/networks"
 import { useBreakpoint } from "@/lib/breakpoints"
 
@@ -280,7 +279,6 @@ function NetworkChips({
             }
             className="-mx-1 inline-flex h-5.5 min-w-0 items-center gap-1.5 rounded-sm px-1 text-body focus-ring transition-colors hover:bg-row-hover"
           >
-            <HueKey color={networkHue(network.name)} />
             <span className="truncate" style={{ color: networkHue(network.name) }}>
               {network.name}
             </span>

@@ -36,7 +36,7 @@ export function ChartReading({
       </span>
       <span
         aria-hidden
-        className="h-2.5 w-0.5 shrink-0 self-center rounded-full"
+        className="size-2 shrink-0 self-center rounded-full"
         style={{ background: color }}
       />
       <span aria-hidden className="numeric text-sm font-semibold tracking-tight">

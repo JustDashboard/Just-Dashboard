@@ -47,15 +47,6 @@ export const LEVEL_TEXT: Record<string, string> = {
   debug: "text-muted-foreground",
 }
 
-/** The rule down a line's left edge. Only the levels that need finding draw one. */
-export const LEVEL_EDGE: Record<string, string> = {
-  critical: "bg-destructive",
-  error: "bg-destructive/70",
-  warn: "bg-warning",
-  info: "bg-transparent",
-  debug: "bg-transparent",
-}
-
 /**
  * The word in the level column, short enough to be a column. `unknown` is
  * blank rather than "other": most of a syslog carries no level, and a column
