@@ -58,6 +58,20 @@ export type AuthStatus = {
   hub?: HubLinkSession
 }
 
+/** `GET /system/hostname`: what the rename form opens on. */
+export type ServerName = {
+  hostname: string
+  /** What the server is called on its tailnet, when it is on one. A rename leaves it. */
+  tailscaleName?: string
+}
+
+/** `PUT /system/hostname`: a finished rename. */
+export type ServerRename = ServerName & {
+  previous: string
+  /** What could not be finished around a name that is set. */
+  warnings?: string[]
+}
+
 export type HostInfo = {
   hostname: string
   os: string

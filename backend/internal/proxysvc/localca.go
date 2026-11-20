@@ -25,6 +25,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // Certificates for names no public authority will sign.
@@ -298,7 +300,7 @@ func readLocalCAKey(root *x509.Certificate) (crypto.Signer, error) {
 // localCAName is the root's common name. The host's name is in it because
 // a laptop that trusts two servers' roots lists both in one keychain.
 func localCAName() string {
-	host, err := os.Hostname()
+	host, err := hostexec.Hostname()
 	if err != nil || host == "" {
 		return "Just Dashboard local CA"
 	}

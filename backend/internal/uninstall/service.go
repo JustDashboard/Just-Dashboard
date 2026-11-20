@@ -20,6 +20,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
 )
 
@@ -469,7 +470,7 @@ func (s *Service) Dismiss() error {
 
 // Phrase is the server's name, which is what typing it confirms.
 func Phrase() string {
-	name, err := os.Hostname()
+	name, err := hostexec.Hostname()
 	if err != nil || name == "" {
 		return "just-dashboard"
 	}

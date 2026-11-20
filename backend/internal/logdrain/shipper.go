@@ -8,11 +8,11 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
-	"os"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
@@ -331,7 +331,7 @@ func newClient() *http.Client {
 
 // hostName is this server's name, as each record's resource says it.
 func hostName() string {
-	name, err := os.Hostname()
+	name, err := hostexec.Hostname()
 	if err != nil {
 		return ""
 	}

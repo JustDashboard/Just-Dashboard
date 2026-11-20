@@ -4,7 +4,7 @@ import { Children, useMemo } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Fact } from "@/components/fact-line"
-import { ArrowCircleUp, Plus, Puzzle, RotateClockwise, Terminal } from "@/components/icons"
+import { ArrowCircleUp, Pencil, Plus, Puzzle, RotateClockwise, Terminal } from "@/components/icons"
 import { get } from "@/lib/api"
 import { duration } from "@/lib/format"
 import type { BoardSummary } from "@/lib/board/boards"
@@ -17,6 +17,7 @@ import type {
   DeploymentFleet,
   Exposure,
   GitRepo,
+  HostInfo,
   SystemdList,
   TerminalList,
   TrafficPulse,
@@ -43,6 +44,7 @@ import { ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { DashboardHealthNotice } from "@/components/overview/health-notice"
 import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
+import { useRenameServer } from "@/components/overview/rename-server"
 import { ActivityPanel } from "@/components/overview/activity"
 import { BackupsPanel, DatabasesPanel } from "@/components/overview/data"
 import { ResourceReadings, ResourceReadingsSkeleton } from "@/components/overview/resources"
@@ -102,7 +104,7 @@ export default function OverviewPage() {
   const { can } = useAuth()
   const reads = useModuleReads(shows, can)
   const { confirm, dialog } = useConfirm()
-  const verbs = useServerVerbs(reads, shows)
+  const verbs = useServerVerbs(reads, shows, host)
 
   const trends = useMemo(() => {
     const points = recorded.history?.points ?? []
@@ -291,15 +293,18 @@ function ServerState({ connection }: { connection: ConnectionState }) {
  * goes to the page that asks before it and follows it after: the same press
  * here would start a restart with nowhere to watch it. Update is the dialog
  * the sidebar's notice opens, offered while there is a version to take.
+ * Rename changes the machine's own name, the one on the line above the menu.
  */
 function useServerVerbs(
   reads: ReturnType<typeof useModuleReads>,
   shows: (key: SectionKey) => boolean,
+  host: HostInfo | undefined,
 ) {
   const router = useRouter()
   const { can } = useAuth()
   const { report } = useSelfUpdate()
   const { openUpdate, dialog } = useUpdateDialog()
+  const rename = useRenameServer(host)
   const admin = can("system.admin")
   const running = report?.run?.status === "running" || report?.run?.status === "pending"
   const waiting = reads.packages.data?.packages.length ?? 0
@@ -321,13 +326,27 @@ function useServerVerbs(
         run: () => router.push("/packages"),
       },
     admin && {
+      key: "rename",
+      label: "Rename this server",
+      icon: Pencil,
+      run: rename.open,
+    },
+    admin && {
       key: "restart",
       label: "Restart the dashboard",
       icon: RotateClockwise,
       run: () => router.push("/dashboard/configuration"),
     },
   ]
-  return { menu: menu.filter((verb): verb is Verb => Boolean(verb)), dialog }
+  return {
+    menu: menu.filter((verb): verb is Verb => Boolean(verb)),
+    dialog: (
+      <>
+        {dialog}
+        {rename.dialog}
+      </>
+    ),
+  }
 }
 
 /**

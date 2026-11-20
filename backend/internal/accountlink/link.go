@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
 	"regexp"
 	"runtime"
 	"slices"
@@ -16,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/sysinfo"
 )
 
@@ -630,11 +630,11 @@ func (s *Service) SyncNow(ctx context.Context) error {
 	return nil
 }
 
-// describeHost names this machine for the site. The container shares the host's
-// UTS namespace through host networking, so its hostname is the server's.
+// describeHost names this machine for the site: the host's own name, which
+// the container's copy of it stops being once the server is renamed.
 func describeHost(ctx context.Context) ServerDescription {
 	d := ServerDescription{Arch: runtime.GOARCH}
-	d.Hostname, _ = os.Hostname()
+	d.Hostname, _ = hostexec.Hostname()
 	d.Name = d.Hostname
 	if info, err := sysinfo.NewCollector().Host(ctx); err == nil {
 		if info.Hostname != "" {

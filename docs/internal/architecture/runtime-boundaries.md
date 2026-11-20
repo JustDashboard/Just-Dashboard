@@ -288,6 +288,11 @@ answer (`httpx.WriteError`); requests that succeed are logged at debug.
   The runtime cannot discard the process's main thread, so `cmd/server` keeps it on the main goroutine
   with `runtime.LockOSThread` in `init`. Otherwise `/proc/<pid>/ns/mnt`, which `docker exec` and so the
   container health check join, can end up as the host's for good.
+- `Hostname()` is the server's name as its kernel has it. The container's own copy (`os.Hostname`)
+  is the one Docker gave it when the container was created, and it does not follow a rename. So the name
+  is read on a discarded thread that `setns`es into `/proc/1/ns/uts`, and the container's copy is set
+  to it; code that names the server calls this, not `os.Hostname`. See
+  [the server's name](../backend/observability-security.md#the-servers-name).
 - Argv is passed through unchanged and **never** through a shell. Keep it that way ([invariant 6](../security/invariants.md#invariants-that-must-not-regress)).
 
 Local interactive rebase uses Git's editor protocol: `gitx` sets the editor to the current server

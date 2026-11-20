@@ -4,10 +4,10 @@ import (
 	"encoding/pem"
 	"errors"
 	"net/http"
-	"os"
 	"runtime/debug"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -50,7 +50,7 @@ func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) error {
 	if id == nil {
 		return httpx.Err(http.StatusNotFound, "not_an_agent", "this server is not running in agent mode")
 	}
-	host, _ := os.Hostname()
+	host, _ := hostexec.Hostname()
 	resp := agentInfoResponse{
 		AgentID:     id.ID(),
 		Hostname:    host,
@@ -112,7 +112,7 @@ func (s *Server) handleAgentEnrol(w http.ResponseWriter, r *http.Request) error 
 	s.Log.Warn("agent enrolled with a hub",
 		"agent_id", id.ID(), "hub_fingerprint", id.HubFingerprint())
 
-	host, _ := os.Hostname()
+	host, _ := hostexec.Hostname()
 	httpx.JSON(w, http.StatusOK, agentInfoResponse{
 		AgentID:     id.ID(),
 		Hostname:    host,

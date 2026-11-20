@@ -156,7 +156,7 @@ segment under `/api/v1`.
 | Page | `app/` | `components/` | Path → `api/` files | Packages | Specs | Document |
 | --- | --- | --- | --- | --- | --- | --- |
 | **Server** | | | | | | |
-| Overview | `page.tsx` | `overview/` | `/system` → `handlers_system.go`; `/dashboard/health` → `handlers_self.go`; and one read from most sections | `sysinfo`, `metrics`, `storehealth` | `overview-ui.spec.ts` | [`../frontend/features/`](../frontend/features/README.md) |
+| Overview | `page.tsx` | `overview/` | `/system` → `handlers_system.go` (`/system/hostname` → `handlers_system_hostname.go`); `/dashboard/health` → `handlers_self.go`; and one read from most sections | `sysinfo`, `metrics`, `storehealth`, `hostname` | `overview-ui.spec.ts` | [`../frontend/features/`](../frontend/features/README.md) |
 | Map | `map/` | `map/` | `/map` → `handlers_map.go`, `map_*.go` | none: lives in `api/` | `server-map.spec.ts` | [`server-map.md`](../server-map.md) |
 | Assistant | `assistant/` | `assistant/` | `/assistant` → `handlers_assistant*.go` | `assistant` | `assistant.spec.ts`, `assistant-settings.spec.ts` | [`operator.md`](../deployments/operator.md) |
 | Metrics | `metrics/` | `metrics/` | `/system` → `handlers_system.go`, `handlers_capacity.go` | `metrics`, `sysinfo` | `metrics-ui.spec.ts` | [`observability-security.md`](../backend/observability-security.md) |

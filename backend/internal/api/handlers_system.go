@@ -26,6 +26,8 @@ func (s *Server) mountSystemRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/stream", s.handle(s.handleSystemStream))
 		// The host's alert rules; see mountHostAlertRoutes.
 		r.Route("/alerts", s.mountHostAlertRoutes)
+		// Renaming the server; see mountHostnameRoutes.
+		r.Route("/hostname", s.mountHostnameRoutes)
 	})
 }
 

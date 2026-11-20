@@ -15,7 +15,11 @@ printed in it. Then the machine's identity line, laid out as a project's header 
 processor and hypervisor drawn as their marks, kernel, uptime, processes; *Online* while the socket
 is open, and *Restart needed* beside it while the packages owe one; **Open terminal** as its command
 for an account that has the terminal, and behind `⋯` *Update to …* (the sidebar notice's dialog,
-while there is a version an administrator can take), *Update N packages* and *Restart the dashboard*,
+while there is a version an administrator can take), *Update N packages*, *Rename this server* (an
+administrator's: the shared `PromptDialog` opened on the name the machine has, the rules of
+`lib/server-name.ts` under the field, one line saying the tailnet name stays where there is one, a
+refusal kept in the dialog with the host's words, and the machine's line and every page's title
+following once the host has taken the name) and *Restart the dashboard*,
 which goes to Configuration where the restart is confirmed and followed: there is no route that
 restarts the machine); Shortcuts — the four things a visit starts, as lit cards
 two by two and four across once the content is 42rem wide, each counting what it adds to and ending

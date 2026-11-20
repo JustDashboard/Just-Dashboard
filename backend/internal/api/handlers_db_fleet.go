@@ -6,7 +6,6 @@ import (
 	"database/sql"
 	"net"
 	"net/http"
-	"os"
 	"sort"
 	"strconv"
 	"strings"
@@ -16,6 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
 
@@ -1121,7 +1121,7 @@ func publishedOn(bound string, hosts []string) []string {
 // address among them.
 func hostAddresses() []string {
 	out := []string{"127.0.0.1", "localhost", "host.docker.internal", "172.17.0.1"}
-	if name, err := os.Hostname(); err == nil && name != "" {
+	if name, err := hostexec.Hostname(); err == nil && name != "" {
 		out = append(out, name)
 	}
 	addrs, err := net.InterfaceAddrs()

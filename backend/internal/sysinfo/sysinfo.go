@@ -18,6 +18,7 @@ import (
 	"github.com/shirou/gopsutil/v4/mem"
 	"github.com/shirou/gopsutil/v4/net"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 )
 
@@ -221,6 +222,11 @@ func (c *Collector) Host(ctx context.Context) (*HostInfo, error) {
 		BootTime:        time.Unix(int64(info.BootTime), 0).UTC(),
 		UptimeSeconds:   info.Uptime,
 		Procs:           info.Procs,
+	}
+	// The library asks this container for its name, which is a copy made
+	// when the container was; the host's own is what a rename changes.
+	if name, err := hostexec.Hostname(); err == nil && name != "" {
+		h.Hostname = name
 	}
 	if cpus, err := cpu.InfoWithContext(ctx); err == nil && len(cpus) > 0 {
 		h.CPUModel = cpus[0].ModelName
