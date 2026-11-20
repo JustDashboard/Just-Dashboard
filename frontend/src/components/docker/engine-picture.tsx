@@ -156,8 +156,15 @@ function emptyLane(unread: boolean): WireFlowNode {
   }
 }
 
+/**
+ * Left off where the picture is rows (`WireFlow`'s `data-form`), and kept
+ * where a node's words stand beside its mark and on a phone's stack.
+ */
+const ONLY_BESIDE = "lg:in-data-[form=rows]:hidden"
+
 function node(item: EngineNode): WireFlowNode {
   const off = item.state === "down" || item.state === "idle"
+  const whole = item.detail ? `${item.words} · ${item.detail}` : item.words
   return {
     id: item.id,
     name: `${item.prefix ?? ""}${item.name}`,
@@ -179,6 +186,7 @@ function node(item: EngineNode): WireFlowNode {
     eyebrow: EYEBROW[item.kind],
     title: (
       <span
+        title={`${item.prefix ?? ""}${item.name}`}
         className={cn(
           "block truncate",
           (item.kind === "network" || item.kind === "volume") && "font-mono",
@@ -188,8 +196,12 @@ function node(item: EngineNode): WireFlowNode {
         {item.name}
       </span>
     ),
+    // One line, whole on hover. In a row a node is about 120px wide, so what
+    // is a fact of the thing rather than a reading of it (the services a
+    // compose file defines) is said there only beside the mark, in a column.
     hint: (
       <span
+        title={whole}
         className={cn(
           "numeric block truncate",
           item.state === "danger" && "text-destructive",
@@ -197,6 +209,7 @@ function node(item: EngineNode): WireFlowNode {
         )}
       >
         {item.words}
+        {item.detail && <span className={ONLY_BESIDE}> · {item.detail}</span>}
       </span>
     ),
     line: {
@@ -244,7 +257,11 @@ function more(side: string, names: string[], words: string, href: string): WireF
     ),
     eyebrow: "Not drawn",
     title: <span className="font-normal text-muted-foreground">{said}</span>,
-    hint: <span className="block truncate">{names.join(", ")}</span>,
+    hint: (
+      <span className="block truncate" title={names.join(", ")}>
+        {names.join(", ")}
+      </span>
+    ),
     line: { state: "idle" },
   }
 }

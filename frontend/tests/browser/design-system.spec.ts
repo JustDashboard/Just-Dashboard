@@ -1624,8 +1624,9 @@ for (const [path, mock] of IDENTITY_SURFACES.slice(2, 8)) {
  * `ChoiceListSkeleton`), and a `WireFlow` drawn as `marks` waits 15px shorter
  * than it lands, which moves the list under it; Notifications' picture waits
  * 4px short at a desk. On `/proxy/ports` the picture lands over the list and
- * moves it down. On `/proxy` the band moves 12px at a desk and 13px on a
- * phone, because the route picture's stand-in is another height.
+ * moves it down. (`/proxy` was here until 0.9.1: its band moved 12px at a
+ * desk and 13px on a phone, because a grey block of another height stood in
+ * for the route picture, which now waits as itself.)
  */
 type Holding = {
   path: string
@@ -1643,8 +1644,10 @@ const SHELL_READS =
 /** Docker's reads but the engine's answer, which the section waits on before it draws. */
 const DOCKER_READS = /^\/docker\/(?!ping)/
 
-const GHOST_ROW = "on a phone a ghost row is one line where its row is two (ChoiceListSkeleton band)"
-const MARKS = "on a phone the picture's marks wait 15px shorter than they land (WireFlow phone=\"marks\")"
+const GHOST_ROW =
+  "on a phone a ghost row is one line where its row is two (ChoiceListSkeleton band)"
+const MARKS =
+  'on a phone the picture\'s marks wait 15px shorter than they land (WireFlow phone="marks")'
 
 const HOLDING: Holding[] = [
   { path: "/docker", mock: (page) => mockDockerHost(page), part: "band", hold: DOCKER_READS },
@@ -1662,7 +1665,6 @@ const HOLDING: Holding[] = [
     mock: (page) => mockShowcase(page),
     part: "band",
     hold: /^\/(proxy\/(vhosts|streams|alerts)|certificates\/|ports)/,
-    today: "the band moves 12 to 13px as the proxy's reads land",
   },
   {
     path: "/deploy/drains",

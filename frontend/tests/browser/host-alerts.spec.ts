@@ -101,7 +101,7 @@ test("an administrator reaches Alerts from Metrics and adds a disk and a contain
   await expect(page.getByText("CPU 97%", { exact: true })).toBeVisible({ timeout: 20_000 })
   await page.locator("[data-slot='host-identity']").getByRole("link", { name: "Alerts" }).click()
   await expect(page).toHaveURL(/\/metrics\/alerts$/)
-  const sheet = page.getByRole("region", { name: "Rules" })
+  const sheet = page.getByRole("region", { name: "Rules", exact: true })
   await expect(identity(page)).toContainText("checked every minute")
 
   await page.getByRole("button", { name: "Add rule" }).click()
@@ -323,7 +323,7 @@ for (const width of [1280, 390]) {
       line,
       picture,
       page.getByRole("region", { name: "Firing" }),
-      page.getByRole("region", { name: "Rules" }),
+      page.getByRole("region", { name: "Rules", exact: true }),
     ]
     await expect(line.locator("[data-slot=skeleton]").first()).toBeVisible()
     await expect(picture).toBeVisible()
@@ -354,7 +354,7 @@ test("with no rule the page offers what can be watched, a name and one fact each
   await page.route("**/api/v1/system/alerts", (route) => json(route, nothing))
   await page.route("**/api/v1/deploy/notifications", (route) => json(route, []))
   await page.goto("/metrics/alerts")
-  const rules = page.getByRole("region", { name: "Rules" })
+  const rules = page.getByRole("region", { name: "Rules", exact: true })
   const cards = rules.getByRole("group", { name: "Rules to add" }).getByRole("button")
   await expect(cards).toHaveCount(8)
   await expect(cards.first()).toHaveText(/CPU high\s*90% or more over 10 min/)

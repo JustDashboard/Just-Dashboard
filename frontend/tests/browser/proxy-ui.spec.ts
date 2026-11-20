@@ -122,7 +122,7 @@ test("the overview draws each domain wired through nginx to what answers it", as
   await expect(identity.getByText("1 route down")).toBeVisible()
 
   const picture = page.locator("[data-slot='route-picture']")
-  const domains = picture.getByRole("list", { name: "Domains" })
+  const domains = picture.getByRole("region", { name: "Domains" })
   // The route that is down leads, then the busiest.
   await expect(domains.getByRole("listitem").first()).toContainText("legacy.example.com")
   await expect(domains.getByRole("link", { name: "app.example.com" })).toHaveAttribute(
@@ -132,7 +132,7 @@ test("the overview draws each domain wired through nginx to what answers it", as
   await expect(domains).toContainText("1.2k req/h")
   // A domain in plain HTTP says so.
   await expect(domains.getByRole("listitem").first()).toContainText("plain HTTP")
-  const apps = picture.getByRole("list", { name: "Applications" })
+  const apps = picture.getByRole("region", { name: "Applications" })
   await expect(apps.locator("img[src='/logos/nodejs.svg']")).toHaveCount(1)
   await expect(apps.getByText("up 2 ms")).toBeVisible()
   await expect(apps.getByText("refused")).toBeVisible()

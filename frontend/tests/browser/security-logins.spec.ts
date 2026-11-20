@@ -190,6 +190,55 @@ test.describe("logins", () => {
     })
   }
 
+  test("on a wide page the picture is rows, and waits as what it last drew", async ({ page }) => {
+    // A side has room for three across from here, so the picture is rows of
+    // nodes on level lines, as tall as its rows and no taller: four where
+    // sessions come from are two rows of two, the two accounts one.
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const opening = ["[data-slot=logins-picture]", "#sessions"]
+    const flow = page.locator("[data-slot=logins-picture] [data-slot=wire-flow]")
+    await mockLogins(page)
+    await page.goto(LOGINS)
+    await loaded(page)
+    await expect(flow).toHaveAttribute("data-form", "rows")
+    await expect(flow.locator("[data-side=start] [data-node]")).toHaveCount(4)
+    const busy = await places(page, opening)
+    // Nothing is held open around it: the box is the picture's own.
+    expect(busy[0]!.height).toBeLessThan(284)
+    expect(busy[0]!.height).toBe(Math.round((await flow.boundingBox())!.height))
+
+    // A quiet server is one node a side, one row, and shorter.
+    const quiet = {
+      "/ssh-sessions": [],
+      "/logins": [],
+      "/logins/attackers": {
+        attempts: 0,
+        addresses: 0,
+        windowHours: 168,
+        capped: false,
+        attackers: [],
+      },
+    }
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockLogins(page, [], { overrides: quiet })
+    await page.goto(LOGINS)
+    await loaded(page)
+    await expect(flow.locator("[data-side=start] [data-node]")).toHaveCount(1)
+    const read = await places(page, opening)
+    expect(read[0]!.height).toBeLessThan(busy[0]!.height)
+
+    // The next visit waits in that shape, not in the two rows it waited in
+    // before it had ever read this server, so the lists do not move by a row.
+    await page.unrouteAll({ behavior: "ignoreErrors" })
+    await mockLogins(page, [], {
+      overrides: { "/ssh-sessions": PENDING, "/logins": PENDING, "/logins/attackers": PENDING },
+    })
+    await page.goto(LOGINS)
+    await page.waitForSelector("[data-slot=logins-picture] [data-slot=wire-flow][data-loading]")
+    await expect(flow).toHaveAttribute("data-form", "rows")
+    expect(await places(page, opening)).toEqual(read)
+  })
+
   test("a session is ended from its menu, after a confirmation", async ({ page }) => {
     const mutations: Mutation[] = []
     await mockLogins(page, mutations, { overrides: { "/ssh-sessions": manySessions } })

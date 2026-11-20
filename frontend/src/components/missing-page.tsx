@@ -73,8 +73,10 @@ export function MissingPage() {
       className="mx-auto flex w-full max-w-3xl min-w-0 flex-col items-center gap-8 pt-2 text-center lg:pt-8"
     >
       <WireFlow
-        // The page's words are centred; a node's own stand beside its mark.
-        className="w-full lg:text-left"
+        // The page's words are centred. So are a node's under its mark, where
+        // the picture is one level line; beside its mark, with two pages to
+        // offer, they start at the mark.
+        className="w-full lg:data-[form=column]:text-left"
         phone="marks"
         hubShare={0.7}
         start={{

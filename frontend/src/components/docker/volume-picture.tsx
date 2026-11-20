@@ -3,6 +3,7 @@
 import { Archive, Box, Database } from "@/components/icons"
 import { bytes, relativeTime } from "@/lib/format"
 import type { BackupJob, VolumeDetail, VolumeUser } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { DestinationGlyph, destinations } from "@/components/backups/marks"
 import { WireMark, WirePlaceholder } from "@/components/wire/wire"
 import {
@@ -21,8 +22,8 @@ import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 
 /**
  * More containers or jobs than this are two and a count. Three rows is what
- * the hub's cell holds open, so the picture is one height whatever a volume
- * has on either side, and nothing under it moves when it lands.
+ * the picture holds open (`HELD`), so it is one height whatever a volume has
+ * on either side, and nothing under it moves when it lands.
  */
 const DRAWN = 2
 
@@ -74,7 +75,7 @@ export function VolumePicture({
       <WireFlow
         loading
         phone="marks"
-        className="py-0"
+        className={HELD}
         start={{ title: "Mounted by", nodes: [], loadingRows: 1 }}
         end={{ title: "Backed up by", nodes: [], loadingRows: 1 }}
         hub={{
@@ -91,7 +92,7 @@ export function VolumePicture({
   return (
     <WireFlow
       phone="marks"
-      className="animate-rise py-0"
+      className={cn("animate-rise", HELD)}
       start={{
         title: "Mounted by",
         nodes:
@@ -136,11 +137,22 @@ export function VolumePicture({
 }
 
 /**
- * Room for three rows beside the hub and for its words under it. The picture's
- * own padding is dropped for it: the hub's cell already stands clear of the
- * identity line above and the views below.
+ * Room for three rows beside the hub and for its words under it, where the
+ * picture is a column a side. Its own padding is dropped for it there: the
+ * hub's cell already stands clear of the identity line above and the views
+ * below.
  */
 const HUB_ROOM = "lg:py-16"
+
+/**
+ * The picture's box. Beside the rail a side has room for two across at most,
+ * so the picture is a level line or a column a side by what the volume has
+ * (`flowForm`): one mounter and one job are a line, three of either a column.
+ * `HUB_ROOM` is the column's alone, so the box holds the same room itself and
+ * a line stands on its middle: the picture is one height from one volume to
+ * the next and while one is read.
+ */
+const HELD = "py-0 lg:flex lg:min-h-[11.5rem] lg:flex-col lg:justify-center"
 
 /** The volume as the product whose data it holds, else a disk in the Volumes hue. */
 function HubMark({ product }: { product?: string }) {

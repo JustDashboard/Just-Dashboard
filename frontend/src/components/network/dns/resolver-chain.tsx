@@ -19,7 +19,25 @@ import {
 import { Bar, GhostMark } from "@/components/network/dns/ghost"
 import { splitServer, type Encryption } from "@/components/network/dns/resolvers"
 
-/** The configured DoT policy is separate from a fresh native transport measurement. */
+/**
+ * In a row of nodes only, where a node is about 120px wide with its words
+ * centred under its mark: a flex line centred as the words are, or left out.
+ */
+const ROW_CENTRED = "lg:in-data-[form=rows]:justify-center"
+const ROW_CUT = "lg:in-data-[form=rows]:hidden"
+
+const POLICY: Record<Encryption, string> = {
+  required: "DoT required",
+  opportunistic: "opportunistic DoT",
+  plain: "classic DNS",
+}
+
+/**
+ * The configured DoT policy is separate from a fresh native transport
+ * measurement. In a row of the chain's nodes the policy alone fits, so
+ * "Configured" is left to the pointer there; the measurement is under the
+ * picture, with the certificates.
+ */
 export function EncryptionNote({
   encryption,
   className,
@@ -28,6 +46,7 @@ export function EncryptionNote({
   className?: string
 }) {
   const Lock = encryption === "plain" ? LockOpen : LockClosed
+  const policy = POLICY[encryption]
   return (
     <span
       className={cn(
@@ -35,13 +54,13 @@ export function EncryptionNote({
         encryption === "plain" && "text-warning",
         className,
       )}
+      title={`Configured ${policy}`}
     >
       <Lock aria-hidden className="size-3 shrink-0" />
-      {encryption === "required"
-        ? "Configured DoT required"
-        : encryption === "opportunistic"
-          ? "Configured opportunistic DoT"
-          : "Configured classic DNS"}
+      <span>
+        <span className={ROW_CUT}>Configured </span>
+        {policy}
+      </span>
     </span>
   )
 }
@@ -95,10 +114,18 @@ function origin(up: Upstream) {
  * is dashed.
  *
  * It is `WireFlow`'s shape (things, one hub, things), so it is drawn by it:
- * three lanes from `lg`, and below that the lanes stack with every word kept
- * and the wires not drawn. While the first read is out it stands at the
- * height it had last time (`shape`), on grey bars laid on the lines the words
- * will take, so nothing under it moves when the read lands.
+ * from `lg` the upstreams are rows on level lines where their side has room
+ * for three across and a column where it has not, and below that the lanes
+ * stack with every word kept and the wires not drawn. While the first read is
+ * out it stands at the height it had last time (`shape`), on grey bars laid
+ * on the lines the words will take, so nothing under it moves when the read
+ * lands.
+ *
+ * Every upstream is four lines in every form. In a row a node is about 120px
+ * wide, which holds an address but not all that stands after it: there the
+ * eyebrow is the scope and "in use" with the routing domains behind the
+ * pointer (the link's card under the picture says them), and a line that is
+ * cut says all of itself behind the pointer too.
  */
 export function ResolverChain({
   view,
@@ -159,6 +186,9 @@ export function ResolverChain({
     return upstreamsOf(view).map((up) => {
       const identity = identify(up, view)
       const { address, tlsName } = splitServer(up.server)
+      const scope = up.fallback ? "fallback" : up.scope
+      const domains = up.domains.length > 0 ? ` · ${up.domains.slice(0, 2).join(" ")}` : ""
+      const detail = identity.detail ? ` · ${identity.detail}` : ""
       return {
         id: up.id,
         mark: (size) => (
@@ -166,18 +196,24 @@ export function ResolverChain({
             {identity.product ? <ProductGlyph id={identity.product} /> : <Globe aria-hidden />}
           </WireMark>
         ),
+        // One line: the scope gives way, "in use" is never the part cut.
         eyebrow: (
-          <span className={cn(up.current && "text-brand")}>
-            {up.fallback ? "fallback" : up.scope}
-            {up.domains.length > 0 && ` · ${up.domains.slice(0, 2).join(" ")}`}
-            {up.current ? " · in use" : ""}
+          <span
+            className={cn("flex min-w-0", ROW_CENTRED, up.current && "text-brand")}
+            title={`${scope}${domains}${up.current ? " · in use" : ""}`}
+          >
+            <span className="truncate">
+              {scope}
+              {domains && <span className={ROW_CUT}>{domains}</span>}
+            </span>
+            {up.current && <span className="shrink-0 whitespace-pre"> · in use</span>}
           </span>
         ),
         title: identity.bare ? <span className="font-mono">{identity.name}</span> : identity.name,
         name: identity.name,
         hint: (
           <>
-            <span className={LINE}>
+            <span className={LINE} title={!identity.bare || tlsName ? up.server : undefined}>
               {!identity.bare || tlsName ? (
                 <span className="font-mono">
                   {address}
@@ -187,13 +223,16 @@ export function ResolverChain({
                 origin(up)
               )}
             </span>
-            <span className={LINE}>
+            <span
+              className={LINE}
+              title={`${identity.tunnel ? "inside the tailnet" : `Configured ${POLICY[up.encryption]}`}${detail}`}
+            >
               {identity.tunnel ? (
                 "inside the tailnet"
               ) : (
                 <EncryptionNote encryption={up.encryption} />
               )}
-              {identity.detail && ` · ${identity.detail}`}
+              {detail}
             </span>
           </>
         ),
@@ -227,8 +266,9 @@ export function ResolverChain({
  * systemd-resolved has neither: the node says what programs do instead.
  */
 function hubOf(view: DNSView | undefined): WireFlowHub {
-  // Room for the words that hang under the mark, which the lanes beside it do
-  // not make when there is one upstream or none.
+  // Room around the mark in the column form, where the lanes are centred on
+  // it and make none themselves with one upstream or none. Rows stand on the
+  // hub's own level and `WireFlow` leaves this off there.
   const className = "lg:py-20"
   if (!view) {
     return {

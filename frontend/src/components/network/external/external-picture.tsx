@@ -18,8 +18,19 @@ import {
 
 const DRAWN = 5
 const HUB_NAME = "The internet"
-/** Room under the hub for its caption, which hangs below a column one node tall. */
+/**
+ * Room around the hub in the column form, where the sides are centred on it
+ * and a column one node tall makes none. Rows stand on the hub's own level
+ * and `WireFlow` leaves this off there.
+ */
 const HUB_ROOM = "lg:py-14"
+
+/**
+ * In a row of nodes only, where a node is about 120px wide with its words
+ * centred under its mark: said on one line and cut with its `title`, or left out.
+ */
+const ROW_WHOLE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
+const ROW_CUT = "lg:in-data-[form=rows]:hidden"
 
 /**
  * The enrolled sources on the left, the internet they measure across, and
@@ -61,7 +72,18 @@ export function ExternalPicture({
           <Location aria-hidden />
         </WireMark>
       ),
-      eyebrow: v.location || "Location undeclared",
+      // One line, so the names of a row stand level: a declared place is cut
+      // to the node's width, and "undeclared" in the place's own slot says
+      // what is missing.
+      eyebrow: (
+        <span className={ROW_WHOLE} title={v.location || "Location undeclared"}>
+          {v.location || (
+            <>
+              <span className={ROW_CUT}>Location </span>undeclared
+            </>
+          )}
+        </span>
+      ),
       title: v.name,
       name: v.name,
       hint: (
@@ -95,7 +117,11 @@ export function ExternalPicture({
       id: `service:${service.target}`,
       mark: (size) => <WireHost size={size === "lg" ? "md" : size} />,
       eyebrow: "This server",
-      title: <span className="font-mono">{service.target}</span>,
+      title: (
+        <span className={cn("font-mono", ROW_WHOLE)} title={service.target}>
+          {service.target}
+        </span>
+      ),
       name: service.target,
       hint: (
         <>

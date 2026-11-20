@@ -27,7 +27,8 @@ without advice or recommended values
 Streams (`/proxy/streams`, 0.8.7) opens on its identity line — the forwards as the services their
 ports are, the stream module's state, how many forward and how many are open to anyone, the hour's
 sessions, the verdict (a press narrows the list to what it counts) and New stream — then the wiring
-picture of the host's ports through nginx to where they go (`stream-picture.tsx`), the module and
+picture of the host's ports through nginx to where they go (`stream-picture.tsx`, a `WireFlow`),
+the module and
 include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
 each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
 A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,

@@ -49,12 +49,13 @@ export function CapturePicture({
   const drops = result?.kernelDropped
   const narrowed = Boolean(request.source || request.destination)
   // Wide, the filter's words hang under its mark, outside the picture's own
-  // box: the room they take is kept under it, more where an address is long
-  // enough to take two lines, so the block below never moves under them.
-  const long = [request.source, request.destination].some((address) => (address ?? "").length > 20)
+  // box, and `WireFlow` keeps the room they take under itself. This picture
+  // kept it too, as padding for two lines of address or four, which stood
+  // empty under the words once the interface and the file had theirs under
+  // their marks.
   return (
     <WireFlow
-      className={cn("animate-rise", long ? "lg:pb-32" : "lg:pb-24", className)}
+      className={cn("animate-rise", className)}
       start={{
         title: "Interface",
         nodes: [

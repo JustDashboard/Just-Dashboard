@@ -19,8 +19,10 @@ A picture of what is connected to what, drawn first (D2).
 
 A picture that is the hub shape uses `WireFlow` and lays its nodes by hand only when it is not that
 shape. In 0.9.0 the account's access picture and the link picture (Settings → Connect, Settings →
-Hub) moved onto it, and in 0.9.1 the alerts pictures (`alerts/kit.tsx`), which had been one column
-a side by hand; the others the 0.9.0 pass looked at stay laid by hand on purpose: a container's
+Hub) moved onto it, and in 0.9.1 the pictures that had been one column a side by hand: the alerts
+pictures (`alerts/kit.tsx`), the proxy's route picture (`proxy/route-picture.tsx`), the stream
+picture (`proxy/stream-picture.tsx`) and Remote Desktop's (`remote-desktop/picture.tsx`). The
+others the 0.9.0 pass looked at stay laid by hand on purpose: a container's
 picture (ways in, the container, what it keeps, with its faces), the procs wiring picture, the stack
 map (many to many), a project's runtime lanes, the routing decision's two columns, the ports
 picture (networks to programs). Porting those would either lose what they show or grow `WireFlow`
@@ -59,7 +61,16 @@ of a wide page with nothing on either side. `size="sm"` draws small marks, which
 
 A page writes a node's `title` and `hint` for both forms: no `lg:text-left`, `lg:justify-start`
 or fixed width on them, since in rows the words are centred and a node is about 120px wide. A
-line that must stay whole is a `block truncate` with its `title`.
+line that must stay whole is a `block truncate` with its `title`. Several facts on one line are
+inline blocks, not a flex row, so the node's own alignment sets them and the line breaks between
+two facts and never inside one (`Facts` in `proxy/route-picture.tsx`). A fact that is the expected
+state (TLS on a domain whose lock is closed, a forward's protocol) goes to the `title`. A mono
+value set inline in a sans line stands 2px taller than the line: make it a `block`, or the hub
+lands taller than the grey line that waited for it.
+
+The lines of a row lie on each other, so a row with one node that needs a look is that colour all
+the way to the hub; which node it is, is read from the mark (its corner dot, its tone) and from
+pointing at it, which steps the other lines back.
 
 **Props.**
 
@@ -68,7 +79,9 @@ line that must stay whole is a `block truncate` with its `title`.
   above the column wide too), `href` (the heading is the way to the page that lists the column, on a
   phone too), `max` and `more` (past `max` the rest are one "N more" tile, and a column with room
   for one more draws it rather than "1 more"), `empty`, and the loading shape (`loadingRows`,
-  `loadingLines`).
+  `loadingLines`). A picture whose data is cut before it reaches the column (the route map's
+  eight domains, a stream picture's eight ports) adds the tile as a node of its own: `placeholder`,
+  a `MoreTile` for its mark, and the count in its words.
 - A node (`WireFlowNode`): `id`, `mark` (or a function of the size it is drawn at), `eyebrow`,
   `title`, `hint`, `name` (the node in words: the link's name and the phone's caption), `href` or
   `onPress` with `label`, `line`, `placeholder` (a dashed ring where a thing would go).
@@ -93,7 +106,8 @@ still under reduced motion, while the tab is hidden and while the reader has pau
   are named (the Network overview, the link picture).
 - `marks`: `WireMarks` (below), a row of the start column's marks, the hub with its words under it, and a row of the end
   column's marks, the lines running down between them, for a picture whose nodes a list under it
-  names again (Notifications, Backups, the proxy's alerts, the account). The lines to the end row
+  names again (Notifications, Backups, the proxy's alerts, routes and streams, Remote Desktop, the
+  account). The lines to the end row
   leave from under the hub's words, so none runs through them. Until 0.9.0 the words were printed
   over the first row, which named that row (the not-found page's "?" read "This server"), and the
   account picture's own phone layout ran its lines through the account's name. A column with
@@ -126,7 +140,9 @@ button is named by `label`, else `name`, else a string `title`; on a phone the m
 **Enforced by** `wire-flow-model.test.js` (line states, the form, rows and level, columns,
 stagger, loading rows), `ui/beam-path.test.js` (the level line) and the
 specs of the pages that draw one (`[data-slot=wire-flow]`), among them `missing-page.spec.ts`,
-`account-ui.spec.ts` and `account-link.spec.ts`.
+`account-ui.spec.ts`, `account-link.spec.ts`, `proxy-ui.spec.ts`, `proxy-streams.spec.ts` and
+`remote-desktop.spec.ts` (a column is a `region` named by its title). A picture that waits as
+itself is held to its place by `design-system.spec.ts` ("stands where it lands").
 
 ## WireLane
 
@@ -141,17 +157,17 @@ level), `dense` (a 12px gap for a lane of small marks that outnumbers the other 
 `WireLaneTitle` is the heading alone, and with `href` it is a link with an arrow; `WireFlow`'s
 columns draw their headings with it.
 
-**Example.** `components/proxy/route-picture.tsx`:
+**Example.** `components/proxy/ports-picture.tsx`:
 
 ```tsx
-<WireLane title="Domains" count={map.total} align="end" float>
-  {map.domains.map((domain) => <li key={domain.id}>…</li>)}
+<WireLane title="Who can reach it" count={model.lanes.length} align="end" float>
+  {model.lanes.map(({ lane }) => <li key={lane}>…</li>)}
 </WireLane>
 ```
 
-Its users: `docker/container-picture.tsx`, `docker/stack-map.tsx`, `procs/wiring-picture.tsx`,
-`proxy/ports-picture.tsx`, `proxy/route-picture.tsx` and `proxy/stream-picture.tsx`; a project's
-runtime map still carries its own copy.
+Its users: `docker/container-picture.tsx`, `docker/stack-map.tsx`, `procs/wiring-picture.tsx` and
+`proxy/ports-picture.tsx`; a project's runtime map still carries its own copy. Until 0.9.1 the
+proxy's route and stream pictures were two more, which are `WireFlow`s now.
 
 ## WireMarks
 
@@ -179,8 +195,8 @@ drawn, because a list under the picture says them.
 **Use.** `WireFlow phone="marks"` draws it for a hub-shaped picture. A hand-laid picture keeps its
 wide layout and draws `WireMarks` below `lg`, choosing between the two with `useBreakpoint("lg")`,
 not with `max-lg:hidden` on a second copy: the specs and a screen reader would find every node
-twice. Its users: the route, stream, ports and tunnel pictures, the Remote Desktop picture and a
-project's databases.
+twice. Its users: the ports and tunnel pictures and a project's databases; the route, stream and
+Remote Desktop pictures drew it themselves until 0.9.1 and reach it through `WireFlow` now.
 
 ## The parts
 

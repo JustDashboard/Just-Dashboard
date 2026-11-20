@@ -24,18 +24,33 @@ import {
 type MarkSize = "lg" | "md" | "sm"
 
 /**
- * The rows each side of the picture holds at most: three lists and "N more",
- * and a limit or two over the exceptions and the trusted set. The picture is
- * held to this height whatever the server has (`FRAME`), so the lists under
- * it start where they will while the first read is still out.
+ * The nodes each side of the picture holds at most: three lists and "N more",
+ * and a limit or two over the exceptions and the trusted set. As a column a
+ * side the picture is held to this height whatever the server has (`FRAME`),
+ * so the lists under it start where they will while the first read is still
+ * out.
  */
 export const PICTURE_ROWS = LISTS_DRAWN + 1
 
 // Four rows of a mark beside three lines, their gaps and the picture's own
-// padding. Wide only: a phone's picture is rows of marks, one height already.
-// The same frame holds the waiting picture (`WireFlow`'s `loading`), whose
-// rows are drawn on the lines of real ones.
-const FRAME = "lg:grid lg:min-h-[18rem] lg:items-center"
+// padding, where the picture is a column a side (`WireFlow`'s `data-form`). A
+// phone's picture is rows of marks, one height already. Where the sides are
+// rows of nodes the frame is left off: four nodes are one row or two by the
+// room the page has, and the frame stood a third taller than two rows and
+// twice as tall as one. The waiting picture there is as tall as the drawn one
+// because it draws as many nodes (`pictureRows`), each on the lines of a real
+// one.
+const FRAME =
+  "lg:data-[form=column]:grid lg:data-[form=column]:min-h-[18rem] lg:data-[form=column]:items-center"
+
+/**
+ * The half of a node's line that is how its entry is set: the networks a list
+ * holds, a limit's rate. Beside the mark it leads the line. In a row of nodes
+ * (`WireFlow`'s `data-form`) a node is about 120px wide and the line was cut
+ * inside what the entry had counted, so there the line is the count alone: the
+ * setting is the line's `title` and in the entry's row under the picture.
+ */
+const SETTING = "lg:in-data-[form=rows]:hidden"
 
 /** A list's mark on a wire: its first country's flag, else the glyph of its kind. */
 export function ListWireMark({
@@ -112,10 +127,13 @@ function useMoved(view: ProtectionView | undefined): Set<string> {
  * table is not loaded. A kind with nothing made yet stands as a dashed ring
  * that opens the form which makes one.
  *
- * It is one height in every state: four rows a side at most, and room for
- * four whatever the server has, so nothing under it moves when the read lands
- * or a list is added. On a phone it is rows of marks: the lists under it name
- * every node again.
+ * As a column a side it is one height in every state: four rows a side at
+ * most, and room for four whatever the server has, so nothing under it moves
+ * when the read lands or a list is added. On a wide page it is rows of nodes
+ * (`WireFlow`'s `rows`) and as short as they are: the read lands on the nodes
+ * the last visit drew, and a fourth list or a second limit may begin a second
+ * row. On a phone it is rows of marks: the lists under it name every node
+ * again.
  */
 export function ProtectionPicture({
   view,
@@ -165,29 +183,45 @@ export function ProtectionPicture({
     }
   }
 
-  const refused: WireFlowNode[] = view.blocklists.map((list) => ({
-    id: `list:${list.id}`,
-    mark: (size) => <ListWireMark list={list} size={size} />,
-    eyebrow: KIND_WORD[list.kind],
-    title: (
-      <span className={cn("block truncate", !list.enabled && "text-muted-foreground")}>
-        {list.name}
-      </span>
-    ),
-    name: list.name,
-    label: `Open ${list.name}`,
-    hint: (
-      <span className={cn("numeric block truncate", list.error && "text-destructive")}>
-        {list.error
-          ? "fetch failed"
-          : list.enabled
-            ? `${list.count.toLocaleString()} networks · ${compact(list.packets)} dropped`
-            : "switched off"}
-      </span>
-    ),
-    onPress: () => onOpenList(list),
-    line: wire(list.enabled, `list:${list.id}`, Boolean(list.error)),
-  }))
+  const refused: WireFlowNode[] = view.blocklists.map((list) => {
+    const held = `${list.count.toLocaleString()} networks`
+    const dropped = `${compact(list.packets)} dropped`
+    const counted = !list.error && list.enabled
+    return {
+      id: `list:${list.id}`,
+      mark: (size) => <ListWireMark list={list} size={size} />,
+      eyebrow: KIND_WORD[list.kind],
+      title: (
+        <span
+          className={cn("block truncate", !list.enabled && "text-muted-foreground")}
+          title={list.name}
+        >
+          {list.name}
+        </span>
+      ),
+      name: list.name,
+      label: `Open ${list.name}`,
+      hint: (
+        <span
+          className={cn("numeric block truncate", list.error && "text-destructive")}
+          title={counted ? `${held} · ${dropped}` : undefined}
+        >
+          {list.error ? (
+            "fetch failed"
+          ) : list.enabled ? (
+            <>
+              <span className={SETTING}>{held} · </span>
+              {dropped}
+            </>
+          ) : (
+            "switched off"
+          )}
+        </span>
+      ),
+      onPress: () => onOpenList(list),
+      line: wire(list.enabled, `list:${list.id}`, Boolean(list.error)),
+    }
+  })
   if (refused.length === 0)
     refused.push({
       id: "add:list",
@@ -206,27 +240,48 @@ export function ProtectionPicture({
     })
 
   const { shown, hidden } = fitColumn(view.limits, LIMITS_DRAWN)
-  const through: WireFlowNode[] = shown.map((limit) => ({
-    id: `limit:${limit.id}`,
-    mark: (size) => <LimitWireMark limit={limit} size={size} />,
-    eyebrow: <span className="font-mono tracking-normal normal-case">{portsWord(limit)}</span>,
-    title: (
-      <span className={cn("block truncate", !limit.enabled && "text-muted-foreground")}>
-        {limit.name}
-      </span>
-    ),
-    name: limit.name,
-    label: `Open ${limit.name}`,
-    hint: (
-      <span className="numeric block truncate">
-        {limit.enabled
-          ? [limitShort(limit), `${compact(limit.packets)} refused`].filter(Boolean).join(" · ")
-          : "switched off"}
-      </span>
-    ),
-    onPress: () => onOpenLimit(limit),
-    line: wire(limit.enabled, `limit:${limit.id}`),
-  }))
+  const through: WireFlowNode[] = shown.map((limit) => {
+    const rate = limitShort(limit)
+    const turned = `${compact(limit.packets)} refused`
+    return {
+      id: `limit:${limit.id}`,
+      mark: (size) => <LimitWireMark limit={limit} size={size} />,
+      // Its own leading: the mono face on the eyebrow's line made that line a
+      // pixel taller than a waiting node's, and a row of nodes with it.
+      eyebrow: (
+        <span className="font-mono leading-none tracking-normal normal-case">
+          {portsWord(limit)}
+        </span>
+      ),
+      title: (
+        <span
+          className={cn("block truncate", !limit.enabled && "text-muted-foreground")}
+          title={limit.name}
+        >
+          {limit.name}
+        </span>
+      ),
+      name: limit.name,
+      label: `Open ${limit.name}`,
+      hint: (
+        <span
+          className="numeric block truncate"
+          title={limit.enabled ? [rate, turned].filter(Boolean).join(" · ") : undefined}
+        >
+          {limit.enabled ? (
+            <>
+              {rate && <span className={SETTING}>{rate} · </span>}
+              {turned}
+            </>
+          ) : (
+            "switched off"
+          )}
+        </span>
+      ),
+      onPress: () => onOpenLimit(limit),
+      line: wire(limit.enabled, `limit:${limit.id}`),
+    }
+  })
   if (hidden > 0) {
     const rest = view.limits.slice(LIMITS_DRAWN)
     through.push({

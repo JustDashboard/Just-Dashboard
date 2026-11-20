@@ -16,7 +16,6 @@ import { IdentityHeader } from "@/components/identity-header"
 import { Modal } from "@/components/modal"
 import { Page, PageContext } from "@/components/page"
 import { ProductGlyph } from "@/components/product-logo"
-import { WireMark } from "@/components/wire/wire"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ErrorState, NeedsAdmin, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
@@ -24,7 +23,6 @@ import { Status } from "@/components/status-dot"
 import { ViewTabList } from "@/components/tabs"
 import { Tabs } from "@/components/ui/tabs"
 import { VerbMenu } from "@/components/verbs"
-import { WireFlow } from "@/components/wire/wire-flow"
 import { IdentityFacts, IdentityStateLoading } from "@/components/network/identity-facts"
 import { InstallFollowUp, InstallHandoff } from "@/components/install-handoff"
 import { NetworkReadWarning } from "@/components/network/read-warning"
@@ -38,7 +36,11 @@ import {
   TunnelIdentity,
   useTunnelControl,
 } from "@/components/network/vpn/tunnel-identity"
-import { PEERS_DRAWN, TunnelPicture } from "@/components/network/vpn/tunnel-picture"
+import {
+  PEERS_DRAWN,
+  TunnelPicture,
+  TunnelPictureWaiting,
+} from "@/components/network/vpn/tunnel-picture"
 import { tailnetState } from "@/components/network/vpn/tunnel-reading"
 import {
   VPN_VIEW_NAME,
@@ -326,18 +328,7 @@ function Waiting({ view }: { view: VPNViewKey }) {
     return (
       <section aria-label="WireGuard" aria-busy className="flex min-w-0 flex-col gap-6">
         <IdentitySkeleton mark="wireguard" />
-        <WireFlow
-          loading
-          start={{ title: "Devices", nodes: [] }}
-          end={{ title: "Sites", nodes: [], loadingRows: 2 }}
-          hub={{
-            mark: (
-              <WireMark tone="neutral" shape="square">
-                <ProductGlyph id="wireguard" />
-              </WireMark>
-            ),
-          }}
-        />
+        <TunnelPictureWaiting />
       </section>
     )
   if (view === "log") return <LoadingRows rows={6} />
@@ -412,10 +403,11 @@ function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChang
           </Panel>
         </>
       ) : (
-        wireguard.interfaces.map((tunnel) => (
+        wireguard.interfaces.map((tunnel, index) => (
           <TunnelBlock
             key={tunnel.name}
             tunnel={tunnel}
+            first={index === 0}
             onChanged={onChanged}
             onAdd={peers.add}
             onPeer={peers.open}
@@ -446,12 +438,15 @@ function WireGuard({ wireguard, onChanged }: { wireguard: WireGuardView; onChang
  */
 function TunnelBlock({
   tunnel,
+  first,
   onChanged,
   onAdd,
   onPeer,
   onCreate,
 }: {
   tunnel: WGInterface
+  /** The tunnel the page waits as: its picture's shape is kept for the next visit. */
+  first: boolean
   onChanged: () => void
   /** Undefined for a session that may not add a peer. */
   onAdd?: (tunnel: string, kind: "device" | "site") => void
@@ -478,6 +473,7 @@ function TunnelBlock({
         onPeer={open}
         onAdd={onAdd ? add : undefined}
         max={PEERS_DRAWN}
+        remember={first}
       />
       <TunnelExit tunnel={tunnel} control={control} />
       {control.dialog}

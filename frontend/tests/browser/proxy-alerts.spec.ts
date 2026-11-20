@@ -29,7 +29,7 @@ test("an administrator can add renewal failure and served certificate alerts", a
     .click()
   await page.getByRole("menuitem", { name: "Alerts" }).click()
   await expect(page).toHaveURL(/\/proxy\/alerts$/)
-  const sheet = page.getByRole("region", { name: "Rules" })
+  const sheet = page.getByRole("region", { name: "Rules", exact: true })
   await expect(sheet).toBeVisible()
 
   for (const [label, kind] of [
@@ -178,7 +178,7 @@ for (const width of [1280, 390]) {
 
     // The catalogue: every kind a card of one height, a few words on it and
     // the sentence behind them.
-    const rules = page.getByRole("region", { name: "Rules" })
+    const rules = page.getByRole("region", { name: "Rules", exact: true })
     const cards = rules.locator("[data-slot='choice-card']")
     await expect(cards).toHaveCount(10)
     const heights = await cards.evaluateAll((all) =>
@@ -266,7 +266,9 @@ test("the line counts the rules that are on, what fires and who is told", async 
   await expect(identity.getByText("telling 1 channel", { exact: true })).toBeVisible()
   // How many are paused is the list's count, not the line's.
   await expect(identity.getByText("1 paused", { exact: true })).toHaveCount(0)
-  await expect(page.getByRole("region", { name: "Rules" })).toContainText("3 rules · 1 paused")
+  await expect(page.getByRole("region", { name: "Rules", exact: true })).toContainText(
+    "3 rules · 1 paused",
+  )
   // Check now is Firing's own verb, and still asks.
   let asked = 0
   await page.route("**/api/v1/proxy/alerts/evaluate", (route) => {

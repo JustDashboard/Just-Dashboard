@@ -2042,13 +2042,13 @@ test("the list draws the forwards: open to anyone in the warning colour, 5432 as
   await expect(identity).toContainText("2,461 sessions in the hour")
   const picture = page.locator("[data-slot='stream-picture']")
   await expect(
-    picture.getByRole("list", { name: "Ports on this host" }).getByRole("listitem"),
+    picture.getByRole("region", { name: "Ports on this host" }).getByRole("listitem"),
   ).toHaveCount(5)
   await expect(picture.locator("img[src='/logos/postgresql.svg']").first()).toBeVisible()
   await expect(picture.getByText("PostgreSQL to anyone")).toHaveClass(/text-destructive/)
   await expect(picture.getByText("anyone", { exact: true })).toHaveClass(/text-warning/)
   await expect(
-    picture.getByRole("list", { name: "Forwarded to" }).getByText("10.0.0.5:5432"),
+    picture.getByRole("region", { name: "Forwarded to" }).getByText("10.0.0.5:5432"),
   ).toBeVisible()
   const row = page.locator("[data-slot='choice-row']").filter({ hasText: "postgres-replica" })
   await expect(row.locator("img[src='/logos/postgresql.svg']")).toHaveCount(1)

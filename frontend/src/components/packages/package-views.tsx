@@ -251,6 +251,10 @@ export function PackagePicture({
     <WireFlow
       // The room four nodes take, whatever the package has: what is under
       // the picture is in one place for every package, and while one loads.
+      // Beside the rail a side has room for two across at most, so a package
+      // with one or two things a side is a level line and one with more a
+      // column (`flowForm`): the room is held for both, and the line stands
+      // on its middle. The top is room for the headings hung over the sides.
       className="lg:flex lg:min-h-[19.75rem] lg:flex-col lg:justify-center lg:pt-12"
       phone="marks"
       loading={!detail}

@@ -32,6 +32,12 @@ export type EngineNode = {
   state: WireState
   /** The reading under its name. */
   words: string
+  /**
+   * What is true of it and no reading: how many services a file that was
+   * never brought up defines. Said on hover, since a node in a row has one
+   * short line under its name.
+   */
+  detail?: string
   /** The image references its mark is drawn from: a project's services, a container's own. */
   images: string[]
   /** The nodes across the engine that light with it: a project's networks and volumes. */
@@ -72,7 +78,7 @@ function stackState(stack: ComposeStack, own: Container[], bucketOf: BucketOf): 
 }
 
 function stackWords(stack: ComposeStack, own: Container[], bucketOf: BucketOf): string {
-  if (!stack.deployed) return `not deployed · ${plural(stack.total, "service")} defined`
+  if (!stack.deployed) return "not deployed"
   const failing = own.filter((c) => bucketOf(c) === "failing").length
   const total = stack.total || stack.services.length
   const up = `${stack.running} of ${total} running`
@@ -198,6 +204,7 @@ export function enginePicture({
         href: `/docker/stacks/${encodeURIComponent(stack.name)}`,
         state: stackState(stack, own, bucketOf),
         words: stackWords(stack, own, bucketOf),
+        detail: stack.deployed ? undefined : `${plural(stack.total, "service")} defined`,
         images: stack.services.map((s) => s.image).filter(Boolean),
         peers: [],
       }

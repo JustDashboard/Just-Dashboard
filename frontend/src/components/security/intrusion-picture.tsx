@@ -17,6 +17,38 @@ const READS: Record<EngineId, string> = {
   suricata: "Reads the packets",
 }
 
+/**
+ * The same in the width a node has in a row, three across beside the shell
+ * on a laptop: the longest ran to a second line there, and stood CrowdSec's
+ * name a line under the other two.
+ */
+const READS_IN_A_ROW: Partial<Record<EngineId, string>> = { crowdsec: "Logs and peers" }
+const ONLY_IN_ROWS = "hidden lg:in-data-[form=rows]:inline"
+const NOT_IN_ROWS = "lg:in-data-[form=rows]:hidden"
+
+/**
+ * What an engine holds and whether it is at work are one line with a dot
+ * between them beside its mark, in a column. In a row the two ran to a second
+ * line wherever a node was too narrow for both ("214 alerts scanned · only"
+ * over "reads"), which stood the picture a line taller than it had waited.
+ * There each is a line of its own, and an engine with nothing to count keeps
+ * the second one empty, so the picture is one height whatever the engines
+ * answer and while they are asked (`SECOND_LINE`).
+ */
+const LINE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
+
+/**
+ * The second line of detail, in rows only: a waiting node's lines are drawn in
+ * both forms, and a column's node has one.
+ */
+const SECOND_LINE = {
+  foot: (
+    <span aria-hidden className="hidden lg:in-data-[form=rows]:block">
+      &nbsp;
+    </span>
+  ),
+}
+
 /** Who holds an address, in the merged list's own names. */
 const HOLDER = { fail2ban: "fail2ban", crowdsec: "CrowdSec", firewall: "firewall" } as const
 
@@ -77,6 +109,7 @@ export function IntrusionPicture({
 
   const nodes: WireFlowNode[] = engines.map((engine) => {
     const here = engine.kind !== "absent" && engine.kind !== "closed"
+    const short = READS_IN_A_ROW[engine.id]
     return {
       id: engine.id,
       name: `${engine.name}, ${[engine.count, engine.word].filter(Boolean).join(", ")}`,
@@ -95,12 +128,27 @@ export function IntrusionPicture({
             fallback={engine.id === "suricata" ? Bug : undefined}
           />
         ),
-      eyebrow: READS[engine.id],
+      eyebrow: short ? (
+        <span title={READS[engine.id]}>
+          <span className={NOT_IN_ROWS}>{READS[engine.id]}</span>
+          <span className={ONLY_IN_ROWS}>{short}</span>
+        </span>
+      ) : (
+        READS[engine.id]
+      ),
       title: engine.name,
       hint: (
         <span className="numeric">
-          {engine.count && <>{engine.count} · </>}
-          <span className={cn(WORD_TONE[engine.tone])}>{engine.word}</span>
+          {engine.count && (
+            <>
+              <span className={LINE} title={engine.count}>
+                {engine.count}
+              </span>
+              <span className={NOT_IN_ROWS}> · </span>
+            </>
+          )}
+          <span className={cn(LINE, WORD_TONE[engine.tone])}>{engine.word}</span>
+          {!engine.count && SECOND_LINE.foot}
         </span>
       ),
       line: engine.line,
@@ -155,7 +203,7 @@ export function IntrusionPicture({
           <span className="numeric">{held || "by any engine or the firewall"}</span>
         ),
       }}
-      end={{ title: "Watched by", loadingRows: 3, nodes }}
+      end={{ title: "Watched by", loadingRows: 3, loadingLines: SECOND_LINE, nodes }}
     />
   )
 }
