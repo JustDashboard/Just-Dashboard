@@ -38,6 +38,7 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/usage", s.handle(s.handleFileUsage))
 		r.Method(http.MethodGet, "/checksum", s.handle(s.handleFileChecksum))
 		r.Method(http.MethodGet, "/archive", s.handle(s.handleFileArchive))
+		s.mountFilesVersionsRoutes(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireCapability(auth.CapFileWrite))
@@ -185,7 +186,7 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	if err := s.modules.hostFiles.WriteChecked(req.Path, req.Content, req.ExpectedRevision); err != nil {
+	if err := s.writeFileKept(r, req.Path, req.Content, req.ExpectedRevision); err != nil {
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.write", req.Path, map[string]any{"bytes": len(req.Content)})
@@ -250,7 +251,7 @@ func (s *Server) handleFileUpload(w http.ResponseWriter, r *http.Request) error 
 			continue
 		}
 		hash := sha256.New()
-		_, err = s.modules.hostFiles.UploadChecked(filepath.Join(dir, name), io.TeeReader(part, hash), overwrite, expected)
+		_, err = s.uploadFileKept(r, filepath.Join(dir, name), io.TeeReader(part, hash), overwrite, expected, hash)
 		part.Close()
 		if err != nil {
 			return uploadError(err)
@@ -357,6 +358,7 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 		return mapFileError(err)
 	}
 	s.moveFileColours(r.Context(), src, dst)
+	s.moveFileVersions(r.Context(), src, dst)
 	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
 	httpx.NoContent(w)
 	return nil

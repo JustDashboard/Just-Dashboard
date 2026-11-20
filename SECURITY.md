@@ -41,6 +41,13 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
   host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- The Files page keeps the earlier contents of each file it saves over, so a save can be undone. They
+  are copies of whatever those files held, `.env` files and keys included, kept under the data
+  directory (`file-versions/`, folders 0700 and files 0600, root's alone), at most 50 per file and
+  512 MiB in all by default (`JD_FILE_VERSIONS`, `JD_FILE_VERSIONS_MB`; `0` turns it off). They are
+  served only to whoever may read the file itself, through the same roots, and a picture's version
+  through the same closed list of types as the file. A secret you rotate out of a file is still in its
+  earlier versions until they age out.
 - The assistant, when you set one up, sends your question and what it reads to the model you chose, with
   every secret value masked first: the model's provider never sees one. An image you paste into its chat is
   the exception: it is sent as it is, because masking reads text, so a secret in a screenshot reaches the

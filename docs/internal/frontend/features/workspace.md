@@ -495,8 +495,20 @@ grouped (`editor-toolbar.tsx`), with text size, indentation and the command pale
 `lg` the tree and the editor are one pane at a time with a bar at the foot, both kept mounted so an
 unsaved draft outlives a look at the tree
 
+**History** in the strip opens the file's versions as a view of the same page
+(`?view=history&version=e12&against=previous`, `version-history.tsx`): the earlier contents as 48px
+rail rows (`RailRow`) beside Monaco's diff editor (`version-diff.tsx`), against the file as it is now
+or the version before it, with Restore and download on the version. A picture's versions are the two
+pictures side by side; any other binary is download and restore only. A backup's copy on another
+machine is read only after a press that says it is fetching. The editor stays mounted, hidden, and is
+keyed without the history's keys (`editorKey` in `versions.ts`), so a draft outlives the history; the
+page's leave guards let the same file's history addresses by (`sameEditorFile`). Below `lg` the bar's
+stops become Files, Versions and Compare. The details pane's **Versions** line (`versions-detail.tsx`)
+says how many there are and when the file last changed, or why none are kept, and links here
+
 **Implementation:** files/editor page and shared `components/files/` editors; checked by
-`tests/browser/files-ui.spec.ts`
+`tests/browser/files-ui.spec.ts` and `tests/browser/files-versions.spec.ts`; the words and addresses by
+`components/files/versions.test.js`
 
 ## `/git`
 

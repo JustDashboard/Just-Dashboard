@@ -46,6 +46,7 @@ import { baseOf, parentOf, rawUrl } from "@/components/files/media"
 import { accessRows, accessSummary, type Access } from "@/components/files/access"
 import { folderSentence } from "@/components/files/counts"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
+import { VersionsDetail } from "@/components/files/versions-detail"
 
 export { rawUrl } from "@/components/files/media"
 
@@ -555,6 +556,7 @@ function Details({ entry, preview }: { entry: FileEntry; preview: FilePreview })
             )}
           </Detail>
         )}
+        {preview.kind !== "dir" && <VersionsDetail path={entry.path} modified={preview.modified} />}
         {preview.kind === "text" && preview.lines !== undefined && !preview.truncated && (
           <Detail icon={ListOrdered} label="Lines" className="numeric">
             {grouped(preview.lines)}

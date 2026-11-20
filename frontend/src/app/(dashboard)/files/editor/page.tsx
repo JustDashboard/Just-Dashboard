@@ -3,6 +3,8 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
+  ArrowLeftRight,
+  ClockRewind,
   FolderOpen,
   MagnifyingGlass,
   Pencil,
@@ -22,17 +24,26 @@ import { ImageEditor } from "@/components/files/image-editor"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import { cleanPath, isImage, parentOf } from "@/components/files/media"
 import { editorHref } from "@/components/files/search"
+import { VersionHistory, type HistoryAgainst } from "@/components/files/version-history"
+import { editorKey, editorSearch, historySearch, sameEditorFile } from "@/components/files/versions"
 import { useAuth } from "@/hooks/use-auth"
 import { useViewState } from "@/lib/view-state"
 import { useConfirm } from "@/components/confirm-dialog"
 import { EmptyState } from "@/components/state"
 import { cn } from "@/lib/utils"
 
-type EditorPane = "tree" | "editor"
+type EditorPane = "tree" | "editor" | "versions" | "compare"
 
 const PANES: PaneStop<EditorPane>[] = [
   { key: "tree", label: "Files", icon: <FolderOpen /> },
   { key: "editor", label: "Editor", icon: <Pencil /> },
+]
+
+// The history's two panes take the editor's place on the bar while it is open.
+const HISTORY_PANES: PaneStop<EditorPane>[] = [
+  { key: "tree", label: "Files", icon: <FolderOpen /> },
+  { key: "versions", label: "Versions", icon: <ClockRewind /> },
+  { key: "compare", label: "Compare", icon: <ArrowLeftRight /> },
 ]
 
 /** Reading register: a scrolling tree and editor are working panes; counts live in their status strips. */
@@ -48,11 +59,25 @@ export default function FileEditorPage() {
       ? parentOf(path)
       : requestedRoot
   const line = Number(params.get("line")) || undefined
+  // The history is a view of this page, in the address with its pick.
+  const history = params.get("view") === "history"
+  const version = params.get("version")
+  const against: HistoryAgainst = params.get("against") === "previous" ? "previous" : "current"
   const name = path?.split("/").pop() || "File"
   const [sidebar, setSidebar] = useViewState("files.fullEditor.sidebar", true)
   // Which pane a phone shows. Both stay mounted while the other is looked
   // at: the editor that is out of sight still holds its unsaved draft.
-  const [pane, setPane] = useState<EditorPane>("editor")
+  const [pane, setPane] = useState<EditorPane>(() => (version ? "compare" : "editor"))
+  const shown: EditorPane = history
+    ? pane === "tree" || pane === "compare"
+      ? pane
+      : "versions"
+    : pane === "tree"
+      ? "tree"
+      : "editor"
+  // Moves when a restored version should be read again by an editor that
+  // holds no draft; one that does keeps it, and its next save asks first.
+  const [reread, setReread] = useState(0)
   const [find, setFind] = useState(false)
   const [searchMode, setSearchMode] = useState<FileSearchMode>("names")
   const [refresh, setRefresh] = useState(0)
@@ -109,6 +134,7 @@ export default function FileEditorPage() {
         destination: { key: string; url: string }
       }
       if (!dirty.current || move.navigationType !== "traverse" || !move.cancelable) return
+      if (sameEditorFile(move.destination.url, window.location.href)) return
       move.preventDefault()
       confirm({
         title: "Leave without saving?",
@@ -141,7 +167,8 @@ export default function FileEditorPage() {
       if (
         !href ||
         href.startsWith("#") ||
-        href === window.location.pathname + window.location.search
+        href === window.location.pathname + window.location.search ||
+        sameEditorFile(href, window.location.href)
       )
         return
       event.preventDefault()
@@ -197,6 +224,24 @@ export default function FileEditorPage() {
           }
           command={
             <>
+              <Button
+                variant={history ? "secondary" : "outline"}
+                size="sm"
+                className="shrink-0"
+                aria-label="History"
+                aria-pressed={history}
+                onClick={() => {
+                  // In and out of the history is not leaving: the draft stays.
+                  setPane(history ? "editor" : "versions")
+                  router.push(
+                    history ? editorSearch(params) : historySearch(params, version, against),
+                    { scroll: false },
+                  )
+                }}
+              >
+                <ClockRewind className="size-4" />
+                <span className="max-sm:hidden">History</span>
+              </Button>
               <IconAction
                 label={sidebar ? "Hide file tree" : "Show file tree"}
                 className="hidden size-8 lg:inline-flex"
@@ -224,13 +269,13 @@ export default function FileEditorPage() {
         <div className="flex min-h-0 min-w-0 flex-1">
           {/* Hidden at a desk is a desk's choice: the bar reaches the tree
               whether or not the column was put away. */}
-          {(sidebar || pane === "tree") && (
+          {(sidebar || shown === "tree") && (
             <aside
               aria-label="File explorer"
               className={cn(
                 "flex shrink-0 flex-col border-hairline max-lg:min-h-0 max-lg:min-w-0 max-lg:flex-1 lg:w-64 lg:border-r",
                 !sidebar && "lg:hidden",
-                paneShown(pane === "tree"),
+                paneShown(shown === "tree"),
               )}
             >
               <FileTree
@@ -244,6 +289,7 @@ export default function FileEditorPage() {
                   // Choosing a file is asking to see it, the open one included.
                   setPane("editor")
                   if (next !== path) requestNavigate(editorHref(next, root))
+                  else if (history) router.push(editorSearch(params), { scroll: false })
                 }}
                 onConfirm={(request) =>
                   confirm({
@@ -268,12 +314,15 @@ export default function FileEditorPage() {
           <div
             className={cn(
               "flex min-h-0 min-w-0 flex-1 [&_h1]:hidden [&_section[aria-label='File_editor']>[data-slot=pane-header]:first-child]:hidden",
-              paneShown(pane === "editor"),
+              paneShown(shown === "editor"),
+              // Out of sight while the history is open, and still mounted:
+              // the draft in it survives the look.
+              history && "hidden",
             )}
           >
             {isImage(path) && can("file.write") ? (
               <ImageEditor
-                key={params.toString()}
+                key={`${editorKey(params)}#${reread}`}
                 path={path}
                 root={root}
                 destination
@@ -285,7 +334,7 @@ export default function FileEditorPage() {
               />
             ) : (
               <FileEditorSheet
-                key={params.toString()}
+                key={`${editorKey(params)}#${reread}`}
                 grouped
                 path={path}
                 root={root}
@@ -297,8 +346,32 @@ export default function FileEditorPage() {
               />
             )}
           </div>
+          {history && (
+            <VersionHistory
+              path={path}
+              versionId={version}
+              against={against}
+              pane={shown === "compare" ? "compare" : "versions"}
+              hrefFor={(id) => historySearch(params, id, against)}
+              onPick={(id) => router.replace(historySearch(params, id, against), { scroll: false })}
+              onAgainst={(next) =>
+                router.replace(historySearch(params, version, next), { scroll: false })
+              }
+              onPane={setPane}
+              onRestored={() => {
+                if (!dirty.current) setReread((v) => v + 1)
+                setRefresh((v) => v + 1)
+              }}
+              refreshTick={refresh}
+            />
+          )}
         </div>
-        <PaneBar label="File editor" stops={PANES} active={pane} onPick={setPane} />
+        <PaneBar
+          label="File editor"
+          stops={history ? HISTORY_PANES : PANES}
+          active={shown}
+          onPick={setPane}
+        />
       </div>
       <QuickOpen
         open={find}

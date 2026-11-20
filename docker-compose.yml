@@ -100,6 +100,9 @@ services:
       JD_DEPLOY_LEASE_TTL: ${JD_DEPLOY_LEASE_TTL:-30s}
       # How many of an environment's newest runs keep their whole output.
       JD_DEPLOY_HISTORY_RUNS: ${JD_DEPLOY_HISTORY_RUNS:-200}
+      # Earlier contents the Files page keeps of each file it saves over.
+      JD_FILE_VERSIONS: ${JD_FILE_VERSIONS:-50}
+      JD_FILE_VERSIONS_MB: ${JD_FILE_VERSIONS_MB:-512}
       JD_NGINX_DIR: ${JD_NGINX_DIR:-/etc/nginx}
       JD_CADDYFILE: ${JD_CADDYFILE:-/etc/caddy/Caddyfile}
       JD_INGRESS_CONTAINER: ${JD_INGRESS_CONTAINER:-}

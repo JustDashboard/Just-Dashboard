@@ -170,7 +170,7 @@ segment under `/api/v1`.
 | **Workspace** | | | | | | |
 | Excalidraw | `excalidraw/` | `boards/` | `/boards` → `handlers_boards.go`, `boards_*.go` | none: lives in `api/` | `boards-ui.spec.ts` | [`boards.md`](../boards.md) |
 | Terminal | `terminal/` | `terminal/` | `/terminal` → `handlers_terminal*.go` | `term`, `ptyhold` | `terminal-*.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md), [`../frontend/features/`](../frontend/features/README.md) |
-| Files | `files/` | `files/` | `/files` → `handlers_files*.go` | `files`, `safepath`, `contentguard` | `files-ui.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
+| Files | `files/` | `files/` | `/files` → `handlers_files*.go` | `files`, `safepath`, `contentguard`, `fileversions` | `files-ui.spec.ts`, `files-versions.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | Git | `git/` | `git/` | `/git` → `handlers_git*.go`, `handlers_github*.go` | `gitx`, `ghx`, `forgex` | `git-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md), [`git-workspace-expansion.md`](../backend/git-workspace-expansion.md) |
 | Remote Desktop | `remote-desktop/` | `remote-desktop/` | `/remote-desktop` → `handlers_remote_desktop*.go` | `remotedesk` | `remote-desktop.spec.ts` | [`remote-desktop.md`](../backend/remote-desktop.md) |
 | **Network** | | | | | | |

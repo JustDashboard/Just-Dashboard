@@ -434,6 +434,48 @@ comparison and rename. They do not make outside processes participate in a files
 saves, Save as occupancy, refusal of FIFOs without waiting for a producer, and the HTTP conflict
 contract on temporary files.
 
+**A save keeps what it replaced** (`internal/fileversions`, `files/kept.go`,
+`api/handlers_files_versions.go`). `WriteKept` and `UploadKept` are `WriteChecked` and
+`UploadChecked` with one more step inside the locked publish, after the final revision check and
+before the rename: they read what is at the path (nonblocking, `O_NOFOLLOW`, checked as a regular
+file after opening, at most 8 MiB) and hand it back as `files.Replaced`, so the content kept is the
+content the rename replaced. The guard itself is unchanged and not duplicated. `PUT /files/write`,
+every replacing `POST /files/upload` (a picture saved over its original is `reason: image`) and a
+restore then give it to the keeper, which runs in the backend's own namespace, after the save, under a
+five-second bound: a version that cannot be kept is a warning in the log, never a failed save.
+Contents are kept once each, named by their SHA-256 (the editor's revision), under
+`JD_DATA_DIR/file-versions/objects/<2>/<64>` (folders 0700, files 0600, written to a staging
+sibling and renamed); `file_versions` holds path, time, account, size, revision and why, and
+`file_version_heads` what the dashboard last wrote at each path. A save that finds something else
+there labels the version `outside` (changed outside the dashboard) and keeps the dashboard's own
+earlier write too, as a `displaced` version, when its content was held. A save of the same bytes
+keeps nothing. Bounds: `JD_FILE_VERSIONS` per path (default 50, `0` is off) and
+`JD_FILE_VERSIONS_MB` in all (default 512), oldest first across every file, a content's file removed
+with the last row that names it; a sweep once per process removes copies a crash left without a row.
+History is keyed by resolved path: `/files/move` carries it, and everything under a moved folder,
+with `MoveEnds` (as a folder's colour), byte-compared so `/srv/app` never takes `/srv/app2`'s; a
+delete leaves it where it was, so a file put back at its path (the Trash's restore) finds it again.
+
+`GET /files/versions?path=` lists a path's versions with the backup runs that hold it, by time:
+`backups.Store.FileCopies` reads only the store (each job's successful runs whose complete manifest
+has a source over the path and no exclusion over it or a folder above it) and never a destination.
+`GET /files/versions/content?path=&version=e12|b7` is a file read: the path goes through `Resolve`
+and an edit version must be that path's row. `as=text` (default) answers JSON for the diff, `as=image`
+answers bytes only for a type `MediaType` lists as an image, with the raw route's `sandbox` policy
+and `no-store`, and `as=download` an attachment. A backup's copy is read by
+`backups.Runner.ReadFileCopy` through `localArtifact` (pinned, fetched from a remote destination,
+proved against the manifest's digest, decrypted), at the archive path the run's own manifest gives,
+bounded to 8 MiB; a run that covers the path but did not hold the file is `410 version_gone`.
+`POST /files/versions/restore` (`file.write`) and `POST /files/versions/restore-backup` (also
+`s.destructive`, the backups' restore gate) take `{path, version, expectedRevision}` and publish the
+content through `WriteKept`, so a stale revision is `409 content_conflict` exactly as a save is, what
+the restore replaces is kept, and the audit entry (`file.version.restore`) names the version or run
+and a byte count, never content. A person the Backups read routes would not answer sees no backup
+copies (`backups: false`). `fileversions_test.go`, `kept_test.go`, `file_copies_test.go` and
+`handlers_files_versions_test.go` cover the capture, the outside label, the bounds and orphan removal,
+a failure to keep that leaves the save standing, moves, the conflict, the roots and another path's
+version, and listing backups with a destination that fails the test if it is reached.
+
 `ResolveArchive` checks an archive download before a header goes out — the base directory, and each
 member through `ResolveEntry` so that a selected symlink is archived as the link it is — and refuses a
 member that is not under the base. Resolving members through `Resolve` used to put a link's *target*
