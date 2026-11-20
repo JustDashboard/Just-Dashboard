@@ -19,7 +19,8 @@ A picture of what is connected to what, drawn first (D2).
 
 A picture that is the hub shape uses `WireFlow` and lays its nodes by hand only when it is not that
 shape. In 0.9.0 the account's access picture and the link picture (Settings → Connect, Settings →
-Hub) moved onto it; the others the 0.9.0 pass looked at stay laid by hand on purpose: a container's
+Hub) moved onto it, and in 0.9.1 the alerts pictures (`alerts/kit.tsx`), which had been one column
+a side by hand; the others the 0.9.0 pass looked at stay laid by hand on purpose: a container's
 picture (ways in, the container, what it keeps, with its faces), the procs wiring picture, the stack
 map (many to many), a project's runtime lanes, the routing decision's two columns, the ports
 picture (networks to programs). Porting those would either lose what they show or grow `WireFlow`
@@ -30,11 +31,35 @@ into a layout engine.
 **Purpose.** The picture several sections open on, from data: what reaches a thing and what it
 reaches, with each line saying its state.
 
-**Anatomy.** Wide, five columns: the start column, a gap the lines bend across, the hub, the gap,
-the end column (`hubShare` sets the hub's width against one for each side). A node is a mark, an
-eyebrow, a name and a line of detail; the start column's words stand before their marks and the
-end's after, so every line leaves a mark over nothing. The hub's words hang under its mark out of
-the flow, and the picture holds the room they need under itself (`useHubRoom`).
+**Anatomy.** Wide, five columns: the start side, a gap the lines bend across, the hub, the gap,
+the end side (`hubShare` scales the hub's column, 10rem at the default). The sides share what is
+left, so the picture is as wide as its page. A node is a mark, an eyebrow, a name and a line of
+detail. The hub's words hang under its mark out of the flow, and the picture holds the room they
+need under itself (`useHubRoom`).
+
+The wide picture takes one of two forms, chosen from the room a side has (`flowForm`):
+
+- **Rows**, wherever a side holds its nodes in one row or has room for three across. Each side is
+  rows of nodes, as many to a row as fit (`perRow`, evened out: five are three and two), a node's
+  words centred under its mark. A row is one level line into the hub that its marks stand on: every
+  node's own line runs along the row under the marks between it and the hub, bends in the gap and
+  arrives level (`AnimatedBeam`'s `acrossRef`). One row a side is a single line across the page.
+  With more, the sides are dropped until the hub stands on the middle of their rows (`useLevel`).
+  A short last row is pushed against the hub. The lines of a row lie on each other, so the one that
+  needs a look is painted last (`paintOrder`) and every line is drawn from the hub out, which puts
+  their dashes in the same places.
+- **Column**, where a side has no room for three across (beside a rail, on a page with a narrow
+  measure). Each side is one column, the start side's words before their marks and the end's after,
+  and a line fans from each node to the hub. Words under a mark cost a row twice the height of
+  words beside it, so rows of one or two would stand taller than the column.
+
+Until 0.9.1 the column was the only form: eight nodes a side stood 480px tall in the middle third
+of a wide page with nothing on either side. `size="sm"` draws small marks, which stand closer
+(`CELL`), for a dense picture whose nodes say a name and a word: the alerts pictures.
+
+A page writes a node's `title` and `hint` for both forms: no `lg:text-left`, `lg:justify-start`
+or fixed width on them, since in rows the words are centred and a node is about 120px wide. A
+line that must stay whole is a `block truncate` with its `title`.
 
 **Props.**
 
@@ -50,7 +75,8 @@ the flow, and the picture holds the room they need under itself (`useHubRoom`).
 - `line` (`WireLine`): `state` — `up` (still, or carrying a pulse when `moving`), `down` (dashed,
   still), `warning` (amber), `danger` (red), `idle` (configured, not in use: dashed, grey) — plus
   `dashed`, `reverse`, `duration`, `delay`.
-- `hub`: `mark`, `eyebrow`, `title`, `hint`, `loadingLines`.
+- `hub`: `mark`, `eyebrow`, `title`, `hint`, `loadingLines`, and `className` on its cell in the
+  column form and stacked (room held open around the mark; left off in rows).
 - `related(focus, id)`: what stays lit with a pointed node besides itself.
 - `phone`: `stack` or `marks` (below); `loading`; `size` of the nodes' marks wide (`md`, `sm`).
 
@@ -97,7 +123,8 @@ button is named by `label`, else `name`, else a string `title`; on a phone the m
 />
 ```
 
-**Enforced by** `wire-flow-model.test.js` (line states, columns, stagger, loading rows) and the
+**Enforced by** `wire-flow-model.test.js` (line states, the form, rows and level, columns,
+stagger, loading rows), `ui/beam-path.test.js` (the level line) and the
 specs of the pages that draw one (`[data-slot=wire-flow]`), among them `missing-page.spec.ts`,
 `account-ui.spec.ts` and `account-link.spec.ts`.
 
@@ -171,8 +198,10 @@ project's databases.
   (`monoBreaks`), never inside a word, and copies whole. It is not specific to pictures: use it
   wherever a mono value must wrap, in place of `break-all`.
 - `AnimatedBeam`: the line between two marks, measured from their positions and redrawn when the
-  container resizes. `shape="s"` leaves and arrives level, as a node editor's wires do; the arc is
-  for a path down a phone. `still`, `dashed`, `tone` and `once` say what the line carries. The pulse
+  container resizes (or `redrawOn` changes). `shape="s"` leaves and arrives level, as a node
+  editor's wires do, and with `acrossRef` bends only across that element's width (`levelPath`); the
+  arc is for a path down a phone. A still line is `--wire`, the strong border's grey on the page's
+  ground, so lines that lie on each other do not add up. `still`, `dashed`, `tone` and `once` say what the line carries. The pulse
   is a CSS animation, still under reduced motion and paused motion.
 
 ## What enforces it

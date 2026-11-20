@@ -37,6 +37,16 @@ The parts and their props are in [`../components/wiring.md`](../components/wirin
    the picture once: over the views when it describes the whole thing, inside the first view when
    it describes only that view (an image, a volume, an egress group's Members).
 
+## As wide as the page, as short as it can be
+
+A hub picture fills its page's width before it grows down. `WireFlow` lays each side as rows of
+nodes on level lines into the hub wherever a side has room for three across, and keeps one column
+a side only where it has not ([`../components/wiring.md`](../components/wiring.md#wireflow)). A
+picture that stands tall in the middle of a wide page with nothing on either side of it is a
+finding: the operator's words for it were "too big, the hierarchy is not good, too much white space
+on the sides while it is super tall" (20 Nov 2026), with the Settings page's request path, one line
+across the page, as the picture that was right.
+
 ## Accessibility
 
 Each column is a `section` named by its title and its nodes an ordered list. A node's link or button

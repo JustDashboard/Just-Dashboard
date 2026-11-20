@@ -81,14 +81,116 @@ export function isLit(
 export const PORT = { lg: 30, md: 26, sm: 22 } as const
 
 /**
- * The wide grid's five columns: the start column, a gap the lines bend
- * across, the hub, the gap again, the end column. `hub` is the hub column's
- * share against the side columns' one each — wider for a hub with a long
- * line of facts under it.
+ * The wide grid's five columns: the start side, a gap the lines bend across,
+ * the hub, the gap again, the end side. The sides share what the hub and the
+ * gaps leave, so the picture is as wide as its page. `hub` scales the hub's
+ * column, which holds the words hung under its mark: 10rem at the default,
+ * wider for a hub with a long line of facts under it.
  */
 export function flowTemplate(hub = 0.8) {
-  const gap = "clamp(2.5rem,6vw,6rem)"
-  return `minmax(0,1fr) ${gap} minmax(0,${hub}fr) ${gap} minmax(0,1fr)`
+  const gap = "clamp(3rem,6vw,6rem)"
+  const width = Math.round(hub * 12.5 * 100) / 100
+  return `minmax(0,1fr) ${gap} ${width}rem ${gap} minmax(0,1fr)`
+}
+
+/**
+ * The narrowest a node is drawn wide, by the size of its mark, and the gap
+ * between two in a row, in px. A picture of small marks is a dense one, whose
+ * nodes say a name and a word.
+ */
+export const CELL = { md: 116, sm: 100, gap: 12 } as const
+
+/** How many nodes of this size a side `width` wide has room for in one row. */
+export function fitsRow(width: number, size: "md" | "sm" = "md") {
+  return Math.max(1, Math.floor((width + CELL.gap) / (CELL[size] + CELL.gap)))
+}
+
+/**
+ * The form the wide picture takes, from the room a side has and how many
+ * nodes each side holds.
+ *
+ * `rows`: each side is rows of nodes with their words under them, each row
+ * one level line into the hub. It is as wide as the page and as short as it
+ * can be, and it is the form wherever a side holds its nodes in one row or
+ * has room for three across.
+ *
+ * `column`: each side is one column, a node's words beside its mark and a
+ * line fanning from each to the hub. Words under a mark cost a row twice the
+ * height of words beside it, so rows of one or two would stand taller than
+ * the column they replace: beside a rail, or on a page that keeps a narrow
+ * measure, the picture stays a column.
+ */
+export function flowForm(
+  width: number,
+  counts: { start: number; end: number },
+  size: "md" | "sm" = "md",
+): "rows" | "column" {
+  const fits = fitsRow(width, size)
+  const room = (count: number) => count <= fits || fits >= 3
+  return room(counts.start) && room(counts.end) ? "rows" : "column"
+}
+
+/**
+ * How many nodes stand in each row of a side `width` wide. A side is rows of
+ * nodes, each row one level line into the hub, so a picture grows sideways
+ * into the room its page has before it grows down: eight nodes are two rows
+ * of four on a wide page, where one column of eight stood taller than the
+ * page's first screen with nothing on either side of it. The rows are evened
+ * out, so five nodes are three and two rather than four and one.
+ */
+export function perRow(width: number, count: number, size: "md" | "sm" = "md") {
+  if (count <= 1) return 1
+  const rows = Math.ceil(count / fitsRow(width, size))
+  return Math.ceil(count / rows)
+}
+
+/**
+ * The grid column a node starts in, where it has to be said: the first node
+ * of a last row that is short, on the start side, which is pushed against the
+ * hub so its line is not drawn across empty places.
+ */
+export function columnStart(index: number, count: number, per: number, side: "start" | "end") {
+  const short = count % per
+  if (side !== "start" || short === 0 || index !== count - short) return undefined
+  return per - short + 1
+}
+
+/**
+ * The order the lines are painted in. The lines of one row lie on each other
+ * between the nearest mark and the hub, and the one painted last is the one
+ * read there: a line that needs a look over one that works, and a line that
+ * works over one that is down.
+ */
+export function paintOrder(line: WireLine | undefined) {
+  const beam = beamOf(line)
+  if (beam.tone === "danger") return 3
+  if (beam.tone === "warning") return 2
+  return beam.dashed ? 0 : 1
+}
+
+/**
+ * The two nodes a side's level is read from: the first of its middle row, or
+ * of the two rows about its middle where it has an even number. With three
+ * rows the hub then stands exactly on the second and that row's line is
+ * level, whatever the words under the first and the third make their rows.
+ */
+export function middleRows(count: number, per: number): [number, number] {
+  const last = Math.max(0, Math.ceil(count / Math.max(1, per)) - 1)
+  return [Math.floor(last / 2) * per, Math.ceil(last / 2) * per]
+}
+
+/**
+ * How far each of the three parts is dropped so that they stand on one level:
+ * a side on the middle of its rows' marks (`middleRows`), the hub on its
+ * mark. `mid` is that level measured from the part's own top.
+ */
+export function levelDrops(mid: { start: number; hub: number; end: number }) {
+  const level = Math.max(mid.start, mid.hub, mid.end)
+  return {
+    start: Math.round(level - mid.start),
+    hub: Math.round(level - mid.hub),
+    end: Math.round(level - mid.end),
+  }
 }
 
 /**

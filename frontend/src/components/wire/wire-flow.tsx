@@ -10,12 +10,19 @@ import { MoreTile, WireMarks } from "@/components/wire/wire-marks"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
+  CELL,
   PORT,
   beamOf,
+  columnStart,
   fitColumn,
+  flowForm,
   flowTemplate,
   isLit,
+  levelDrops,
   loadingRows,
+  middleRows,
+  paintOrder,
+  perRow,
   staggerOf,
   waitingLines,
   type WaitingHint,
@@ -116,9 +123,11 @@ export type WireFlowHub = {
   title?: React.ReactNode
   hint?: React.ReactNode
   /**
-   * On the hub's cell. The picture keeps room under itself for the hub's
-   * words (`useHubRoom`), so this is for a picture that holds its height open
-   * around the mark: a volume's, for three rows a side.
+   * On the hub's cell, in the column form and stacked. The picture keeps room
+   * under itself for the hub's words (`useHubRoom`), so this is for a picture
+   * that holds its height open around the mark: a volume's, for three nodes
+   * a side. In rows it is left off: the sides are dropped to the hub's level,
+   * and room above the hub would be room above the whole picture.
    */
   className?: string
   /**
@@ -135,10 +144,22 @@ export type WireFlowHub = {
  * lines between them, from data — the picture six Network pages, the
  * deployment section's Notifications, Backups and the proxy each drew by hand
  * on `components/wire/wire` (design-system §2). A node is a mark with an eyebrow, a
- * name and a line of detail; its line to the hub is its state (`WireLine`),
- * drawn by `ui/animated-beam`, which holds the line still under reduced
- * motion. Pointing at a node steps every other node and line back, keeping
- * what `related` says travels with it.
+ * name and a line of detail under it; its line to the hub is its state
+ * (`WireLine`), drawn by `ui/animated-beam`, which holds the line still under
+ * reduced motion. Pointing at a node steps every other node and line back,
+ * keeping what `related` says travels with it.
+ *
+ * Wide, the picture is as wide as its page and as short as it can be
+ * (`flowForm`'s `rows`): each side is rows of nodes, as many to a row as the
+ * side has room for (`perRow`), and a row is one level line into the hub that
+ * its marks stand on. One row a side is a single line across the page. More
+ * rows bend into the hub in the gap beside it, the sides standing so that the
+ * hub is on the middle of their rows (`useLevel`). Until 0.9.1 a side was
+ * always one column with its words beside the marks and a line fanning from
+ * each to the hub: eight nodes stood 480px tall in the middle third of the
+ * page, with nothing on either side of them. That form (`column`) is kept
+ * where a side has no room for three nodes across — beside a rail, on a page
+ * with a narrow measure — since rows of one or two would stand taller there.
  *
  On a phone it takes the one phone form every picture takes
  * (`docs/internal/frontend/patterns/pictures-on-a-phone.md`):
@@ -216,36 +237,74 @@ export function WireFlow({
   const room = useHubRoom(root, hubRef)
   const hubWaits = hub.loadingLines && waitingDetail(hub.loadingLines, HUB_WIDTHS)
 
-  const beams = all.map((node, index) => {
-    const ref = refs.get(node.id)
-    if (!ref) return null
-    const into = node.side === "start"
-    const beam = beamOf(loading ? { state: "up" } : node.line)
-    return (
-      <AnimatedBeam
-        key={node.id}
-        containerRef={container}
-        fromRef={into ? ref : hubRef}
-        toRef={into ? hubRef : ref}
-        // A wire leaves a mark level from its edge and arrives level at the
-        // other.
-        shape="s"
-        startXOffset={port}
-        endXOffset={-port}
-        reverse={node.line?.reverse}
-        still={beam.still || held}
-        dashed={beam.dashed}
-        tone={beam.tone}
-        duration={node.line?.duration}
-        delay={node.line?.delay ?? staggerOf(index)}
-        className={cn(
-          "transition-opacity",
-          phone === "stack" && "max-lg:hidden",
-          !lit(node.id) && "opacity-15",
-        )}
-      />
-    )
-  })
+  const startSide = useRef<HTMLElement>(null)
+  const endSide = useRef<HTMLElement>(null)
+  const hubCell = useRef<HTMLDivElement>(null)
+  const startGap = useRef<HTMLDivElement>(null)
+  const endGap = useRef<HTMLDivElement>(null)
+  // Both sides are one width, so one of them is measured.
+  const sideWidth = useWidth(startSide)
+  const form = flowForm(sideWidth, { start: left.length, end: right.length }, size)
+  const rows = form === "rows"
+  const per = {
+    start: rows ? perRow(sideWidth, left.length, size) : 1,
+    end: rows ? perRow(sideWidth, right.length, size) : 1,
+  }
+  const middle = (nodes: Laid[], across: number) =>
+    middleRows(nodes.length, across).map((index) => refs.get(nodes[index]?.id ?? ""))
+  const [startAbove, startBelow] = middle(left, per.start)
+  const [endAbove, endBelow] = middle(right, per.end)
+  const drops = useLevel(
+    wide && !compact && rows,
+    { box: startSide, above: startAbove, below: startBelow },
+    { box: hubCell, above: hubRef },
+    { box: endSide, above: endAbove, below: endBelow },
+  )
+  const laidOut = `${form}:${per.start}:${per.end}:${drops.start}:${drops.hub}:${drops.end}`
+
+  const beams = all
+    .map((node, index) => {
+      const ref = refs.get(node.id)
+      if (!ref) return null
+      const into = node.side === "start"
+      const line = loading ? { state: "up" as const } : node.line
+      const beam = beamOf(line)
+      return {
+        order: paintOrder(line),
+        beam: (
+          <AnimatedBeam
+            key={node.id}
+            containerRef={container}
+            // Every line is drawn from the hub out, so the dashes of the
+            // lines that lie on each other in a row fall in the same places.
+            fromRef={hubRef}
+            toRef={ref}
+            // In rows it leaves the hub level, bends in the gap beside it and
+            // runs level along its row, under the marks between it and its
+            // own. In a column it bends all the way from one to the other.
+            shape="s"
+            acrossRef={rows ? (into ? startGap : endGap) : undefined}
+            redrawOn={laidOut}
+            startXOffset={into ? -PORT.lg : PORT.lg}
+            endXOffset={into ? port : -port}
+            reverse={node.line?.reverse}
+            still={beam.still || held}
+            dashed={beam.dashed}
+            tone={beam.tone}
+            duration={node.line?.duration}
+            delay={node.line?.delay ?? staggerOf(index)}
+            className={cn(
+              "transition-opacity",
+              phone === "stack" && "max-lg:hidden",
+              !lit(node.id) && "opacity-15",
+            )}
+          />
+        ),
+      }
+    })
+    .filter((drawn) => drawn !== null)
+    .sort((a, b) => a.order - b.order)
+    .map((drawn) => drawn.beam)
 
   if (compact) {
     // The phone's one form (`WireMarks`): the start's marks, the hub with its
@@ -308,6 +367,7 @@ export function WireFlow({
     <div
       ref={root}
       data-slot="wire-flow"
+      data-form={form}
       data-loading={loading || undefined}
       aria-busy={loading || undefined}
       className={cn("relative py-4", className)}
@@ -315,14 +375,27 @@ export function WireFlow({
       <div ref={container} className="relative">
         {beams}
         <div
-          className="relative grid gap-y-8 lg:grid-cols-[var(--wire-flow-columns)] lg:items-center"
+          className={cn(
+            "relative grid gap-y-8 lg:grid-cols-[var(--wire-flow-columns)]",
+            rows ? "lg:items-start" : "lg:items-center",
+          )}
           style={{ "--wire-flow-columns": flowTemplate(hubShare) } as React.CSSProperties}
         >
-          <Column column={start} side="start" bare={left.length === 0}>
-            {left.map((node) => (
+          <Column
+            column={start}
+            side="start"
+            bare={left.length === 0}
+            sideRef={startSide}
+            rows={rows}
+            per={per.start}
+            drop={drops.start}
+          >
+            {left.map((node, index) => (
               <Item
                 key={node.id}
                 node={node}
+                rows={rows}
+                column={columnStart(index, left.length, per.start, "start")}
                 nodeRef={refs.get(node.id)}
                 size={size}
                 dim={!node.placeholder && !lit(node.id)}
@@ -332,9 +405,15 @@ export function WireFlow({
             ))}
           </Column>
 
-          <div aria-hidden className="max-lg:hidden" />
+          <div ref={startGap} aria-hidden className="max-lg:hidden" />
 
-          <div className={cn("flex min-w-0 justify-center", hub.className)}>
+          <div
+            ref={hubCell}
+            // Rows stand on the hub's level whatever its cell holds, so room
+            // held open around it there is only room above the picture.
+            className={cn("flex min-w-0 justify-center", !(wide && rows) && hub.className)}
+            style={drops.hub ? { marginTop: drops.hub } : undefined}
+          >
             <WireNode
               nodeRef={hubRef}
               align="center"
@@ -357,13 +436,22 @@ export function WireFlow({
             />
           </div>
 
-          <div aria-hidden className="max-lg:hidden" />
+          <div ref={endGap} aria-hidden className="max-lg:hidden" />
 
-          <Column column={end} side="end" bare={right.length === 0}>
+          <Column
+            column={end}
+            side="end"
+            bare={right.length === 0}
+            sideRef={endSide}
+            rows={rows}
+            per={per.end}
+            drop={drops.end}
+          >
             {right.map((node) => (
               <Item
                 key={node.id}
                 node={node}
+                rows={rows}
                 nodeRef={refs.get(node.id)}
                 size={size}
                 dim={!node.placeholder && !lit(node.id)}
@@ -423,6 +511,84 @@ function useHubRoom(root: RefObject<HTMLDivElement | null>, hub: RefObject<HTMLD
   return room
 }
 
+/**
+ * An element's width, read before the browser paints and again when it
+ * changes. Until it is read a side is taken to hold three nodes to a row,
+ * which is what it holds beside the shell on a laptop.
+ */
+function useWidth(target: RefObject<HTMLElement | null>) {
+  const [width, setWidth] = useState(CELL.md * 3 + CELL.gap * 2)
+  useLayoutEffect(() => {
+    const el = target.current
+    if (!el) return
+    const read = () => setWidth(el.getBoundingClientRect().width)
+    read()
+    const observer = new ResizeObserver(read)
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [target])
+  return width
+}
+
+type Part = {
+  box: RefObject<HTMLElement | null>
+  /** The marks of the rows about its middle: the hub's own, for the hub. */
+  above?: RefObject<HTMLElement | null>
+  below?: RefObject<HTMLElement | null>
+}
+
+const LEVEL = { start: 0, hub: 0, end: 0 }
+
+/** A part's level, from its own top: the middle of its two marks, or of itself with none. */
+function levelOf({ box, above, below }: Part) {
+  const frame = box.current?.getBoundingClientRect()
+  if (!frame) return 0
+  const a = above?.current?.getBoundingClientRect()
+  const b = below?.current?.getBoundingClientRect()
+  if (!a || !b) return frame.height / 2
+  return (a.top + a.height / 2 + b.top + b.height / 2) / 2 - frame.top
+}
+
+/**
+ * How far each side and the hub are dropped to stand on one level.
+ *
+ * A side is as tall as its rows and the words under the last of them, and
+ * the hub as tall as its mark, so centring the three boxes put a single row
+ * above the hub's line by half its words and bent every line that should
+ * have been level. They stand at the top of the picture instead, and each
+ * is dropped until the middle of its rows' marks is on the hub's mark
+ * (`middleRows`, `levelDrops`). Read from the marks' own places before the
+ * browser paints, and again when a part changes size: a name that wraps
+ * moves the rows under it. A side with nothing in it stands on its own
+ * middle.
+ */
+function useLevel(on: boolean, start: Part, hub: Part, end: Part) {
+  const [drops, setDrops] = useState(LEVEL)
+  const [sBox, sAbove, sBelow] = [start.box, start.above, start.below]
+  const [hBox, hMark] = [hub.box, hub.above]
+  const [eBox, eAbove, eBelow] = [end.box, end.above, end.below]
+  useLayoutEffect(() => {
+    const read = () => {
+      const next = on
+        ? levelDrops({
+            start: levelOf({ box: sBox, above: sAbove, below: sBelow }),
+            hub: levelOf({ box: hBox, above: hMark, below: hMark }),
+            end: levelOf({ box: eBox, above: eAbove, below: eBelow }),
+          })
+        : LEVEL
+      setDrops((held) =>
+        held.start === next.start && held.hub === next.hub && held.end === next.end ? held : next,
+      )
+    }
+    read()
+    if (!on) return
+    const observer = new ResizeObserver(read)
+    for (const box of [sBox, hBox, eBox]) if (box.current) observer.observe(box.current)
+    return () => observer.disconnect()
+  }, [on, sBox, sAbove, sBelow, hBox, hMark, eBox, eAbove, eBelow])
+  return drops
+}
+
 type Laid = WireFlowNode & {
   side: "start" | "end"
   more?: boolean
@@ -464,17 +630,32 @@ function draw(mark: Drawn, size: MarkSize) {
   return typeof mark === "function" ? mark(size) : mark
 }
 
-/** The column's landmark, its heading, and its list or what it says when empty. */
+/**
+ * A side's landmark, its heading, and its nodes or what it says when empty.
+ * In `rows` the nodes are a grid `per` across; in a column and stacked, one
+ * under the other.
+ */
 function Column({
   column,
   side,
   bare,
+  sideRef,
+  rows,
+  per,
+  drop,
   children,
 }: {
   column: WireFlowColumn
   side: "start" | "end"
   /** Nothing to draw: the column says `empty` instead. */
   bare: boolean
+  sideRef: RefObject<HTMLElement | null>
+  /** The wide picture is rows on level lines, not a column a side. */
+  rows: boolean
+  /** Nodes to a row, wide. */
+  per: number
+  /** How far the side is dropped to stand on the hub's level, wide. */
+  drop: number
   children: React.ReactNode
 }) {
   const always = column.heading === "always"
@@ -483,21 +664,38 @@ function Column({
       title={column.title}
       count={column.count}
       href={column.href}
-      className={cn("mb-4", always ? "lg:absolute lg:inset-x-0 lg:bottom-full" : "lg:hidden")}
+      className={cn(
+        "mb-4",
+        rows && "lg:text-center",
+        always ? "lg:absolute lg:inset-x-0 lg:bottom-full" : "lg:hidden",
+      )}
     />
   )
   const body =
     bare && column.empty ? (
-      <p className="text-body text-muted-foreground">{column.empty}</p>
+      <p className={cn("text-body text-muted-foreground", rows && "lg:text-center")}>
+        {column.empty}
+      </p>
     ) : (
-      <ol className="flex flex-col gap-5">{children}</ol>
+      <ol
+        className={cn(
+          "grid gap-5",
+          rows && "lg:grid-cols-[repeat(var(--wire-per),minmax(0,1fr))] lg:gap-x-3 lg:gap-y-6",
+        )}
+        style={{ "--wire-per": per } as React.CSSProperties}
+      >
+        {children}
+      </ol>
     )
   return (
     <section
+      ref={sideRef}
       aria-label={column.title}
-      className={cn("min-w-0", side === "start" && "lg:text-right")}
+      data-side={side}
+      className={cn("min-w-0", !rows && side === "start" && "lg:text-right")}
+      style={drop ? { marginTop: drop } : undefined}
     >
-      {/* Hung above the list wide rather than sharing its box: in the box it
+      {/* Hung above the rows wide rather than sharing their box: in the box it
           pushed the marks below the hub's, and every wire bent to meet them. */}
       <div className={cn(always && "lg:relative")}>
         {heading}
@@ -513,6 +711,8 @@ function Item({
   size,
   dim,
   loading,
+  rows,
+  column,
   ...handlers
 }: {
   node: Laid
@@ -520,12 +720,18 @@ function Item({
   size: MarkSize
   dim: boolean
   loading: boolean
+  /** Its words stand under its mark, in a row; beside it otherwise. */
+  rows: boolean
+  /** The grid column it starts in, where its row is short (`columnStart`). */
+  column?: number
 } & React.HTMLAttributes<HTMLLIElement>) {
-  const align = node.side === "start" ? "end" : "start"
+  const align = rows ? "under" : node.side === "start" ? "end" : "start"
+  const place = cn("min-w-0", rows && column && "lg:col-start-(--wire-column)")
+  const style = column ? ({ "--wire-column": column } as React.CSSProperties) : undefined
   if (loading) {
     const shape = typeof node.waiting === "object" ? node.waiting : undefined
     return (
-      <li className="min-w-0" aria-hidden>
+      <li className={place} style={style} aria-hidden>
         <WireNode
           nodeRef={nodeRef}
           align={align}
@@ -549,12 +755,17 @@ function Item({
       {...handlers}
       data-node={node.more ? undefined : node.id}
       data-dim={dim ? "" : undefined}
-      className={cn("min-w-0 transition-opacity", dim && "opacity-40")}
+      className={cn(place, "transition-opacity", dim && "opacity-40")}
+      style={style}
     >
       <WireNode
         nodeRef={nodeRef}
         align={align}
-        mark={<Pressable node={node}>{draw(node.mark, size)}</Pressable>}
+        mark={
+          <span className={cn("flex items-center justify-center", MARK_BOX[size])}>
+            <Pressable node={node}>{draw(node.mark, size)}</Pressable>
+          </span>
+        }
         eyebrow={node.eyebrow}
         title={node.title}
         hint={node.hint}
@@ -564,6 +775,14 @@ function Item({
 }
 
 const SKELETON_SIZE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
+
+/**
+ * The box a node's mark stands in: its nominal height, whatever the mark's
+ * own box comes to with a ring or a corner badge. The lines of a row are read
+ * from these boxes and lie on each other, so two marks a pixel apart in
+ * height drew two lines a hair apart all the way to the hub.
+ */
+const MARK_BOX = { lg: "h-14", md: "h-11", sm: "h-9" } as const
 
 /** How long each waiting line of detail is drawn, by its place: no two alike. */
 const NODE_WIDTHS = ["w-24", "w-20", "w-16"]

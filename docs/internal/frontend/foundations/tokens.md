@@ -57,6 +57,7 @@ A frame, a field, where a header meets a body, a destination's hover, a control'
 | `--hairline` | `color-mix(in oklab, var(--border) 70%, transparent)` | `border-hairline` |  |
 | `--grid-dot` | `color-mix(in oklab, var(--border) 45%, transparent)` |  |  |
 | `--border-strong` | `color-mix(in oklab, var(--foreground) 22%, transparent)` | `border-border-strong` |  |
+| `--wire` | `color-mix(in oklab, var(--foreground) 22%, var(--background))` | `border-wire` |  |
 
 ### Brand
 

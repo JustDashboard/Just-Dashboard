@@ -114,12 +114,12 @@ test("the alerts page wires what is watched to each channel and leads with what 
   ).toHaveAttribute("href", "/proxy/alerts")
 
   await page.goto("/proxy/alerts")
-  const watched = page.getByRole("group", { name: "What the rules watch" })
+  const watched = page.getByRole("region", { name: "What the rules watch" })
   await expect(watched).toContainText("1 firing")
   // Certificates are drawn as Let's Encrypt, the channel as its own service.
   await expect(watched.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   await expect(
-    page.getByRole("group", { name: "Who is told" }).locator("img[src='/logos/slack.svg']"),
+    page.getByRole("region", { name: "Who is told" }).locator("img[src='/logos/slack.svg']"),
   ).toHaveCount(1)
   const firing = page.getByRole("region", { name: "Firing" })
   await expect(firing.getByText("legacy.example.com")).toBeVisible()

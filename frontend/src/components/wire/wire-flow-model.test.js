@@ -1,10 +1,16 @@
 import { expect, test } from "bun:test"
 import {
+  CELL,
   beamOf,
+  columnStart,
   fitColumn,
   flowTemplate,
   isLit,
+  levelDrops,
   loadingRows,
+  middleRows,
+  paintOrder,
+  perRow,
   staggerOf,
   waitingLines,
 } from "./wire-flow-model"
@@ -64,11 +70,78 @@ test("pointing at a node keeps it and what travels with it lit", () => {
   expect(isLit("internet", "docker:b", related)).toBe(false)
 })
 
-test("the wide grid is five columns with the hub's share in the middle", () => {
+test("the wide grid is five columns, the sides sharing what the hub leaves", () => {
   expect(flowTemplate()).toBe(
-    "minmax(0,1fr) clamp(2.5rem,6vw,6rem) minmax(0,0.8fr) clamp(2.5rem,6vw,6rem) minmax(0,1fr)",
+    "minmax(0,1fr) clamp(3rem,6vw,6rem) 10rem clamp(3rem,6vw,6rem) minmax(0,1fr)",
   )
-  expect(flowTemplate(0.9)).toContain("minmax(0,0.9fr)")
+  expect(flowTemplate(1)).toContain(" 12.5rem ")
+})
+
+test("a side holds as many nodes to a row as it has room for", () => {
+  const room = (nodes) => nodes * CELL.md + (nodes - 1) * CELL.gap
+  expect(perRow(room(3), 3)).toBe(3)
+  expect(perRow(room(3) - 1, 3)).toBe(2)
+  expect(perRow(room(4), 8)).toBe(4)
+  // One node is one row whatever the room, and a side with none still divides.
+  expect(perRow(0, 1)).toBe(1)
+  expect(perRow(0, 0)).toBe(1)
+  expect(perRow(0, 5)).toBe(1)
+})
+
+test("the rows are evened out rather than filled", () => {
+  const room = 4 * CELL.md + 3 * CELL.gap
+  // Five are three and two, not four and one.
+  expect(perRow(room, 5)).toBe(3)
+  expect(perRow(room, 7)).toBe(4)
+  expect(perRow(room, 9)).toBe(3)
+  // Fewer than fit are one row.
+  expect(perRow(room, 2)).toBe(2)
+})
+
+test("small marks stand closer, so more of them fit a row", () => {
+  const room = 4 * CELL.sm + 3 * CELL.gap
+  expect(perRow(room, 8, "sm")).toBe(4)
+  expect(perRow(room, 8, "md")).toBe(3)
+})
+
+test("a short last row is pushed against the hub on the start side only", () => {
+  // Eight in threes: the last row holds two, and starts in the second place.
+  expect([0, 3, 6, 7].map((index) => columnStart(index, 8, 3, "start"))).toEqual([
+    undefined,
+    undefined,
+    2,
+    undefined,
+  ])
+  expect(columnStart(6, 8, 3, "end")).toBeUndefined()
+  // A full last row starts where every row does.
+  expect(columnStart(4, 8, 4, "start")).toBeUndefined()
+  expect(columnStart(0, 2, 2, "start")).toBeUndefined()
+})
+
+test("the hub stands on the middle row, or between the two about the middle", () => {
+  expect(middleRows(3, 3)).toEqual([0, 0])
+  expect(middleRows(6, 3)).toEqual([0, 3])
+  expect(middleRows(8, 3)).toEqual([3, 3])
+  expect(middleRows(12, 3)).toEqual([3, 6])
+  expect(middleRows(0, 3)).toEqual([0, 0])
+})
+
+test("each part is dropped to the lowest level among them", () => {
+  expect(levelDrops({ start: 22, hub: 28, end: 22 })).toEqual({ start: 6, hub: 0, end: 6 })
+  expect(levelDrops({ start: 150, hub: 28, end: 22 })).toEqual({ start: 0, hub: 122, end: 128 })
+})
+
+test("the line that needs a look is painted over the ones that do not", () => {
+  const order = [
+    { state: "idle" },
+    { state: "down" },
+    { state: "up" },
+    { state: "up", moving: true },
+    { state: "warning" },
+    { state: "danger" },
+    undefined,
+  ].map(paintOrder)
+  expect(order).toEqual([0, 0, 1, 1, 2, 3, 1])
 })
 
 test("a loading column holds the rows it will have", () => {

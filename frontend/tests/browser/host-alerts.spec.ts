@@ -212,12 +212,12 @@ test("the page wires what is watched to each channel, leads with what fires and 
   })
 
   await page.goto("/metrics/alerts")
-  const watched = page.getByRole("group", { name: "What the rules watch" })
+  const watched = page.getByRole("region", { name: "What the rules watch" })
   await expect(watched).toContainText("1 firing")
   // Containers are drawn as Docker, the channel as its own service.
   await expect(watched.locator("img[src='/logos/docker.svg']")).toHaveCount(1)
   await expect(
-    page.getByRole("group", { name: "Who is told" }).locator("img[src='/logos/slack.svg']"),
+    page.getByRole("region", { name: "Who is told" }).locator("img[src='/logos/slack.svg']"),
   ).toHaveCount(1)
   const firing = page.getByRole("region", { name: "Firing" })
   await expect(firing.getByText("It exited with code 1.")).toBeVisible()
@@ -275,7 +275,7 @@ test("the page opens on what the rules are doing, with its verbs on that line", 
   await expect.poll(() => checks).toBe(1)
   // The line is the page's first block, over the picture, and no tile row.
   const first = (await line.boundingBox())!
-  const picture = (await page.getByRole("group", { name: "What the rules watch" }).boundingBox())!
+  const picture = (await page.getByRole("region", { name: "What the rules watch" }).boundingBox())!
   expect(first.y).toBeLessThan(picture.y)
   await expect(page.locator("[data-slot=stat-grid]")).toHaveCount(0)
 })
@@ -318,7 +318,7 @@ for (const width of [1280, 390]) {
     await page.route("**/api/v1/deploy/notifications", (route) => json(route, []))
     await page.goto("/metrics/alerts")
     const line = identity(page)
-    const picture = page.getByRole("group", { name: "What the rules watch" })
+    const picture = page.getByRole("region", { name: "What the rules watch" })
     const blocks = [
       line,
       picture,

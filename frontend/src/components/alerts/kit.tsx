@@ -1,25 +1,22 @@
 "use client"
 
-import { useId, useRef, type RefObject } from "react"
+import { useId } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
 import { Plus } from "@/components/icons"
 import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { NotificationChannel } from "@/lib/types"
-import { useBreakpoint } from "@/lib/breakpoints"
 import { ChoiceCard, ChoiceCardHint, ChoiceCardTitle, ChoiceGrid } from "@/components/choice-card"
 import { Field, FormNote, OptionList, OptionRow } from "@/components/form"
 import { ProductGlyph, ProductLogo, hasProductLogo } from "@/components/product-logo"
 import { ChannelGlyph } from "@/components/deploy/vocabulary"
 import { Bone } from "@/components/bone"
-import { WireHost, WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireLaneTitle } from "@/components/wire/wire-lane"
+import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { SidePanel, SidePanelFooter } from "@/components/side-panel"
 import { Button } from "@/components/ui/button"
 import {
-  PictureChannel,
+  channelNode,
   isFiring,
   pictureTargets,
   type AlertSubjectView,
@@ -187,11 +184,17 @@ export function KindCards<K extends string>({
 
 /**
  * What the rules watch, wired through this server to who is told: the
- * Notifications picture's shape, read left to right. A watched area is drawn
- * as its product; its wire is red while something there fires, amber while
- * one holds, moving where a rule watches it and dashed where none does, and
- * pressing an unwatched one opens a rule for it. A channel's wire moves while
- * an enabled rule reaches it; a paused one is still and grey.
+ * Notifications picture's shape, read left to right, and since 0.9.1 the same
+ * `WireFlow` that draws it. A watched area is drawn as its product; its wire
+ * is red while something there fires, amber while one holds, moving where a
+ * rule watches it and dashed where none does, and pressing an unwatched one
+ * opens a rule for it. A channel's wire moves while an enabled rule reaches
+ * it; a paused one is still and grey.
+ *
+ * It was laid by hand as one column a side, every area a row with its words
+ * beside it: the host's eight sources stood 480px tall in the middle third of
+ * the page. As a `WireFlow` of small marks they are rows on level lines, two
+ * rows of four on a wide page.
  *
  * While `waiting` (the rules not read yet) every area keeps its place without
  * its words, so nothing under the picture moves when they land.
@@ -230,167 +233,62 @@ export function AlertsPicture<K extends string>({
   /** The phone's form: the marks alone, or every word stacked. */
   phone?: "marks" | "stack"
 }) {
-  const wide = useBreakpoint("lg")
-  const stacked = !wide && phone === "stack"
-  // Stacked, no line is drawn: the nodes wire to a hub that is never placed.
-  const unwired = useRef<HTMLDivElement>(null)
-  const router = useRouter()
-  const container = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
   const enabled = rules.filter((rule) => rule.enabled)
-  const targets = pictureTargets(channels)
-  const hubTitle = waiting ? <Bone className="w-16" /> : title
-  const hubReach = waiting ? <Bone className="w-24" /> : reach
-
-  const areas = kinds.areas.map((area, index) => (
-    <PictureArea
-      key={area.key}
-      area={area}
-      index={index}
-      engine={engine}
-      rules={enabled.filter((rule) => area.kinds.includes(rule.kind))}
-      subjects={subjects.filter((s) => area.kinds.includes(s.kind))}
-      containerRef={container}
-      hubRef={stacked ? unwired : hub}
-      compact={!wide && !stacked}
-      waiting={waiting}
-      onAdd={onAdd}
-    />
-  ))
-  const channelNodes = targets.map((target) => (
-    <PictureChannel
-      key={target.key}
-      channel={target.channel}
-      kind={target.kind}
-      live={target.channel ? reaches(rules, target.channel) : false}
-      containerRef={container}
-      hubRef={stacked ? unwired : hub}
-      compact={!wide && !stacked}
-      onAdd={() => router.push("/deploy/notifications")}
-    />
-  ))
-
   return (
-    <div ref={container} className="relative mx-auto max-w-5xl">
-      {wide ? (
-        <div className="grid grid-cols-[minmax(0,1fr)_minmax(3rem,0.4fr)_auto_minmax(4.5rem,0.5fr)_minmax(0,1.1fr)] items-center">
-          <div
-            role="group"
-            aria-label="What the rules watch"
-            className="flex flex-col items-end gap-4"
-          >
-            {areas}
-          </div>
-          <div aria-hidden />
-          <WireNode
-            nodeRef={hub}
-            align="center"
-            mark={<WireHost />}
-            eyebrow="This server"
-            title={hubTitle}
-            hint={hubReach}
-          />
-          <div aria-hidden />
-          <div role="group" aria-label="Who is told" className="flex flex-col gap-4">
-            {channelNodes}
-          </div>
-        </div>
-      ) : stacked ? (
-        <div className="flex flex-col gap-8">
-          <div>
-            <WireLaneTitle title="Watched" className="mb-4" />
-            <div role="group" aria-label="What the rules watch" className="flex flex-col gap-4">
-              {areas}
-            </div>
-          </div>
-          <WireNode
-            mark={<WireHost size="md" />}
-            eyebrow="This server"
-            title={hubTitle}
-            hint={hubReach}
-          />
-          <div>
-            <WireLaneTitle title="Told" className="mb-4" />
-            <div role="group" aria-label="Who is told" className="flex flex-col gap-4">
-              {channelNodes}
-            </div>
-          </div>
-        </div>
-      ) : (
-        <div className="flex flex-col items-center text-center">
-          <p className="eyebrow">This server</p>
-          <p className="text-body leading-snug font-medium">{hubTitle}</p>
-          <p className="text-hint leading-snug text-muted-foreground">{hubReach}</p>
-          <div
-            role="group"
-            aria-label="What the rules watch"
-            className="mt-5 flex flex-wrap justify-center gap-4"
-          >
-            {areas}
-          </div>
-          <div ref={hub} className="relative z-raised mt-10 flex">
-            <WireHost size="md" />
-          </div>
-          <div
-            role="group"
-            aria-label="Who is told"
-            className="mt-10 flex flex-wrap justify-center gap-4"
-          >
-            {channelNodes}
-          </div>
-        </div>
-      )}
-    </div>
+    <WireFlow
+      phone={phone}
+      size="sm"
+      start={{
+        title: "What the rules watch",
+        nodes: kinds.areas.map((area) =>
+          areaNode({
+            area,
+            engine,
+            rules: enabled.filter((rule) => area.kinds.includes(rule.kind)),
+            subjects: subjects.filter((subject) => area.kinds.includes(subject.kind)),
+            waiting,
+            onAdd,
+          }),
+        ),
+      }}
+      hub={{
+        mark: (size) => <WireHost size={size} />,
+        eyebrow: "This server",
+        title: waiting ? <Bone className="w-16" /> : title,
+        hint: waiting ? <Bone className="w-24" /> : reach,
+      }}
+      end={{
+        title: "Who is told",
+        nodes: pictureTargets(channels).map((target) =>
+          channelNode(target, target.channel ? reaches(rules, target.channel) : false),
+        ),
+      }}
+    />
   )
 }
 
-/** One watched area in the picture's left column, with its wire to the server. */
-export function PictureArea<K extends string>({
+/** One watched area as the picture's node, with the wire its state draws. */
+function areaNode<K extends string>({
   area,
-  index,
   engine,
   rules,
   subjects,
-  containerRef,
-  hubRef,
-  compact,
   waiting,
   onAdd,
 }: {
   area: AlertArea<K>
-  /** Its place in the column, which staggers the wires. */
-  index: number
   engine?: string
+  /** The enabled rules that watch it. */
   rules: AlertRuleView<K>[]
   subjects: AlertSubjectView[]
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  compact: boolean
   waiting?: boolean
   onAdd?: (kind: K) => void
-}) {
-  const mark = useRef<HTMLDivElement>(null)
+}): WireFlowNode {
   const product = areaProduct(area, engine)
   const Glyph = area.fallback
   const { firing, holding } = alertCounts(subjects)
   const watched = rules.length > 0
   const tone = firing > 0 ? "danger" : holding > 0 ? "warning" : undefined
-  const size = compact ? "sm" : "md"
-  const glyph = hasProductLogo(product) ? <ProductGlyph id={product} /> : <Glyph aria-hidden />
-  const drawn = watched ? (
-    <WireMark tone={tone ?? "logo"} size={size}>
-      {glyph}
-    </WireMark>
-  ) : waiting ? (
-    <WirePlaceholder size={size} product={product} fallback={Glyph} />
-  ) : (
-    <WireLink
-      label={`Watch ${area.title.toLowerCase()}`}
-      onClick={onAdd ? () => onAdd(area.kinds[0]) : undefined}
-    >
-      <WirePlaceholder size={size} product={product} fallback={Glyph} />
-    </WireLink>
-  )
   const words = !watched
     ? "not watched"
     : firing > 0
@@ -398,53 +296,39 @@ export function PictureArea<K extends string>({
       : holding > 0
         ? `${holding} holding`
         : `${plural(rules.length, "rule")}, all quiet`
-  const beam = (
-    <AnimatedBeam
-      containerRef={containerRef}
-      fromRef={mark}
-      toRef={hubRef}
-      still={!watched || tone !== undefined}
-      dashed={!watched}
-      tone={tone ?? "default"}
-      duration={2.4}
-      delay={(index % 5) * 0.35}
-    />
-  )
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          {drawn}
-        </div>
-        <span className="sr-only">{`${area.title}: ${words}`}</span>
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        align="end"
-        mark={drawn}
-        title={watched ? area.title : <span className="text-muted-foreground">{area.title}</span>}
-        hint={
-          waiting ? (
-            <Bone className="w-16" />
-          ) : (
-            <span
-              className={cn(
-                tone === "danger" && "font-medium text-destructive",
-                tone === "warning" && "font-medium text-warning",
-              )}
-            >
-              {words}
-            </span>
-          )
-        }
-      />
-    </div>
-  )
+  return {
+    id: `area-${area.key}`,
+    name: `${area.title}: ${words}`,
+    label: watched ? undefined : `Watch ${area.title.toLowerCase()}`,
+    placeholder: !watched,
+    onPress: !watched && !waiting && onAdd ? () => onAdd(area.kinds[0]) : undefined,
+    mark: (size) =>
+      watched ? (
+        <WireMark tone={tone ?? "logo"} size={size}>
+          {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Glyph aria-hidden />}
+        </WireMark>
+      ) : (
+        <WirePlaceholder size={size} product={product} fallback={Glyph} />
+      ),
+    title: watched ? area.title : <span className="text-muted-foreground">{area.title}</span>,
+    hint: waiting ? (
+      <Bone className="w-16" />
+    ) : (
+      <span
+        className={cn(
+          tone === "danger" && "font-medium text-destructive",
+          tone === "warning" && "font-medium text-warning",
+        )}
+      >
+        {words}
+      </span>
+    ),
+    line: !watched
+      ? { state: "idle" }
+      : tone
+        ? { state: tone }
+        : { state: "up", moving: true, duration: 2.4 },
+  }
 }
 
 /**
