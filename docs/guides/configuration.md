@@ -63,6 +63,8 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | Variable | Default | Description |
 | --- | --- | --- |
 | `JD_FILE_ROOTS` | `/` | Directories the file manager may reach. |
+| `JD_FILES_TRASH_DAYS` | `30` | Days the Files page's Trash keeps what was deleted before removing it in the background; `0` keeps everything until the Trash is emptied. |
+| `JD_FILES_INDEX` | `true` | Find answers from an index of file names kept under `JD_DATA_DIR`; `false` walks the disk on every search instead. |
 | `JD_LOG_ROOTS` | `/var/log` | Directories the log viewer may read. |
 | `JD_COMPOSE_ROOTS` | `/opt,/srv,/home` | Where compose stacks are discovered. |
 | `JD_GIT_ROOTS` | `/opt,/srv,/home,/root` | Where the Git page looks for repositories. |

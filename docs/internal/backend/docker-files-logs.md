@@ -500,6 +500,65 @@ two-gigabyte log.
   10,000 entries directly inside it is refused (`422 disk_scan_limit`). A result limit controls the response
   size; it is not mistaken for a bound on the work needed to rank those results.
 
+**A delete goes to the Trash** (`files/trash.go`, routes in `handlers_files_trash.go`). Trashing is a
+rename and never a copy, so there is one Trash folder per filesystem: `<JD_DATA_DIR>/.jd-trash` for
+whatever is on the data directory's mount (the same path on the host), otherwise `.jd-trash` at the
+top of the entry's own mount, found from the mount table of the thread's namespace
+(`/proc/thread-self/mountinfo`, since the Files operations run on a thread that entered the host's).
+A Trash folder is made on first use, 0700, and must be a real directory this process owns or it is
+refused. Each item sits alone in `<folder>/<id>/<name>` with its owner, mode and contents untouched,
+beside a 0600 `<id>.json` record (where it came from, when, by whom, its size once measured in the
+background); the record is written before the rename, the rename is a no-replace `renameat2` from the
+source's folder opened through the pinned root, and the listing is read from the folders on every
+request, so it survives a lost database and an item whose record was lost is still listed (by its
+holder's only entry, with nowhere to restore it to). An entry that cannot go to the Trash is refused
+with the reason (`TrashUnavailableError`, a 409 `trash_unavailable`): a configured root, a mount point,
+anything in a Trash folder or holding one or the data directory, a read-only filesystem, a pseudo
+filesystem, or a mount whose top cannot hold the folder; `EXDEV` is refused too, never copied.
+`GET /files/trash/check` answers the same question without changing anything, and the page asks it
+before its confirmation. `DELETE /files/delete` trashes and answers `{trashed, path, item}`;
+`permanent=true` is the old delete. Restore (`POST /files/trash/restore`, a file write) resolves the
+recorded path through `ResolveEntry` again, remakes a vanished parent with `unmade`/`handDown`, and
+renames back with no-replace; a taken place is a 409 `already_exists` unless `conflict` is `keep`
+("name (2).ext") or `replace` (the occupant goes to the Trash). Deleting one item
+(`DELETE /files/trash/item`) and emptying (`DELETE /files/trash`) are behind `s.destructive`. An id is
+checked against `^[0-9a-f]{32}$` before it reaches a path. Items older than `JD_FILES_TRASH_DAYS` (30;
+0 keeps everything) are removed hourly by `expireFileTrash`, each removal an audit entry
+(`file.trash.expire`, actor `system`); the same sweep removes the leftovers of a trash that never
+finished. A move or copy with `overwrite` first puts what it replaces in the Trash
+(`trashReplaced`) and answers 200 `{replaced: {item}}` instead of 204: a move renames the occupant
+away; a copy keeps a regular file by a hard link, so the copy's atomic replacement still reads the old
+file's owner, mode and ACL, and renames a folder away (so Replace replaces rather than merges); a
+symbolic link at a copy's destination is left to Copy, which refuses it. If the operation then fails,
+the occupant is put back. Find, content search, a folder's measured size and an archive of a parent
+skip any folder named `.jd-trash`. `trash_test.go` covers same-filesystem and tmpfs-mount trashing
+(the second under `sudo`), restores with and without a conflict and into a vanished parent, owner and
+mode, links, containment, expiry and the refusals; `handlers_files_trash_test.go` the routes.
+
+**Find answers from a name index** (`files/index.go`, wired in `handlers_files_index.go`) unless
+`JD_FILES_INDEX=false`. The index is `<JD_DATA_DIR>/files-index/names.idx` (0600 in a 0700 folder, with
+`names.json` beside it): a line `\x01<folder>` for each folder followed by a kind letter and the name
+for each entry in it, written depth first by a walk on a thread of its own at nice 19 and the idle I/O
+class, never following a link, reading a folder 4,096 entries at a time, and published by a rename. It
+is built two minutes after start when missing or six hours old, and in the background when a search
+finds it more than an hour old. The walk leaves out `/proc`, `/sys`, `/dev`, `/run`, `/var/run`,
+Docker's and containerd's layer and container stores under `/var/lib/docker` and `/var/lib/containerd`,
+the index's own folder, Trash folders, the contents of the folders `find.go` never enters
+(`node_modules`, `.git`, `vendor` and the rest of `skipDirs`), and every mount of a pseudo or network
+filesystem (`proc`, `sysfs`, `cgroup`, `nfs`, `cifs`, `sshfs` and the rest of `pseudoFS` and
+`networkFS`); names containing a newline are left to the walk. A search streams the file through a
+256 KiB buffer, tests each line with a byte subsequence filter, scores the survivors with `find.go`'s
+own `scoreCandidate` and keeps the best `limit*2+20` in a heap, so its memory is bounded by the limit,
+not the server. Every kept result is resolved through `ResolveEntry` and `Lstat`ed before it is
+returned: gone, moved out of the roots, or reached through a link that now leads out of them, it is
+dropped. Beside it a 300 ms walk of the folder on screen (`here`, else the search's root) is rebased
+onto the search's root and merged, so a file made a moment ago is found. The answer carries
+`source` (`index` or `walk`) and `index` (`builtAt`, `ageSeconds`, `entries`, `complete`, `building`);
+`truncated` means the index's walk stopped on its bounds. Before the first build, and with the switch
+off, Find is the walk it was. `index_test.go` covers build, refresh, vanished results, containment, the
+skipped trees, the merge, and half a million names searched in well under a second with a few MiB
+allocated.
+
 Bookmarks live in the `settings` table (`handlers_files_browse.go`), not the browser — which directory
 matters is a fact about the server and should be there from a phone. Recent folders are the opposite and
 stay in `useViewState`. The bookmark list is saved whole, so an add, a removal and a reorder cannot

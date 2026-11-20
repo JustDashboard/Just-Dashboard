@@ -93,6 +93,8 @@ services:
       JD_GIT_ROOTS: ${JD_GIT_ROOTS:-/opt,/srv,/home,/root}
       JD_LOG_ROOTS: ${JD_LOG_ROOTS:-/var/log}
       JD_FILE_ROOTS: ${JD_FILE_ROOTS:-/}
+      JD_FILES_TRASH_DAYS: ${JD_FILES_TRASH_DAYS:-30}
+      JD_FILES_INDEX: ${JD_FILES_INDEX:-true}
       JD_DEPLOY_ROOTS: ${JD_DEPLOY_ROOTS:-/opt,/srv,/home,/root}
       # Persistent deployment worker capacity and stale-claim recovery.
       JD_DEPLOY_HEAVY_SLOTS: ${JD_DEPLOY_HEAVY_SLOTS:-1}

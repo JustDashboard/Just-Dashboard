@@ -15,6 +15,8 @@ A real terminal, files, Git, drawings and your own computers, all in the same br
 
 - A file manager with search, previews, Monaco and image editors
 - Files and the file editor one pane at a time on a phone, with a bottom bar for places, the folder and its details
+- A Trash for everything deleted in Files, kept 30 days, with Restore, and Undo (or Ctrl+Z) after a delete, move, rename or copy
+- Find that answers from an index of every name on the server, however big the tree
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs, with the screenshots and videos a pull request embeds drawn in place
 - One pane at a time on a phone, with a bottom bar for changes, history, branches, GitHub and files
