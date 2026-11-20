@@ -139,6 +139,9 @@ type Trash struct {
 
 	mu        sync.Mutex
 	measuring map[string]bool
+	// afterPin, in tests, runs once a Trash folder is pinned and before it
+	// is used: where a swap of the folder's name would have to land.
+	afterPin func(folder string)
 }
 
 // NewTrash keeps items for keepDays days; 0 keeps them until emptied.
@@ -184,6 +187,23 @@ func (t *Trash) Check(path string) (plan *TrashPlan, err error) {
 		}
 		plan = &TrashPlan{Path: full, KeepDays: t.KeepDays()}
 		folder, why := t.folderFor(s, full)
+		if why == nil {
+			var pinned *pinnedFolder
+			pinned, why = t.pin(folder, false)
+			switch {
+			case errors.Is(why, errNoTrashFolder):
+				// Not there yet is fine: the first item makes it. Whether the
+				// place can hold it is tested by making it, so a check only
+				// asks that the folder above is a directory.
+				if parent, err := os.Stat(filepath.Dir(folder)); err != nil || !parent.IsDir() {
+					why = unavailable("the top of its filesystem cannot hold a Trash folder")
+				} else {
+					why = nil
+				}
+			case why == nil:
+				pinned.Close()
+			}
+		}
 		if why != nil {
 			var refusal *TrashUnavailableError
 			if errors.As(why, &refusal) {
@@ -192,10 +212,6 @@ func (t *Trash) Check(path string) (plan *TrashPlan, err error) {
 			}
 			err = why
 			plan = nil
-			return
-		}
-		if why := checkFolder(folder, false); why != nil {
-			plan.Reason = why.Error()
 			return
 		}
 		plan.Available, plan.Folder = true, folder
@@ -239,15 +255,16 @@ func (t *Trash) put(s *Service, path, actor string, replaced, link bool) (*Trash
 	if err != nil {
 		return nil, err
 	}
-	if err := checkFolder(folder, true); err != nil {
+	bin, err := t.pin(folder, true)
+	if err != nil {
 		return nil, err
 	}
+	defer bin.Close()
 	id, err := newTrashID()
 	if err != nil {
 		return nil, err
 	}
-	holder := filepath.Join(folder, id)
-	if err := os.Mkdir(holder, 0o700); err != nil {
+	if err := bin.root.Mkdir(id, 0o700); err != nil {
 		return nil, err
 	}
 	name := filepath.Base(full)
@@ -260,29 +277,33 @@ func (t *Trash) put(s *Service, path, actor string, replaced, link bool) (*Trash
 	// The record first: an item without one would be in the Trash with no
 	// way back to where it came from, and a record without an item is
 	// skipped by the listing and swept by the next expiry.
-	if err := writeTrashRecord(folder, record); err != nil {
-		os.Remove(holder)
+	if err := writeTrashRecord(bin.root, record); err != nil {
+		bin.root.Remove(id)
 		return nil, err
 	}
 	discard := func() {
-		os.Remove(filepath.Join(folder, id+".json"))
-		os.Remove(holder)
+		bin.root.Remove(id + ".json")
+		bin.root.Remove(id)
 	}
-	if err := s.moveIntoTrash(full, holder, name, link); err != nil {
+	holder, err := bin.root.OpenFile(id, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err != nil {
 		discard()
 		return nil, err
 	}
-	item, err := t.item(folder, record)
+	err = s.moveIntoTrash(full, holder, name, link)
+	holder.Close()
 	if err != nil {
+		discard()
 		return nil, err
 	}
-	return item, nil
+	return t.item(bin, record)
 }
 
 // moveIntoTrash renames (or, with link, hard-links) the entry at full into
-// holder. The source's folder is opened through the pinned root, so a link
-// swapped in above it after the resolve cannot redirect the rename.
-func (s *Service) moveIntoTrash(full, holder, name string, link bool) error {
+// holder, a folder inside a pinned Trash folder. The source's folder is
+// opened through the pinned root of the file roots, so a link swapped in
+// above it after the resolve cannot redirect the rename either.
+func (s *Service) moveIntoTrash(full string, holder *os.File, name string, link bool) error {
 	root, rel, err := s.openRootEntry(full)
 	if err != nil {
 		return err
@@ -293,12 +314,7 @@ func (s *Service) moveIntoTrash(full, holder, name string, link bool) error {
 		return err
 	}
 	defer parent.Close()
-	into, err := os.OpenFile(holder, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer into.Close()
-	from, to := int(parent.Fd()), int(into.Fd())
+	from, to := int(parent.Fd()), int(holder.Fd())
 	if link {
 		err = unix.Linkat(from, name, to, name, 0)
 	} else {
@@ -317,7 +333,7 @@ func (s *Service) moveIntoTrash(full, holder, name string, link bool) error {
 	case errors.Is(err, unix.EBUSY):
 		return unavailable("it is in use as a mount point")
 	case err != nil:
-		return &os.LinkError{Op: "trash", Old: full, New: holder, Err: err}
+		return &os.LinkError{Op: "trash", Old: full, New: holder.Name(), Err: err}
 	}
 	return nil
 }
@@ -419,47 +435,109 @@ func deviceOf(path string) (uint64, bool) {
 	return uint64(st.Dev), true
 }
 
-// checkFolder makes sure folder is the dashboard's own Trash folder: a real
-// directory, this process's, closed to everyone else. With create it is made
-// when missing, and its mode closed again if somebody opened it.
-func checkFolder(folder string, create bool) error {
-	info, err := os.Lstat(folder)
-	if errors.Is(err, fs.ErrNotExist) {
-		if !create {
-			// Not there yet is fine: the first item makes it. Whether the
-			// place can hold it is tested by making it, so a check only asks
-			// that the folder above is a directory.
-			if parent, err := os.Stat(filepath.Dir(folder)); err != nil || !parent.IsDir() {
-				return unavailable("the top of its filesystem cannot hold a Trash folder")
-			}
-			return nil
+// errNoTrashFolder is a Trash folder that has not been made yet.
+var errNoTrashFolder = errors.New("no Trash folder there yet")
+
+// pinnedFolder is a Trash folder opened once, checked on the handle, and
+// used through that handle alone.
+//
+// The top of a mount is often not root's — a data disk handed to an app's
+// account, with no sticky bit — and that account can rename `.jd-trash` aside
+// and put a link or a folder of its own in its place at any moment. A folder
+// checked by its path and then used by its path again would let it choose
+// where root writes a deleted item, which records are read back, and so where
+// a restore puts a file. So the folder is opened without following a link in
+// its own name, its owner and mode are read from the open handle, and every
+// later step — making a holder, writing and reading records, listing,
+// renaming in and out, removing, measuring — goes through an os.Root made
+// from that handle. path is kept for messages and for the page, never to
+// reach the folder again.
+type pinnedFolder struct {
+	path string
+	root *os.Root
+	dev  uint64
+	ino  uint64
+}
+
+func (p *pinnedFolder) Close() { p.root.Close() }
+
+// pin opens the Trash folder at path. With create it is made when missing.
+// A name that is a link, not a directory, another account's, or that cannot
+// be made is refused with the reason (a *TrashUnavailableError); a missing
+// folder without create is errNoTrashFolder.
+func (t *Trash) pin(path string, create bool) (*pinnedFolder, error) {
+	const flags = unix.O_RDONLY | unix.O_DIRECTORY | unix.O_NOFOLLOW | unix.O_CLOEXEC
+	fd, err := unix.Open(path, flags, 0)
+	made := false
+	if errors.Is(err, unix.ENOENT) && create {
+		if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+			return nil, unavailable("the top of its filesystem cannot hold a Trash folder")
 		}
-		if err := os.MkdirAll(filepath.Dir(folder), 0o700); err != nil {
-			return unavailable("the top of its filesystem cannot hold a Trash folder")
-		}
-		if err := os.Mkdir(folder, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		if err := unix.Mkdir(path, 0o700); err != nil && !errors.Is(err, unix.EEXIST) {
 			if errors.Is(err, unix.EROFS) {
-				return unavailable("its filesystem is read-only")
+				return nil, unavailable("its filesystem is read-only")
 			}
-			return unavailable("the top of its filesystem cannot hold a Trash folder")
+			return nil, unavailable("the top of its filesystem cannot hold a Trash folder")
+		} else if err == nil {
+			made = true
 		}
-		info, err = os.Lstat(folder)
+		fd, err = unix.Open(path, flags, 0)
 	}
+	switch {
+	case errors.Is(err, unix.ENOENT):
+		return nil, errNoTrashFolder
+	case errors.Is(err, unix.ELOOP), errors.Is(err, unix.ENOTDIR):
+		return nil, unavailable("%s is not a folder the dashboard made", path)
+	case err != nil:
+		return nil, unavailable("%s cannot be opened: %v", path, err)
+	}
+	var st unix.Stat_t
+	if err := unix.Fstat(fd, &st); err != nil {
+		unix.Close(fd)
+		return nil, err
+	}
+	if st.Mode&unix.S_IFMT != unix.S_IFDIR {
+		unix.Close(fd)
+		return nil, unavailable("%s is not a folder the dashboard made", path)
+	}
+	if int(st.Uid) != os.Geteuid() {
+		unix.Close(fd)
+		return nil, unavailable("%s belongs to another account, not the dashboard", path)
+	}
+	if st.Mode&0o077 != 0 {
+		if !made {
+			// Somebody opened the dashboard's folder to other accounts, and
+			// what they could put in it while it was open (a record naming
+			// any path, an item to go there) is not the dashboard's to trust.
+			unix.Close(fd)
+			return nil, unavailable("%s is open to other accounts; check what is in it, then close it (chmod 700)", path)
+		}
+		// Made just now under a umask that left it open: closed on the
+		// handle before anything is put in it.
+		if err := unix.Fchmod(fd, 0o700); err != nil {
+			unix.Close(fd)
+			return nil, unavailable("%s could not be closed to other accounts", path)
+		}
+	}
+	// os.Root opens by name; the descriptor's own entry in /proc names the
+	// directory it holds, whatever has been renamed since, and the identity
+	// is compared after.
+	root, err := os.OpenRoot(fmt.Sprintf("/proc/self/fd/%d", fd))
+	unix.Close(fd)
 	if err != nil {
-		return err
+		return nil, unavailable("%s could not be held open: %v", path, err)
 	}
-	if info.Mode()&os.ModeSymlink != 0 || !info.IsDir() {
-		return unavailable("%s is not a folder the dashboard made", folder)
+	held, err := root.Stat(".")
+	sys, ok := held.Sys().(*syscall.Stat_t)
+	if err != nil || !ok || uint64(sys.Dev) != uint64(st.Dev) || sys.Ino != st.Ino {
+		root.Close()
+		return nil, unavailable("%s changed while it was opened", path)
 	}
-	if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Geteuid() {
-		return unavailable("%s belongs to another account, not the dashboard", folder)
+	pinned := &pinnedFolder{path: path, root: root, dev: uint64(st.Dev), ino: st.Ino}
+	if t.afterPin != nil {
+		t.afterPin(path)
 	}
-	if info.Mode().Perm() != 0o700 && create {
-		if err := os.Chmod(folder, 0o700); err != nil {
-			return err
-		}
-	}
-	return nil
+	return pinned, nil
 }
 
 func newTrashID() (string, error) {
@@ -470,35 +548,36 @@ func newTrashID() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-func writeTrashRecord(folder string, record trashRecord) error {
+func writeTrashRecord(bin *os.Root, record trashRecord) error {
 	encoded, err := json.Marshal(record)
 	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(folder, ".record-*")
+	token, err := newTrashID()
 	if err != nil {
 		return err
 	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(encoded); err != nil {
-		tmp.Close()
+	tmp := ".record-" + token
+	f, err := bin.OpenFile(tmp, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	if err != nil {
 		return err
 	}
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+	defer bin.Remove(tmp)
+	if _, err := f.Write(encoded); err != nil {
+		f.Close()
 		return err
 	}
-	if err := tmp.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), filepath.Join(folder, record.ID+".json"))
+	return bin.Rename(tmp, record.ID+".json")
 }
 
-// readTrashRecord reads an item's record, or makes one up from the folder for
-// an item whose record was lost: it is still listed, and can still be removed,
-// but there is nowhere recorded to restore it to.
-func readTrashRecord(folder, id string) (trashRecord, error) {
-	raw, err := os.ReadFile(filepath.Join(folder, id+".json"))
+// readTrashRecord reads an item's record, or makes one up from the holder for
+// an item whose record was lost: it is still listed, and can still be
+// removed, but there is nowhere recorded to restore it to.
+func readTrashRecord(bin *os.Root, id string) (trashRecord, error) {
+	raw, err := bin.ReadFile(id + ".json")
 	if err == nil {
 		var record trashRecord
 		if err := json.Unmarshal(raw, &record); err != nil {
@@ -512,12 +591,11 @@ func readTrashRecord(folder, id string) (trashRecord, error) {
 	if !errors.Is(err, fs.ErrNotExist) {
 		return trashRecord{}, err
 	}
-	holder := filepath.Join(folder, id)
-	entries, readErr := os.ReadDir(holder)
+	entries, readErr := fs.ReadDir(bin.FS(), id)
 	if readErr != nil || len(entries) != 1 {
 		return trashRecord{}, err
 	}
-	info, statErr := os.Lstat(holder)
+	info, statErr := bin.Lstat(id)
 	if statErr != nil {
 		return trashRecord{}, err
 	}
@@ -529,25 +607,29 @@ func validTrashName(name string) bool {
 }
 
 // item reads what is in the Trash under record, as the page lists it.
-func (t *Trash) item(folder string, record trashRecord) (*TrashItem, error) {
-	full := filepath.Join(folder, record.ID, record.Name)
-	entry, err := t.svc.inPlace().entry(full, record.Name)
+func (t *Trash) item(bin *pinnedFolder, record trashRecord) (*TrashItem, error) {
+	held := filepath.Join(record.ID, record.Name)
+	info, err := bin.root.Lstat(held)
 	if err != nil {
 		return nil, err
 	}
 	item := &TrashItem{
 		ID: record.ID, Name: record.Name, OriginalPath: record.Path, DeletedAt: record.DeletedAt,
 		DeletedBy: record.DeletedBy, Replaced: record.Replaced,
-		IsDir: entry.IsDir && !entry.IsSymlink, IsSymlink: entry.IsSymlink, LinkTarget: entry.LinkTarget,
+		IsDir: info.IsDir(), IsSymlink: info.Mode()&os.ModeSymlink != 0,
 		Size: record.Size, SizeKnown: record.SizeKnown, SizePartial: record.SizePartial,
-		Owner: entry.Owner, Group: entry.Group, Mode: entry.Mode, ModeOctal: entry.ModeOctal,
-		Folder: folder,
+		Mode: info.Mode().String(), ModeOctal: fmt.Sprintf("%04o", info.Mode().Perm()),
+		Folder: bin.path,
 	}
-	if entry.IsSymlink {
+	if item.IsSymlink {
 		// A link's own size, not what it points at: the Trash holds the link.
-		if li, err := os.Lstat(full); err == nil {
-			item.Size, item.SizeKnown = li.Size(), true
+		item.Size, item.SizeKnown = info.Size(), true
+		if target, err := bin.root.Readlink(held); err == nil {
+			item.LinkTarget = target
 		}
+	}
+	if st, ok := info.Sys().(*syscall.Stat_t); ok {
+		item.Owner, item.Group = lookupUser(st.Uid), lookupGroup(st.Gid)
 	}
 	if t.keep > 0 {
 		expires := record.DeletedAt.Add(t.keep)
@@ -556,50 +638,65 @@ func (t *Trash) item(folder string, record trashRecord) (*TrashItem, error) {
 	return item, nil
 }
 
-// folders are the Trash folders that exist: the data directory's, and one at
-// the top of each mount. Anything of the name that is not a directory this
-// process owns is not a Trash folder and is left alone.
-func (t *Trash) folders(s *Service) []string {
-	seen := map[string]bool{}
+// candidates are where Trash folders can be: the data directory's, and one at
+// the top of each mount and each root.
+func (t *Trash) candidates(s *Service) []string {
 	var out []string
-	consider := func(folder string) {
-		if seen[folder] {
-			return
-		}
-		seen[folder] = true
-		info, err := os.Lstat(folder)
-		if err != nil || !info.IsDir() || info.Mode()&os.ModeSymlink != 0 {
-			return
-		}
-		if st, ok := info.Sys().(*syscall.Stat_t); ok && int(st.Uid) != os.Geteuid() {
-			return
-		}
-		out = append(out, folder)
-	}
 	if t.dataDir != "" {
 		dataDir := t.dataDir
 		if resolved, err := resolveFromExistingAncestor(dataDir); err == nil {
 			dataDir = resolved
 		}
-		consider(filepath.Join(dataDir, TrashFolderName))
+		out = append(out, filepath.Join(dataDir, TrashFolderName))
 	}
 	mounts, _ := readMountTable()
 	for _, m := range mounts {
-		if pseudoFS[m.FSType] {
-			continue
+		if !pseudoFS[m.FSType] {
+			out = append(out, filepath.Join(m.Path, TrashFolderName))
 		}
-		consider(filepath.Join(m.Path, TrashFolderName))
 	}
 	for _, root := range s.roots {
-		consider(filepath.Join(root, TrashFolderName))
+		out = append(out, filepath.Join(root, TrashFolderName))
 	}
 	sort.Strings(out)
 	return out
 }
 
-// ids lists the items in one Trash folder by the folders that hold them.
-func trashIDs(folder string) []string {
-	entries, err := os.ReadDir(folder)
+// pinAll pins every Trash folder that exists and is the dashboard's own,
+// each once; anything of the name that is not is skipped and never read.
+// The caller closes them.
+func (t *Trash) pinAll(s *Service) []*pinnedFolder {
+	seenPath := map[string]bool{}
+	seenDir := map[[2]uint64]bool{}
+	var out []*pinnedFolder
+	for _, path := range t.candidates(s) {
+		if seenPath[path] {
+			continue
+		}
+		seenPath[path] = true
+		bin, err := t.pin(path, false)
+		if err != nil {
+			continue
+		}
+		if seenDir[[2]uint64{bin.dev, bin.ino}] {
+			bin.Close()
+			continue
+		}
+		seenDir[[2]uint64{bin.dev, bin.ino}] = true
+		out = append(out, bin)
+	}
+	return out
+}
+
+func closeAll(bins []*pinnedFolder) {
+	for _, bin := range bins {
+		bin.Close()
+	}
+}
+
+// trashIDs lists the items in one Trash folder by the holders that hold them.
+func trashIDs(bin *os.Root) []string {
+	entries, err := fs.ReadDir(bin.FS(), ".")
 	if err != nil {
 		return nil
 	}
@@ -617,13 +714,15 @@ func (t *Trash) List() (listing *TrashListing, err error) {
 	var unmeasured [][2]string
 	t.on(func(s *Service) {
 		listing = &TrashListing{Items: []TrashItem{}, KeepDays: t.KeepDays()}
-		for _, folder := range t.folders(s) {
-			for _, id := range trashIDs(folder) {
-				record, err := readTrashRecord(folder, id)
+		bins := t.pinAll(s)
+		defer closeAll(bins)
+		for _, bin := range bins {
+			for _, id := range trashIDs(bin.root) {
+				record, err := readTrashRecord(bin.root, id)
 				if err != nil {
 					continue
 				}
-				item, err := t.item(folder, record)
+				item, err := t.item(bin, record)
 				if err != nil {
 					continue
 				}
@@ -633,7 +732,7 @@ func (t *Trash) List() (listing *TrashListing, err error) {
 					listing.Partial = true
 				}
 				if !item.SizeKnown {
-					unmeasured = append(unmeasured, [2]string{folder, id})
+					unmeasured = append(unmeasured, [2]string{bin.path, id})
 				}
 			}
 		}
@@ -647,25 +746,36 @@ func (t *Trash) List() (listing *TrashListing, err error) {
 	return listing, nil
 }
 
-// find locates an item by id in whichever Trash folder holds it. An id is
-// checked against its pattern before it reaches a path, so it can only ever
-// name a folder directly inside a Trash folder.
-func (t *Trash) find(s *Service, id string) (string, trashRecord, error) {
+// find locates an item by id in whichever Trash folder holds it, and returns
+// that folder pinned; the caller closes it. An id is checked against its
+// pattern before it is used as a name, so it can only ever name an entry
+// directly inside a pinned Trash folder.
+func (t *Trash) find(s *Service, id string) (*pinnedFolder, trashRecord, error) {
 	if !trashIDPattern.MatchString(id) {
-		return "", trashRecord{}, fmt.Errorf("%w: %q is not a Trash id", ErrNotInTrash, id)
+		return nil, trashRecord{}, fmt.Errorf("%w: %q is not a Trash id", ErrNotInTrash, id)
 	}
-	for _, folder := range t.folders(s) {
-		info, err := os.Lstat(filepath.Join(folder, id))
+	bins := t.pinAll(s)
+	var found *pinnedFolder
+	defer func() {
+		for _, bin := range bins {
+			if bin != found {
+				bin.Close()
+			}
+		}
+	}()
+	for _, bin := range bins {
+		info, err := bin.root.Lstat(id)
 		if err != nil || !info.IsDir() {
 			continue
 		}
-		record, err := readTrashRecord(folder, id)
+		record, err := readTrashRecord(bin.root, id)
 		if err != nil {
-			return "", trashRecord{}, err
+			return nil, trashRecord{}, err
 		}
-		return folder, record, nil
+		found = bin
+		return bin, record, nil
 	}
-	return "", trashRecord{}, ErrNotInTrash
+	return nil, trashRecord{}, ErrNotInTrash
 }
 
 // Restore conflict choices, the ones the page offers for every other name
@@ -704,10 +814,11 @@ func (t *Trash) restore(s *Service, id, conflict, actor string) (*Restored, *Tra
 	default:
 		return nil, nil, fmt.Errorf("conflict must be empty, %q or %q", RestoreReplace, RestoreKeep)
 	}
-	folder, record, err := t.find(s, id)
+	bin, record, err := t.find(s, id)
 	if err != nil {
 		return nil, nil, err
 	}
+	defer bin.Close()
 	if record.Path == "" {
 		return nil, nil, errors.New("where this came from was not recorded; move it out of the Trash folder by hand")
 	}
@@ -745,15 +856,22 @@ func (t *Trash) restore(s *Service, id, conflict, actor string) (*Restored, *Tra
 				return nil, nil, err
 			}
 		case RestoreKeep:
-			name = freeName(dir, name)
+			name, err = freeName(dir, name)
+			if err != nil {
+				return nil, nil, err
+			}
 		default:
 			return nil, nil, fmt.Errorf("%w: %s", fs.ErrExist, target)
 		}
 	} else if !errors.Is(err, fs.ErrNotExist) {
 		return nil, nil, err
 	}
-	holder := filepath.Join(folder, id)
-	if err := s.moveOutOfTrash(holder, record.Name, filepath.Join(dir, name)); err != nil {
+	holder, err := bin.root.OpenFile(id, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
+	if err == nil {
+		err = s.moveOutOfTrash(holder, record.Name, filepath.Join(dir, name))
+		holder.Close()
+	}
+	if err != nil {
 		if displaced != nil {
 			// Put back what was displaced: a restore that failed must not
 			// also have emptied the place it was going to.
@@ -763,14 +881,14 @@ func (t *Trash) restore(s *Service, id, conflict, actor string) (*Restored, *Tra
 		}
 		return nil, nil, err
 	}
-	os.Remove(filepath.Join(folder, id+".json"))
-	os.Remove(holder)
+	bin.root.Remove(id + ".json")
+	bin.root.Remove(id)
 	return &Restored{Path: filepath.Join(dir, name), Name: name, Replaced: displaced}, displaced, nil
 }
 
 // moveOutOfTrash renames the item in holder to target, refusing to replace
 // anything that claimed target in the meantime.
-func (s *Service) moveOutOfTrash(holder, name, target string) error {
+func (s *Service) moveOutOfTrash(holder *os.File, name, target string) error {
 	root, rel, err := s.openRootEntry(target)
 	if err != nil {
 		return err
@@ -781,69 +899,69 @@ func (s *Service) moveOutOfTrash(holder, name, target string) error {
 		return err
 	}
 	defer parent.Close()
-	from, err := os.OpenFile(holder, os.O_RDONLY|syscall.O_DIRECTORY|syscall.O_NOFOLLOW, 0)
-	if err != nil {
-		return err
-	}
-	defer from.Close()
-	err = unix.Renameat2(int(from.Fd()), name, int(parent.Fd()), filepath.Base(rel), unix.RENAME_NOREPLACE)
+	from := int(holder.Fd())
+	err = unix.Renameat2(from, name, int(parent.Fd()), filepath.Base(rel), unix.RENAME_NOREPLACE)
 	if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) {
-		// No no-replace rename here: a hard link claims the name only if it
-		// is free, for a file; a folder is checked and renamed.
+		// No no-replace rename here: the name is checked, then renamed.
 		if _, statErr := os.Lstat(target); statErr == nil {
 			return fmt.Errorf("%w: %s", fs.ErrExist, target)
 		}
-		err = unix.Renameat(int(from.Fd()), name, int(parent.Fd()), filepath.Base(rel))
+		err = unix.Renameat(from, name, int(parent.Fd()), filepath.Base(rel))
 	}
 	switch {
 	case errors.Is(err, unix.EEXIST), errors.Is(err, unix.ENOTEMPTY):
 		return fmt.Errorf("%w: %s", fs.ErrExist, target)
 	case errors.Is(err, unix.EXDEV):
-		return fmt.Errorf("the folder it came from is now on another filesystem, so it cannot be moved back in one step; copy it out of %s by hand", holder)
+		return fmt.Errorf("the folder it came from is now on another filesystem, so it cannot be moved back in one step; copy it out of the Trash by hand")
 	case err != nil:
-		return &os.LinkError{Op: "restore", Old: filepath.Join(holder, name), New: target, Err: err}
+		return &os.LinkError{Op: "restore", Old: name, New: target, Err: err}
 	}
 	return nil
 }
 
+// freeNameLimit bounds the search for a "keep both" name.
+const freeNameLimit = 10_000
+
 // freeName is name, or "name (2).ext" and up, whichever is not taken in dir:
 // the page's own "keep both" for a transfer.
-func freeName(dir, name string) string {
+func freeName(dir, name string) (string, error) {
 	stem, ext := name, ""
 	if dot := strings.LastIndexByte(name, '.'); dot > 0 {
 		stem, ext = name[:dot], name[dot:]
 	}
-	for n := 2; ; n++ {
+	for n := 2; n <= freeNameLimit; n++ {
 		candidate := fmt.Sprintf("%s (%d)%s", stem, n, ext)
 		if _, err := os.Lstat(filepath.Join(dir, candidate)); errors.Is(err, fs.ErrNotExist) {
-			return candidate
+			return candidate, nil
 		}
 	}
+	return "", fmt.Errorf("%w: every name from %s (2) to (%d) is taken in %s", fs.ErrExist, stem, freeNameLimit, dir)
 }
 
 // Remove deletes one item for good, and returns what it was.
 func (t *Trash) Remove(id string) (item *TrashItem, err error) {
 	t.on(func(s *Service) {
-		var folder string
+		var bin *pinnedFolder
 		var record trashRecord
-		folder, record, err = t.find(s, id)
+		bin, record, err = t.find(s, id)
 		if err != nil {
 			return
 		}
-		item, _ = t.item(folder, record)
+		defer bin.Close()
+		item, _ = t.item(bin, record)
 		if item == nil {
-			item = &TrashItem{ID: id, Name: record.Name, OriginalPath: record.Path, Folder: folder}
+			item = &TrashItem{ID: id, Name: record.Name, OriginalPath: record.Path, Folder: bin.path}
 		}
-		err = removeTrashItem(folder, id)
+		err = removeTrashItem(bin.root, id)
 	})
 	return item, err
 }
 
-func removeTrashItem(folder, id string) error {
-	if err := os.RemoveAll(filepath.Join(folder, id)); err != nil {
+func removeTrashItem(bin *os.Root, id string) error {
+	if err := bin.RemoveAll(id); err != nil {
 		return err
 	}
-	if err := os.Remove(filepath.Join(folder, id+".json")); err != nil && !errors.Is(err, fs.ErrNotExist) {
+	if err := bin.Remove(id + ".json"); err != nil && !errors.Is(err, fs.ErrNotExist) {
 		return err
 	}
 	return nil
@@ -860,10 +978,12 @@ func (t *Trash) Discard(id string) error {
 func (t *Trash) Empty() (removed int, bytes int64, err error) {
 	t.on(func(s *Service) {
 		var errs []error
-		for _, folder := range t.folders(s) {
-			for _, id := range trashIDs(folder) {
-				record, _ := readTrashRecord(folder, id)
-				if err := removeTrashItem(folder, id); err != nil {
+		bins := t.pinAll(s)
+		defer closeAll(bins)
+		for _, bin := range bins {
+			for _, id := range trashIDs(bin.root) {
+				record, _ := readTrashRecord(bin.root, id)
+				if err := removeTrashItem(bin.root, id); err != nil {
 					errs = append(errs, err)
 					continue
 				}
@@ -892,15 +1012,17 @@ func (t *Trash) Expire() (gone []Expired, err error) {
 	t.on(func(s *Service) {
 		now := t.now()
 		var errs []error
-		for _, folder := range t.folders(s) {
-			entries, _ := os.ReadDir(folder)
+		bins := t.pinAll(s)
+		defer closeAll(bins)
+		for _, bin := range bins {
+			entries, _ := fs.ReadDir(bin.root.FS(), ".")
 			for _, e := range entries {
 				name := e.Name()
 				if strings.HasSuffix(name, ".json") && trashIDPattern.MatchString(strings.TrimSuffix(name, ".json")) {
 					id := strings.TrimSuffix(name, ".json")
-					if _, err := os.Lstat(filepath.Join(folder, id)); errors.Is(err, fs.ErrNotExist) {
+					if _, err := bin.root.Lstat(id); errors.Is(err, fs.ErrNotExist) {
 						if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > time.Hour {
-							os.Remove(filepath.Join(folder, name))
+							bin.root.Remove(name)
 						}
 					}
 					continue
@@ -908,21 +1030,20 @@ func (t *Trash) Expire() (gone []Expired, err error) {
 				if !e.IsDir() || !trashIDPattern.MatchString(name) {
 					continue
 				}
-				holder := filepath.Join(folder, name)
-				if inside, _ := os.ReadDir(holder); len(inside) == 0 {
+				if inside, _ := fs.ReadDir(bin.root.FS(), name); len(inside) == 0 {
 					if info, err := e.Info(); err == nil && now.Sub(info.ModTime()) > time.Hour {
-						removeTrashItem(folder, name)
+						removeTrashItem(bin.root, name)
 					}
 					continue
 				}
 				if t.keep <= 0 {
 					continue
 				}
-				record, err := readTrashRecord(folder, name)
+				record, err := readTrashRecord(bin.root, name)
 				if err != nil || now.Sub(record.DeletedAt) < t.keep {
 					continue
 				}
-				if err := removeTrashItem(folder, name); err != nil {
+				if err := removeTrashItem(bin.root, name); err != nil {
 					errs = append(errs, err)
 					continue
 				}
@@ -939,7 +1060,8 @@ const trashMeasureVisits = 2_000_000
 
 // measureLater sizes a trashed folder in the background and writes the size
 // into its record, so the listing can say how much the Trash holds without
-// walking every folder in it on every visit.
+// walking every folder in it on every visit. The folder is pinned again for
+// it, with the same checks as every other use.
 func (t *Trash) measureLater(folder, id string) {
 	key := folder + "/" + id
 	t.mu.Lock()
@@ -955,12 +1077,22 @@ func (t *Trash) measureLater(folder, id string) {
 			delete(t.measuring, key)
 			t.mu.Unlock()
 		}()
-		t.on(func(s *Service) { t.measure(folder, id) })
+		t.on(func(s *Service) {
+			bin, err := t.pin(folder, false)
+			if err != nil {
+				return
+			}
+			defer bin.Close()
+			t.measure(bin.root, id)
+		})
 	}()
 }
 
-func (t *Trash) measure(folder, id string) {
-	record, err := readTrashRecord(folder, id)
+func (t *Trash) measure(bin *os.Root, id string) {
+	if !trashIDPattern.MatchString(id) {
+		return
+	}
+	record, err := readTrashRecord(bin, id)
 	if err != nil || record.SizeKnown {
 		return
 	}
@@ -968,18 +1100,20 @@ func (t *Trash) measure(folder, id string) {
 	visits := 0
 	partial := false
 	deadline := time.Now().Add(2 * time.Minute)
-	_ = filepath.WalkDir(filepath.Join(folder, id, record.Name), func(p string, d os.DirEntry, err error) error {
+	// Through the pinned folder's own file system: a walk that cannot leave
+	// it and does not follow links.
+	_ = fs.WalkDir(bin.FS(), id+"/"+record.Name, func(p string, d fs.DirEntry, err error) error {
 		if err != nil {
 			partial = true
 			if d != nil && d.IsDir() {
-				return filepath.SkipDir
+				return fs.SkipDir
 			}
 			return nil
 		}
 		visits++
 		if visits > trashMeasureVisits || (visits%4096 == 0 && time.Now().After(deadline)) {
 			partial = true
-			return filepath.SkipAll
+			return fs.SkipAll
 		}
 		if info, err := d.Info(); err == nil && info.Mode().IsRegular() {
 			total += info.Size()
@@ -988,15 +1122,15 @@ func (t *Trash) measure(folder, id string) {
 	})
 	// Read again: a restore or a removal while the walk ran means there is no
 	// record left to write the size into.
-	current, err := readTrashRecord(folder, id)
-	if err != nil || current.Path == "" && record.Path != "" {
+	current, err := readTrashRecord(bin, id)
+	if err != nil {
 		return
 	}
-	if _, err := os.Stat(filepath.Join(folder, id+".json")); err != nil {
+	if _, err := bin.Lstat(id + ".json"); err != nil {
 		return
 	}
 	current.Size, current.SizeKnown, current.SizePartial = total, true, partial
-	_ = writeTrashRecord(folder, current)
+	_ = writeTrashRecord(bin, current)
 }
 
 // CopyEnds is where a copy from one path to another lands: onto `to` itself,

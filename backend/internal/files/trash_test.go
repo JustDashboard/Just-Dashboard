@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"os/exec"
@@ -333,7 +334,12 @@ func TestTrashStaysInsideTheRoots(t *testing.T) {
 	raw, _ := os.ReadFile(recordPath)
 	json.Unmarshal(raw, &record)
 	record.Path = outside + ".restored"
-	if err := writeTrashRecord(filepath.Join(data, TrashFolderName), record); err != nil {
+	bin, err := os.OpenRoot(filepath.Join(data, TrashFolderName))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer bin.Close()
+	if err := writeTrashRecord(bin, record); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := trash.Restore(item.ID, RestoreAsk, ""); !errors.Is(err, ErrOutsideRoot) {
@@ -604,5 +610,300 @@ func TestMountInfoLinesAreRead(t *testing.T) {
 	}
 	if got, _ := mountOf(mounts, "/srv/data/x"); got.ID != 3 {
 		t.Fatalf("/srv/data/x is on %+v", got)
+	}
+}
+
+// plantedTrash is what an account that owns the top of a mount could put
+// where the dashboard's Trash folder is expected: a holder with an item in it
+// and a record saying the item came from target, deleted long ago.
+func plantedTrash(t *testing.T, dir, id, target string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Join(dir, id), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	writeFile(t, filepath.Join(dir, id, "payload"), "planted", 0o644)
+	record, _ := json.Marshal(trashRecord{
+		ID: id, Name: "payload", Path: target, DeletedAt: time.Now().Add(-400 * 24 * time.Hour),
+	})
+	if err := os.WriteFile(filepath.Join(dir, id+".json"), record, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// nothingFromPlanted runs every Trash operation and checks that none of them
+// read, restored or removed anything of the planted folder.
+func nothingFromPlanted(t *testing.T, trash *Trash, planted, id, target string) {
+	t.Helper()
+	listing, err := trash.List()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, item := range listing.Items {
+		if item.ID == id || item.OriginalPath == target {
+			t.Fatalf("the listing shows the planted item: %+v", item)
+		}
+	}
+	if _, err := trash.Restore(id, RestoreAsk, ""); !errors.Is(err, ErrNotInTrash) {
+		t.Fatalf("restoring the planted id: %v, want ErrNotInTrash", err)
+	}
+	if _, err := os.Lstat(target); err == nil {
+		t.Fatal("a planted record moved a file to the path it named")
+	}
+	if _, err := trash.Remove(id); !errors.Is(err, ErrNotInTrash) {
+		t.Fatalf("removing the planted id: %v, want ErrNotInTrash", err)
+	}
+	trash.now = func() time.Time { return time.Now().Add(1000 * 24 * time.Hour) }
+	defer func() { trash.now = time.Now }()
+	if _, err := trash.Expire(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := trash.Empty(); err != nil {
+		t.Fatal(err)
+	}
+	if readBody(t, filepath.Join(planted, id, "payload")) != "planted" {
+		t.Fatal("Expire or Empty removed what was in the planted folder")
+	}
+	if _, err := os.Lstat(filepath.Join(planted, id+".json")); err != nil {
+		t.Fatal("Expire or Empty removed the planted record")
+	}
+}
+
+// A Trash folder swapped, after it was made, for a link to a folder holding a
+// crafted record and item is not a Trash folder: nothing in it is listed,
+// restored or removed, and nothing is put in it.
+func TestATrashFolderSwappedForALinkIsNotUsed(t *testing.T) {
+	_, trash, root, data := trashFixture(t, 30)
+	writeFile(t, filepath.Join(root, "first.txt"), "x", 0o644)
+	if _, err := trash.Put(filepath.Join(root, "first.txt"), ""); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(data, TrashFolderName)
+	planted := filepath.Join(t.TempDir(), "planted")
+	const id = "0123456789abcdef0123456789abcdef"
+	target := filepath.Join(root, "etc", "sudoers.d", "planted")
+	plantedTrash(t, planted, id, target)
+	if err := os.Rename(bin, bin+".aside"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(planted, bin); err != nil {
+		t.Fatal(err)
+	}
+	nothingFromPlanted(t, trash, planted, id, target)
+	writeFile(t, filepath.Join(root, "second.txt"), "y", 0o644)
+	if _, err := trash.Put(filepath.Join(root, "second.txt"), ""); !errors.Is(err, ErrTrashUnavailable) {
+		t.Fatalf("trashing into a linked Trash folder: %v", err)
+	}
+	if readBody(t, filepath.Join(root, "second.txt")) != "y" {
+		t.Fatal("a refused trash moved the file")
+	}
+	entries, _ := os.ReadDir(planted)
+	if len(entries) != 2 {
+		t.Fatalf("something was put in the planted folder: %v", entries)
+	}
+}
+
+// The same swap made between the moment the folder is checked and the moment
+// it is used, by a hook rather than by timing: the operation goes on in the
+// folder it checked, wherever that folder now is, and never in the one put in
+// its place.
+func TestATrashFolderSwappedAfterTheCheckIsNotUsed(t *testing.T) {
+	_, trash, root, data := trashFixture(t, 30)
+	bin := filepath.Join(data, TrashFolderName)
+	original := filepath.Join(root, "site", "nginx.conf")
+	writeFile(t, original, "server {}\n", 0o644)
+	item, err := trash.Put(original, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(t.TempDir(), "planted")
+	target := filepath.Join(root, "etc", "sudoers.d", "planted")
+	// The planted folder holds a record under the real item's id, naming
+	// another destination.
+	plantedTrash(t, planted, item.ID, target)
+	swaps := 0
+	swap := func(folder string) {
+		if folder != bin || swaps > 0 {
+			return
+		}
+		swaps++
+		if err := os.Rename(bin, bin+".aside"); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(planted, bin); err != nil {
+			t.Fatal(err)
+		}
+	}
+	unswap := func() {
+		os.Remove(bin)
+		if err := os.Rename(bin+".aside", bin); err != nil {
+			t.Fatal(err)
+		}
+		swaps = 0
+	}
+
+	trash.afterPin = swap
+	restored, err := trash.Restore(item.ID, RestoreAsk, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if swaps != 1 {
+		t.Fatal("the hook did not swap the folder")
+	}
+	if restored.Path != original || readBody(t, original) != "server {}\n" {
+		t.Fatalf("restored %+v from somewhere other than the folder it checked", restored)
+	}
+	if _, err := os.Lstat(target); err == nil {
+		t.Fatal("the planted record was followed")
+	}
+	if readBody(t, filepath.Join(planted, item.ID, "payload")) != "planted" {
+		t.Fatal("the planted item was moved")
+	}
+	trash.afterPin = nil
+	unswap()
+
+	// A put swapped the same way lands in the folder that was checked.
+	trash.afterPin = swap
+	moved, err := trash.Put(original, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if readBody(t, filepath.Join(bin+".aside", moved.ID, "nginx.conf")) != "server {}\n" {
+		t.Fatal("the put did not land in the folder it checked")
+	}
+	if _, err := os.Lstat(filepath.Join(planted, moved.ID)); err == nil {
+		t.Fatal("the put wrote into the planted folder")
+	}
+	trash.afterPin = nil
+	unswap()
+
+	// Empty, swapped the same way, empties the folder it checked and leaves
+	// the planted one alone.
+	trash.afterPin = swap
+	if removed, _, err := trash.Empty(); err != nil || removed != 1 {
+		t.Fatalf("empty: %d %v", removed, err)
+	}
+	if readBody(t, filepath.Join(planted, item.ID, "payload")) != "planted" {
+		t.Fatal("Empty removed the planted item")
+	}
+	trash.afterPin = nil
+}
+
+// A Trash folder the dashboard owns but somebody opened to other accounts
+// may hold what they put there while it was open: it is not used until it is
+// closed again by hand.
+func TestAnOpenedTrashFolderIsNotTrusted(t *testing.T) {
+	_, trash, root, data := trashFixture(t, 30)
+	writeFile(t, filepath.Join(root, "first.txt"), "x", 0o644)
+	if _, err := trash.Put(filepath.Join(root, "first.txt"), ""); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(data, TrashFolderName)
+	const id = "0123456789abcdef0123456789abcdef"
+	target := filepath.Join(root, "etc", "sudoers.d", "planted")
+	plantedTrash(t, bin, id, target)
+	if err := os.Chmod(bin, 0o777); err != nil {
+		t.Fatal(err)
+	}
+	nothingFromPlanted(t, trash, bin, id, target)
+	writeFile(t, filepath.Join(root, "second.txt"), "y", 0o644)
+	if _, err := trash.Put(filepath.Join(root, "second.txt"), ""); !errors.Is(err, ErrTrashUnavailable) {
+		t.Fatalf("trashing into an opened Trash folder: %v", err)
+	}
+	plan, err := trash.Check(filepath.Join(root, "second.txt"))
+	if err != nil || plan.Available || !strings.Contains(plan.Reason, "open to other accounts") {
+		t.Fatalf("check: %+v %v", plan, err)
+	}
+}
+
+// A folder of the Trash's name that another account owns is not the
+// dashboard's: refused for a put, and never read.
+func TestATrashFolderAnotherAccountOwnsIsNotUsed(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root to make a folder another account owns")
+	}
+	_, trash, root, data := trashFixture(t, 30)
+	if err := os.Chmod(filepath.Dir(data), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	bin := filepath.Join(data, TrashFolderName)
+	const id = "0123456789abcdef0123456789abcdef"
+	target := filepath.Join(root, "etc", "sudoers.d", "planted")
+	plantedTrash(t, bin, id, target)
+	if err := os.Chmod(bin, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range []string{bin, filepath.Join(bin, id), filepath.Join(bin, id, "payload"), filepath.Join(bin, id+".json")} {
+		if err := os.Lchown(p, 4242, 4242); err != nil {
+			t.Fatal(err)
+		}
+	}
+	nothingFromPlanted(t, trash, bin, id, target)
+	writeFile(t, filepath.Join(root, "file.txt"), "y", 0o644)
+	if _, err := trash.Put(filepath.Join(root, "file.txt"), ""); !errors.Is(err, ErrTrashUnavailable) ||
+		!strings.Contains(err.Error(), "another account") {
+		t.Fatalf("trashing into another account's folder: %v", err)
+	}
+}
+
+func TestFreeNameStopsLookingAfterItsBound(t *testing.T) {
+	dir := t.TempDir()
+	if name, err := freeName(dir, "a.txt"); err != nil || name != "a (2).txt" {
+		t.Fatalf("%q %v", name, err)
+	}
+	for n := 2; n <= freeNameLimit; n++ {
+		f, err := os.Create(filepath.Join(dir, fmt.Sprintf("a (%d).txt", n)))
+		if err != nil {
+			t.Fatal(err)
+		}
+		f.Close()
+	}
+	if _, err := freeName(dir, "a.txt"); !errors.Is(err, fs.ErrExist) {
+		t.Fatalf("every name taken: %v", err)
+	}
+}
+
+// The same race without a seam of the Trash's own: the folder is swapped from
+// inside the mount table read, which comes after a by-path check of the data
+// directory's Trash folder and before its use. A record planted under the
+// real item's id must never be followed.
+func TestATrashFolderSwappedDuringALookupIsNotFollowed(t *testing.T) {
+	_, trash, root, data := trashFixture(t, 30)
+	bin := filepath.Join(data, TrashFolderName)
+	original := filepath.Join(root, "site", "nginx.conf")
+	writeFile(t, original, "server {}\n", 0o644)
+	item, err := trash.Put(original, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	planted := filepath.Join(t.TempDir(), "planted")
+	target := filepath.Join(root, "etc", "sudoers.d", "planted")
+	plantedTrash(t, planted, item.ID, target)
+	previous := readMountTable
+	t.Cleanup(func() { readMountTable = previous })
+	swapped := false
+	readMountTable = func() ([]mountPoint, error) {
+		if !swapped {
+			swapped = true
+			if err := os.Rename(bin, bin+".aside"); err != nil {
+				t.Fatal(err)
+			}
+			if err := os.Symlink(planted, bin); err != nil {
+				t.Fatal(err)
+			}
+		}
+		return previous()
+	}
+	restored, err := trash.Restore(item.ID, RestoreAsk, "")
+	if !swapped {
+		t.Fatal("the swap did not happen")
+	}
+	if _, statErr := os.Lstat(target); statErr == nil {
+		t.Fatalf("the planted record was followed: restored %+v", restored)
+	}
+	if readBody(t, filepath.Join(planted, item.ID, "payload")) != "planted" {
+		t.Fatal("the planted item was moved")
+	}
+	if err != nil && !errors.Is(err, ErrNotInTrash) {
+		t.Fatalf("restore: %v", err)
 	}
 }

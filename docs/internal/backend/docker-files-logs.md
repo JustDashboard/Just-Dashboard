@@ -506,7 +506,13 @@ whatever is on the data directory's mount (the same path on the host), otherwise
 top of the entry's own mount, found from the mount table of the thread's namespace
 (`/proc/thread-self/mountinfo`, since the Files operations run on a thread that entered the host's).
 A Trash folder is made on first use, 0700, and must be a real directory this process owns or it is
-refused. Each item sits alone in `<folder>/<id>/<name>` with its owner, mode and contents untouched,
+refused. It is pinned by handle: opened once per operation without following a link in its own name,
+its type, owner and mode checked on the open descriptor, and everything inside it (holders, records,
+listing, renames in and out, removal, expiry, the size walk) done through an `os.Root` made from that
+descriptor, because the top of a mount may belong to another account that can swap the folder's name
+for a link or a folder of its own between a check by path and a use by path. One the dashboard owns
+but that is open to group or others is refused rather than trusted, since anything could have been
+put in it while it was open. Each item sits alone in `<folder>/<id>/<name>` with its owner, mode and contents untouched,
 beside a 0600 `<id>.json` record (where it came from, when, by whom, its size once measured in the
 background); the record is written before the rename, the rename is a no-replace `renameat2` from the
 source's folder opened through the pinned root, and the listing is read from the folders on every

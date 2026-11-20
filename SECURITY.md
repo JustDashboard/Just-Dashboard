@@ -49,7 +49,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   every path on the server. The Trash is bounded by time (`JD_FILES_TRASH_DAYS`, 30 by default, every
   removal audited) and by Empty Trash; the index by the names on disk, one line each, rebuilt in place.
   Deleting from the Trash, emptying it and a permanent delete need the destructive capability; a
-  restore is a file write and lands only inside `JD_FILE_ROOTS`.
+  restore is a file write and lands only inside `JD_FILE_ROOTS`. A Trash folder is opened once per
+  operation and used only through that open handle, checked to be the dashboard's own and closed to
+  everyone else, because the top of a mount may belong to another account that could otherwise swap
+  the folder for one of its own and choose where root moves a restored file.
 - The assistant, when you set one up, sends your question and what it reads to the model you chose, with
   every secret value masked first: the model's provider never sees one. An image you paste into its chat is
   the exception: it is sent as it is, because masking reads text, so a secret in a screenshot reaches the
