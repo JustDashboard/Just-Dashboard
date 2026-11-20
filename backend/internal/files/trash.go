@@ -125,6 +125,8 @@ type TrashPlan struct {
 	Available bool   `json:"available"`
 	Reason    string `json:"reason,omitempty"`
 	Folder    string `json:"folder,omitempty"`
+	// KeepDays is how long the Trash would keep it; 0 is until emptied.
+	KeepDays int `json:"keepDays"`
 }
 
 // Trash is the Files page's Trash, over the same roots and in the same mount
@@ -180,7 +182,7 @@ func (t *Trash) Check(path string) (plan *TrashPlan, err error) {
 		if _, err = os.Lstat(full); err != nil {
 			return
 		}
-		plan = &TrashPlan{Path: full}
+		plan = &TrashPlan{Path: full, KeepDays: t.KeepDays()}
 		folder, why := t.folderFor(s, full)
 		if why != nil {
 			var refusal *TrashUnavailableError

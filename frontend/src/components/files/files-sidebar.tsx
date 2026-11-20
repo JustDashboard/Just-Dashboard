@@ -1,6 +1,7 @@
 "use client"
 
 import { ChevronDown, Cross } from "@/components/icons"
+import { TrashPlace } from "@/components/files/trash-place"
 import { cn } from "@/lib/utils"
 import type { FileBookmark, FilePlaces } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
@@ -47,6 +48,7 @@ export function FilesSidebar({
   onBookmarksChange,
   onDropPaths,
   onDropFiles,
+  trashActive,
   className,
 }: {
   places: FilePlaces | undefined
@@ -58,6 +60,8 @@ export function FilesSidebar({
   onBookmarksChange: (next: FileBookmark[]) => void
   onDropPaths: (paths: string[], dir: string, mode: DropMode) => void
   onDropFiles: (transfer: DataTransfer, dir: string) => void
+  /** The Trash is the page on screen. */
+  trashActive?: boolean
   className?: string
 }) {
   const [folded, setFolded] = useViewState<PlaceSectionKey[]>("files.sidebar.folded", [])
@@ -135,6 +139,7 @@ export function FilesSidebar({
           )
         })
       )}
+      <TrashPlace active={trashActive} />
     </nav>
   )
 }

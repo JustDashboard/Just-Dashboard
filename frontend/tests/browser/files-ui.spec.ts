@@ -1469,7 +1469,8 @@ test("a right-click offers the row's verbs, or the folder's between rows", async
   const menu = page.getByRole("menu")
   await expect(menu.getByRole("menuitem", { name: /Open in editor/ })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: /Rename/ })).toBeVisible()
-  await expect(menu.getByRole("menuitem", { name: /^Delete/ })).toBeVisible()
+  await expect(menu.getByRole("menuitem", { name: /^Delete(?! permanently)/ })).toBeVisible()
+  await expect(menu.getByRole("menuitem", { name: /^Delete permanently/ })).toBeVisible()
   await page.keyboard.press("Escape")
   await expect(menu).toBeHidden()
 
@@ -2176,7 +2177,7 @@ for (const width of [1280, 390]) {
       page,
       `files-delete-${width}`,
       async () => {
-        await dialog.getByRole("button", { name: "Delete all", exact: true }).click()
+        await dialog.getByRole("button", { name: "Move to Trash", exact: true }).click()
         // Part of the footer, not a box over the body: the words sit beside
         // the buttons, the track runs along the footer's top edge, and the
         // dialog keeps its size.
