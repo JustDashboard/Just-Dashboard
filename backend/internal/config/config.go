@@ -145,6 +145,13 @@ type Config struct {
 	// With a test origin set it refuses to start, unless the binary was built
 	// for the local end-to-end harness (the hublinktest build tag).
 	HubSignIn bool
+	// FilesTrashDays is JD_FILES_TRASH_DAYS: how long the Files page's Trash
+	// keeps what was deleted before removing it in the background; 0 keeps
+	// everything until it is emptied.
+	FilesTrashDays int
+	// FilesIndex is JD_FILES_INDEX: whether Find answers from the on-disk
+	// index of names, built in the background, or walks the disk each time.
+	FilesIndex bool
 }
 
 func Load() (*Config, error) {
@@ -195,6 +202,8 @@ func Load() (*Config, error) {
 		HubSignIn:        l.boolean("JD_HUB_SIGNIN", false),
 	}
 	c.DeployHistoryRuns = l.integer("JD_DEPLOY_HISTORY_RUNS", 200, 0, 100000)
+	c.FilesTrashDays = l.integer("JD_FILES_TRASH_DAYS", 30, 0, 3650)
+	c.FilesIndex = l.boolean("JD_FILES_INDEX", true)
 	c.AccountURL = l.accountURL()
 	c.HubLinkTestOrigin = l.hubLinkTestOrigin()
 	if c.HubSignIn && c.HubLinkTestOrigin != "" && !hubSignInTestOriginAllowed {

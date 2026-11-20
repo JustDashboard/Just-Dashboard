@@ -59,6 +59,7 @@ var skipDirs = map[string]bool{
 	"node_modules": true, ".git": true, ".svn": true, "vendor": true,
 	"__pycache__": true, ".cache": true, ".next": true,
 	"proc": true, "sys": true, "dev": true, "run": true,
+	TrashFolderName: true,
 }
 
 func (s *Service) Search(ctx context.Context, opts SearchOptions) ([]SearchHit, error) {

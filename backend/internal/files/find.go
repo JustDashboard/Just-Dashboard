@@ -146,6 +146,9 @@ walk:
 				break walk
 			}
 			name := d.Name()
+			if IsTrashFolderName(name) {
+				continue
+			}
 			path := filepath.Join(dir.path, name)
 			hidden := strings.HasPrefix(name, ".")
 			if hidden && !opts.Hidden {

@@ -114,6 +114,9 @@ type moduleSet struct {
 	// someone reading the server's tree in the terminal beside it, while the
 	// other callers resolve a path and then open it themselves, from here.
 	hostFiles *files.Service
+	// fileTrash is where a delete on the Files page puts things; see
+	// handlers_files_trash.go.
+	fileTrash *files.Trash
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
@@ -307,6 +310,7 @@ func (s *Server) initModules() {
 	// (sysinfo/mounts.go) from its first sample, and has no log of its own.
 	s.modules.onHost(func() {})
 	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
+	s.modules.fileTrash = files.NewTrash(s.modules.hostFiles, s.Cfg.DataDir, s.Cfg.FilesTrashDays)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()
