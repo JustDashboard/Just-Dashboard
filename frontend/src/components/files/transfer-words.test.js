@@ -30,7 +30,7 @@ describe("how far a transfer is, in words", () => {
       "Paused at 1.0 GB of 2.0 GB",
     )
     expect(transferWords({ kind: "upload", status: "stopped", size: 2 * GB, sent: GB }, 0)).toBe(
-      "Stopped at 1.0 GB of 2.0 GB; add the file again to carry on",
+      "Stopped at 1.0 GB of 2.0 GB; add it again to carry on",
     )
     expect(transferWords({ kind: "fetch", status: "uploading", size: -1, sent: 2048 }, 0)).toBe(
       "2.0 KB so far",

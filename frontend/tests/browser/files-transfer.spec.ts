@@ -352,7 +352,7 @@ test.describe("uploads in pieces", () => {
     })
     await openFiles(page)
     const row = page.locator("[data-transfer='backup.tar']")
-    await expect(row).toContainText("Stopped at 512.0 MB of 2.0 GB; add the file again to carry on")
+    await expect(row).toContainText("Stopped at 512.0 MB of 2.0 GB; add it again to carry on")
     await row.getByRole("button", { name: "Cancel" }).click()
     await expect.poll(() => cancelled).toBe("/api/v1/files/pieces/left")
     await expect(row).toHaveCount(0)
@@ -408,7 +408,7 @@ test.describe("fetching a link", () => {
       await page.getByRole("button", { name: "New", exact: true }).click()
       await page.getByRole("menuitem", { name: "From a link…" }).click()
       const dialog = page.getByRole("dialog")
-      await dialog.getByRole("textbox").fill("ftp://nope")
+      await dialog.getByRole("textbox", { name: "Link" }).fill("ftp://nope")
       await expect(dialog).toContainText("A link starts with http:// or https://.")
       await dialog
         .getByRole("textbox")

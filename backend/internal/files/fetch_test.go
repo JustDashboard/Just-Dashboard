@@ -140,9 +140,12 @@ func TestFetchRefusesWhatIsNotAWebLinkOrNotAFolder(t *testing.T) {
 	f := NewFetches(New([]string{root}))
 	defer f.Close()
 	for _, link := range []string{"ftp://example.test/x", "file:///etc/passwd", "javascript:alert(1)", "not a link"} {
-		if _, err := f.Start("a", FetchRequest{Dir: root, URL: link}); err == nil {
-			t.Errorf("%q was accepted", link)
+		if _, err := f.Start("a", FetchRequest{Dir: root, URL: link}); !errors.Is(err, ErrFetchScheme) {
+			t.Errorf("%q returned %v", link, err)
 		}
+	}
+	if _, err := f.Start("a", FetchRequest{Dir: root, URL: "https://"}); !errors.Is(err, fs.ErrInvalid) {
+		t.Errorf("a link with no host returned %v", err)
 	}
 	if _, err := f.Start("a", FetchRequest{Dir: t.TempDir(), URL: "https://example.test/x"}); !errors.Is(err, ErrOutsideRoot) {
 		t.Errorf("a folder outside the roots returned %v", err)

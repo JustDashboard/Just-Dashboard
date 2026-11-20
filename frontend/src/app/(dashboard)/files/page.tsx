@@ -922,6 +922,7 @@ export default function FilesPage() {
   const fetchLink = () =>
     prompt({
       title: "Fetch a link",
+      label: "Link",
       placeholder: "https://example.com/release.tar.gz",
       confirmLabel: "Fetch",
       validate: (v) =>

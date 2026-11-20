@@ -672,7 +672,8 @@ export function UploadStrip({
           {live.length > 0
             ? [
                 uploading > 0 && `Uploading ${plural(uploading, "file")}`,
-                fetching > 0 && `Fetching ${plural(fetching, "link")}`,
+                fetching > 0 &&
+                  `${uploading > 0 ? "fetching" : "Fetching"} ${plural(fetching, "link")}`,
               ]
                 .filter(Boolean)
                 .join(", ") + (total > 0 ? ` · ${bytes(sent)} of ${bytes(total)}` : "")

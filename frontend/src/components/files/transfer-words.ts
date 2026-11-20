@@ -67,7 +67,7 @@ export function transferWords(t: TransferReading, now: number): string {
     case "paused":
       return `Paused at ${progressWords(t.sent, t.size)}`
     case "stopped":
-      return `Stopped at ${progressWords(t.sent, t.size)}; add the file again to carry on`
+      return `Stopped at ${progressWords(t.sent, t.size)}; add it again to carry on`
     case "finishing":
       return "Putting it in place"
     case "done":

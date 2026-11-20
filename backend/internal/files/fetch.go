@@ -174,11 +174,14 @@ func ShownURL(raw string) string {
 // status.
 func (f *Fetches) Start(owner string, req FetchRequest) (Fetch, error) {
 	u, err := url.Parse(strings.TrimSpace(req.URL))
-	if err != nil || u.Host == "" {
+	if err != nil {
 		return Fetch{}, fmt.Errorf("%w: that is not a link", fs.ErrInvalid)
 	}
 	if u.Scheme != "http" && u.Scheme != "https" {
 		return Fetch{}, ErrFetchScheme
+	}
+	if u.Host == "" {
+		return Fetch{}, fmt.Errorf("%w: that is not a link", fs.ErrInvalid)
 	}
 	var name string
 	if req.Name != "" {
