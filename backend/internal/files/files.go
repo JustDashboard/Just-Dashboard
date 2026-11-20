@@ -5,7 +5,6 @@
 package files
 
 import (
-	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
@@ -21,8 +20,6 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
-
-	"golang.org/x/sys/unix"
 )
 
 var (
@@ -949,130 +946,37 @@ func (s *Service) UploadChecked(path string, r io.Reader, overwrite bool, expect
 	if s.run != nil {
 		return hosted2(s, func(s *Service) (int64, error) { return s.UploadChecked(path, r, overwrite, expected) })
 	}
-	full, err := s.Resolve(path)
+	t, err := s.openUploadTarget(path, overwrite, expected)
 	if err != nil {
 		return 0, err
 	}
-	allowed, relative, err := s.openRootEntry(full)
+	defer t.Close()
+	_, tmpName, err := newStageName()
 	if err != nil {
 		return 0, err
 	}
-	defer allowed.Close()
-	parent, err := allowed.OpenRoot(filepath.Dir(relative))
-	if err != nil {
-		return 0, err
-	}
-	defer parent.Close()
-	directory, err := parent.Open(".")
-	if err != nil {
-		return 0, err
-	}
-	defer directory.Close()
-	parentInfo, err := directory.Stat()
-	if err != nil {
-		return 0, err
-	}
-	name := filepath.Base(relative)
-	if err := checkUploadRevision(parent, name, expected); err != nil {
-		return 0, err
-	}
-	perm := os.FileMode(0o644)
-	uid, gid := -1, -1
-	if st, err := parent.Lstat(name); err == nil {
-		if st.IsDir() {
-			return 0, ErrIsDir
-		}
-		if !overwrite {
-			return 0, fmt.Errorf("%w: %s", fs.ErrExist, path)
-		}
-		if !st.Mode().IsRegular() {
-			return 0, fmt.Errorf("refusing to replace %s: it is not a regular file", path)
-		}
-		perm = st.Mode().Perm()
-		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
-			uid, gid = int(sys.Uid), int(sys.Gid)
-		}
-	} else if os.IsNotExist(err) {
-		uid, gid = heir(parentInfo)
-	} else {
-		return 0, err
-	}
-	token := make([]byte, 16)
-	if _, err := rand.Read(token); err != nil {
-		return 0, err
-	}
-	tmpName := fmt.Sprintf(".jd-upload-%x", token)
-	tmp, err := parent.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
+	tmpName = ".jd-upload-" + strings.TrimPrefix(tmpName, stagePrefix)
+	tmp, err := t.parent.OpenFile(tmpName, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o600)
 	if err != nil {
 		return 0, err
 	}
 	defer tmp.Close()
 	// Cleanup must follow the directory we opened, even if a native writer
 	// moves it and installs a symlink or another directory at its old name.
-	defer parent.Remove(tmpName)
+	defer t.parent.Remove(tmpName)
 
 	n, err := io.Copy(tmp, r)
 	if err != nil {
 		tmp.Close()
 		return n, err
 	}
-	if uid >= 0 {
-		if err := tmp.Chown(uid, gid); err != nil {
-			return n, err
-		}
-	}
-	if err := tmp.Chmod(perm); err != nil {
-		return n, err
-	}
-	if err := tmp.Sync(); err != nil {
-		return n, err
-	}
-	if err := tmp.Close(); err != nil {
+	if err := t.seal(tmp); err != nil {
 		return n, err
 	}
 	// Transfers stage outside the lock so a slow browser cannot hold other
-	// saves hostage. The final comparison and publication are one locked step.
-	unlock := contentguard.Lock(full)
-	defer unlock()
-	if !overwrite {
-		if _, err := parent.Lstat(name); err == nil {
-			return n, fmt.Errorf("%w: %s", fs.ErrExist, path)
-		} else if !os.IsNotExist(err) {
-			return n, err
-		}
-	}
-	resolved, err := s.Resolve(path)
-	if err != nil {
-		return n, err
-	}
-	if resolved != full {
-		return n, contentguard.ErrConflict
-	}
-	currentParent, err := os.Stat(filepath.Dir(resolved))
-	if err != nil {
-		return n, err
-	}
-	if !os.SameFile(parentInfo, currentParent) {
-		return n, contentguard.ErrConflict
-	}
-	if err := checkUploadRevision(parent, name, expected); err != nil {
-		return n, err
-	}
-	if !overwrite || (expected != nil && *expected == "") {
-		// A network transfer leaves time for another writer to claim the
-		// destination. Publish only if the name is still free; a hard link
-		// keeps this atomic on filesystems without no-replace rename support.
-		fd := int(directory.Fd())
-		err := unix.Renameat2(fd, tmpName, fd, name, unix.RENAME_NOREPLACE)
-		if errors.Is(err, unix.ENOSYS) || errors.Is(err, unix.EINVAL) || errors.Is(err, unix.EOPNOTSUPP) {
-			return n, parent.Link(tmpName, name)
-		}
-		if err != nil {
-			return n, &os.LinkError{Op: "rename", Old: tmpName, New: full, Err: err}
-		}
-		return n, nil
-	}
-	return n, parent.Rename(tmpName, name)
+	// saves hostage. The final comparison and publication are one locked step
+	// (publishStaged, which uploads in pieces and fetched links share).
+	return n, s.publishStaged(t, tmpName, overwrite, expected)
 }
 
 func checkUploadRevision(parent *os.Root, name string, expected *string) error {

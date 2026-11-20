@@ -1,24 +1,35 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Cross } from "@/components/icons"
-import { API_BASE, errorFromResponse, mutationHeaders } from "@/lib/api"
+import { Cross, Pause, Play } from "@/components/icons"
+import { API_BASE, ApiError, del, errorFromResponse, get, mutationHeaders, post } from "@/lib/api"
 import { bytes, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import { IconAction } from "@/components/icon-action"
 import { Meter } from "@/components/meter"
+import {
+  PIECE,
+  SINGLE_MAX,
+  fileKey,
+  pause as waitAWhile,
+  retryWait,
+  sendPiece,
+  transient,
+  type UploadSession,
+} from "./upload-pieces"
+import { transferWords, type TransferReading } from "./transfer-words"
 
-export type UploadStatus = "queued" | "uploading" | "done" | "failed" | "cancelled"
+export type UploadStatus = TransferReading["status"]
 
-export type UploadItem = {
-  id: number
+export type UploadItem = TransferReading & {
+  id: string
   name: string
   dir: string
-  size: number
-  sent: number
-  status: UploadStatus
-  error?: string
+  /** Sent in pieces: it can be paused, and it carries on after a dropped connection. */
+  pieces?: boolean
+  /** Known only to the server: an upload a reloaded page has not been given the file for. */
+  remote?: boolean
 }
 
 export type UploadJob = { file: File; dir: string; name: string; overwrite: boolean }
@@ -28,115 +39,342 @@ export type Incoming = { file: File; rel: string }
 
 const PARALLEL = 3
 
+type Running = {
+  job: UploadJob
+  xhr?: XMLHttpRequest
+  session?: string
+  paused?: boolean
+  cancelled?: boolean
+  wake?: () => void
+  /** For the time left: the last progress reading and the rate measured from it. */
+  mark?: { at: number; sent: number }
+  rate?: number
+}
+
 /**
  * The upload queue.
  *
- * One request per file rather than one form for all of them: a single
+ * One request per small file rather than one form for all of them: a single
  * multipart body carrying forty files is one progress bar that says nothing,
- * one failure that takes the other thirty-nine with it, and one request whose
- * size limit is the *total* rather than the per-file cap the server documents.
- * `XMLHttpRequest` rather than `fetch` because it is still the only way a
- * browser reports upload progress.
+ * one failure that takes the other thirty-nine with it. A file over
+ * `SINGLE_MAX` goes in pieces (`/files/uploads`), which is what lets it be of
+ * any size, be paused, and carry on by itself after a dropped connection or a
+ * sleeping laptop: the server says where it stands and the next piece starts
+ * there. A page reloaded halfway lists what the server still holds, and the
+ * same file dropped again continues it. `XMLHttpRequest` rather than `fetch`
+ * because it is still the only way a browser reports upload progress.
  *
  * Three transfers run at once. More does not make a home connection faster;
  * fewer leaves a folder of small files waiting on round trips.
  */
 export function useUploads(onSettled: (dir: string) => void) {
   const [items, setItems] = useState<UploadItem[]>([])
-  const queue = useRef<{ id: number; job: UploadJob }[]>([])
-  const running = useRef(new Map<number, XMLHttpRequest>())
+  const queue = useRef<string[]>([])
+  const jobs = useRef(new Map<string, Running>())
+  const active = useRef(new Set<string>())
   const nextId = useRef(1)
   const settled = useRef(onSettled)
   useEffect(() => {
     settled.current = onSettled
   }, [onSettled])
 
-  const update = useCallback((id: number, patch: Partial<UploadItem>) => {
+  const update = useCallback((id: string, patch: Partial<UploadItem>) => {
     setItems((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)))
   }, [])
+
+  /** Progress, with the rate measured over a few seconds for the time left. */
+  const progress = useCallback(
+    (id: string, sent: number) => {
+      const run = jobs.current.get(id)
+      if (run) {
+        const now = Date.now()
+        if (!run.mark || sent < run.mark.sent) run.mark = { at: now, sent }
+        else if (now - run.mark.at >= 2000) {
+          const measured = ((sent - run.mark.sent) * 1000) / (now - run.mark.at)
+          run.rate = run.rate ? run.rate * 0.6 + measured * 0.4 : measured
+          run.mark = { at: now, sent }
+        }
+      }
+      update(id, { sent, rate: run?.rate })
+    },
+    [update],
+  )
 
   // A finished transfer starts the next one, which means the runner calls
   // itself from a callback registered before it existed; the ref is how it
   // reaches its own current self.
   const pumpRef = useRef<() => void>(() => undefined)
 
+  const runSingle = useCallback(
+    (id: string, run: Running) =>
+      new Promise<void>((resolve) => {
+        const { job } = run
+        const xhr = new XMLHttpRequest()
+        run.xhr = xhr
+        const form = new FormData()
+        form.append("file", job.file, job.name)
+        xhr.open(
+          "POST",
+          `${API_BASE}/files/upload?path=${encodeURIComponent(job.dir)}&overwrite=${job.overwrite}`,
+        )
+        xhr.withCredentials = true
+        for (const [key, value] of Object.entries(mutationHeaders()))
+          xhr.setRequestHeader(key, value)
+        xhr.upload.onprogress = (event) => progress(id, event.loaded)
+        const finish = (patch: Partial<UploadItem>) => {
+          update(id, patch)
+          resolve()
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) finish({ status: "done", sent: job.file.size })
+          else finish({ status: "failed", error: failureOf(xhr) })
+        }
+        xhr.onerror = () => finish({ status: "failed", error: "The connection dropped." })
+        xhr.onabort = () => finish({ status: "cancelled" })
+        update(id, { status: "uploading" })
+        xhr.send(form)
+      }),
+    [progress, update],
+  )
+
+  const runPieces = useCallback(
+    async (id: string, run: Running) => {
+      const { job } = run
+      const size = job.file.size
+      const stopped = () => run.paused || run.cancelled
+      let failures = 0
+      /** After a failure: true to try again (having waited), false to give up. */
+      const recover = async (err: unknown, at: number): Promise<boolean> => {
+        if (stopped()) return false
+        if (!transient(err)) {
+          update(id, { status: "failed", error: sentenceOf(err) })
+          return false
+        }
+        failures += 1
+        const wait = retryWait(failures)
+        update(id, { status: "reconnecting", retryAt: Date.now() + wait, sent: at })
+        await waitAWhile(wait, run)
+        return !stopped()
+      }
+
+      let session: UploadSession | undefined
+      while (!session) {
+        if (stopped()) return
+        try {
+          session = await post<UploadSession>("/files/uploads", {
+            path: job.dir,
+            name: job.name,
+            size,
+            key: fileKey(job.file, job.name),
+            overwrite: job.overwrite,
+          })
+        } catch (err) {
+          if (!(await recover(err, 0))) return
+        }
+      }
+      run.session = session.id
+      // The server already held this one: the reloaded page's row for it is
+      // this row now.
+      setItems((prev) => prev.filter((item) => item.id !== `server:${session.id}`))
+      let offset = session.next
+      update(id, { status: "uploading", sent: offset, retryAt: undefined })
+
+      while (offset < size) {
+        if (stopped()) return
+        const from = offset
+        try {
+          const answer = await sendPiece(
+            session.id,
+            from,
+            job.file.slice(from, Math.min(size, from + PIECE)),
+            (loaded) => progress(id, from + loaded),
+            run,
+          )
+          offset = answer.next
+          failures = 0
+          update(id, { status: "uploading", sent: offset, retryAt: undefined })
+        } catch (err) {
+          if (!(await recover(err, from))) return
+          try {
+            // Where the server stands is where to carry on: a piece cut off
+            // halfway kept what arrived.
+            offset = (await get<UploadSession>(`/files/uploads/${session.id}`)).next
+          } catch (lost) {
+            if (lost instanceof ApiError && lost.code === "upload_not_found") {
+              update(id, { status: "failed", error: "The server no longer holds this upload." })
+              return
+            }
+          }
+          update(id, { status: "uploading", sent: offset, retryAt: undefined })
+        }
+      }
+
+      update(id, { status: "finishing", sent: size })
+      for (;;) {
+        if (stopped()) return
+        try {
+          await post(`/files/uploads/${session.id}/complete`)
+          update(id, { status: "done", retryAt: undefined })
+          return
+        } catch (err) {
+          if (err instanceof ApiError && err.code === "upload_not_found" && failures > 0) {
+            // The answer to a completion that went through was lost.
+            update(id, { status: "done", retryAt: undefined })
+            return
+          }
+          if (!(await recover(err, size))) return
+          update(id, { status: "finishing" })
+        }
+      }
+    },
+    [progress, update],
+  )
+
   const pump = useCallback(() => {
-    while (running.current.size < PARALLEL && queue.current.length > 0) {
-      const { id, job } = queue.current.shift()!
-      const xhr = new XMLHttpRequest()
-      running.current.set(id, xhr)
-      const form = new FormData()
-      form.append("file", job.file, job.name)
-      xhr.open(
-        "POST",
-        `${API_BASE}/files/upload?path=${encodeURIComponent(job.dir)}&overwrite=${job.overwrite}`,
-      )
-      xhr.withCredentials = true
-      for (const [key, value] of Object.entries(mutationHeaders())) xhr.setRequestHeader(key, value)
-      xhr.upload.onprogress = (event) => update(id, { sent: event.loaded })
-      const finish = (patch: Partial<UploadItem>) => {
-        running.current.delete(id)
-        update(id, patch)
-        settled.current(job.dir)
-        pumpRef.current()
-      }
-      xhr.onload = () => {
-        if (xhr.status >= 200 && xhr.status < 300) finish({ status: "done", sent: job.file.size })
-        else finish({ status: "failed", error: failureOf(xhr) })
-      }
-      xhr.onerror = () => finish({ status: "failed", error: "The connection dropped." })
-      xhr.onabort = () => finish({ status: "cancelled" })
+    while (active.current.size < PARALLEL && queue.current.length > 0) {
+      const id = queue.current.shift()!
+      const run = jobs.current.get(id)
+      if (!run || run.cancelled || run.paused) continue
+      active.current.add(id)
+      const pieces = run.job.file.size > SINGLE_MAX
       update(id, { status: "uploading" })
-      xhr.send(form)
+      void (pieces ? runPieces(id, run) : runSingle(id, run)).finally(() => {
+        active.current.delete(id)
+        if (!run.paused) settled.current(run.job.dir)
+        pumpRef.current()
+      })
     }
-  }, [update])
+  }, [runPieces, runSingle, update])
 
   useEffect(() => {
     pumpRef.current = pump
   }, [pump])
 
+  // What a page reloaded halfway left on the server: shown, so it can be
+  // cancelled, and continued by dropping the same file again.
+  useEffect(() => {
+    const controller = new AbortController()
+    get<UploadSession[]>("/files/uploads", undefined, controller.signal)
+      .then((sessions) => {
+        if (!Array.isArray(sessions)) return
+        const held = new Set([...jobs.current.values()].map((run) => run.session))
+        const stopped: UploadItem[] = sessions
+          .filter((s) => !held.has(s.id))
+          .map((s) => ({
+            id: `server:${s.id}`,
+            kind: "upload",
+            name: s.name,
+            dir: s.dir,
+            size: s.size,
+            sent: s.received,
+            status: "stopped",
+            pieces: true,
+            remote: true,
+          }))
+        if (stopped.length > 0) setItems((prev) => [...stopped, ...prev])
+      })
+      .catch(() => undefined)
+    return () => controller.abort()
+  }, [])
+
   const enqueue = useCallback(
-    (jobs: UploadJob[]) => {
-      if (jobs.length === 0) return
-      const created = jobs.map((job) => ({ id: nextId.current++, job }))
+    (list: UploadJob[]) => {
+      if (list.length === 0) return
+      const created = list.map((job) => ({ id: `upload:${nextId.current++}`, job }))
       setItems((prev) => [
         ...prev,
         ...created.map(({ id, job }) => ({
           id,
+          kind: "upload" as const,
           name: job.name,
           dir: job.dir,
           size: job.file.size,
           sent: 0,
           status: "queued" as const,
+          pieces: job.file.size > SINGLE_MAX,
         })),
       ])
-      queue.current.push(...created)
+      for (const { id, job } of created) {
+        jobs.current.set(id, { job })
+        queue.current.push(id)
+      }
       pump()
     },
     [pump],
   )
 
+  const pauseUpload = useCallback((id: string) => {
+    const run = jobs.current.get(id)
+    if (!run || run.job.file.size <= SINGLE_MAX) return
+    run.paused = true
+    run.xhr?.abort()
+    run.wake?.()
+    queue.current = queue.current.filter((queued) => queued !== id)
+    setItems((prev) =>
+      prev.map((item) =>
+        item.id === id ? { ...item, status: "paused", retryAt: undefined, rate: undefined } : item,
+      ),
+    )
+  }, [])
+
+  const resume = useCallback(
+    (id: string) => {
+      const run = jobs.current.get(id)
+      if (!run || !run.paused) return
+      run.paused = false
+      run.mark = undefined
+      run.rate = undefined
+      update(id, { status: "queued" })
+      queue.current.unshift(id)
+      pump()
+    },
+    [pump, update],
+  )
+
   const cancel = useCallback(
-    (id: number) => {
-      const live = running.current.get(id)
-      if (live) {
-        live.abort()
+    (id: string) => {
+      if (id.startsWith("server:")) {
+        void del(`/files/uploads/${id.slice("server:".length)}`).catch(() => undefined)
+        setItems((prev) => prev.filter((item) => item.id !== id))
         return
       }
-      queue.current = queue.current.filter((entry) => entry.id !== id)
+      const run = jobs.current.get(id)
+      if (!run) return
+      run.cancelled = true
+      run.xhr?.abort()
+      run.wake?.()
+      queue.current = queue.current.filter((queued) => queued !== id)
+      if (run.session) void del(`/files/uploads/${run.session}`).catch(() => undefined)
       update(id, { status: "cancelled" })
     },
     [update],
   )
 
-  const dismiss = useCallback((id: number) => {
+  const dismiss = useCallback((id: string) => {
+    const run = jobs.current.get(id)
+    // A failed upload in pieces still holds its bytes on the server; dismissing
+    // it is letting them go.
+    if (run?.session && !run.cancelled) {
+      run.cancelled = true
+      void del(`/files/uploads/${run.session}`).catch(() => undefined)
+    }
+    jobs.current.delete(id)
     setItems((prev) => prev.filter((item) => item.id !== id))
   }, [])
 
   const clear = useCallback(() => {
-    setItems((prev) =>
-      prev.filter((item) => item.status === "queued" || item.status === "uploading"),
-    )
+    setItems((prev) => {
+      for (const item of prev) {
+        if (item.status === "failed") {
+          const run = jobs.current.get(item.id)
+          if (run?.session && !run.cancelled) {
+            run.cancelled = true
+            void del(`/files/uploads/${run.session}`).catch(() => undefined)
+          }
+        }
+      }
+      return prev.filter((item) => isLive(item) || item.status === "paused" || item.remote)
+    })
   }, [])
 
   // A finished transfer leaves the strip on its own a few seconds later; a
@@ -153,13 +391,38 @@ export function useUploads(onSettled: (dir: string) => void) {
   }, [items])
 
   useEffect(() => {
-    const live = running.current
+    const live = jobs.current
     return () => {
-      for (const xhr of live.values()) xhr.abort()
+      // Leaving the page stops what this page was sending; an upload in
+      // pieces stays on the server for a day and carries on when its file is
+      // given again.
+      for (const run of live.values()) {
+        run.paused = true
+        run.xhr?.abort()
+        run.wake?.()
+      }
     }
   }, [])
 
-  return { items, enqueue, cancel, dismiss, clear }
+  return { items, enqueue, cancel, dismiss, clear, pause: pauseUpload, resume }
+}
+
+/** Still moving, or about to. */
+function isLive(item: UploadItem) {
+  return (
+    item.status === "queued" ||
+    item.status === "uploading" ||
+    item.status === "reconnecting" ||
+    item.status === "finishing"
+  )
+}
+
+function sentenceOf(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.code === "already_exists") return "A file with this name already exists."
+    return err.message
+  }
+  return err instanceof Error ? err.message : String(err)
 }
 
 function failureOf(xhr: XMLHttpRequest): string {
@@ -236,9 +499,11 @@ async function walk(entry: FileSystemEntry, prefix: string, out: Incoming[]): Pr
 /**
  * The transfers in flight, above the listing's footer.
  *
- * Each row is a name, a bar and a figure; the strip's own line says how many
+ * Each row is one line: the name, a bar, how far it is in words, and its
+ * verbs — pause and resume for a file sent in pieces, cancel for anything
+ * moving, dismiss for anything finished. The strip's own line says how many
  * are still going. It is drawn in the workbench rather than as toasts because
- * an upload is something you watch, and a toast is something that goes away.
+ * a transfer is something you watch, and a toast is something that goes away.
  */
 export function UploadStrip({
   items,
@@ -246,36 +511,61 @@ export function UploadStrip({
   onCancel,
   onDismiss,
   onClear,
+  onPause,
+  onResume,
   className,
 }: {
   items: UploadItem[]
   currentDir: string
-  onCancel: (id: number) => void
-  onDismiss: (id: number) => void
+  onCancel: (id: string) => void
+  onDismiss: (id: string) => void
   onClear: () => void
+  onPause?: (id: string) => void
+  onResume?: (id: string) => void
   className?: string
 }) {
+  const [now, setNow] = useState(() => Date.now())
+  const waiting = items.some((item) => item.status === "reconnecting")
+  useEffect(() => {
+    if (!waiting) return
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [waiting])
   if (items.length === 0) return null
-  const live = items.filter((item) => item.status === "queued" || item.status === "uploading")
+  const live = items.filter(isLive)
   const failed = items.filter((item) => item.status === "failed")
-  const total = live.reduce((sum, item) => sum + item.size, 0)
-  const sent = live.reduce((sum, item) => sum + item.sent, 0)
+  const held = items.filter((item) => item.status === "paused" || item.status === "stopped")
+  const known = live.filter((item) => item.size >= 0)
+  const total = known.reduce((sum, item) => sum + item.size, 0)
+  const sent = known.reduce((sum, item) => sum + item.sent, 0)
+  const fetching = live.filter((item) => item.kind === "fetch").length
+  const uploading = live.length - fetching
 
   return (
-    <div className={cn("shrink-0 border-t border-hairline bg-surface-header", className)}>
+    <div
+      className={cn("shrink-0 border-t border-hairline bg-surface-header", className)}
+      data-transfers
+    >
       <div className="flex items-center gap-3 px-3 py-1.5 text-hint text-muted-foreground">
-        <span className="min-w-0 flex-1 truncate">
+        <span className="min-w-0 flex-1 truncate" role="status">
           {live.length > 0
-            ? `Uploading ${plural(live.length, "file")} · ${bytes(sent)} of ${bytes(total)}`
+            ? [
+                uploading > 0 && `Uploading ${plural(uploading, "file")}`,
+                fetching > 0 && `Fetching ${plural(fetching, "link")}`,
+              ]
+                .filter(Boolean)
+                .join(", ") + (total > 0 ? ` · ${bytes(sent)} of ${bytes(total)}` : "")
             : failed.length > 0
-              ? `${plural(failed.length, "upload")} failed`
-              : "Uploads finished"}
+              ? `${plural(failed.length, "transfer")} failed`
+              : held.length > 0
+                ? `${plural(held.length, "upload")} paused`
+                : "Transfers finished"}
         </span>
-        {live.length > 0 && (
+        {live.length > 0 && total > 0 && (
           <Meter
-            value={total > 0 ? (sent / total) * 100 : 0}
+            value={(sent / total) * 100}
             size="thin"
-            label="Upload progress"
+            label="Transfer progress"
             className="w-32"
           />
         )}
@@ -286,50 +576,75 @@ export function UploadStrip({
         )}
       </div>
       <ul className="max-h-40 divide-y divide-hairline overflow-auto border-t border-hairline">
-        {items.map((item) => (
-          <li key={item.id} className="flex items-center gap-3 px-3 py-1 text-xs">
-            <span className="min-w-0 flex-1 truncate" title={`${item.dir}/${item.name}`}>
-              {item.name}
-              {item.dir !== currentDir && (
-                <span className="ml-1.5 font-mono text-hint text-muted-foreground">
-                  → {item.dir}
-                </span>
-              )}
-            </span>
-            {item.status === "failed" ? (
-              <span className="truncate text-hint text-destructive">{item.error}</span>
-            ) : item.status === "cancelled" ? (
-              <span className="text-hint text-muted-foreground">Cancelled</span>
-            ) : item.status === "done" ? (
-              <span className="text-hint text-success">Done</span>
-            ) : (
-              <>
+        {items.map((item) => {
+          const moving = isLive(item)
+          const words = transferWords(item, now)
+          return (
+            <li
+              key={item.id}
+              className="flex h-8 items-center gap-3 px-3 text-xs"
+              data-transfer={item.name}
+              data-status={item.status}
+            >
+              <span className="min-w-0 flex-1 truncate" title={`${item.dir}/${item.name}`}>
+                {item.name}
+                {item.dir !== currentDir && (
+                  <span className="ml-1.5 font-mono text-hint text-muted-foreground">
+                    → {item.dir}
+                  </span>
+                )}
+              </span>
+              {(moving || item.status === "paused") && item.size > 0 && (
                 <Meter
-                  value={item.size > 0 ? (item.sent / item.size) * 100 : 0}
+                  value={(item.sent / item.size) * 100}
                   size="thin"
                   label={`${item.name} progress`}
-                  className="w-24"
+                  className="hidden w-24 sm:block"
                 />
-                <span className="numeric w-24 shrink-0 text-right text-hint text-muted-foreground">
-                  {item.status === "queued"
-                    ? "Waiting"
-                    : `${bytes(item.sent)} / ${bytes(item.size)}`}
-                </span>
-              </>
-            )}
-            <IconAction
-              label={item.status === "queued" || item.status === "uploading" ? "Cancel" : "Dismiss"}
-              className="size-6"
-              onClick={() =>
-                item.status === "queued" || item.status === "uploading"
-                  ? onCancel(item.id)
-                  : onDismiss(item.id)
-              }
-            >
-              <Cross />
-            </IconAction>
-          </li>
-        ))}
+              )}
+              <span
+                className={cn(
+                  "numeric max-w-[55%] min-w-0 shrink truncate text-right text-hint",
+                  item.status === "failed"
+                    ? "text-destructive"
+                    : item.status === "done"
+                      ? "text-success"
+                      : "text-muted-foreground",
+                )}
+                title={words}
+              >
+                {words}
+              </span>
+              {item.pieces && !item.remote && (moving || item.status === "paused") && (
+                <IconAction
+                  label={item.status === "paused" ? "Resume" : "Pause"}
+                  className="size-6"
+                  disabled={item.status === "finishing"}
+                  onClick={() =>
+                    item.status === "paused" ? onResume?.(item.id) : onPause?.(item.id)
+                  }
+                >
+                  {item.status === "paused" ? <Play /> : <Pause />}
+                </IconAction>
+              )}
+              <IconAction
+                label={
+                  moving || item.status === "paused" || item.status === "stopped"
+                    ? "Cancel"
+                    : "Dismiss"
+                }
+                className="size-6"
+                onClick={() =>
+                  moving || item.status === "paused" || item.status === "stopped"
+                    ? onCancel(item.id)
+                    : onDismiss(item.id)
+                }
+              >
+                <Cross />
+              </IconAction>
+            </li>
+          )
+        })}
       </ul>
     </div>
   )

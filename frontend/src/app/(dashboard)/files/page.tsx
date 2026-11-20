@@ -2060,6 +2060,8 @@ export default function FilesPage() {
                 onCancel={uploads.cancel}
                 onDismiss={uploads.dismiss}
                 onClear={uploads.clear}
+                onPause={uploads.pause}
+                onResume={uploads.resume}
               />
 
               <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
