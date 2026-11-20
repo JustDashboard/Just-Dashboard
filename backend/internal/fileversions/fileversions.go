@@ -223,7 +223,7 @@ type Version struct {
 	ID       int64     `json:"id"`
 	Revision string    `json:"revision"`
 	Size     int64     `json:"size"`
-	At       time.Time `json:"at"`
+	At       time.Time `json:"at,omitzero"`
 	By       string    `json:"by"`
 	Reason   string    `json:"reason"`
 	// Outside is set when this content was not what the dashboard last
@@ -234,7 +234,7 @@ type Version struct {
 // Head is what the dashboard last wrote at a path.
 type Head struct {
 	Revision string    `json:"revision"`
-	At       time.Time `json:"at"`
+	At       time.Time `json:"at,omitzero"`
 	By       string    `json:"by"`
 }
 

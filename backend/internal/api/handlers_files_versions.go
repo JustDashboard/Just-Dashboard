@@ -137,7 +137,7 @@ type fileVersionEntry struct {
 	// ID is "e<n>" for an edit version and "b<run>" for a backup's copy.
 	ID       string            `json:"id"`
 	Kind     string            `json:"kind"`
-	At       time.Time         `json:"at"`
+	At       time.Time         `json:"at,omitzero"`
 	By       string            `json:"by,omitempty"`
 	Reason   string            `json:"reason,omitempty"`
 	Outside  bool              `json:"outside,omitempty"`

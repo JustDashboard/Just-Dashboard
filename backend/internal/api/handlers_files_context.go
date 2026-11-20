@@ -84,7 +84,7 @@ type fileContextResponse struct {
 	Partial []string `json:"partial"`
 	// Truncated says the folder held more entries than were matched.
 	Truncated bool      `json:"truncated,omitempty"`
-	CheckedAt time.Time `json:"checkedAt"`
+	CheckedAt time.Time `json:"checkedAt,omitzero"`
 }
 
 func (s *Server) handleFileContext(w http.ResponseWriter, r *http.Request) error {

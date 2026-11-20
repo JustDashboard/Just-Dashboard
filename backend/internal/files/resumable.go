@@ -61,8 +61,8 @@ type UploadSession struct {
 	Received int64      `json:"received"`
 	Next     int64      `json:"next"`
 	Ranges   [][2]int64 `json:"ranges"`
-	Created  time.Time  `json:"created"`
-	Updated  time.Time  `json:"updated"`
+	Created  time.Time  `json:"created,omitzero"`
+	Updated  time.Time  `json:"updated,omitzero"`
 
 	Owner    string  `json:"owner,omitempty"`
 	Expected *string `json:"expectedRevision,omitempty"`

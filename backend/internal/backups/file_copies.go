@@ -18,7 +18,7 @@ type FileCopy struct {
 	RunID       int64      `json:"runId"`
 	JobID       int64      `json:"jobId"`
 	Job         string     `json:"job"`
-	At          time.Time  `json:"at"`
+	At          time.Time  `json:"at,omitzero"`
 	TargetKind  TargetKind `json:"targetKind"`
 	Destination string     `json:"destination"`
 	// Endpoint is an S3-compatible destination's host, which names the

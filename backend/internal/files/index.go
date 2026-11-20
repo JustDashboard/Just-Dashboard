@@ -55,7 +55,7 @@ type NameIndex struct {
 // IndexInfo is what the page is told about the index that answered: how old
 // it is, whether its walk saw everything, and whether a new one is being made.
 type IndexInfo struct {
-	BuiltAt    time.Time `json:"builtAt"`
+	BuiltAt    time.Time `json:"builtAt,omitzero"`
 	AgeSeconds int       `json:"ageSeconds"`
 	Entries    int       `json:"entries"`
 	Complete   bool      `json:"complete"`
@@ -65,7 +65,7 @@ type IndexInfo struct {
 // indexMeta is written beside the index once it is published.
 type indexMeta struct {
 	Version   int       `json:"version"`
-	BuiltAt   time.Time `json:"builtAt"`
+	BuiltAt   time.Time `json:"builtAt,omitzero"`
 	Entries   int       `json:"entries"`
 	Complete  bool      `json:"complete"`
 	Roots     []string  `json:"roots"`

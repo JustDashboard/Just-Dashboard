@@ -78,7 +78,7 @@ type Fetch struct {
 	Status    string    `json:"status"`
 	Error     string    `json:"error,omitempty"`
 	Redirects int       `json:"redirects"`
-	Started   time.Time `json:"started"`
+	Started   time.Time `json:"started,omitzero"`
 	Finished  time.Time `json:"finished,omitzero"`
 	Owner     string    `json:"-"`
 }

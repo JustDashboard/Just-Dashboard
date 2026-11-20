@@ -72,7 +72,7 @@ type trashRecord struct {
 	ID          string    `json:"id"`
 	Name        string    `json:"name"`
 	Path        string    `json:"path"`
-	DeletedAt   time.Time `json:"deletedAt"`
+	DeletedAt   time.Time `json:"deletedAt,omitzero"`
 	DeletedBy   string    `json:"deletedBy,omitempty"`
 	Replaced    bool      `json:"replaced,omitempty"`
 	Size        int64     `json:"size"`
@@ -85,7 +85,7 @@ type TrashItem struct {
 	ID           string     `json:"id"`
 	Name         string     `json:"name"`
 	OriginalPath string     `json:"originalPath"`
-	DeletedAt    time.Time  `json:"deletedAt"`
+	DeletedAt    time.Time  `json:"deletedAt,omitzero"`
 	DeletedBy    string     `json:"deletedBy,omitempty"`
 	ExpiresAt    *time.Time `json:"expiresAt,omitempty"`
 	// Replaced is an item that went in because a move, a copy or a restore
@@ -1001,7 +1001,7 @@ type Expired struct {
 	ID        string    `json:"id"`
 	Name      string    `json:"name"`
 	Path      string    `json:"path"`
-	DeletedAt time.Time `json:"deletedAt"`
+	DeletedAt time.Time `json:"deletedAt,omitzero"`
 }
 
 // Expire removes what has been in the Trash longer than it is kept, and the
