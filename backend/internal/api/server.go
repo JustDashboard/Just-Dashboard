@@ -322,6 +322,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// What has been in the Files page's Trash longer than it is kept goes,
 	// whether or not anybody opens the Trash.
 	s.keep(background, "files trash expiry", s.expireFileTrash)
+	if s.modules.fileIndex != nil {
+		s.keep(background, "files name index", s.keepFileIndex)
+	}
 	// Country and feed blocklists go stale; each is fetched again a day after
 	// its last refresh, whether or not anybody opens the Protection page.
 	s.modules.network.StartBlocklistRefresh(ctx)
