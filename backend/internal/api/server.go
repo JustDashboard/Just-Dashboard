@@ -215,6 +215,7 @@ func (s *Server) Start(ctx context.Context) error {
 	// First, and whatever else fails below: a store that cannot be written is
 	// the reason most of the rest would fail, and the one thing to say.
 	s.keep(background, "store health", s.modules.storeHealth.Run)
+	s.keep(background, "file transfers", s.modules.fileTransfer.run)
 	// Before anything is served: with hub sign-in off, no grant and no hub
 	// session may survive this start, and if that cannot be written the
 	// dashboard does not start (hub-link-protocol.md section 9.3).

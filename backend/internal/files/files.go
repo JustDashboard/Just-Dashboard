@@ -249,7 +249,7 @@ func (s *Service) List(path string, showHidden bool) (*Listing, error) {
 	out := &Listing{Path: dir, Parent: filepath.Dir(dir), Entries: []Entry{}, Roots: s.roots}
 	owners := newEntryNames()
 	for _, d := range names {
-		if !showHidden && strings.HasPrefix(d.Name(), ".") {
+		if (!showHidden && strings.HasPrefix(d.Name(), ".")) || IsStagingName(d.Name()) {
 			continue
 		}
 		full := filepath.Join(dir, d.Name())

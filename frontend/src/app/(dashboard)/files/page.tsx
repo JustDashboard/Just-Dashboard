@@ -111,6 +111,7 @@ import {
   useUploads,
   type Incoming,
 } from "@/components/files/uploads"
+import { useFolderFollow, useFollowedListing } from "@/components/files/live-folder"
 import {
   baseOf,
   cleanPath,
@@ -284,14 +285,18 @@ export default function FilesPage() {
   // operator navigated away and back. The hidden switch is a parameter of the
   // same resource, refetched in place, rather than a new resource that would
   // blank the rows for a skeleton on every flip.
-  const listing = usePoll(
+  // Followed, where the server can watch the folder (`live-folder.ts`): the
+  // rows that change arrive by themselves and the listing is not asked again.
+  const follow = useFolderFollow(path, showHidden)
+  const polled = usePoll(
     (signal) =>
       path === null
         ? Promise.resolve(null as unknown as FileListing)
         : get<FileListing>("/files/list", { path, hidden: showHidden }, signal),
-    20_000,
+    follow.mode === "off" ? 20_000 : 0,
     [path],
   )
+  const listing = useFollowedListing(polled, follow)
   const refreshListing = listing.refresh
   const firstHidden = useRef(true)
   useEffect(() => {

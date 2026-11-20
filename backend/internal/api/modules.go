@@ -117,6 +117,9 @@ type moduleSet struct {
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
+	// fileTransfer is the Files page's followed folders, uploads in pieces
+	// and fetched links (handlers_files_transfer.go).
+	fileTransfer *fileTransfer
 	// kernelRelease reads the running kernel's release; nil is
 	// sysinfo.KernelRelease, and a test hands it the kernel it is about.
 	kernelRelease func(context.Context) (string, error)
@@ -307,6 +310,7 @@ func (s *Server) initModules() {
 	// (sysinfo/mounts.go) from its first sample, and has no log of its own.
 	s.modules.onHost(func() {})
 	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
+	s.modules.fileTransfer = newFileTransfer(s)
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()
