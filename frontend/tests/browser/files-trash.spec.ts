@@ -431,7 +431,7 @@ for (const width of [1280, 390]) {
         .locator("li")
         .first()
         .boundingBox()
-      expect((await trashPlace.boundingBox())!.height).toBe(place!.height)
+      expect(Math.round((await trashPlace.boundingBox())!.height)).toBe(Math.round(place!.height))
       await bar.getByRole("button", { name: "Trash" }).click()
       await rows.first().getByRole("button", { name: "a.txt", exact: true }).click()
       await expect(page.getByText(/Deleted 2 hours ago/)).toBeVisible()

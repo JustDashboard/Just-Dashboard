@@ -436,7 +436,7 @@ test.describe("fetching a link", () => {
       const stopped = page.locator("[data-transfer='held.img']")
       await expect(stopped).toBeVisible()
       const [a, b] = await Promise.all([fetchRow.boundingBox(), stopped.boundingBox()])
-      expect(a!.height).toBe(b!.height)
+      expect(Math.round(a!.height)).toBe(Math.round(b!.height))
 
       await fetchRow.getByRole("button", { name: "Cancel" }).click()
       await expect.poll(() => cancelled).toBe(true)
@@ -462,7 +462,9 @@ test.describe("fetching a link", () => {
         item(page, "m-was-there.txt").boundingBox(),
         item(page, "n-arrived.txt").boundingBox(),
       ])
-      expect(a!.height).toBe(b!.height)
+      // In whole pixels: a table lays its rows out in fractions that can
+      // differ in the last digit between two rows of one height.
+      expect(Math.round(a!.height)).toBe(Math.round(b!.height))
     })
   }
 })

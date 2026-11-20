@@ -307,7 +307,7 @@ test("every picture lists as the server's small copy, and a row with one is one 
     )
     const withPicture = await row(page, `${home}/scan.jpg`).boundingBox()
     const without = await row(page, `${home}/notes.txt`).boundingBox()
-    expect(withPicture!.height).toBe(without!.height)
+    expect(Math.round(withPicture!.height)).toBe(Math.round(without!.height))
   }
 })
 
@@ -364,7 +364,7 @@ test("audio plays as a queue that carries on across folders, on one line", async
   await expect(player).toContainText("02 song.wav")
   await expect(player).toContainText("2 of 3")
   // One line in the foot the listing already had: nothing moved.
-  expect((await footer.boundingBox())!.height).toBe(footerBefore!.height)
+  expect(Math.round((await footer.boundingBox())!.height)).toBe(Math.round(footerBefore!.height))
   expect((await firstRow.boundingBox())!.y).toBe(rowBefore!.y)
 
   // Another folder, walked to within the page: the music goes on.
@@ -438,7 +438,7 @@ test.describe("on a phone", () => {
     await page.keyboard.press("Escape")
     const player = page.locator("[data-files-player]")
     await expect(player).toContainText("01 intro.wav")
-    expect((await footer.boundingBox())!.height).toBe(before)
+    expect(Math.round((await footer.boundingBox())!.height)).toBe(Math.round(before))
     const line = (await player.boundingBox())!
     expect(line.x + line.width).toBeLessThanOrEqual(390)
   })
