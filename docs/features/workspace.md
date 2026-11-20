@@ -17,6 +17,8 @@ A real terminal, files, Git, drawings and your own computers, all in the same br
 - Every file keeps its earlier versions: each save through the dashboard, and each backup that holds it, with a diff and a restore; an edit made in a shell between two saves is caught and labelled at the next one
 - Folders and files that know the server: a container's volume, a site's root, a Git checkout with its uncommitted changes, a deployment's source, a database's data, and whether a backup covers it, each linked to its page
 - Files and the file editor one pane at a time on a phone, with a bottom bar for places, the folder and its details
+- A Trash for everything deleted in Files, kept 30 days, with Restore, and Undo (or Ctrl+Z) after a delete, move, rename or copy
+- Find that answers from an index of every name on the server, however big the tree
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs, with the screenshots and videos a pull request embeds drawn in place
 - One pane at a time on a phone, with a bottom bar for changes, history, branches, GitHub and files

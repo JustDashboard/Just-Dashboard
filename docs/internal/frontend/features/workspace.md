@@ -493,6 +493,28 @@ what the entry is inside and "Not backed up" for a folder that matters (`server-
 **Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
 
+A delete moves to the Trash (`delete-flow.tsx`): before the confirmation opens it asks
+`GET /files/trash/check` for each entry, so the sentence says where things go ("It goes to the Trash,
+kept 30 days") or, for what the Trash cannot take, why it is deleted permanently instead. Shift+Delete
+and "Delete permanently" in the menu skip the Trash. Every delete, move, rename, copy and duplicate is
+recorded as data (`undo.ts`: the steps that undo it, in order) on this visit's stack
+(`use-file-undo.ts`); its notice carries Undo, and Ctrl/Cmd+Z undoes the newest, then the one before,
+while text fields, dialogs and menus keep their own. An operation that cannot be undone (a permanent
+delete, a copy by an account that may not delete) says so on its notice instead. Name search passes
+the folder on screen as `here` and says the index's age beside the count when the index answered.
+
+## `/files/trash`
+
+The Trash (`trash-view.tsx`) in the Files workbench's frame: the places sidebar with Trash as its last
+row (`trash-place.tsx`, also the places menu's last item), a table of what was deleted (name, the
+folder it came from, how long ago and by whom, how long it is still kept, its size; one 44px line
+each) and the chosen item's details (`?item=` in the address). Restore asks through the conflict
+dialog when the place is taken; Delete permanently and Empty Trash confirm and need the destructive
+capability. Below `lg` it is one pane at a time (Places, Trash, Details) with the bar at the foot
+
+**Implementation:** `app/(dashboard)/files/trash/page.tsx` and `components/files/trash*.ts*`; checked
+by `tests/browser/files-trash.spec.ts` and `trash.test.js`
+
 ## `/files/editor`
 
 A file opened as a page: a folder tree (`file-tree.tsx`) beside the text editor (`file-editor.tsx`)

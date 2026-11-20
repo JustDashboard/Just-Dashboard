@@ -309,7 +309,7 @@ func TestFolderColoursFollowTheFolder(t *testing.T) {
 	target := filepath.Join(moved, "nginx")
 	if w := c.do(http.MethodDelete, query("/api/v1/files/delete",
 		map[string]string{"path": target, "recursive": "true"}),
-		"", map[string]string{httpx.ConfirmHeader: "nginx"}); w.Code != http.StatusNoContent {
+		"", map[string]string{httpx.ConfirmHeader: "nginx"}); w.Code != http.StatusOK {
 		t.Fatalf("delete: %d %s", w.Code, w.Body.String())
 	}
 	if len(colours()) != 0 {

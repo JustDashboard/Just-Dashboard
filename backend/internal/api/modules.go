@@ -117,6 +117,11 @@ type moduleSet struct {
 	// fileVersions keeps what the Files page's saves replace
 	// (handlers_files_versions.go), built on first use.
 	fileVersions fileVersionsSlot
+	// fileTrash is where a delete on the Files page puts things; see
+	// handlers_files_trash.go.
+	fileTrash *files.Trash
+	// fileIndex is Find's index of names; nil with JD_FILES_INDEX=false.
+	fileIndex *files.NameIndex
 	// onHost is what moves hostFiles: hostexec.InHostMounts, warning once
 	// when the namespace cannot be entered.
 	onHost func(fn func())
@@ -310,6 +315,10 @@ func (s *Server) initModules() {
 	// (sysinfo/mounts.go) from its first sample, and has no log of its own.
 	s.modules.onHost(func() {})
 	s.modules.hostFiles = s.modules.files.OnHost(s.modules.onHost)
+	s.modules.fileTrash = files.NewTrash(s.modules.hostFiles, s.Cfg.DataDir, s.Cfg.FilesTrashDays)
+	if s.Cfg.FilesIndex {
+		s.modules.fileIndex = files.NewNameIndex(s.modules.hostFiles, s.Cfg.DataDir, fileIndexMaxAge)
+	}
 	s.modules.gameVersions = gameserver.New()
 	s.modules.git = gitx.New(s.Cfg.GitRoots)
 	s.modules.github = ghx.New()

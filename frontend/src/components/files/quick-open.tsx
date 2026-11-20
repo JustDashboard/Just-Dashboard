@@ -8,6 +8,7 @@ import { get } from "@/lib/api"
 import { bytes, grouped, plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileEntry, FileFindResult, FilePlaces } from "@/lib/types"
+import { indexAge, type FindSource } from "@/components/files/trash"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { ErrorState } from "@/components/state"
@@ -88,15 +89,17 @@ function SearchBody({
   const [run, setRun] = useState(0)
   const [selected, setSelected] = useState<string>()
   const [pending, setPending] = useState<string>()
-  const [answer, setAnswer] = useState<{
-    key: string
-    hits: FileSearchHit[]
-    truncated?: boolean
-    total?: number
-    elapsedMs?: number
-    unreadable?: number
-    error?: Error
-  }>()
+  const [answer, setAnswer] = useState<
+    {
+      key: string
+      hits: FileSearchHit[]
+      truncated?: boolean
+      total?: number
+      elapsedMs?: number
+      unreadable?: number
+      error?: Error
+    } & FindSource
+  >()
   const input = useRef<HTMLInputElement>(null)
   const list = useRef<HTMLDivElement>(null)
   const id = useId()
@@ -133,13 +136,15 @@ function SearchBody({
         setPending(key)
         try {
           if (mode === "names") {
-            const result = await get<FileFindResult>(
+            const result = await get<FileFindResult & FindSource>(
               "/files/find",
               {
                 path: scope,
                 q: trimmed,
                 hidden,
                 limit: 60,
+                // The folder on screen is walked live beside the index's answer.
+                here: root,
               },
               controller.signal,
             )
@@ -178,7 +183,7 @@ function SearchBody({
       clearTimeout(timer)
       controller.abort()
     }
-  }, [key, matchCase, mode, ready, regex, hidden, run, scope, trimmed])
+  }, [key, matchCase, mode, ready, regex, hidden, root, run, scope, trimmed])
 
   useEffect(() => {
     list.current
@@ -467,6 +472,9 @@ function SearchBody({
                         )
                       : ""}
             </span>
+            {mode === "names" && !busy && indexAge(current) && (
+              <span className="shrink-0 text-muted-foreground">· {indexAge(current)}</span>
+            )}
             {!!current?.unreadable && (
               <span className="truncate text-warning">
                 · {current.unreadable} entries could not be read

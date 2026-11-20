@@ -63,6 +63,7 @@ func (s *Server) mountFileRoutes(r chi.Router) {
 		s.destructive(r, func(r chi.Router) {
 			r.Method(http.MethodDelete, "/delete", s.handle(s.handleFileDelete))
 		})
+		s.mountFilesTrashRoutes(r)
 	})
 }
 
@@ -355,13 +356,18 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
+	replaced, err := s.trashReplaced(r, src, dst, req.Overwrite, false)
+	if err != nil {
+		return err
+	}
 	if err := s.modules.hostFiles.Move(req.From, req.To, req.Overwrite); err != nil {
+		s.settleReplaced(replaced, true)
 		return mapFileError(err)
 	}
 	s.moveFileColours(r.Context(), src, dst)
 	s.moveFileVersions(r.Context(), src, dst)
 	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
-	httpx.NoContent(w)
+	respondReplaced(w, replaced)
 	return nil
 }
 
@@ -373,11 +379,20 @@ func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) error {
 	if err := req.validate(); err != nil {
 		return err
 	}
+	src, dst, err := s.modules.hostFiles.CopyEnds(req.From, req.To)
+	if err != nil {
+		return mapFileError(err)
+	}
+	replaced, err := s.trashReplaced(r, src, dst, req.Overwrite, true)
+	if err != nil {
+		return err
+	}
 	if err := s.modules.hostFiles.Copy(req.From, req.To, req.Overwrite); err != nil {
+		s.settleReplaced(replaced, true)
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
-	httpx.NoContent(w)
+	respondReplaced(w, replaced)
 	return nil
 }
 
@@ -398,28 +413,6 @@ func (s *Server) handleFileSymlink(w http.ResponseWriter, r *http.Request) error
 		return mapFileError(err)
 	}
 	httpx.SetAudit(r, "file.symlink", req.Link, map[string]any{"target": req.Target})
-	httpx.NoContent(w)
-	return nil
-}
-
-func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error {
-	path := r.URL.Query().Get("path")
-	if path == "" {
-		return httpx.BadRequest("path query parameter is required")
-	}
-	recursive, err := httpx.QueryBool(r, "recursive")
-	if err != nil {
-		return err
-	}
-	entry, err := s.modules.hostFiles.ResolveEntry(path)
-	if err != nil {
-		return mapFileError(err)
-	}
-	if err := s.modules.hostFiles.Delete(path, recursive); err != nil {
-		return mapFileError(err)
-	}
-	s.dropFileColours(r.Context(), entry)
-	httpx.SetAudit(r, "file.delete", path, map[string]any{"recursive": recursive})
 	httpx.NoContent(w)
 	return nil
 }

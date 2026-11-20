@@ -94,6 +94,9 @@ func writeTarGz(w io.Writer, baseDir string, paths []string) error {
 
 	for _, root := range paths {
 		if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err == nil && skipTrashFolder(root, path, info) {
+				return filepath.SkipDir
+			}
 			if err != nil {
 				return nil
 			}
@@ -136,6 +139,9 @@ func writeZip(w io.Writer, baseDir string, paths []string) error {
 
 	for _, root := range paths {
 		if err := filepath.Walk(root, func(path string, info os.FileInfo, err error) error {
+			if err == nil && skipTrashFolder(root, path, info) {
+				return filepath.SkipDir
+			}
 			if err != nil || !info.Mode().IsRegular() {
 				return nil
 			}
@@ -413,4 +419,10 @@ func extractZip(src, dest string, budget *extractBudget, made *[]string) ([]stri
 		written = append(written, path)
 	}
 	return written, nil
+}
+
+// skipTrashFolder leaves a Trash folder out of an archive of a folder above
+// it: what was deleted is not part of what is being downloaded.
+func skipTrashFolder(root, path string, info os.FileInfo) bool {
+	return path != root && info.IsDir() && IsTrashFolderName(info.Name())
 }

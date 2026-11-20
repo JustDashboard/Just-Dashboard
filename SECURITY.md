@@ -50,6 +50,18 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   them, and its content is read out of the archive only for an administrator, as downloading the
   archive is. A secret you rotate out of a file is still in its
   earlier versions until they age out.
+- A delete on the Files page goes to a Trash instead of being final, and Find answers from an index of
+  file names. Both live outside the folders you browse and are root's alone: the Trash is
+  `.jd-trash` under the data directory (`/var/lib/just-dashboard`) for what shares its filesystem, and
+  at the top of each other mount (folders 0700, records 0600), each item kept with its own owner and
+  mode; the index is `/var/lib/just-dashboard/files-index/` (0700, its file 0600), because it lists
+  every path on the server. The Trash is bounded by time (`JD_FILES_TRASH_DAYS`, 30 by default, every
+  removal audited) and by Empty Trash; the index by the names on disk, one line each, rebuilt in place.
+  Deleting from the Trash, emptying it and a permanent delete need the destructive capability; a
+  restore is a file write and lands only inside `JD_FILE_ROOTS`. A Trash folder is opened once per
+  operation and used only through that open handle, checked to be the dashboard's own and closed to
+  everyone else, because the top of a mount may belong to another account that could otherwise swap
+  the folder for one of its own and choose where root moves a restored file.
 - The assistant, when you set one up, sends your question and what it reads to the model you chose, with
   every secret value masked first: the model's provider never sees one. An image you paste into its chat is
   the exception: it is sent as it is, because masking reads text, so a secret in a screenshot reaches the

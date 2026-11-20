@@ -41,7 +41,7 @@ import {
   Trash,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { ApiError, del, get, post, put } from "@/lib/api"
+import { ApiError, get, post, put } from "@/lib/api"
 import { bytes, plural, truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileBookmark, FileEntry, FileListing, FilePlaces } from "@/lib/types"
@@ -56,7 +56,6 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { FileEditorSheet } from "@/components/files/file-editor"
 import {
   defaultFolderColour,
-  FileIcon,
   folderColourOf,
   FolderColourProvider,
   FolderIcon,
@@ -105,6 +104,10 @@ import {
 } from "@/components/files/os-clipboard"
 import { inspectUpload } from "@/components/files/upload-plan"
 import { useConflicts, type ConflictPolicy } from "@/components/files/conflict-dialog"
+import { useDeleteFlow } from "@/components/files/delete-flow"
+import { useFileUndo, useUndoShortcut } from "@/components/files/use-file-undo"
+import { copyOperation, moveOperation, type Copied, type Moved } from "@/components/files/undo"
+import type { ReplaceResult } from "@/components/files/trash"
 import {
   collectInput,
   collectTransfer,
@@ -638,6 +641,11 @@ export default function FilesPage() {
 
   // --- operations ---
 
+  // Every delete, move, rename and copy below is recorded with how to undo
+  // it, for the notice's Undo and for Ctrl+Z (use-file-undo.ts).
+  const undo = useFileUndo(reload)
+  useUndoShortcut(undo.undoLast)
+
   /** Every name in a folder, dotfiles included: what a new name must not be. */
   const namesIn = async (dir: string): Promise<Set<string>> => {
     const full = await get<FileListing>("/files/list", { path: dir, hidden: true })
@@ -709,6 +717,7 @@ export default function FilesPage() {
         policy = answer
       }
       let ok = 0
+      const done: (Moved & Copied)[] = []
       for (const src of targets) {
         const base = baseOf(src)
         let name = base
@@ -720,7 +729,12 @@ export default function FilesPage() {
           else name = numberedName(base, taken)
         }
         try {
-          await post(`/files/${mode}`, { from: src, to: joinPath(dest, name), overwrite })
+          const answer = await post<ReplaceResult>(`/files/${mode}`, {
+            from: src,
+            to: joinPath(dest, name),
+            overwrite,
+          })
+          done.push({ from: src, to: joinPath(dest, name), replaced: answer?.replaced?.item })
           taken.add(name)
           if (mode === "move") moved.add(src)
           ok++
@@ -730,7 +744,13 @@ export default function FilesPage() {
       }
       if (ok > 0) {
         const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
-        notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
+        const what = ok === 1 ? baseOf(done[0].from) : plural(ok, "item")
+        undo.record(
+          mode === "move"
+            ? moveOperation(`moving ${what}`, done)
+            : copyOperation(`copying ${what}`, done, canDestruct),
+          `${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`,
+        )
         if (mode === "move") {
           afterLabelledChange([...moved])
           setActive((previous) => {
@@ -778,8 +798,12 @@ export default function FilesPage() {
       hint: (v) => joinPath(path ?? "/", v || "…"),
       submit: async (name) => {
         if (name === entry.name) return
-        await post("/files/move", { from: entry.path, to: joinPath(path ?? "/", name) })
-        notify.success(`Renamed to ${name}`)
+        const to = joinPath(path ?? "/", name)
+        await post("/files/move", { from: entry.path, to })
+        undo.record(
+          moveOperation(`renaming ${entry.name}`, [{ from: entry.path, to }]),
+          `Renamed to ${name}`,
+        )
         setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange([entry.path])
@@ -789,8 +813,12 @@ export default function FilesPage() {
   const duplicate = async (entry: FileEntry) => {
     const name = uniqueName(entry.name, names)
     try {
-      await post("/files/copy", { from: entry.path, to: joinPath(path ?? "/", name) })
-      notify.success(`Duplicated as ${name}`)
+      const to = joinPath(path ?? "/", name)
+      await post("/files/copy", { from: entry.path, to })
+      undo.record(
+        copyOperation(`duplicating ${entry.name}`, [{ to }], canDestruct),
+        `Duplicated as ${name}`,
+      )
       reload()
     } catch (err) {
       notify.error("Could not duplicate", err)
@@ -810,69 +838,26 @@ export default function FilesPage() {
     }
   }
 
-  const deleteEntry = (entry: FileEntry) =>
-    confirm({
-      title: entry.isDir ? "Delete folder" : "Delete file",
-      confirmLabel: "Delete",
-      // What it acts on, drawn as itself; the button carries the danger, not the sentence.
-      subject: {
-        mark: <FileIcon entry={entry} className="size-6" />,
-        name: entry.name,
-        facts: <span className="font-mono break-all">{entry.path}</span>,
-      },
-      description: (
-        <p>It is deleted permanently{entry.isDir ? ", along with everything inside it." : "."}</p>
-      ),
-      action: async () => {
-        await del("/files/delete", {
-          query: { path: entry.path, recursive: entry.isDir },
-        })
-        setActive({ dir: path ?? "/", entry: null })
-        reload()
-        afterLabelledChange([entry.path])
-      },
-    })
+  // To the Trash, or for good with Shift+Delete or "Delete permanently"
+  // (delete-flow.tsx says which, and why, before anything happens).
+  const deleteEntries = useDeleteFlow({
+    confirm,
+    record: undo.record,
+    onDeleted: (gone) => {
+      clearSelection()
+      setActive({ dir: path ?? "/", entry: null })
+      reload()
+      afterLabelledChange(gone)
+    },
+  })
+  const deleteEntry = (entry: FileEntry, permanent?: boolean) =>
+    void deleteEntries([entry], permanent === true)
 
-  const bulkDelete = () => {
-    const targets = entries.filter((e) => selected.has(e.path))
-    if (targets.length === 0) return
-    const dirs = targets.filter((e) => e.isDir)
-    confirm({
-      title: `Delete ${plural(targets.length, "item")}`,
-      confirmLabel: "Delete all",
-      workingLabel: "Deleting selected files…",
-      description: (
-        <p>
-          {plural(targets.length, "selected item")} {targets.length === 1 ? "is" : "are"} deleted
-          permanently
-          {dirs.length > 0 ? ", folders and everything inside them included." : "."}
-        </p>
-      ),
-      action: async (_, report) => {
-        let failed = 0
-        report({ completed: 0, total: targets.length })
-        for (const [index, entry] of targets.entries()) {
-          report({ detail: entry.name, completed: index })
-          try {
-            await del("/files/delete", {
-              query: { path: entry.path, recursive: entry.isDir },
-            })
-          } catch {
-            failed++
-          }
-          report({ completed: index + 1 })
-        }
-        clearSelection()
-        setActive({ dir: path ?? "/", entry: null })
-        reload()
-        afterLabelledChange(targets.map((e) => e.path))
-        if (failed) {
-          notify.error(`${plural(failed, "item")} could not be deleted`)
-          return "reported" as const
-        }
-      },
-    })
-  }
+  const bulkDelete = (permanent?: boolean) =>
+    void deleteEntries(
+      entries.filter((e) => selected.has(e.path)),
+      permanent === true,
+    )
 
   const newFolder = () =>
     prompt({
@@ -980,6 +965,8 @@ export default function FilesPage() {
     onPermissions: () => setPermsEntry(entry),
     onDelete: () =>
       selected.has(entry.path) && selected.size > 1 ? bulkDelete() : deleteEntry(entry),
+    onDeleteForGood: () =>
+      selected.has(entry.path) && selected.size > 1 ? bulkDelete(true) : deleteEntry(entry, true),
     onEditImage: () => setEditingImage(entry.path),
     onToggleStar: () => toggleStar(entry.path, entry.name),
     starred: bookmarks.some((b) => b.path === entry.path),
@@ -1367,8 +1354,8 @@ export default function FilesPage() {
         case "Delete":
           if (!canDestruct) break
           event.preventDefault()
-          if (selected.size > 0) bulkDelete()
-          else if (activeEntry) deleteEntry(activeEntry)
+          if (selected.size > 0) bulkDelete(event.shiftKey)
+          else if (activeEntry) deleteEntry(activeEntry, event.shiftKey)
           break
         case "Backspace":
           event.preventDefault()
@@ -1850,7 +1837,7 @@ export default function FilesPage() {
                         archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
                         onCopy={() => cutCopy("copy", [...selected])}
                         onCut={() => cutCopy("cut", [...selected])}
-                        onDelete={bulkDelete}
+                        onDelete={() => bulkDelete()}
                         onClear={clearSelection}
                       />
                     </motion.div>
