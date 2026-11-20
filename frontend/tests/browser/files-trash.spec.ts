@@ -141,7 +141,16 @@ async function mockServer(
           entry("report.csv"),
         ],
       })
-    if (path === "/files/preview") return json(route, { kind: "text", text: "", size: 12 })
+    if (path === "/files/preview") {
+      const target = url.searchParams.get("path") ?? ""
+      return json(route, {
+        path: target,
+        name: target.split("/").pop() ?? "",
+        kind: "text",
+        text: "",
+        size: 12,
+      })
+    }
     if (path === "/files/trash/check")
       return json(route, {
         path: url.searchParams.get("path"),

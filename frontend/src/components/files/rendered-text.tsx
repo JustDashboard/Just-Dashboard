@@ -41,7 +41,8 @@ import {
 /** The view this preview gets, or nothing for lines that are only lines. */
 export function renderedViewOf(preview: FilePreview | undefined): TextView | null {
   if (!preview || preview.kind !== "text") return null
-  return textViewOf(preview.name, preview.text ?? "")
+  // A preview without its name (an answer of another shape) is lines, never a throw.
+  return textViewOf(preview.name ?? "", preview.text ?? "")
 }
 
 /** Rendered or source, remembered per browser: whoever reads Markdown as source reads it so everywhere. */

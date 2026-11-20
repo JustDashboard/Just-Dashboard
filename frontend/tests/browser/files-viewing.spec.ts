@@ -441,8 +441,5 @@ test.describe("on a phone", () => {
     expect((await footer.boundingBox())!.height).toBe(before)
     const line = (await player.boundingBox())!
     expect(line.x + line.width).toBeLessThanOrEqual(390)
-    await page.screenshot({
-      path: "/home/ubuntu/just-dashboard-files-2026-11-20/viewing/shots/phone-player.png",
-    })
   })
 })
