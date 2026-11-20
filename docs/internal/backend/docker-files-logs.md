@@ -471,7 +471,10 @@ bounded to 8 MiB; a run that covers the path but did not hold the file is `410 v
 content through `WriteKept`, so a stale revision is `409 content_conflict` exactly as a save is, what
 the restore replaces is kept, and the audit entry (`file.version.restore`) names the version or run
 and a byte count, never content. A person the Backups read routes would not answer sees no backup
-copies (`backups: false`). `fileversions_test.go`, `kept_test.go`, `file_copies_test.go` and
+copies (`backups: false`). Reading a backup copy's content (`/files/versions/content` with a `b` version) asks
+`system.admin`, as `GET /backups/runs/{id}/download` does: the bytes leave an archive, and reading one
+may fetch and decrypt the whole of it. Anyone else sees the copy listed and may restore it in place
+behind the restore's own gate; the page says only an administrator can open it. `fileversions_test.go`, `kept_test.go`, `file_copies_test.go` and
 `handlers_files_versions_test.go` cover the capture, the outside label, the bounds and orphan removal,
 a failure to keep that leaves the save standing, moves, the conflict, the roots and another path's
 version, and listing backups with a destination that fails the test if it is reached.

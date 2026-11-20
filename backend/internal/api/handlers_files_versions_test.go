@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/contentguard"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 )
@@ -237,5 +238,23 @@ func TestAPictureSavedOverItsOriginalKeepsTheOriginal(t *testing.T) {
 	if image.Code != http.StatusOK || !bytes.Equal(image.Body.Bytes(), original) || image.Header().Get("Content-Type") != "image/png" ||
 		!strings.Contains(image.Header().Get("Content-Security-Policy"), "sandbox") || image.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("picture: %d %v", image.Code, image.Header())
+	}
+}
+
+// A backup's copy leaves the archive only for an administrator, as the
+// archive's own download does; a reader is refused before any run is looked
+// up, so the refusal says nothing about which runs exist.
+func TestABackupCopyIsOpenedOnlyByAnAdministrator(t *testing.T) {
+	_, s, dir := versionsClient(t)
+	path := filepath.Join(dir, "notes.txt")
+	for _, role := range []auth.Role{auth.RoleReadOnly, auth.RoleLimited} {
+		c := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "person-"+string(role), role)}
+		for _, as := range []string{"", "image", "download"} {
+			w := c.do(http.MethodGet, query("/api/v1/files/versions/content",
+				map[string]string{"path": path, "version": "b1", "as": as}), "", nil)
+			if w.Code != http.StatusForbidden {
+				t.Fatalf("%s reading a backup copy as %q: %d %s", role, as, w.Code, w.Body)
+			}
+		}
 	}
 }

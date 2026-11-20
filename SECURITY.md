@@ -46,7 +46,9 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   directory (`file-versions/`, folders 0700 and files 0600, root's alone), at most 50 per file and
   512 MiB in all by default (`JD_FILE_VERSIONS`, `JD_FILE_VERSIONS_MB`; `0` turns it off). They are
   served only to whoever may read the file itself, through the same roots, and a picture's version
-  through the same closed list of types as the file. A secret you rotate out of a file is still in its
+  through the same closed list of types as the file. A backup run's copy of a file is listed beside
+  them, and its content is read out of the archive only for an administrator, as downloading the
+  archive is. A secret you rotate out of a file is still in its
   earlier versions until they age out.
 - The assistant, when you set one up, sends your question and what it reads to the model you chose, with
   every secret value masked first: the model's provider never sees one. An image you paste into its chat is

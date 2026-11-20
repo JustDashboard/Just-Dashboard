@@ -1,7 +1,15 @@
 "use client"
 
 import { useCallback, useEffect, useRef, useState } from "react"
-import { Archive, ClockRewind, CloudDownload, Download, Pencil, Terminal } from "@/components/icons"
+import {
+  Archive,
+  ClockRewind,
+  CloudDownload,
+  Download,
+  Pencil,
+  Shield,
+  Terminal,
+} from "@/components/icons"
 import { ApiError, downloadUrl, get, post, shaped } from "@/lib/api"
 import { bytes, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -357,8 +365,12 @@ function Compare({
   const { can } = useAuth()
   const picture = isImage(path)
   const base = against === "previous" ? previous : undefined
-  const mine = useVersionText(path, version, !picture)
-  const theirs = useVersionText(path, base, !picture && against === "previous")
+  // A backup's copy leaves its archive only for an administrator, as the
+  // archive's own download does. Anyone else may still restore it in place.
+  const opens = (v: FileVersion | undefined) => !v || v.kind === "edit" || can("system.admin")
+  const sealed = !opens(version)
+  const mine = useVersionText(path, version, !picture && !sealed)
+  const theirs = useVersionText(path, base, !picture && against === "previous" && opens(base))
   const [fetched, setFetched] = useState(readsHere(version))
   const [restoring, setRestoring] = useState(false)
   const [conflict, setConflict] = useState(false)
@@ -409,7 +421,7 @@ function Compare({
           ]}
         />
       )}
-      {(fetched || readsHere(version)) && (
+      {!sealed && (fetched || readsHere(version)) && (
         <IconAction label="Download this version" className="size-8" asChild>
           <a href={versionUrl(path, version, "download")} download>
             <Download />
@@ -420,7 +432,7 @@ function Compare({
         <Button
           size="sm"
           onClick={() => void restore()}
-          disabled={restoring || remote}
+          disabled={restoring || (remote && !sealed)}
           aria-label="Restore this version"
         >
           <ClockRewind />
@@ -431,7 +443,19 @@ function Compare({
   )
 
   let body: React.ReactNode
-  if (remote) {
+  if (sealed) {
+    body = (
+      <EmptyState
+        icon={Shield}
+        title="Only an administrator can open a backup's copy"
+        description={
+          canRestore
+            ? "You can still restore it over the file. What it replaces is kept as a version."
+            : "It is listed here so you know it exists."
+        }
+      />
+    )
+  } else if (remote) {
     body = (
       <EmptyState
         icon={CloudDownload}
@@ -485,6 +509,15 @@ function Compare({
     const failed = [left, right].find((side) => side.state === "failed")
     if (failed && failed.state === "failed") body = <Failure error={failed.error} />
     else if (currentError && against === "current") body = <Failure error={currentError} />
+    else if (base && !opens(base))
+      body = (
+        <EmptyState
+          icon={Shield}
+          className="m-6"
+          title="The version before it is a backup's copy"
+          description="Only an administrator can open one. Compare with the file as it is now instead."
+        />
+      )
     else if (base && !readsHere(base) && theirs.loaded.state === "idle")
       body = (
         <EmptyState

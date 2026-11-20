@@ -169,6 +169,16 @@ func canSeeBackups(r *http.Request) bool {
 	return ok && p.Can(auth.CapRead) && !p.DeployKey()
 }
 
+// canOpenBackupCopies is whether this person may read a file's copy out of a
+// backup run. It is what GET /backups/runs/{id}/download asks, for the same
+// reason: the bytes leave an archive that holds whatever the job covered, and
+// reading one may fetch and decrypt the whole of it. Restoring a copy in
+// place hands the bytes to nobody, so it keeps the restore's own gate.
+func canOpenBackupCopies(r *http.Request) bool {
+	p, ok := httpx.PrincipalFrom(r.Context())
+	return ok && p.Can(auth.CapSystemAdmin)
+}
+
 func (s *Server) handleFileVersions(w http.ResponseWriter, r *http.Request) error {
 	raw := r.URL.Query().Get("path")
 	if raw == "" {
@@ -305,6 +315,10 @@ func (s *Server) handleFileVersionContent(w http.ResponseWriter, r *http.Request
 	path, err := s.modules.hostFiles.Resolve(raw)
 	if err != nil {
 		return mapFileError(err)
+	}
+	if ref.backup > 0 && !canOpenBackupCopies(r) {
+		return httpx.Err(http.StatusForbidden, "forbidden",
+			"opening a backup's copy takes it out of the archive, which only an administrator may do ("+string(auth.CapSystemAdmin)+")")
 	}
 	as := q.Get("as")
 	mediaType := files.MediaType(filepath.Base(path))
