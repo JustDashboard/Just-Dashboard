@@ -1453,10 +1453,10 @@ test("pictures are visible in the listing and Space opens the viewer", async ({ 
   await expect(dialog).toBeVisible()
   // Folders first, then files by name: clip.mp4, logo.png, notes.md.
   await expect(dialog).toContainText("logo.png")
-  await expect(dialog).toContainText("2 / 3")
+  await expect(dialog).toContainText("2 of 3")
   await page.keyboard.press("ArrowLeft")
   await expect(dialog).toContainText("clip.mp4")
-  await expect(dialog).toContainText("1 / 3")
+  await expect(dialog).toContainText("1 of 3")
   await page.keyboard.press("Escape")
   await expect(dialog).toBeHidden()
 })

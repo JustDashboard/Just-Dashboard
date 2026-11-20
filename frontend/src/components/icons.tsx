@@ -26,6 +26,7 @@ import {
   ArrowsRightLeftIcon,
   ArrowsUpDownIcon,
   BackspaceIcon,
+  BackwardIcon,
   Bars3BottomLeftIcon,
   BellIcon,
   BoldIcon,
@@ -76,6 +77,7 @@ import {
   FolderIcon,
   FolderOpenIcon,
   FolderPlusIcon,
+  ForwardIcon,
   FunnelIcon,
   GlobeAltIcon,
   HashtagIcon,
@@ -281,6 +283,8 @@ export const Hash: Icon = adapt(HashtagIcon, "Hash")
 export const Command: Icon = adapt(CommandLineIcon, "Command")
 export const Play: Icon = adapt(PlayIcon, "Play")
 export const Pause: Icon = adapt(PauseIcon, "Pause")
+export const TrackPrevious: Icon = adapt(BackwardIcon, "TrackPrevious")
+export const TrackNext: Icon = adapt(ForwardIcon, "TrackNext")
 export const StopCircle: Icon = adapt(StopCircleIcon, "StopCircle")
 export const PlusSquareSmall: Icon = adapt(DocumentPlusIcon, "PlusSquareSmall")
 

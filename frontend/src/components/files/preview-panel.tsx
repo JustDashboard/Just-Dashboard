@@ -48,6 +48,8 @@ import { folderSentence } from "@/components/files/counts"
 import { ArchiveListing, PdfPreview, TextHead } from "@/components/files/preview-bits"
 import { TextContents } from "@/components/files/text-contents"
 import { renderedViewOf } from "@/components/files/rendered-text"
+import { PlayableVideo } from "@/components/files/playable-video"
+import { ListenSection } from "@/components/files/listen-section"
 
 export { rawUrl } from "@/components/files/media"
 
@@ -224,11 +226,12 @@ function Hero({
           />
         </button>
       ) : preview?.kind === "video" ? (
-        <video
-          src={rawUrl(entry.path, preview.modified)}
-          controls
-          preload="metadata"
-          className="h-44 w-full rounded-lg border border-hairline bg-black object-contain"
+        <PlayableVideo
+          path={entry.path}
+          name={entry.name}
+          modified={preview.modified}
+          className="h-44 rounded-lg border border-hairline"
+          videoClassName="h-44 w-full rounded-lg border border-hairline bg-black object-contain"
         />
       ) : (
         <FileIcon entry={entry} detail className="mx-auto mt-2 size-24" />
@@ -402,11 +405,7 @@ function Contents({
 }: PreviewProps & { preview: FilePreview }) {
   switch (preview.kind) {
     case "audio":
-      return (
-        <Section title="Listen">
-          <audio src={rawUrl(entry.path, preview.modified)} controls className="w-full" />
-        </Section>
-      )
+      return <ListenSection entry={entry} modified={preview.modified} />
     case "pdf":
       return (
         <Section title="Pages">

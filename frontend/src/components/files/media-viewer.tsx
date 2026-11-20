@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import {
   ChevronLeft,
   ChevronRight,
@@ -10,7 +10,9 @@ import {
   MagnifyingGlass,
   MagnifyingGlassMinus,
   Music,
+  Pause,
   Pencil,
+  Play,
 } from "@/components/icons"
 import { downloadUrl, get } from "@/lib/api"
 import { bytes, relativeTime, timestamp } from "@/lib/format"
@@ -26,6 +28,17 @@ import { FileIcon } from "@/components/file-icon"
 import { mediaKind, rawUrl } from "@/components/files/media"
 import { ArchiveListing, PdfPreview } from "@/components/files/preview-bits"
 import { TextStage } from "@/components/files/text-contents"
+import { GalleryStrip } from "@/components/files/gallery-strip"
+import { PlayableVideo } from "@/components/files/playable-video"
+import { PlayerControls, useAudioQueue } from "@/components/files/audio-queue"
+import {
+  aheadOf,
+  clockTime,
+  hasSlideshow,
+  nextPicture,
+  positionWords,
+  swipeStep,
+} from "@/components/files/gallery"
 
 /**
  * The full-screen look at a file.
@@ -38,9 +51,17 @@ import { TextStage } from "@/components/files/text-contents"
  * inspector shows, at a size that can actually be read. Space in the listing
  * is the quick look; Escape is the way out.
  *
+ * A folder of pictures reads as a gallery: how far through it is, in words; a
+ * strip of the folder under the stage to jump by; a swipe on a phone; the next
+ * pictures fetched ahead; and a slideshow. Audio plays through the page's queue
+ * (`audio-queue.tsx`), so it carries on after this closes.
+ *
  * Editing is a deliberate second step from here: the image editor and the
  * code editor are offered in the strip, and opening either closes this.
  */
+
+/** How long the slideshow holds each picture. */
+const SLIDE_MS = 4000
 export function MediaViewer({
   items,
   index,
@@ -67,6 +88,14 @@ export function MediaViewer({
   const kind = entry ? mediaKind(entry.name) : null
   const [fit, setFit] = useState(true)
   const [dimensions, setDimensions] = useState<{ w: number; h: number } | null>(null)
+  const [showing, setShowing] = useState(false)
+  const [wasOpen, setWasOpen] = useState(open)
+  if (open !== wasOpen) {
+    setWasOpen(open)
+    if (!open) setShowing(false)
+  }
+  const slideshow = showing && open && hasSlideshow(items)
+  const swipe = useRef<{ x: number; y: number } | null>(null)
 
   const step = (delta: number) => {
     if (index === null) return
@@ -90,17 +119,34 @@ export function MediaViewer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, index, items.length])
 
-  // The neighbours are fetched while this one is on screen, so an arrow
-  // press lands on a picture rather than on a spinner.
+  // The next pictures are fetched while this one is on screen, so an arrow
+  // press, a swipe or the slideshow lands on a picture rather than a spinner.
   useEffect(() => {
     if (index === null) return
-    for (const neighbour of [items[index - 1], items[index + 1]]) {
-      if (neighbour && mediaKind(neighbour.name) === "image") {
-        const image = new Image()
-        image.src = rawUrl(neighbour.path, neighbour.modified)
-      }
+    for (const at of aheadOf(items, index)) {
+      const image = new Image()
+      image.src = rawUrl(items[at].path, items[at].modified)
     }
   }, [index, items])
+
+  // The slideshow walks the folder's pictures and stops at the last; it
+  // stops too when the viewer closes, and does not start again on reopening.
+  // The page hands a new callback on every render; the timer must not restart on each.
+  const advance = useRef(onIndexChange)
+  useEffect(() => {
+    advance.current = onIndexChange
+  }, [onIndexChange])
+  useEffect(() => {
+    if (!slideshow || index === null) return
+    const timer = window.setTimeout(() => {
+      const next = nextPicture(items, index)
+      if (next === null) setShowing(false)
+      else advance.current(next)
+    }, SLIDE_MS)
+    return () => window.clearTimeout(timer)
+  }, [slideshow, index, items])
+
+  const position = index === null ? null : positionWords(index, items)
 
   return (
     <Modal
@@ -112,9 +158,12 @@ export function MediaViewer({
           <span className="flex min-w-0 items-center gap-2">
             <FileIcon entry={entry} className="size-4" />
             <span className="truncate">{entry.name}</span>
-            {items.length > 1 && index !== null && (
-              <span className="numeric shrink-0 text-xs font-normal text-muted-foreground">
-                {index + 1} / {items.length}
+            {position && (
+              <span
+                data-gallery-position
+                className="numeric shrink-0 text-xs font-normal text-muted-foreground"
+              >
+                {position}
               </span>
             )}
           </span>
@@ -128,17 +177,40 @@ export function MediaViewer({
           <>
             {items.length > 1 && (
               <>
-                <IconAction label="Previous" disabled={index === 0} onClick={() => step(-1)}>
+                {/* A phone walks by swipe and the strip; its header has no room for these. */}
+                <IconAction
+                  label="Previous"
+                  disabled={index === 0}
+                  onClick={() => step(-1)}
+                  className="max-sm:hidden"
+                >
                   <ChevronLeft />
                 </IconAction>
                 <IconAction
                   label="Next"
                   disabled={index === items.length - 1}
                   onClick={() => step(1)}
+                  className="max-sm:hidden"
                 >
                   <ChevronRight />
                 </IconAction>
               </>
+            )}
+            {hasSlideshow(items) && (
+              <IconAction
+                label={slideshow ? "Stop the slideshow" : "Slideshow"}
+                aria-pressed={slideshow}
+                onClick={() => {
+                  // Started on something that is not a picture, it begins at the next one.
+                  if (!slideshow && kind !== "image" && index !== null) {
+                    const next = nextPicture(items, index)
+                    if (next !== null) onIndexChange(next)
+                  }
+                  setShowing(!slideshow)
+                }}
+              >
+                {slideshow ? <Pause /> : <Play />}
+              </IconAction>
             )}
             {kind === "image" && (
               <IconAction
@@ -156,7 +228,8 @@ export function MediaViewer({
             {kind === "image" && canWrite && (
               <Button size="sm" variant="outline" onClick={() => onEditImage(entry.path)}>
                 <ImageIcon className="size-3.5" />
-                Edit image
+                {/* A phone's header keeps its room for the picture's name. */}
+                <span className="max-sm:sr-only">Edit image</span>
               </Button>
             )}
             {!kind && (
@@ -198,15 +271,35 @@ export function MediaViewer({
       initialFocus="body"
       bodyClassName="flex min-h-0 flex-1 flex-col p-0"
     >
-      {entry && (
-        <Stage
-          key={entry.path}
-          entry={entry}
-          fit={fit}
-          onFit={setFit}
-          onDimensions={setDimensions}
-          onOpenPath={onOpenPath}
-        />
+      {entry && index !== null && (
+        <>
+          {/* A finger's sideways swipe steps through the folder, as on a phone's own gallery. */}
+          <div
+            className={cn("flex min-h-0 flex-1 flex-col", fit && "touch-pan-y")}
+            onPointerDown={(event) => {
+              swipe.current =
+                event.pointerType === "touch" ? { x: event.clientX, y: event.clientY } : null
+            }}
+            onPointerUp={(event) => {
+              const start = swipe.current
+              swipe.current = null
+              if (!start) return
+              const delta = swipeStep(event.clientX - start.x, event.clientY - start.y)
+              if (delta) step(delta)
+            }}
+          >
+            <Stage
+              key={entry.path}
+              entry={entry}
+              items={items}
+              fit={fit}
+              onFit={setFit}
+              onDimensions={setDimensions}
+              onOpenPath={onOpenPath}
+            />
+          </div>
+          {items.length > 1 && <GalleryStrip items={items} index={index} onPick={onIndexChange} />}
+        </>
       )}
     </Modal>
   )
@@ -214,12 +307,14 @@ export function MediaViewer({
 
 function Stage({
   entry,
+  items,
   fit,
   onFit,
   onDimensions,
   onOpenPath,
 }: {
   entry: FileEntry
+  items: FileEntry[]
   fit: boolean
   onFit: (fit: boolean) => void
   onDimensions: (d: { w: number; h: number } | null) => void
@@ -262,16 +357,18 @@ function Stage({
     case "video":
       return (
         <div className="flex min-h-0 flex-1 items-center justify-center bg-black p-2">
-          <video src={src} controls autoPlay className="max-h-full max-w-full" />
+          <PlayableVideo
+            path={entry.path}
+            name={entry.name}
+            modified={entry.modified}
+            autoPlay
+            className="rounded-lg bg-card"
+            videoClassName="max-h-full max-w-full"
+          />
         </div>
       )
     case "audio":
-      return (
-        <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-6 p-6">
-          <Music className="size-16 text-muted-foreground" aria-hidden />
-          <audio src={src} controls autoPlay className="w-full max-w-xl" />
-        </div>
-      )
+      return <AudioStage entry={entry} items={items} />
     case "pdf":
       return (
         <div className="flex min-h-0 flex-1 flex-col p-3">
@@ -281,6 +378,44 @@ function Stage({
     default:
       return <OtherStage entry={entry} onOpenPath={onOpenPath} />
   }
+}
+
+/**
+ * A track: arriving on it plays it through the page's queue, with the rest of
+ * the folder after it, and the stage shows what is playing and where it is.
+ */
+function AudioStage({ entry, items }: { entry: FileEntry; items: FileEntry[] }) {
+  const queue = useAudioQueue()
+  const playFrom = queue?.playFrom
+  useEffect(() => {
+    playFrom?.(entry, items)
+    // Only on arriving at a track: a later change to the listing is not a new press.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entry.path])
+  const track = queue?.tracks[queue.index]
+  const here = track?.path === entry.path
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-4 p-6 text-center">
+      <Music className="size-16 text-muted-foreground" aria-hidden />
+      {queue && here ? (
+        <>
+          <PlayerControls queue={queue} large />
+          <p className="numeric text-hint text-muted-foreground">
+            {clockTime(queue.position)}
+            {queue.duration > 0 && ` of ${clockTime(queue.duration)}`}
+            {queue.tracks.length > 1 && ` · track ${queue.index + 1} of ${queue.tracks.length}`}
+          </p>
+        </>
+      ) : queue ? (
+        <Button size="sm" variant="outline" onClick={() => queue.playFrom(entry, items)}>
+          <Play className="size-3.5" />
+          Play
+        </Button>
+      ) : (
+        <audio src={rawUrl(entry.path, entry.modified)} controls className="w-full max-w-xl" />
+      )}
+    </div>
+  )
 }
 
 /** Anything the browser cannot draw as itself: the head, the listing, or a note. */

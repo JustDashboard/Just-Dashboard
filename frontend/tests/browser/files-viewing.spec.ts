@@ -91,7 +91,7 @@ test("Markdown is rendered in the inspector, with its source a press away", asyn
 
   const rendered = inspector(page).locator("[data-rendered='markdown']")
   await expect(rendered.getByRole("heading", { name: "Deploying the site" })).toBeVisible()
-  await expect(rendered.getByRole("img", { name: "done" })).toBeVisible()
+  await expect(rendered.getByRole("img", { name: "done", exact: true })).toBeVisible()
   await expect(rendered.getByRole("img", { name: "not done" })).toBeVisible()
   await expect(rendered.getByRole("table")).toContainText("443")
   // The fenced block, coloured by the editor's grammar once it has loaded.
@@ -132,8 +132,10 @@ test("a link to another file opens it in Files; a folder link enters the folder"
   await expect(link).not.toHaveAttribute("target", "_blank")
   await link.click()
   await expect(page).toHaveURL(new RegExp(`path=${encodeURIComponent(`${home}/docs`)}`))
-  await expect(inspector(page).getByRole("heading", { name: "Setup" })).toBeVisible()
-  await expect(inspector(page).getByRole("heading", { name: "setup.md" })).toBeVisible()
+  await expect(inspector(page).getByRole("heading", { name: "Setup", exact: true })).toBeVisible()
+  await expect(
+    inspector(page).getByRole("heading", { name: "setup.md", exact: true }),
+  ).toBeVisible()
 
   await page.goBack()
   await pick(page, "README.md")
@@ -201,7 +203,7 @@ test("a CSV is a table with its numbers to the right, and says when it is cut", 
   await expect(table.locator("tbody tr")).toHaveCount(3)
   await expect(inspector(page)).toContainText("First 3 rows")
   await expect(inspector(page).locator("[data-truncated]")).toContainText(
-    "Only the first 3 rows of 12 MB are shown.",
+    "Only the first 3 rows of 12.0 MB are shown.",
   )
 })
 
@@ -229,4 +231,218 @@ test("the viewer renders Markdown and draws a CSV as its table", async ({ page }
   await pick(page, "visits.csv")
   await inspector(page).getByRole("button", { name: "View", exact: true }).click()
   await expect(dialog.locator("[data-file-table] tbody tr")).toHaveCount(4)
+})
+
+/** One second of silence as a WAV: a track the browser really plays. */
+function silence(seconds = 1): Buffer {
+  const rate = 8000
+  const samples = rate * seconds
+  const b = Buffer.alloc(44 + samples)
+  b.write("RIFF", 0)
+  b.writeUInt32LE(36 + samples, 4)
+  b.write("WAVEfmt ", 8)
+  b.writeUInt32LE(16, 16)
+  b.writeUInt16LE(1, 20)
+  b.writeUInt16LE(1, 22)
+  b.writeUInt32LE(rate, 24)
+  b.writeUInt32LE(rate, 28)
+  b.writeUInt16LE(1, 32)
+  b.writeUInt16LE(8, 34)
+  b.write("data", 36)
+  b.writeUInt32LE(samples, 40)
+  b.fill(128, 44)
+  return b
+}
+
+const picture = { contentType: "image/png", body: png }
+const media = {
+  [home]: [
+    { name: "music", isDir: true },
+    { name: "photos", isDir: true },
+    { name: "scan.jpg", size: 12 << 20, raw: picture },
+    { name: "logo.webp", size: 2048, raw: picture },
+    { name: "notes.txt", ...text("hello\n") },
+    {
+      name: "film.mkv",
+      size: 4096,
+      preview: { kind: "video", mime: "video/x-matroska" },
+      raw: { contentType: "video/x-matroska", body: Buffer.from("not a video") },
+    },
+    // The listing's last row has no hairline under it, so it is never the one measured.
+    { name: "zz-last.txt", ...text("last\n") },
+  ],
+  [`${home}/photos`]: ["a.jpg", "b.jpg", "c.png", "d.gif"].map((name) => ({
+    name,
+    size: 6 << 20,
+    raw: picture,
+  })),
+  [`${home}/music`]: ["01 intro.wav", "02 song.wav", "03 outro.wav"].map((name) => ({
+    name,
+    size: 8044,
+    raw: { contentType: "audio/wav", body: silence(60) },
+  })),
+}
+
+const row = (page: Page, path: string) =>
+  page.locator(`[data-file-listing] [data-entry-path="${path}"]`)
+
+test("every picture lists as the server's small copy, and a row with one is one height", async ({
+  page,
+}) => {
+  await mockViewing(page, media)
+  for (const width of [1280, 390]) {
+    await page.setViewportSize({ width, height: 844 })
+    await openFolder(page)
+    // A 12 MB photograph is drawn, from its copy; the file itself is never fetched for it.
+    const scan = row(page, `${home}/scan.jpg`).locator("img")
+    await expect(scan).toHaveAttribute(
+      "src",
+      /\/api\/v1\/files\/thumbnail\?path=%2Fhome%2Foperator%2Fscan\.jpg&v=\d+/,
+    )
+    await expect(scan).toHaveJSProperty("complete", true)
+    // A format the server does not decode is still the file, drawn small.
+    await expect(row(page, `${home}/logo.webp`).locator("img")).toHaveAttribute(
+      "src",
+      /\/files\/raw\?/,
+    )
+    const withPicture = await row(page, `${home}/scan.jpg`).boundingBox()
+    const without = await row(page, `${home}/notes.txt`).boundingBox()
+    expect(withPicture!.height).toBe(without!.height)
+  }
+})
+
+test("a folder of pictures is a gallery: words, a strip, a slideshow", async ({ page }) => {
+  await page.clock.install()
+  await mockViewing(page, media)
+  await openFolder(page, `${home}/photos`)
+  await row(page, `${home}/photos/a.jpg`).locator("[data-file-name]").dblclick()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.locator("[data-gallery-position]")).toHaveText("Picture 1 of 4")
+  await page.keyboard.press("ArrowRight")
+  await expect(dialog.locator("[data-gallery-position]")).toHaveText("Picture 2 of 4")
+
+  // The strip jumps, and says where the stage is.
+  const strip = dialog.getByRole("toolbar", { name: "Files in this folder" })
+  await expect(strip.getByRole("button")).toHaveCount(4)
+  await strip.getByRole("button", { name: /^d\.gif/ }).click()
+  await expect(dialog.locator("[data-gallery-position]")).toHaveText("Picture 4 of 4")
+  await expect(strip.getByRole("button", { name: /^d\.gif/ })).toHaveAttribute(
+    "aria-current",
+    "true",
+  )
+  // Its pictures are the small copies.
+  await expect(strip.locator("img").first()).toHaveAttribute("src", /\/files\/thumbnail\?/)
+
+  // The slideshow walks on by itself and stops at the last picture.
+  await strip.getByRole("button", { name: /^b\.jpg/ }).click()
+  await dialog.getByRole("button", { name: "Slideshow" }).click()
+  await page.clock.fastForward(4100)
+  await expect(dialog.locator("[data-gallery-position]")).toHaveText("Picture 3 of 4")
+  await page.clock.fastForward(4100)
+  await expect(dialog.locator("[data-gallery-position]")).toHaveText("Picture 4 of 4")
+  await page.clock.fastForward(4100)
+  await expect(dialog.getByRole("button", { name: "Slideshow" })).toHaveAttribute(
+    "aria-pressed",
+    "false",
+  )
+})
+
+test("audio plays as a queue that carries on across folders, on one line", async ({ page }) => {
+  await mockViewing(page, media)
+  await openFolder(page, `${home}/music`)
+  const footer = page.locator("[data-slot='pane-footer']").first()
+  const footerBefore = await footer.boundingBox()
+  const firstRow = row(page, `${home}/music/01 intro.wav`)
+  const rowBefore = await firstRow.boundingBox()
+
+  await row(page, `${home}/music/02 song.wav`).locator("[data-file-name]").dblclick()
+  const dialog = page.getByRole("dialog")
+  await expect(dialog.getByRole("button", { name: "Pause" })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  const player = page.locator("[data-files-player]")
+  await expect(player).toContainText("02 song.wav")
+  await expect(player).toContainText("2 of 3")
+  // One line in the foot the listing already had: nothing moved.
+  expect((await footer.boundingBox())!.height).toBe(footerBefore!.height)
+  expect((await firstRow.boundingBox())!.y).toBe(rowBefore!.y)
+
+  // Another folder, walked to within the page: the music goes on.
+  await firstRow.locator("[data-file-name]").focus()
+  await page.keyboard.press("Alt+ArrowUp")
+  await row(page, `${home}/photos`).locator("[data-file-name]").dblclick()
+  await expect(row(page, `${home}/photos/a.jpg`)).toBeVisible()
+  await expect(player).toContainText("02 song.wav")
+  await player.getByRole("button", { name: "Previous track" }).click()
+  await expect(player).toContainText("01 intro.wav")
+  await player.getByRole("button", { name: "Next track" }).click()
+  await expect(player).toContainText("02 song.wav")
+  await player.getByRole("button", { name: "Stop playing" }).click()
+  await expect(player).toHaveCount(0)
+})
+
+test("a video the browser cannot play says so, with Download", async ({ page }) => {
+  await mockViewing(page, media)
+  await openFolder(page)
+  await row(page, `${home}/film.mkv`).locator("[data-file-name]").click()
+  const pane = page.locator("[data-files-inspector] [data-cannot-play]")
+  await expect(pane).toContainText("This browser cannot play this video (.mkv).")
+  await expect(pane.getByRole("link", { name: "Download" })).toHaveAttribute(
+    "href",
+    /\/files\/download\?path=%2Fhome%2Foperator%2Ffilm\.mkv/,
+  )
+  await row(page, `${home}/film.mkv`).locator("[data-file-name]").dblclick()
+  const stage = page.getByRole("dialog").locator("[data-cannot-play]")
+  await expect(stage).toContainText("This browser cannot play this video (.mkv).")
+  await expect(stage.getByRole("link", { name: "Download" })).toBeVisible()
+})
+
+test.describe("on a phone", () => {
+  test.use({ hasTouch: true, viewport: { width: 390, height: 844 } })
+
+  test("the viewer and its strip fit, a swipe steps, and the player is the foot", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 390, height: 844 })
+    await mockViewing(page, media)
+    await openFolder(page, `${home}/photos`)
+    await row(page, `${home}/photos/a.jpg`).locator("[data-file-name]").dblclick()
+    const dialog = page.getByRole("dialog")
+    const strip = dialog.locator("[data-gallery-strip]")
+    await expect(strip).toBeVisible()
+    const box = (await strip.boundingBox())!
+    expect(box.x).toBeGreaterThanOrEqual(0)
+    expect(box.x + box.width).toBeLessThanOrEqual(390)
+    // A finger moving leftwards across the stage is the next picture.
+    const stage = (await dialog.locator("img[alt='a.jpg']").boundingBox())!
+    const y = stage.y + stage.height / 2
+    await dialog.locator("img[alt='a.jpg']").dispatchEvent("pointerdown", {
+      pointerType: "touch",
+      clientX: 300,
+      clientY: y,
+      bubbles: true,
+    })
+    await dialog.locator("img[alt='a.jpg']").dispatchEvent("pointerup", {
+      pointerType: "touch",
+      clientX: 120,
+      clientY: y + 5,
+      bubbles: true,
+    })
+    await expect(dialog.locator("[data-gallery-position]")).toHaveText("Picture 2 of 4")
+    await page.keyboard.press("Escape")
+
+    await openFolder(page, `${home}/music`)
+    const footer = page.locator("[data-slot='pane-footer']").first()
+    const before = (await footer.boundingBox())!.height
+    await row(page, `${home}/music/01 intro.wav`).locator("[data-file-name]").dblclick()
+    await page.keyboard.press("Escape")
+    const player = page.locator("[data-files-player]")
+    await expect(player).toContainText("01 intro.wav")
+    expect((await footer.boundingBox())!.height).toBe(before)
+    const line = (await player.boundingBox())!
+    expect(line.x + line.width).toBeLessThanOrEqual(390)
+    await page.screenshot({
+      path: "/home/ubuntu/just-dashboard-files-2026-11-20/viewing/shots/phone-player.png",
+    })
+  })
 })

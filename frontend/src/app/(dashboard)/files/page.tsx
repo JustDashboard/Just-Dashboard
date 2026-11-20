@@ -86,6 +86,7 @@ import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
 import { useLinkedFile } from "@/components/files/linked-file"
+import { AudioQueueHost, PlayerLine } from "@/components/files/audio-queue"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import { homeFor } from "@/components/files/search"
 import {
@@ -1540,6 +1541,7 @@ export default function FilesPage() {
     <Page fill="workspace" data-files-workspace className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
+      <AudioQueueHost entries={entries} />
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
@@ -2061,7 +2063,7 @@ export default function FilesPage() {
                 onClear={uploads.clear}
               />
 
-              <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
+              <PaneFooter className="relative justify-between gap-3 px-3 text-hint text-muted-foreground">
                 <span aria-live="polite" aria-atomic="true" className="numeric min-w-0 truncate">
                   {listing.data
                     ? selected.size > 0
@@ -2071,6 +2073,7 @@ export default function FilesPage() {
                       : (folderSentence(folderCount, fileCount) ?? "Empty folder")
                     : ""}
                 </span>
+                <PlayerLine />
                 <IconAction
                   label="Files shortcuts"
                   className="size-6 shrink-0"
