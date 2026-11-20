@@ -379,7 +379,7 @@ if it is still free after the transfer; with overwrite, a rename replaces it. An
 never leaves a truncated file. An existing file keeps its owner and mode across the replacement
 (which is what lets the image editor save over a picture the web server owns), and `?overwrite=true`
 is what permits the replacement at all. The handler sends one
-request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
+request per file from the page, maps a body over `maxUploadBytes` (256 MiB per request; a larger file goes in pieces, below) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
 
@@ -648,7 +648,7 @@ footer space for partial/unreadable notices. The search input has no active bord
 caret, selected result and keyboard navigation carry its state. Results fade in and out without
 resizing the frame; exiting rows immediately become inert and hidden from assistive technology, and
 reduced motion shows each state immediately. A failed disk request leaves current-listing matches
-available. The listing polls every twenty seconds and refetches
+available. The listing follows the disk (*Live folders*, below) and refetches
 hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
 delete that includes a folder uses ordinary confirmation like a single one. Two layout rules are easy to undo: **the
 listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
@@ -669,6 +669,80 @@ The row/tile checkbox is a controlled two-state button, while select-all keeps i
 Overflow menus instantiate on first activation and remain mounted afterwards for focus restoration.
 The listing API still returns the complete directory; these rendering savings do not reduce its disk
 reads or response bytes.
+
+**Live folders** (`files/watch.go`, `handlers_files_transfer.go`, `components/files/live-folder.ts`).
+The folder on screen follows the disk. `GET /files/watch?path=&hidden=` is a read route and a
+WebSocket: the folder is resolved and watched *before* the upgrade, so a path the roots refuse is an
+ordinary 403. One inotify instance (`WatchHub`) serves every watch, so the per-user instance limit is
+spent once; the watch is added inside `hostexec.InHostMounts` (the server's folder, not this
+container's) and the descriptor stays valid outside it. Two pages on one folder share its kernel watch,
+refcounted by watch descriptor. A watch counts against its session (16) and the total (256); past
+either, or on a filesystem inotify cannot report (NFS, CIFS/SMB, FUSE, 9P, proc, sysfs and the like,
+by `statfs` magic) or when `inotify_add_watch` answers ENOSPC, the socket opens only to send
+`fallback`, and the page polls `GET /files/changes`, a SHA-256 fingerprint of each name's size, times,
+mode and owner read without the listing's name lookups, every two seconds, reading the listing again
+only when it differs. Each watch has one goroutine that coalesces: a first change waits 150 ms for its
+burst, a batch never follows the last sooner than 300 ms, and a batch of more than 200 names (or a
+kernel queue overflow) is sent as `resync`, which the page answers with one listing read. A batch
+(`changes`) carries the changed names' entries exactly as `List` draws them and the names removed;
+`gone` says the folder itself was removed or moved. Dotfiles are left out unless `hidden`, staging
+names always. The page lays the batches over the last listing by name (`live-patches.ts`), so a row
+nobody changed keeps its object; selection, the inspector (which follows the active entry's
+`modified`), a rename dialog, scroll (Chrome's scroll anchoring holds the rows being read) and an open
+menu are untouched. The twenty-second listing poll runs only while neither is in effect. The socket
+closes when the page leaves or the tab is hidden, which releases the watch; on reconnect the page reads
+the listing once. The editor follows its one file (`?name=`, `editor-follow.ts`): with no unsaved edits
+it takes the new contents quietly, with unsaved edits it raises the existing `ContentConflict`, and its
+own save arriving back is neither. `watch_test.go` and `handlers_files_transfer_test.go` cover create,
+remove, rename, growth, coalescing, the limits and fallback, a path outside the roots, release and a
+moved folder; `files-transfer.spec.ts` the page.
+
+**Uploads in pieces** (`files/resumable.go`, `components/files/uploads.tsx`, `upload-pieces.ts`). A
+file over 32 MiB goes to `POST /files/uploads` (`file.write`, audited as `file.upload.begin`), which
+checks the destination as a one-request upload would and the disk's room for the whole file, and
+creates a staging file `.jd-part-<id>` (0600, root's) beside the destination, on its filesystem. Pieces
+of 8 MiB (at most 64 MiB) go to `PUT /files/uploads/{id}?offset=`, written at their offset; the session
+keeps merged byte ranges, so a repeated piece is harmless, an out-of-order one is kept, and a piece cut
+off keeps what arrived: `next` is the first missing byte, where the page carries on. A landed piece is
+not audited (a large file is thousands), a refused one is. Each piece reaches the staging file through
+its folder found again by path and checked to be the same folder (device and inode) and the same file
+with one link, so a moved or swapped folder, a link or a hard link put in the staging name is a
+conflict, never a write elsewhere. `POST /files/uploads/{id}/complete` publishes through the code
+`UploadChecked` uses, now factored out of it in `staged.go` (`openUploadTarget`, `seal`,
+`publishStaged`): the parent pinned through the allowed root, the expected-revision check, the owner
+and mode, the no-replace rename or deliberate overwrite, all under the path lock. A refused completion
+keeps the staged bytes. `DELETE /files/uploads/{id}` removes them, following the folder held open
+since the upload began even if it moved. Sessions belong to the account, are kept as one 0600 JSON
+record each in `<JD_DATA_DIR>/file-uploads` (0700, made silently) so a restart or a reloaded page
+carries on, are bounded (64 an account, 512 in all), and are removed with their bytes after a day
+untouched (an hourly sweep). `GET /files/uploads` lists an account's, which a reloaded page shows as
+stopped with Cancel; dropping the same file again (same folder, name, size and the page's key of name,
+size and modification time) continues it. Every piece checks the room left against a reserve of two
+per cent of the disk, between 64 MiB and 1 GiB, and refuses in words (`507 no_space`). Staging names
+are never in a listing, a completion, a find, a search, a watch or a fingerprint (`IsStagingName`).
+The page sends pieces one after another, three files at a time; after a dropped piece it waits 1, 2, 4
+… 30 seconds, or less when the browser is back online or the tab is in front again, asks where the
+upload stands, and carries on; a file can be paused, resumed and cancelled. `resumable_test.go` reuses
+`upload_parent_test.go`'s cases (moved parents, outward and inward retargets, a replacement folder,
+cleanup) and adds resume at an offset, out-of-order and repeated pieces, overwrite and no-overwrite,
+the revision conflict, disk room, a restart and expiry.
+
+**Fetching a link** (`files/fetch.go`). New → *From a link* posts `POST /files/fetch`
+(`file.write`, audited as `file.fetch` with the link shown without query, fragment or credentials,
+`ShownURL`). The fetch is a job of the server's, not of the request: it carries on when the page goes,
+`GET /files/fetches` lists running ones and those finished in the last hour (each marked `mine` for
+the account that started it), and `DELETE /files/fetches/{id}` cancels a running one, waiting for it
+to clean up, or takes a finished one off the list. Only `http` and `https`, redirects followed up to
+ten and each checked to stay on those schemes; the request carries the link and a `User-Agent` and
+nothing else: no cookie jar, no dashboard header, no `Accept-Encoding` (the bytes are kept as served).
+The name is the response's `Content-Disposition` filename, else the link's last path segment, with any
+folder part dropped and unsafe names refused (`SafeName`); a taken name becomes `name (2).ext` rather
+than replacing anything. The bytes stage beside the destination like an upload's and publish through
+`publishStaged`; a known length is checked against the room first, an unknown one every 16 MiB, and a
+download that stops early, sends nothing for a minute, is cancelled or would fill the disk leaves
+nothing behind. Four running fetches an account, eight in all. `fetch_test.go` covers success, a
+redirect chain, refused schemes, a name with a path in it, cancel, a connection dropped midway, disk
+room and no clobber, and the headers sent.
 
 ## Logs
 

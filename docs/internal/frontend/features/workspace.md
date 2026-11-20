@@ -482,9 +482,14 @@ The host's files as a workbench: a sidebar of places and starred folders (`files
 name and content search (`quick-open.tsx`, `search.ts`) and a preview and details panel
 (`preview-panel.tsx`). Below `lg` it is one pane at a time (Places, Folder, Details) with a bar at the
 foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and the rest as words in
-`more-menu.tsx`
+`more-menu.tsx`. The folder follows the disk over a socket (`live-folder.ts`, `live-patches.ts`), with
+the rows that changed laid over the listing so selection, scroll and dialogs stay put. The uploads panel
+(`uploads.tsx`) holds uploads (in pieces over 32 MiB, with pause, resume and cancel, carrying on after a
+dropped connection) and links being fetched by the server (New → *From a link*), each one line with
+how far it is in words (`transfer-words.ts`)
 
-**Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`;
+**Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`
+and `tests/browser/files-transfer.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
 
 ## `/files/editor`

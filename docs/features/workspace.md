@@ -14,6 +14,7 @@ A real terminal, files, Git, drawings and your own computers, all in the same br
 ## Files and Git
 
 - A file manager with search, previews, Monaco and image editors
+- Folders that follow the disk as other programs change them, uploads of any size that pause and carry on after a dropped connection, and links fetched straight onto the server
 - Files and the file editor one pane at a time on a phone, with a bottom bar for places, the folder and its details
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs, with the screenshots and videos a pull request embeds drawn in place
