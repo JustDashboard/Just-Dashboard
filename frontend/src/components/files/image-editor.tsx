@@ -157,11 +157,14 @@ export function ImageEditor({
 }) {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
-  const [handoff] = useState(() => {
-    const value = destination ? imageDrafts.get(path) : undefined
+  // Read here and forgotten only once this editor is on the page. React may
+  // throw a first render away and render again; a draft deleted while it was
+  // read was gone by the second attempt, and the full editor opened the file
+  // from disk without the edit it had been handed.
+  const [handoff] = useState(() => (destination ? imageDrafts.get(path) : undefined))
+  useEffect(() => {
     imageDrafts.delete(path)
-    return value
-  })
+  }, [path])
   const [revision, setRevision] = useState(handoff?.revision)
   const [conflict, setConflict] = useState(handoff?.conflict ?? false)
   const [loadVersion, setLoadVersion] = useState(0)

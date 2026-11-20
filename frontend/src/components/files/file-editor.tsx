@@ -34,7 +34,7 @@ import { EditorToolbar } from "./editor-toolbar"
 import { ContentConflict } from "./content-conflict"
 import { useEditorFollow } from "./editor-follow"
 import { FileIcon } from "@/components/file-icon"
-import { handoffDraft, takeDraft } from "./editor-handoff"
+import { dropDraft, handoffDraft, peekDraft } from "./editor-handoff"
 import { editorHref } from "./search"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ErrorState, Notice } from "@/components/state"
@@ -148,7 +148,12 @@ function FileEditorPanel({
 }) {
   const { can } = useAuth()
   const router = useRouter()
-  const [handoff] = useState(() => (path && destination ? takeDraft(path) : undefined))
+  // Read here and forgotten once this editor is on the page: a first render
+  // React throws away must not have used the draft up (see image-editor.tsx).
+  const [handoff] = useState(() => (path && destination ? peekDraft(path) : undefined))
+  useEffect(() => {
+    if (path && destination) dropDraft(path)
+  }, [path, destination])
   const [commands, setCommands] = useState<EditorCommands>()
   const [indent, setIndent] = useViewState("files.editor.indent", "2")
   const { confirm, dialog } = useConfirm()
