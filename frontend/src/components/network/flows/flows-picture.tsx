@@ -11,14 +11,29 @@ import type { FlowAnchor } from "@/components/network/flows/views"
 
 const SOURCES_DRAWN = 2
 
+/**
+ * Said over the observer's name where the nodes are a column a side. In a row
+ * of nodes (`WireFlow`'s `data-form`) it stood the observer's name a line
+ * under its neighbours', and the line under the name says whether it is on.
+ */
+const OPT_IN = <span className="lg:in-data-[form=rows]:hidden">Opt-in</span>
+
 /** What the recorder keeps: three things whose names are known before anything is read. */
-const KEPT: { title: string; glyph: Icon; eyebrow?: string }[] = [
+const KEPT: { title: string; glyph: Icon; eyebrow?: React.ReactNode }[] = [
   { title: "Socket hours", glyph: Layers },
   { title: "Recorded hours", glyph: Clock },
-  { title: "Kernel observer", glyph: Cpu, eyebrow: "Opt-in" },
+  { title: "Kernel observer", glyph: Cpu, eyebrow: OPT_IN },
 ]
-/** Room for the caption's four lines under the recorder's mark. */
+/**
+ * Room for the caption's four lines under the recorder's mark, where the
+ * sides are a column each. `WireFlow` leaves it off where they are rows.
+ */
 const HUB_ROOM = "lg:py-[4.5rem]"
+/**
+ * In a row a node is about 120px wide and its line of detail takes two: the
+ * break is evened out, so no line is one word.
+ */
+const ROWS = "lg:data-[form=rows]:text-balance"
 
 /**
  * What the recorder samples, the recorder, and what it keeps.
@@ -32,7 +47,10 @@ const HUB_ROOM = "lg:py-[4.5rem]"
  * Every node is a name and one line whatever it holds, and before the first
  * read the picture waits on `WireFlow`'s own rows with those lines and the
  * names that are already known, so it is one height loading, off and
- * recording and the table under it does not move. On a phone it is
+ * recording and the table under it does not move. On a wide page the nodes
+ * stand in a row with their words under them, the line of detail may take
+ * two, and the picture is as tall as the recorder's own words under its mark,
+ * which are the same four lines in every state. On a phone it is
  * rows of marks around the recorder (the sections under it name each again),
  * except in the off state, where the words are the page.
  */
@@ -201,6 +219,7 @@ export function FlowsPicture({
 
   return (
     <WireFlow
+      className={ROWS}
       phone={words ? "stack" : "marks"}
       start={{
         title: "Sampled",
@@ -249,6 +268,7 @@ function Waiting({ words }: { words?: boolean }) {
   return (
     <WireFlow
       loading
+      className={ROWS}
       phone={words ? "stack" : "marks"}
       start={{
         title: "Sampled",

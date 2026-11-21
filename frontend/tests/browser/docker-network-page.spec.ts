@@ -374,9 +374,9 @@ test("a network the inspect cannot read is drawn from the list, and with neither
   await expect(identity(page)).toHaveCount(0)
 })
 
-// A network nothing is on has no column as tall as the hub's mark and its
-// three lines. The picture keeps the room those lines need under itself
-// (`WireFlow`), where this page used to pad its own hub by a guess.
+// A network nothing is on has nothing beside the hub but the way out. The
+// picture keeps the room the hub's three lines need under itself (`WireFlow`),
+// where this page used to pad its own hub by a guess.
 test("the picture keeps room for the hub's words where no column is tall enough", async ({
   page,
 }) => {
@@ -390,9 +390,16 @@ test("the picture keeps room for the hub's words where no column is tall enough"
   const box = (await flow.boundingBox())!
   const foot = words.y + words.height
   expect(foot).toBeLessThanOrEqual(box.y + box.height + 0.5)
-  // The room is what the words reach past the columns by, not a fixed pad
-  // around the mark: the mark stands at the picture's head.
-  expect((await flow.locator("[data-slot=wire-hub-room]").boundingBox())!.height).toBeGreaterThan(0)
+  // The room is what the words reach past the sides by, not a fixed pad
+  // around the mark: the mark stands at the picture's head, and the picture
+  // ends no more than its own padding under whichever reaches lower, the
+  // hub's words or the side's. One node a side is a level line with its words
+  // under its mark, which reach nearly as low as the hub's, so there is
+  // little or nothing left to hold; beside the mark, as they were until
+  // 0.9.1, they ended well above and the room was all of the hub's lines.
+  const side = (await flow.getByRole("region", { name: "Leads to" }).boundingBox())!
+  const lowest = Math.max(foot, side.y + side.height)
+  expect(box.y + box.height - lowest).toBeLessThanOrEqual(16.5)
   const mark = (await flow.getByText("Bridge", { exact: true }).boundingBox())!
   expect(mark.y - box.y).toBeLessThan(120)
   // What stands under the picture begins after them.

@@ -160,6 +160,37 @@ for (const width of [1280, 390]) {
   })
 }
 
+test("a tunnel's picture waits on the nodes the last visit drew", async ({ page }) => {
+  // Wide, a side is rows of nodes: the four on the left are two rows where
+  // three were one, and the waiting picture stood half as tall as the read one.
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockNetwork(page)
+  await page.goto("/network/vpn")
+  await expect(identity(page, "wg0")).toContainText("online")
+  const picture = page.locator("[data-slot=wire-flow]").first()
+  await expect(picture).toHaveAttribute("data-form", "rows")
+  await risen(page)
+  const read = await picture.boundingBox()
+
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockNetwork(page)
+  let answer: () => void = () => undefined
+  const held = new Promise<void>((resolve) => (answer = resolve))
+  await page.route("**/api/v1/network/vpn", async (route) => {
+    await held
+    await json(route, vpn)
+  })
+  await page.reload()
+  await expect(page.locator("[data-slot=wire-flow][data-loading]")).toBeVisible()
+  await risen(page)
+  const waiting = await picture.boundingBox()
+  expect(waiting?.height).toBe(read?.height)
+  answer()
+  await expect(identity(page, "wg0")).toContainText("online")
+  await risen(page)
+  expect(await picture.boundingBox()).toEqual(waiting)
+})
+
 test("what needs a look is a mark on the peer it is about, and a sentence in its sheet", async ({
   page,
 }) => {

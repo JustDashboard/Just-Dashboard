@@ -8,6 +8,7 @@ import type { NetworkKind } from "@/lib/clients"
 import type { Connections } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
+import { Bone } from "@/components/bone"
 import { NETWORK_GLYPH } from "@/components/client-mark"
 import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
 import { portsHref } from "@/components/proxy/ports-list"
@@ -49,10 +50,16 @@ const PROGRAMS = 5
  * line — the backend keeps no history of connections, and a count that is
  * only ever "now" cannot show that the burst was ten minutes ago.
  *
+ * On a wide page the sides are rows of nodes with their words under them
+ * (`WireFlow`'s `rows`), each about 120px wide: a node's two counts stand one
+ * to a line there (`Counts`), and a place names its busiest address alone
+ * with how many more, since the list under the picture names them all.
+ *
  * Before the first read it is drawn at the height it will have: the three
  * places and as many programs as the last visit drew, on `WireFlow`'s own
- * waiting rows with the lines a place and the hub say (`loadingLines`), so
- * the list under the picture does not move when the read lands.
+ * waiting rows with the lines a place, a program and the hub say
+ * (`loadingLines`), so the list under the picture does not move when the
+ * read lands.
  */
 export function ConnectionsPicture({
   data,
@@ -86,8 +93,9 @@ export function ConnectionsPicture({
       start={{
         title: "Where the callers are",
         loadingRows: PLACES.length,
-        // A place's line of addresses, over the box its trend is drawn in.
-        loadingLines: { foot: <Trend values={[]} label="" align="end" /> },
+        // A place's counts and its line of addresses, over the box its trend
+        // is drawn in.
+        loadingLines: { eyebrow: WAITING_COUNTS, foot: <Trend values={[]} label="" align="end" /> },
         nodes: waiting
           ? []
           : places.map((place) =>
@@ -133,6 +141,7 @@ export function ConnectionsPicture({
       end={{
         title: "What they reached",
         loadingRows: drawn,
+        loadingLines: { eyebrow: WAITING_COUNTS },
         nodes: waiting ? [] : programs.map((program) => programNode(program, onProgram)),
         max: PROGRAMS,
         more: { words: (hidden) => `${hidden} more programs` },
@@ -149,6 +158,44 @@ const PLACE_WORD: Partial<Record<NetworkKind, string>> = {
   local: "local",
 }
 
+/** Drawn in a row of nodes only, and in a column a side only (`WireFlow`'s `data-form`). */
+const IN_ROWS = "hidden lg:in-data-[form=rows]:block"
+const IN_COLUMN = "lg:in-data-[form=rows]:hidden"
+
+/**
+ * A node's two counts over its name. Beside the mark they are one line. In a
+ * row a node is about 120px wide, where the line broke under some marks and
+ * not under others and the names of one row stood on two levels: there each
+ * count has its own line, under every mark.
+ */
+function Counts({ first, second }: { first: string; second?: string }) {
+  // A node with one thing to say keeps the second line in a row.
+  if (!second)
+    return (
+      <>
+        {first}
+        <span className={IN_ROWS}>{"\u00a0"}</span>
+      </>
+    )
+  return (
+    <>
+      <span className="lg:in-data-[form=rows]:block">{first}</span>
+      <span className={IN_COLUMN}> · </span>
+      <span className="lg:in-data-[form=rows]:block">{second}</span>
+    </>
+  )
+}
+
+/** The counts' lines before the read: one beside the mark, two in a row. */
+const WAITING_COUNTS = (
+  <>
+    <Bone className="w-16" />
+    <span className={IN_ROWS}>
+      <Bone className="w-14" />
+    </span>
+  </>
+)
+
 function placeNode(
   place: Place,
   values: number[],
@@ -156,6 +203,7 @@ function placeNode(
 ): WireFlowNode {
   const Glyph = NETWORK_GLYPH[place.kind]
   const quiet = place.peers.length === 0
+  const busiest = place.peers.slice(0, 2).map((p) => p.address)
   return {
     id: `place:${place.kind}`,
     mark: (size) => (
@@ -163,9 +211,14 @@ function placeNode(
         {place.kind === "tailscale" ? <ProductGlyph id="tailscale" /> : <Glyph aria-hidden />}
       </WireMark>
     ),
-    eyebrow: quiet
-      ? "nobody"
-      : `${plural(place.peers.length, "address", "addresses")} · ${plural(place.sockets, "socket")}`,
+    eyebrow: quiet ? (
+      <Counts first="nobody" />
+    ) : (
+      <Counts
+        first={plural(place.peers.length, "address", "addresses")}
+        second={plural(place.sockets, "socket")}
+      />
+    ),
     title: <span className={cn(quiet && "font-normal text-muted-foreground")}>{place.title}</span>,
     name: place.title,
     label: press.onPress
@@ -176,16 +229,19 @@ function placeNode(
     onPress: press.onPress,
     hint: (
       <>
-        {/* A quiet place keeps the line its addresses would stand on. */}
-        <span className="block truncate font-mono">
-          {quiet
-            ? "\u00a0"
-            : place.peers
-                .slice(0, 2)
-                .map((p) => p.address)
-                .join(", ")}
+        {/* A quiet place keeps the line its addresses would stand on. In a
+            row there is room for one address whole, and the list under the
+            picture names the rest. */}
+        <span className="block truncate font-mono" title={busiest.join(", ") || undefined}>
+          {busiest[0] ?? "\u00a0"}
+          {busiest[1] && <span className={IN_COLUMN}>, {busiest[1]}</span>}
           {place.peers.length > 2 && (
-            <span className="ml-1.5 font-sans">+{place.peers.length - 2}</span>
+            <span className={cn("ml-1.5 font-sans", IN_COLUMN)}>+{place.peers.length - 2}</span>
+          )}
+          {place.peers.length > 1 && (
+            <span className="ml-1.5 hidden font-sans lg:in-data-[form=rows]:inline">
+              +{place.peers.length - 1}
+            </span>
           )}
         </span>
         <Trend
@@ -210,7 +266,9 @@ function programNode(program: Program, onProgram: (name: string) => void): WireF
         {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Servers aria-hidden />}
       </WireMark>
     ),
-    eyebrow: `${plural(program.sockets, "socket")} · ${program.active} active`,
+    eyebrow: (
+      <Counts first={plural(program.sockets, "socket")} second={`${program.active} active`} />
+    ),
     title: program.name,
     name: program.name,
     label: `Show the addresses connected to ${program.name}`,
@@ -245,7 +303,10 @@ function Trend({
 }: {
   values: number[]
   label: string
-  /** Where the node's words stand: the left column's are set against the wires. */
+  /**
+   * Where the node's words stand: the left column's are set against the
+   * wires, and under their mark where the side is rows.
+   */
   align: "centre" | "end"
 }) {
   const shown = values.length >= 2 && Math.min(...values) !== Math.max(...values)
@@ -254,7 +315,7 @@ function Trend({
       aria-hidden={!shown}
       className={cn(
         "mt-1 block h-4 w-20 max-lg:hidden",
-        align === "centre" ? "mx-auto" : "lg:ml-auto",
+        align === "centre" ? "mx-auto" : "lg:ml-auto lg:in-data-[form=rows]:mx-auto",
       )}
     >
       {shown && (

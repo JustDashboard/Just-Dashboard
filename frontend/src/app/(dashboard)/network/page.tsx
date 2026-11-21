@@ -495,7 +495,11 @@ function Readings({ links, live }: { links?: NetworkLink[]; live: LiveTraffic })
         <ReadingLines>
           <ReadingLine
             href={href}
-            label={`Open ${uplinks[0]?.name ?? "the uplink"}: what it received`}
+            // Named by what it shows rather than by a `label`: axe reads the
+            // reading and its detail as shown text whatever is hidden from a
+            // screen reader, so "Open ens3: what it received" failed WCAG
+            // 2.5.3 as soon as a shorter picture brought these lines onto the
+            // first screen, where the axe gate reads them.
             mark={
               <WireMark size="md" hue={IN}>
                 <ArrowDown aria-hidden />
@@ -523,7 +527,6 @@ function Readings({ links, live }: { links?: NetworkLink[]; live: LiveTraffic })
           </ReadingLine>
           <ReadingLine
             href={href}
-            label={`Open ${uplinks[0]?.name ?? "the uplink"}: what it sent`}
             mark={
               <WireMark size="md" hue={OUT}>
                 <ArrowUp aria-hidden />

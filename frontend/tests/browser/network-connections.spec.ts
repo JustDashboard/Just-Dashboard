@@ -229,6 +229,42 @@ for (const width of [1280, 390]) {
   })
 }
 
+test("on a wide page the picture is rows of nodes, as tall waiting as read", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await openMaturity(page, [])
+  await visit(page, "/network/connections")
+  const picture = page.locator("[data-slot=wire-flow]")
+  await expect(picture).toHaveAttribute("data-form", "rows")
+  // A node is about 120px wide there, so each of its two counts has a line
+  // of its own and the names of one row stand on one level: on one line the
+  // counts broke under some marks and not under others.
+  const tops: number[] = []
+  await risen(page)
+  for (const place of ["The internet", "Tailnet", "Local networks"]) {
+    const box = await picture.getByText(place, { exact: true }).boundingBox()
+    tops.push(Math.round(box!.y))
+  }
+  expect(new Set(tops).size, `names at ${tops.join(", ")}`).toBe(1)
+  const read = await picture.boundingBox()
+
+  // The next visit waits on the nodes this one drew, each with those lines.
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/connections", async (route) => {
+    await held
+    return json(route, connectionsWithQuality)
+  })
+  await page.reload()
+  await expect(picture).toHaveAttribute("data-loading", "true")
+  await expect(picture).toHaveAttribute("data-form", "rows")
+  await risen(page)
+  expect((await picture.boundingBox())?.height).toBe(read?.height)
+  release()
+  await expect(picture.locator("[data-slot=skeleton]")).toHaveCount(0)
+  await risen(page)
+  expect((await picture.boundingBox())?.height).toBe(read?.height)
+})
+
 test("the address page holds what the sheet held, and its views are in the address", async ({
   page,
 }) => {

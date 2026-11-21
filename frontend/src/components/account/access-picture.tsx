@@ -4,6 +4,7 @@ import { Key } from "@/components/icons"
 import { describeClient, networkOf } from "@/lib/clients"
 import { relativeTime } from "@/lib/format"
 import type { ApiToken, DashboardUser, SessionInfo } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { WirePlaceholder } from "@/components/wire/wire"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { useNow } from "@/hooks/use-now"
@@ -20,6 +21,30 @@ import { displayNameOf } from "@/components/user-avatar"
 
 /** How many marks each side of the picture draws before it counts the rest. */
 const SHOWN = 4
+
+/**
+ * A node says two things under its name: where a session is from and its
+ * address, when a key was used and when it stops. Beside the mark, in a
+ * column, they are one line with a dot between them. In a row a node is about
+ * 120px wide and the two wrapped wherever the width ran out, so there each is
+ * a line of its own, cut at the node's width and whole on hover, and every
+ * node has both lines, which keeps a row one height (`TWO_LINES`).
+ */
+const LINE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
+const DOT = "lg:in-data-[form=rows]:hidden"
+const ONLY_IN_ROWS = "hidden lg:in-data-[form=rows]:block"
+
+/**
+ * A waiting node's second line of detail, in rows only: the lines a waiting
+ * node is given are drawn in both forms, and a column's node has one.
+ */
+const TWO_LINES = {
+  foot: (
+    <span aria-hidden className={ONLY_IN_ROWS}>
+      &nbsp;
+    </span>
+  ),
+}
 
 /**
  * Everything that is signed in as this account, drawn as itself and wired
@@ -76,7 +101,11 @@ export function AccessPicture({
     title: describeClient(session.userAgent),
     hint: (
       <>
-        {networkOf(session.ip).label} · <span className="numeric font-mono">{session.ip}</span>
+        <span className={LINE}>{networkOf(session.ip).label}</span>
+        <span className={DOT}> · </span>
+        <span className={cn("numeric font-mono", LINE)} title={session.ip}>
+          {session.ip}
+        </span>
       </>
     ),
     name: `${describeClient(session.userAgent)}, ${sessionHint(session, now)}`,
@@ -89,8 +118,12 @@ export function AccessPicture({
           id: `key:${token.id}`,
           mark: (size) => <KeyWireMark name={token.name} size={size} />,
           eyebrow: ROLE_NAME[token.role],
-          title: <span className="font-mono">{token.name}</span>,
-          hint: keyHint(token),
+          title: (
+            <span className={cn("font-mono", LINE)} title={token.name}>
+              {token.name}
+            </span>
+          ),
+          hint: <KeyWords token={token} />,
           name: `Key ${token.name}, ${ROLE_NAME[token.role]}, ${keyHint(token)}`,
           line: wire(keyLine(token, now)),
         }))
@@ -133,6 +166,7 @@ export function AccessPicture({
         max: SHOWN,
         more: { href: "/account/sessions", words: (hidden) => `${hidden} more sessions` },
         loadingRows: 3,
+        loadingLines: TWO_LINES,
       }}
       hub={{
         mark: <AccountWireMark user={user} />,
@@ -151,8 +185,36 @@ export function AccessPicture({
         max: SHOWN,
         more: { href: "/account/keys", words: (hidden) => `${hidden} more keys` },
         loadingRows: 2,
+        loadingLines: TWO_LINES,
       }}
     />
+  )
+}
+
+/**
+ * When a key was last used and when it stops (`keyHint`), as the two lines a
+ * node has in a row. A key that never stops keeps the second line empty.
+ */
+function KeyWords({ token }: { token: ApiToken }) {
+  const [used, stops] = keyHint(token).split(" · ")
+  return (
+    <>
+      <span className={LINE} title={used}>
+        {used}
+      </span>
+      {stops ? (
+        <>
+          <span className={DOT}> · </span>
+          <span className={LINE} title={stops}>
+            {stops}
+          </span>
+        </>
+      ) : (
+        <span aria-hidden className={ONLY_IN_ROWS}>
+          &nbsp;
+        </span>
+      )}
+    </>
   )
 }
 

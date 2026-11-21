@@ -8,9 +8,27 @@ import { AccountWireMark } from "@/components/system-users/wire-marks"
 import { WireFlow, type WireFlowNode, type WireLine } from "@/components/wire/wire-flow"
 import { plural } from "@/lib/format"
 import type { SystemUser } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 /** The accounts the picture has room for before the rest are one "more". */
 const SHOWN = 4
+
+/**
+ * One line, cut at its place's width and whole on hover, where the picture is
+ * rows: a node there is about 100px wide, and three ways to root over a long
+ * name, or a sentence under it, stood its row a line or two taller than the
+ * picture had waited. Beside its mark, in a column, it is whole.
+ */
+const ONE_LINE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
+
+/** Why a way in is closed, on the one line a node in a row has. */
+function Why({ children }: { children: string }) {
+  return (
+    <span className={ONE_LINE} title={children}>
+      {children}
+    </span>
+  )
+}
 
 /**
  * How an account becomes root, by the strongest way that works today: the
@@ -67,9 +85,21 @@ export function RootPicture({
     return {
       id: `account:${user.username}`,
       mark: (size) => <AccountWireMark user={user} size={size === "lg" ? "md" : size} />,
-      eyebrow: ways.join(" · "),
-      title: <span className="font-mono">{user.username}</span>,
-      hint: reach.words,
+      eyebrow: ways.length > 0 && (
+        <span className={ONE_LINE} title={ways.join(" · ")}>
+          {ways.join(" · ")}
+        </span>
+      ),
+      title: (
+        <span className={cn("font-mono", ONE_LINE)} title={user.username}>
+          {user.username}
+        </span>
+      ),
+      hint: (
+        <span className={ONE_LINE} title={reach.words}>
+          {reach.words}
+        </span>
+      ),
       name: user.username,
       href: accountHref(user.username),
       label: `Open ${user.username}`,
@@ -93,7 +123,7 @@ export function RootPicture({
           ),
           eyebrow: "Password",
           title: password?.allowed ? "Signs in over SSH" : "Closed",
-          hint: password?.allowed ? undefined : whyClosed(password?.why),
+          hint: password?.allowed ? undefined : <Why>{whyClosed(password?.why)}</Why>,
           name: "root's password",
           line: { state: password?.allowed ? "warning" : "idle" },
         },
@@ -113,7 +143,7 @@ export function RootPicture({
               ? plural(root.sshKeyCount, "key")
               : "Signs in"
             : "Closed",
-          hint: key?.allowed ? undefined : whyClosed(key?.why),
+          hint: key?.allowed ? undefined : <Why>{whyClosed(key?.why)}</Why>,
           name: "root's SSH keys",
           href: accountHref(root.username),
           label: "Open root",
@@ -154,6 +184,10 @@ export function RootPicture({
             ),
             eyebrow: "Everything on this server",
             title: <span className="font-mono">root</span>,
+            // Root is root before the list is read, and has no line under
+            // its name: a row of accounts is shorter than the hub with its
+            // words, so a line waited on there was a line the picture lost.
+            loadingLines: { title: <span className="font-mono">root</span>, hint: 0 },
           }}
           end={{
             title: "Sign in as root",

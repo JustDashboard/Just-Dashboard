@@ -1,14 +1,10 @@
 "use client"
 
-import Link from "next/link"
-import { createRef, useMemo, useRef, useState, useSyncExternalStore, type RefObject } from "react"
-import { ClientMark } from "@/components/client-mark"
-import { WireHost, WireNode, WirePlaceholder } from "@/components/wire/wire"
+import { useSyncExternalStore } from "react"
+import { SessionWireMark } from "@/components/account/marks"
+import { WireHost, WirePlaceholder } from "@/components/wire/wire"
 import { Plus } from "@/components/icons"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
-import { WireMarks } from "@/components/wire/wire-marks"
-import { useMotionHeld } from "@/components/wire/use-motion-held"
-import { useBreakpoint } from "@/lib/breakpoints"
+import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
 import { relativeTime } from "@/lib/format"
 import {
   isoOf,
@@ -19,10 +15,14 @@ import {
   type RdComputerView,
   type RdOverview,
 } from "@/lib/remote-desktop"
-import { cn } from "@/lib/utils"
 import { ComputerMark } from "@/components/remote-desktop/marks"
 
 const noSubscribe = () => () => {}
+
+const SKELETON_SIZE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
+
+/** This browser's id among the picture's nodes. */
+const YOU = "you"
 
 /**
  * The way a session travels, drawn: this browser, this server running guacd
@@ -34,13 +34,22 @@ const noSubscribe = () => () => {}
  * its remote desktop server is not answering, grey where the tailnet says it
  * is offline — so which computers can be used right now is read across the
  * picture before a word is. The browser's wire pulses whenever any session
- * is open, since every screen comes through it. Hovering a computer lights
- * its own wire and dims the rest.
+ * is open, since every screen comes through it. Pointing at a computer lights
+ * its own wire and the browser's and dims the rest.
  *
- * Wide, the three stand in lanes. On a phone it is the one phone form
- * (`WireMarks`): this browser, the server named, and the computers' marks
- * fanned under it with their wires, unnamed — the Computers cards under the
- * picture are the list, and a phone was shown the four names twice.
+ * Since 0.9.1 it is a `WireFlow`. It was laid by hand with the computers as
+ * one column, each name beside its mark, so four of them and the ring that
+ * adds one stood 340px tall against the right of a page whose left held one
+ * mark. Wide, the computers are rows on level lines into the server, and the
+ * browser's line runs level into it from the other side; a column where a
+ * side has no room for three across. A computer's mark opens its screen, and
+ * its words are its name and one line: the Computers list under the picture
+ * says the rest.
+ *
+ * On a phone it is the one phone form (`WireMarks`): this browser, the server
+ * named, and the computers' marks fanned under it with their wires, unnamed —
+ * the Computers cards under the picture are the list, and a phone was shown
+ * the four names twice.
  */
 export function ComputerPicture({
   overview,
@@ -49,18 +58,6 @@ export function ComputerPicture({
   overview: RdOverview
   hostname?: string
 }) {
-  const container = useRef<HTMLDivElement>(null)
-  const you = useRef<HTMLDivElement>(null)
-  const hub = useRef<HTMLDivElement>(null)
-  const [focus, setFocus] = useState<string | null>(null)
-  const wide = useBreakpoint("lg")
-  const held = useMotionHeld()
-  const ids = overview.computers.map((computer) => computer.id).join(",")
-  const refs = useMemo(() => {
-    const out = new Map<string, RefObject<HTMLSpanElement | null>>()
-    for (const id of ids.split(",")) if (id) out.set(id, createRef<HTMLSpanElement>())
-    return out
-  }, [ids])
   // Read on the client only: the server rendering this page has no browser
   // of the reader's to draw.
   const agent = useSyncExternalStore(
@@ -71,206 +68,83 @@ export function ComputerPicture({
   const live = overview.computers.some((computer) => computer.live > 0)
   const engine = overview.engine
   const running = engine.state === "running"
-  const hubHint = running ? (
-    overview.stream.state === "running" ? (
-      `guacd ${engine.version} · Moonlight Web ${overview.stream.version}`
-    ) : (
-      `guacd ${engine.version}`
-    )
-  ) : (
-    <span className="text-warning">engine not running</span>
-  )
 
-  if (!wide)
-    return (
-      <WireMarks
-        data-slot="computer-picture"
-        className="animate-rise"
-        tiers={[
-          {
-            title: "You",
-            nodes: [
-              {
-                id: "you",
-                mark: agent ? <ClientMark userAgent={agent} /> : <span className="size-11" />,
-                name: "This browser",
-              },
-            ],
-          },
-          {
-            id: "hub",
-            mark: <WireHost />,
-            eyebrow: "This server",
-            title: hostname ?? "This server",
-            hint: hubHint,
-          },
-          {
-            title: "Computers",
-            nodes: [
-              ...overview.computers.map((computer) => ({
-                id: computer.id,
-                mark: <ComputerMark os={computer.os} reach={reachability(computer)} size="sm" />,
-                name: computer.name,
-                href: sessionHref(computer.id),
-              })),
-              {
-                id: "add",
-                mark: (
-                  <WirePlaceholder size="sm">
-                    <Plus />
-                  </WirePlaceholder>
-                ),
-                label: "Add a computer",
-                href: "/remote-desktop/new",
-                round: true,
-                anonymous: true,
-              },
-            ],
-          },
-        ]}
-        wires={[
-          { from: "you", to: "hub", still: !live || held, duration: 2.2 },
-          ...overview.computers.map((computer) => {
-            const reach = reachability(computer)
-            return {
-              from: "hub",
-              to: computer.id,
-              still: reach.kind !== "live" || held,
-              dashed: reach.kind === "closed" || reach.kind === "offline",
-              tone: reach.kind === "closed" ? ("warning" as const) : ("default" as const),
-              duration: 2.2,
-            }
-          }),
-        ]}
-      />
-    )
+  const you: WireFlowNode = {
+    id: YOU,
+    name: "This browser",
+    // The browser as the picture's own tile, the size of the computers' marks,
+    // so its line meets it where theirs meet them.
+    mark: (size) =>
+      agent ? (
+        <SessionWireMark userAgent={agent} size={size} />
+      ) : (
+        <span className={SKELETON_SIZE[size]} />
+      ),
+    eyebrow: "You",
+    title: "This browser",
+    hint: overview.tailnet.installed ? "the screen arrives here" : undefined,
+    line: { state: "up", moving: live, duration: 2.2 },
+  }
 
   return (
-    <div data-slot="computer-picture" className="relative animate-rise py-4">
-      <div ref={container} className="relative">
-        <AnimatedBeam
-          containerRef={container}
-          fromRef={you}
-          toRef={hub}
-          shape="s"
-          startXOffset={30}
-          endXOffset={-30}
-          still={!live || held}
-          duration={2.2}
-        />
-        {overview.computers.map((computer, index) => {
-          const to = refs.get(computer.id)
-          if (!to) return null
-          const reach = reachability(computer)
-          return (
-            <AnimatedBeam
-              key={computer.id}
-              containerRef={container}
-              fromRef={hub}
-              toRef={to}
-              shape="s"
-              startXOffset={30}
-              endXOffset={-24}
-              still={reach.kind !== "live" || held}
-              dashed={reach.kind === "closed" || reach.kind === "offline"}
-              tone={reach.kind === "closed" ? "warning" : "default"}
-              duration={2.2}
-              delay={(index % 6) * 0.35}
-              className={cn(
-                "transition-opacity",
-                reach.kind === "offline" && "opacity-40",
-                focus !== null && focus !== computer.id && "opacity-15",
-              )}
-            />
-          )
-        })}
-
-        <div className="relative grid gap-y-8 lg:grid-cols-[minmax(0,0.8fr)_clamp(2.5rem,7vw,7rem)_minmax(0,0.8fr)_clamp(2.5rem,7vw,7rem)_minmax(0,1fr)] lg:items-center">
-          <div className="flex min-w-0 lg:justify-end">
-            <WireNode
-              nodeRef={you}
-              align="end"
-              mark={agent ? <ClientMark userAgent={agent} /> : <span className="size-11" />}
-              eyebrow="You"
-              title="This browser"
-              hint={overview.tailnet.installed ? "the screen arrives here" : undefined}
-            />
-          </div>
-
-          <div aria-hidden />
-
-          <div className="flex min-w-0 lg:justify-center">
-            <WireNode
-              nodeRef={hub}
-              align="center"
-              mark={<WireHost />}
-              eyebrow="This server"
-              title={hostname ?? "This server"}
-              hint={hubHint}
-            />
-          </div>
-
-          <div aria-hidden />
-
-          <section aria-label="Computers" className="min-w-0">
-            <p className="eyebrow mb-3 flex items-center gap-1.5">
-              Computers
-              <span className="numeric text-faint">{overview.computers.length}</span>
-            </p>
-            <ul className="flex min-w-0 flex-col gap-4">
-              {overview.computers.map((computer) => (
-                <li
-                  key={computer.id}
-                  onPointerEnter={() => setFocus(computer.id)}
-                  onPointerLeave={() => setFocus((held) => (held === computer.id ? null : held))}
-                  onFocus={() => setFocus(computer.id)}
-                  onBlur={() => setFocus((held) => (held === computer.id ? null : held))}
-                  className={cn(
-                    "min-w-0 transition-opacity",
-                    focus !== null && focus !== computer.id && "opacity-40",
-                  )}
-                >
-                  <ComputerNode computer={computer} nodeRef={refs.get(computer.id)} />
-                </li>
-              ))}
-              <li className="min-w-0">
-                <WireNode
-                  mark={
-                    <Link
-                      href="/remote-desktop/new"
-                      aria-label="Add a computer"
-                      className="rounded-full focus-ring"
-                    >
-                      <WirePlaceholder size="md">
-                        <Plus />
-                      </WirePlaceholder>
-                    </Link>
-                  }
-                  title={
-                    <Link
-                      href="/remote-desktop/new"
-                      className="text-muted-foreground hover:text-foreground hover:underline"
-                    >
-                      Add a computer
-                    </Link>
-                  }
-                />
-              </li>
-            </ul>
-          </section>
-        </div>
-      </div>
+    <div data-slot="computer-picture" className="animate-rise">
+      <WireFlow
+        phone="marks"
+        // Every screen comes through the browser, so it stays lit with
+        // whichever computer is pointed at, and they all do with it.
+        related={(focus, id) => focus === YOU || id === YOU}
+        start={{ title: "You", nodes: [you] }}
+        hub={{
+          mark: <WireHost />,
+          eyebrow: "This server",
+          title: hostname ?? "This server",
+          hint: running ? (
+            overview.stream.state === "running" ? (
+              `guacd ${engine.version} · Moonlight Web ${overview.stream.version}`
+            ) : (
+              `guacd ${engine.version}`
+            )
+          ) : (
+            <span className="text-warning">engine not running</span>
+          ),
+        }}
+        end={{
+          title: "Computers",
+          count: overview.computers.length,
+          heading: "always",
+          nodes: [
+            ...overview.computers.map(computerNode),
+            {
+              id: "add",
+              placeholder: true,
+              href: "/remote-desktop/new",
+              label: "Add a computer",
+              mark: (size) => (
+                <WirePlaceholder size={size}>
+                  <Plus />
+                </WirePlaceholder>
+              ),
+              title: <span className="font-normal text-muted-foreground">Add a computer</span>,
+              line: { state: "idle" },
+            },
+          ],
+        }}
+      />
     </div>
   )
 }
 
-function ComputerNode({
-  computer,
-  nodeRef,
-}: {
-  computer: RdComputerView
-  nodeRef?: RefObject<HTMLSpanElement | null>
-}) {
+/**
+ * A computer: its system's mark with its state in the corner, its name, and
+ * one line of what a session to it would meet.
+ *
+ * The line is short enough to stand under a mark in a row. A computer that
+ * answers says how it is reached and how far it is; the name of the server on
+ * it is the expected one and is a hover away, as is when an offline computer
+ * was last seen. One that is on and not answering names its server, since
+ * that is what to go and look at.
+ */
+function computerNode(computer: RdComputerView): WireFlowNode {
   const reach = reachability(computer)
   const server = protocolLabel(computer.protocol, computer.os)
   const path = computer.peer
@@ -280,43 +154,39 @@ function ComputerNode({
         ? `relayed via ${computer.peer.relay}`
         : undefined
     : undefined
-  return (
-    <WireNode
-      mark={
-        <span ref={nodeRef} className="flex">
-          <ComputerMark os={computer.os} reach={reach} />
+  const seen = computer.peer?.lastSeen
+    ? `seen ${relativeTime(isoOf(computer.peer.lastSeen))}`
+    : undefined
+  const open = [path, latency(computer.reach.latencyMs)].filter(Boolean).join(" · ")
+  return {
+    id: computer.id,
+    name: computer.name,
+    href: sessionHref(computer.id),
+    mark: (size) => <ComputerMark os={computer.os} reach={reach} size={size} />,
+    title: (
+      <span className="block truncate" title={computer.name}>
+        {computer.name}
+      </span>
+    ),
+    hint:
+      reach.kind === "live" ? (
+        <span className="font-medium text-success">in a session</span>
+      ) : reach.kind === "open" ? (
+        <span className="numeric block truncate" title={[server, open].filter(Boolean).join(" · ")}>
+          {open || server}
         </span>
-      }
-      title={
-        <Link
-          href={sessionHref(computer.id)}
-          className="min-w-0 truncate rounded-sm focus-ring hover:underline"
-        >
-          {computer.name}
-        </Link>
-      }
-      hint={
-        <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
-          {reach.kind === "live" ? (
-            <span className="font-medium text-success">in a session</span>
-          ) : reach.kind === "open" ? (
-            <>
-              <span>{server}</span>
-              {path && <span>{path}</span>}
-              <span className="numeric">{latency(computer.reach.latencyMs)}</span>
-            </>
-          ) : reach.kind === "offline" ? (
-            <span>
-              offline
-              {computer.peer?.lastSeen
-                ? ` · seen ${relativeTime(isoOf(computer.peer.lastSeen))}`
-                : ""}
-            </span>
-          ) : (
-            <span className="text-warning">{server} not answering</span>
-          )}
-        </span>
-      }
-    />
-  )
+      ) : reach.kind === "offline" ? (
+        <span title={seen}>offline</span>
+      ) : (
+        <span className="block text-balance text-warning">{server} not answering</span>
+      ),
+    line:
+      reach.kind === "live"
+        ? { state: "up", moving: true, duration: 2.2 }
+        : reach.kind === "open"
+          ? { state: "up" }
+          : reach.kind === "offline"
+            ? { state: "down" }
+            : { state: "warning", dashed: true },
+  }
 }

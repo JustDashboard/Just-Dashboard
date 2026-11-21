@@ -55,13 +55,19 @@ export function ImagePicture({
   return (
     <WireFlow
       // Three rows of nodes and the hub's words under its mark, whichever is
-      // taller: the height the picture has with the most it ever draws.
+      // taller: the height the picture has with the most it ever draws. Beside
+      // the rail a side has room for two across at most, so an image two
+      // containers run is one level line and one that three run is a column
+      // (`flowForm`): the room is held for both, and the line stands on its
+      // middle.
       className="lg:flex lg:min-h-60 lg:flex-col lg:justify-center"
       phone="marks"
       loading={!detail}
       start={{
         title: "Comes from",
         loadingRows: 1,
+        // A registry's two lines: its answer and when it was asked.
+        loadingLines: { hint: 2 },
         nodes: detail ? [origin(detail, tag, state ?? "unknown", update, pulling)] : [],
       }}
       hub={{

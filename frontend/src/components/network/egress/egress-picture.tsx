@@ -16,7 +16,12 @@ import {
   egressTrafficLine,
 } from "@/components/network/egress/reading"
 
-/** Room under the group's mark for its three lines, which hang below it wide. */
+/**
+ * Room under the group's mark for its three lines, which hang below it wide,
+ * where the members are a column. `WireFlow` leaves it off where each side is
+ * a row, as two members are on a wide page: there the picture is as tall as
+ * those three lines, loading and read.
+ */
 const HUB = "lg:py-16"
 
 /**
@@ -66,7 +71,11 @@ export function EgressPicture({
       </span>
     ),
     name: policy.title,
-    hint: <span className="block truncate">{policy.hint}</span>,
+    hint: (
+      <span className="block truncate" title={policy.hint}>
+        {policy.hint}
+      </span>
+    ),
     line: egressTrafficLine(group),
   }
   const members = [...group.members]
@@ -127,7 +136,11 @@ function memberNode(group: EgressGroup, m: EgressMemberView, links: NetworkLink[
       </WireMark>
     ),
     eyebrow: `Tier ${m.priority}${m.weight > 1 ? ` · weight ${m.weight}` : ""}`,
-    title: <span className="block truncate">{m.name}</span>,
+    title: (
+      <span className="block truncate" title={m.name}>
+        {m.name}
+      </span>
+    ),
     name: m.name,
     hint: (
       <>
@@ -138,7 +151,9 @@ function memberNode(group: EgressGroup, m: EgressMemberView, links: NetworkLink[
           {state.label}
           {detail}
         </span>
-        <span className="block truncate font-mono">{egressPath(m)}</span>
+        <span className="block truncate font-mono" title={egressPath(m)}>
+          {egressPath(m)}
+        </span>
       </>
     ),
     line: egressMemberLine(group, m),

@@ -7,7 +7,8 @@ import type { NetworkLink, NetworkOverview } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { ProductGlyph, ProductGlyphs, imageProduct } from "@/components/product-logo"
 import { WireHost, WireMark, WirePlaceholder } from "@/components/wire/wire"
-import { WireFlow, type WireFlowNode } from "@/components/wire/wire-flow"
+import { WireFlow, type WireFlowNode, type WireFlowWaiting } from "@/components/wire/wire-flow"
+import { Bone } from "@/components/bone"
 import { LinkGlyph, carrying, pulseDuration } from "@/components/network/marks"
 import { flowNeighbours, nodeFlows } from "@/components/network/topology-reading"
 import { deviceHref } from "@/components/network/interfaces/device-facts"
@@ -51,10 +52,14 @@ type Node = {
  * Docker networks reaching it. Where nothing is set up yet a dashed ring
  * stands in the place it would go, with the way to set it up.
  *
- * On the page's own ground, with no frame or dot grid. Three lanes from `lg`
- * (`WireFlow`);
- * below it the lanes stack, the wires are not drawn, and each node says its
- * traffic in words.
+ * On the page's own ground, with no frame or dot grid. From `lg` it is
+ * `WireFlow`'s wide picture, rows of nodes on level lines where a side has
+ * room for three across and a column a side where it has not; below it the
+ * lanes stack, the wires are not drawn, and each node says its traffic in
+ * words. A node in a row is about 120px wide with its words centred under its
+ * mark, so there its eyebrow is one line (`ROW_WHOLE`), a Docker network's
+ * says how many containers and leaves "Docker" to the mark, and the two rates
+ * stand one over the other.
  */
 export function Topology({
   overview,
@@ -131,11 +136,23 @@ export function Topology({
 }
 
 /**
- * Room over and under this server's mark for the lines that hang under it:
- * on a server with one device a side the picture is no taller than the mark,
- * and its words ran into the section below.
+ * Room over and under this server's mark in the column form, where each side
+ * is centred on it: on a server with one device a side the picture is no
+ * taller than the mark. Rows stand on the hub's own level and `WireFlow`
+ * leaves this off there.
  */
 const HUB_ROOM = "lg:py-28"
+
+/** In a row of nodes only: a line of its own, said whole or cut with its `title`, or left out. */
+const ROW_LINE = "lg:in-data-[form=rows]:block"
+const ROW_WHOLE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
+const ROW_CUT = "lg:in-data-[form=rows]:hidden"
+/**
+ * A line of more than words, which a row's `text-center` does not centre:
+ * centred there, and its parts one under the other where they do not fit.
+ */
+const ROW_CENTRED =
+  "lg:in-data-[form=rows]:flex-wrap lg:in-data-[form=rows]:justify-center lg:in-data-[form=rows]:gap-y-0.5"
 
 /** What did the refusing, for the figure's hover: the lists and limits in force. */
 function refusedBy(overview: NetworkOverview) {
@@ -147,7 +164,8 @@ function refusedBy(overview: NetworkOverview) {
 
 /**
  * The picture before its first read: the hub and as many grey rows a side as
- * the last visit drew, so the blocks under it stand where they will.
+ * the last visit drew, each holding the lines a node will, so the blocks
+ * under it stand where they will.
  */
 export function TopologyLoading({
   outside = 3,
@@ -160,10 +178,45 @@ export function TopologyLoading({
     <WireFlow
       loading
       hubShare={0.9}
-      start={{ title: "Outside", nodes: [], loadingRows: outside }}
-      end={{ title: "Inside", nodes: [], loadingRows: inside }}
-      hub={{ className: HUB_ROOM, mark: <WireHost />, eyebrow: "This server" }}
+      start={{ title: "Outside", nodes: [], loadingRows: outside, loadingLines: waiting }}
+      end={{ title: "Inside", nodes: [], loadingRows: inside, loadingLines: waiting }}
+      hub={{
+        className: HUB_ROOM,
+        mark: <WireHost />,
+        eyebrow: "This server",
+        // The firewall, the routing, the connections and what listens.
+        loadingLines: { hint: 4 },
+      }}
     />
+  )
+}
+
+/**
+ * A waiting node: an address under the name, then its traffic and, on the
+ * first of a side, its count of tracked flows: the internet on the outside
+ * and most often the busiest network on the inside. Those are set in the
+ * small face, so they wait on lines of it rather than on the hint's own. In
+ * a row the two rates are a line each, so the node waits a line longer there.
+ */
+function waiting(row: number): WireFlowWaiting {
+  return {
+    hint: 1,
+    foot: (
+      <>
+        <SmallLine width="w-24" />
+        <SmallLine width="w-16" className={cn("hidden", ROW_LINE)} />
+        {row === 0 && <SmallLine width="w-20" />}
+      </>
+    ),
+  }
+}
+
+/** A waiting line of the face the rates and the flows are set in. */
+function SmallLine({ width, className }: { width: string; className?: string }) {
+  return (
+    <span className={cn("block text-micro", className)}>
+      <Bone className={width} />
+    </span>
   )
 }
 
@@ -196,16 +249,30 @@ function flowNode(node: Node): WireFlowNode {
   }
 }
 
-/** In and out as words, for the hint under a node and the stacked picture. */
+/**
+ * In and out as words, for the hint under a node and the stacked picture. In
+ * a row of nodes the pair is wider than the node, and wrapped in the middle
+ * of the second rate; there each is a line.
+ */
 function Throughput({ devices }: { devices: NetworkLink[] }) {
   if (devices.length === 0) return null
   const rx = devices.reduce((n, d) => n + d.rxRate, 0)
   const tx = devices.reduce((n, d) => n + d.txRate, 0)
   return (
     <span className="numeric block font-mono text-micro">
-      <span className="text-chart-5">↓ {rate(rx)}</span>
-      <span className="mx-1.5 text-faint">·</span>
-      <span className="text-chart-2">↑ {rate(tx)}</span>
+      <span className={cn("text-chart-5", ROW_LINE)}>↓ {rate(rx)}</span>
+      <span className={cn("mx-1.5 text-faint", ROW_CUT)}>·</span>
+      <span className={cn("text-chart-2", ROW_LINE)}>↑ {rate(tx)}</span>
+    </span>
+  )
+}
+
+/** An eyebrow that stays one line in a row of nodes, with all of it behind the pointer. */
+function Kind({ children, cut }: { children: string; cut?: string }) {
+  return (
+    <span className={ROW_WHOLE} title={`${cut ?? ""}${children}`}>
+      {cut && <span className={ROW_CUT}>{cut}</span>}
+      {children}
     </span>
   )
 }
@@ -238,7 +305,11 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
         <Globe aria-hidden />
       </WireMark>
     ),
-    eyebrow: uplinks.length > 0 ? `Uplink · ${uplinks.map((l) => l.name).join(", ")}` : "No uplink",
+    eyebrow: (
+      <Kind>
+        {uplinks.length > 0 ? `Uplink · ${uplinks.map((l) => l.name).join(", ")}` : "No uplink"}
+      </Kind>
+    ),
     title: "The internet",
     hint: (
       <>
@@ -279,7 +350,11 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
           )}
         </WireMark>
       ),
-      eyebrow: tailnet ? "Tailscale" : l.kind === "wireguard" ? "WireGuard" : l.kind.toUpperCase(),
+      eyebrow: (
+        <Kind>
+          {tailnet ? "Tailscale" : l.kind === "wireguard" ? "WireGuard" : l.kind.toUpperCase()}
+        </Kind>
+      ),
       title: tailnet ? "Tailnet" : l.remote ? `${l.name} → ${l.remote}` : l.name,
       hint: (
         <>
@@ -332,11 +407,12 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
           <ProductGlyph id="docker" />
         </WireMark>
       ),
-      eyebrow: `Docker · ${network.containers.length} container${network.containers.length === 1 ? "" : "s"}`,
+      // The mark is Docker's own, so a row's eyebrow has the count alone.
+      eyebrow: <Kind cut="Docker · ">{plural(network.containers.length, "container")}</Kind>,
       title: network.name,
       hint: (
         <>
-          <span className="flex min-w-0 items-center gap-2 lg:justify-start">
+          <span className={cn("flex min-w-0 items-center gap-2", ROW_CENTRED)}>
             <span className="truncate font-mono">{network.subnets[0] ?? network.bridge}</span>
             <ProductGlyphs ids={[...new Set(products)]} max={4} />
           </span>
@@ -367,12 +443,15 @@ export function buildNodes(overview: NetworkOverview, links: NetworkLink[]): Nod
           <LinkGlyph kind={l.kind} />
         </WireMark>
       ),
-      eyebrow:
-        l.role === "bridge"
-          ? `Bridge${l.members?.length ? ` · ${l.members.length} port${l.members.length === 1 ? "" : "s"}` : ""}`
-          : l.role === "vlan"
-            ? `VLAN${l.vlanId ? ` ${l.vlanId}` : ""}`
-            : "Network card",
+      eyebrow: (
+        <Kind>
+          {l.role === "bridge"
+            ? `Bridge${l.members?.length ? ` · ${l.members.length} port${l.members.length === 1 ? "" : "s"}` : ""}`
+            : l.role === "vlan"
+              ? `VLAN${l.vlanId ? ` ${l.vlanId}` : ""}`
+              : "Network card"}
+        </Kind>
+      ),
       title: <span className="font-mono">{l.name}</span>,
       name: l.name,
       hint: (

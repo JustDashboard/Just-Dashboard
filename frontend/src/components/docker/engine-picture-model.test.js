@@ -81,7 +81,10 @@ describe("enginePicture, the left side", () => {
     expect(state).toEqual({ a: "warning", b: "down", c: "idle" })
     const words = Object.fromEntries(picture.start.map((node) => [node.name, node.words]))
     expect(words.b).toBe("stopped")
-    expect(words.c).toBe("not deployed · 3 services defined")
+    expect(words.c).toBe("not deployed")
+    // What the file defines is no reading: it is kept apart, for the hover.
+    expect(picture.start.find((node) => node.name === "c").detail).toBe("3 services defined")
+    expect(picture.start.find((node) => node.name === "b").detail).toBeUndefined()
   })
 
   test("a container started by hand says how it stopped; a stop is not a failure", () => {

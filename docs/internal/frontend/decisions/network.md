@@ -53,6 +53,15 @@ reading page, and what makes them alive is the sanctioned five, held hard:
   go; still while idle, dashed where the thing is down or not set up, amber where the internet
   reaches a server no firewall filters. Where nothing is set up a dashed ring stands where it would
   go, and is the way to set it up.
+  Wide, the ones on `WireFlow` are rows of nodes on level lines wherever a side has the room
+  (0.9.1, `components/wiring.md`), and a node in a row is about 120px wide with its words under its
+  mark. What a node says is written for that: the topology's eyebrow is one line (a Docker
+  network's is its count of containers, "Docker" being the mark) and its two rates stand one over
+  the other; a firewall port stands under its service where both do not fit, and the limit's
+  refusals that join the default take a line of their own; the resolver chain leaves an upstream's
+  routing domains (on the link's card under the picture) and the word "Configured" to the pointer,
+  and a line cut to the node's width says all of itself there too. The column form and the stacked lanes keep every word where it was. A picture waits
+  on the lines its nodes will hold in the form it is drawn in (`loadingLines`).
 - **Figures that move.** The live ring (`use-live-traffic.ts`, two-second points topped up with only
   what the page has not drawn) feeds `LiveBytes` figures, each tile's fifteen minutes as its
   `TileTrend`, the device rows' two-minute sparklines and every chart's Live window.
