@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
@@ -240,5 +241,34 @@ func TestAFailureToKeepIsReportedNotHidden(t *testing.T) {
 	}
 	if got := contents(t, k, "/srv/x"); len(got) != 0 {
 		t.Fatalf("a row points at content that was never kept: %q", got)
+	}
+}
+
+// The two tables keep their rows when the store is opened again: the schema
+// only adds, so an upgrade or a restart never costs a file its history. It
+// lives here rather than beside the schema because the store package's own
+// suite is within seconds of its time limit under the race detector, and this
+// opens an existing database, which costs a fraction of building one.
+func TestVersionsSurviveTheStoreBeingReopened(t *testing.T) {
+	dir := t.TempDir()
+	st, err := storetest.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.DB.Exec(`INSERT INTO file_versions(path, revision, size, at) VALUES('/srv/app.conf', 'abc', 3, 1)`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = st.DB.Exec(`INSERT INTO file_version_heads(path, revision, at) VALUES('/srv/app.conf', 'def', 2)`); err != nil {
+		t.Fatal(err)
+	}
+	st.Close()
+	st, err = store.Open(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer st.Close()
+	var n int
+	if err = st.DB.QueryRow(`SELECT COUNT(*) FROM file_versions JOIN file_version_heads USING(path)`).Scan(&n); err != nil || n != 1 {
+		t.Fatal("reopening lost a file's versions", n, err)
 	}
 }
