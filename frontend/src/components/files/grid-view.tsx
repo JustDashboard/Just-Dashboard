@@ -10,6 +10,7 @@ import { Thumbnail } from "@/components/files/thumbnail"
 import { rowReveal } from "@/components/icon-action"
 import { useDropTarget } from "@/components/files/dnd"
 import type { EntryHandlers } from "@/components/files/entry-handlers"
+import { TileContextMark } from "@/components/files/server-context"
 
 export type TileSize = "sm" | "md" | "lg"
 
@@ -148,6 +149,7 @@ const Tile = memo(function Tile({
           className="bg-card"
         />
       </span>
+      <TileContextMark path={entry.path} />
 
       {near || active ? (
         <Thumbnail entry={entry} size={size} hoverPlay />

@@ -13,6 +13,7 @@ import {
   Check,
   ChevronDown,
   Clipboard,
+  CloudDownload,
   CloudUpload,
   Cross,
   Eye,
@@ -41,7 +42,7 @@ import {
   Trash,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
-import { ApiError, del, get, post, put } from "@/lib/api"
+import { ApiError, get, post, put } from "@/lib/api"
 import { bytes, plural, truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { FileBookmark, FileEntry, FileListing, FilePlaces } from "@/lib/types"
@@ -56,7 +57,6 @@ import { GitHubAccountControl } from "@/components/git/github-account"
 import { FileEditorSheet } from "@/components/files/file-editor"
 import {
   defaultFolderColour,
-  FileIcon,
   folderColourOf,
   FolderColourProvider,
   FolderIcon,
@@ -85,6 +85,9 @@ import { PaneBar, paneShown, type PaneStop } from "@/components/phone-panes"
 import { Modal } from "@/components/modal"
 import { PermissionsDialog } from "@/components/files/permissions-dialog"
 import { PreviewPanel } from "@/components/files/preview-panel"
+import { useServerContextFeed } from "@/components/files/server-context"
+import { useLinkedFile } from "@/components/files/linked-file"
+import { AudioQueueHost, PlayerLine } from "@/components/files/audio-queue"
 import { QuickOpen, type FileSearchMode } from "@/components/files/quick-open"
 import { homeFor } from "@/components/files/search"
 import {
@@ -104,6 +107,10 @@ import {
 } from "@/components/files/os-clipboard"
 import { inspectUpload } from "@/components/files/upload-plan"
 import { useConflicts, type ConflictPolicy } from "@/components/files/conflict-dialog"
+import { useDeleteFlow } from "@/components/files/delete-flow"
+import { useFileUndo, useUndoShortcut } from "@/components/files/use-file-undo"
+import { copyOperation, moveOperation, type Copied, type Moved } from "@/components/files/undo"
+import type { ReplaceResult } from "@/components/files/trash"
 import {
   collectInput,
   collectTransfer,
@@ -111,6 +118,7 @@ import {
   useUploads,
   type Incoming,
 } from "@/components/files/uploads"
+import { useFolderFollow, useFollowedListing } from "@/components/files/live-folder"
 import {
   baseOf,
   cleanPath,
@@ -284,15 +292,20 @@ export default function FilesPage() {
   // operator navigated away and back. The hidden switch is a parameter of the
   // same resource, refetched in place, rather than a new resource that would
   // blank the rows for a skeleton on every flip.
-  const listing = usePoll(
+  // Followed, where the server can watch the folder (`live-folder.ts`): the
+  // rows that change arrive by themselves and the listing is not asked again.
+  const follow = useFolderFollow(path, showHidden)
+  const polled = usePoll(
     (signal) =>
       path === null
         ? Promise.resolve(null as unknown as FileListing)
         : get<FileListing>("/files/list", { path, hidden: showHidden }, signal),
-    20_000,
+    follow.mode === "off" ? 20_000 : 0,
     [path],
   )
+  const listing = useFollowedListing(polled, follow)
   const refreshListing = listing.refresh
+  useServerContextFeed(path, showHidden, listing.data)
   const firstHidden = useRef(true)
   useEffect(() => {
     if (firstHidden.current) {
@@ -622,6 +635,9 @@ export default function FilesPage() {
     [viewable],
   )
 
+  // A link in a rendered file: a folder is entered, a file is shown where it lives.
+  const openPath = useLinkedFile({ path, viewable, viewing, navigate, setViewing, setActive })
+
   // What a double-click means: a folder is entered, media is looked at, and
   // everything else goes to the editor — which says so if the bytes turn out
   // not to be text.
@@ -635,6 +651,11 @@ export default function FilesPage() {
   )
 
   // --- operations ---
+
+  // Every delete, move, rename and copy below is recorded with how to undo
+  // it, for the notice's Undo and for Ctrl+Z (use-file-undo.ts).
+  const undo = useFileUndo(reload)
+  useUndoShortcut(undo.undoLast)
 
   /** Every name in a folder, dotfiles included: what a new name must not be. */
   const namesIn = async (dir: string): Promise<Set<string>> => {
@@ -707,6 +728,7 @@ export default function FilesPage() {
         policy = answer
       }
       let ok = 0
+      const done: (Moved & Copied)[] = []
       for (const src of targets) {
         const base = baseOf(src)
         let name = base
@@ -718,7 +740,12 @@ export default function FilesPage() {
           else name = numberedName(base, taken)
         }
         try {
-          await post(`/files/${mode}`, { from: src, to: joinPath(dest, name), overwrite })
+          const answer = await post<ReplaceResult>(`/files/${mode}`, {
+            from: src,
+            to: joinPath(dest, name),
+            overwrite,
+          })
+          done.push({ from: src, to: joinPath(dest, name), replaced: answer?.replaced?.item })
           taken.add(name)
           if (mode === "move") moved.add(src)
           ok++
@@ -728,7 +755,13 @@ export default function FilesPage() {
       }
       if (ok > 0) {
         const where = dest === path ? "" : ` to ${truncateMiddle(dest, 40)}`
-        notify.success(`${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`)
+        const what = ok === 1 ? baseOf(done[0].from) : plural(ok, "item")
+        undo.record(
+          mode === "move"
+            ? moveOperation(`moving ${what}`, done)
+            : copyOperation(`copying ${what}`, done, canDestruct),
+          `${mode === "move" ? "Moved" : "Copied"} ${plural(ok, "item")}${where}`,
+        )
         if (mode === "move") {
           afterLabelledChange([...moved])
           setActive((previous) => {
@@ -776,8 +809,12 @@ export default function FilesPage() {
       hint: (v) => joinPath(path ?? "/", v || "…"),
       submit: async (name) => {
         if (name === entry.name) return
-        await post("/files/move", { from: entry.path, to: joinPath(path ?? "/", name) })
-        notify.success(`Renamed to ${name}`)
+        const to = joinPath(path ?? "/", name)
+        await post("/files/move", { from: entry.path, to })
+        undo.record(
+          moveOperation(`renaming ${entry.name}`, [{ from: entry.path, to }]),
+          `Renamed to ${name}`,
+        )
         setActive({ dir: path ?? "/", entry: null })
         reload()
         afterLabelledChange([entry.path])
@@ -787,8 +824,12 @@ export default function FilesPage() {
   const duplicate = async (entry: FileEntry) => {
     const name = uniqueName(entry.name, names)
     try {
-      await post("/files/copy", { from: entry.path, to: joinPath(path ?? "/", name) })
-      notify.success(`Duplicated as ${name}`)
+      const to = joinPath(path ?? "/", name)
+      await post("/files/copy", { from: entry.path, to })
+      undo.record(
+        copyOperation(`duplicating ${entry.name}`, [{ to }], canDestruct),
+        `Duplicated as ${name}`,
+      )
       reload()
     } catch (err) {
       notify.error("Could not duplicate", err)
@@ -808,69 +849,26 @@ export default function FilesPage() {
     }
   }
 
-  const deleteEntry = (entry: FileEntry) =>
-    confirm({
-      title: entry.isDir ? "Delete folder" : "Delete file",
-      confirmLabel: "Delete",
-      // What it acts on, drawn as itself; the button carries the danger, not the sentence.
-      subject: {
-        mark: <FileIcon entry={entry} className="size-6" />,
-        name: entry.name,
-        facts: <span className="font-mono break-all">{entry.path}</span>,
-      },
-      description: (
-        <p>It is deleted permanently{entry.isDir ? ", along with everything inside it." : "."}</p>
-      ),
-      action: async () => {
-        await del("/files/delete", {
-          query: { path: entry.path, recursive: entry.isDir },
-        })
-        setActive({ dir: path ?? "/", entry: null })
-        reload()
-        afterLabelledChange([entry.path])
-      },
-    })
+  // To the Trash, or for good with Shift+Delete or "Delete permanently"
+  // (delete-flow.tsx says which, and why, before anything happens).
+  const deleteEntries = useDeleteFlow({
+    confirm,
+    record: undo.record,
+    onDeleted: (gone) => {
+      clearSelection()
+      setActive({ dir: path ?? "/", entry: null })
+      reload()
+      afterLabelledChange(gone)
+    },
+  })
+  const deleteEntry = (entry: FileEntry, permanent?: boolean) =>
+    void deleteEntries([entry], permanent === true)
 
-  const bulkDelete = () => {
-    const targets = entries.filter((e) => selected.has(e.path))
-    if (targets.length === 0) return
-    const dirs = targets.filter((e) => e.isDir)
-    confirm({
-      title: `Delete ${plural(targets.length, "item")}`,
-      confirmLabel: "Delete all",
-      workingLabel: "Deleting selected files…",
-      description: (
-        <p>
-          {plural(targets.length, "selected item")} {targets.length === 1 ? "is" : "are"} deleted
-          permanently
-          {dirs.length > 0 ? ", folders and everything inside them included." : "."}
-        </p>
-      ),
-      action: async (_, report) => {
-        let failed = 0
-        report({ completed: 0, total: targets.length })
-        for (const [index, entry] of targets.entries()) {
-          report({ detail: entry.name, completed: index })
-          try {
-            await del("/files/delete", {
-              query: { path: entry.path, recursive: entry.isDir },
-            })
-          } catch {
-            failed++
-          }
-          report({ completed: index + 1 })
-        }
-        clearSelection()
-        setActive({ dir: path ?? "/", entry: null })
-        reload()
-        afterLabelledChange(targets.map((e) => e.path))
-        if (failed) {
-          notify.error(`${plural(failed, "item")} could not be deleted`)
-          return "reported" as const
-        }
-      },
-    })
-  }
+  const bulkDelete = (permanent?: boolean) =>
+    void deleteEntries(
+      entries.filter((e) => selected.has(e.path)),
+      permanent === true,
+    )
 
   const newFolder = () =>
     prompt({
@@ -908,6 +906,22 @@ export default function FilesPage() {
         notify.success(`Created ${name}`)
         reload()
         setEditing(joinPath(path ?? "/", name))
+      },
+    })
+
+  // New → From a link: the server downloads it into this folder; its
+  // progress is in the uploads panel (`uploads.tsx`).
+  const fetchLink = () =>
+    prompt({
+      title: "Fetch a link",
+      label: "Link",
+      placeholder: "https://example.com/release.tar.gz",
+      confirmLabel: "Fetch",
+      validate: (v) =>
+        /^https?:\/\/\S+$/i.test(v.trim()) ? undefined : "A link starts with http:// or https://.",
+      hint: () => `The server downloads it into ${path ?? "/"}`,
+      submit: async (url) => {
+        await uploads.fetchLink(path ?? "/", url.trim())
       },
     })
 
@@ -978,6 +992,8 @@ export default function FilesPage() {
     onPermissions: () => setPermsEntry(entry),
     onDelete: () =>
       selected.has(entry.path) && selected.size > 1 ? bulkDelete() : deleteEntry(entry),
+    onDeleteForGood: () =>
+      selected.has(entry.path) && selected.size > 1 ? bulkDelete(true) : deleteEntry(entry, true),
     onEditImage: () => setEditingImage(entry.path),
     onToggleStar: () => toggleStar(entry.path, entry.name),
     starred: bookmarks.some((b) => b.path === entry.path),
@@ -1018,6 +1034,7 @@ export default function FilesPage() {
       ? [
           { id: "new-folder", label: "New folder", icon: FolderPlus, onSelect: newFolder },
           { id: "new-file", label: "New file", icon: PlusSquareSmall, onSelect: newFile },
+          { id: "fetch-link", label: "From a link…", icon: CloudDownload, onSelect: fetchLink },
           {
             id: "upload",
             label: "Upload files…",
@@ -1365,8 +1382,8 @@ export default function FilesPage() {
         case "Delete":
           if (!canDestruct) break
           event.preventDefault()
-          if (selected.size > 0) bulkDelete()
-          else if (activeEntry) deleteEntry(activeEntry)
+          if (selected.size > 0) bulkDelete(event.shiftKey)
+          else if (activeEntry) deleteEntry(activeEntry, event.shiftKey)
           break
         case "Backspace":
           event.preventDefault()
@@ -1536,6 +1553,7 @@ export default function FilesPage() {
     <Page fill="workspace" data-files-workspace className="gap-2">
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Files</h1>
+      <AudioQueueHost entries={entries} />
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
         {/* One frame around the whole workbench: a strip across the top, then
             the sidebar, the listing and the inspector separated by a hairline
@@ -1750,6 +1768,7 @@ export default function FilesPage() {
                     onFolder={newFolder}
                     onFile={newFile}
                     onSymlink={() => setSymlinkOpen(true)}
+                    onLink={fetchLink}
                   />
                   <UploadMenu
                     className="max-lg:hidden"
@@ -1848,7 +1867,7 @@ export default function FilesPage() {
                         archiveHref={archiveHref(path ?? "/", [...selected], "zip")}
                         onCopy={() => cutCopy("copy", [...selected])}
                         onCut={() => cutCopy("cut", [...selected])}
-                        onDelete={bulkDelete}
+                        onDelete={() => bulkDelete()}
                         onClear={clearSelection}
                       />
                     </motion.div>
@@ -2055,9 +2074,11 @@ export default function FilesPage() {
                 onCancel={uploads.cancel}
                 onDismiss={uploads.dismiss}
                 onClear={uploads.clear}
+                onPause={uploads.pause}
+                onResume={uploads.resume}
               />
 
-              <PaneFooter className="justify-between gap-3 px-3 text-hint text-muted-foreground">
+              <PaneFooter className="relative justify-between gap-3 px-3 text-hint text-muted-foreground">
                 <span aria-live="polite" aria-atomic="true" className="numeric min-w-0 truncate">
                   {listing.data
                     ? selected.size > 0
@@ -2067,6 +2088,7 @@ export default function FilesPage() {
                       : (folderSentence(folderCount, fileCount) ?? "Empty folder")
                     : ""}
                 </span>
+                <PlayerLine />
                 <IconAction
                   label="Files shortcuts"
                   className="size-6 shrink-0"
@@ -2110,6 +2132,7 @@ export default function FilesPage() {
                   onView={viewEntry}
                   onEditImage={(p) => setEditingImage(p)}
                   onNavigate={navigate}
+                  onOpenPath={openPath}
                   className="flex-1"
                 />
               </div>
@@ -2158,6 +2181,7 @@ export default function FilesPage() {
           setViewing(null)
           setEditing(p)
         }}
+        onOpenPath={openPath}
       />
       <FileEditorSheet
         grouped
@@ -2371,10 +2395,12 @@ function NewMenu({
   onFolder,
   onFile,
   onSymlink,
+  onLink,
 }: {
   onFolder: () => void
   onFile: () => void
   onSymlink: () => void
+  onLink: () => void
 }) {
   return (
     <DropdownMenu>
@@ -2396,6 +2422,10 @@ function NewMenu({
         <DropdownMenuItem onSelect={onSymlink}>
           <Linked className="size-3.5" />
           Symlink
+        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onLink}>
+          <CloudDownload className="size-3.5" />
+          From a link…
         </DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>

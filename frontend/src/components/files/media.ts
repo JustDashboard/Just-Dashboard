@@ -42,11 +42,19 @@ export function rawUrl(path: string, modified?: string) {
 }
 
 /**
- * The thumbnail is the file itself, drawn small by the browser. That is honest
- * for the sizes a server holds — an icon, a screenshot, a photograph — and it
- * needs no thumbnail cache to go stale or to fill a disk this page exists to
- * keep tidy. The cap on which images are tried is what keeps a listing from
- * pulling a 40 MB scan over a VPN just to draw it at 28 pixels.
+ * A picture's thumbnail is a small copy the server makes once and keeps
+ * (`GET /files/thumbnail`, `internal/thumbnail`), for every picture in a
+ * format it decodes (PNG, JPEG, GIF), however large: a folder of forty 12 MB
+ * photographs costs forty copies of tens of kilobytes. The address carries the
+ * file's modification time, as the raw route's does, so a changed picture is a
+ * new copy. `THUMBNAILED` mirrors `thumbnail.Decodable`.
+ *
+ * Any other picture (WebP, SVG, AVIF, an icon) is still the file itself,
+ * drawn small by the browser, up to `THUMBNAIL_MAX_BYTES`: honest for the
+ * sizes a server holds of those, and the cap keeps a listing from pulling a
+ * 40 MB scan over a VPN to draw it at 28 pixels. A copy the server cannot make
+ * (a canvas over its pixel limit, bytes that are not the picture the name
+ * says) falls back to the same.
  *
  * A video costs far less than its size suggests: the browser asks for its
  * header and the first frame with range requests, which the raw route honours,
@@ -54,12 +62,37 @@ export function rawUrl(path: string, modified?: string) {
  */
 export const THUMBNAIL_MAX_BYTES = 4 << 20
 
+const THUMBNAILED = new Set(["png", "jpg", "jpeg", "gif"])
+
+/** Whether the server makes a small copy of this picture. */
+export const hasServerThumbnail = (name: string) => THUMBNAILED.has(extensionOf(name))
+
+/** The small copy's address, cache-busted by the file's modification time. */
+export function thumbnailUrl(path: string, modified?: string) {
+  return downloadUrl("/files/thumbnail", { path, v: modified ? Date.parse(modified) : undefined })
+}
+
 export function thumbnailKind(entry: Pick<FileEntry, "name" | "isDir" | "size">) {
   if (entry.isDir || entry.size === 0) return null
   const kind = mediaKind(entry.name)
-  if (kind === "image") return entry.size <= THUMBNAIL_MAX_BYTES ? "image" : null
+  if (kind === "image") {
+    return hasServerThumbnail(entry.name) || entry.size <= THUMBNAIL_MAX_BYTES ? "image" : null
+  }
   if (kind === "video") return "video"
   return null
+}
+
+/**
+ * Where a picture's thumbnail is drawn from: the server's copy, or the file
+ * itself for a format it does not decode or after its copy failed — and only
+ * while the file is small enough to draw that way.
+ */
+export function thumbnailSrc(
+  entry: Pick<FileEntry, "name" | "path" | "size" | "modified">,
+  copyFailed = false,
+): string | null {
+  if (hasServerThumbnail(entry.name) && !copyFailed) return thumbnailUrl(entry.path, entry.modified)
+  return entry.size <= THUMBNAIL_MAX_BYTES ? rawUrl(entry.path, entry.modified) : null
 }
 
 /** A non-colliding name for putting a second copy of something in a folder. */

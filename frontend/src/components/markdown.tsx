@@ -2,7 +2,14 @@
 
 import { Fragment, useMemo } from "react"
 import { Check, ChevronRight } from "@/components/icons"
-import { markdownMedia, onlyMedia, parseMarkdown, type Block, type Inline } from "@/lib/markdown"
+import {
+  markdownMedia,
+  onlyMedia,
+  parseMarkdown,
+  safeHref,
+  type Block,
+  type Inline,
+} from "@/lib/markdown"
 import { cn } from "@/lib/utils"
 import { MediaGrid, MediaImage, MediaLightbox } from "@/components/markdown-media"
 import { Well } from "@/components/panel"
@@ -22,6 +29,7 @@ export function Markdown({
   source,
   repoUrl,
   code,
+  files,
   className,
 }: {
   source: string
@@ -33,24 +41,43 @@ export function Markdown({
    * statement it wrote the verbs that open it in the editor.
    */
   code?: (block: { lang: string; v: string }) => React.ReactNode
+  /**
+   * A file on this server, read in Files: a reference with no scheme is
+   * another file beside it, and nothing is fetched from anywhere else.
+   */
+  files?: MarkdownFiles
   className?: string
 }) {
-  const blocks = useMemo(() => parseMarkdown(source), [source])
-  const media = useMemo(() => markdownMedia(blocks), [blocks])
+  const relative = files !== undefined
+  const blocks = useMemo(() => parseMarkdown(source, { relative }), [source, relative])
+  const media = useMemo(() => (relative ? [] : markdownMedia(blocks)), [blocks, relative])
   const forge = repoUrl ? new URL(repoUrl).origin : undefined
   return (
     <MediaLightbox media={media}>
       <div className={cn("min-w-0 space-y-3 text-body leading-relaxed break-words", className)}>
-        <Blocks blocks={blocks} repoUrl={repoUrl} forge={forge} code={code} />
+        <Blocks blocks={blocks} repoUrl={repoUrl} forge={forge} code={code} files={files} />
       </div>
     </MediaLightbox>
   )
+}
+
+/**
+ * How a file's Markdown reaches the files beside it. `href` is the page's own
+ * address for a reference (for a middle click), `open` is a plain click, and
+ * `image` is a picture's address through `GET /files/raw`, or nothing for a
+ * name that route would refuse.
+ */
+export type MarkdownFiles = {
+  href: (ref: string) => string | undefined
+  open: (ref: string) => void
+  image: (ref: string) => string | undefined
 }
 
 type Links = {
   repoUrl?: string
   forge?: string
   code?: (block: { lang: string; v: string }) => React.ReactNode
+  files?: MarkdownFiles
 }
 
 // Each rung opens more room above it than it leaves below, so a heading reads
@@ -83,9 +110,13 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
         const pictures = block.c.filter((run) => run.t === "image")
         return (
           <MediaGrid count={pictures.length}>
-            {pictures.map((run, index) => (
-              <MediaImage key={index} src={run.src} alt={run.alt} fill={pictures.length > 1} />
-            ))}
+            {pictures.map((run, index) =>
+              links.files ? (
+                <FilePicture key={index} src={run.src} alt={run.alt} files={links.files} />
+              ) : (
+                <MediaImage key={index} src={run.src} alt={run.alt} fill={pictures.length > 1} />
+              ),
+            )}
           </MediaGrid>
         )
       }
@@ -210,13 +241,49 @@ function BlockView({ block, ...links }: { block: Block } & Links) {
 const LINK =
   "text-foreground underline decoration-muted-foreground/60 underline-offset-2 hover:decoration-foreground"
 
-function Runs({ runs, repoUrl, forge }: { runs: Inline[] } & Links) {
+/**
+ * A picture in a file on this server. One beside the file is drawn through the
+ * raw route and its allowlist; one from another site is named and left out,
+ * because opening a README must not make the browser call anywhere.
+ */
+function FilePicture({ src, alt, files }: { src: string; alt: string; files: MarkdownFiles }) {
+  const remote = safeHref(src)
+  const local = remote ? undefined : files.image(src)
+  if (local) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element -- our own raw route
+      <img
+        src={local}
+        alt={alt}
+        loading="lazy"
+        className="inline-block h-auto max-h-[32rem] max-w-full rounded-md align-top"
+      />
+    )
+  }
+  let where = src
+  try {
+    if (remote) where = new URL(remote).host
+  } catch {}
+  return (
+    <span data-left-out className="text-hint text-muted-foreground">
+      [{remote ? `Picture from ${where} not loaded` : `Picture ${src} not shown`}
+      {alt ? `: ${alt}` : ""}]
+    </span>
+  )
+}
+
+function Runs({ runs, ...links }: { runs: Inline[] } & Links) {
+  const { repoUrl, forge, files } = links
   return runs.map((run, index) => {
     switch (run.t) {
       case "text":
         return <Fragment key={index}>{run.v}</Fragment>
       case "image":
-        return <MediaImage key={index} src={run.src} alt={run.alt} />
+        return files ? (
+          <FilePicture key={index} src={run.src} alt={run.alt} files={files} />
+        ) : (
+          <MediaImage key={index} src={run.src} alt={run.alt} />
+        )
       case "br":
         return <br key={index} />
       case "code":
@@ -231,25 +298,41 @@ function Runs({ runs, repoUrl, forge }: { runs: Inline[] } & Links) {
       case "strong":
         return (
           <strong key={index} className="font-semibold text-foreground">
-            <Runs runs={run.c} repoUrl={repoUrl} forge={forge} />
+            <Runs runs={run.c} {...links} />
           </strong>
         )
       case "em":
         return (
           <em key={index}>
-            <Runs runs={run.c} repoUrl={repoUrl} forge={forge} />
+            <Runs runs={run.c} {...links} />
           </em>
         )
       case "del":
         return (
           <del key={index} className="text-muted-foreground">
-            <Runs runs={run.c} repoUrl={repoUrl} forge={forge} />
+            <Runs runs={run.c} {...links} />
           </del>
         )
       case "link":
+        if (files && !safeHref(run.href)) {
+          return (
+            <a
+              key={index}
+              href={files.href(run.href)}
+              onClick={(event) => {
+                if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey) return
+                event.preventDefault()
+                files.open(run.href)
+              }}
+              className={LINK}
+            >
+              <Runs runs={run.c} {...links} />
+            </a>
+          )
+        }
         return (
           <a key={index} href={run.href} target="_blank" rel="noreferrer noopener" className={LINK}>
-            <Runs runs={run.c} repoUrl={repoUrl} forge={forge} />
+            <Runs runs={run.c} {...links} />
           </a>
         )
       case "ref":

@@ -485,10 +485,50 @@ The host's files as a workbench: a sidebar of places and starred folders (`files
 name and content search (`quick-open.tsx`, `search.ts`) and a preview and details panel
 (`preview-panel.tsx`). Below `lg` it is one pane at a time (Places, Folder, Details) with a bar at the
 foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and the rest as words in
-`more-menu.tsx`
+`more-menu.tsx`. The folder follows the disk over a socket (`live-folder.ts`, `live-patches.ts`), with
+the rows that changed laid over the listing so selection, scroll and dialogs stay put. The uploads panel
+(`uploads.tsx`) holds uploads (in pieces over 32 MiB, with pause, resume and cancel, carrying on after a
+dropped connection) and links being fetched by the server (New → *From a link*), each one line with
+how far it is in words (`transfer-words.ts`)
 
-**Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`;
+Each row says the most telling thing the server knows about the entry after its name, with its logo
+("Postgres volume of shop-db", "Served at example.com by nginx"); a tile carries the logo in its
+corner; the details pane's *On this server* says everything known as linked sentences, including
+what the entry is inside and "Not backed up" for a folder that matters (`server-context.tsx`,
+`server-context-words.ts`, `GET /files/context`, checked by `tests/browser/files-context.spec.ts`).
+
+A text file reads as what it is in the details pane and the viewer: Markdown rendered with a press
+back to the source, a CSV or TSV as a table, one-line JSON indented (`rendered-text.tsx`). Pictures
+list as the server's small copies (`/files/thumbnail`); the viewer walks a folder as a gallery with
+a strip, swipe and a slideshow; audio plays as a queue whose player is one line in the listing's
+foot and keeps playing across folders (`audio-queue.tsx`); a video the browser cannot play says so
+and offers Download (`playable-video.tsx`). Checked by `tests/browser/files-viewing.spec.ts`
+
+**Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`
+and `tests/browser/files-transfer.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
+
+A delete moves to the Trash (`delete-flow.tsx`): before the confirmation opens it asks
+`GET /files/trash/check` for each entry, so the sentence says where things go ("It goes to the Trash,
+kept 30 days") or, for what the Trash cannot take, why it is deleted permanently instead. Shift+Delete
+and "Delete permanently" in the menu skip the Trash. Every delete, move, rename, copy and duplicate is
+recorded as data (`undo.ts`: the steps that undo it, in order) on this visit's stack
+(`use-file-undo.ts`); its notice carries Undo, and Ctrl/Cmd+Z undoes the newest, then the one before,
+while text fields, dialogs and menus keep their own. An operation that cannot be undone (a permanent
+delete, a copy by an account that may not delete) says so on its notice instead. Name search passes
+the folder on screen as `here` and says the index's age beside the count when the index answered.
+
+## `/files/trash`
+
+The Trash (`trash-view.tsx`) in the Files workbench's frame: the places sidebar with Trash as its last
+row (`trash-place.tsx`, also the places menu's last item), a table of what was deleted (name, the
+folder it came from, how long ago and by whom, how long it is still kept, its size; one 44px line
+each) and the chosen item's details (`?item=` in the address). Restore asks through the conflict
+dialog when the place is taken; Delete permanently and Empty Trash confirm and need the destructive
+capability. Below `lg` it is one pane at a time (Places, Trash, Details) with the bar at the foot
+
+**Implementation:** `app/(dashboard)/files/trash/page.tsx` and `components/files/trash*.ts*`; checked
+by `tests/browser/files-trash.spec.ts` and `trash.test.js`
 
 ## `/files/editor`
 
@@ -498,8 +538,20 @@ grouped (`editor-toolbar.tsx`), with text size, indentation and the command pale
 `lg` the tree and the editor are one pane at a time with a bar at the foot, both kept mounted so an
 unsaved draft outlives a look at the tree
 
+**History** in the strip opens the file's versions as a view of the same page
+(`?view=history&version=e12&against=previous`, `version-history.tsx`): the earlier contents as 48px
+rail rows (`RailRow`) beside Monaco's diff editor (`version-diff.tsx`), against the file as it is now
+or the version before it, with Restore and download on the version. A picture's versions are the two
+pictures side by side; any other binary is download and restore only. A backup's copy on another
+machine is read only after a press that says it is fetching. The editor stays mounted, hidden, and is
+keyed without the history's keys (`editorKey` in `versions.ts`), so a draft outlives the history; the
+page's leave guards let the same file's history addresses by (`sameEditorFile`). Below `lg` the bar's
+stops become Files, Versions and Compare. The details pane's **Versions** line (`versions-detail.tsx`)
+says how many there are and when the file last changed, or why none are kept, and links here
+
 **Implementation:** files/editor page and shared `components/files/` editors; checked by
-`tests/browser/files-ui.spec.ts`
+`tests/browser/files-ui.spec.ts` and `tests/browser/files-versions.spec.ts`; the words and addresses by
+`components/files/versions.test.js`
 
 ## `/git`
 

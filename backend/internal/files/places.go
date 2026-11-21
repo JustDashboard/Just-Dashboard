@@ -187,7 +187,7 @@ func (s *Service) Complete(prefix string, limit int) []Entry {
 		}
 		// A typed dot is a request for the dotfiles; without one they stay out
 		// of the way, exactly as the listing's own hidden switch has it.
-		if strings.HasPrefix(name, ".") && !strings.HasPrefix(fragment, ".") {
+		if (strings.HasPrefix(name, ".") && !strings.HasPrefix(fragment, ".")) || IsStagingName(name) {
 			continue
 		}
 		e, err := s.entryWithNames(filepath.Join(full, name), name, owners)

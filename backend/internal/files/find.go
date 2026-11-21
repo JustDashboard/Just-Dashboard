@@ -146,9 +146,12 @@ walk:
 				break walk
 			}
 			name := d.Name()
+			if IsTrashFolderName(name) {
+				continue
+			}
 			path := filepath.Join(dir.path, name)
 			hidden := strings.HasPrefix(name, ".")
-			if hidden && !opts.Hidden {
+			if (hidden && !opts.Hidden) || IsStagingName(name) {
 				continue
 			}
 			if d.IsDir() && !skipDirs[name] && dir.depth+1 < opts.MaxDepth {

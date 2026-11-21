@@ -13,8 +13,12 @@ export function handoffDraft(
   drafts.set(path, { content, language, original })
 }
 
-export function takeDraft(path: string) {
-  const draft = drafts.get(path)
+/** The draft handed over for this path, left in place: a render may be thrown away and run again. */
+export function peekDraft(path: string) {
+  return drafts.get(path)
+}
+
+/** Forget the draft once the editor that read it is on the page. */
+export function dropDraft(path: string) {
   drafts.delete(path)
-  return draft
 }

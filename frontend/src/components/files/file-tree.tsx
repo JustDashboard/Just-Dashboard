@@ -17,6 +17,8 @@ import { truncateMiddle } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { describeChange, gitLetter, gitStyle, gitTone } from "@/lib/git-status"
 import { FileIcon } from "@/components/file-icon"
+import { keepSentence, type DeleteResult, type TrashPlan } from "@/components/files/trash"
+import { restoreTrashItem } from "@/components/files/use-file-undo"
 import type { FileEntry, FileListing, GitFileChange } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
 import { Button } from "@/components/ui/button"
@@ -248,26 +250,56 @@ export function FileTree({
     }
   }
 
-  const requestDelete = (entry: FileEntry, parent: string) =>
+  // To the Trash, as on the Files page, unless the Trash cannot take it, which
+  // the confirmation says before anything happens.
+  const requestDelete = async (entry: FileEntry, parent: string) => {
+    const plan = await get<TrashPlan>("/files/trash/check", { path: entry.path }).catch(() => null)
+    const forGood = plan !== null && !plan.available
+    const inside = entry.isDir ? ", along with everything inside it" : ""
     onConfirm({
-      title: `Delete ${entry.name}`,
+      title: forGood ? `Delete ${entry.name} permanently` : `Move ${entry.name} to Trash`,
       danger: true,
-      confirmLabel: "Delete",
-      body: (
+      confirmLabel: forGood ? "Delete permanently" : "Move to Trash",
+      body: forGood ? (
         <>
-          <span className="font-mono break-all">{entry.path}</span> is deleted permanently
-          {entry.isDir ? ", along with everything inside it." : "."}
+          <span className="font-mono break-all">{entry.path}</span> cannot go to the Trash:{" "}
+          {plan.reason}. It is deleted permanently{inside}, and this cannot be undone.
+        </>
+      ) : (
+        <>
+          <span className="font-mono break-all">{entry.path}</span> goes to the Trash{inside},{" "}
+          {keepSentence(plan?.keepDays)}, and can be restored from there.
         </>
       ),
       run: async () => {
-        await del("/files/delete", {
-          query: { path: entry.path, recursive: entry.isDir },
+        const result = await del<DeleteResult>("/files/delete", {
+          query: {
+            path: entry.path,
+            recursive: entry.isDir,
+            ...(forGood ? { permanent: true } : {}),
+          },
         })
-        notify.success(`Deleted ${entry.name}`)
-        await load(parent)
-        onChanged()
+        const refresh = async () => {
+          await load(parent)
+          onChanged()
+        }
+        const item = result?.item
+        if (item) {
+          notify.success(`Moved ${entry.name} to the Trash`, {
+            action: {
+              label: "Undo",
+              onClick: () => void restoreTrashItem(item.id, item.name, () => void refresh()),
+            },
+          })
+        } else {
+          notify.success(`Deleted ${entry.name} permanently`, {
+            description: "It cannot be undone.",
+          })
+        }
+        await refresh()
       },
     })
+  }
 
   const body = (
     <TreeLevel
@@ -296,7 +328,7 @@ export function FileTree({
       }}
       onCancelCreate={() => setCreating(null)}
       onSubmitCreate={submitCreate}
-      onDelete={requestDelete}
+      onDelete={(entry, parent) => void requestDelete(entry, parent)}
       onDropPaths={onDropPaths}
       onDropFiles={onDropFiles}
       foldersOnly={foldersOnly}

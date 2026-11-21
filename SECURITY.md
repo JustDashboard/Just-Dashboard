@@ -41,6 +41,27 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
   host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
 - Every state-changing request lands in the audit log.
+- The Files page keeps the earlier contents of each file it saves over, so a save can be undone. They
+  are copies of whatever those files held, `.env` files and keys included, kept under the data
+  directory (`file-versions/`, folders 0700 and files 0600, root's alone), at most 50 per file and
+  512 MiB in all by default (`JD_FILE_VERSIONS`, `JD_FILE_VERSIONS_MB`; `0` turns it off). They are
+  served only to whoever may read the file itself, through the same roots, and a picture's version
+  through the same closed list of types as the file. A backup run's copy of a file is listed beside
+  them, and its content is read out of the archive only for an administrator, as downloading the
+  archive is. A secret you rotate out of a file is still in its
+  earlier versions until they age out.
+- A delete on the Files page goes to a Trash instead of being final, and Find answers from an index of
+  file names. Both live outside the folders you browse and are root's alone: the Trash is
+  `.jd-trash` under the data directory (`/var/lib/just-dashboard`) for what shares its filesystem, and
+  at the top of each other mount (folders 0700, records 0600), each item kept with its own owner and
+  mode; the index is `/var/lib/just-dashboard/files-index/` (0700, its file 0600), because it lists
+  every path on the server. The Trash is bounded by time (`JD_FILES_TRASH_DAYS`, 30 by default, every
+  removal audited) and by Empty Trash; the index by the names on disk, one line each, rebuilt in place.
+  Deleting from the Trash, emptying it and a permanent delete need the destructive capability; a
+  restore is a file write and lands only inside `JD_FILE_ROOTS`. A Trash folder is opened once per
+  operation and used only through that open handle, checked to be the dashboard's own and closed to
+  everyone else, because the top of a mount may belong to another account that could otherwise swap
+  the folder for one of its own and choose where root moves a restored file.
 - The assistant, when you set one up, sends your question and what it reads to the model you chose, with
   every secret value masked first: the model's provider never sees one. An image you paste into its chat is
   the exception: it is sent as it is, because masking reads text, so a secret in a screenshot reaches the
@@ -97,7 +118,26 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   [the invariants](docs/internal/security/invariants.md#the-exception-hub-sign-in), and the security
   review the owner signs before turning it on is
   [docs/audits/2026-11-05-hub-signin/security-review.md](docs/audits/2026-11-05-hub-signin/security-review.md).
+- The Files page can fetch a link onto the server (New → From a link), for accounts that may change
+  files. The download is made by the server as the dashboard, so it can reach whatever the server can:
+  the internet, and also the loopback, the private network, other containers and a cloud provider's
+  metadata address. That is no more than such an account already has, since writing any file as root
+  is root, but it means a link pasted from somewhere else is fetched from inside your network. Only
+  `http` and `https` links are followed, through at most ten redirects that stay on those schemes; the
+  request carries the link and a user agent and nothing else, no cookie and no header of the
+  dashboard's; the audit log records the link without its query string, where signed download links
+  keep their secret. A fetched file and an upload in pieces are staged root-only (0600) beside where
+  they go, never visible under their name until whole, and never replace a file unless asked. An upload
+  in pieces is recorded in the dashboard's data folder (`file-uploads`, 0700, one 0600 record each, at
+  most 512), and one left untouched for a day is removed with its bytes. Every transfer stops, with a
+  sentence, before it would leave the disk with less than two per cent free (between 64 MiB and 1 GiB).
 - [The usage count](docs/guides/linking-and-usage.md#the-usage-count) is off until an administrator says yes, and is three fields with no ID.
+- The Files page keeps small copies of pictures so a folder of photographs lists quickly. They are
+  made only of a file the person could already open in Files, kept in `thumbnails` under the data
+  directory (readable by root alone, at most 256 MiB, the least recently used removed first), and a
+  picture claiming more than 50 megapixels is never decoded. A Markdown file is shown rendered but
+  never as HTML: its script, styles and `javascript:` links are shown as text, and a picture from
+  another site in it is not fetched.
 
 ### Roles
 

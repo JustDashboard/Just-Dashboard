@@ -59,6 +59,7 @@ var skipDirs = map[string]bool{
 	"node_modules": true, ".git": true, ".svn": true, "vendor": true,
 	"__pycache__": true, ".cache": true, ".next": true,
 	"proc": true, "sys": true, "dev": true, "run": true,
+	TrashFolderName: true,
 }
 
 func (s *Service) Search(ctx context.Context, opts SearchOptions) ([]SearchHit, error) {
@@ -149,7 +150,7 @@ func (s *Service) SearchDetailed(ctx context.Context, opts SearchOptions) (*Sear
 		}
 		// A symlink is followed by neither the name nor content search; the
 		// target is visited on its own if it lives under the root.
-		if !info.Mode().IsRegular() {
+		if !info.Mode().IsRegular() || IsStagingName(d.Name()) {
 			return nil
 		}
 		if !opts.Content {

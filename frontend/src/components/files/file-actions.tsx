@@ -62,6 +62,8 @@ export type FileActions = {
   onExtract: () => void
   onPermissions: () => void
   onDelete: () => void
+  /** Delete without the Trash: Shift+Delete. */
+  onDeleteForGood?: () => void
   onEditImage: () => void
   onToggleStar: () => void
   starred: boolean
@@ -266,6 +268,18 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
         danger: true,
         shortcut: "Del",
       },
+      ...(actions.onDeleteForGood
+        ? [
+            {
+              id: "delete-permanently",
+              label: "Delete permanently",
+              icon: Trash,
+              onSelect: actions.onDeleteForGood,
+              danger: true,
+              shortcut: "⇧Del",
+            },
+          ]
+        : []),
     ])
   }
   return groups

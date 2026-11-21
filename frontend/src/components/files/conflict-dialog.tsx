@@ -97,7 +97,10 @@ export function useConflicts() {
         </ul>
         {request.names.length > 0 && (
           <p className="text-xs leading-relaxed text-muted-foreground">
-            <b className="font-medium text-foreground">Replace</b> overwrites what is there.{" "}
+            <b className="font-medium text-foreground">Replace</b>{" "}
+            {request.verb === "uploaded"
+              ? "overwrites what is there."
+              : "puts what is there in the Trash."}{" "}
             <b className="font-medium text-foreground">Keep both</b> gives the new one a numbered
             name. <b className="font-medium text-foreground">Skip</b> leaves those out and{" "}
             {request.verb === "uploaded" ? "uploads" : "handles"} the rest.
