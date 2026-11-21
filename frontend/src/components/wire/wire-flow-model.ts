@@ -186,6 +186,19 @@ export function beyondInRow(index: number, count: number, per: number, side: "st
 }
 
 /**
+ * What a node's line draws when other nodes reach the hub through it. Its
+ * colour is its own, so a failing node does not colour the nodes nearer in.
+ * Its dashes are not: a node that is switched off, standing between working
+ * ones and the hub, would draw a broken stretch that reads as the working
+ * ones cut off. The stretch is dashed only while nothing beyond it is drawn
+ * solid; what is off about the node itself is in its words and its mark.
+ */
+export function carriedBeam(own: BeamProps, beyond: BeamProps[]): BeamProps {
+  if (!own.dashed || beyond.every((line) => line.dashed)) return own
+  return { ...own, dashed: false }
+}
+
+/**
  * The order the lines are painted in. The rows of a side share the last of
  * their way into the hub, and the line painted last is the one read there:
  * a line that needs a look over one that works, and a line that works over

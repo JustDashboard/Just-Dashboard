@@ -70,7 +70,9 @@ value set inline in a sans line stands 2px taller than the line: make it a `bloc
 lands taller than the grey line that waited for it.
 
 The line at a mark says that mark's state and no other's: a failing node at the far end of a row
-is red from its mark to the next, and the working nodes nearer the hub keep their own lines.
+is red from its mark to the next, and the working nodes nearer the hub keep their own lines. One
+exception keeps the row whole: a node that is off draws its stretch dashed only while nothing
+beyond it is drawn solid (`carriedBeam`), so working nodes are never shown cut off from the hub.
 Pointing at a node keeps its way to the hub lit (`beyondInRow`) and steps the rest back.
 
 **Props.**

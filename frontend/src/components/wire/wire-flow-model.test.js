@@ -3,6 +3,7 @@ import {
   CELL,
   beamOf,
   beyondInRow,
+  carriedBeam,
   columnStart,
   fitColumn,
   flowTemplate,
@@ -160,6 +161,19 @@ test("the rest of a row reaches the hub through the nodes nearer in", () => {
   expect(beyondInRow(0, 8, 3, "start")).toEqual([])
   expect(beyondInRow(3, 8, 3, "end")).toEqual([4, 5])
   expect(beyondInRow(7, 8, 3, "end")).toEqual([])
+})
+
+test("a switched-off node between working ones and the hub does not cut them off", () => {
+  const off = beamOf({ state: "idle" })
+  const up = beamOf({ state: "up" })
+  const failing = beamOf({ state: "danger" })
+  // Dashed only while nothing beyond it is drawn solid.
+  expect(carriedBeam(off, []).dashed).toBe(true)
+  expect(carriedBeam(off, [off]).dashed).toBe(true)
+  expect(carriedBeam(off, [off, up]).dashed).toBe(false)
+  // Its colour stays its own: a failing node beyond does not colour it.
+  expect(carriedBeam(off, [failing])).toEqual({ still: true, dashed: false, tone: "default" })
+  expect(carriedBeam(up, [failing])).toEqual(up)
 })
 
 test("the line that needs a look is painted over the ones that do not", () => {

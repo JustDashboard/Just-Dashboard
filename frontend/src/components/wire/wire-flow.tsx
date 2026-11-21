@@ -14,6 +14,7 @@ import {
   PORT,
   beamOf,
   beyondInRow,
+  carriedBeam,
   columnStart,
   fitColumn,
   flowForm,
@@ -271,15 +272,18 @@ export function WireFlow({
       const into = side === "start"
       const across = into ? per.start : per.end
       const line = loading ? { state: "up" as const } : node.line
-      const beam = beamOf(line)
       // In rows a node's line runs to the mark between it and the hub, and
       // only the nearest one's goes on into the hub.
       const nearer = rows ? nearerInRow(index, nodes.length, across, side) : undefined
       const from = nearer === undefined ? hubRef : refs.get(nodes[nearer].id)
       const out = into ? -1 : 1
       // The rest of the row reaches the hub along this line, so pointing at
-      // one of them keeps it lit.
+      // one of them keeps it lit, and it is drawn whole while one of them is.
       const carries = rows ? beyondInRow(index, nodes.length, across, side) : []
+      const beam = carriedBeam(
+        beamOf(line),
+        loading ? [] : carries.map((at) => beamOf(nodes[at].line)),
+      )
       const shown = lit(node.id) || carries.some((at) => lit(nodes[at].id) && focus !== null)
       return {
         order: paintOrder(line),
