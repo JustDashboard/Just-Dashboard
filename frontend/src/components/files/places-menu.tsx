@@ -7,6 +7,7 @@ import { platformProduct, ProductGlyph } from "@/components/product-logo"
 import { FolderIcon } from "@/components/file-icon"
 import { baseOf } from "@/components/files/media"
 import { cn } from "@/lib/utils"
+import { TrashMenuItem } from "@/components/files/trash-place"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -164,6 +165,8 @@ export function PlacesMenu({
             ))}
           </div>
         ))}
+        <DropdownMenuSeparator />
+        <TrashMenuItem />
       </DropdownMenuContent>
     </DropdownMenu>
   )

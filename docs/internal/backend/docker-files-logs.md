@@ -379,7 +379,7 @@ if it is still free after the transfer; with overwrite, a rename replaces it. An
 never leaves a truncated file. An existing file keeps its owner and mode across the replacement
 (which is what lets the image editor save over a picture the web server owns), and `?overwrite=true`
 is what permits the replacement at all. The handler sends one
-request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request) to 413
+request per file from the page, maps a body over `maxUploadBytes` (2 GiB per request; the page sends anything over 32 MiB in pieces, below) to 413
 `too_large`, and drops any directory part a client put in the filename. Empty `from`/`to`/`path`
 fields are 400s rather than "the first root", which is what an empty path resolves to.
 
@@ -434,6 +434,51 @@ comparison and rename. They do not make outside processes participate in a files
 saves, Save as occupancy, refusal of FIFOs without waiting for a producer, and the HTTP conflict
 contract on temporary files.
 
+**A save keeps what it replaced** (`internal/fileversions`, `files/kept.go`,
+`api/handlers_files_versions.go`). `WriteKept` and `UploadKept` are `WriteChecked` and
+`UploadChecked` with one more step inside the locked publish, after the final revision check and
+before the rename: they read what is at the path (nonblocking, `O_NOFOLLOW`, checked as a regular
+file after opening, at most 8 MiB) and hand it back as `files.Replaced`, so the content kept is the
+content the rename replaced. The guard itself is unchanged and not duplicated. `PUT /files/write`,
+every replacing `POST /files/upload` (a picture saved over its original is `reason: image`) and a
+restore then give it to the keeper, which runs in the backend's own namespace, after the save, under a
+five-second bound: a version that cannot be kept is a warning in the log, never a failed save.
+Contents are kept once each, named by their SHA-256 (the editor's revision), under
+`JD_DATA_DIR/file-versions/objects/<2>/<64>` (folders 0700, files 0600, written to a staging
+sibling and renamed); `file_versions` holds path, time, account, size, revision and why, and
+`file_version_heads` what the dashboard last wrote at each path. A save that finds something else
+there labels the version `outside` (changed outside the dashboard) and keeps the dashboard's own
+earlier write too, as a `displaced` version, when its content was held. A save of the same bytes
+keeps nothing. Bounds: `JD_FILE_VERSIONS` per path (default 50, `0` is off) and
+`JD_FILE_VERSIONS_MB` in all (default 512), oldest first across every file, a content's file removed
+with the last row that names it; a sweep once per process removes copies a crash left without a row.
+History is keyed by resolved path: `/files/move` carries it, and everything under a moved folder,
+with `MoveEnds` (as a folder's colour), byte-compared so `/srv/app` never takes `/srv/app2`'s; a
+delete leaves it where it was, so a file put back at its path (the Trash's restore) finds it again.
+
+`GET /files/versions?path=` lists a path's versions with the backup runs that hold it, by time:
+`backups.Store.FileCopies` reads only the store (each job's successful runs whose complete manifest
+has a source over the path and no exclusion over it or a folder above it) and never a destination.
+`GET /files/versions/content?path=&version=e12|b7` is a file read: the path goes through `Resolve`
+and an edit version must be that path's row. `as=text` (default) answers JSON for the diff, `as=image`
+answers bytes only for a type `MediaType` lists as an image, with the raw route's `sandbox` policy
+and `no-store`, and `as=download` an attachment. A backup's copy is read by
+`backups.Runner.ReadFileCopy` through `localArtifact` (pinned, fetched from a remote destination,
+proved against the manifest's digest, decrypted), at the archive path the run's own manifest gives,
+bounded to 8 MiB; a run that covers the path but did not hold the file is `410 version_gone`.
+`POST /files/versions/restore` (`file.write`) and `POST /files/versions/restore-backup` (also
+`s.destructive`, the backups' restore gate) take `{path, version, expectedRevision}` and publish the
+content through `WriteKept`, so a stale revision is `409 content_conflict` exactly as a save is, what
+the restore replaces is kept, and the audit entry (`file.version.restore`) names the version or run
+and a byte count, never content. A person the Backups read routes would not answer sees no backup
+copies (`backups: false`). Reading a backup copy's content (`/files/versions/content` with a `b` version) asks
+`system.admin`, as `GET /backups/runs/{id}/download` does: the bytes leave an archive, and reading one
+may fetch and decrypt the whole of it. Anyone else sees the copy listed and may restore it in place
+behind the restore's own gate; the page says only an administrator can open it. `fileversions_test.go`, `kept_test.go`, `file_copies_test.go` and
+`handlers_files_versions_test.go` cover the capture, the outside label, the bounds and orphan removal,
+a failure to keep that leaves the save standing, moves, the conflict, the roots and another path's
+version, and listing backups with a destination that fails the test if it is reached.
+
 `ResolveArchive` checks an archive download before a header goes out — the base directory, and each
 member through `ResolveEntry` so that a selected symlink is archived as the link it is — and refuses a
 member that is not under the base. Resolving members through `Resolve` used to put a link's *target*
@@ -461,6 +506,39 @@ two-gigabyte log.
   never gets a thumbnail or a viewer, because the request would be refused. A video thumbnail is the
   browser's own first frame, fetched with the range requests `http.ServeContent` honours, so a poster
   for a two-gigabyte recording costs a few hundred kilobytes.
+- **`internal/thumbnail`** makes the small copy a listing draws of a picture, once, and keeps it.
+  `GET /files/thumbnail?path=&v=` is a read route beside `/files/raw` with the same posture: it
+  answers only for PNG, JPEG and GIF (`thumbnail.Decodable`, mirrored by `media.ts`'s
+  `hasServerThumbnail`; a WebP, SVG, AVIF or icon is still drawn from the raw route, as before),
+  only with a JPEG or a PNG it made itself (PNG where the picture has transparency), inline, with
+  `sandbox` and the 30-second private cache, and `Last-Modified` from the source. The path is opened
+  through `hostFiles.Open` (the resolver, in the host's namespace) on every request before the cache
+  is consulted, and the cache keys on what the *opened* file is — device, inode, size and
+  modification time, never the path — so a copy is never served for a path the caller could not
+  read through `/files/raw`, and a changed file is a new key. Making one is bounded: a canvas over
+  50 megapixels is refused from its header before any decode (`413 too_large`), at most 128 MiB of
+  the file is read, the decode reads through the request's 15-second context, two decodes run at
+  once across the server and concurrent asks for one new picture decode it once. The EXIF orientation
+  tag of a JPEG is read by hand (no EXIF library in `go.mod`) and applied, so a portrait photograph is
+  upright as the browser draws the original. Copies live in `<JD_DATA_DIR>/thumbnails` (made 0700 on
+  first use, files 0600 through a temporary sibling and a rename), at most 256 MiB in total; past that
+  the least recently used go first, down to nine tenths, and a use is written to the file's
+  modification time so the order survives a restart. `thumbnail_test.go` covers each format, the
+  pixel limit, truncated and hostile files, orientation, the bound and eviction and a changed file;
+  `handlers_files_viewing_test.go` the headers, the refusals and paths outside the roots.
+- **Text and media in the page** (`rendered-text.tsx`, `text-contents.tsx`, `text-view.ts`): a
+  Markdown file (`.md`, `.mdx`, `.markdown`, a `README` that reads as Markdown) is drawn through the
+  same reader as a pull request's description (`lib/markdown.ts`, never HTML), with
+  `parseMarkdown(source, { relative: true })` keeping a scheme-less reference as another file: a link
+  opens it in Files (`linked-file.ts`), a picture beside it is drawn through `/files/raw` and its
+  allowlist, and a picture from another site is named and not fetched. A CSV or TSV is a table and one-line JSON
+  is indented by walking its characters, so a head cut at 64 KiB still reads. All of it works on the
+  preview's bounded head and says when that head is not the whole file. Fenced code is coloured by
+  Monaco's own tokenizer, loaded from this origin (`code-highlight.tsx`). In the viewer a folder is a
+  gallery (`gallery.ts`, `gallery-strip.tsx`: position in words, a strip, swipe, two pictures fetched
+  ahead, a slideshow); audio plays through one page-wide queue (`audio-queue.tsx`) whose player is a
+  line in the listing's foot; and a video the browser cannot decode is a sentence and a Download
+  (`playable-video.tsx`). Nothing is transcoded: there is no ffmpeg in the stack.
 - **`find.go`** is the fuzzy finder (`search.go` is the literal/regex one, optionally grepping contents).
   Subsequence matching scored so the basename beats directories, a run beats scattered characters, a
   boundary beats mid-word and a shallow path beats a deep one; terms ANDed; positions as **UTF-16
@@ -499,6 +577,73 @@ two-gigabyte log.
   quarter of a million entries, which is every server's `/` with Docker on it. Only a directory with more than
   10,000 entries directly inside it is refused (`422 disk_scan_limit`). A result limit controls the response
   size; it is not mistaken for a bound on the work needed to rank those results.
+
+**A delete goes to the Trash** (`files/trash.go`, routes in `handlers_files_trash.go`). Trashing is a
+rename and never a copy, so there is one Trash folder per filesystem: `<JD_DATA_DIR>/.jd-trash` for
+whatever is on the data directory's mount (the same path on the host), otherwise `.jd-trash` at the
+top of the entry's own mount, found from the mount table of the thread's namespace
+(`/proc/thread-self/mountinfo`, since the Files operations run on a thread that entered the host's).
+A Trash folder is made on first use, 0700, and must be a real directory this process owns or it is
+refused. It is pinned by handle: opened once per operation without following a link in its own name,
+its type, owner and mode checked on the open descriptor, and everything inside it (holders, records,
+listing, renames in and out, removal, expiry, the size walk) done through an `os.Root` made from that
+descriptor, because the top of a mount may belong to another account that can swap the folder's name
+for a link or a folder of its own between a check by path and a use by path. One the dashboard owns
+but that is open to group or others is refused rather than trusted, since anything could have been
+put in it while it was open. Each item sits alone in `<folder>/<id>/<name>` with its owner, mode and contents untouched,
+beside a 0600 `<id>.json` record (where it came from, when, by whom, its size once measured in the
+background); the record is written before the rename, the rename is a no-replace `renameat2` from the
+source's folder opened through the pinned root, and the listing is read from the folders on every
+request, so it survives a lost database and an item whose record was lost is still listed (by its
+holder's only entry, with nowhere to restore it to). An entry that cannot go to the Trash is refused
+with the reason (`TrashUnavailableError`, a 409 `trash_unavailable`): a configured root, a mount point,
+anything in a Trash folder or holding one or the data directory, a read-only filesystem, a pseudo
+filesystem, or a mount whose top cannot hold the folder; `EXDEV` is refused too, never copied.
+`GET /files/trash/check` answers the same question without changing anything, and the page asks it
+before its confirmation. `DELETE /files/delete` trashes and answers `{trashed, path, item}`;
+`permanent=true` is the old delete. Restore (`POST /files/trash/restore`, a file write) resolves the
+recorded path through `ResolveEntry` again, remakes a vanished parent with `unmade`/`handDown`, and
+renames back with no-replace; a taken place is a 409 `already_exists` unless `conflict` is `keep`
+("name (2).ext") or `replace` (the occupant goes to the Trash). Deleting one item
+(`DELETE /files/trash/item`) and emptying (`DELETE /files/trash`) are behind `s.destructive`. An id is
+checked against `^[0-9a-f]{32}$` before it reaches a path. Items older than `JD_FILES_TRASH_DAYS` (30;
+0 keeps everything) are removed hourly by `expireFileTrash`, each removal an audit entry
+(`file.trash.expire`, actor `system`); the same sweep removes the leftovers of a trash that never
+finished. A move or copy with `overwrite` first puts what it replaces in the Trash
+(`trashReplaced`) and answers 200 `{replaced: {item}}` instead of 204: a move renames the occupant
+away; a copy keeps a regular file by a hard link, so the copy's atomic replacement still reads the old
+file's owner, mode and ACL, and renames a folder away (so Replace replaces rather than merges); a
+symbolic link at a copy's destination is left to Copy, which refuses it. If the operation then fails,
+the occupant is put back. Find, content search, a folder's measured size and an archive of a parent
+skip any folder named `.jd-trash`. `trash_test.go` covers same-filesystem and tmpfs-mount trashing
+(the second under `sudo`), restores with and without a conflict and into a vanished parent, owner and
+mode, links, containment, expiry and the refusals; `handlers_files_trash_test.go` the routes.
+
+**Find answers from a name index** (`files/index.go`, wired in `handlers_files_index.go`) unless
+`JD_FILES_INDEX=false`. The index is `<JD_DATA_DIR>/files-index/names.idx` (0600 in a 0700 folder, with
+`names.json` beside it): a line `\x01<folder>` for each folder followed by a kind letter and the name
+for each entry in it, written depth first by a walk on a thread of its own at nice 19 and the idle I/O
+class, never following a link, reading a folder 4,096 entries at a time, and published by a rename. It
+is built two minutes after start when missing or six hours old, and in the background when a search
+finds it more than an hour old. The walk leaves out `/proc`, `/sys`, `/dev`, `/run`, `/var/run`,
+Docker's and containerd's layer and container stores under `/var/lib/docker` and `/var/lib/containerd`,
+the index's own folder and the dashboard's other stores beside it (`file-versions`, `thumbnails`,
+`file-uploads`), Trash folders, a transfer still arriving under its staging name, the contents of the
+folders `find.go` never enters
+(`node_modules`, `.git`, `vendor` and the rest of `skipDirs`), and every mount of a pseudo or network
+filesystem (`proc`, `sysfs`, `cgroup`, `nfs`, `cifs`, `sshfs` and the rest of `pseudoFS` and
+`networkFS`); names containing a newline are left to the walk. A search streams the file through a
+256 KiB buffer, tests each line with a byte subsequence filter, scores the survivors with `find.go`'s
+own `scoreCandidate` and keeps the best `limit*2+20` in a heap, so its memory is bounded by the limit,
+not the server. Every kept result is resolved through `ResolveEntry` and `Lstat`ed before it is
+returned: gone, moved out of the roots, or reached through a link that now leads out of them, it is
+dropped. Beside it a 300 ms walk of the folder on screen (`here`, else the search's root) is rebased
+onto the search's root and merged, so a file made a moment ago is found. The answer carries
+`source` (`index` or `walk`) and `index` (`builtAt`, `ageSeconds`, `entries`, `complete`, `building`);
+`truncated` means the index's walk stopped on its bounds. Before the first build, and with the switch
+off, Find is the walk it was. `index_test.go` covers build, refresh, vanished results, containment, the
+skipped trees, the merge, and half a million names searched in well under a second with a few MiB
+allocated.
 
 Bookmarks live in the `settings` table (`handlers_files_browse.go`), not the browser — which directory
 matters is a fact about the server and should be there from a phone. Recent folders are the opposite and
@@ -648,7 +793,7 @@ footer space for partial/unreadable notices. The search input has no active bord
 caret, selected result and keyboard navigation carry its state. Results fade in and out without
 resizing the frame; exiting rows immediately become inert and hidden from assistive technology, and
 reduced motion shows each state immediately. A failed disk request leaves current-listing matches
-available. The listing polls every twenty seconds and refetches
+available. The listing follows the disk (*Live folders*, below) and refetches
 hidden-file flips in place; the parent row is offered only where the parent is inside the roots; a bulk
 delete that includes a folder uses ordinary confirmation like a single one. Two layout rules are easy to undo: **the
 listing body does not scroll** (a sticky table header sticks to its nearest scrolling ancestor), and
@@ -669,6 +814,137 @@ The row/tile checkbox is a controlled two-state button, while select-all keeps i
 Overflow menus instantiate on first activation and remain mounted afterwards for focus restoration.
 The listing API still returns the complete directory; these rendering savings do not reduce its disk
 reads or response bytes.
+
+### Files that know the server
+
+`GET /files/context?path=&hidden=` (`handlers_files_context.go`, mounted by
+`mountFilesContextRoutes` in the `/files` read group) says what the folder on screen and each entry
+in it is to this server: a Docker volume and the containers using it, a container's bind mount, a
+Compose project's folder and file, a site's root, configuration and logs, a certificate and its
+folder, the backup jobs covering it (or "not backed up" on a folder that matters), a backup job's
+local destination, a Git checkout with its branch and uncommitted count, a deployment's source and
+data folders, a database server's data directory and configuration, a unit file, a PM2 app's folder,
+script and logs, and the dashboard's own data and install folder.
+
+- **No new probing.** Every source is the reading its own page already makes, held on the server
+  map's shelf (`map_sources.go`) under the map's keys, so the two pages share one read:
+  `containers`, `volumes`, `projects`, `vhosts`, `certificates`, `backups`, `repositories`, `units`,
+  `pm2` (the map's `mapReadProjects`, `mapReadVHosts` and `mapReadBackups` are named so both call
+  the same function). Two the map does not draw are held there too: `stacks` (`ListStacks` over
+  `JD_COMPOSE_ROOTS`) and `deployFolders` (a deployment's `bind_path` storage and legacy
+  `RepoPath`). The databases come from the inventory's kept reduced reading (`keptInventory(false)`,
+  no container environment), never waited on. Each source waits at most `contextBudget` (800 ms);
+  one still being read when the budget runs out is left out and named in `partial`, which the page
+  writes as "Still reading Git". A source that failed (no Docker socket, no proxy on the host) is
+  left out without being called partial, so the page never waits on something that will not answer.
+- **One place matches.** `internal/filecontext` is pure: the handler turns each reading into
+  `Thing`s (a fact and its paths) and `Job`s (sources, excludes), and `Resolve` answers. A new source
+  is one more builder in `contextThings`. Matching is on whole segments (`/srv/app` is not inside
+  `/srv/app2`); a fact that `inherits` reaches what is inside its path, marked `from` that path and
+  said once, at the nearest. Children carry only their own facts plus their coverage where it
+  differs from the folder's (their own job, or `backup-excluded`); the page adds the folder's
+  inheriting facts itself, which keeps a folder of thousands of entries small on the wire.
+- **Resolved paths.** The folder goes through `Resolve` and its entries are read by
+  `files.ContextPaths` in one move into the host's mount namespace: a directory read without a
+  listing's stats and owner lookups, each symlinked entry resolved through the roots (one pointing
+  outside keeps its own path and matches nothing it points at), and every inventory path resolved
+  from its nearest existing ancestor. Inventory paths are only compared, never opened. At most 5,000
+  entries are matched (`truncated` past that) and 500 links followed.
+- **Bounded commands.** The only command is a checkout's `git` summary, for the checkout on screen
+  (or the one it is inside) and entries that are checkouts, at most six, each held 15 s on the same
+  shelf (`git-summary:<path>`); the repository list itself is held for five minutes.
+- **Who sees what.** `contextSourceNeeds` names the capability each source's own page requires
+  (every one is `read` today); a fact or a `partial` source the reader could not open is not sent.
+  No secret, environment value, bucket or URL is in a fact: a backup says its target's kind.
+- **Facts are data.** A fact is a kind, its names, product or image, state, a detail word, count,
+  times and the link to the page that owns it; the sentence is the page's
+  (`components/files/server-context-words.ts`). The route is read-only and not audited.
+
+On the page, `useServerContextFeed` (called once in `files/page.tsx`) asks after the listing is
+drawn and again whenever the listing is read again; a failure, a refusal or an answer of another
+shape is no facts, and the rows are drawn as they would be without it. `EntryContextPhrase` puts
+the most telling own fact after a row's name with its logo: it has no intrinsic width (`w-0 grow`),
+so it never widens the name column and is the first thing to go when there is no room.
+`TileContextMark` is the logo in a tile's top corner with the phrase as its tooltip.
+`ServerContextSection` ("On this server") is the details pane's account: own facts, then what the
+entry is inside, each a link, with "Not backed up" said there and for the folder on screen, never
+on a row. `files-context.spec.ts` checks the phrases, one row height at 1280 and 390, the tiles,
+the section's links, the phone pane and a listing drawn when the route fails or never answers;
+`server-context-words.test.js` holds the wording.
+
+**Live folders** (`files/watch.go`, `handlers_files_transfer.go`, `components/files/live-folder.ts`).
+The folder on screen follows the disk. `GET /files/watch?path=&hidden=` is a read route and a
+WebSocket: the folder is resolved and watched *before* the upgrade, so a path the roots refuse is an
+ordinary 403. One inotify instance (`WatchHub`) serves every watch, so the per-user instance limit is
+spent once; the watch is added inside `hostexec.InHostMounts` (the server's folder, not this
+container's) and the descriptor stays valid outside it. Two pages on one folder share its kernel watch,
+refcounted by watch descriptor. A watch counts against its session (16) and the total (256); past
+either, or on a filesystem inotify cannot report (NFS, CIFS/SMB, FUSE, 9P, proc, sysfs and the like,
+by `statfs` magic) or when `inotify_add_watch` answers ENOSPC, the socket opens only to send
+`fallback`, and the page polls `GET /files/changes`, a SHA-256 fingerprint of each name's size, times,
+mode and owner read without the listing's name lookups, every two seconds, reading the listing again
+only when it differs. Each watch has one goroutine that coalesces: a first change waits 150 ms for its
+burst, a batch never follows the last sooner than 300 ms, and a batch of more than 200 names (or a
+kernel queue overflow) is sent as `resync`, which the page answers with one listing read. A batch
+(`changes`) carries the changed names' entries exactly as `List` draws them and the names removed;
+`gone` says the folder itself was removed or moved. Dotfiles are left out unless `hidden`, staging
+names always. The page lays the batches over the last listing by name (`live-patches.ts`), so a row
+nobody changed keeps its object; selection, the inspector (which follows the active entry's
+`modified`), a rename dialog, scroll (Chrome's scroll anchoring holds the rows being read) and an open
+menu are untouched. The twenty-second listing poll runs only while neither is in effect. The socket
+closes when the page leaves or the tab is hidden, which releases the watch; on reconnect the page reads
+the listing once. The editor follows its one file (`?name=`, `editor-follow.ts`): with no unsaved edits
+it takes the new contents quietly, with unsaved edits it raises the existing `ContentConflict`, and its
+own save arriving back is neither. `watch_test.go` and `handlers_files_transfer_test.go` cover create,
+remove, rename, growth, coalescing, the limits and fallback, a path outside the roots, release and a
+moved folder; `files-transfer.spec.ts` the page.
+
+**Uploads in pieces** (`files/resumable.go`, `components/files/pieces.tsx`, `upload-pieces.ts`). A
+file over 32 MiB goes to `POST /files/pieces` (`file.write`, audited as `file.upload.begin`), which
+checks the destination as a one-request upload would and the disk's room for the whole file, and
+creates a staging file `.jd-part-<id>` (0600, root's) beside the destination, on its filesystem. Pieces
+of 8 MiB (at most 64 MiB) go to `PUT /files/pieces/{id}?offset=`, written at their offset; the session
+keeps merged byte ranges, so a repeated piece is harmless, an out-of-order one is kept, and a piece cut
+off keeps what arrived: `next` is the first missing byte, where the page carries on. A landed piece is
+not audited (a large file is thousands), a refused one is. Each piece reaches the staging file through
+its folder found again by path and checked to be the same folder (device and inode) and the same file
+with one link, so a moved or swapped folder, a link or a hard link put in the staging name is a
+conflict, never a write elsewhere. `POST /files/pieces/{id}/complete` publishes through the code
+`UploadChecked` uses, now factored out of it in `staged.go` (`openUploadTarget`, `seal`,
+`publishStaged`): the parent pinned through the allowed root, the expected-revision check, the owner
+and mode, the no-replace rename or deliberate overwrite, all under the path lock. A refused completion
+keeps the staged bytes. `DELETE /files/pieces/{id}` removes them, following the folder held open
+since the upload began even if it moved. Sessions belong to the account, are kept as one 0600 JSON
+record each in `<JD_DATA_DIR>/file-uploads` (0700, made silently) so a restart or a reloaded page
+carries on, are bounded (64 an account, 512 in all), and are removed with their bytes after a day
+untouched (an hourly sweep). `GET /files/pieces` lists an account's, which a reloaded page shows as
+stopped with Cancel; dropping the same file again (same folder, name, size and the page's key of name,
+size and modification time) continues it. Every piece checks the room left against a reserve of two
+per cent of the disk, between 64 MiB and 1 GiB, and refuses in words (`507 no_space`). Staging names
+are never in a listing, a completion, a find, a search, a watch or a fingerprint (`IsStagingName`).
+The page sends pieces one after another, three files at a time; after a dropped piece it waits 1, 2, 4
+… 30 seconds, or less when the browser is back online or the tab is in front again, asks where the
+upload stands, and carries on; a file can be paused, resumed and cancelled. `resumable_test.go` reuses
+`upload_parent_test.go`'s cases (moved parents, outward and inward retargets, a replacement folder,
+cleanup) and adds resume at an offset, out-of-order and repeated pieces, overwrite and no-overwrite,
+the revision conflict, disk room, a restart and expiry.
+
+**Fetching a link** (`files/fetch.go`). New → *From a link* posts `POST /files/fetch`
+(`file.write`, audited as `file.fetch` with the link shown without query, fragment or credentials,
+`ShownURL`). The fetch is a job of the server's, not of the request: it carries on when the page goes,
+`GET /files/fetches` lists running ones and those finished in the last hour (each marked `mine` for
+the account that started it), and `DELETE /files/fetches/{id}` cancels a running one, waiting for it
+to clean up, or takes a finished one off the list. Only `http` and `https`, redirects followed up to
+ten and each checked to stay on those schemes; the request carries the link and a `User-Agent` and
+nothing else: no cookie jar, no dashboard header, no `Accept-Encoding` (the bytes are kept as served).
+The name is the response's `Content-Disposition` filename, else the link's last path segment, with any
+folder part dropped and unsafe names refused (`SafeName`); a taken name becomes `name (2).ext` rather
+than replacing anything. The bytes stage beside the destination like an upload's and publish through
+`publishStaged`; a known length is checked against the room first, an unknown one every 16 MiB, and a
+download that stops early, sends nothing for a minute, is cancelled or would fill the disk leaves
+nothing behind. Four running fetches an account, eight in all. `fetch_test.go` covers success, a
+redirect chain, refused schemes, a name with a path in it, cancel, a connection dropped midway, disk
+room and no clobber, and the headers sent.
 
 ## Logs
 

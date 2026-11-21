@@ -269,14 +269,14 @@ func (s *Server) handleFileFind(w http.ResponseWriter, r *http.Request) error {
 	// backstop for a filesystem that blocks on a read.
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
-	result, err := s.modules.hostFiles.Find(ctx, files.FindOptions{
+	result, err := s.findNames(ctx, files.FindOptions{
 		Root:     q.Get("path"),
 		Query:    q.Get("q"),
 		Limit:    atoiDefault(q.Get("limit"), 0),
 		Hidden:   hidden,
 		MaxDepth: atoiDefault(q.Get("depth"), 0),
 		Budget:   time.Duration(atoiDefault(q.Get("budgetMs"), 0)) * time.Millisecond,
-	})
+	}, q.Get("here"))
 	if err != nil {
 		return mapFileError(err)
 	}

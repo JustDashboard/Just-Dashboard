@@ -93,6 +93,8 @@ services:
       JD_GIT_ROOTS: ${JD_GIT_ROOTS:-/opt,/srv,/home,/root}
       JD_LOG_ROOTS: ${JD_LOG_ROOTS:-/var/log}
       JD_FILE_ROOTS: ${JD_FILE_ROOTS:-/}
+      JD_FILES_TRASH_DAYS: ${JD_FILES_TRASH_DAYS:-30}
+      JD_FILES_INDEX: ${JD_FILES_INDEX:-true}
       JD_DEPLOY_ROOTS: ${JD_DEPLOY_ROOTS:-/opt,/srv,/home,/root}
       # Persistent deployment worker capacity and stale-claim recovery.
       JD_DEPLOY_HEAVY_SLOTS: ${JD_DEPLOY_HEAVY_SLOTS:-1}
@@ -100,6 +102,9 @@ services:
       JD_DEPLOY_LEASE_TTL: ${JD_DEPLOY_LEASE_TTL:-30s}
       # How many of an environment's newest runs keep their whole output.
       JD_DEPLOY_HISTORY_RUNS: ${JD_DEPLOY_HISTORY_RUNS:-200}
+      # Earlier contents the Files page keeps of each file it saves over.
+      JD_FILE_VERSIONS: ${JD_FILE_VERSIONS:-50}
+      JD_FILE_VERSIONS_MB: ${JD_FILE_VERSIONS_MB:-512}
       JD_NGINX_DIR: ${JD_NGINX_DIR:-/etc/nginx}
       JD_CADDYFILE: ${JD_CADDYFILE:-/etc/caddy/Caddyfile}
       JD_INGRESS_CONTAINER: ${JD_INGRESS_CONTAINER:-}

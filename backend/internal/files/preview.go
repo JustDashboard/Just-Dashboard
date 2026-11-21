@@ -539,6 +539,10 @@ func (s *Service) Usage(ctx context.Context, path string, budget time.Duration) 
 		if p == full {
 			return nil
 		}
+		// What is in the Trash is not part of the folder it sits in.
+		if d.IsDir() && IsTrashFolderName(d.Name()) {
+			return filepath.SkipDir
+		}
 		var size int64
 		if d.IsDir() {
 			out.Dirs++

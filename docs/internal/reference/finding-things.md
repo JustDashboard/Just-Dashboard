@@ -67,7 +67,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 
 ### File groups inside `api`
 
-276 source files and their tests, in one package. The prefix says the area.
+284 source files and their tests, in one package. The prefix says the area.
 
 | Files | Count | Area |
 | --- | --- | --- |
@@ -77,8 +77,9 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | `handlers_proxy*.go` | 18 | Proxy; with `handlers_certificates*.go`, `handlers_tls*.go`, `handlers_ports*.go` |
 | `handlers_assistant*.go` | 9 | The assistant |
 | `handlers_git*.go` | 9 | Git (4) and GitHub (5, `handlers_github*.go`) |
+| `handlers_files*.go` | 8 | Files: browsing, the Trash, versions, what a folder is to the server, transfers, thumbnails, Find's index |
 | `handlers_mcp*.go` | 5 | The MCP endpoint and its keys |
-| other `handlers_*.go` | 59 | One to four files per remaining area |
+| other `handlers_*.go` | 58 | One to four files per remaining area |
 | `database_*.go` | 21 | Databases: inventory, metrics, alerts, point-in-time recovery, TLS, the pooler, upgrades |
 | `deployment_*.go`, `deploy_*.go` | 17 | Deployments: joins with other features, deploy keys, the OpenAPI description |
 | `boards_*.go`, `map_*.go` | 9 | Excalidraw and the server map, which have no package of their own |
@@ -170,7 +171,7 @@ segment under `/api/v1`.
 | **Workspace** | | | | | | |
 | Excalidraw | `excalidraw/` | `boards/` | `/boards` → `handlers_boards.go`, `boards_*.go` | none: lives in `api/` | `boards-ui.spec.ts` | [`boards.md`](../boards.md) |
 | Terminal | `terminal/` | `terminal/` | `/terminal` → `handlers_terminal*.go` | `term`, `ptyhold` | `terminal-*.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md), [`../frontend/features/`](../frontend/features/README.md) |
-| Files | `files/` | `files/` | `/files` → `handlers_files*.go` | `files`, `safepath`, `contentguard` | `files-ui.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
+| Files | `files/` | `files/` | `/files` → `handlers_files*.go` | `files`, `filecontext`, `fileversions`, `thumbnail`, `safepath`, `contentguard` | `files-ui.spec.ts`, `files-context.spec.ts`, `files-transfer.spec.ts`, `files-trash.spec.ts`, `files-versions.spec.ts`, `files-viewing.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | Git | `git/` | `git/` | `/git` → `handlers_git*.go`, `handlers_github*.go` | `gitx`, `ghx`, `forgex` | `git-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md), [`git-workspace-expansion.md`](../backend/git-workspace-expansion.md) |
 | Remote Desktop | `remote-desktop/` | `remote-desktop/` | `/remote-desktop` → `handlers_remote_desktop*.go` | `remotedesk` | `remote-desktop.spec.ts` | [`remote-desktop.md`](../backend/remote-desktop.md) |
 | **Network** | | | | | | |

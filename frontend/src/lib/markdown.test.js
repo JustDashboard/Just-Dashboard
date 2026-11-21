@@ -5,6 +5,7 @@ import {
   onlyMedia,
   parseInline,
   parseMarkdown,
+  relativeRef,
   safeHref,
 } from "./markdown"
 
@@ -179,5 +180,45 @@ describe("media", () => {
       true,
     )
     expect(onlyMedia(parseInline("see ![a](https://x.test/a.png)"))).toBe(false)
+  })
+})
+
+describe("a file on this server, read in Files", () => {
+  test("a reference with no scheme is kept only when asked for", () => {
+    const source = "[setup](docs/setup.md) and ![shot](./shot.png)"
+    expect(parseMarkdown(source)[0].c[0]).toEqual({ t: "text", v: "setup" })
+    const [paragraph] = parseMarkdown(source, { relative: true })
+    expect(paragraph.c[0]).toMatchObject({ t: "link", href: "docs/setup.md" })
+    expect(paragraph.c[2]).toEqual({ t: "image", src: "./shot.png", alt: "shot" })
+    // The next parse without the option is a description again.
+    expect(parseMarkdown(source)[0].c[0]).toEqual({ t: "text", v: "setup" })
+  })
+
+  test("what runs or leaves is never a reference, asked for or not", () => {
+    for (const href of [
+      "javascript:alert(1)",
+      "JaVaScRiPt:alert(1)",
+      "data:text/html,x",
+      "vbscript:x",
+      "//evil.test/x",
+      "\\\\evil.test\\x",
+      "#top",
+    ]) {
+      const [paragraph] = parseMarkdown(`[go](${href})`, { relative: true })
+      expect(paragraph.c.every((run) => run.t === "text")).toBe(true)
+    }
+    expect(relativeRef("java\u0009script:x")).toBeUndefined()
+    expect(relativeRef("a/b.md")).toBe("a/b.md")
+  })
+
+  test("raw HTML is words, never markup", () => {
+    const blocks = parseMarkdown('<script>alert(1)</script>\n\n<img src=x onerror="alert(1)">', {
+      relative: true,
+    })
+    expect(JSON.stringify(blocks)).not.toContain('"t":"html"')
+    expect(blocks[0]).toEqual({
+      t: "paragraph",
+      c: [{ t: "text", v: "<script>alert(1)</script>" }],
+    })
   })
 })

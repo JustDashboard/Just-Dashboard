@@ -87,6 +87,7 @@ var agentStreamHandlers = map[string]bool{
 	"containerStream": true, "containerStatStream": true, "containerExec": true, "imagePull": true,
 	"imageBuild": true, "stackRun": true, "dockerEventStream": true, "jobStream": true, "logStream": true,
 	"remoteDesktopSession": true, "systemStream": true, "terminalAttach": true,
+	"fileWatch": true,
 }
 
 const whyStream = "a live stream (a WebSocket), which a request and its answer cannot hold; take the person to its page"
