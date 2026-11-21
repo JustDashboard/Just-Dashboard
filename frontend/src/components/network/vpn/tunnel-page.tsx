@@ -16,11 +16,8 @@ import { Page, PageContext } from "@/components/page"
 import { EmptyState, ErrorState, NeedsAdmin } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { ViewTabList, type TabView } from "@/components/tabs"
-import { ProductGlyph } from "@/components/product-logo"
-import { WireMark } from "@/components/wire/wire"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent } from "@/components/ui/tabs"
-import { WireFlow } from "@/components/wire/wire-flow"
 import { NetworkReadWarning } from "@/components/network/read-warning"
 import { archivedLine, useArchive, useRestore } from "./archive"
 import { usePeerSheets } from "./peers"
@@ -28,7 +25,7 @@ import { useHistory } from "./record"
 import type { HistoryWindow } from "./record-logic"
 import { TunnelExit } from "./tunnel-exit"
 import { IdentitySkeleton, TunnelIdentity, useTunnelControl } from "./tunnel-identity"
-import { TunnelPicture } from "./tunnel-picture"
+import { TunnelPicture, TunnelPictureWaiting } from "./tunnel-picture"
 import { TunnelRail } from "./tunnel-rail"
 import { railTunnels, tunnelHref, type TunnelTab } from "./tunnel-reading"
 import { TunnelEndpoint, TunnelHistory, TunnelTraffic } from "./tunnel-views"
@@ -137,18 +134,7 @@ export function TunnelPage() {
         {vpn.error ? (
           <ErrorState error={vpn.error} onRetry={vpn.refresh} retryable />
         ) : (
-          <WireFlow
-            loading
-            start={{ title: "Devices", nodes: [] }}
-            end={{ title: "Sites", nodes: [], loadingRows: 2 }}
-            hub={{
-              mark: (
-                <WireMark tone="neutral" shape="square">
-                  <ProductGlyph id="wireguard" />
-                </WireMark>
-              ),
-            }}
-          />
+          <TunnelPictureWaiting whole />
         )}
       </DetailPage>
     )

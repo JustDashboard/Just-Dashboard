@@ -26,7 +26,6 @@ import { Fact } from "@/components/fact-line"
 import { Status, type DotTone } from "@/components/status-dot"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { useNow } from "@/hooks/use-now"
 import type { Verb } from "@/components/verbs"
 import { useProxy } from "@/components/proxy/proxy-context"
@@ -518,28 +517,28 @@ export default function ProxyOverviewPage() {
         <EngineSetup status={status} admin={admin} onInstalled={refreshAll} />
       ) : (
         <>
-          {/* The picture needs the sites; while they are read it holds its
-          height, and a failure is said once, where the routes are. */}
-          {hasEngine &&
-            (vhosts.loading ? (
-              <Skeleton className="h-72 w-full" />
-            ) : (
-              picture.domains.length > 0 && (
-                <RoutePicture
-                  map={picture}
-                  engine={status.nginx ? "nginx" : "Caddy"}
-                  engineMark={engineProduct(status)}
-                  engineTone={engineTone}
-                  engineHint={
-                    doors && (
-                      <span className="font-mono">
-                        {frontDoorLine(doors, status.nginx ? "nginx" : "caddy")}
-                      </span>
-                    )
-                  }
-                />
-              )
-            ))}
+          {/* The picture needs the sites; while they are read it waits at the
+          shape it will have (a grey block of a guessed height stood here, and
+          everything under it moved when they landed), and a failure is said
+          once, where the routes are. */}
+          {hasEngine && (vhosts.loading || picture.domains.length > 0) && (
+            <RoutePicture
+              map={picture}
+              loading={vhosts.loading}
+              engine={status.nginx ? "nginx" : "Caddy"}
+              engineMark={engineProduct(status)}
+              engineTone={engineTone}
+              engineHint={
+                doors && (
+                  // A block, so the line is the height of the grey one that
+                  // waits for it: mono set inline in the sans stood 2px taller.
+                  <span className="block font-mono">
+                    {frontDoorLine(doors, status.nginx ? "nginx" : "caddy")}
+                  </span>
+                )
+              }
+            />
+          )}
 
           {traffics && (
             <LiveTraffic

@@ -373,6 +373,32 @@ test("the views are in the address", async ({ page }) => {
   await expect(page.getByRole("tab", { name: "Overview" })).toHaveAttribute("aria-selected", "true")
 })
 
+test("on a wide page the picture is rows of nodes, no taller than they are", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await open(page)
+  const flow = page.locator("[data-slot=wire-flow]")
+  await expect(flow).toHaveAttribute("data-form", "rows")
+  // The 18rem frame that holds a column a side at one height is left off:
+  // it stood empty over and under the rows.
+  const drawn = await box(page, picture(page))
+  expect(drawn.height).toBeLessThan(288)
+  // A node's line is what its entry counted, whole; how the entry is set is
+  // the line's title and in its row under the picture.
+  const refused = page.getByRole("region", { name: "Refused" })
+  const line = refused.getByText("48.2k dropped")
+  await expect(line).toHaveAttribute("title", "9,843 networks · 48.2k dropped")
+  await expect(line.getByText("9,843 networks")).toBeHidden()
+  expect(await line.evaluate((el) => el.scrollWidth <= el.clientWidth)).toBe(true)
+
+  // The next visit waits on as many nodes, so it is the same height unread.
+  await page.unrouteAll({ behavior: "ignoreErrors" })
+  await mockNetwork(page, [], { overrides })
+  await page.route("**/api/v1/network/protection", () => new Promise(() => {}))
+  await page.reload()
+  await page.waitForSelector("[data-slot=protection-picture][data-loading]")
+  expect((await box(page, picture(page))).height).toBe(drawn.height)
+})
+
 test("the kernel's settings are one column of rows at one height, saved by one bar", async ({
   page,
 }) => {

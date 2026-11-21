@@ -21,10 +21,25 @@ const MOST = 5
 type MarkSize = "lg" | "md" | "sm"
 
 /**
- * Room over and under the firewall's mark for the words that hang under it:
- * with no rule made the picture is one row, and they ran into the rules' frame.
+ * Room over and under the firewall's mark in the column form, where the ports
+ * are centred on it: with no rule made that picture is one row. Rows stand on
+ * the hub's own level and `WireFlow` leaves this off there.
  */
 const HUB_ROOM = "lg:py-16"
+
+/**
+ * In a row of nodes only, where a node is about 120px wide with its words
+ * centred under its mark: a line of its own, a flex line centred as the words
+ * are and wrapped where its parts do not fit, or left out.
+ */
+const ROW_LINE = "lg:in-data-[form=rows]:block"
+const ROW_CENTRED = "lg:in-data-[form=rows]:flex-wrap lg:in-data-[form=rows]:justify-center"
+/** A port after its service as one name: a word's space apart, and under it where both do not fit. */
+const ROW_NAME = "lg:in-data-[form=rows]:gap-x-1.5 lg:in-data-[form=rows]:gap-y-0"
+const ROW_CUT = "lg:in-data-[form=rows]:hidden"
+
+/** Openings drawn while the firewall is read; the default is the row after them. */
+const WAITING_OPENINGS = 3
 
 /** What the firewall's log adds up to over its window, for the picture's nodes. */
 export type FirewallCounts = {
@@ -64,7 +79,9 @@ export type FirewallCounts = {
  * addresses, under the default that refused it; what a rate limit turned
  * away under the port it limits. Each is a press that narrows the log at the
  * foot of the page to those lines. With two limited ports, or none, the log
- * cannot say which port a refusal was at, so the figure joins the default's.
+ * cannot say which port a refusal was at, so the figure joins the default's:
+ * after a dot beside the column's mark, and on a line of its own in a row of
+ * nodes, which is too narrow for the sentence.
  */
 export function FirewallPicture({
   status,
@@ -153,13 +170,25 @@ export function FirewallPicture({
         </span>
         {counts && (
           <span className="numeric block" data-testid="refused-reading">
-            {counts.blocked === undefined
-              ? "reading the log…"
-              : `${counts.blocked.toLocaleString()} refused${
-                  counts.sources === undefined
-                    ? ""
-                    : ` from ${counts.sources.toLocaleString()} address${counts.sources === 1 ? "" : "es"}`
-                }${strays ? ` · ${strays.toLocaleString()} rate-limited` : ""} ${counts.window}`}
+            {counts.blocked === undefined ? (
+              "reading the log…"
+            ) : (
+              <>
+                {counts.blocked.toLocaleString()} refused
+                {counts.sources !== undefined &&
+                  ` from ${counts.sources.toLocaleString()} address${counts.sources === 1 ? "" : "es"}`}
+                {strays ? (
+                  <>
+                    <span className={ROW_CUT}> · </span>
+                    <span className={ROW_LINE}>
+                      {strays.toLocaleString()} rate-limited {counts.window}
+                    </span>
+                  </>
+                ) : (
+                  ` ${counts.window}`
+                )}
+              </>
+            )}
           </span>
         )}
       </>
@@ -233,7 +262,14 @@ export function FirewallPictureLoading() {
         loading
         hubShare={0.7}
         start={{ title: "Arrives", nodes: [], loadingRows: 1 }}
-        end={{ title: "Answered by", nodes: [], loadingRows: 4 }}
+        end={{
+          title: "Answered by",
+          nodes: [],
+          loadingRows: WAITING_OPENINGS + 1,
+          // A port has no eyebrow and says who may reach it; the default says
+          // its policy and what it refused.
+          loadingLines: (row) => ({ eyebrow: false, hint: row < WAITING_OPENINGS ? 1 : 2 }),
+        }}
         hub={{
           className: HUB_ROOM,
           mark: (size) => (
@@ -261,7 +297,7 @@ function OpeningMark({ opening, size }: { opening: Opening; size: MarkSize }) {
 
 function OpeningName({ opening }: { opening: Opening }) {
   return (
-    <span className="flex min-w-0 items-baseline gap-2">
+    <span className={cn("flex min-w-0 items-baseline gap-2", ROW_CENTRED, ROW_NAME)}>
       {opening.service && <span className="truncate">{opening.service}</span>}
       {opening.port ? (
         <span className="numeric shrink-0 font-mono font-normal">
@@ -282,7 +318,7 @@ function OpeningReach({ opening, limited }: { opening: Opening; limited: boolean
   if (opening.anyone)
     return <span className="block">from anyone{limited && " · rate-limited"}</span>
   return (
-    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+    <span className={cn("flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5", ROW_CENTRED)}>
       from
       {opening.sources.slice(0, 2).map((source) => {
         const network = networkOf(source.split("/")[0])

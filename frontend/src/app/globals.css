@@ -265,6 +265,12 @@
      link does — by getting a little more present, not by lifting. */
   --border-strong: color-mix(in oklab, var(--foreground) 22%, transparent);
 
+  /* A wiring picture's line at rest: the strong border's grey laid on the
+     page's ground rather than on nothing. The lines of one row lie on each
+     other on their way to the hub, and a translucent grey added up there,
+     one step brighter for every line under it. */
+  --wire: color-mix(in oklab, var(--foreground) 22%, var(--background));
+
   /* Row banding and hover, expressed against the card rather than as a
      translucent grey. */
   --row-hover: color-mix(in oklab, var(--muted) 55%, transparent);
@@ -594,6 +600,7 @@
   --color-surface-sunken: var(--surface-sunken);
   --color-hairline: var(--hairline);
   --color-border-strong: var(--border-strong);
+  --color-wire: var(--wire);
 
   --color-flow-surface: var(--flow-surface);
   --color-choice-surface: var(--choice-surface);

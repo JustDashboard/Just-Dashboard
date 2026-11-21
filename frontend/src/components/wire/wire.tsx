@@ -16,8 +16,11 @@ import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
  * A node is a mark with a name and a line of detail beside it. `align` says
  * which side of the mark the text sits on when the picture is wide, so the
  * line always leaves the mark over nothing: before it on the left edge, after
- * it on the right, under it in the middle. Narrow, marks stand in one column
- * and the text is always to their right.
+ * it on the right, under it in the middle. `center` hangs the words under the
+ * mark out of the flow, for the one hub a picture stands on; `under` keeps
+ * them in the flow, for a row of nodes on one level line, each as wide as its
+ * place in the row. Narrow, marks stand in one column and the text is always
+ * to their right.
  *
  * `aside` is a node's readings — a strip of outcomes, the days a certificate
  * has left — set at the far end of a wide column from `xl`, so the width a
@@ -40,7 +43,7 @@ export function WireNode({
   title: React.ReactNode
   hint?: React.ReactNode
   aside?: React.ReactNode
-  align?: "start" | "center" | "end"
+  align?: "start" | "center" | "end" | "under"
   className?: string
 }) {
   const text = (
@@ -50,6 +53,9 @@ export function WireNode({
         aside && "xl:flex-1",
         align === "center" &&
           "lg:absolute lg:top-full lg:left-1/2 lg:mt-3 lg:w-44 lg:-translate-x-1/2 lg:text-center",
+        // Balanced, so a hint that takes two lines does not leave one word
+        // on the second.
+        align === "under" && "lg:w-full lg:text-center lg:text-balance",
       )}
     >
       {eyebrow && <p className="eyebrow">{eyebrow}</p>}
@@ -66,6 +72,7 @@ export function WireNode({
         // its box, so every mark sits on one line and the lines between
         // them run level.
         align === "center" && "lg:relative lg:justify-center",
+        align === "under" && "lg:flex-col lg:gap-2",
         className,
       )}
     >

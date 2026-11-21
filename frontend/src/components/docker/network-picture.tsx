@@ -3,6 +3,7 @@
 import { NetworkDevice, Slash } from "@/components/icons"
 import { plural, rate } from "@/lib/format"
 import type { Container, DockerNetwork } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { LogoGlyph } from "@/components/logo"
 import { ProductGlyph, containerProduct, hasProductLogo } from "@/components/product-logo"
 import { WireHost, WireMark } from "@/components/wire/wire"
@@ -29,6 +30,23 @@ const HUB_SHARE = 0.4
 /** A side draws this many and counts the rest; the Members view lists every one. */
 const MEMBERS = 5
 const LEADS = 3
+
+/**
+ * One line, cut at its place's width, where the picture is rows: a node there
+ * is about 120px wide, and a sentence that wrapped to three lines stood its
+ * row taller than the members' across the hub. Whole beside its mark, in a
+ * column, and whole on hover (`title`).
+ */
+const ONE_LINE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
+
+/** A lead's line of detail, in words. */
+function Said({ children }: { children: string }) {
+  return (
+    <span className={ONE_LINE} title={children}>
+      {children}
+    </span>
+  )
+}
 
 /**
  * A network drawn as what it is: where it leads on the left, the network in
@@ -109,7 +127,7 @@ export function NetworkPicture({
       hint: way.gateway ? (
         <span className="font-mono">{way.gateway}</span>
       ) : (
-        "Docker's own address translation"
+        <Said>Docker&apos;s own address translation</Said>
       ),
       line: { state: "up" },
     })
@@ -125,9 +143,11 @@ export function NetworkPicture({
       title: way.device ? <span className="font-mono">{way.device}</span> : "A network card",
       name: way.device ?? "A network card",
       hint: way.gateway ? (
-        <span className="font-mono">gateway {way.gateway}</span>
+        <span className={cn("font-mono", ONE_LINE)} title={`gateway ${way.gateway}`}>
+          gateway {way.gateway}
+        </span>
       ) : (
-        "the card's own network"
+        <Said>the card&apos;s own network</Said>
       ),
       href: way.device ? deviceHref(way.device) : undefined,
       label: way.device ? `Open ${way.device} on Interfaces` : undefined,
@@ -144,7 +164,7 @@ export function NetworkPicture({
       eyebrow: "No way out",
       title: <span className="text-muted-foreground">Cut off</span>,
       name: "Cut off from the internet",
-      hint: "its members reach only each other",
+      hint: <Said>its members reach only each other</Said>,
       line: { state: "idle" },
     })
   }
@@ -158,9 +178,17 @@ export function NetworkPicture({
         </WireMark>
       ),
       eyebrow: "Joined to",
-      title: other.name,
+      title: (
+        <span className={ONE_LINE} title={other.name}>
+          {other.name}
+        </span>
+      ),
       name: other.name,
-      hint: `through ${through[0]}${through.length > 1 ? ` and ${through.length - 1} more` : ""}`,
+      hint: (
+        <Said>
+          {`through ${through[0]}${through.length > 1 ? ` and ${through.length - 1} more` : ""}`}
+        </Said>
+      ),
       href: networkHref(other.name, tab),
       label: `Open ${other.name}`,
       line: { state: other.up ? "up" : "down" },

@@ -1,5 +1,6 @@
 "use client"
 
+import { useEffect } from "react"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { WireHost } from "@/components/wire/wire"
@@ -14,6 +15,7 @@ import {
   type DriftRow,
 } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
+import { useViewState } from "@/lib/view-state"
 import { ShortDigest } from "@/components/network/drift/marks"
 
 /**
@@ -73,6 +75,10 @@ function domainProducts(rows: DriftRow[]) {
  * in script after mount. The wires are the readings the four grey tiles were,
  * said per domain (`domainLine`); pressing a domain narrows the comparisons
  * below to it.
+ *
+ * How many domains it drew is kept for the next visit: on a wide page they
+ * stand in rows, and the fourth (the blocklists, where there are some) may
+ * begin a second row that a waiting picture of three did not have.
  */
 export function DriftPicture({
   report,
@@ -89,7 +95,12 @@ export function DriftPicture({
 }) {
   const saved = rows.filter((row) => row.domain === "saved")
   const spec = saved.find((row) => row.kind === "spec")
-  const nodes: WireFlowNode[] = driftTargets(rows).map(({ domain, label }) => {
+  const [drawn, setDrawn] = useViewState(DRAWN_KEY, TARGETS)
+  const targets = driftTargets(rows)
+  useEffect(() => {
+    if (targets.length !== drawn) setDrawn(targets.length)
+  }, [targets.length, drawn, setDrawn])
+  const nodes: WireFlowNode[] = targets.map(({ domain, label }) => {
     const own = rows.filter((row) => row.domain === domain)
     const products = domainProducts(own)
     return {
@@ -143,7 +154,7 @@ export function DriftPicture({
         ),
       }}
       end={{ title: "Where it is written", nodes, heading: "narrow" }}
-      className={NO_START}
+      className={FORM}
     />
   )
 }
@@ -154,9 +165,19 @@ export function DriftPicture({
  * hub that says "Saved" itself, so the empty column is not drawn there.
  */
 const NO_START = "max-lg:[&_section:first-of-type]:hidden"
+/**
+ * In a row a domain is about 120px wide and its count may take two lines:
+ * the break is evened out, so no line is one word.
+ */
+const FORM = `${NO_START} lg:data-[form=rows]:text-balance`
 
-/** The picture before the first inspection lands, at the shape it will have. */
+/** The domains every server has; the blocklists make a fourth. */
+const TARGETS = 3
+const DRAWN_KEY = "network.drift.targets"
+
+/** The picture before the first inspection lands, at the shape the last one had. */
 export function DriftPictureWaiting() {
+  const [drawn] = useViewState(DRAWN_KEY, TARGETS)
   return (
     <WireFlow
       loading
@@ -170,10 +191,10 @@ export function DriftPictureWaiting() {
         title: "Where it is written",
         nodes: [],
         heading: "narrow",
-        loadingRows: 3,
+        loadingRows: drawn,
         loadingLines: { eyebrow: false },
       }}
-      className={NO_START}
+      className={FORM}
     />
   )
 }

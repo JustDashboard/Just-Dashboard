@@ -48,7 +48,7 @@ const FAMILIES = [
   {
     part: "Colour",
     name: "Edges",
-    match: /^--(border|input|hairline|border-strong|control-edge|grid-dot)$/,
+    match: /^--(border|input|hairline|border-strong|control-edge|grid-dot|wire)$/,
     use: "border",
     page: "surfaces.md",
     for: "A frame, a field, where a header meets a body, a destination's hover, a control's 3:1 edge (T3), a canvas's dots.",

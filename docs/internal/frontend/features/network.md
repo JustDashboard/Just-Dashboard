@@ -66,7 +66,8 @@ default, `tailscale`, `headscale` where this server runs one, `log`; `components
 each kind on its own identity line with no tile row, opts in to IPv6 addressing and separate
 egress with per-family evidence and translated-connection counts on the row that switches that
 family's exit; each tunnel's picture marks stale always-on handshakes, captured transports and
-passed budgets on the peer they are about, a tunnel has a page of its own (`/network/vpn/<name>`:
+passed budgets on the peer they are about and waits, before its read, on the nodes and lines the
+last one drew (`TunnelPictureWaiting`), a tunnel has a page of its own (`/network/vpn/<name>`:
 endpoint evidence, trend and what each peer moved, lifecycle with outcomes, kept for a removed
 tunnel beside its restore), and each peer's sheet adds its trend, endpoint history, alert-only
 budget, editing (a device's regenerated configuration), site verification and a Linux kill-switch
@@ -105,7 +106,9 @@ and destination-scoped NAT, flags a drifted auto source-translation decision wit
 labels live counters by table generation beside totals carried across reloads. Protection
 (`components/network/protection/`) opens on an identity line (what the lists dropped and the limits
 refused, New blocklist as its command) and a `WireFlow` picture of who is refused, this server's
-filter and what gets through, and has three views in the address (`?tab=`): the lists, limits,
+filter and what gets through (held at one height as a column a side; as rows of nodes it is as tall
+as they are, and a node's line is what its entry counted, the setting in its `title`), and has
+three views in the address (`?tab=`): the lists, limits,
 exceptions and trusted addresses as one-height rows, the connection table (administrators), and the
 kernel's protections as a settings column on the shared save bar. It adds
 service-profile limits with a ceiling for everyone, meter occupancy and per-limit refusal trends,
@@ -361,6 +364,8 @@ service state. The pages that moved keep their behaviour:
   "A past hour" are a `ViewTabs` strip directly under the line (`?when=recorded`, `?hour=`). The
   three places are always drawn, a quiet
   one with a still dashed wire; each node carries every read since the page opened as its trend;
+  where the picture is rows of nodes (`WireFlow`'s `rows`, a wide page) a node's two counts stand
+  one to a line and a place names its busiest address alone, with how many more;
   "Everything" and "From the internet" are filter chips with counts beside the search, and a
   program narrows the list to its callers. Four
   tiles stood over the picture until 0.8.7, every figure of theirs already on the page. Under it each

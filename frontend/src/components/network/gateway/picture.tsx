@@ -30,10 +30,14 @@ const NAT_DRAWN = 3
 type Node = WireFlowNode & { side: "in" | "out" }
 
 /**
- * Room over and under this server's mark for the lines that hang under it:
- * with nothing made the picture is two rows, and they ran into the list below.
+ * Room over and under this server's mark in the column form, where each side
+ * is centred on it: with nothing made that picture is two rows. Rows stand on
+ * the hub's own level and `WireFlow` leaves this off there.
  */
 const HUB_ROOM = "lg:py-20"
+
+/** An eyebrow that is a name somebody typed stays one line in a row of nodes, which is about 120px wide. */
+const ROW_WHOLE = "lg:in-data-[form=rows]:block lg:in-data-[form=rows]:truncate"
 
 /** The firewall's own name, for the middle node's title. */
 const FIREWALL: Record<GatewayView["capability"]["firewall"], string> = {
@@ -61,8 +65,10 @@ const FIREWALL: Record<GatewayView["capability"]["firewall"], string> = {
  *
  * A kind with nothing made yet stands as a dashed ring with the form that makes
  * one behind it, and its counterpart on the right as a ring that only says
- * what would be there. Three lanes from `lg` (`WireFlow`); below it they stack
- * and the wires are not drawn.
+ * what would be there. From `lg` it is `WireFlow`'s wide picture, rows of
+ * nodes on level lines where a side has room for three across and a column a
+ * side where it has not; below it the lanes stack and the wires are not drawn.
+ * A line that is cut to its node's width says all of itself behind the pointer.
  */
 export function GatewayPicture({
   view,
@@ -164,7 +170,13 @@ export function GatewayPictureLoading({ rows = 4 }: { rows?: number }) {
       loading
       start={{ title: "Arrives", nodes: [], loadingRows: rows }}
       end={{ title: "Goes to", nodes: [], loadingRows: rows }}
-      hub={{ className: HUB_ROOM, mark: <WireHost />, eyebrow: "This server" }}
+      hub={{
+        className: HUB_ROOM,
+        mark: <WireHost />,
+        eyebrow: "This server",
+        // Who writes the firewall, then what is forwarded.
+        loadingLines: { hint: 2 },
+      }}
     />
   )
 }
@@ -197,6 +209,15 @@ function placeholder(
   }
 }
 
+/** A line of detail kept to one line, with all of it behind the pointer where it is cut. */
+function Whole({ children, className }: { children: string; className?: string }) {
+  return (
+    <span className={cn("block truncate", className)} title={children}>
+      {children}
+    </span>
+  )
+}
+
 /** The nodes, from the gateway's entries and the devices. Pure, so it is testable. */
 export function buildNodes(
   view: GatewayView,
@@ -224,6 +245,11 @@ export function buildNodes(
 
   for (const f of view.forwards.slice(0, FORWARDS_DRAWN)) {
     const line = wire(inForce(f.enabled) && moved.has(`forward:${f.id}`), !inForce(f.enabled))
+    const arrival = f.enabled
+      ? f.sources.length
+        ? `from ${sourcesWord(f.sources)}`
+        : f.name
+      : "switched off"
     nodes.push({
       id: `forward:${f.id}:in`,
       side: "in",
@@ -239,22 +265,18 @@ export function buildNodes(
           </span>
         </span>
       ),
-      hint: (
-        <span className="block truncate">
-          {f.enabled
-            ? f.sources.length
-              ? `from ${sourcesWord(f.sources)}`
-              : f.name
-            : "switched off"}
-        </span>
-      ),
+      hint: <Whole>{arrival}</Whole>,
       line: line(nodes.length),
     })
     nodes.push({
       id: `forward:${f.id}:out`,
       side: "out",
       mark: <TargetMark ports={f.ports} targetPort={f.targetPort} />,
-      eyebrow: f.name,
+      eyebrow: (
+        <span className={ROW_WHOLE} title={f.name}>
+          {f.name}
+        </span>
+      ),
       title: (
         <Endpoint
           address={f.target}
@@ -290,7 +312,7 @@ export function buildNodes(
         : { onPress: () => open.onOpenNAT(n), label: `Open ${n.name}` }),
       eyebrow: owner ? `NAT · ${owner.name}` : "NAT",
       title: <Cidr cidr={n.source} className={cn(!n.enabled && "text-muted-foreground")} />,
-      hint: <span className="block truncate">{n.enabled ? n.name : "switched off"}</span>,
+      hint: <Whole>{n.enabled ? n.name : "switched off"}</Whole>,
       line: line(nodes.length),
     })
     nodes.push({
@@ -315,7 +337,7 @@ export function buildNodes(
         natMode(n) === "masquerade" && !(n.destinations ?? []).length ? (
           "masqueraded"
         ) : (
-          <span className="block truncate font-mono">{natWord(n)}</span>
+          <Whole className="font-mono">{natWord(n)}</Whole>
         ),
       line: line(nodes.length),
     })

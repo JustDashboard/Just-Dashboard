@@ -30,11 +30,11 @@ now, and one component draws it.
 
 | Picture | Phone | Why |
 | --- | --- | --- |
-| Proxy overview, `RoutePicture` | marks: domains, the engine named, applications | Routes lists every domain and its upstream |
-| Streams and a stream, `StreamPicture` | marks: ports, nginx named, addresses | the stream rows name each port and address |
+| Proxy overview, `RoutePicture` | marks (`WireFlow phone="marks"`): domains, the engine named, applications | Routes lists every domain and its upstream |
+| Streams and a stream, `StreamPicture` | marks (`WireFlow phone="marks"`): ports, nginx named, addresses | the stream rows name each port and address |
 | Ports, `PortsPicture` | marks, two rows and no hub: networks over programs, each row's heading shown | the socket list names every program and port; a network mark still narrows the list |
 | Tunnel, `TunnelPicture` | marks: hostnames, then the edge, the connector and this server, each named | Hostnames lists the hostnames; the three middle things are named nowhere else |
-| Remote Desktop, `ComputerPicture` | marks: this browser, the server named, the computers fanned under it | the Computers cards are the list |
+| Remote Desktop, `ComputerPicture` | marks (`WireFlow phone="marks"`): this browser, the server named, the computers fanned under it | the Computers cards are the list |
 | Notifications, Backups, the account | marks (`WireFlow phone="marks"`) | a list under each names the nodes |
 | The proxy's alerts, `AlertsPicture` | marks (its default) | the kind cards and rules name the areas |
 | Host alerts, `AlertsPicture phone="stack"` | stack | five of its eight sources are named nowhere else until a rule watches them |

@@ -94,9 +94,14 @@ export function AddressPicture({
   return (
     <section aria-label="Where it connects" className="min-w-0">
       <WireFlow
-        // The hub's cell keeps room for the words that hang under its mark,
-        // and the same room above it is empty: the picture gives some back.
-        className="animate-rise lg:-mt-8"
+        // As a column a side, the hub's cell keeps room for the words that
+        // hang under its mark, and the same room above it is empty: the
+        // picture gives some back. As one row it is as tall as those words,
+        // which are the ports alone for one address and a service and two
+        // lines of states for the next, so it is held at the height of the
+        // longest and the views under it stand in one place from one address
+        // to the next and while the list is read.
+        className="animate-rise lg:data-[form=column]:-mt-8 lg:data-[form=rows]:min-h-[10.25rem]"
         loading={!listed}
         // A narrow hub column: its words hang centred under the mark and may
         // run past it, while the address beside the rail needs its line whole.
@@ -140,14 +145,18 @@ export function AddressPicture({
               {states && <span className="numeric block">{states}</span>}
             </>
           ),
-          // The hub's words hang under its mark, and one address is a single
-          // row: the cell keeps the room they need. Stacked down a phone it
-          // stands on the edge the other marks stand on.
+          // The hub's words hang under its mark, and an address with a
+          // column of programs is still a short picture: the cell keeps the
+          // room they need (`WireFlow` leaves this off where the sides are
+          // rows). Stacked down a phone it stands on the edge the other marks
+          // stand on.
           className: "max-lg:justify-start lg:py-20",
         }}
         end={{
           title: "What it reached",
           loadingRows: 1,
+          // A program is its mark and its name.
+          loadingLines: { eyebrow: false, hint: 0 },
           empty: "Nothing reached now",
           nodes: programs.map((name) => {
             const product = processProduct(name)

@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, type ReactNode, type RefObject } from "react"
+import { type ReactNode } from "react"
 import Link from "next/link"
 import { Bell, CheckCircle, Envelope, PaperAirplane } from "@/components/icons"
 import { plural, relativeTime } from "@/lib/format"
@@ -8,8 +8,8 @@ import { cn } from "@/lib/utils"
 import type { NotificationChannel, NotificationChannelKind } from "@/lib/types"
 import { ProductLogo, ProductLogos, channelProduct } from "@/components/product-logo"
 import { ChannelGlyph, channelMark } from "@/components/deploy/vocabulary"
-import { WireLink, WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
-import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { WireMark, WirePlaceholder } from "@/components/wire/wire"
+import type { WireFlowNode } from "@/components/wire/wire-flow"
 import { EmptyState, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -311,77 +311,53 @@ export function ChannelTests({
 }
 
 /**
- * One channel in the picture's right column: its own service's mark, its wire
- * moving while an enabled rule reaches it, or a dashed way to add one.
+ * One channel as the picture's node: its own service's mark, its wire moving
+ * while an enabled rule reaches it, or a dashed way to add one.
  */
-export function PictureChannel({
-  channel,
-  kind,
-  live,
-  containerRef,
-  hubRef,
-  compact,
-  onAdd,
-}: {
-  channel?: NotificationChannel
-  kind: NotificationChannelKind
-  live: boolean
-  containerRef: RefObject<HTMLDivElement | null>
-  hubRef: RefObject<HTMLDivElement | null>
-  compact: boolean
-  onAdd: () => void
-}) {
-  const mark = useRef<HTMLDivElement>(null)
-  const size = compact ? "sm" : "md"
+export function channelNode(
+  target: { key: string; channel?: NotificationChannel; kind: NotificationChannelKind },
+  live: boolean,
+): WireFlowNode {
+  const { channel, kind } = target
   const title = ALERT_CHANNEL_KINDS.find((item) => item.kind === kind)?.title ?? kind
-  const drawn = channel ? (
-    <WireMark tone="logo" size={size}>
-      <ChannelGlyph channel={channel} />
-    </WireMark>
-  ) : (
-    <WireLink label={`Add a ${title} channel`} onClick={onAdd}>
-      <WirePlaceholder size={size} product={channelProduct(kind)} fallback={Envelope} />
-    </WireLink>
-  )
-  const beam = (
-    <AnimatedBeam
-      containerRef={containerRef}
-      fromRef={hubRef}
-      toRef={mark}
-      still={!live}
-      dashed={!channel}
-      duration={2.2}
-      delay={channel ? (channel.id % 5) * 0.3 : 0}
-    />
-  )
-  const hint = channel
-    ? !channel.enabled
-      ? "paused"
-      : live
-        ? (channel.target || channel.url) && `told · ${channel.target || channel.url}`
-        : "no rule tells it"
-    : "add on Notifications"
-  if (compact)
-    return (
-      <div className="min-w-0">
-        {beam}
-        <div ref={mark} className="relative z-raised flex">
-          {drawn}
-        </div>
-        {channel && <span className="sr-only">{`${channel.name}: ${hint}`}</span>}
-      </div>
-    )
-  return (
-    <div className="min-w-0">
-      {beam}
-      <WireNode
-        nodeRef={mark}
-        mark={drawn}
-        title={channel ? channel.name : <span className="text-muted-foreground">{title}</span>}
-        hint={<span className="block truncate">{hint}</span>}
-      />
-    </div>
-  )
+  if (!channel)
+    return {
+      id: target.key,
+      name: title,
+      label: `Add a ${title} channel`,
+      href: "/deploy/notifications",
+      placeholder: true,
+      mark: (size) => (
+        <WirePlaceholder size={size} product={channelProduct(kind)} fallback={Envelope} />
+      ),
+      title: <span className="text-muted-foreground">{title}</span>,
+      hint: "add on Notifications",
+      line: { state: "idle" },
+    }
+  const address = channel.target || channel.url
+  const hint = !channel.enabled
+    ? "paused"
+    : live
+      ? address && `told · ${address}`
+      : "no rule tells it"
+  return {
+    id: target.key,
+    name: hint ? `${channel.name}: ${hint}` : channel.name,
+    mark: (size) => (
+      <WireMark tone="logo" size={size}>
+        <ChannelGlyph channel={channel} />
+      </WireMark>
+    ),
+    title: channel.name,
+    hint: hint ? (
+      <span className="block truncate" title={hint}>
+        {hint}
+      </span>
+    ) : undefined,
+    line: live
+      ? { state: "up", moving: true, duration: 2.2, delay: (channel.id % 5) * 0.3 }
+      : { state: "up" },
+  }
 }
 
 /**

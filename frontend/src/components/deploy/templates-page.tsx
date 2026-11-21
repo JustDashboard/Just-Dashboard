@@ -392,7 +392,10 @@ function TemplateCard({
 }
 
 // Wide, the room three services take, with a shorter template centred in
-// it: choosing another card must not move the cards under the picture.
+// it: choosing another card must not move the cards under the picture. The
+// page's measure leaves a side room for two across, so a template of one or
+// two services is a level line and one of three a column (`flowForm`), and
+// the room is held for both.
 const ROOM = "lg:flex lg:min-h-64 lg:flex-col lg:justify-center"
 
 const ROLE_WORD: Record<BlueprintServiceSummary["role"], string> = {

@@ -95,9 +95,11 @@ its facts, the page's keys and Refresh at the far end — then a `WireFlow` pict
 (`logins-picture.tsx`): where sessions are held from and who is attacking on the left, sshd in the
 middle, the accounts on the right. A session's line moves; an attacker is in the danger colour and
 moves while an attempt is under a quarter of an hour old; one the firewall already turns away
-(`refusedBy`, read from the rules the layout polls) is grey and dashed. The picture is four rows in
-every state and while it waits (`drawnFirst` shares the rows between who is in and who is trying,
-the last row counting the rest), so the lists under it do not move. Under it a session is a
+(`refusedBy`, read from the rules the layout polls) is grey and dashed. A side holds four nodes at
+most (`drawnFirst` shares them between who is in and who is trying, the last counting the rest). As
+a column a side the picture is four rows tall in every state and while it waits; as rows on a wide
+page it is one or two rows, and waits as what it last drew (`security.logins.picture.rows`), so
+the lists under it do not move. Under it a session is a
 `ChoiceRow` with End session in its `⋯`, offered only with `system.admin` and `destructive` as the
 route requires; attackers are a `RankList` (attempts and their share in columns, no bar per row)
 with Block and the lookups in each row's `⋯` and "blocked" where the firewall already refuses the
@@ -185,8 +187,11 @@ their ports are, the module's state, the counts and the hour's sessions as facts
 the Live tile was at its end and New stream beside it), then a wiring picture — the host's ports on
 the left drawn as their products, nginx in the middle, the addresses they are handed to on the
 right, a forward open to anyone in the warning colour and a database port open to anyone in the
-danger one, a line moving only while nginx holds the port and bytes crossed it in the hour — and
-then the forwards as one-line `ChoiceRow`s, one height in every state: the name over where it
+danger one, a line moving only while nginx holds the port and bytes crossed it in the hour (a
+`WireFlow` since 0.9.1, as the overview's route picture is: rows on level lines across the page,
+five forwards 226px tall where the two columns stood 404, one forward on its own page a single
+line; a port says its number, its name and who may connect, its protocol and hour a hover away)
+— and then the forwards as one-line `ChoiceRow`s, one height in every state: the name over where it
 listens and where that goes, the protocol, who may connect and the hour's sessions in aligned
 columns, its state, and a menu. A test's outcome takes the hour's place on the row until the next
 test. Why a stream is not live, nginx's bind error and the way to what holds the port are a
@@ -388,7 +393,17 @@ eight. A wire is the route's last hour from its access log: it pulses while the 
 more than a request a minute, quicker the busier (`requestPulse`, the Network section's curve
 over requests), red where it fails or the upstream refuses (dashed then), amber in plain HTTP
 or where the upstream times out; pointing at a domain lights the application it reaches and the
-other way round. The band under it (`overview-band.tsx`) is three bar readings (§10): Traffic, the
+other way round. Since 0.9.1 the picture is a `WireFlow` (`components/wire/wire-flow.tsx`): it was
+laid by hand as one column a side, each name beside its mark, in the middle of a wide page with
+nothing on either side, and is now rows of domains and applications on level lines through the
+engine, as wide as the page (three a side are one line across it, 131px tall where the columns
+stood 276), a column a side only where a side has no room for three across. A node's mark is the
+way to its page. Under a mark a domain says its name and one line: its hour and 5xx share, plain
+HTTP where it is served so, and "TLS" with its issuer only where there is no hour to read (the lock
+says it, and the rest is the line's tooltip). While the sites are read the picture waits as itself,
+the engine named and grey nodes a side; a grey block 288px tall stood in for it, and the band under
+it moved 12px when the sites landed. The band under it (`overview-band.tsx`) is three bar readings
+(§10): Traffic, the
 hour's requests shared out over the busiest five, each rank a `LANES` hue, its 5xx share and its
 trail on the line; Certificates, the five that run out first as ticks in the colour of their state
 on one ninety-day axis, the rest counted at the strip's end, each opening its certificate; and Recent

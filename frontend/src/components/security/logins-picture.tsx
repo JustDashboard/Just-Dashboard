@@ -1,11 +1,12 @@
 "use client"
 
-import { useCallback, useMemo } from "react"
+import { useCallback, useEffect, useMemo } from "react"
 import { Globe, SecureConnection, Slash, Terminal } from "@/components/icons"
 import { networkOf } from "@/lib/clients"
 import { plural, relativeTime } from "@/lib/format"
 import type { AttackSummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { useViewState } from "@/lib/view-state"
 import { useNow } from "@/hooks/use-now"
 import { InitialsMark } from "@/components/user-avatar"
 import { NETWORK_GLYPH } from "@/components/client-mark"
@@ -23,10 +24,22 @@ import {
 } from "@/components/security/logins-reading"
 
 /**
- * The rows a column holds. The picture is this tall whatever it draws, so a
- * column with more than this says how many more on its last row.
+ * The nodes a side holds, so one with more than this says how many more on
+ * its last. As a column a side the picture is this many rows tall whatever
+ * it draws (`HELD`).
  */
 const ROWS = 4
+
+/**
+ * The picture's box. On a phone its rows of marks are one height by
+ * themselves, given the hub's two lines of words. Wide, as a column a side,
+ * it is held four rows tall whatever it draws, so the lists under it stay
+ * where they are from one read to the next. As rows it is as tall as they
+ * are, one or two a side, with nothing held open: what it waits as is what
+ * it last drew (`drawn`).
+ */
+const HELD =
+  "flex flex-col justify-center max-lg:min-h-[20.75rem] lg:has-[[data-form=column]]:min-h-[17.75rem]"
 
 /** A person's face at the size of the marks beside it, on the tile every mark stands on. */
 const FACE = { lg: "size-14", md: "size-11", sm: "size-9" } as const
@@ -84,6 +97,9 @@ export function LoginsPicture({
       ...ranked.filter((entry) => !entry.blocked),
       ...ranked.filter((entry) => entry.blocked),
     ]) {
+      const tried =
+        plural(attacker.attempts, "attempt") +
+        (attacker.users.length > 0 ? ` · ${attacker.users.slice(0, 2).join(", ")}` : "")
       trying.push({
         id: `attacker:${attacker.address}`,
         name: `${attacker.address}, ${plural(attacker.attempts, "failed attempt")}`,
@@ -95,14 +111,16 @@ export function LoginsPicture({
         ),
         eyebrow: blocked ? "Blocked" : "Attacking",
         title: (
-          <span className={cn("block truncate font-mono", !blocked && "text-destructive")}>
+          <span
+            title={attacker.address}
+            className={cn("block truncate font-mono", !blocked && "text-destructive")}
+          >
             {attacker.address}
           </span>
         ),
         hint: (
-          <span className="numeric block truncate">
-            {plural(attacker.attempts, "attempt")}
-            {attacker.users.length > 0 && ` · ${attacker.users.slice(0, 2).join(", ")}`}
+          <span className="numeric block truncate" title={tried}>
+            {tried}
           </span>
         ),
         line: blocked
@@ -164,6 +182,22 @@ export function LoginsPicture({
     [accounts],
   )
 
+  // What each side drew the last time, so the picture waits in the form and
+  // at the height it is about to have: one node is a row where four are two,
+  // and the lists under it would move by a row when the reads land. A first
+  // visit waits as a server the internet can reach most often is: somebody
+  // in, and more trying than a side has room for.
+  const [drawn, rememberDrawn] = useViewState("security.logins.picture.rows", {
+    start: ROWS,
+    end: 2,
+  })
+  const startDrawn = Math.min(start.length, ROWS)
+  const endDrawn = Math.max(1, Math.min(end.length, ROWS))
+  useEffect(() => {
+    if (!loading && (drawn.start !== startDrawn || drawn.end !== endDrawn))
+      rememberDrawn({ start: startDrawn, end: endDrawn })
+  }, [loading, drawn.start, drawn.end, startDrawn, endDrawn, rememberDrawn])
+
   const related = useCallback(
     (focus: string, id: string) => {
       const [origin, account] = focus.startsWith("origin:") ? [focus, id] : [id, focus]
@@ -175,13 +209,7 @@ export function LoginsPicture({
   )
 
   return (
-    // Four rows tall whatever it holds and while it waits, so the lists under
-    // it stay where they are when the reads land; the phone's rows of marks
-    // are one height by themselves, given the hub's two lines of words.
-    <div
-      data-slot="logins-picture"
-      className="flex min-h-[20.75rem] flex-col justify-center lg:min-h-[17.75rem]"
-    >
+    <div data-slot="logins-picture" className={HELD}>
       <WireFlow
         className="animate-rise"
         phone="marks"
@@ -191,14 +219,14 @@ export function LoginsPicture({
           title: "Where from",
           nodes: start,
           max: ROWS - 1,
-          loadingRows: 3,
+          loadingRows: drawn.start,
           more: { href: "#attackers", words: (hidden) => `${hidden} more in the lists` },
         }}
         end={{
           title: "Accounts",
           nodes: end,
           max: ROWS - 1,
-          loadingRows: 2,
+          loadingRows: drawn.end,
           more: { href: "#recent", words: (hidden) => `${hidden} more in the record` },
           empty: unread ? "The accounts were not read." : "No account has signed in.",
         }}
@@ -210,6 +238,10 @@ export function LoginsPicture({
           ),
           eyebrow: "This server",
           title: "sshd",
+          // Its name and its two lines, known before the reads: one row of
+          // nodes is shorter than the hub with its words, so a hub that
+          // waited on one line stood the picture a line short.
+          loadingLines: { title: "sshd", hint: 2 },
           hint: (
             <>
               <span className={cn("numeric block", unread && "text-warning")}>
@@ -257,10 +289,12 @@ function originNode(origin: Origin): WireFlowNode {
     title: local ? (
       "The console"
     ) : (
-      <span className="block truncate font-mono">{origin.address}</span>
+      <span className="block truncate font-mono" title={origin.address}>
+        {origin.address}
+      </span>
     ),
     hint: (
-      <span className="block truncate">
+      <span className="block truncate" title={who}>
         {who}
         {origin.since && ` · ${relativeTime(origin.since)}`}
       </span>

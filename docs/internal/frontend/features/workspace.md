@@ -90,7 +90,10 @@ of facts (how many, how many ready, open sessions, the tailnet) with the verdict
 a computer as the one command and Check every computer again in the menu after it, drawn while the
 page loads;
 then the picture of a session's path — this browser, this server running guacd, each computer wired
-by whether its port answers and pulsing while a session is open; the computers as one-line rows (the
+by whether its port answers and pulsing while a session is open (`picture.tsx`, a `WireFlow` since
+0.9.1: the computers are rows on level lines into the server and the browser's line runs level into
+it from the other side, each computer its name and one line under its mark, which opens its
+screen); the computers as one-line rows (the
 system's mark, the name over the server on it and `account@address:port` in mono, a state dot and
 word, "43 ms direct · used 11m ago" as one line, Stream once paired, Connect and a menu; on a phone
 the mark, the name over its state and reading, and the menu), and the

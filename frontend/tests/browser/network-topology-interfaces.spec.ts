@@ -220,7 +220,7 @@ test("the throughput lines and the chart drill into the devices under them", asy
   await carried.getByRole("button", { name: "Clear" }).click()
   await expect(carried).toHaveCount(0)
 
-  await page.getByRole("link", { name: /Open ens3: what it received/ }).click()
+  await page.getByRole("link", { name: /^In .*received from the internet · ens3/ }).click()
   await expect(page).toHaveURL(/\/network\/interfaces\/ens3$/)
   await expect(page.getByRole("region", { name: "About ens3" })).toContainText("Uplink")
 })

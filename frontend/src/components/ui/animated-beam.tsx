@@ -3,6 +3,7 @@
 import { useEffect, useId, useState, type RefObject } from "react"
 
 import { cn } from "@/lib/utils"
+import { levelPath } from "@/components/ui/beam-path"
 
 /**
  * A line drawn between two elements, with a pulse of light travelling along
@@ -34,12 +35,20 @@ import { cn } from "@/lib/utils"
  * of things wired to a column of other things reads as ports and wires
  * rather than as strings pulled tight between them. The default is the arc
  * the picture of a request's path uses, bowed by `curvature`.
+ *
+ * `acrossRef` is where an `s` line bends: it runs level from each end to that
+ * element's edge and crosses only its width. A row of marks wired to one hub
+ * is then one level line the marks stand on, each mark's own line lying under
+ * the marks between it and the hub, and several rows bend into the hub in the
+ * gap they share rather than through each other's words.
  */
 export function AnimatedBeam({
   className,
   containerRef,
   fromRef,
   toRef,
+  acrossRef,
+  redrawOn,
   curvature = 0,
   shape = "arc",
   reverse = false,
@@ -60,6 +69,13 @@ export function AnimatedBeam({
   containerRef: RefObject<HTMLElement | null>
   fromRef: RefObject<HTMLElement | null>
   toRef: RefObject<HTMLElement | null>
+  /** An `s` line bends only across this element's width, and runs level beside it. */
+  acrossRef?: RefObject<HTMLElement | null>
+  /**
+   * The line is measured again when this changes: for ends that move inside a
+   * container that keeps its size, which no resize reports.
+   */
+  redrawOn?: string | number
   /** How far the midpoint bows above (positive) or below the straight line. */
   curvature?: number
   /** An arc bowed by `curvature`, or a wire that leaves and arrives level. */
@@ -107,6 +123,18 @@ export function AnimatedBeam({
       const endX = b.left - box.left + b.width / 2 + endXOffset
       const endY = b.top - box.top + b.height / 2 + endYOffset
       if (shape === "s") {
+        const across = acrossRef?.current?.getBoundingClientRect()
+        if (across && across.width > 0) {
+          setPathD(
+            levelPath(
+              { x: startX, y: startY },
+              { x: endX, y: endY },
+              across.left - box.left,
+              across.right - box.left,
+            ),
+          )
+          return
+        }
         const midX = (startX + endX) / 2
         setPathD(`M ${startX},${startY} C ${midX},${startY} ${midX},${endY} ${endX},${endY}`)
         return
@@ -122,6 +150,8 @@ export function AnimatedBeam({
     containerRef,
     fromRef,
     toRef,
+    acrossRef,
+    redrawOn,
     curvature,
     shape,
     startXOffset,
@@ -151,8 +181,7 @@ export function AnimatedBeam({
           tone === "success" && "stroke-success",
           tone === "warning" && "stroke-warning",
           tone === "danger" && "stroke-destructive",
-          tone === "default" &&
-            (quiet ? "stroke-border-strong" : "stroke-border motion-reduce:stroke-border-strong"),
+          tone === "default" && (quiet ? "stroke-wire" : "stroke-border motion-reduce:stroke-wire"),
         )}
       />
       {!quiet && pathD && (
