@@ -3868,6 +3868,7 @@ type Release struct {
 type ReleaseArtifactStatus struct {
 	Digest    string       `json:"digest,omitempty"`
 	Kind      ArtifactKind `json:"kind,omitempty"`
+	PrunedAt  *time.Time   `json:"prunedAt,omitempty"`
 	Reason    string       `json:"reason,omitempty"`
 	Reference string       `json:"reference,omitempty"`
 	Retained  bool         `json:"retained,omitempty"`

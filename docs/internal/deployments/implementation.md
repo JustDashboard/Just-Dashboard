@@ -910,9 +910,35 @@ only renderer/executor/validation authority for their feature.
   reads the report as a sentence and a line of facts (`run-rehearsal.tsx`).
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
-  an active deployment lease, and a staging release an unfinished promotion is about to take its image
-  from ([staging and promotion](staging-promotion.md)). Cleanup reports the reason for every retained row and removes a mutable
-  Docker tag only after inspection proves it still names the recorded config/digest. A run that fails
+  an active deployment lease, a staging release an unfinished promotion is about to take its image
+  from ([staging and promotion](staging-promotion.md)), every release whose runtime is in a state where
+  its container may still exist (`candidate`, `live`, `warm`, `draining`, `stopped` — a stopped or
+  sleeping environment starts the same container again — and a `quarantined` preview;
+  `heldRuntimeStates`), and the target of an unfinished rollback, redeploy or restart
+  (`operationTargetRetainedWhere`, since a queued run holds no lease yet). Cleanup reports the reason
+  for every retained row and removes a mutable Docker tag only after inspection proves it still names
+  the recorded config/digest.
+  **The retention sweep** (`ReleaseImageSweeper`, `release_retention_sweep.go`) is what removes the rest;
+  before it, `PruneArtifacts` had no caller and every release image stayed for good (about 1.6 GB per
+  Next.js release). A pass runs a minute after start-up, daily, and 30 s after any run finishes (the
+  engine's run observer), one pass at a time, oldest release first, at most 20 removals a pass (the
+  next pass carries on) and ten minutes long. Nothing is removed while any deployment holds a lease
+  (`reserveArtifactPrune`). Before each removal the remover (`DockerArtifactRemover`) asks the daemon
+  (`ImageUseReader.ImageUse`: the image's id, its names, and every container created from it in any
+  state — running, paused, exited, created) and refuses an image any container uses
+  (`ErrArtifactInUse`), a name outside the release namespace `just-dashboard/deployment-*` (a pulled
+  Compose service under its registry name, the dashboard's own images; `ErrArtifactNotOwned`), a
+  removal by id while another name holds the image, and any backend that cannot ask
+  (`ErrArtifactUnguarded`). A refusal leaves the artifact `available` with the reason; an image
+  already gone counts as removed. Each removal, and each removal that failed (`prune_failed`, tried
+  again next pass), is audited as `deploy.release.artifact.prune` (actor `system`; the reference,
+  release, digest, size, reason, trigger and any error). A removed artifact is `pruned` with
+  `pruned_at`, and the release's artifact readout (the release comparison's *Retained artifacts*)
+  shows it as *removed*, when, and that the release can no longer be rolled back to.
+  `ReleaseImageSweeper.DryRun` is the same pass removing and writing nothing, with the daemon's
+  refusals. Archived projects keep the same retention as any other (an archive is reversible and keeps
+  its history); a permanently deleted project's images are not in the store any more and stay on the
+  server, as [permanent deletion](permanent-deletion.md) says. A run that fails
   after `render_runtime` moves its candidate release to `failed` the moment the run itself reaches
   `failed`, `failed_activation`, `rolled_back` or `cancelled` — `TransitionRun` does it in the same
   transaction as the run's own state change — so it leaves `candidate` (which retention always keeps,

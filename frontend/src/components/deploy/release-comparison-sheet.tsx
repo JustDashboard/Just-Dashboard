@@ -419,8 +419,20 @@ function RetainedArtifacts({ artifacts }: { artifacts: ReleaseComparisonResponse
                   <span className="min-w-0 truncate font-mono text-xs">{artifact.reference}</span>
                   <Tag>{artifact.kind}</Tag>
                   <Status
-                    tone={artifact.retained ? "running" : "warning"}
-                    label={artifact.retained ? "retained" : "prunable"}
+                    tone={
+                      artifact.state === "pruned"
+                        ? "stopped"
+                        : artifact.retained
+                          ? "running"
+                          : "warning"
+                    }
+                    label={
+                      artifact.state === "pruned"
+                        ? "removed"
+                        : artifact.retained
+                          ? "retained"
+                          : "prunable"
+                    }
                   />
                   {artifact.sizeBytes > 0 && (
                     <span className="numeric ml-auto text-hint text-muted-foreground">
@@ -428,7 +440,10 @@ function RetainedArtifacts({ artifacts }: { artifacts: ReleaseComparisonResponse
                     </span>
                   )}
                 </div>
-                <p className="text-hint text-muted-foreground">{artifact.reason}</p>
+                <p className="text-hint text-muted-foreground">
+                  {artifact.reason}
+                  {artifact.prunedAt && ` Removed ${relativeTime(artifact.prunedAt)}.`}
+                </p>
               </div>
             </li>
           ))}

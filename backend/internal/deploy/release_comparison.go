@@ -38,6 +38,8 @@ type ReleaseArtifactStatus struct {
 	State     string       `json:"state"`
 	Retained  bool         `json:"retained"`
 	Reason    string       `json:"reason"`
+	// PrunedAt is when release retention removed it from this server.
+	PrunedAt *time.Time `json:"prunedAt,omitempty"`
 }
 
 type ReleaseDetailComparison struct {
@@ -484,6 +486,9 @@ func (s *OrchestrationStore) releaseArtifactStatus(
 		}
 		if decision, found := byArtifact[artifact.ID]; found {
 			status.Retained, status.Reason = decision.Retain, decision.Reason
+		} else if artifact.State == "pruned" {
+			status.Retained, status.PrunedAt = false, artifact.PrunedAt
+			status.Reason = "Release retention removed this from the server, so this release can no longer be rolled back to."
 		}
 		result = append(result, status)
 	}

@@ -3888,6 +3888,7 @@ export interface Release {
 export interface ReleaseArtifactStatus {
   digest?: string
   kind?: ArtifactKind
+  prunedAt?: string | null
   reason?: string
   reference?: string
   retained?: boolean

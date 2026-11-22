@@ -162,6 +162,8 @@ type moduleSet struct {
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
+	// releaseImages removes release images retention no longer keeps.
+	releaseImages *deploy.ReleaseImageSweeper
 	// sleeper stops environments that sleep once nobody visits and wakes
 	// them on the next request (deploy/sleep.go).
 	sleeper    *deploy.Sleeper
@@ -524,6 +526,11 @@ func (s *Server) initModules() {
 		normalizedExecutor.WithRequestRecord(s.modules.requests)
 	}
 	s.modules.deployExecutor = normalizedExecutor
+	// Release retention: images outside the policy are removed after runs,
+	// at start-up and daily, each removal audited, never one a container
+	// uses (release_retention_sweep.go).
+	s.modules.releaseImages = deploy.NewReleaseImageSweeper(s.modules.deployRuns,
+		deploy.NewDockerArtifactRemover(artifactBackend), s.auditReleaseImagePrune, s.Log)
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
 		deploy.NewDeploymentStepExecutor(
@@ -562,6 +569,9 @@ func (s *Server) initModules() {
 		// And what the executor held for it: the certificate its build
 		// started ordering.
 		normalizedExecutor.HousekeepingObserver(),
+		// A finished run may have retired a release, or let go of the
+		// lease that held every image back, so retention gets a pass.
+		s.modules.releaseImages,
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)
