@@ -53,7 +53,10 @@ describe("settingsChanges", () => {
   test("only the changed fields are sent", () => {
     const repo = detail()
     const draft = { ...draftOf(repo), description: "Orders and billing", hasWiki: true }
-    expect(settingsChanges(repo, draft)).toEqual({ description: "Orders and billing", hasWiki: true })
+    expect(settingsChanges(repo, draft)).toEqual({
+      description: "Orders and billing",
+      hasWiki: true,
+    })
     expect(changeCount(settingsChanges(repo, draft))).toBe(2)
   })
 
@@ -66,7 +69,12 @@ describe("settingsChanges", () => {
 
   test("a rename, a topic list and a default branch", () => {
     const repo = detail()
-    const draft = { ...draftOf(repo), name: " api-v2 ", topics: ["billing", "grpc"], defaultBranch: "trunk" }
+    const draft = {
+      ...draftOf(repo),
+      name: " api-v2 ",
+      topics: ["billing", "grpc"],
+      defaultBranch: "trunk",
+    }
     expect(settingsChanges(repo, draft)).toEqual({
       name: "api-v2",
       topics: ["billing", "grpc"],
@@ -105,7 +113,11 @@ describe("validation", () => {
 
 describe("runs", () => {
   test("a run's word comes from its status while it runs, its conclusion after", () => {
-    expect(runState({ status: "in_progress" })).toEqual({ word: "running", tone: "notice", live: true })
+    expect(runState({ status: "in_progress" })).toEqual({
+      word: "running",
+      tone: "notice",
+      live: true,
+    })
     expect(runState({ status: "queued" }).word).toBe("queued")
     expect(runState({ status: "completed", conclusion: "success" }).word).toBe("succeeded")
     expect(runState({ status: "completed", conclusion: "failure" }).tone).toBe("danger")
@@ -119,7 +131,11 @@ describe("runs", () => {
       cancel: false,
     })
     expect(runVerbs({ status: "completed", conclusion: "failure" }).rerunFailed).toBe(true)
-    expect(runVerbs({ status: "in_progress" })).toEqual({ rerun: false, rerunFailed: false, cancel: true })
+    expect(runVerbs({ status: "in_progress" })).toEqual({
+      rerun: false,
+      rerunFailed: false,
+      cancel: true,
+    })
   })
 })
 

@@ -50,11 +50,7 @@ export function RepoCommits() {
         title="Commits"
         actions={
           <Select value={branch} onValueChange={setBranch}>
-            <SelectTrigger
-              aria-label="Branch"
-              size="sm"
-              className="w-48 font-mono max-sm:w-36"
-            >
+            <SelectTrigger aria-label="Branch" size="sm" className="w-48 font-mono max-sm:w-36">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>

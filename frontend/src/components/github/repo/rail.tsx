@@ -65,8 +65,7 @@ export function useRepoRail(connection: number | null) {
     query: filters.query,
     setQuery: (query: string) => setFilters({ ...filters, query }),
     filtered: narrowed,
-    clearFilters: () =>
-      setFilters({ ...GITHUB_LIST_DEFAULTS, sort: filters.sort }),
+    clearFilters: () => setFilters({ ...GITHUB_LIST_DEFAULTS, sort: filters.sort }),
     caption,
   }
 }
@@ -145,9 +144,7 @@ function RepoRailRow({
       }
     >
       <RailName current={current}>{repo.name}</RailName>
-      <RailLine>
-        {[repo.owner.login, repo.language].filter(Boolean).join(" · ")}
-      </RailLine>
+      <RailLine>{[repo.owner.login, repo.language].filter(Boolean).join(" · ")}</RailLine>
     </RailRow>
   )
 }

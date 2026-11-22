@@ -88,8 +88,8 @@ export function Blocked({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its reason can be read without a pointer */}
         <span
+          // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its reason can be read without a pointer
           tabIndex={0}
           data-slot="blocked"
           aria-label={reason}

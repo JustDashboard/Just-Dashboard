@@ -67,7 +67,11 @@ export function RepoPulls() {
 function PullList({ onOpen }: { onOpen: (number: number) => void }) {
   const { path } = useRepo()
   const [filter, setFilter] = useState<PullFilter>("open")
-  const pages = usePages<GitHubPull, GitHubPullPage>(path("/pulls"), { state: filter }, (p) => p.pulls)
+  const pages = usePages<GitHubPull, GitHubPullPage>(
+    path("/pulls"),
+    { state: filter },
+    (p) => p.pulls,
+  )
   return (
     <Panel plain aria-label="Pull requests">
       <PanelHeader title="Pull requests" />
@@ -197,9 +201,8 @@ function PullDetail({ number, onBack }: { number: number; onBack: () => void }) 
           <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
             <PullStateWord pull={asPull(pull)} />
             <span>
-              {pull.author} wants{" "}
-              <span className="font-mono text-foreground">{pull.head.ref}</span> in{" "}
-              <span className="font-mono text-foreground">{pull.base.ref}</span>
+              {pull.author} wants <span className="font-mono text-foreground">{pull.head.ref}</span>{" "}
+              in <span className="font-mono text-foreground">{pull.base.ref}</span>
             </span>
             <span className="numeric" title={timestamp(pull.updatedAt)}>
               updated {relativeTime(pull.updatedAt)}
@@ -264,7 +267,10 @@ function PullDetail({ number, onBack }: { number: number; onBack: () => void }) 
           ) : (
             <ul className="divide-y divide-hairline" data-slot="github-checks">
               {pull.checks.map((check, index) => (
-                <li key={`${check.name}-${index}`} className="flex min-w-0 items-center gap-2.5 py-2">
+                <li
+                  key={`${check.name}-${index}`}
+                  className="flex min-w-0 items-center gap-2.5 py-2"
+                >
                   <CheckMark check={check} />
                   <span className="min-w-0 flex-1 truncate text-body">{check.name}</span>
                   {check.detailsUrl && (
@@ -352,7 +358,9 @@ function CheckMark({ check }: { check: GitHubCheck }) {
     return <CheckCircle role="img" aria-label="passed" className="size-4 shrink-0 text-success" />
   }
   if (["failure", "timed_out", "error", "action_required"].includes(check.conclusion ?? "")) {
-    return <CrossCircle role="img" aria-label="failed" className="size-4 shrink-0 text-destructive" />
+    return (
+      <CrossCircle role="img" aria-label="failed" className="size-4 shrink-0 text-destructive" />
+    )
   }
   return (
     <Slash

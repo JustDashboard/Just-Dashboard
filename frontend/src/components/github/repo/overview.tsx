@@ -7,7 +7,12 @@ import { WireMark } from "@/components/wire/wire"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
 import { Button } from "@/components/ui/button"
-import { abilityList, grantWords, installationWords, roleWord } from "@/components/github/repo/model"
+import {
+  abilityList,
+  grantWords,
+  installationWords,
+  roleWord,
+} from "@/components/github/repo/model"
 import { LabelTag, useRepo } from "@/components/github/repo/shared"
 import { plural } from "@/lib/format"
 import { localGitHref } from "@/lib/github"
@@ -236,7 +241,10 @@ function Abilities() {
               {item.allowed ? (
                 <CheckCircle aria-label="allowed" className="mt-0.5 size-4 shrink-0 text-success" />
               ) : (
-                <Slash aria-label="not allowed" className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+                <Slash
+                  aria-label="not allowed"
+                  className="mt-0.5 size-4 shrink-0 text-muted-foreground"
+                />
               )}
               <span className="min-w-0">
                 <span className={item.allowed ? "" : "text-muted-foreground"}>{item.words}</span>

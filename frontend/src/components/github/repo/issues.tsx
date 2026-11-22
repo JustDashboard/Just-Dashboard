@@ -147,7 +147,9 @@ function IssueList({ onOpen }: { onOpen: (number: number) => void }) {
           <ChoiceListSkeleton rows={4} />
         ) : pages.items.length === 0 ? (
           <EmptyNote>
-            {filter === "all" ? "No issues yet." : `No ${filter} issues${label === ANY_LABEL ? "" : ` labelled ${label}`}.`}
+            {filter === "all"
+              ? "No issues yet."
+              : `No ${filter} issues${label === ANY_LABEL ? "" : ` labelled ${label}`}.`}
           </EmptyNote>
         ) : (
           <ChoiceList data-slot="github-issues">
@@ -164,7 +166,8 @@ function IssueList({ onOpen }: { onOpen: (number: number) => void }) {
                 }
                 description={
                   <>
-                    {issue.author} · <span className="numeric">{relativeTime(issue.updatedAt)}</span>
+                    {issue.author} ·{" "}
+                    <span className="numeric">{relativeTime(issue.updatedAt)}</span>
                   </>
                 }
                 trailing={
@@ -212,7 +215,11 @@ function IssueState({ issue }: { issue: Pick<GitHubIssue, "state" | "stateReason
   }
   if (issue.stateReason === "not_planned") {
     return (
-      <IssueMark role="img" aria-label="not planned" className="size-4 shrink-0 text-muted-foreground" />
+      <IssueMark
+        role="img"
+        aria-label="not planned"
+        className="size-4 shrink-0 text-muted-foreground"
+      />
     )
   }
   return (

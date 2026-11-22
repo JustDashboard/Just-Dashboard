@@ -44,8 +44,8 @@ export function useRepoActs() {
         </p>
       ) : (
         <p>
-          It becomes read-only for everyone: no pushes, issues, pull requests, comments or changes to
-          its settings until it is unarchived. Nothing in it is deleted, and it can be unarchived
+          It becomes read-only for everyone: no pushes, issues, pull requests, comments or changes
+          to its settings until it is unarchived. Nothing in it is deleted, and it can be unarchived
           here.
         </p>
       ),

@@ -1,29 +1,13 @@
 "use client"
 
 import Link from "next/link"
-import {
-  Archive,
-  ArrowUpRight,
-  Copy,
-  Download,
-  Eye,
-  FolderOpen,
-  MoreHorizontal,
-  Trash,
-} from "@/components/icons"
+import { Archive, ArrowUpRight, Copy, Download, Eye, FolderOpen, Trash } from "@/components/icons"
 import { Fact } from "@/components/fact-line"
 import { ForgeFace, BranchChip } from "@/components/git/marks"
 import { IdentityHeader } from "@/components/identity-header"
 import { LanguageMark } from "@/components/language-icon"
 import { Button } from "@/components/ui/button"
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuSeparator,
-  DropdownMenuTrigger,
-} from "@/components/ui/dropdown-menu"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { VerbMenu, type VerbSpec } from "@/components/verbs"
 import { useRepoActs } from "@/components/github/repo/acts"
 import { roleWord } from "@/components/github/repo/model"
 import { useActReason, useRepo } from "@/components/github/repo/shared"
@@ -131,99 +115,47 @@ function RepoMenu({
   const administer = useActReason("administer")
   const remove = useActReason("delete", { destructive: true })
   const visibility = useActReason("administer", { destructive: true })
-  return (
-    <DropdownMenu>
-      <DropdownMenuTrigger asChild>
-        <Button
-          size="icon-sm"
-          variant="ghost"
-          aria-label={`More actions for ${repo.fullName}`}
-          className="[&_svg:not([class*='size-'])]:size-3.5"
-        >
-          <MoreHorizontal />
-        </Button>
-      </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="min-w-52">
-        <DropdownMenuItem asChild>
-          <a href={repo.htmlUrl} target="_blank" rel="noreferrer">
-            <ArrowUpRight />
-            Open on GitHub
-          </a>
-        </DropdownMenuItem>
-        <MenuVerb
-          icon={Download}
-          label="Clone to server"
-          reason={cloneable ? undefined : controlReason}
-          run={onClone}
-        />
-        <MenuVerb
-          icon={Copy}
-          label="Copy clone URL"
-          run={() => void copyText(repo.cloneUrl, "Clone URL copied")}
-        />
-        <DropdownMenuSeparator />
-        <MenuVerb
-          icon={Archive}
-          label={repo.archived ? "Unarchive" : "Archive"}
-          reason={administer}
-          run={acts.archive}
-        />
-        <MenuVerb
-          icon={Eye}
-          label={acts.goingPublic ? "Make public" : "Make private"}
-          reason={visibility}
-          run={acts.visibility}
-        />
-        <DropdownMenuSeparator />
-        <MenuVerb icon={Trash} label="Delete" danger reason={remove} run={acts.remove} />
-      </DropdownMenuContent>
-    </DropdownMenu>
-  )
-}
-
-/**
- * One verb of the menu. Held back, it stays in its place, quiet, and says
- * why on hover and on the keyboard's arrival: Radix's own `disabled` takes
- * the item out of both, so it would sit there unexplained.
- */
-function MenuVerb({
-  icon: Icon,
-  label,
-  reason,
-  danger,
-  run,
-}: {
-  icon: React.ComponentType<{ className?: string }>
-  label: string
-  reason?: string
-  danger?: boolean
-  run: () => void
-}) {
-  if (!reason) {
-    return (
-      <DropdownMenuItem variant={danger ? "destructive" : "default"} onSelect={run}>
-        <Icon />
-        {label}
-      </DropdownMenuItem>
-    )
-  }
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <DropdownMenuItem
-          aria-disabled
-          aria-description={reason}
-          data-held=""
-          className="text-muted-foreground focus:text-muted-foreground"
-          onSelect={(event) => event.preventDefault()}
-        >
-          <Icon />
-          {label}
-        </DropdownMenuItem>
-      </TooltipTrigger>
-      <TooltipContent side="left" className="max-w-xs">
-        {reason}
-      </TooltipContent>
-    </Tooltip>
-  )
+  const held = (reason: string | undefined) => ({ disabled: Boolean(reason), reason })
+  const verbs: VerbSpec[] = [
+    { key: "github", label: "Open on GitHub", icon: ArrowUpRight, href: repo.htmlUrl },
+    {
+      key: "clone",
+      label: "Clone to server",
+      icon: Download,
+      run: onClone,
+      ...held(cloneable ? undefined : controlReason),
+    },
+    {
+      key: "copy",
+      label: "Copy clone URL",
+      icon: Copy,
+      run: () => void copyText(repo.cloneUrl, "Clone URL copied"),
+    },
+    {
+      key: "archive",
+      label: repo.archived ? "Unarchive" : "Archive",
+      icon: Archive,
+      group: "Repository",
+      run: acts.archive,
+      ...held(administer),
+    },
+    {
+      key: "visibility",
+      label: acts.goingPublic ? "Make public" : "Make private",
+      icon: Eye,
+      group: "Repository",
+      run: acts.visibility,
+      ...held(visibility),
+    },
+    {
+      key: "delete",
+      label: "Delete",
+      icon: Trash,
+      group: "Repository",
+      danger: true,
+      run: acts.remove,
+      ...held(remove),
+    },
+  ]
+  return <VerbMenu verbs={verbs} label={`More actions for ${repo.fullName}`} />
 }

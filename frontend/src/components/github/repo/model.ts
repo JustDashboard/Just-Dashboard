@@ -272,7 +272,11 @@ export function runState(run: Pick<GitHubRun, "status" | "conclusion">): {
     case "neutral":
       return { word: "neutral", tone: "neutral", live: false }
     default:
-      return { word: run.conclusion?.replace(/_/g, " ") || "completed", tone: "neutral", live: false }
+      return {
+        word: run.conclusion?.replace(/_/g, " ") || "completed",
+        tone: "neutral",
+        live: false,
+      }
   }
 }
 
@@ -283,7 +287,8 @@ export function runVerbs(run: Pick<GitHubRun, "status" | "conclusion">): {
   cancel: boolean
 } {
   const done = run.status === "completed"
-  const failed = done && ["failure", "timed_out", "cancelled", "startup_failure"].includes(run.conclusion ?? "")
+  const failed =
+    done && ["failure", "timed_out", "cancelled", "startup_failure"].includes(run.conclusion ?? "")
   return {
     rerun: done,
     rerunFailed: failed,

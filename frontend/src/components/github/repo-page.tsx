@@ -201,10 +201,7 @@ function RepoLoaded({
   const views: TabView<RepoTab>[] = REPO_TABS.map((key) => ({
     key,
     label: REPO_TAB_LABEL[key],
-    count:
-      key === "issues" && repo.settings.hasIssues
-        ? repo.openIssues || undefined
-        : undefined,
+    count: key === "issues" && repo.settings.hasIssues ? repo.openIssues || undefined : undefined,
   }))
   const value = {
     connection,
@@ -225,12 +222,7 @@ function RepoLoaded({
         <RepoIdentity checkouts={checkouts} onClone={() => setCloning(true)} />,
         <>
           <Tabs value={tab} onValueChange={setTab} className="gap-0">
-            <ViewTabList
-              label={`Views of ${repo.fullName}`}
-              views={views}
-              value={tab}
-              sticky
-            />
+            <ViewTabList label={`Views of ${repo.fullName}`} views={views} value={tab} sticky />
             <TabsContent value="overview" className="pt-6">
               {tab === "overview" && (
                 <RepoOverview
@@ -258,12 +250,7 @@ function RepoLoaded({
             <TabsContent value="collaborators" className="pt-4">
               {tab === "collaborators" && <RepoCollaborators />}
             </TabsContent>
-            <TabsContent
-              value="settings"
-              forceMount
-              hidden={tab !== "settings"}
-              className="pt-6"
-            >
+            <TabsContent value="settings" forceMount hidden={tab !== "settings"} className="pt-6">
               {settingsOpened && <RepoSettings onRenamed={onRenamed} />}
             </TabsContent>
           </Tabs>
@@ -331,7 +318,10 @@ function useAccountFor(
     return { connection: null, none: false, failure: connections.error }
   }
   const result = found?.name === fullName ? found : null
-  return { connection: result?.connection ?? null, none: result !== null && result.connection === null }
+  return {
+    connection: result?.connection ?? null,
+    none: result !== null && result.connection === null,
+  }
 }
 
 /**
@@ -408,5 +398,11 @@ function RepoUnavailable({
       </MissingThing>
     )
   }
-  return <ErrorState error={error ?? new Error("The repository could not be read.")} onRetry={onRetry} retryable />
+  return (
+    <ErrorState
+      error={error ?? new Error("The repository could not be read.")}
+      onRetry={onRetry}
+      retryable
+    />
+  )
 }

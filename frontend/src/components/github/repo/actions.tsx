@@ -183,7 +183,12 @@ function WorkflowRow({ workflow, onRun }: { workflow: GitHubWorkflow; onRun: () 
                 </Button>
               </Blocked>
             ) : (
-              <Button size="xs" variant="outline" onClick={onRun} aria-label={`Run ${workflow.name}`}>
+              <Button
+                size="xs"
+                variant="outline"
+                onClick={onRun}
+                aria-label={`Run ${workflow.name}`}
+              >
                 <Play />
                 Run
               </Button>
@@ -191,8 +196,8 @@ function WorkflowRow({ workflow, onRun }: { workflow: GitHubWorkflow; onRun: () 
           ) : (
             <Tooltip>
               <TooltipTrigger asChild>
-                {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its reason can be read without a pointer */}
                 <span
+                  // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that its reason can be read without a pointer
                   tabIndex={0}
                   data-slot="no-dispatch"
                   className="rounded-sm text-hint text-faint focus-ring"
@@ -243,7 +248,11 @@ function RunRow({
     confirm({
       title: `Cancel run ${run.runNumber}`,
       confirmLabel: "Cancel run",
-      description: <p>Stops {workflow} on {run.branch}. Jobs that finished keep their results.</p>,
+      description: (
+        <p>
+          Stops {workflow} on {run.branch}. Jobs that finished keep their results.
+        </p>
+      ),
       action: async () => {
         await post(path(`/actions/runs/${run.id}/cancel`))
         onChanged()
@@ -289,7 +298,9 @@ function RunRow({
   return (
     <Row
       data-run={run.id}
-      leading={<Status tone={DOT[state.tone]} live={state.live} label={state.word} className="w-28" />}
+      leading={
+        <Status tone={DOT[state.tone]} live={state.live} label={state.word} className="w-28" />
+      }
       title={run.title || run.name}
       subtitle={
         <>
@@ -343,7 +354,12 @@ function DispatchDialog({
     Object.fromEntries(
       workflow.dispatch.inputs.map((input) => [
         input.name,
-        input.default ?? (input.type === "boolean" ? "false" : input.type === "choice" ? (input.options?.[0] ?? "") : ""),
+        input.default ??
+          (input.type === "boolean"
+            ? "false"
+            : input.type === "choice"
+              ? (input.options?.[0] ?? "")
+              : ""),
       ]),
     ),
   )
@@ -359,7 +375,8 @@ function DispatchDialog({
         path(`/actions/workflows/${workflow.id}/dispatch`),
         { ref, inputs },
       )
-      notify.success(`Started ${workflow.name}`, result.htmlUrl)
+      void result
+      notify.success(`Started ${workflow.name}`)
       onStarted()
     } catch (err) {
       setRefused(errorMessage(err))

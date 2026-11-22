@@ -33,11 +33,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { del, errorMessage, get, post } from "@/lib/api"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type {
-  GitHubBranch,
-  GitHubBranchPage,
-  GitHubBranchProtection,
-} from "@/lib/github-types"
+import type { GitHubBranch, GitHubBranchPage, GitHubBranchProtection } from "@/lib/github-types"
 
 /** The default first, then the rest as GitHub lists them. */
 function ordered(branches: GitHubBranch[]) {
@@ -77,9 +73,16 @@ export function RepoBranches() {
     <Panel plain aria-label="Branches">
       <PanelHeader
         title="Branches"
-        count={pages.items.length > 0 ? plural(pages.items.length, "branch", "branches") : undefined}
+        count={
+          pages.items.length > 0 ? plural(pages.items.length, "branch", "branches") : undefined
+        }
         actions={
-          <AbilityButton ability="push" size="sm" variant="outline" onClick={() => setCreating(true)}>
+          <AbilityButton
+            ability="push"
+            size="sm"
+            variant="outline"
+            onClick={() => setCreating(true)}
+          >
             <BranchPlus className="size-3.5" />
             New branch
           </AbilityButton>
@@ -174,8 +177,7 @@ function Protection({ branch }: { branch: string }) {
 function ProtectionBody({ branch }: { branch: string }) {
   const { path } = useRepo()
   const read = usePoll(
-    (signal) =>
-      get<GitHubBranchProtection>(path("/branches/protection"), { name: branch }, signal),
+    (signal) => get<GitHubBranchProtection>(path("/branches/protection"), { name: branch }, signal),
     0,
     [branch],
   )
