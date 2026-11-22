@@ -194,7 +194,7 @@ function repository(
   const [login, name] = fullName.split("/")
   const owner = { login, type: installation.account.type }
   const base: GitHubRepository = {
-    id: 9000 + fullName.length * 7 + login.length,
+    id: 5000 + [...fullName].reduce((sum, c, i) => sum + c.charCodeAt(0) * (i + 1), 0),
     name,
     fullName,
     owner,
