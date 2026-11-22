@@ -653,6 +653,26 @@ export function GitHubListPage() {
   )
 }
 
+/** The page before its first read, in its loaded shape: the route's Suspense fallback. */
+export function GitHubListSkeleton() {
+  return (
+    <Page>
+      <PageContext title="GitHub" />
+      <IdentityHeader
+        label="About GitHub"
+        slot="github-identity"
+        loading
+        mark="github"
+        fallback={GitHubMark}
+        title="GitHub"
+        command
+        menu={false}
+      />
+      <ChoiceListSkeleton rows={6} lines={2} />
+    </Page>
+  )
+}
+
 /**
  * Why the web sign-in cannot start from this address, and the two ways on:
  * the code sign-in, which works from anywhere, or adding this address to the
@@ -1012,7 +1032,8 @@ function RepositoryList({
           <ChoiceList aria-label={`Repositories of @${connection.login}`}>
             {page.map((repo) => (
               <RepositoryRow
-                key={repo.id}
+                // The full name, which one account's list holds once.
+                key={repo.fullName}
                 repo={repo}
                 connection={connection.id}
                 checkouts={localCheckoutsOf(local, repo.fullName)}

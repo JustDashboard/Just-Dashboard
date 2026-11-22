@@ -41,6 +41,24 @@ test("the rail has Local Git and GitHub, and /git is still Local Git", async ({ 
   await expect(page).toHaveTitle(/^GitHub · /)
 })
 
+test("search finds both pages by git and by github", async ({ page }) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockGitHubPage(page)
+  await page.goto("/github")
+  await expect(identity(page)).toBeVisible()
+  const trigger = page.locator('[data-slot="sidebar-header"]').getByRole("button", { name: /Search/ })
+  await trigger.focus()
+  await page.keyboard.press("Control+k")
+  const palette = page.getByRole("dialog", { name: "Command palette" })
+  const input = palette.getByRole("combobox", { name: "Search dashboard" })
+  const options = palette.getByRole("listbox").getByRole("option")
+  await input.fill("page: git")
+  await expect(options.filter({ hasText: "Local Git" }).first()).toBeVisible()
+  await expect(options.filter({ hasText: /^GitHub/ }).first()).toBeVisible()
+  await input.fill("page: github")
+  await expect(options.first()).toContainText("GitHub")
+})
+
 test.describe("before the App exists", () => {
   test("an administrator sets it up and is sent to GitHub with the manifest", async ({
     page,
@@ -54,13 +72,14 @@ test.describe("before the App exists", () => {
     const dialog = page.getByRole("dialog", { name: "Set up GitHub" })
     await expect(dialog).toContainText("Read and push code")
     await dialog.getByRole("radio", { name: "An organisation" }).click()
-    await dialog.getByLabel("Organisation").fill("-bad")
+    await dialog.getByRole("textbox", { name: "Organisation" }).fill("-bad")
     await expect(dialog.getByRole("button", { name: "Continue on GitHub" })).toBeDisabled()
-    await dialog.getByLabel("Organisation").fill("northwind")
+    await dialog.getByRole("textbox", { name: "Organisation" }).fill("northwind")
     await dialog.getByRole("button", { name: "Continue on GitHub" }).click()
     await expect.poll(() => github.length).toBe(1)
     expect(github[0].method).toBe("POST")
-    expect(decodeURIComponent(github[0].body ?? "")).toContain('"name":"Just Dashboard Repos"')
+    const posted = new URLSearchParams(github[0].body ?? "").get("manifest")
+    expect(JSON.parse(posted ?? "{}")).toEqual({ name: "Just Dashboard Repos" })
     const manifest = calls.find((call) => call.path === "/github/app/manifest")
     expect(manifest?.body).toMatchObject({
       origin: baseURL,
@@ -165,9 +184,9 @@ test.describe("connected", () => {
     // Recently updated first.
     await expect(rows(page).first()).toContainText("northwind/api")
 
-    await page.getByRole("searchbox", { name: "Search repositories" }).fill("billing")
+    await page.getByRole("textbox", { name: "Search repositories" }).fill("billing")
     await expect(rows(page)).toHaveCount(1)
-    await page.getByRole("searchbox", { name: "Search repositories" }).fill("")
+    await page.getByRole("textbox", { name: "Search repositories" }).fill("")
     await page.getByRole("button", { name: "Private 4" }).click()
     await expect(rows(page)).toHaveCount(4)
     await page.getByRole("button", { name: "All 9" }).click()
@@ -187,7 +206,7 @@ test.describe("connected", () => {
     await page.getByRole("option", { name: "Most stars" }).click()
     await expect(rows(page).first()).toContainText("acme-labs/design-system")
 
-    await page.getByRole("searchbox", { name: "Search repositories" }).fill("nothing-like-this")
+    await page.getByRole("textbox", { name: "Search repositories" }).fill("nothing-like-this")
     await expect(page.getByText("No repository matches.")).toBeVisible()
     await page.getByRole("button", { name: "Clear filters" }).click()
     await expect(rows(page)).toHaveCount(9)
@@ -198,10 +217,19 @@ test.describe("connected", () => {
     await mockGitHubPage(page, { repositories: { 1: manyRepositories(40), 2: [] } })
     await page.goto("/github")
     await expect(rows(page)).toHaveCount(30)
-    const before = await rows(page).nth(5).boundingBox()
+    // Where a drawn row stands in the list, whatever the press scrolled.
+    const place = () =>
+      rows(page).evaluateAll((items) =>
+        items
+          .slice(0, 30)
+          .map((item) =>
+            Math.round(item.getBoundingClientRect().top - items[0].getBoundingClientRect().top),
+          ),
+      )
+    const before = await place()
     await page.getByRole("button", { name: "Show more" }).click()
     await expect(rows(page)).toHaveCount(49)
-    expect(await rows(page).nth(5).boundingBox()).toEqual(before)
+    expect(await place()).toEqual(before)
     await expect(page.getByRole("button", { name: "Show more" })).toHaveCount(0)
   })
 

@@ -207,12 +207,12 @@ export async function mockGitHubPage(page: Page, options: PageMockOptions = {}) 
         deviceReads++
         await json(
           route,
-          deviceReads < 2 ? { status: "pending" } : { status: "complete", connection: conns[0] },
+          deviceReads < 2 ? { status: "pending" } : { status: "complete", connection: conns[0] ?? baseConnections[0] },
         )
         return true
       }
       if (path === "/github/callback" && method === "POST") {
-        await json(route, { kind: "connection", connection: conns[0] })
+        await json(route, { kind: "connection", connection: conns[0] ?? baseConnections[0] })
         return true
       }
       if (/^\/github\/connections\/\d+\/refresh$/.test(path) && method === "POST") {
