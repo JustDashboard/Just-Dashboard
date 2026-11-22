@@ -27,7 +27,7 @@ import { LoadingPanel } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 import { IdentityHeader } from "@/components/identity-header"
 import { useProjectStart } from "@/components/deploy/project-verbs"
-import { projectProduct } from "@/components/deploy/vocabulary"
+import { RUN_IN_FLIGHT_POLL_MS, isActiveRun, projectProduct } from "@/components/deploy/vocabulary"
 import { OverviewSkeleton } from "@/components/deploy/overview-skeleton"
 
 /**
@@ -185,9 +185,13 @@ export function ProjectProvider({
     [stagingId],
   )
 
+  // A run in flight changes the project every second or two — its stage, its
+  // release, its state — so the reads that show it follow at that pace while
+  // one is running, and at their own once it ends.
+  const [inFlight, setInFlight] = useState(false)
   const detail = usePoll(
     (signal) => get<ProjectDetail>(`/deploy/${projectId}`, environmentQuery, signal),
-    5000,
+    inFlight ? RUN_IN_FLIGHT_POLL_MS : 5000,
     [projectId, stagingId],
     { enabled: valid && (chosen !== "staging" || environmentList.data !== undefined) },
   )
@@ -204,10 +208,14 @@ export function ProjectProvider({
           : { view: "engine", scope: "production" },
         signal,
       ),
-    5000,
+    inFlight ? RUN_IN_FLIGHT_POLL_MS : 5000,
     [projectId, stagingId],
     { enabled: valid },
   )
+  const running =
+    Boolean(detail.data?.deployment.activeRun) ||
+    (runs.data?.runs ?? []).some((run) => isActiveRun(run.state))
+  if (running !== inFlight) setInFlight(running)
   const releases = usePoll(
     (signal) =>
       get<DeploymentRelease[]>(

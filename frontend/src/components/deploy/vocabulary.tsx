@@ -108,6 +108,13 @@ const ACTIVE_RUN_STATES = new Set<DeploymentRunState>([
   "cancelling",
 ])
 
+/**
+ * How often a page that shows a project's runs reads them again while one is
+ * in flight: a run's stage moves every second or two, and the five seconds a
+ * resting page waits was a stage behind. A hidden tab still stops reading.
+ */
+export const RUN_IN_FLIGHT_POLL_MS = 2000
+
 export function isActiveRun(state: DeploymentRunState | string | undefined) {
   return state ? ACTIVE_RUN_STATES.has(state as DeploymentRunState) : false
 }

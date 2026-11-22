@@ -63,6 +63,7 @@ import {
   runCommit,
   runTitle,
   runTriggerLine,
+  RUN_IN_FLIGHT_POLL_MS,
 } from "@/components/deploy/vocabulary"
 import { useNow } from "@/hooks/use-now"
 import {
@@ -139,10 +140,15 @@ function Fleet() {
   const roomy = useBreakpoint("sm")
   const lined = useBreakpoint("lg")
   const wide = useBreakpoint("xl")
+  // While anything is building the fleet follows it every two seconds, so a
+  // card's stage keeps up with the run; at rest it reads every five.
+  const [inFlight, setInFlight] = useState(false)
   const fleet = usePoll(
     (signal) => get<DeploymentFleet>("/deploy/", { view: "fleet" }, signal),
-    5000,
+    inFlight ? RUN_IN_FLIGHT_POLL_MS : 5000,
   )
+  const running = (fleet.data?.activeWork.length ?? 0) > 0
+  if (running !== inFlight) setInFlight(running)
   // Every project's last hour in one answer, cached to the minute per route
   // on the server, so a fleet of forty is one read rather than forty.
   const pulse = usePoll(
