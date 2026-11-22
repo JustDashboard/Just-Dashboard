@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
 )
@@ -57,8 +56,7 @@ func (s *Service) CloneToken(ctx context.Context, access *RepoAccess) (string, f
 	}
 	asApp := NewClient(s.APIURL, s.HTTP, func(context.Context) (string, error) { return jwt, nil })
 	var minted struct {
-		Token     string    `json:"token"`
-		ExpiresAt time.Time `json:"expires_at"`
+		Token string `json:"token"`
 	}
 	body := DownscopedTokenRequest(access.Repository.ID)
 	if _, err := asApp.Do(ctx, http.MethodPost, "/app/installations/"+strconv.FormatInt(access.Installation.ID, 10)+"/access_tokens", body, &minted); err != nil {

@@ -88,7 +88,7 @@ func githubUser(r *http.Request) int64 { return httpx.MustPrincipal(r).UserID() 
 func githubOrigin(r *http.Request, body string) (string, error) {
 	claimed, err := githubrepos.ParseOrigin(body)
 	if err != nil {
-		return "", httpx.BadRequest("%s", err.Error())
+		return "", httpx.Refused(err)
 	}
 	actual, err := githubrepos.ParseOrigin(r.Header.Get("Origin"))
 	if err != nil || actual != claimed {
@@ -286,7 +286,11 @@ func (s *Server) handleGitHubRepositories(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return err
 	}
-	list, err := s.modules.githubRepos.Repositories(r.Context(), githubUser(r), id, r.URL.Query().Get("refresh") == "1")
+	refresh, err := httpx.QueryBool(r, "refresh")
+	if err != nil {
+		return err
+	}
+	list, err := s.modules.githubRepos.Repositories(r.Context(), githubUser(r), id, refresh)
 	if err != nil {
 		return githubPageErr(err)
 	}
