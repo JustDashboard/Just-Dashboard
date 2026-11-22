@@ -617,9 +617,43 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handlingFor(https) + errorPages + "}\n"
 	}
 	tlsServed, plainServed := route.servedByScheme()
+	// The app names a route serves with their wildcard are a block of
+	// their own, with the copy's tls line (app_domain_routes.go); the rest
+	// keep the route's own certificate handling.
+	var grouped []string
+	groupTLS := ""
+	if len(route.Certificates) > 0 {
+		if err := validateRouteCertificates(route, true); err != nil {
+			return "", err
+		}
+		hash, err := dockerCaddyCertificateCopy(route.Certificates[0].CertPath)
+		if err != nil {
+			return "", err
+		}
+		groupTLS = tlsCopyLine(hash) + "\n"
+		in := route.certificateGroupNames()
+		rest := tlsServed[:0:0]
+		for _, name := range tlsServed {
+			if in[strings.ToLower(name)] {
+				grouped = append(grouped, name)
+			} else {
+				rest = append(rest, name)
+			}
+		}
+		tlsServed = rest
+	}
 	out := "# Managed by Just Dashboard\n"
 	if len(tlsServed) > 0 {
 		out += block(tlsServed, true)
+	}
+	if len(grouped) > 0 {
+		if len(tlsServed) > 0 {
+			out += "\n"
+		}
+		saved := tlsDirective
+		tlsDirective = groupTLS
+		out += block(grouped, true)
+		tlsDirective = saved
 	}
 	if len(plainServed) > 0 {
 		if len(tlsServed) > 0 {
@@ -1320,12 +1354,12 @@ func (s *Service) applyDockerCaddyRoute(ctx context.Context, c *dockerCaddy, rou
 	if err := c.ensurePages(ctx, route); err != nil {
 		return result, fmt.Errorf("the route's pages could not be written: %w", err)
 	}
-	if servesExplicitCertificate(route) {
-		cert, err := os.ReadFile(route.CertPath)
+	if certPath, keyPath, ok := route.copySource(); ok {
+		cert, err := os.ReadFile(certPath)
 		if err != nil {
 			return result, err
 		}
-		key, err := os.ReadFile(route.KeyPath)
+		key, err := os.ReadFile(keyPath)
 		if err != nil {
 			return result, err
 		}

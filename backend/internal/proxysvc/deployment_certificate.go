@@ -100,6 +100,11 @@ func (s *Service) EnsureDeploymentCertificate(
 		}
 		names = append(names, name)
 	}
+	// A name under the app domain zone is the handle's wildcard's, and
+	// nothing here orders one for it, on either proxy (app_domain.go).
+	if err := s.refuseAppDomainNames(names); err != nil {
+		return DeploymentCertificate{}, err
+	}
 	// What is on the host already, and an ingress that orders for itself,
 	// need no certbot and wait for nobody's.
 	if result, done, err := s.deploymentCertificateWithoutCertbot(ctx, names, wildcard, log); done || err != nil {

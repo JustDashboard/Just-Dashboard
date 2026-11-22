@@ -217,6 +217,9 @@ type SiteSpec struct {
 	// application may be stopped while nobody visits, and a request that
 	// finds it stopped is held while the dashboard starts it.
 	sleep *siteSleep
+	// certGroups are a deployment route's names served with a certificate
+	// of their own, each a server beside the site's (app_domain_routes.go).
+	certGroups []RouteCertificate
 	// dropCookies are the deployment route's DropCookies: taken out of the
 	// Cookie header every forwarding location and the sign-in check send.
 	dropCookies []string
