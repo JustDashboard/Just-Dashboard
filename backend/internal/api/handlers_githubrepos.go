@@ -77,6 +77,16 @@ func (s *Server) githubRepo(r *http.Request) (*githubrepos.RepoAccess, error) {
 //	429 github_rate_limited    GitHub's rate limit, with when it lifts
 //	502 github_unavailable     GitHub could not be reached or answered badly
 //	504 timeout                the request ran out of time
+//	400 github_state           a callback whose state was not issued to this
+//	                           account, expired, or was used already
+//	409 github_callback_unregistered  a sign-in from an address the App
+//	                           has no callback URL for; names the ones it has
+//	409 github_device_flow_disabled   the App's Enable Device Flow box is not
+//	                           ticked; says where to tick it
+//
+// GitHub refusing a sign-in exchange (a code that expired, a client secret
+// reset on GitHub) is github_validation with GitHub's reason in words, and a
+// second App while one exists is github_conflict.
 func githubPageErr(err error) error {
 	if err == nil {
 		return nil
@@ -88,7 +98,20 @@ func githubPageErr(err error) error {
 	var reconnect *githubrepos.ReconnectError
 	var refused *githubrepos.NotPermittedError
 	var api *githubrepos.APIError
+	var unregistered *githubrepos.CallbackUnregisteredError
+	var deviceDisabled *githubrepos.DeviceFlowDisabledError
+	var oauth *githubrepos.OAuthError
 	switch {
+	case errors.Is(err, githubrepos.ErrState):
+		return httpx.Err(http.StatusBadRequest, "github_state", err.Error())
+	case errors.As(err, &unregistered):
+		return httpx.Err(http.StatusConflict, "github_callback_unregistered", unregistered.Error())
+	case errors.As(err, &deviceDisabled):
+		return httpx.Err(http.StatusConflict, "github_device_flow_disabled", deviceDisabled.Error())
+	case errors.As(err, &oauth):
+		return httpx.Err(http.StatusUnprocessableEntity, "github_validation", oauth.Error())
+	case errors.Is(err, githubrepos.ErrAppExists):
+		return httpx.Err(http.StatusConflict, "github_conflict", err.Error())
 	case errors.Is(err, githubrepos.ErrNotConfigured):
 		return httpx.Err(http.StatusConflict, "github_not_configured", err.Error())
 	case errors.Is(err, githubrepos.ErrConnectionNotFound):
