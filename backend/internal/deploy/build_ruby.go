@@ -78,7 +78,7 @@ func renderRubyDockerfile(recipe rubyRecipe, config BuildPlanConfig, bases []Res
 		lines = append(lines, "ENV BUNDLE_DEPLOYMENT=1")
 	}
 	if recipe.node != nil {
-		lines = append(lines, recipe.node.installLines(installSecrets)...)
+		lines = append(lines, recipe.node.installLines(installSecrets, config.cache)...)
 	}
 	if recipe.precompile != "" {
 		lines = append(lines, "RUN "+buildSecrets+recipe.precompile)

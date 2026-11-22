@@ -86,7 +86,7 @@ func renderElixirDockerfile(recipe elixirRecipe, config BuildPlanConfig, bases [
 		}
 	}
 	if recipe.node != nil {
-		lines = append(lines, recipe.node.installLines(installSecrets)...)
+		lines = append(lines, recipe.node.installLines(installSecrets, config.cache)...)
 	}
 	lines = append(lines, "RUN "+buildSecrets+"mix compile")
 	if recipe.aliases["assets.deploy"] {

@@ -2802,7 +2802,10 @@ releases with a throwaway key made inside the step, never a value from the plan.
 asset pipeline borrows Node: the install is planned by the [JavaScript installs](#javascript-installs)
 planner on the Debian Node image (the lockfile's manager, pinned releases through Corepack, Bun copied
 in), whose `/usr/local` and `/opt` are copied into the Ruby build stage under `/opt/node`, and the install
-runs there before the precompile, which calls `yarn build` or `npm run build` itself. tailwindcss-rails
+runs there before the precompile, which calls `yarn build` or `npm run build` itself. That install runs
+after the source copy, so it reruns on each commit, with its manager's download cache mounted (the
+[dependency caches](#dependency-caches) a Node install uses), so it reruns from what the last build
+fetched; the Phoenix install below does the same. tailwindcss-rails
 and dartsass-rails need no Node: their compilers are platform gems, which is one more reason the lock
 has to carry the server's platform. ExecJS without `mini_racer` gets Node alone. The runtime stage has no Node, and `node_modules` stays in the build.
 Build values reach the precompile the way they reach any recipe's build (a build-scoped

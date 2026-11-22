@@ -497,3 +497,33 @@ func TestEarlyInstallsKeepToWhatTheBuildContextHolds(t *testing.T) {
 		t.Fatalf("an auth.json project installs before its source:\n%s", cached)
 	}
 }
+
+// A Rails or Phoenix asset install runs inside the language's build stage,
+// after its source copy, so it reruns on each commit; it reruns from what
+// its manager downloaded last time.
+func TestLanguageAssetInstallsMountTheirManagersDownloadCache(t *testing.T) {
+	rails := t.TempDir()
+	for name, content := range railsFiles(map[string]string{
+		"package.json":   `{"name":"shop","private":true,"packageManager":"pnpm@9.15.0","scripts":{"build":"esbuild app/javascript/*.* --bundle --outdir=app/assets/builds"},"devDependencies":{"esbuild":"0.25.0"}}`,
+		"pnpm-lock.yaml": "lockfileVersion: '9.0'\n\nimporters:\n\n  .:\n    devDependencies:\n      esbuild:\n        specifier: 0.25.0\n        version: 0.25.0\n",
+	}) {
+		writeBuildFixture(t, rails, name, content)
+	}
+	cached, _ := prepareCachedAndForced(t, rails, rails, BuildPlanConfig{Recipe: "ruby", TargetPlatform: "linux/amd64", StartCommand: "bundle exec puma"})
+	if line := dockerfileLine(t, cached, "pnpm install --frozen-lockfile"); !strings.Contains(line, cacheMountFor("pnpm", "/root/.local/share/pnpm/store")) {
+		t.Fatalf("the Rails asset install mounts no pnpm store: %s", line)
+	}
+
+	phoenix := t.TempDir()
+	for name, content := range map[string]string{
+		"mix.exs": phoenixMix, "mix.lock": "%{}\n", ".tool-versions": "elixir 1.18.4-otp-27\nerlang 27.3\n",
+		"assets/package.json":      `{"name":"assets","dependencies":{"alpinejs":"3.14.1"}}`,
+		"assets/package-lock.json": `{"name":"assets","lockfileVersion":3,"requires":true,"packages":{"":{"name":"assets","dependencies":{"alpinejs":"3.14.1"}},"node_modules/alpinejs":{"version":"3.14.1"}}}`,
+	} {
+		writeBuildFixture(t, phoenix, name, content)
+	}
+	cached, _ = prepareCachedAndForced(t, phoenix, phoenix, BuildPlanConfig{Recipe: "elixir", StartCommand: "/app/bin/shop start"})
+	if line := dockerfileLine(t, cached, "npm ci"); !strings.Contains(line, cacheMountFor("npm", "/root/.npm")) {
+		t.Fatalf("the Phoenix asset install mounts no npm cache: %s", line)
+	}
+}

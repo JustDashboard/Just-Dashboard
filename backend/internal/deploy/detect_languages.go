@@ -383,8 +383,11 @@ func (a *languageNodeAssets) copyLines() []string {
 	return lines
 }
 
-// installLines run the planned install in the package's directory.
-func (a *languageNodeAssets) installLines(installSecrets string) []string {
+// installLines run the planned install in the package's directory, with
+// its manager's download cache mounted (installCache): the install runs
+// after the language's source copy, so it reruns on every commit, but from
+// what the last build downloaded.
+func (a *languageNodeAssets) installLines(installSecrets string, cache recipeCache) []string {
 	if a.runtimeOnly {
 		return nil
 	}
@@ -397,7 +400,7 @@ func (a *languageNodeAssets) installLines(installSecrets string) []string {
 		// application the build copies.
 		lines = append(lines, "ENV YARN_ENABLE_GLOBAL_CACHE=false")
 	}
-	lines = append(lines, nodeRunWith(installSecrets, a.plan.installDefaults(), a.plan.installLine()))
+	lines = append(lines, a.plan.installRun(cache, installSecrets))
 	if a.dir != "" {
 		lines = append(lines, "WORKDIR /app")
 	}
