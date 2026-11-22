@@ -44,6 +44,10 @@ type ImmutableBuildOptions struct {
 	// definition the frontend reads, such as a Railpack plan — through a
 	// BuildKit frontend image instead of BuildKit's own Dockerfile frontend.
 	Frontend *BuildxFrontend
+	// containerdStore is the daemon's own answer, never the caller's:
+	// BuildImmutable reads it, and it decides how the image is exported
+	// (build_export.go).
+	containerdStore bool
 }
 
 // BuildxFrontend is a BuildKit frontend image and the options the deployment
@@ -87,7 +91,8 @@ func (c *Client) BuildxAvailable(ctx context.Context) bool {
 
 // BuildImmutable is the deployment builder's Docker authority. It uses
 // Buildx/BuildKit explicitly, keeps secret values in its process environment,
-// streams plain progress, loads one host-platform image, and returns both OCI
+// streams plain progress, loads one host-platform image into the daemon's
+// store (zstd layers on containerd's, build_export.go), and returns both OCI
 // and config identities instead of treating a mutable tag as an artifact.
 func (c *Client) BuildImmutable(
 	ctx context.Context,
@@ -123,6 +128,7 @@ func (c *Client) BuildImmutable(
 		return ImmutableImage{}, err
 	}
 	defer os.Remove(metadataPath)
+	opts.containerdStore = c.containerdImageStore(ctx)
 	args, environment, err := BuildxCommand(opts, metadataPath)
 	if err != nil {
 		return ImmutableImage{}, err
@@ -163,8 +169,14 @@ func (c *Client) BuildImmutable(
 func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, []string, error) {
 	args := []string{
 		"buildx", "build", "--progress=plain", "--file", filepath.ToSlash(filepath.Clean(opts.Dockerfile)),
-		"--tag", ImageRef(opts.Tag), "--load", "--metadata-file", metadataPath,
+		"--tag", ImageRef(opts.Tag),
 	}
+	if opts.containerdStore {
+		args = append(args, "--output", containerdImageExport)
+	} else {
+		args = append(args, "--load")
+	}
+	args = append(args, "--metadata-file", metadataPath)
 	if opts.Pull {
 		args = append(args, "--pull")
 	}

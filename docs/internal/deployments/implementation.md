@@ -773,6 +773,20 @@ only renderer/executor/validation authority for their feature.
   stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
   dashboard files stay out of the image whatever the repository's own ignore file says.
+- Every build method's image reaches the daemon the same way (`dockerx/build_export.go`). On
+  containerd's image store (`docker info` driver status `driver-type io.containerd.snapshotter.v1`, read
+  once per process and not remembered when the daemon does not answer) buildx exports with
+  `--output type=image,unpack=true,compression=zstd,compression-level=3,oci-mediatypes=true` instead of
+  `--load`, whose gzip compression and unpack of every new layer were most of a large image's build:
+  on a 1.1 GB node_modules layer, 80 s exporting and 53 s unpacking with gzip, 35 s and 20 s with zstd,
+  and a smaller blob (303 MB against 336 MB). zstd level 1 was no faster and uncompressed blobs were
+  slower and three times the disk. Base layers keep the blobs they were pulled with (no
+  `force-compression`), so a manifest mixes gzip and zstd layers, which the daemon runs and retags and
+  `docker save` writes as they are. On a classic graph driver BuildKit writes into the driver with
+  nothing to compress, and the build keeps `--load`; the zstd output also works there, so a daemon that
+  changed stores under a running dashboard still builds. The recorded digest is the exporter's
+  `containerimage.digest` from `--metadata-file` either way. The build's preview argv
+  (`buildPreviewArgv`) still reads `--load`: it is written before the daemon is asked.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
   registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
