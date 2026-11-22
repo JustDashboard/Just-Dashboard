@@ -48,6 +48,8 @@ async function hostnames(page: Page, fallback: Record<string, unknown>) {
     if (url.searchParams.get("method") === "app-domain") {
       return json(route, appDomainSuggestion(url.searchParams.get("name") ?? "app"))
     }
+    // The suggestion without the address, which the step offers beside an app-domain default.
+    if (url.searchParams.get("method") === "standard") return json(route, sslip)
     const typed = url.searchParams.get("hostname")
     if (typed) {
       return json(route, {
@@ -88,9 +90,11 @@ test("new project: the app-domain name is the default when new deployments get i
   // The default was the app-domain name: nothing else had to be asked for it.
   expect(asked.filter((query) => query.includes("method=app-domain"))).toEqual([])
 
-  // sslip.io stays a choice, made from the same app label and checked like any typed name.
+  // sslip.io stays a choice: the name the backend suggests without the address
+  // (`method=standard`), not one composed in the browser.
+  expect(asked.filter((query) => query.includes("method=standard"))).toHaveLength(1)
   await choice(page).getByRole("radio", { name: "sslip.io" }).click()
-  await expect(hostnameField(page)).toHaveValue("wesmokefish.203-0-113-10.sslip.io")
+  await expect(hostnameField(page)).toHaveValue(sslip.hostname)
   await expect(page.getByText("Certificate on deploy")).toBeVisible()
 
   // Your own domain empties the field and puts the cursor in it.

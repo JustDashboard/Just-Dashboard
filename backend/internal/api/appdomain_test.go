@@ -237,6 +237,11 @@ func TestTheHostnameSuggestionOffersTheAppDomain(t *testing.T) {
 	if got.Method == "app-domain" {
 		t.Fatalf("a tunnel was offered the address: %+v", got)
 	}
+	// The alternative the new-project step offers beside the default is the
+	// backend's own suggestion without the address, not a name it composed.
+	if got := askHostname(t, s, "name=shop&method=standard"); got.Method == "app-domain" || got.AppDomain != "" {
+		t.Fatalf("method=standard still answered the app domain: %+v", got)
+	}
 
 	off, _, _ := appDomainServer(t, false)
 	if got := askHostname(t, off, "name=shop"); got.Method == "app-domain" {

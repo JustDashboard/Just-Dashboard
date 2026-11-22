@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
-import { sslipAlternative, zoneWords } from "@/lib/app-domain"
+import { zoneWords } from "@/lib/app-domain"
 import { useAppDomain } from "@/hooks/use-app-domain"
 import { useAuth } from "@/hooks/use-auth"
 import { Field, FormNote, FormSection, OptionRow } from "@/components/form"
@@ -108,7 +108,7 @@ export function PublicAddress({
 
   // The addresses the name can be: the just-dashboard.com one, the one that needs nothing from
   // the site (the operator's wildcard, or sslip.io), and the reader's own.
-  const choices = addressChoices(suggestion, offer.suggestion, offer.zone)
+  const choices = addressChoices(suggestion, offer.suggestion, offer.zone, offer.standard)
   const chosen = choices.find((choice) => choice.hostname === normalizedHostname)
   const pick = (value: string) => {
     if (value === "own") {
@@ -398,6 +398,7 @@ function addressChoices(
   suggestion: DeploymentHostnameSuggestion | undefined,
   appSuggestion: DeploymentHostnameSuggestion | undefined,
   zone: string | undefined,
+  standard: DeploymentHostnameSuggestion | undefined,
 ): AddressChoice[] {
   if (!appSuggestion?.hostname) return []
   const app: AddressChoice = {
@@ -406,19 +407,21 @@ function addressChoices(
     hostname: appSuggestion.hostname.toLowerCase(),
     answer: appSuggestion,
   }
-  if (suggestion && suggestion.method !== "app-domain" && suggestion.method !== "none") {
+  // The other name is the backend's own suggestion without the address: the default itself
+  // when that is not the app-domain name, else what `method=standard` answered.
+  const other = suggestion?.method !== "app-domain" ? suggestion : standard
+  if (other?.hostname && other.method !== "app-domain" && other.method !== "none") {
     return [
       app,
       {
-        value: suggestion.method,
-        label: suggestion.method === "sslip" ? "sslip.io" : (suggestion.base ?? "Wildcard"),
-        hostname: suggestion.hostname.toLowerCase(),
-        answer: suggestion,
+        value: other.method,
+        label: other.method === "sslip" ? "sslip.io" : (other.base ?? "Wildcard"),
+        hostname: other.hostname.toLowerCase(),
+        answer: other,
       },
     ]
   }
-  const sslip = sslipAlternative(appSuggestion)
-  return sslip ? [app, { value: "sslip", label: "sslip.io", hostname: sslip }] : [app]
+  return [app]
 }
 
 /**
@@ -438,6 +441,30 @@ function useAppDomainOffer(
   const own = suggestion?.method === "app-domain" ? suggestion : undefined
   const [asked, setAsked] = useState<{ key: string; answer: DeploymentHostnameSuggestion }>()
   const key = active && name && !own ? `${active.handle}:${name}` : ""
+  // With the app-domain name the default, the alternative is asked for too: the name the
+  // backend would suggest without it (`method=standard`), never one composed here.
+  const [standard, setStandard] = useState<{
+    key: string
+    answer: DeploymentHostnameSuggestion
+  }>()
+  const standardKey = own && name ? `${own.hostname}:${name}` : ""
+
+  useEffect(() => {
+    if (!standardKey || !name) return
+    const controller = new AbortController()
+    get<DeploymentHostnameSuggestion>(
+      "/deploy/hostname",
+      { name, method: "standard" },
+      controller.signal,
+    )
+      .then((answer) => {
+        if (answer.hostname && answer.method !== "none") setStandard({ key: standardKey, answer })
+      })
+      .catch(() => {
+        // Best-effort: without it the step offers the app-domain name and your own domain.
+      })
+    return () => controller.abort()
+  }, [standardKey, name])
 
   useEffect(() => {
     if (!key || !name) return
@@ -468,6 +495,7 @@ function useAppDomainOffer(
   return {
     suggestion: own ?? (asked?.key === key ? asked.answer : undefined),
     zone: status?.zone ?? undefined,
+    standard: standard?.key === standardKey ? standard.answer : undefined,
     hint,
   }
 }

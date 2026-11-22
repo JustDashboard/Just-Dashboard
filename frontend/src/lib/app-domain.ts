@@ -76,20 +76,6 @@ export function appDomainStateOf(
   return domain?.status === "active" && labels[1] === domain.handle ? "active" : "detached"
 }
 
-/**
- * The sslip.io name beside an app-domain suggestion, so the new-project step can still offer
- * the name that needs nothing from the site. The app's label is the suggestion's own (the
- * backend has already cut it to one DNS label and kept it clear of other projects); the check
- * the step runs on a picked name is what says whether HTTPS works for it.
- */
-export function sslipAlternative(suggestion: DeploymentHostnameSuggestion): string | undefined {
-  if (suggestion.method !== "app-domain" || !suggestion.address) return undefined
-  if (!/^\d{1,3}(\.\d{1,3}){3}$/.test(suggestion.address)) return undefined
-  const label = suggestion.hostname.split(".")[0]
-  if (!label) return undefined
-  return `${label}.${suggestion.address.replaceAll(".", "-")}.sslip.io`
-}
-
 const seconds = (value: number | null | undefined) =>
   value ? new Date(value * 1000).toISOString() : undefined
 

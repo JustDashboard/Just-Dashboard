@@ -1891,7 +1891,8 @@ export interface DeploymentHostnameQuery {
   tunnel?: string
   /**
    * app-domain to ask for the just-dashboard.com address of the deployment name even when it is
-   * not the default.
+   * not the default; standard for the suggestion without it (the operator's own wildcard, else
+   * sslip.io).
    */
   method?: string
 }

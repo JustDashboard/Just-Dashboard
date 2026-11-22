@@ -94,9 +94,14 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	if err != nil {
 		return err
 	}
+	// method narrows the suggestion for a page offering a choice:
+	// "app-domain" is the just-dashboard.com name whatever the default, and
+	// "standard" is what would be suggested without it, the operator's own
+	// wildcard or sslip.io, so the page offers the name the backend would
+	// generate rather than one it composed.
 	method := strings.TrimSpace(r.URL.Query().Get("method"))
-	if method != "" && method != "app-domain" {
-		return httpx.BadRequest("method must be app-domain")
+	if method != "" && method != "app-domain" && method != "standard" {
+		return httpx.BadRequest("method must be app-domain or standard")
 	}
 	// A hostname that is given is being asked about, not replaced: the operator
 	// has typed their own domain and wants to know whether HTTPS will work.
@@ -166,7 +171,7 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 
 	// Second: the just-dashboard.com address, while the handle is active
 	// and new deployments get it by default.
-	if !tunnel && s.modules.appDomain != nil {
+	if !tunnel && method != "standard" && s.modules.appDomain != nil {
 		if _, autoAssign, ok := s.modules.appDomain.Active(ctx); ok && autoAssign {
 			suggestion := s.appDomainSuggestion(ctx, name, false)
 			suggestion.NameTaken = &taken

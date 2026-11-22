@@ -903,7 +903,8 @@ type DeploymentHostnameParams struct {
 	// no certificate here, and never a just-dashboard.com address.
 	Tunnel string
 	// app-domain to ask for the just-dashboard.com address of the deployment name even when it is not
-	// the default.
+	// the default; standard for the suggestion without it (the operator's own wildcard, else
+	// sslip.io).
 	Method string
 }
 

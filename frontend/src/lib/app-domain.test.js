@@ -8,7 +8,6 @@ import {
   handleValid,
   normalizeHandle,
   refusalWords,
-  sslipAlternative,
 } from "./app-domain"
 
 const met = (value) =>
@@ -77,35 +76,6 @@ test("a name is the server's, detached, or not an app name at all", () => {
       active,
     ),
   ).toBe("detached")
-})
-
-test("the sslip.io name beside an app-domain suggestion keeps the app's label", () => {
-  expect(
-    sslipAlternative({
-      hostname: "shop.acme.just-dashboard.com",
-      method: "app-domain",
-      address: "203.0.113.10",
-      covered: true,
-      detail: "",
-    }),
-  ).toBe("shop.203-0-113-10.sslip.io")
-  expect(
-    sslipAlternative({
-      hostname: "shop.acme.just-dashboard.com",
-      method: "app-domain",
-      covered: true,
-      detail: "",
-    }),
-  ).toBeUndefined()
-  expect(
-    sslipAlternative({
-      hostname: "shop.example.com",
-      method: "custom",
-      address: "203.0.113.10",
-      covered: true,
-      detail: "",
-    }),
-  ).toBeUndefined()
 })
 
 test("the certificate reads as a dot, a word and the one thing to do", () => {
