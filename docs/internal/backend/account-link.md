@@ -316,6 +316,7 @@ optional fields are omitted, never `null`.
 | `DELETE /request` | session; `account.link.cancel` | Forget the pending request (`204`) |
 | `PUT /scope` `{scope}` | session; `account.link.scope` | Change the scope; the next heartbeat tells the site. `409 not_linked` |
 | `DELETE /` | session, `s.destructive`; `account.unlink` | Unlink (`204`). `409 not_linked` |
+| `GET /domain`, `PUT /domain`, `DELETE /domain`, `POST /domain/certificate`, `PUT /domain/settings` | claim session-only, release session-only and destructive | The just-dashboard.com address held through the link ([app-domains.md](app-domains.md#rest-api-apihandlers_appdomaingo)) |
 | `POST /sync` | | A heartbeat now, then the status. `409 not_linked`; `409 site_changed` when `JD_ACCOUNT_URL` is no longer the site the link was made with. Held to the site's four a minute: if the window is full no heartbeat is sent and the status comes back as it was |
 
 ## Terminal, installer, `manage.sh`

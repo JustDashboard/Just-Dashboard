@@ -1339,7 +1339,7 @@ func (e *NormalizedStepExecutor) releaseSnapshotForRun(
 	if err != nil {
 		return nil, runtimeReleaseSnapshot{}, err
 	}
-	return e.decodeReleaseSnapshot(release)
+	return e.decodeReleaseSnapshot(ctx, release)
 }
 
 func (e *NormalizedStepExecutor) releaseSnapshot(
@@ -1350,16 +1350,21 @@ func (e *NormalizedStepExecutor) releaseSnapshot(
 	if err != nil {
 		return nil, runtimeReleaseSnapshot{}, err
 	}
-	return e.decodeReleaseSnapshot(release)
+	return e.decodeReleaseSnapshot(ctx, release)
 }
 
+// decodeReleaseSnapshot is the release as every step acts on it: without the
+// app domain names this server no longer holds (app_domains.go), which no
+// route serves and no certificate is ordered for.
 func (e *NormalizedStepExecutor) decodeReleaseSnapshot(
+	ctx context.Context,
 	release *ReleaseWithArtifacts,
 ) (*ReleaseWithArtifacts, runtimeReleaseSnapshot, error) {
 	snapshot, err := decodeReleaseRuntimeSnapshot(release)
 	if err != nil {
 		return nil, runtimeReleaseSnapshot{}, err
 	}
+	snapshot.Domains, _ = e.detachedDomains(ctx, snapshot.Domains)
 	return release, snapshot, nil
 }
 

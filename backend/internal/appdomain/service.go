@@ -166,6 +166,9 @@ func FirstPublicIPv4(addresses []string) string {
 	return ""
 }
 
+// PublicAddress is the address a claim would publish, or "".
+func (s *Service) PublicAddress() string { return s.address() }
+
 // Enabled is JD_APP_DOMAINS with the account link permitted.
 func (s *Service) Enabled() bool { return s != nil && s.enabled }
 

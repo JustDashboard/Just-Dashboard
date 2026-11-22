@@ -99,6 +99,14 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Linking to a just-dashboard.com account is optional and outbound only. A command from the site runs
   only if its signature verifies against the key pinned at link time and its kind is within the scope
   you chose; linking is a browser-session action for an administrator, or root at the terminal.
+- A just-dashboard.com address (app domains) is optional and held through the same link. Claiming a handle
+  **publishes this server's public IPv4 address in public DNS** under just-dashboard.com, so claiming and
+  releasing are browser-session actions for an administrator, never an API key or the assistant, and
+  releasing is in the destructive budget. The new outbound calls are signed requests on the link
+  (`GET/PUT/DELETE /domain`, the challenge values); the site keeps its DNS token and changes only this
+  server's three names. The wildcard's certbot hook reaches the backend only on loopback with a credential
+  the backend writes 0600 in its data directory, and can only publish a challenge for this server's own
+  handle. No certificate is ever ordered for a single app name under the zone.
 - Connecting to a Just Hub is optional and outbound only, to one machine on the server's own tailnet,
   reached only over the tailnet. It has its own key, pinned hub key, counter and audit name, separate
   from the just-dashboard.com link, and a hub's command runs only under the same checks and the scope

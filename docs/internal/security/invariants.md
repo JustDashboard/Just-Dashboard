@@ -351,7 +351,12 @@ A change that weakens any of these has to say so explicitly.
     log whatever its outcome; the kinds are a closed set that call the services the pages call. Linking,
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
-    the installer never handles a link credential. See [account link](../backend/account-link.md).
+    the installer never handles a link credential. See [account link](../backend/account-link.md). Claiming and
+    releasing a just-dashboard.com address, which publish or withdraw the server's IP address in public DNS,
+    are held to the same rule: a browser session of an administrator, never an API key or the assistant, and
+    releasing is in the destructive budget. The certbot hook that proves the address's wildcard reaches the
+    backend only on loopback, with a credential the backend writes 0600 into its data directory, and can only
+    publish or withdraw a challenge value for this server's own handle ([app domains](../backend/app-domains.md)).
 13. The dashboard's assistant is a person's, at the dashboard, and acts as them: no more than their role, and,
     since 0.8.5, no less. Its routes are a session's (a deployment's, a new deployment's, a database connection's,
     `POST /databases/{id}/assistant`, and the server's, `POST /assistant/chat`). Every call it makes is a request through the dashboard's own router under the

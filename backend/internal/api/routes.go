@@ -92,6 +92,10 @@ func (s *Server) Routes() http.Handler {
 			s.mountAgentRoutes(r)
 		} else {
 			s.mountNetworkVantageMachineRoutes(r)
+			// certbot's hook for the just-dashboard.com address's
+			// wildcard: loopback only, its own credential
+			// (handlers_appdomain.go).
+			s.mountAppDomainHook(r)
 			// The hub's discovery probe: no sign-in, behind the allowlist
 			// and the per-address limit (handlers_hublink.go).
 			s.mountHubHello(r)

@@ -82,3 +82,13 @@ database tools. *Read* is offered the reads; *Deploy* also the changes, held to 
 do; a destructive route also needs a role that may take destructive actions. Each call goes through
 the dashboard's own routes as the key and is in the audit log twice: as the MCP call and as the
 route's own entry.
+
+## certbot's hook for the just-dashboard.com address
+
+`jd app-domain challenge add|remove [--credentials FILE]` is not for people: certbot runs it as the manual
+hook of the [app domain](linking-and-usage.md#app-domains)'s wildcard certificate, with `CERTBOT_VALIDATION`
+and `CERTBOT_DOMAIN` set. It asks the dashboard on this server, on its loopback listener, to publish or
+withdraw the value through the account link, with the credential the dashboard wrote to
+`/var/lib/just-dashboard/app-domain-hook.json` (0600, root's) instead of a key. `add` returns once the zone's
+own nameservers answer the value, or fails after two minutes saying which did not. It is why the renewal
+needs `/usr/local/bin/jd` from 0.9.1 or later.
