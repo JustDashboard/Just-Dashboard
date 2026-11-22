@@ -505,3 +505,50 @@ func phpComposerInputs(root string, recipe phpRecipe) []string {
 }
 
 var phpComposerReadsTheCheckout = regexp.MustCompile(`"type"\s*:\s*"path"|"installer-paths"|"patches(?:-file)?"|"(?:pre-install-cmd|(?:pre|post)-package-(?:install|update))"`)
+
+// elixirMixInputs are what mix deps.get and deps.compile read, which the
+// recipe copies before the source, as phx.gen.release's Dockerfile does:
+// mix.exs, mix.lock and the config/ directory compile-time configuration
+// comes from. It is nil, and the dependencies stay after the source as
+// before, for an umbrella (each application's mix.exs is its own), a path
+// or umbrella dependency, and a mix.exs or configuration that reads or
+// evaluates another file of the checkout.
+func elixirMixInputs(root string, recipe elixirRecipe) []string {
+	manifest, err := readContainedRegular(root, "mix.exs", 256<<10)
+	if err != nil || elixirReadsTheCheckout.Match(manifest) || len(recipe.assetApps) > 0 {
+		return nil
+	}
+	inputs := []string{"mix.exs"}
+	if recipe.locked {
+		inputs = append(inputs, "mix.lock")
+	}
+	if info, err := os.Lstat(filepath.Join(root, "config")); err == nil {
+		if !info.IsDir() {
+			return nil
+		}
+		entries, err := os.ReadDir(filepath.Join(root, "config"))
+		if err != nil || len(entries) > 64 {
+			return nil
+		}
+		for _, entry := range entries {
+			if !entry.Type().IsRegular() || !recipeCopyPathRE.MatchString(entry.Name()) {
+				return nil
+			}
+			content, err := readContainedRegular(filepath.Join(root, "config"), entry.Name(), 256<<10)
+			if err != nil || elixirReadsTheCheckout.Match(content) {
+				return nil
+			}
+		}
+		inputs = append(inputs, "config/")
+	}
+	return inputs
+}
+
+var elixirReadsTheCheckout = regexp.MustCompile(`\bapps_path\b|\bin_umbrella\b|\bpath:|\bFile\.|\bCode\.(?:require|eval|compile)|\bimport_config\s+"\.\.|__DIR__|\bSystem\.cmd`)
+
+// elixirMixMounts are Hex's package cache and rebar3's, which deps.get
+// fetches into; ~/.mix keeps the Hex and rebar the image installed, so it
+// is not mounted.
+func elixirMixMounts(cache recipeCache) string {
+	return cache.mount("hex-packages", "/root/.hex/packages") + cache.mount("rebar3", "/root/.cache/rebar3")
+}

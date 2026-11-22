@@ -580,7 +580,8 @@ func TestElixirRecipeRendersARelease(t *testing.T) {
 	}
 	assertRendered(t, prepared, []string{
 		"FROM elixir:1.18.4-otp-27-slim@sha256:", "build-essential ca-certificates git", "RUN mix local.hex --force && mix local.rebar --force",
-		"RUN mix deps.get --only prod --check-locked", "RUN mix deps.compile", "RUN mix assets.setup", "WORKDIR /app/assets", "npm ci",
+		// The dependencies come from mix.exs and mix.lock before the source.
+		"COPY mix.exs mix.lock /app/\nRUN ", " mix deps.get --only prod --check-locked\nRUN mix deps.compile\nCOPY . .\n", "RUN mix assets.setup", "WORKDIR /app/assets", "npm ci",
 		"RUN mix compile", "RUN mix assets.deploy", "RUN mix release --overwrite", "ENV MIX_ENV=prod LANG=C.UTF-8 PHX_SERVER=true",
 		"COPY --from=build --chown=10001:10001 /app/_build/prod/rel/shop/ /app/", "USER 10001", `CMD ["/bin/sh","-c","/app/bin/shop start"]`,
 	}, nil)

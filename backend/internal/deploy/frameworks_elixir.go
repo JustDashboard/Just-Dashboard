@@ -487,6 +487,10 @@ type elixirRecipe struct {
 	phoenix      bool
 	aliases      map[string]bool
 	node         *languageNodeAssets
+	// mixInputs are what the dependencies are fetched and compiled from,
+	// copied before the source (elixirMixInputs); a trailing slash marks a
+	// directory. nil keeps the dependencies after the source.
+	mixInputs []string
 }
 
 func selectElixirRecipe(root string, config BuildPlanConfig) (elixirRecipe, error) {

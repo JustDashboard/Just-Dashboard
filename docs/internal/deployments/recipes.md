@@ -2728,7 +2728,13 @@ The build follows `mix phx.gen.release`: `mix local.hex` and `local.rebar`, `mix
 a private organisation's packages belongs), `deps.compile`, `mix assets.setup` when the alias exists,
 the npm install of `assets/package.json` when there is one (the same borrowed Node as Rails), `mix
 compile`, `mix assets.deploy` when the alias exists, and `mix release` — named when `mix.exs` configures
-releases (`default_release`, else the first of `releases:`), plain otherwise. An umbrella without a
+releases (`default_release`, else the first of `releases:`), plain otherwise. As in `phx.gen.release`,
+`deps.get` and `deps.compile` run before `COPY . .`, from `mix.exs`, `mix.lock` and `config/` copied first
+(`elixirMixInputs`), so a commit that changes only code keeps the compiled dependencies, and `deps.get`
+mounts Hex's package cache and rebar3's (`/root/.hex/packages`, `/root/.cache/rebar3`; `~/.mix`, where
+the image installed Hex, is left alone; [Dependency caches](#dependency-caches)). They stay after the
+source, as before, for an umbrella, a path or umbrella dependency, and a `mix.exs` or configuration file
+that reads, evaluates or runs anything else of the checkout. An umbrella without a
 release is `recipe_unsupported`. The slim image has no CA certificates, which Hex needs, so both stages
 install `ca-certificates`. The runtime copies the release to `/app` and runs it as the unprivileged
 `app` user (uid 10001) with `LANG=C.UTF-8`, and for Phoenix `PHX_SERVER=true`, which a release otherwise

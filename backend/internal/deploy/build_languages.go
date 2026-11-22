@@ -36,6 +36,12 @@ func selectLanguageRecipe(root, kind string, config BuildPlanConfig) (selectedRe
 		if node := recipe.language.elixir.node; node != nil {
 			recipe.nodeInputs = node.inputs
 		}
+		if err == nil {
+			// What the dependencies come from must be in the context whatever
+			// the repository's .dockerignore says.
+			recipe.language.elixir.mixInputs = elixirMixInputs(root, recipe.language.elixir)
+			recipe.nodeInputs = append(append([]string(nil), recipe.nodeInputs...), recipe.language.elixir.mixInputs...)
+		}
 	case "scala", "clojure":
 		recipe.language.jvm, err = selectJVMLanguageRecipe(root, kind)
 	case "dart":

@@ -411,3 +411,23 @@ func TestPHPInstallsLockedPackagesBeforeTheSource(t *testing.T) {
 		}
 	}
 }
+
+func TestElixirFetchesAndCompilesDependenciesBeforeTheSource(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "mix.exs", "defmodule Shop.MixProject do\n  use Mix.Project\n  def project, do: [app: :shop, version: \"0.1.0\", deps: deps(), releases: [shop: []]]\n  defp deps, do: [{:jason, \"~> 1.4\"}]\nend\n")
+	writeBuildFixture(t, root, "mix.lock", "%{\"jason\": {:hex, :jason, \"1.4.4\"}}\n")
+	writeBuildFixture(t, root, "config/config.exs", "import Config\nimport_config \"#{config_env()}.exs\"\n")
+	writeBuildFixture(t, root, "config/prod.exs", "import Config\n")
+	writeBuildFixture(t, root, "lib/shop.ex", "defmodule Shop do\nend\n")
+	config := BuildPlanConfig{Recipe: "elixir", StartCommand: "/app/bin/shop start"}
+	cached, forced := prepareCachedAndForced(t, root, root, config)
+	hex := cacheMountFor("hex-packages", "/root/.hex/packages") + cacheMountFor("rebar3", "/root/.cache/rebar3")
+	assertGoDockerfile(t, cached, "COPY config/ /app/config/\nCOPY mix.exs mix.lock /app/\nRUN "+hex+"mix deps.get --only prod --check-locked\nRUN mix deps.compile\nCOPY . .\n")
+	assertGoDockerfile(t, forced, "COPY mix.exs mix.lock /app/\nRUN mix deps.get --only prod --check-locked\nRUN mix deps.compile\nCOPY . .\n")
+	// A path dependency, or a version read from a file, needs the source.
+	for _, manifest := range []string{"{:core, path: \"../core\"}", "File.read!(\"VERSION\")"} {
+		writeBuildFixture(t, root, "mix.exs", "defmodule Shop.MixProject do\n  use Mix.Project\n  def project, do: [app: :shop, version: \"0.1.0\", deps: [{:jason, \"~> 1.4\"}], releases: [shop: []]]\n  # "+manifest+"\nend\n")
+		cached, _ = prepareCachedAndForced(t, root, root, config)
+		assertBefore(t, cached, "COPY . .", "mix deps.get")
+	}
+}
