@@ -2651,7 +2651,12 @@ fixes the lock. A lock with `ruby` or the server's Linux platform needs nothing.
 Dockerfile beside a Ruby root is judged the same way: `ruby_lock_platform_missing` is blocked when the
 Dockerfile freezes the bundle (`BUNDLE_DEPLOYMENT`, `BUNDLE_FROZEN`, `--deployment`, `--frozen`) and a
 warning otherwise, and not raised when the Dockerfile's own `bundle lock --add-platform` names the
-server's platform before it installs. The build stage installs the headers the locked gems compile
+server's platform before it installs. The bundle installs before `COPY . .`, from `Gemfile`,
+`Gemfile.lock`, `.ruby-version`, `.tool-versions` and a committed `.bundle/config` copied first
+(`rubyBundleInputs`), so a commit that changes only code keeps it; it stays after the source, as before,
+for a path gem or `gemspec` (the lock's `PATH` section), a Gemfile that evaluates, requires or reads other
+files, and a lock the build adds this server's platform to, since the source's copy of the lock would then
+replace the one the bundle was installed from. The build stage installs the headers the locked gems compile
 against (`libpq-dev` for `pg`, `default-libmysqlclient-dev` for `mysql2`, `libssl-dev` for `trilogy`,
 `libsqlite3-dev`, `libmagickwand-dev`, `libffi-dev`, always `build-essential`, `pkg-config` and
 `libyaml-dev`, and `git` for Git gems) and the runtime only the libraries they load (`libpq5`,

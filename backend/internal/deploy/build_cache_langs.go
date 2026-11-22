@@ -428,3 +428,40 @@ func dotnetRestoreInputs(boundary string, reader *dotnetReader, build dotnetBuil
 	}
 	return inputs
 }
+
+// rubyBundleInputs are the files bundle install reads, which the recipe
+// copies before the source so a commit that changes only code keeps the
+// bundle: the Gemfile, its lock, the Ruby version files a `ruby file:` line
+// names, and a committed .bundle/config. It is nil, and the install stays
+// after the source as before, when the bundle needs more of the checkout:
+// a path gem or gemspec (the lock's PATH section), a Gemfile that reads or
+// evaluates another file, and a lock the build adds this server's platform
+// to, which the source's copy of the lock would then replace.
+func rubyBundleInputs(root string, recipe rubyRecipe) []string {
+	if recipe.addPlatform != "" {
+		return nil
+	}
+	gemfile, err := readContainedRegular(root, "Gemfile", 256<<10)
+	if err != nil || rubyGemfileReadsTheCheckout.Match(gemfile) {
+		return nil
+	}
+	inputs := []string{"Gemfile"}
+	if recipe.locked {
+		lock, err := readContainedRegular(root, "Gemfile.lock", 4<<20)
+		if err != nil || strings.Contains("\n"+string(lock), "\nPATH\n") {
+			return nil
+		}
+		inputs = append(inputs, "Gemfile.lock")
+	}
+	for _, name := range []string{".ruby-version", ".tool-versions", ".bundle/config"} {
+		if regularExists(root, name) {
+			inputs = append(inputs, name)
+		}
+	}
+	return inputs
+}
+
+// rubyGemfileReadsTheCheckout finds what makes a Gemfile depend on files
+// beside it: a gemspec, a path gem, another Gemfile evaluated into it, or a
+// file it reads or requires.
+var rubyGemfileReadsTheCheckout = regexp.MustCompile(`(?m)^\s*(?:gemspec\b|eval_gemfile\b|require_relative\b|load\b)|\bpath\s*(?::|=>)|\bFile\.|\bDir\.|__dir__|__FILE__|\bIO\.`)

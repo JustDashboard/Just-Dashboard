@@ -25,6 +25,12 @@ func selectLanguageRecipe(root, kind string, config BuildPlanConfig) (selectedRe
 		if node := recipe.language.ruby.node; node != nil {
 			recipe.nodeInputs = node.inputs
 		}
+		if err == nil {
+			// What the bundle installs from must be in the context whatever
+			// the repository's .dockerignore says.
+			recipe.language.ruby.bundleInputs = rubyBundleInputs(root, recipe.language.ruby)
+			recipe.nodeInputs = append(append([]string(nil), recipe.nodeInputs...), recipe.language.ruby.bundleInputs...)
+		}
 	case "elixir":
 		recipe.language.elixir, err = selectElixirRecipe(root, config)
 		if node := recipe.language.elixir.node; node != nil {

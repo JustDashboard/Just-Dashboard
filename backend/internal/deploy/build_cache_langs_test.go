@@ -350,3 +350,33 @@ func TestDotnetRestoresFromTheProjectFilesBeforeTheSource(t *testing.T) {
 	cached, _ = prepareCachedAndForced(t, boundary, root, config)
 	assertBefore(t, cached, "COPY . .", "dotnet restore")
 }
+
+func TestRubyInstallsTheBundleBeforeTheSource(t *testing.T) {
+	root := t.TempDir()
+	copyFrameworkFixture(t, "sinatra", root)
+	detection, err := (Detector{}).DetectPath(t.Context(), root, SourceIdentity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := selectedDetectionCandidate(&detection)
+	if candidate == nil || candidate.Recipe != "ruby" {
+		t.Fatalf("candidate = %+v", candidate)
+	}
+	config := BuildPlanConfig{Recipe: "ruby", StartCommand: candidate.StartCommand}
+	cached, forced := prepareCachedAndForced(t, root, root, config)
+	for _, dockerfile := range []string{cached, forced} {
+		assertBefore(t, dockerfile, "COPY Gemfile Gemfile.lock", "bundle install")
+		assertBefore(t, dockerfile, "bundle install", "COPY . .")
+	}
+	// A gemspec or a path gem is part of the checkout: the bundle installs
+	// from the source, as before.
+	gemfile, err := os.ReadFile(filepath.Join(root, "Gemfile"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, line := range []string{"gemspec\n", "gem \"local\", path: \"vendor/local\"\n", "eval_gemfile \"Gemfile.shared\"\n"} {
+		writeBuildFixture(t, root, "Gemfile", string(gemfile)+line)
+		cached, _ = prepareCachedAndForced(t, root, root, config)
+		assertBefore(t, cached, "COPY . .", "bundle install")
+	}
+}

@@ -576,6 +576,9 @@ type rubyRecipe struct {
 	precompile              string
 	buildPackages, packages []string
 	node                    *languageNodeAssets
+	// bundleInputs are the files the bundle installs from, copied before
+	// the source (rubyBundleInputs); nil keeps the install after it.
+	bundleInputs []string
 }
 
 func selectRubyRecipe(root string, config BuildPlanConfig) (rubyRecipe, error) {
