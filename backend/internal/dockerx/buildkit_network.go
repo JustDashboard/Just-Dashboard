@@ -7,7 +7,6 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -35,13 +34,16 @@ const networkedBuilderConfig = "# Written by Just Dashboard for builds that reac
 
 const networkedBuilderConfigName = "networked-buildkitd.toml"
 
-var networkedBuilderNameRE = regexp.MustCompile(`^jd-build-e[1-9][0-9]{0,18}$`)
+var networkedBuilderNameRE = regexp.MustCompile(`^jd-build-[a-z0-9][a-z0-9_.-]{0,100}$`)
 
-// NetworkedBuilderName is the builder an environment's builds that reach its
-// databases run on. One per environment: two environments' builds never share
-// a network namespace, so one cannot reach the other's database.
-func NetworkedBuilderName(environmentID int64) string {
-	return "jd-build-e" + strconv.FormatInt(environmentID, 10)
+// NetworkedBuilderName is the builder the builds that reach an environment's
+// databases run on, named after that environment's database network
+// (jd-e<environment>-db-<owner key>): one per environment, so two
+// environments' builds never share a network namespace, and with the
+// network's random owner key in it, so another store on the same daemon — a
+// live test's — never names this install's builder.
+func NetworkedBuilderName(network string) string {
+	return "jd-build-" + strings.TrimPrefix(strings.ToLower(network), "jd-")
 }
 
 // networkedBuilderContainer is the container buildx's docker-container driver

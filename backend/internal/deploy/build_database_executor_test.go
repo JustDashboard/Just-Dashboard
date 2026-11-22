@@ -54,7 +54,7 @@ func (b *databaseBuildBackend) StartNetworkedBuilder(_ context.Context, network 
 		return "", nil, b.startErr
 	}
 	b.started = append(b.started, network)
-	return dockerx.NetworkedBuilderName(network.EnvironmentID), func(context.Context) { b.closed++ }, nil
+	return dockerx.NetworkedBuilderName(network.Networks[0]), func(context.Context) { b.closed++ }, nil
 }
 
 func (b *databaseBuildBackend) RunCacheOnly(_ context.Context, invocation BuildInvocation, emit func(BuildLog) error) error {
@@ -278,7 +278,7 @@ func TestBuildReachesItsDatabaseAppliesTheSchemaAndSeedsANewDatabase(t *testing.
 		t.Fatalf("builder started %+v, closed %d", backend.started, backend.closed)
 	}
 	for _, build := range backend.builds {
-		if build.Builder != dockerx.NetworkedBuilderName(execution.Run.EnvironmentID) {
+		if build.Builder != "jd-build-e1-db-test" {
 			t.Fatalf("a build ran off the networked builder: %+v", build)
 		}
 	}

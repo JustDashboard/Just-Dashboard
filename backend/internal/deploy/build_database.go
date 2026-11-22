@@ -68,24 +68,6 @@ func (e *NormalizedStepExecutor) WithDatabaseContents(contents DatabaseContents)
 	return e
 }
 
-// BuildStateOwner removes what an environment's builds kept on the server.
-type BuildStateOwner interface {
-	RemoveBuildState(ctx context.Context, environmentID int64) error
-}
-
-// RemoveBuildState removes the environment's networked builder and its
-// cache; a backend without one has nothing to remove.
-func (b *ArtifactBuilder) RemoveBuildState(ctx context.Context, environmentID int64) error {
-	if b == nil {
-		return nil
-	}
-	owner, ok := b.backend.(BuildStateOwner)
-	if !ok {
-		return nil
-	}
-	return owner.RemoveBuildState(ctx, environmentID)
-}
-
 // NetworksForBuild is NetworksForRuntime for a build: the same bindings and
 // refusals, with no runtime of its own to consider.
 func (o *DockerRuntimeOwner) NetworksForBuild(ctx context.Context, environmentID int64, values map[string]string) ([]string, error) {

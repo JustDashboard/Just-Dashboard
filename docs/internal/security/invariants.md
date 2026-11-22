@@ -448,8 +448,9 @@ A change that weakens any of these has to say so explicitly.
     link is idle nothing links to the stored hub address at all, since it may answer on the machine that was
     refused. See [hub link](../backend/hub-link.md) and its [protocol](../backend/hub-link-protocol.md).
 18. A build reaches no more than its release will. A build whose values name a linked database runs on
-    the environment's own builder, `jd-build-e<environment>`, joined only to the networks
-    `NetworksForRuntime` gives that environment's release, under the same isolation refusals; its steps
+    the environment's own builder, named after its database network (`jd-build-e<environment>-db-<key>`),
+    joined only to the networks `NetworksForRuntime` gives that environment's release, under the same
+    isolation refusals; its steps
     share the builder container's network namespace, never the server's, and `--network=host` is used by
     no build. The BuildKit image is pinned by digest, two environments never share a builder, and the
     builder is removed after each build, so it holds no endpoint between builds. A migration or seed run

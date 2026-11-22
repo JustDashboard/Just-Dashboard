@@ -9,18 +9,18 @@ import (
 )
 
 // A build that reaches a database runs on a builder of its own: one per
-// environment, on that environment's network, its steps in the builder's
-// network namespace and resolving through Docker's embedded DNS, from a
-// BuildKit image pinned by digest.
+// environment, named after and created on that environment's network, its
+// steps in the builder's network namespace and resolving through Docker's
+// embedded DNS, from a BuildKit image pinned by digest.
 func TestNetworkedBuilderIsCreatedOnItsNetwork(t *testing.T) {
 	t.Parallel()
-	spec := NetworkedBuilderSpec{Name: NetworkedBuilderName(22), Networks: []string{"jd-e22-db-abc123", "jd-preview-22"}}
+	spec := NetworkedBuilderSpec{Name: NetworkedBuilderName("jd-e22-db-ABC123"), Networks: []string{"jd-e22-db-abc123", "jd-preview-22"}}
 	args, err := NetworkedBuilderCreateArgs(spec, "/var/lib/just-dashboard/buildkit/networked-buildkitd.toml")
 	if err != nil {
 		t.Fatal(err)
 	}
 	want := []string{
-		"buildx", "create", "--name", "jd-build-e22", "--driver", "docker-container",
+		"buildx", "create", "--name", "jd-build-e22-db-abc123", "--driver", "docker-container",
 		"--driver-opt", "network=jd-e22-db-abc123",
 		"--driver-opt", "image=" + NetworkedBuilderImage,
 		"--driver-opt", "env.BUILDKIT_STEP_LOG_MAX_SIZE=-1",
@@ -35,14 +35,14 @@ func TestNetworkedBuilderIsCreatedOnItsNetwork(t *testing.T) {
 	if !strings.Contains(NetworkedBuilderImage, "@sha256:") {
 		t.Fatal("the BuildKit image is not pinned by digest")
 	}
-	if NetworkedBuilderStateVolume("jd-build-e22") != "buildx_buildkit_jd-build-e220_state" {
-		t.Fatal(NetworkedBuilderStateVolume("jd-build-e22"))
+	if NetworkedBuilderStateVolume("jd-build-e22-db-abc123") != "buildx_buildkit_jd-build-e22-db-abc1230_state" {
+		t.Fatal(NetworkedBuilderStateVolume("jd-build-e22-db-abc123"))
 	}
 	for _, bad := range []NetworkedBuilderSpec{
 		{Name: "default", Networks: []string{"jd-e22-db-abc123"}},
 		{Name: "jd-build-e22 --driver-opt", Networks: []string{"jd-e22-db-abc123"}},
-		{Name: "jd-build-e22"},
-		{Name: "jd-build-e22", Networks: []string{"net --privileged"}},
+		{Name: "jd-build-e22-db-abc123"},
+		{Name: "jd-build-e22-db-abc123", Networks: []string{"net --privileged"}},
 	} {
 		if _, err := NetworkedBuilderCreateArgs(bad, "/x.toml"); err == nil {
 			t.Errorf("%+v was accepted", bad)
@@ -75,11 +75,11 @@ func TestNetworkedBuilderConfigNamesDockersResolver(t *testing.T) {
 // own; a schema step keeps nothing but the cache.
 func TestBuildxCommandNamesTheNetworkedBuilder(t *testing.T) {
 	t.Parallel()
-	argv, _, err := BuildxCommand(ImmutableBuildOptions{Dockerfile: ".just-dashboard/Dockerfile", Tag: "app:1", Builder: "jd-build-e22"}, "/tmp/m.json")
-	if err != nil || !slices.Equal(argv[:4], []string{"buildx", "build", "--builder", "jd-build-e22"}) || !slices.Contains(argv, "--load") {
+	argv, _, err := BuildxCommand(ImmutableBuildOptions{Dockerfile: ".just-dashboard/Dockerfile", Tag: "app:1", Builder: "jd-build-e22-db-abc123"}, "/tmp/m.json")
+	if err != nil || !slices.Equal(argv[:4], []string{"buildx", "build", "--builder", "jd-build-e22-db-abc123"}) || !slices.Contains(argv, "--load") {
 		t.Fatalf("argv = %q, %v", argv, err)
 	}
-	argv, _, err = BuildxCommand(ImmutableBuildOptions{Dockerfile: ".just-dashboard/Dockerfile.schema", Builder: "jd-build-e22", CacheOnly: true}, "")
+	argv, _, err = BuildxCommand(ImmutableBuildOptions{Dockerfile: ".just-dashboard/Dockerfile.schema", Builder: "jd-build-e22-db-abc123", CacheOnly: true}, "")
 	if err != nil || slices.Contains(argv, "--load") || slices.Contains(argv, "--tag") || slices.Contains(argv, "--metadata-file") ||
 		!strings.Contains(strings.Join(argv, " "), "--output type=cacheonly") {
 		t.Fatalf("argv = %q, %v", argv, err)

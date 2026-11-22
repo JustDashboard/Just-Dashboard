@@ -48,7 +48,7 @@ func TestLiveBuildReachesItsDatabaseAndAppliesTheSchemaFirst(t *testing.T) {
 	t.Cleanup(func() {
 		_, _ = liveDockerOutput(context.Background(), "rm", "--force", database)
 		_, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag)
-		_ = client.RemoveNetworkedBuilderState(context.Background(), dockerx.NetworkedBuilderName(environmentID))
+		_ = client.RemoveNetworkedBuilderState(context.Background(), dockerx.NetworkedBuilderName(network))
 		_, _ = liveDockerOutput(context.Background(), "network", "rm", network)
 	})
 	if _, err := liveDockerOutput(ctx, "run", "-d", "--name", database, "--network", network, "--network-alias", alias,
@@ -248,11 +248,11 @@ func TestLiveBuildStepBuildsAnApplicationThatReadsItsNewDatabase(t *testing.T) {
 	client := liveC4Docker(t)
 	stamp := time.Now().UnixNano() % 1_000_000_000
 	// Far from any environment this server deploys: the step names its
-	// image and its builder after the environment.
+	// image after the environment.
 	environmentID := int64(900_000_000) + stamp%99_000_000
 	network, alias, database := liveBuildDatabaseServer(t, ctx, stamp)
 	t.Cleanup(func() {
-		_ = client.RemoveNetworkedBuilderState(context.Background(), dockerx.NetworkedBuilderName(environmentID))
+		_ = client.RemoveNetworkedBuilderState(context.Background(), dockerx.NetworkedBuilderName(network))
 	})
 
 	root, config, candidate := liveSeededBuildSource(t)

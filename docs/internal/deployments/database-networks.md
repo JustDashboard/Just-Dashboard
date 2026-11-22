@@ -83,7 +83,8 @@ and runtime scoped by default, so this was most Next.js projects with a linked d
 value's host is one of the dashboard's database names — `db-N.jd.internal`, its pooler, a preview's
 branch — build_artifact asks `NetworksForRuntime` for the networks those values need, with the same
 bindings and refusals a release gets (staging isolation, data copies), and runs the build, whatever its
-method, on a builder of the environment's own: `jd-build-e<environment>`, buildx's `docker-container`
+method, on a builder of the environment's own, named after its database network
+(`jd-build-e<environment>-db-<key>`, so another store on the same daemon never names it): buildx's `docker-container`
 driver with `moby/buildkit` pinned by digest (`dockerx.NetworkedBuilderImage`), created on the first
 network and joined to any other. Its steps share the builder container's network namespace
 (`--oci-worker-net=host`, which is the container's, never the server's), and its configuration names
@@ -91,7 +92,7 @@ Docker's embedded resolver `127.0.0.11`, which BuildKit otherwise drops from a s
 a step resolves `db-N.jd.internal` as the application does and reaches the internet through the same
 resolver. The step log limits are lifted to match Docker's builder. The builder is created for the
 step and removed after it (`buildx rm --keep-state`), so it holds no endpoint on the network between
-builds; its state volume `buildx_buildkit_jd-build-e<environment>0_state` keeps the cache. Builds of
+builds; its state volume (`buildx_buildkit_<builder>0_state`) keeps the cache. Builds of
 one environment take turns on it; two environments never share one, so one environment's build cannot
 reach another's database. Starting it takes 3 to 6 seconds and removing it under two, and an
 environment's first build on it fills its own cache. It pulls base images itself, as BuildKit does, so

@@ -36,7 +36,10 @@ func (b *DockerArtifactBackend) StartNetworkedBuilder(ctx context.Context, netwo
 	if b.builderDir == "" {
 		return "", nil, fmt.Errorf("%w: no folder for the networked builder's configuration", ErrBuilderUnavailable)
 	}
-	name := dockerx.NetworkedBuilderName(network.EnvironmentID)
+	if len(network.Networks) == 0 {
+		return "", nil, fmt.Errorf("%w: a networked build needs a network", ErrBuilderUnavailable)
+	}
+	name := dockerx.NetworkedBuilderName(network.Networks[0])
 	builder, err := b.docker.StartNetworkedBuilder(ctx, dockerx.NetworkedBuilderSpec{
 		Name: name, Networks: network.Networks, ConfigDir: b.builderDir,
 	})
@@ -66,15 +69,6 @@ func (b *DockerArtifactBackend) RunCacheOnly(ctx context.Context, invocation Bui
 		}, output)
 	})
 	return err
-}
-
-// RemoveBuildState removes an environment's networked builder and its
-// cache, when the environment goes.
-func (b *DockerArtifactBackend) RemoveBuildState(ctx context.Context, environmentID int64) error {
-	if b == nil || b.docker == nil {
-		return nil
-	}
-	return b.docker.RemoveNetworkedBuilderState(ctx, dockerx.NetworkedBuilderName(environmentID))
 }
 
 func NewDockerArtifactBackend(client *dockerx.Client) *DockerArtifactBackend {
