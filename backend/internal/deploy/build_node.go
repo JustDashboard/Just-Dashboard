@@ -383,7 +383,7 @@ func (f nodeInstallFacts) inputsWith(lockfiles []string) []string {
 // same release offline.
 func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
 	plan := recipe.nodeInstall
-	lines, base, err := nodeInstallStage(plan, bases[0], bases, "toolchain", "build", "", installSecrets)
+	lines, base, err := nodeInstallStage(plan, bases[0], bases, "toolchain", "build", "", installSecrets, config.cache)
 	if err != nil {
 		return nil, err
 	}
@@ -411,7 +411,11 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		plan.buildEnv.framework = defaults.BuildEnv
-		lines = append(lines, plan.buildRun(buildSecrets, command, boundToBuild(config.Secrets)))
+		mounts := buildSecrets
+		if recipe.node.name == "nextjs" {
+			mounts = nextBuildCaches(config.cache, workdir) + mounts
+		}
+		lines = append(lines, plan.buildRun(mounts, command, boundToBuild(config.Secrets)))
 	}
 	if serving.entry != "" {
 		// The start command runs the framework's entry, so a build that did
@@ -467,7 +471,7 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 // otherwise. base is what a later stage starts from to have the same tools.
 // The PHP recipe's asset stage runs the same plan's install on its vendor
 // stage instead (phpAssetStage).
-func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []ResolvedImage, toolchainStage, stage, dir, installSecrets string) ([]string, string, error) {
+func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []ResolvedImage, toolchainStage, stage, dir, installSecrets string, cache recipeCache) ([]string, string, error) {
 	bun := ""
 	if plan.bun != "" {
 		image, err := resolveCatalogueImage(bases, plan.bun)
@@ -491,7 +495,7 @@ func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []Resolved
 		lines = append(lines, "ENV "+env)
 	}
 	lines = append(lines, "WORKDIR /app")
-	return append(lines, nodeInstallLines(plan, dir, nodeRunWith(installSecrets, plan.installDefaults(), plan.installLine()))...), base, nil
+	return append(lines, nodeInstallLines(plan, dir, plan.installRun(cache, installSecrets))...), base, nil
 }
 
 // readNodeInstalls reads the install inputs of every package detection

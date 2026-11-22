@@ -364,7 +364,7 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 				t.Fatal(err)
 			}
 			for _, want := range fixture.want {
-				if !strings.Contains(prepared.DockerfilePreview, want) {
+				if !strings.Contains(withoutNodeCacheMounts(prepared.DockerfilePreview), want) {
 					t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
 				}
 			}

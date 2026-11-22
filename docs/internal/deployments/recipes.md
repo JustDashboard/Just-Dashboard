@@ -1350,6 +1350,19 @@ the whole source as before, and the run's notes say which order it used and why
 Files the install reads that are not among the fixed inputs are added to them instead: a patch
 `patchedDependencies` names (pnpm's, in `package.json` or `pnpm-workspace.yaml`, and Bun's), a member's own
 `.npmrc`, Yarn's `.env.yarn`, and a workspace member's committed `bin` file, which the install links.
+**Download and compiler caches.** The install RUN mounts its manager's download cache from BuildKit's
+cache (`build_node_caches.go`, through `recipeCache`, so the id is scoped to the environment,
+`jd-deployment-<environment>-<name>`, and a forced build mounts none): npm's `/root/.npm`, pnpm's store at
+`/root/.local/share/pnpm/store`, Yarn 1's `/usr/local/share/.cache/yarn`, Yarn Berry's global folder
+`/root/.yarn/berry` (its global cache, or the mirror a project cache is filled from) and Bun's
+`/root/.bun/install/cache`, in every stage that installs (the Node recipe, a Hugo site's dependencies,
+the Python, Go and PHP asset stages). So a lockfile change downloads only what changed. A Next.js build
+also mounts the compiler caches `next build` keeps under the package's `.next/cache` — `webpack`,
+`turbopack` and `swc`, the persistence Next.js recommends for CI — but not its `fetch-cache` or `images`,
+which stay in the image as before: a persisted fetch cache would answer a build-time `fetch` with an
+earlier build's data. A mount's content never reaches the image; BuildKit keeps these caches for its own
+garbage-collection window, so a cold cache only costs a slower build.
+
 What the plan adds after the install (system packages' runs, Prisma's `generate`, SvelteKit's
 `BeforeBuild` adapter install) still runs after the source is copied. `TestLiveNodeInstallLayerOutlivesASourceChange`
 (`JD_DEPLOY_LIVE=1`) builds a Next.js app on Bun and on npm twice across a one-line page change and
@@ -1432,8 +1445,10 @@ the same way (`script_runtime_added`); `deno` cannot be, and is refused (`comman
 manifest declaring another manager than the committed lockfile's runs with `COREPACK_ENABLE_STRICT=0`
 (`package_manager_declaration_conflict`).
 
-**Yarn Plug'n'Play.** Berry keeps its cache inside the build (`YARN_ENABLE_GLOBAL_CACHE=false`) so it is
-copied with the application. When the linker is Plug'n'Play and a command runs outside `yarn` — a
+**Yarn Plug'n'Play.** Under Plug'n'Play, or with a committed `.yarn/cache` (zero-installs), Berry keeps
+its cache inside the build (`YARN_ENABLE_GLOBAL_CACHE=false`), because the application resolves packages
+from its archives at run time and the cache is copied with it. With any other linker the cache is global
+(`YARN_ENABLE_GLOBAL_CACHE=true`), under `/root/.yarn/berry`, and does not ship. When the linker is Plug'n'Play and a command runs outside `yarn` — a
 framework's `node build` — the install sets `YARN_NODE_LINKER=node-modules`; the lockfile does not depend
 on the linker (`yarn_linker_adjusted`).
 

@@ -111,6 +111,8 @@ func prepareNode(t *testing.T, files map[string]string, config BuildPlanConfig) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	// The install's cache mounts are build_node_caches_test.go's subject.
+	prepared.DockerfilePreview = withoutNodeCacheMounts(prepared.DockerfilePreview)
 	return prepared
 }
 
@@ -436,7 +438,7 @@ func TestWorkspaceMemberBuildsFromItsWorkspaceRoot(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(boundary, ".just-dashboard", "Dockerfile")); err != nil {
 		t.Fatalf("the Dockerfile is not at the workspace root: %v", err)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		"FROM toolchain AS build\nWORKDIR /app\nCOPY --parents [\"package.json\",\"apps/web/package.json\",\"pnpm-lock.yaml\",\"pnpm-workspace.yaml\",\"packages/ui/package.json\",\"./\"]\n" +
 			"RUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\nCOPY . /app/\nWORKDIR /app/apps/web\n",
 		"ENV PATH=/app/apps/web/node_modules/.bin:/app/node_modules/.bin:$PATH",
@@ -503,7 +505,7 @@ func TestNPMWorkspaceMemberBuildsItsSiblingsWithTurbo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"COPY --parents [\"package.json\",\"apps/web/package.json\",\"package-lock.json\",\"apps/docs/package.json\",\"packages/shared/package.json\",\"./\"]\nRUN npm ci\nCOPY . /app/\nWORKDIR /app/apps/web\n", nodeBuildRun("npx turbo run build --filter=web...\n")}, []string{"apk add"})
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{"COPY --parents [\"package.json\",\"apps/web/package.json\",\"package-lock.json\",\"apps/docs/package.json\",\"packages/shared/package.json\",\"./\"]\nRUN npm ci\nCOPY . /app/\nWORKDIR /app/apps/web\n", nodeBuildRun("npx turbo run build --filter=web...\n")}, []string{"apk add"})
 }
 
 // A member directory the recipe cannot write unquoted into WORKDIR, ENV and

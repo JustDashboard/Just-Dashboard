@@ -210,7 +210,7 @@ func TestRegistryCredentialsReachTheInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		"RUN --mount=type=secret,id=NODE_AUTH_TOKEN,env=NODE_AUTH_TOKEN,required=true --mount=type=secret,id=NPM_TOKEN,env=NPM_TOKEN,required=true npm install",
 	}, []string{"ghp_example", "npm_example"})
 }
@@ -286,7 +286,7 @@ func TestPHPAssetStageSharesTheNodeInstall(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"FROM node:22-alpine@sha256:", " AS assets\n", "RUN npm install --no-audit --no-fund\n", nodeBuildRun("npm run build\n")}, nil)
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{"FROM node:22-alpine@sha256:", " AS assets\n", "RUN npm install --no-audit --no-fund\n", nodeBuildRun("npm run build\n")}, nil)
 
 	// The asset install authenticates a private registry the same way.
 	private := map[string]string{

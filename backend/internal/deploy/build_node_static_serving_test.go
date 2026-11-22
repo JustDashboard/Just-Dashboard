@@ -46,7 +46,7 @@ func TestNextExportIsServedByTheStaticServerUnderItsBasePath(t *testing.T) {
 		candidate.StaticSite == nil || candidate.StaticSite.BasePath != "/docs" || candidate.StaticSite.HostingRules != 2 {
 		t.Fatalf("candidate = %+v / %+v", candidate, candidate.StaticSite)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		"RUN npm run build",
 		"COPY --from=build /app/out/ /usr/share/nginx/html/docs/",
 		// /about is out/about.html, which Next.js writes beside out/about/.

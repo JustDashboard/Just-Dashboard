@@ -1023,7 +1023,7 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 	if stage := plan.frontend; stage != nil {
 		// The stage copies the whole context, so a package that reads a
 		// file beside it still finds it, and installs where package.json is.
-		web, _, err := nodeInstallStage(stage.plan, bases[2], bases, "web-toolchain", "web", stage.root, installSecrets)
+		web, _, err := nodeInstallStage(stage.plan, bases[2], bases, "web-toolchain", "web", stage.root, installSecrets, config.cache)
 		if err != nil {
 			return nil, err
 		}

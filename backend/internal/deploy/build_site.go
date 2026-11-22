@@ -160,7 +160,7 @@ func renderSiteDockerfile(recipe siteRecipe, config BuildPlanConfig, serving sta
 			if err != nil {
 				return nil, err
 			}
-			stage, _, err := nodeInstallStage(*recipe.node, node, bases, "deps-toolchain", "deps", "", installSecrets)
+			stage, _, err := nodeInstallStage(*recipe.node, node, bases, "deps-toolchain", "deps", "", installSecrets, config.cache)
 			if err != nil {
 				return nil, err
 			}

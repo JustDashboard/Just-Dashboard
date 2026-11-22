@@ -34,7 +34,7 @@ func TestLaravelAssetStageInstallsWithTheNodePlanOnTheVendorStage(t *testing.T) 
 		candidate.PHP == nil || candidate.PHP.AssetOutput != "public/build" {
 		t.Fatalf("candidate = %+v / %+v", candidate, candidate.PHP)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		// The Node major is the repository's, read as the Node recipe reads it.
 		"FROM node:20-alpine@sha256:",
 		// pnpm is the release package.json declares, installed once into the

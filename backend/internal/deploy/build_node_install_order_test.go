@@ -27,7 +27,8 @@ func TestNodeRecipeInstallsBeforeTheSourceAndShipsNodeModulesApart(t *testing.T)
 		t.Fatal(err)
 	}
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
-		"WORKDIR /app\nCOPY --parents [\"package.json\",\"package-lock.json\",\".npmrc\",\"patches/\",\"./\"]\nRUN npm ci\nCOPY . /app/\n",
+		"WORKDIR /app\nCOPY --parents [\"package.json\",\"package-lock.json\",\".npmrc\",\"patches/\",\"./\"]\n" +
+			"RUN --mount=type=cache,id=jd-deployment-3-npm,target=/root/.npm,sharing=locked npm ci\nCOPY . /app/\n",
 		"COPY --from=build /app/node_module[s] /app/node_modules/\nCOPY --from=build --exclude=node_modules /app /app\nCMD",
 	}, []string{"COPY . .\n", "COPY --from=build /app /app\n"})
 	if !slices.ContainsFunc(prepared.Notes, func(note string) bool {
@@ -161,7 +162,7 @@ func TestNodeInstallLinesForEveryCaller(t *testing.T) {
 	}
 	plan.sourceFirst, plan.berry = "package.json has a postinstall script", true
 	if got := strings.Join(nodeInstallLines(plan, ".", "RUN yarn install --immutable"), "\n"); got !=
-		"COPY . .\nENV YARN_ENABLE_GLOBAL_CACHE=false\nRUN yarn install --immutable" {
+		"COPY . .\nENV YARN_ENABLE_GLOBAL_CACHE=true\nRUN yarn install --immutable" {
 		t.Fatalf("source-first lines:\n%s", got)
 	}
 }

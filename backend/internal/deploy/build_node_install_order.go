@@ -358,10 +358,7 @@ func nodeInstallLines(plan nodeInstallPlan, dir, install string) []string {
 	} else {
 		dir = ""
 	}
-	settings := []string{}
-	if plan.berry {
-		settings = append(settings, "ENV YARN_ENABLE_GLOBAL_CACHE=false")
-	}
+	settings := plan.yarnSettings()
 	if first, _ := plan.installFirst(); !first {
 		return slices.Concat([]string{"COPY . ."}, workdir, settings, []string{install})
 	}

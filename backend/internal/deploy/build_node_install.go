@@ -822,9 +822,12 @@ type nodeInstallPlan struct {
 	// committed.
 	inputs      []string
 	sourceFirst string
-	yarnCache   bool
-	toolchain   string
-	reason      string
+	// yarnCache says Yarn's cache is committed (zero-installs), and yarnPnP
+	// that Yarn Berry links with Plug'n'Play, which resolves packages from
+	// the cache at run time (build_node_caches.go).
+	yarnCache, yarnPnP bool
+	toolchain          string
+	reason             string
 	// build and start are the choice's commands on this manager's runner.
 	build, start string
 	findings     []PreflightFinding
@@ -1322,6 +1325,7 @@ func planYarnInstall(facts nodeInstallFacts, plan *nodeInstallPlan, choice nodeI
 			"A command started without yarn cannot load Plug'n'Play dependencies, so the install links node_modules; the lockfile does not depend on the linker.",
 			"", choice.fieldPackageManager))
 	}
+	plan.yarnPnP = pnp && plan.env == ""
 }
 
 func planBunInstall(facts nodeInstallFacts, plan *nodeInstallPlan, assets bool) {

@@ -434,7 +434,7 @@ func TestLaravelAssetStageHasPHPAndVendor(t *testing.T) {
 		"vite.config.ts":    "import icons from './vendor/acme/dev-icons/vite.js'\nexport default defineConfig({ plugins: [laravel({ input: ['resources/js/app.ts'] }), wayfinder(), icons()] })",
 	})
 	candidate, prepared, _ := phpPlan(t, files)
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		"FROM php-base AS vendor\nCOPY . .\nRUN mkdir -p storage/framework/cache",
 		"FROM node:22-alpine@sha256:", " AS assets-toolchain\nFROM vendor AS assets\nCOPY --from=assets-toolchain /usr/local /opt/node\nCOPY --from=assets-toolchain /opt /opt\nENV PATH=/opt/node/bin:$PATH\n",
 		"RUN composer install --no-interaction --prefer-dist --no-scripts\nRUN npm ci\n", nodeBuildRun("npm run build\n"),
@@ -590,7 +590,7 @@ func TestWordPressShapes(t *testing.T) {
 		t.Fatalf("candidates = %+v", result.Candidates)
 	}
 	_, prepared, _ = phpPlan(t, plugin)
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		"COPY . wp-content/plugins/acme-blocks/\n",
 		"FROM vendor AS assets\n", "WORKDIR /app/wp-content/plugins/acme-blocks\n", "RUN npm ci", "RUN npm run build\n",
 		"COPY --from=assets /app/wp-content/plugins/acme-blocks/build /app/wp-content/plugins/acme-blocks/build\n",

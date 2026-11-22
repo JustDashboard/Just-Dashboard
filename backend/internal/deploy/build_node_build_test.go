@@ -111,7 +111,7 @@ func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertDockerfile(t, prepared.DockerfilePreview, test.want, test.absent)
+			assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), test.want, test.absent)
 			plan := planNodeInstall(readNodeTree(t, test.files, "").facts, nodeInstallChoice{build: test.config.BuildCommand, start: test.config.StartCommand})
 			for _, code := range test.findings {
 				if findingByCode(plan.findings, code) == nil {

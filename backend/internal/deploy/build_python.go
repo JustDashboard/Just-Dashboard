@@ -903,7 +903,7 @@ func renderPythonDockerfile(recipe pythonRecipe, config BuildPlanConfig, bases [
 	if recipe.assets != nil {
 		// The install and the build run in the asset package's own
 		// directory, over a copy of the whole application.
-		stage, _, err := nodeInstallStage(*recipe.assets, bases[1], bases, "assets-toolchain", "assets", recipe.assetsDir, installSecrets)
+		stage, _, err := nodeInstallStage(*recipe.assets, bases[1], bases, "assets-toolchain", "assets", recipe.assetsDir, installSecrets, config.cache)
 		if err != nil {
 			return nil, err
 		}
