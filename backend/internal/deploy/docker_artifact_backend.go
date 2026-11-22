@@ -15,6 +15,60 @@ type DockerArtifactBackend struct {
 	// Docker binds by its path on this server (build_railpack.go).
 	railpackDir   string
 	sweepRailpack sync.Once
+	// builderDir is where a networked builder's configuration is written,
+	// a folder the docker CLI reads by the same path as this process.
+	builderDir string
+}
+
+// WithBuilderDir names the folder a networked builder's configuration is
+// written to.
+func (b *DockerArtifactBackend) WithBuilderDir(dir string) *DockerArtifactBackend {
+	b.builderDir = dir
+	return b
+}
+
+// StartNetworkedBuilder starts the builder an environment's builds that reach
+// its databases run on (build_database.go).
+func (b *DockerArtifactBackend) StartNetworkedBuilder(ctx context.Context, network BuildNetwork) (string, func(context.Context), error) {
+	if b == nil || b.docker == nil {
+		return "", nil, ErrBuilderUnavailable
+	}
+	if b.builderDir == "" {
+		return "", nil, fmt.Errorf("%w: no folder for the networked builder's configuration", ErrBuilderUnavailable)
+	}
+	if len(network.Networks) == 0 {
+		return "", nil, fmt.Errorf("%w: a networked build needs a network", ErrBuilderUnavailable)
+	}
+	name := dockerx.NetworkedBuilderName(network.Networks[0])
+	builder, err := b.docker.StartNetworkedBuilder(ctx, dockerx.NetworkedBuilderSpec{
+		Name: name, Networks: network.Networks, ConfigDir: b.builderDir,
+	})
+	if err != nil {
+		return "", nil, err
+	}
+	return builder.Name, builder.Close, nil
+}
+
+// RunCacheOnly runs a build for what its steps do, keeping only the cache.
+func (b *DockerArtifactBackend) RunCacheOnly(ctx context.Context, invocation BuildInvocation, emit func(BuildLog) error) error {
+	if b == nil || b.docker == nil {
+		return ErrBuilderUnavailable
+	}
+	secrets := make([]dockerx.BuildxSecret, 0, len(invocation.Secrets))
+	for _, secret := range invocation.Secrets {
+		secrets = append(secrets, dockerx.BuildxSecret{ID: secret.ID, Value: secret.Value})
+	}
+	buildArgs := make([]dockerx.BuildxArg, 0, len(invocation.BuildArgs))
+	for _, arg := range invocation.BuildArgs {
+		buildArgs = append(buildArgs, dockerx.BuildxArg{Name: arg.Name, Value: arg.Value})
+	}
+	_, err := consumeDockerBuildLogs(ctx, emit, func(child context.Context, output chan<- dockerx.LogLine) (dockerx.ImmutableImage, error) {
+		return dockerx.ImmutableImage{}, b.docker.RunCacheOnly(child, dockerx.ImmutableBuildOptions{
+			Dir: invocation.ContextDir, Dockerfile: invocation.Dockerfile, Platform: invocation.Platform,
+			Secrets: secrets, BuildArgs: buildArgs, Builder: invocation.Builder,
+		}, output)
+	})
+	return err
 }
 
 func NewDockerArtifactBackend(client *dockerx.Client) *DockerArtifactBackend {
@@ -74,6 +128,7 @@ func (b *DockerArtifactBackend) BuildImage(
 			Tag: invocation.Tag, Platform: invocation.Platform,
 			NoCache: invocation.NoCache, Pull: invocation.Pull, Secrets: secrets,
 			Target: invocation.Target, BuildArgs: buildArgs, Frontend: frontend,
+			Builder: invocation.Builder,
 		}, output)
 	})
 	if err != nil {

@@ -81,7 +81,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | `handlers_mcp*.go` | 5 | The MCP endpoint and its keys |
 | other `handlers_*.go` | 58 | One to four files per remaining area |
 | `database_*.go` | 21 | Databases: inventory, metrics, alerts, point-in-time recovery, TLS, the pooler, upgrades |
-| `deployment_*.go`, `deploy_*.go` | 17 | Deployments: joins with other features, deploy keys, the OpenAPI description |
+| `deployment_*.go`, `deploy_*.go` | 19 | Deployments: joins with other features, deploy keys, the OpenAPI description |
 | `boards_*.go`, `map_*.go` | 9 | Excalidraw and the server map, which have no package of their own |
 | `routes.go`, `route_methods.go`, `server.go`, `modules.go`, `modules_proxy.go` | 5 | The router, the `Server`, and the module set |
 
@@ -91,7 +91,7 @@ Counts are source files; the tests sit beside them. A group named `detect` is `d
 `detect_*.go`; a name with a `*` is a plain wildcard. Files outside a group are named for the one
 thing they hold.
 
-**`deploy`** (247 source files), described in
+**`deploy`** (249 source files), described in
 [`implementation.md`](../deployments/implementation.md):
 
 | Group | Count | What it holds |

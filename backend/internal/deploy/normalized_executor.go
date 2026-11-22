@@ -79,6 +79,12 @@ type NormalizedStepExecutor struct {
 	// rehearser makes the throwaway database copies release tasks are
 	// rehearsed against (rehearsal.go); nil reports a rehearsal unavailable.
 	rehearser MigrationRehearser
+	// databases says whether a linked database is new, before a build that
+	// needs rows loads the project's seed into it (build_database.go).
+	databases DatabaseContents
+	// buildNetworks joins a build to its databases' network; nil asks the
+	// runtime owner, which joins the release's containers the same way.
+	buildNetworks BuildNetworkOwner
 
 	// requests is the held request record the traffic replay reads its
 	// requests from (replay.go) and a canary's two releases are read from
@@ -176,6 +182,9 @@ type preparedStepEvidence struct {
 
 type builtStepEvidence struct {
 	Result BuildArtifactResult `json:"result"`
+	// DatabaseSteps are the steps that ran against the build's databases
+	// before it built: the schema, the seed of a new database.
+	DatabaseSteps []builtDatabaseStep `json:"databaseSteps,omitempty"`
 }
 
 type renderedStepEvidence struct {
@@ -615,22 +624,92 @@ func (e *NormalizedStepExecutor) buildArtifact(
 			return normalizedStepFailure(err)
 		}
 	}
+	// A build handed a linked database runs on a builder on the database's
+	// network, so a page it prerenders reads the database as the running
+	// application does (build_database.go).
+	builder := e.builder
+	refused := func(err error) StepResult {
+		failure := buildNetworkFailure(err)
+		cleaned, cleanupErr := preparedEvidence.Source.Cleanup()
+		failure.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
+		return failure
+	}
+	network, err := e.buildNetwork(ctx, execution.Run, buildVariables)
+	if err != nil {
+		return refused(err)
+	}
+	if network != nil {
+		if err := stepLog(execution, "status", "The build reaches "+strings.Join(network.Hosts, ", ")+
+			" on the environment's network, as the application does"); err != nil {
+			return normalizedStepFailure(err)
+		}
+		networked, closeBuilder, err := builder.StartNetworkedBuilder(ctx, *network)
+		if err != nil {
+			return refused(err)
+		}
+		defer closeBuilder(context.WithoutCancel(ctx))
+		builder = networked
+	}
 	// The collector reads the transcript as it is logged, after the builder
 	// has redacted it, so a failure can be named from its own output.
 	collector := newBuildOutputCollector(func() int64 { return lastLogMark(execution.Output) })
-	result, err := e.builder.Build(
-		ctx, preparedEvidence.BuildRoot,
-		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
-		plan.Build, preparedEvidence.Prepared, buildVariables, secret, registryAuth,
-		plan.SourceIdentity, plan.BuildEvidence.Compose,
-		func(line BuildLog) error {
-			if err := stepLog(execution, line.Stream, line.Text); err != nil {
-				return err
+	build := func() (BuildArtifactResult, error) {
+		return builder.Build(
+			ctx, preparedEvidence.BuildRoot,
+			releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
+			plan.Build, preparedEvidence.Prepared, buildVariables, secret, registryAuth,
+			plan.SourceIdentity, plan.BuildEvidence.Compose,
+			func(line BuildLog) error {
+				if err := stepLog(execution, line.Stream, line.Text); err != nil {
+					return err
+				}
+				collector.observe(line)
+				return nil
+			},
+		)
+	}
+	result, err := build()
+	redacted := buildLogRedactions(buildVariables, secret)
+	// A build that read a table its migrations create gets them applied
+	// first, and one that then needs rows a new database does not have gets
+	// the project's seed; each runs at most once, from the build's own
+	// layers, and the build runs again after it.
+	schemaApplied, seeded := false, false
+	databaseSteps := []builtDatabaseStep{}
+	for err != nil && ctx.Err() == nil {
+		var retry schemaRetry
+		switch code := e.buildFailureCode(plan, preparedEvidence.Prepared, redacted, collector, err); {
+		case code == "build_database_schema_missing" && !schemaApplied:
+			schemaApplied = true
+			retry = e.applySchemaBeforeBuild(ctx, execution, plan, preparedEvidence, builder, redacted)
+			if retry.reason != "" {
+				_ = stepLog(execution, "status", "The schema was not applied before the build: "+retry.reason)
 			}
-			collector.observe(line)
-			return nil
-		},
-	)
+		case (code == "build_static_params_empty" || code == "build_prerender_failed") && !seeded:
+			seeded = true
+			retry = e.seedBeforeBuild(ctx, execution, plan, preparedEvidence, builder, redacted, network)
+			if retry.reason != "" && network != nil {
+				_ = stepLog(execution, "status", "The seed was not run before the build: "+retry.reason)
+			}
+		}
+		if retry.failure != nil {
+			cleaned, cleanupErr := preparedEvidence.Source.Cleanup()
+			retry.failure.Cleanup = mustJSON(map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)})
+			return *retry.failure
+		}
+		if !retry.applied {
+			break
+		}
+		databaseSteps = append(databaseSteps, retry.step)
+		collector = newBuildOutputCollector(func() int64 { return lastLogMark(execution.Output) })
+		result, err = build()
+	}
+	// The diagnosis of a build that still fails says whether the schema
+	// step had run, not whether it was tried.
+	schemaApplied = false
+	for _, step := range databaseSteps {
+		schemaApplied = schemaApplied || step.Kind == "schema"
+	}
 	if err != nil {
 		cleaned, cleanupErr := preparedEvidence.Source.Cleanup()
 		cleanup := map[string]any{"workspaceRemoved": cleaned, "error": safeCleanupError(cleanupErr)}
@@ -640,7 +719,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 				Cleanup: mustJSON(cleanup),
 			}
 		}
-		if failure := e.buildFailure(ctx, execution, plan, preparedEvidence.Prepared, buildLogRedactions(buildVariables, secret), collector, err); failure != nil {
+		if failure := e.buildFailure(ctx, execution, plan, preparedEvidence.Prepared, redacted, collector, err, schemaApplied); failure != nil {
 			failure.Cleanup = mustJSON(buildFailureCleanup(cleanup, err))
 			return *failure
 		}
@@ -648,7 +727,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 		failure.Cleanup = mustJSON(cleanup)
 		return failure
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{Result: result})}
+	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{Result: result, DatabaseSteps: databaseSteps})}
 }
 
 func (e *NormalizedStepExecutor) renderRuntime(

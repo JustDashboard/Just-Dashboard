@@ -118,26 +118,34 @@ func TestPreflightJudgesTheBuildsEnvValidation(t *testing.T) {
 	}
 }
 
-// A prerendering build cannot reach a linked database, whose alias exists
-// only on the network the running release joins, nor a loopback one.
-func TestPreflightWarnsWhenThePrerenderCannotReachTheDatabase(t *testing.T) {
+// A prerendering build reaches a linked database on the environment's
+// network, however the link reached the plan; loopback inside the build is
+// the build container itself, which nothing can reach.
+func TestPreflightSaysWhatThePrerenderReaches(t *testing.T) {
 	t.Parallel()
 	files := map[string]string{"package.json": nextPrisma, "prisma/schema.prisma": prismaSchemaFor("postgresql")}
 	configuration := nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", StartCommand: "npm run start"})
+	configuration.Dependencies = []PlannedDependency{{Kind: "database", ResourceKind: "database_connection", ResourceID: "12", Ownership: "linked"}}
 	for _, test := range []struct {
 		name, value string
 		scopes      []string
 		reference   string
-		measured    string
+		reached     string
+		warned      string
 	}{
-		{name: "linked database", value: "postgresql://app:hunter2@db-12.jd.internal:5432/app", scopes: []string{"runtime", "build"},
-			measured: "DATABASE_URL points at db-12.jd.internal, which only the running release can resolve"},
-		{name: "loopback", value: "postgres://app:hunter2@127.0.0.1:5432/app", scopes: []string{"runtime", "build"},
-			measured: "DATABASE_URL points at 127.0.0.1, which inside the build is the build container itself"},
+		{name: "linked database address", value: "postgresql://app:hunter2@db-12.jd.internal:5432/app", scopes: []string{"runtime", "build"},
+			reached: "DATABASE_URL (db-12.jd.internal)"},
 		{name: "a typed database reference", reference: "${{database.12.url}}", scopes: []string{"runtime", "build"},
-			measured: "DATABASE_URL is a linked database, which only the running release can reach"},
+			reached: "DATABASE_URL (a linked database)"},
+		// The new-deployment page writes the link into the variable's row,
+		// where it reaches the draft as a supplied value.
+		{name: "the link the new-deployment page writes", value: "${{database.12}}", scopes: []string{"runtime", "build"},
+			reached: "DATABASE_URL (a linked database)"},
+		{name: "loopback", value: "postgres://app:hunter2@127.0.0.1:5432/app", scopes: []string{"runtime", "build"},
+			warned: "DATABASE_URL points at 127.0.0.1, which inside the build is the build container itself"},
 		{name: "a hosted database", value: "postgresql://app:hunter2@ep-cool.neon.tech/app", scopes: []string{"runtime", "build"}},
 		{name: "runtime only", value: "postgresql://app:hunter2@db-12.jd.internal:5432/app", scopes: []string{"runtime"}},
+		{name: "another connection's reference text", value: "${{database.13}}", scopes: []string{"runtime", "build"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
@@ -148,42 +156,29 @@ func TestPreflightWarnsWhenThePrerenderCannotReachTheDatabase(t *testing.T) {
 			draft, _ := buildScopedDraft(t, files, values)
 			configuration := configuration
 			configuration.Variables = []PlannedVariable{{Name: "DATABASE_URL", Sensitivity: "secret", Scopes: test.scopes, Reference: test.reference}}
-			unreachable := findingByCode(preflightFindings(draft, configuration, dockerHost, false), "build_database_unreachable")
-			if test.measured == "" {
-				if unreachable != nil {
-					t.Fatalf("unexpected %+v", unreachable)
+			findings := preflightFindings(draft, configuration, dockerHost, false)
+			unreachable, network := findingByCode(findings, "build_database_unreachable"), findingByCode(findings, "build_database_network")
+			for _, item := range []*PreflightFinding{unreachable, network} {
+				if item != nil && strings.Contains(item.Measured+item.Means+item.Action, "hunter2") {
+					t.Fatal("a value was echoed")
 				}
-				return
 			}
-			if unreachable == nil || unreachable.Severity != PreflightWarning || unreachable.Measured != test.measured || unreachable.FieldID != "variables.DATABASE_URL" {
-				t.Fatalf("unreachable = %+v", unreachable)
-			}
-			if strings.Contains(unreachable.Measured+unreachable.Means+unreachable.Action, "hunter2") {
-				t.Fatal("a value was echoed")
-			}
-			// Nothing reads DATABASE_URL while this build runs, so the
-			// finding offers to take the build scope away.
-			if fix := unreachable.Fix; fix == nil || fix.Kind != fixRemoveVariableScope || fix.Field != "variables.DATABASE_URL" || fix.Scope != "build" {
-				t.Fatalf("fix = %+v", unreachable.Fix)
+			switch {
+			case test.reached != "":
+				if network == nil || network.Severity != PreflightPass || network.Measured != test.reached || network.FieldID != "variables.DATABASE_URL" || unreachable != nil {
+					t.Fatalf("network = %+v, unreachable = %+v", network, unreachable)
+				}
+			case test.warned != "":
+				if unreachable == nil || unreachable.Severity != PreflightWarning || unreachable.Measured != test.warned ||
+					unreachable.FieldID != "variables.DATABASE_URL" || unreachable.Fix != nil || network != nil {
+					t.Fatalf("unreachable = %+v, network = %+v", unreachable, network)
+				}
+			default:
+				if unreachable != nil || network != nil {
+					t.Fatalf("unexpected %+v %+v", unreachable, network)
+				}
 			}
 		})
-	}
-}
-
-// A build that reads the database variable itself — next.config — keeps its
-// build scope: the finding names the problem and offers no plan change.
-func TestUnreachableDatabaseKeepsTheBuildScopeABuildReadNeeds(t *testing.T) {
-	t.Parallel()
-	files := map[string]string{
-		"package.json": nextPrisma, "prisma/schema.prisma": prismaSchemaFor("postgresql"),
-		"next.config.js": "module.exports = { env: { DB_HOST: new URL(process.env.DATABASE_URL).host } }\n",
-	}
-	draft, _ := buildScopedDraft(t, files, map[string]string{"DATABASE_URL": "postgresql://app:hunter2@db-12.jd.internal:5432/app"})
-	configuration := nodeTestConfiguration(BuildPlanConfig{Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", StartCommand: "npm run start"})
-	configuration.Variables = []PlannedVariable{{Name: "DATABASE_URL", Sensitivity: "secret", Scopes: []string{"runtime", "build"}}}
-	unreachable := findingByCode(preflightFindings(draft, configuration, dockerHost, false), "build_database_unreachable")
-	if unreachable == nil || unreachable.Fix != nil {
-		t.Fatalf("unreachable = %+v", unreachable)
 	}
 }
 

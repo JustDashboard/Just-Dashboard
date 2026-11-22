@@ -14,6 +14,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more, and builds what no recipe does with Railpack, the builder Railway and Coolify use, pinned to a reviewed release
 - Push to deploy, plus pull-request previews only your tailnet can reach — Compose stacks too, every service isolated on the preview's own network and storage
 - Database branches for previews: a preview's own copy of a linked PostgreSQL, MySQL or MariaDB, restored from its newest backup with chosen columns masked, removed with the preview, never for a fork
+- Builds that read their database work as they do on Vercel: a page prerendered from a linked database reaches it on the project's own network, a table the migrations create is created before the build reads it, and a new, empty database gets the project's seed when the build needs its rows
 
 <table>
 <tr>

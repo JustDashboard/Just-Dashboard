@@ -447,6 +447,17 @@ A change that weakens any of these has to say so explicitly.
     notice's link) opens only in a new tab with `noopener noreferrer`, never in this dashboard's own. While the
     link is idle nothing links to the stored hub address at all, since it may answer on the machine that was
     refused. See [hub link](../backend/hub-link.md) and its [protocol](../backend/hub-link-protocol.md).
+18. A build reaches no more than its release will. A build whose values name a linked database runs on
+    the environment's own builder, named after its database network (`jd-build-e<environment>-db-<key>`),
+    joined only to the networks `NetworksForRuntime` gives that environment's release, under the same
+    isolation refusals; its steps
+    share the builder container's network namespace, never the server's, and `--network=host` is used by
+    no build. The BuildKit image is pinned by digest, two environments never share a builder, and the
+    builder is removed after each build, so it holds no endpoint between builds. A migration or seed run
+    before the build is the plan's own command (the start command's migration, an image release task's,
+    detection's seed), with the values that step would get anyway as BuildKit secrets; a seed runs only on
+    databases holding no row, and a plan's backup gate is checked first. See
+    [database networks](../deployments/database-networks.md#builds-that-read-their-database).
 
 ## Invariant 2: what two-factor still guarantees
 

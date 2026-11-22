@@ -375,6 +375,15 @@ func nextOutputMode(text string) string {
 	return ""
 }
 
+// nextCacheComponents says next.config turns on Cache Components: the
+// top-level cacheComponents of Next.js 16, or the experimental flag it grew
+// from (experimental.cacheComponents, and dynamicIO before that).
+func nextCacheComponents(text string) bool {
+	return nextCacheComponentsRE.MatchString(text)
+}
+
+var nextCacheComponentsRE = regexp.MustCompile(`(?:^|[\s{,])(?:cacheComponents|dynamicIO)\s*:\s*true\b`)
+
 // nextImagesUnoptimized says a static export can use next/image: the images
 // are served as they are, or through a loader the project supplies.
 func nextImagesUnoptimized(text string) bool {

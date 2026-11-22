@@ -287,7 +287,7 @@ func seedFinding(candidate *DetectedCandidate, configuration PlanConfiguration, 
 			return nil
 		}
 	}
-	means := "The project loads its first rows — an administrator account, the lookup data its forms need — with " + candidate.SeedCommand + ", and nothing runs it against a new database."
+	means := "The project loads its first rows — an administrator account, the lookup data its forms need — with " + candidate.SeedCommand + ". The dashboard runs it only for a build that cannot build without those rows, on a database that has none; otherwise nothing runs it against a new database."
 	if candidate.SeedResets {
 		means += " The seed clears tables before inserting, so it must only ever run against an empty database."
 	}

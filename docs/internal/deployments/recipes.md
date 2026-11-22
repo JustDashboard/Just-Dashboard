@@ -1595,7 +1595,7 @@ toolchain needs, below; the PHP recipe's asset stage builds the same way.
 | `build_env_validation_skipped` (pass; warning when a skipped variable has no value at all) | the schema's required server variables have no build value and the schema honours `SKIP_ENV_VALIDATION`; the environment check then does not refuse them as `build_variable_missing_*` |
 | `build_env_missing` (warning) | the same, and the schema cannot be skipped, so the build stops with "Invalid environment variables"; it lists only what the environment check did not already refuse per field as `build_variable_missing_*` |
 | `build_env_client_missing` (warning) | a `client` variable has no build value; the browser bundle gets `undefined` |
-| `build_database_unreachable` (warning) | Next.js, Nuxt, Astro, SvelteKit or Gatsby with a database client, and a build-scoped URL pointing at `db-N.jd.internal`, at loopback, or a linked database reference: the build runs apart from the environment's network, so a prerendered page that queries it fails; the action is rendering those pages on request, and — when no build-time read detection saw needs the variable — the finding's `fix` removes its build scope, one click on Review or the variable editor opened on the change elsewhere |
+| `build_database_network` (pass), `build_database_unreachable` (warning) | Next.js, Nuxt, Astro, SvelteKit or Gatsby with a database client and a build-scoped database URL: a linked database (a typed reference, the link the new-deployment page writes into the row, or a `db-N.jd.internal` address) passes, since the build runs on a builder on the environment's network ([database networks](database-networks.md#builds-that-read-their-database)); one at loopback warns, since inside the build that is the build container itself, and the action is to link the database |
 | `port_variable_mismatch` (warning) | a `PORT` variable differs from the internal port the proxy and readiness check use |
 | `node_env_not_production` (warning) | `NODE_ENV` other than `production` reaches the build or the server |
 | `host_variable_loopback_hostname` (warning) | `HOSTNAME` on loopback, which Next.js standalone binds to (a loopback `HOST` is the environment check's `host_variable_loopback_host`) |
@@ -2938,7 +2938,10 @@ preflight raises `seed_available` (a
 warning) naming the command to run once from the project's console after the first release. Only a
 first release does: a deployment that replaces a live runtime has a database that already holds whatever
 was seeded. It is never planned as a release task, which runs before every release, because a seed that
-clears tables must not run on every release.
+clears tables must not run on every release. The one time the dashboard runs it is for a build that cannot
+build without its rows — Next.js with Cache Components refuses an empty `generateStaticParams`, a page
+reads a settings row — on linked databases that hold no row at all, once, before building again
+([database networks](database-networks.md#builds-that-read-their-database)).
 
 ## Failure diagnosis
 
@@ -2970,7 +2973,10 @@ names, with the remedy the evidence supports:
 | `build_runtime_version` | EBADENGINE, `ERR_PNPM_UNSUPPORTED_ENGINE`, Yarn/Next engine lines, Go `GOTOOLCHAIN=local`, rustc `or newer`, Maven release, Gradle class version, a Gradle toolchain no JDK matches, NETSDK1045, `A compatible .NET SDK was not found`, NETSDK1005 (a referenced project restored for another framework than it builds for), Composer `requires php`, pip `requires a different Python`, uv/Poetry Python requirement, Ruby/Elixir/Hugo versions | a Go, Python, Node, PHP, Java or .NET release the recipe offers |
 | `build_env_missing` | PrismaConfigEnvError, P1012, t3-env, SvelteKit `$env/static`, Astro, Rails `secret_key_base`, Phoenix, Django, `KeyError` on the environment | the variable, or its build scope (recipes only) |
 | `build_sqlx_offline` | sqlx `set DATABASE_URL to use query macros` / no cached data | `SQLX_OFFLINE=true` for the build |
-| `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve (a linked database is reachable only on the project network, which a build is not on); Django `OperationalError` | — |
+| `build_database_schema_missing` | a table or column the database does not have yet: PostgreSQL's `relation "x" does not exist` / `column … does not exist` (not a `NOTICE … skipping`), Prisma P2021/P2022, MySQL `Table '…' doesn't exist` / `Unknown column`, SQLite `no such table` | — (a recipe build gets the plan's migration applied first and builds again; the sentence says the migrations had already run when they had) |
+| `build_static_params_empty` | Next.js with Cache Components: `all generateStaticParams functions must return at least one result`, with the page from `Failed to collect page data for` | — (a build whose linked databases have no rows gets the project's seed first and builds again) |
+| `build_database_unreachable`, `build_prerender_failed` | Next prerender/collect-page-data errors, with or without a database error; `Can't reach database server`; a `*.jd.internal` address that does not resolve; Django `OperationalError`. The sentence says which: a linked database that did not answer on the environment's network, loopback (the build container itself), or a database outside the server. With Cache Components (`nodeBuild.cacheComponents`, from `next.config`) the remedy is a `<Suspense>` boundary, never `export const dynamic`, which that mode refuses | — |
+| `build_database_network`, `build_schema_step_failed`, `build_seed_step_failed` | the build could not join its database's network (a refusal a release would get too, or a builder that did not start); the migration or seed run before the build failed, with its last line | — |
 | `build_prisma_client_missing` | `@prisma/client did not initialize yet` | `prisma generate` before the build command, unless the recipe already runs it (the `prisma` CLI is a dependency); otherwise the sentence says to add the CLI |
 | `build_platform_binary_missing` | rollup/esbuild/SWC/lightningcss/oxide/sharp Linux binaries missing | — |
 | `build_legacy_openssl` | `0308010C`, `ERR_OSSL_EVP_UNSUPPORTED` | `NODE_OPTIONS=--openssl-legacy-provider` |
