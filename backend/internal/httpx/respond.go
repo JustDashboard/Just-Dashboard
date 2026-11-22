@@ -86,6 +86,17 @@ func (e *APIError) Retry() *APIError {
 	return &out
 }
 
+// RetryAfter is a 429 that says when the same request would be admitted, for
+// a limit somebody else keeps (GitHub's). WriteError sends it as Retry-After.
+func (e *APIError) RetryAfter(wait time.Duration) *APIError {
+	out := *e
+	out.Retryable = true
+	if wait > 0 {
+		out.retryAfter = wait
+	}
+	return &out
+}
+
 func (e *APIError) Error() string {
 	if e.err != nil {
 		return e.err.Error()

@@ -21,6 +21,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/githubrepos"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
@@ -93,6 +94,11 @@ type Server struct {
 	// The GitHub accounts' own pictures, read once an hour per account.
 	avatars    avatarCache
 	forgeMedia forgeMediaCache
+
+	// githubAccessOverride stands in for resolveGitHubRepoAccess in tests of
+	// the GitHub page's repository routes, which then need no connection,
+	// App or token: a test hands the handlers a client aimed at a fake GitHub.
+	githubAccessOverride func(r *http.Request) (*githubrepos.RepoAccess, error)
 
 	// What the DNS record routes reach, which a test replaces
 	// (handlers_deploy_dns_record.go).
