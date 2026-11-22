@@ -312,11 +312,33 @@ func (s *Server) hostnameSuffix(name string, attempt int) string {
 	return hex.EncodeToString(sum[:3])
 }
 
+// DNS carries a name of at most 253 characters, written without its final
+// dot, in labels of at most 63.
+const (
+	maxHostnameLength = 253
+	maxLabelLength    = 63
+	// hostnameSuffixLength is "-" and the six hex digits of hostnameSuffix.
+	hostnameSuffixLength = 7
+)
+
+// slugWithin cuts a slug to room characters, and never to nothing: a slug
+// starts with a letter or digit, so its first character is always a label.
+func slugWithin(slug string, room int) string {
+	if len(slug) <= room {
+		return slug
+	}
+	return strings.Trim(slug[:max(room, 1)], "-")
+}
+
 // suggestHostnameSlug is hostnameSlug's public-facing form: the deterministic
 // label plus a deterministic suffix, advanced by a counter only when the
-// resulting hostname is already a managed domain of another project.
+// resulting hostname is already a managed domain of another project. The
+// slug is cut so the label stays within 63 characters and the whole name,
+// under domainSuffix, within 253: a wildcard certificate's zone can be long
+// enough that a 47-character label under it is not a name DNS can carry.
 func (s *Server) suggestHostnameSlug(ctx context.Context, name, domainSuffix string) string {
-	base := hostnameSlug(name)
+	room := min(maxLabelLength, maxHostnameLength-1-len(domainSuffix)) - hostnameSuffixLength
+	base := slugWithin(hostnameSlug(name), room)
 	for attempt := 0; attempt < maxHostnameSuffixAttempts; attempt++ {
 		candidate := base + "-" + s.hostnameSuffix(name, attempt)
 		if !s.hostnameDomainTaken(ctx, candidate+"."+domainSuffix) {

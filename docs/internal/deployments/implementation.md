@@ -300,7 +300,12 @@ only renderer/executor/validation authority for their feature.
   truncated to three bytes, not a random draw, so the same name proposes the same hostname on every call —
   a screen that re-fetches must not see a different address. If that
   deterministic hostname is already a managed domain of another active project, the HMAC input gains a
-  `#2`, `#3`, … counter and is recomputed until a free one is found. `covered` is whether a certificate
+  `#2`, `#3`, … counter and is recomputed until a free one is found. The slug is at most 40 characters
+  and is cut further when the base is long, so the label stays within 63 characters and the whole name
+  within 253 (a 100-character project name under an sslip.io base is a 47-character label and a
+  68-character name). Any generated name over 46 characters is longer than nginx's default server-name
+  bucket takes; the proxy fits the bucket itself when it writes the route (see the server-name hash
+  in [the proxy notes](../backend/proxy.md)). `covered` is whether a certificate
   already covers the name — the only thing activation accepts — and `certificateMethod` is the HTTP-01
   challenge this host could issue one with. For a typed wildcard (`?hostname=*.example.com`) asked by
   `system.admin` it is `dns-01` with `certificateDnsProvider`, the provider whose saved credentials the
@@ -327,7 +332,10 @@ only renderer/executor/validation authority for their feature.
   safety property: a run that cannot obtain the certificate its own plan asked for stops with no
   candidate container to stop, restore or explain. A plan with no HTTPS domain is `skipped`; a host
   without certbot is `unavailable` (`certificate_unavailable`), which is terminal but is not a failure of
-  the deployment's own work; a refused order is `failed` (`certificate_issue_failed`). Redeploy and
+  the deployment's own work; a refused order is `failed` (`certificate_issue_failed`). A temporary
+  challenge site nginx refuses says nginx's own first error, with its file and line, in the step's
+  message ("nginx could not serve the certificate challenge: nginx refused the challenge site: …"),
+  not "configuration failed validation". Redeploy and
   rollback carry the step; restart and preview-remove do not, because neither applies a route.
   Reuse comes first, and covers wildcards both ways: a name under an existing wildcard (a preview's
   `pr-7.preview.example.com` under `*.preview.example.com`) and a wildcard plan name an existing
