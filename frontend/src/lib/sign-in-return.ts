@@ -46,6 +46,7 @@ export const SIGNED_IN_SECTIONS: readonly string[] = [
   "excalidraw",
   "files",
   "git",
+  "github",
   "logs",
   "map",
   "metrics",
