@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // The host's own records are lines in /etc/hosts. The dashboard owns exactly
@@ -160,12 +162,8 @@ func (s *Service) SetHostRecords(ctx context.Context, records []HostRecord) (*Ho
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	path := hostFilePath(s.paths.Hosts)
-	// A symbolic link is replaced by the rename that makes the write atomic,
-	// which would turn the link into a file. Write through it instead.
-	if resolved, err := filepath.EvalSymlinks(path); err == nil {
-		path = resolved
-	}
+	mirrored := hostFilePath(s.paths.Hosts)
+	path := throughLink(mirrored)
 	data, err := os.ReadFile(path)
 	if err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("reading %s: %w", path, err)
@@ -179,11 +177,27 @@ func (s *Service) SetHostRecords(ctx context.Context, records []HostRecord) (*Ho
 		return nil, err
 	}
 	if !bytes.Equal(next, data) {
-		if err := writeFileAtomic(path, next, mode); err != nil {
+		// Docker mounts its own hosts file over the one the container is
+		// given, and the server's is busy under /host as well, so the write
+		// goes where the server's file is a plain one.
+		err := hostexec.OnServerPath(s.paths.Hosts, mirrored, func(at string) error {
+			return writeFileAtomic(throughLink(at), next, mode)
+		})
+		if err != nil {
 			return nil, fmt.Errorf("writing %s: %w", path, err)
 		}
 	}
 	return s.HostRecords(ctx)
+}
+
+// throughLink is where a write to path belongs. A symbolic link is replaced
+// by the rename that makes a write atomic, which would turn the link into a
+// file, so the write goes through it instead.
+func throughLink(path string) string {
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		return resolved
+	}
+	return path
 }
 
 // replaceHostsBlock is the byte-level edit: the lines outside the block come

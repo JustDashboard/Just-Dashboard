@@ -8,6 +8,8 @@ import (
 	"os"
 	"path/filepath"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // Spec is everything the dashboard has made on this host's network, and the
@@ -456,7 +458,9 @@ func (sp *Spec) link(name string) (*LinkSpec, bool) {
 }
 
 // writeFileAtomic writes through a temporary file and a rename, so a reader
-// — the boot unit, sysctl, systemd-resolved — never sees half of a file.
+// — the boot unit, sysctl, systemd-resolved — never sees half of a file. A
+// file that is a mount point here cannot be renamed over and is written in
+// place (hostexec.RenameOver).
 func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
 		return err
@@ -481,7 +485,7 @@ func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	if err := os.Rename(tmp.Name(), path); err != nil {
+	if err := hostexec.RenameOver(tmp.Name(), path, data); err != nil {
 		return err
 	}
 	// The rename must reach stable storage too: fsync of only the file can

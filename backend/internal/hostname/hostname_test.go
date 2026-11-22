@@ -331,6 +331,53 @@ func TestRenameReachesCloudInitsHostsTemplate(t *testing.T) {
 	}
 }
 
+// In the shipped stack the server's /etc/hosts and /etc/hostname are busy
+// under /host as well, because Docker mounts its own over the container's
+// copies; each write is handed over by the server's own path so it can be
+// made where they are not.
+func TestRenameWritesTheServersFilesByTheirOwnPaths(t *testing.T) {
+	_, svc := newHost(t, "vps-1", "hostname")
+	write(t, svc, "/etc/hostname", "vps-1\n")
+	write(t, svc, "/etc/hosts", providerHosts)
+	write(t, svc, "/etc/cloud/templates/hosts.debian.tmpl", "127.0.0.1 localhost\n")
+	var handed []string
+	svc.onServer = func(real, mirrored string, write func(string) error) error {
+		if mirrored != filepath.Join(svc.root, real) {
+			t.Errorf("%s was handed over as %s", real, mirrored)
+		}
+		handed = append(handed, real)
+		return write(mirrored)
+	}
+
+	result, err := svc.Rename(context.Background(), "atlas")
+	if err != nil || len(result.Warnings) != 0 {
+		t.Fatalf("result = %+v, %v", result, err)
+	}
+	want := []string{"/etc/hostname", "/etc/hosts", "/etc/cloud/templates/hosts.debian.tmpl"}
+	if strings.Join(handed, " ") != strings.Join(want, " ") {
+		t.Fatalf("handed over %v, want %v", handed, want)
+	}
+	if got := read(t, svc, "/etc/hostname"); got != "atlas\n" {
+		t.Fatalf("/etc/hostname = %q", got)
+	}
+}
+
+// A write that fails where it was made is the rename's warning, as before.
+func TestRenameWarnsWhenTheServersHostsFileCannotBeWritten(t *testing.T) {
+	_, svc := newHost(t, "vps-1", "hostnamectl")
+	write(t, svc, "/etc/hosts", "127.0.0.1 localhost\n")
+	svc.onServer = func(real, _ string, _ func(string) error) error {
+		return errors.New("rename " + real + ": device or resource busy")
+	}
+	result, err := svc.Rename(context.Background(), "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "/etc/hosts could not be updated") {
+		t.Fatalf("warnings = %q", result.Warnings)
+	}
+}
+
 func TestRenameLeavesTheTemplateAloneWhereCloudInitDoesNotOwnHosts(t *testing.T) {
 	_, svc := newHost(t, "vps-1", "hostnamectl")
 	write(t, svc, "/etc/hosts", "127.0.0.1 localhost\n")
