@@ -6,6 +6,7 @@ import { Check, MoreHorizontal } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { DimActions, IconAction, RowActions } from "@/components/icon-action"
 import { Button } from "@/components/ui/button"
+import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import {
   ContextMenuItem,
   ContextMenuLabel,
@@ -78,6 +79,12 @@ export type VerbSpec = {
   progressive?: string
   danger?: boolean
   disabled?: boolean
+  /**
+   * Why a disabled verb is off, said on hover and focus of its menu item. A
+   * held verb with a reason stays focusable (it is `aria-disabled` rather
+   * than taken out of the menu), so the keyboard reaches the reason too.
+   */
+  reason?: string
   /**
    * The part of a long menu this verb belongs to — "Run", "Project". A menu
    * of eleven words in a row is a wall; the same eleven under two names are
@@ -392,6 +399,26 @@ function VerbItem({ verb, parts }: { verb: VerbSpec; parts: VerbMenuParts }) {
       <Item asChild variant={verb.danger ? "destructive" : "default"} disabled={verb.disabled}>
         <VerbLink verb={verb}>{face}</VerbLink>
       </Item>
+    )
+  }
+  if (verb.disabled && verb.reason) {
+    return (
+      <Tooltip>
+        <TooltipTrigger asChild>
+          <Item
+            aria-disabled
+            aria-description={verb.reason}
+            data-held=""
+            className="text-muted-foreground focus:text-muted-foreground"
+            onSelect={(event: Event) => event.preventDefault()}
+          >
+            {face}
+          </Item>
+        </TooltipTrigger>
+        <TooltipContent side="left" className="max-w-xs">
+          {verb.reason}
+        </TooltipContent>
+      </Tooltip>
     )
   }
   // A choice closes the menu. Preventing the item's default, which the
