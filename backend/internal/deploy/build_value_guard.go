@@ -169,6 +169,35 @@ func (b *ArtifactBuilder) buildValueGuardArgs(prepared PreparedBuild, secrets []
 	return args
 }
 
+// declaredBuildValueGuardArgs are the build's guard arguments that a
+// Dockerfile cut from its recipe still declares, at the digests the build
+// gave them. A schema step runs the recipe's instructions up to the build
+// command (build_database.go), and BuildKit serves them from the cache the
+// build filled only when every guard they follow has the build's value:
+// without it the install would run again, with none of the install's own
+// values mounted.
+func (b *ArtifactBuilder) declaredBuildValueGuardArgs(prepared PreparedBuild, variables map[string]string, dockerfile string) []BuildArgValue {
+	declared := map[string]bool{}
+	for _, line := range strings.Split(dockerfile, "\n") {
+		if name, ok := strings.CutPrefix(strings.TrimSpace(line), "ARG "+buildValueGuardPrefix); ok {
+			declared[buildValueGuardPrefix+name] = true
+		}
+	}
+	secrets := make([]BuildSecretValue, 0, len(prepared.SecretBindings))
+	for _, requested := range prepared.SecretBindings {
+		if value, ok := variables[requested.Variable]; ok {
+			secrets = append(secrets, BuildSecretValue{ID: requested.Variable, Step: requested.Step, Value: value})
+		}
+	}
+	args := []BuildArgValue{}
+	for _, arg := range b.buildValueGuardArgs(prepared, secrets) {
+		if declared[arg.Name] {
+			args = append(args, arg)
+		}
+	}
+	return args
+}
+
 // valueKey is the key build values are digested under: the server's, or
 // the process's own when the builder was given none.
 func (b *ArtifactBuilder) valueKey() []byte {

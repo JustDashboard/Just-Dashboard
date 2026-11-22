@@ -124,6 +124,10 @@ type BuildInvocation struct {
 	// Frontend builds Dockerfile — a Railpack plan — through a BuildKit
 	// frontend image (build_railpack.go).
 	Frontend *BuildFrontend
+	// Builder is the networked builder the build runs on when it reaches a
+	// database on its environment's network (build_database.go); empty is
+	// the server's own builder.
+	Builder string
 }
 
 // BuildFrontend is the BuildKit frontend a build goes through, pinned by
@@ -261,6 +265,19 @@ type ArtifactBuilder struct {
 	composeParallelism int
 	// buildValueKey keys the build-value guards' digests (WithBuildValueKey).
 	buildValueKey []byte
+	// builderName is the networked builder one build runs on (withBuilder).
+	builderName string
+}
+
+// withBuilder is the builder running one build on a networked builder, so
+// the build reaches the databases on its environment's network.
+func (b *ArtifactBuilder) withBuilder(name string) *ArtifactBuilder {
+	if b == nil {
+		return nil
+	}
+	copied := *b
+	copied.builderName = name
+	return &copied
 }
 
 // withRailpackValues is the builder preparing one Railpack plan with the run's
@@ -598,7 +615,7 @@ func (b *ArtifactBuilder) Build(
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
 			Pull: buildPulls(prepared), Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
-			Frontend: railpackFrontendFor(prepared, tag, secrets, b.valueKey()),
+			Frontend: railpackFrontendFor(prepared, tag, secrets, b.valueKey()), Builder: b.builderName,
 		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
 			return result, err
@@ -712,7 +729,7 @@ func (b *ArtifactBuilder) Build(
 				invocation := BuildInvocation{
 					ContextDir: contextRoot, Dockerfile: dockerfile, Tag: serviceTag,
 					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: buildPulls(servicePrepared),
-					Target: target, BuildArgs: buildArgs,
+					Target: target, BuildArgs: buildArgs, Builder: b.builderName,
 				}
 				jobs = append(jobs, composeJob{service: service.Name, run: func(ctx context.Context, emit func(BuildLog) error) error {
 					if err := emit(BuildLog{Stream: "status", Text: composeServiceBuildStatus + service.Name}); err != nil {

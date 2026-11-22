@@ -175,10 +175,13 @@ func nodeBuildSkipsValidation(candidate *DetectedCandidate, configuration PlanCo
 // page that queries its database at build time runs.
 var nodePrerenderFrameworks = []string{"nextjs", "nuxt", "astro", "sveltekit", "gatsby"}
 
-// buildDatabaseFindings warns when a prerendering build is given a
-// database it cannot reach: a linked database's db-N.jd.internal alias
-// exists only on the environment network the running release joins, and
-// loopback inside the build is the build container itself.
+// buildDatabaseFindings says what a prerendering build that is given a
+// database reaches. A linked database — a typed reference, the link the
+// new-deployment page writes into the variable's row, or its db-N.jd.internal
+// address — is reached on the environment's network, where the build runs on
+// a builder of its own (build_database.go), so it is a pass. Loopback inside
+// the build is the build container itself, which is the one address no
+// builder can reach, and is a warning.
 func buildDatabaseFindings(candidate *DetectedCandidate, configuration PlanConfiguration, values map[string]string) []PreflightFinding {
 	if !slices.Contains(nodePrerenderFrameworks, candidate.Framework) || strings.TrimSpace(configuration.Build.BuildCommand) == "" {
 		return nil
@@ -189,52 +192,44 @@ func buildDatabaseFindings(candidate *DetectedCandidate, configuration PlanConfi
 	if !database {
 		return nil
 	}
-	findings := []PreflightFinding{}
+	linked := linkedDatabaseConnections(configuration.Dependencies)
+	findings, reached := []PreflightFinding{}, []string{}
+	field := ""
 	for _, variable := range configuration.Variables {
 		if !buildValue(configuration, values, variable.Name) {
 			continue
 		}
-		measured := ""
-		if reference, err := ParseVariableReference(variable.Reference); err == nil && reference.Kind == "database" {
-			measured = variable.Name + " is a linked database, which only the running release can reach"
-		} else if host := buildValueHost(values[variable.Name]); strings.HasSuffix(host, ".jd.internal") {
-			measured = variable.Name + " points at " + host + ", which only the running release can resolve"
-		} else if host != "" && nodeLoopbackHost(host) {
-			measured = variable.Name + " points at " + host + ", which inside the build is the build container itself"
+		value := values[variable.Name]
+		reference := variable.Reference
+		if reference == "" && linkedDatabaseReference(value, linked) {
+			reference = value
 		}
-		if measured == "" {
+		if parsed, err := ParseVariableReference(reference); err == nil && parsed.Kind == "database" {
+			reached = append(reached, variable.Name+" (a linked database)")
+		} else if host := buildValueHost(value); strings.HasSuffix(host, ".jd.internal") {
+			reached = append(reached, variable.Name+" ("+host+")")
+		} else if host != "" && nodeLoopbackHost(host) {
+			findings = append(findings, finding("build_database_unreachable", PreflightWarning,
+				"The build cannot reach the database",
+				variable.Name+" points at "+host+", which inside the build is the build container itself",
+				"A page the build prerenders that queries the database fails the build (ECONNREFUSED), and the running application, in its own container, cannot reach it either.",
+				"Link the database in Variables, so the build and the application reach it on the environment's network.",
+				"deploy", "variables."+variable.Name))
+			continue
+		} else {
 			continue
 		}
-		item := finding("build_database_unreachable", PreflightWarning,
-			"The build cannot reach the database", measured,
-			"The build runs apart from the environment's network, so a page the build prerenders that queries the database fails the build (\"Can't reach database server\", ENOTFOUND or ECONNREFUSED); pages rendered on request are unaffected.",
-			"Render pages that read the database on request (export const dynamic = \"force-dynamic\" or await connection() in Next.js), or remove "+variable.Name+"'s build scope if the build does not read it.",
-			"deploy", "variables."+variable.Name)
-		if !buildReadNeedsValue(candidate, configuration, variable.Name) {
-			// Nothing detection saw reads it while the build runs, so the
-			// build scope only hands the build an address it cannot reach.
-			item.Action = "Nothing in the build reads " + variable.Name + ", so remove its build scope; if a page the build prerenders queries the database, render it on request instead (export const dynamic = \"force-dynamic\" or await connection() in Next.js)."
-			item.Fix = &CauseFix{Kind: fixRemoveVariableScope, Field: "variables." + variable.Name, Scope: "build"}
+		if field == "" {
+			field = "variables." + variable.Name
 		}
-		findings = append(findings, item)
+	}
+	if len(reached) > 0 {
+		findings = append(findings, finding("build_database_network", PreflightPass,
+			"The build reaches its database", strings.Join(reached, ", "),
+			"The build runs on a builder joined to the environment's network, so a page it prerenders reads the database as the running application does. If it reads a table the migrations have not created yet, the plan's migration is applied first and the build runs again.",
+			"", "deploy", field))
 	}
 	return findings
-}
-
-// buildReadNeedsValue says whether the plan's build reads the variable
-// itself: detection saw a read while the build runs — a framework config
-// file, a static env import, a browser prefix — that the recipe does not
-// supply with a placeholder of its own.
-func buildReadNeedsValue(candidate *DetectedCandidate, configuration PlanConfiguration, name string) bool {
-	if slices.Contains(prismaRecipeSupplied(candidate, configuration), name) {
-		return false
-	}
-	for _, variable := range candidate.Variables {
-		if variable.Name == name {
-			return variable.Phase == "build" || variable.BrowserInlined
-		}
-	}
-	return false
 }
 
 // buildValueHost is the host of a URL-shaped value, empty for anything else.

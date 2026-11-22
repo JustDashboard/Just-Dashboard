@@ -48,9 +48,11 @@ func (e *NormalizedStepExecutor) buildFailure(
 	redacted map[string]string,
 	collector *buildOutputCollector,
 	err error,
+	schemaApplied bool,
 ) *StepResult {
 	context := causeContext{
-		build: plan.Build, runtime: plan.Runtime, prepared: prepared,
+		schemaApplied: schemaApplied,
+		build:         plan.Build, runtime: plan.Runtime, prepared: prepared,
 		candidate: e.causeCandidate(ctx, execution.Run.ID, plan), variables: plan.Variables,
 		hostMemory: hostMemoryTotal(),
 	}
@@ -66,6 +68,23 @@ func (e *NormalizedStepExecutor) buildFailure(
 		State: StepFailed, ErrorCode: cause.Code, ErrorMessage: message,
 		Evidence: mustJSON(map[string]any{"cause": cause}),
 	}
+}
+
+// buildFailureCode names a failed build from what it printed, for deciding
+// whether a database step before it would let it build; "" when the error is
+// no build's own failure.
+func (e *NormalizedStepExecutor) buildFailureCode(
+	plan *StoredExecutionPlan,
+	prepared PreparedBuild,
+	redacted map[string]string,
+	collector *buildOutputCollector,
+	err error,
+) string {
+	context := causeContext{build: plan.Build, runtime: plan.Runtime, prepared: prepared, variables: plan.Variables}
+	if cause := buildFailureCause(err, collector, context, buildRedactor(redacted)); cause != nil {
+		return cause.Code
+	}
+	return ""
 }
 
 // railpackPrepareFailure is a plan Railpack's planner refused: what it

@@ -686,7 +686,9 @@ only renderer/executor/validation authority for their feature.
   `dotnet_data_protection_ephemeral`) or passes `persistent_state_kept`; SQLite on a volume also has its
   schema step checked. Detection also records a seed (`seedCommand`, `seedResets`); `seed_available` warns
   when a linked database or a new SQLite volume would start without it, on a first release only — the
-  observation's `replacesRuntime` says a live runtime is being replaced.
+  observation's `replacesRuntime` says a live runtime is being replaced. The build step runs that seed
+  itself only for a build that cannot build without its rows, on linked databases with none
+  ([database networks](database-networks.md#builds-that-read-their-database)).
 - A managed Docker volume belongs to one project (`deploy/planning_volume_owner.go`). `SavePreflight`
   adds `storage_owned_by_other_project` (blocked, naming the owner) for a planned managed mount or storage
   dependency another project's desired plan already manages, since only the store knows the owners, and
@@ -710,14 +712,13 @@ only renderer/executor/validation authority for their feature.
   `build_env_missing`, `build_env_client_missing` — when the recipe runs the build past a schema that
   honours `SKIP_ENV_VALIDATION`, the environment check does not also refuse those names as
   `build_variable_missing_*`, and without the skip it refuses them per field and the schema's summary
-  lists only the rest), a prerendering framework's build-scoped database URL that points at a
-  `db-N.jd.internal` alias or loopback, or a typed database reference (`build_database_unreachable` —
-  BuildKit cannot join the environment's network, and `--network=host` would hand repository build code
-  the host's loopback services; when no build-time read detection saw needs the variable — its phase
-  is not `build`, or `prisma.config` alone reads it and the recipe supplies that — the finding carries a
-  `fix` of kind `remove_variable_scope`, which Review applies to the draft's declaration and the check
-  before Deploy and the run page open in the variable editor with the build scope already cleared,
-  `?variable=NAME&without=build`), and platform variables an operator's pasted `.env` sets
+  lists only the rest), what a prerendering framework's build-scoped database URL reaches (a linked
+  database — a typed reference, the `${{database.N}}` the new-deployment page writes into the row, or a
+  `db-N.jd.internal` address — passes as `build_database_network`, since the build runs on a builder on
+  the environment's network, [database networks](database-networks.md#builds-that-read-their-database);
+  loopback inside the build is the build container itself and warns as `build_database_unreachable`,
+  whose action is to link the database; `--network=host` is never used, as it would hand repository
+  build code the host's loopback services), and platform variables an operator's pasted `.env` sets
   (`port_variable_mismatch`, `node_env_not_production`, `host_variable_loopback_hostname`; a loopback
   `HOST` is the environment check's `host_variable_loopback_host`). Values are compared, never echoed,
   except a port number, a `NODE_ENV` word and a host name.
@@ -792,7 +793,10 @@ only renderer/executor/validation authority for their feature.
   pinned frontend image over the read-only checkout, and build_artifact builds the plan through the
   same buildx path with that image as `BUILDKIT_SYNTAX`, so its image lands under the run's tag like a
   recipe's and nothing after the build branches on the method; its build variables are BuildKit
-  secret mounts named in the plan, as the recipes' are. Reviewed base tags are resolved before rendering and every
+  secret mounts named in the plan, as the recipes' are. A build whose values name a linked database
+  runs, whatever its method, on the environment's own networked builder, and a recipe build that then
+  reads a table its migrations create, or needs rows a new database lacks, gets the schema or the
+  project's seed first ([database networks](database-networks.md#builds-that-read-their-database)). Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Every reviewed base, and every Bun, Deno, site and language image a
   recipe settles, is resolved through the builder's `resolveBase` (`build_base_resolution.go`): an
   answer is reused for ten minutes (`baseResolutionTTL`, keyed by reference — the answer is the tag's
@@ -869,7 +873,10 @@ only renderer/executor/validation authority for their feature.
   `force-compression`), so a manifest mixes gzip and zstd layers, which the daemon runs and retags and
   `docker save` writes as they are. On a classic graph driver BuildKit writes into the driver with
   nothing to compress, and the build keeps `--load`; the zstd output also works there, so a daemon that
-  changed stores under a running dashboard still builds. The recorded digest is the exporter's
+  changed stores under a running dashboard still builds. A build on an environment's networked builder
+  ([database networks](database-networks.md#builds-that-read-their-database)) keeps `--load` on either
+  store: that builder is a container of its own, and an image export there would land in its store, not
+  the daemon's. The recorded digest is the exporter's
   `containerimage.digest` from `--metadata-file` either way. That file is written in a private
   temporary folder (`os.MkdirTemp`, removed when the build returns), never in the build context: inside
   it, it changed every user Dockerfile and Compose build's context, so `COPY . .` never reused its

@@ -492,12 +492,15 @@ func classifyLines(signatures []buildSignature, lines []collectedLine, exitCode 
 // built, what detection read in the exact commit, and the variables the run
 // was given (names and scopes only).
 type causeContext struct {
-	build      BuildPlanConfig
-	runtime    RuntimePlanConfig
-	prepared   PreparedBuild
-	candidate  *DetectedCandidate
-	variables  []ReleaseVariableSnapshot
-	hostMemory int64
+	// schemaApplied says the build ran again after the schema step applied
+	// the plan's migrations (build_database.go).
+	schemaApplied bool
+	build         BuildPlanConfig
+	runtime       RuntimePlanConfig
+	prepared      PreparedBuild
+	candidate     *DetectedCandidate
+	variables     []ReleaseVariableSnapshot
+	hostMemory    int64
 }
 
 // buildFailureCause names a failed build step from what it printed. err is
@@ -572,9 +575,28 @@ func buildFailureCause(err error, collector *buildOutputCollector, context cause
 	if cause.Code == "build_lockfile_out_of_sync" && cause.Detail == "" {
 		cause.Detail = lockfileForCommand(cause.Command)
 	}
+	switch cause.Code {
+	case "build_database_unreachable", "build_database_schema_missing", "build_prerender_failed", "build_static_params_empty":
+		// What the remedy may suggest depends on what Next.js allows: with
+		// Cache Components a page's route segment config is refused.
+		if candidate := context.candidate; candidate != nil && candidate.NodeBuild != nil && candidate.NodeBuild.CacheComponents {
+			cause.Detail = detailNextCacheComponents
+		}
+		if context.schemaApplied && cause.Code == "build_database_schema_missing" {
+			cause.Detail = detailSchemaApplied
+		}
+	}
 	cause.Fix = buildCauseFix(cause, context)
 	return cause
 }
+
+// Details a cause takes from what the plan and detection say rather than from
+// the signature: Next.js with Cache Components on, and a build that read a
+// missing table after the schema step had already run.
+const (
+	detailNextCacheComponents = "next-cache-components"
+	detailSchemaApplied       = "schema-applied"
+)
 
 func isPullFailure(err error) bool {
 	text := err.Error()

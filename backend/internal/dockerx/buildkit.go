@@ -44,6 +44,12 @@ type ImmutableBuildOptions struct {
 	// definition the frontend reads, such as a Railpack plan — through a
 	// BuildKit frontend image instead of BuildKit's own Dockerfile frontend.
 	Frontend *BuildxFrontend
+	// Builder runs the build on a networked builder (buildkit_network.go)
+	// instead of Docker's own; empty is Docker's own.
+	Builder string
+	// CacheOnly runs the build for its side effects and keeps nothing but
+	// the cache: no image is loaded, so Tag is not needed.
+	CacheOnly bool
 	// containerdStore is the daemon's own answer, never the caller's:
 	// BuildImmutable reads it, and it decides how the image is exported
 	// (build_export.go).
@@ -99,21 +105,9 @@ func (c *Client) BuildImmutable(
 	opts ImmutableBuildOptions,
 	out chan<- LogLine,
 ) (ImmutableImage, error) {
-	if !dirExists(opts.Dir) {
-		return ImmutableImage{}, os.ErrNotExist
-	}
-	if opts.Dockerfile == "" {
-		opts.Dockerfile = "Dockerfile"
-	}
-	cleanDockerfile := filepath.Clean(opts.Dockerfile)
-	if filepath.IsAbs(cleanDockerfile) || cleanDockerfile == ".." ||
-		strings.HasPrefix(cleanDockerfile, ".."+string(filepath.Separator)) ||
-		strings.ContainsAny(cleanDockerfile, "\x00\r\n") {
-		return ImmutableImage{}, fmt.Errorf("Dockerfile must remain in the build context")
-	}
-	if info, err := os.Lstat(filepath.Join(opts.Dir, cleanDockerfile)); err != nil ||
-		!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
-		return ImmutableImage{}, ErrNoDockerfile
+	opts.CacheOnly = false
+	if err := validateBuildContext(&opts); err != nil {
+		return ImmutableImage{}, err
 	}
 	if strings.TrimSpace(opts.Tag) == "" || strings.ContainsAny(opts.Tag, "\x00\r\n") {
 		return ImmutableImage{}, fmt.Errorf("a safe image tag is required")
@@ -163,20 +157,71 @@ func (c *Client) BuildImmutable(
 	}, nil
 }
 
+// RunCacheOnly runs a build for what its steps do — a schema step applying a
+// database's migrations before the build reads it — and keeps nothing but the
+// cache. It streams like BuildImmutable and fails the same way.
+func (c *Client) RunCacheOnly(ctx context.Context, opts ImmutableBuildOptions, out chan<- LogLine) error {
+	opts.CacheOnly = true
+	if err := validateBuildContext(&opts); err != nil {
+		return err
+	}
+	args, environment, err := BuildxCommand(opts, "")
+	if err != nil {
+		return err
+	}
+	buildCtx, cancel := context.WithTimeout(ctx, buildTimeout)
+	defer cancel()
+	cmd := hostexec.CommandInDir(buildCtx, opts.Dir, "docker", args...)
+	cmd.Env = environment
+	if err := runGroupStream(buildCtx, cmd, out, newBuildFailureReader()); err != nil {
+		return buildRunError(ctx, buildCtx, err)
+	}
+	return nil
+}
+
+func validateBuildContext(opts *ImmutableBuildOptions) error {
+	if !dirExists(opts.Dir) {
+		return os.ErrNotExist
+	}
+	if opts.Dockerfile == "" {
+		opts.Dockerfile = "Dockerfile"
+	}
+	cleanDockerfile := filepath.Clean(opts.Dockerfile)
+	if filepath.IsAbs(cleanDockerfile) || cleanDockerfile == ".." ||
+		strings.HasPrefix(cleanDockerfile, ".."+string(filepath.Separator)) ||
+		strings.ContainsAny(cleanDockerfile, "\x00\r\n") {
+		return fmt.Errorf("Dockerfile must remain in the build context")
+	}
+	if info, err := os.Lstat(filepath.Join(opts.Dir, cleanDockerfile)); err != nil ||
+		!info.Mode().IsRegular() || info.Mode()&os.ModeSymlink != 0 {
+		return ErrNoDockerfile
+	}
+	return nil
+}
+
 // BuildxCommand is exported as a hermetic transcript boundary. Secret values
 // occur only in the returned environment; argv contains generated environment
 // variable names, so /proc command lines and persisted previews remain clean.
 func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, []string, error) {
-	args := []string{
-		"buildx", "build", "--progress=plain", "--file", filepath.ToSlash(filepath.Clean(opts.Dockerfile)),
-		"--tag", ImageRef(opts.Tag),
+	args := []string{"buildx", "build"}
+	if opts.Builder != "" {
+		if !networkedBuilderNameRE.MatchString(opts.Builder) {
+			return nil, nil, fmt.Errorf("invalid Buildx builder")
+		}
+		args = append(args, "--builder", opts.Builder)
 	}
-	if opts.containerdStore {
-		args = append(args, "--output", containerdImageExport)
-	} else {
-		args = append(args, "--load")
+	args = append(args, "--progress=plain", "--file", filepath.ToSlash(filepath.Clean(opts.Dockerfile)))
+	switch {
+	case opts.CacheOnly:
+		args = append(args, "--output", "type=cacheonly")
+	case opts.containerdStore && opts.Builder == "":
+		args = append(args, "--tag", ImageRef(opts.Tag), "--output", containerdImageExport, "--metadata-file", metadataPath)
+	default:
+		// A networked builder is a container of its own: an image export
+		// there would land in that container's store, not the daemon's, so
+		// its image comes back through `--load` on either store.
+		args = append(args, "--tag", ImageRef(opts.Tag), "--load", "--metadata-file", metadataPath)
 	}
-	args = append(args, "--metadata-file", metadataPath)
 	if opts.Pull {
 		args = append(args, "--pull")
 	}

@@ -1754,6 +1754,7 @@ type DetectedNetworkVariable struct {
 
 // DetectedNodeBuild is deploy.DetectedNodeBuild in the dashboard's source.
 type DetectedNodeBuild struct {
+	CacheComponents      bool               `json:"cacheComponents,omitempty"`
 	DevScripts           map[string]string  `json:"devScripts"`
 	EnvClient            []string           `json:"envClient"`
 	EnvSchema            string             `json:"envSchema,omitempty"`

@@ -44,6 +44,33 @@ func TestBuildxCommandExportsZstdOnlyIntoContainerdsStore(t *testing.T) {
 	}
 }
 
+// A networked builder is a container of its own, so an image export there
+// would land in its store, not the daemon's: it loads on containerd's store
+// too, and a cache-only step exports nothing at all.
+func TestANetworkedBuildLoadsOnEitherStore(t *testing.T) {
+	for _, containerd := range []bool{true, false} {
+		argv, _, err := BuildxCommand(ImmutableBuildOptions{
+			Dockerfile: "Dockerfile", Tag: "just-dashboard/test:run-1", Builder: "jd-build-e22-db-abc123", containerdStore: containerd,
+		}, "/tmp/m.json")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if !slices.Contains(argv, "--load") || slices.Contains(argv, "--output") || !slices.Contains(argv, "--metadata-file") {
+			t.Fatalf("containerd=%v argv = %v", containerd, argv)
+		}
+		argv, _, err = BuildxCommand(ImmutableBuildOptions{
+			Dockerfile: "Dockerfile.schema", Builder: "jd-build-e22-db-abc123", CacheOnly: true, containerdStore: containerd,
+		}, "")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if at := slices.Index(argv, "--output"); at < 0 || argv[at+1] != "type=cacheonly" ||
+			slices.Contains(argv, "--load") || slices.Contains(argv, containerdImageExport) || slices.Contains(argv, "--tag") {
+			t.Fatalf("cache-only containerd=%v argv = %v", containerd, argv)
+		}
+	}
+}
+
 func TestContainerdSnapshotterIsReadFromDriverStatus(t *testing.T) {
 	for name, test := range map[string]struct {
 		status [][2]string
