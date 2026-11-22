@@ -46,8 +46,12 @@ func selectLanguageRecipe(root, kind string, config BuildPlanConfig) (selectedRe
 		recipe.language.jvm, err = selectJVMLanguageRecipe(root, kind)
 	case "dart":
 		recipe.language.dart, err = selectDartRecipe(root, config)
+		recipe.language.dart.pubInputs = dartPubInputs(root)
+		recipe.nodeInputs = recipe.language.dart.pubInputs
 	case "gleam":
 		recipe.language.gleam, err = selectGleamRecipe(root)
+		recipe.language.gleam.depsInputs = gleamDepsInputs(root)
+		recipe.nodeInputs = recipe.language.gleam.depsInputs
 	default:
 		return selectedRecipe{}, fmt.Errorf("%w: no supported automatic recipe was selected", ErrUnsupportedBuilder)
 	}

@@ -1115,6 +1115,10 @@ paths. The GitHub Pages gem derives `url` from the repository's GitHub name, whi
 checkout here does not carry, and stops the build; a site whose `_config.yml` sets no `url` builds with a
 one-line override (`url: ""`) the recipe writes, and `PAGES_DISABLE_NETWORK=1` keeps the gem from asking
 GitHub's API while it builds.
+Jekyll's bundle installs before `COPY . .`, from the site's `Gemfile` and `Gemfile.lock` copied first (or
+the Gemfile the recipe writes for a site without one), so a commit that changes only content keeps it
+(`jekyllBundleInputs`); a Gemfile that reads the checkout (a `gemspec` theme, a path gem) and a lock the
+build adds platforms to keep the install after the source.
 
 **Sub-paths.** A framework whose output is built for a sub-path — a literal `baseUrl` in
 `docusaurus.config.*`, `base` in `vite.config.*`, `astro.config.*`, `.vitepress/config.*` or
@@ -2461,6 +2465,12 @@ caches the entry with `deno cache <file>` at the same point. With an output dire
 `lume/` import names it — the build task's output is served by nginx, there is no start command and no
 entry to cache ([Static sites](#static-sites-and-site-generators)).
 
+Deno 2's `deno install` runs before `COPY . .`, from `deno.json` or `deno.jsonc`, `deno.lock` and a
+`package.json` copied first (`denoInstallInputs`), so a commit that changes only code keeps the installed
+modules; a workspace, an `importMap` file, a linked, patched, `file:` or vendored package, and a committed
+`node_modules` or `vendor/` keep the install after the source. Its modules stay in the image's `DENO_DIR`,
+not a cache mount, since the build stage is the image that runs.
+
 ## PHP
 
 A `composer.json`, or an `index.php` at the root, under `public/`, or under a conventional document root
@@ -2823,9 +2833,15 @@ scratch-based `/runtime` would not. The install is `dart pub get --enforce-lockf
 or `bin/main.dart`. Both listen on PORT, 8080 by default. A pub mirror given as a `PUB_HOSTED_URL` build
 value mapped to the install keeps the locked versions without `--enforce-lockfile`, which refuses a
 pub.dev lock resolved against another host. A custom build command must write `/out/server`.
+`dart pub get` runs before `COPY . .`, from `pubspec.yaml` and `pubspec.lock` copied first
+(`dartPubInputs`), so a commit that changes only code keeps the packages; a `path` dependency, a pub
+workspace and a committed `.dart_tool` keep the fetch after the source. The pub cache stays in the layer,
+where the compile reads it.
 
 A `gleam.toml` is built by the Gleam recipe (`deploy/frameworks_gleam.go`) into an Erlang shipment
-(`gleam deps download`, `gleam export erlang-shipment`) with the Gleam project's own
+(`gleam deps download` — before `COPY . .`, from `gleam.toml` and `manifest.toml` copied first
+(`gleamDepsInputs`), unless a `path` dependency or a committed `build/` needs the source — then `gleam
+export erlang-shipment`) with the Gleam project's own
 `ghcr.io/gleam-lang/gleam:v1.18.1-erlang-alpine`, and the shipment runs on that same image, whose
 Erlang it was compiled for, as `/app/entrypoint.sh run`. A `gleam = "…"` requirement that 1.18.1 does not
 meet, or a JavaScript target, is `recipe_unsupported`. A Mist or Wisp service listens on the literal

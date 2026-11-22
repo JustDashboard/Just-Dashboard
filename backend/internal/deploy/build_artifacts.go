@@ -927,7 +927,8 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		recipe := selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno}
+		deno.installInputs = denoInstallInputs(root, deno)
+		recipe := selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno, nodeInputs: deno.installInputs}
 		if strings.TrimSpace(config.OutputDirectory) != "" {
 			recipe.serving = readStaticServing(boundary, root, config, "", "")
 		}
@@ -948,8 +949,9 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		site.bundleInputs, site.bundleFirst = jekyllBundleInputs(root, site)
 		return selectedRecipe{kind: "site", catalogueKey: "site:" + site.generator.name, site: site,
-			nodeInputs: site.nodeInputs, serving: readStaticServing(boundary, root, config, "", "")}, nil
+			nodeInputs: append(append([]string(nil), site.nodeInputs...), site.bundleInputs...), serving: readStaticServing(boundary, root, config, "", "")}, nil
 	case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		return selectLanguageRecipe(root, requested, config)
 	default:

@@ -431,3 +431,41 @@ func TestElixirFetchesAndCompilesDependenciesBeforeTheSource(t *testing.T) {
 		assertBefore(t, cached, "COPY . .", "mix deps.get")
 	}
 }
+
+func TestOtherRecipesFetchFromTheirManifestsBeforeTheSource(t *testing.T) {
+	for _, fixture := range []struct{ name, fetch, first string }{
+		{"deno", "deno install", "COPY deno.json"},
+		{"gleam", "gleam deps download", "COPY gleam.toml"},
+		{"jekyll", "bundle install", "COPY Gemfile"},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := t.TempDir()
+			copyFrameworkFixture(t, fixture.name, root)
+			detection, err := (Detector{}).DetectPath(t.Context(), root, SourceIdentity{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			candidate := selectedDetectionCandidate(&detection)
+			if candidate == nil {
+				t.Fatalf("no candidate: %+v", detection.Candidates)
+			}
+			config := BuildPlanConfig{Recipe: candidate.Recipe, BuildCommand: candidate.BuildCommand, StartCommand: candidate.StartCommand, OutputDirectory: candidate.OutputDirectory}
+			cached, forced := prepareCachedAndForced(t, root, root, config)
+			for _, dockerfile := range []string{cached, forced} {
+				assertBefore(t, dockerfile, fixture.first, fixture.fetch)
+				assertBefore(t, dockerfile, fixture.fetch, "COPY . .")
+			}
+		})
+	}
+	dart := t.TempDir()
+	writeBuildFixture(t, dart, "pubspec.yaml", "name: server\nenvironment:\n  sdk: ^3.5.0\ndependencies:\n  shelf: ^1.4.0\n")
+	writeBuildFixture(t, dart, "pubspec.lock", "packages:\n  shelf:\n    version: \"1.4.2\"\n")
+	writeBuildFixture(t, dart, "bin/server.dart", "import 'package:shelf/shelf.dart';\nvoid main() {}\n")
+	config := BuildPlanConfig{Recipe: "dart", StartCommand: "/app/server"}
+	cached, _ := prepareCachedAndForced(t, dart, dart, config)
+	assertGoDockerfile(t, cached, "COPY pubspec.yaml pubspec.lock /app/\nRUN dart pub get --enforce-lockfile\nCOPY . .\n")
+	// A path dependency is part of the checkout.
+	writeBuildFixture(t, dart, "pubspec.yaml", "name: server\nenvironment:\n  sdk: ^3.5.0\ndependencies:\n  shelf: ^1.4.0\n  core:\n    path: ../core\n")
+	cached, _ = prepareCachedAndForced(t, dart, dart, config)
+	assertBefore(t, cached, "COPY . .", "dart pub get")
+}

@@ -552,3 +552,82 @@ var elixirReadsTheCheckout = regexp.MustCompile(`\bapps_path\b|\bin_umbrella\b|\
 func elixirMixMounts(cache recipeCache) string {
 	return cache.mount("hex-packages", "/root/.hex/packages") + cache.mount("rebar3", "/root/.cache/rebar3")
 }
+
+// otherRecipesInputs: Deno, Dart, Gleam and Jekyll fetch their packages
+// from their manifests alone, so the recipes copy those first. What each
+// fetches stays in the layer, unmounted: the Deno image runs from its
+// build stage and reads DENO_DIR, Dart's compile reads the pub cache, and
+// Gleam's and Bundler's downloads land in the tree or the bundle the image
+// ships.
+
+// manifestInputs lists the names that exist at root, or nil when one of
+// the required ones is missing or any of them matches readsTheCheckout, or
+// the checkout carries one of the directories the fetch writes (which the
+// source copy would land on top of).
+func manifestInputs(root string, required, optional []string, readsTheCheckout *regexp.Regexp, written ...string) []string {
+	for _, directory := range written {
+		if pathExists(root, directory) {
+			return nil
+		}
+	}
+	inputs := []string{}
+	for index, name := range append(append([]string(nil), required...), optional...) {
+		if !regularExists(root, name) {
+			if index < len(required) {
+				return nil
+			}
+			continue
+		}
+		content, err := readContainedRegular(root, name, 1<<20)
+		if err != nil || readsTheCheckout != nil && readsTheCheckout.Match(content) {
+			return nil
+		}
+		inputs = append(inputs, name)
+	}
+	return inputs
+}
+
+// denoInstallInputs are what Deno 2's `deno install` reads: deno.json or
+// deno.jsonc, deno.lock and a package.json. A workspace, an import map
+// file, a linked or patched package and a vendor directory need the source.
+func denoInstallInputs(root string, recipe denoRecipe) []string {
+	if recipe.major == 1 || !regularExists(root, "deno.json") && !regularExists(root, "deno.jsonc") {
+		return nil
+	}
+	return manifestInputs(root, nil, []string{"deno.json", "deno.jsonc", "deno.lock", "package.json"},
+		regexp.MustCompile(`"(?:workspace|workspaces|importMap|links|patch|vendor)"\s*:|"file:|"link:|"workspace:`), "node_modules", "vendor")
+}
+
+// dartPubInputs are pubspec.yaml and pubspec.lock; a path dependency or a
+// pub workspace needs the source, and a committed .dart_tool the fetch
+// writes would be replaced by the checkout's.
+func dartPubInputs(root string) []string {
+	return manifestInputs(root, []string{"pubspec.yaml"}, []string{"pubspec.lock"},
+		regexp.MustCompile(`(?m)^\s*(?:path|workspace|resolution)\s*:`), ".dart_tool")
+}
+
+// gleamDepsInputs are gleam.toml and manifest.toml; a path dependency needs
+// the source, and a committed build/ holds the packages the download writes.
+func gleamDepsInputs(root string) []string {
+	return manifestInputs(root, []string{"gleam.toml"}, []string{"manifest.toml"},
+		regexp.MustCompile(`\bpath\s*=`), "build")
+}
+
+// jekyllBundleInputs are the site's Gemfile and lock, read the way the Ruby
+// recipe reads them (rubyGemfileReadsTheCheckout), and whether the bundle
+// can install before the source: not when the build adds platforms to the
+// lock, which the source's copy would replace. A site without a Gemfile
+// installs the one the recipe writes, with nothing to copy.
+func jekyllBundleInputs(root string, site siteRecipe) ([]string, bool) {
+	if site.generator.name != "jekyll" || site.generator.addLinuxPlatform {
+		return nil, false
+	}
+	if !site.generator.gemfile {
+		return nil, true
+	}
+	inputs := manifestInputs(root, []string{"Gemfile"}, []string{"Gemfile.lock"}, rubyGemfileReadsTheCheckout)
+	if lock, err := readContainedRegular(root, "Gemfile.lock", 4<<20); inputs == nil || err == nil && strings.Contains("\n"+string(lock), "\nPATH\n") {
+		return nil, false
+	}
+	return inputs, true
+}

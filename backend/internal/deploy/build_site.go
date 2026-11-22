@@ -32,6 +32,10 @@ type siteRecipe struct {
 	// pythonInstalls are a Python site's install lines; the environment
 	// they need is the Python recipe's install's (selectPythonSiteRecipe).
 	pythonInstalls []string
+	// bundleFirst says Jekyll's bundle installs before the source, from
+	// bundleInputs (jekyllBundleInputs).
+	bundleFirst  bool
+	bundleInputs []string
 }
 
 func (r siteRecipe) toolchain() string {
@@ -204,7 +208,15 @@ func renderSiteDockerfile(recipe siteRecipe, config BuildPlanConfig, serving sta
 		lines = append(lines, "FROM "+immutableImageReference(image)+" AS build",
 			"RUN apt-get update && apt-get install -y --no-install-recommends build-essential git && rm -rf /var/lib/apt/lists/*",
 			"WORKDIR "+workdir, "ENV LANG=C.UTF-8 JEKYLL_ENV=production PAGES_DISABLE_NETWORK=1",
-			"RUN printf '%s\\n' 'url: \"\"' > "+jekyllURLOverride, "COPY . .")
+			"RUN printf '%s\\n' 'url: \"\"' > "+jekyllURLOverride)
+		if recipe.bundleFirst {
+			// The bundle comes from the Gemfile and its lock alone, so it is
+			// installed before the source and a commit that changes only
+			// content keeps it.
+			lines = append(lines, copyInputsTo(workdir, recipe.bundleInputs)...)
+		} else {
+			lines = append(lines, "COPY . .")
+		}
 		if !recipe.generator.gemfile {
 			lines = append(lines, `RUN printf '%s\n' 'source "https://rubygems.org"' 'gem "github-pages", group: :jekyll_plugins' > Gemfile`)
 		}
@@ -216,6 +228,9 @@ func renderSiteDockerfile(recipe siteRecipe, config BuildPlanConfig, serving sta
 			lines = append(lines, "ENV BUNDLE_FROZEN=true")
 		}
 		lines = append(lines, "RUN "+installSecrets+install)
+		if recipe.bundleFirst {
+			lines = append(lines, "COPY . .")
+		}
 	default:
 		return nil, ErrUnsupportedBuilder
 	}
