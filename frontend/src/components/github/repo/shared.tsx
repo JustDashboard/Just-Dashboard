@@ -4,6 +4,8 @@ import { createContext, useCallback, useContext, useEffect, useRef, useState } f
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { ArrowUpRight } from "@/components/icons"
 import { Button } from "@/components/ui/button"
+import { RowsSkeleton } from "@/components/row-list"
+import { EmptyNote, ErrorState } from "@/components/state"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import type { ConfirmRequest } from "@/components/confirm-dialog"
 import { get } from "@/lib/api"
@@ -252,4 +254,51 @@ export function usePages<T, P extends { hasMore: boolean }>(
     more: () => void read(state.page + 1, false),
     reload: () => setAsk((n) => n + 1),
   }
+}
+
+/** **Show more** under a list GitHub has more of, held in place while the next page is read. */
+export function ShowMore({
+  pages,
+  label = "Show more",
+}: {
+  pages: { hasMore: boolean; loading: boolean; more: () => void; items: unknown[] }
+  label?: string
+}) {
+  if (!pages.hasMore) return null
+  return (
+    <div className="flex justify-center pt-3">
+      <Button
+        size="sm"
+        variant="outline"
+        pending={pages.loading && pages.items.length > 0}
+        onClick={pages.more}
+      >
+        {label}
+      </Button>
+    </div>
+  )
+}
+
+/**
+ * A view's list in its four states: rows at their own pitch while the first
+ * page is read, the failure with **Try again**, one line when there is
+ * nothing, and the rows.
+ */
+export function ListBody({
+  pages,
+  empty,
+  rows = 5,
+  children,
+}: {
+  pages: { items: unknown[]; loading: boolean; error?: Error; reload: () => void }
+  empty: React.ReactNode
+  rows?: number
+  children: React.ReactNode
+}) {
+  if (pages.error && pages.items.length === 0) {
+    return <ErrorState error={pages.error} onRetry={pages.reload} retryable />
+  }
+  if (pages.loading && pages.items.length === 0) return <RowsSkeleton rows={rows} />
+  if (pages.items.length === 0) return <EmptyNote>{empty}</EmptyNote>
+  return <>{children}</>
 }
