@@ -723,9 +723,11 @@ mapping (`build.secrets`) is refused. A `secrets-hash` over the values, in build
 never argv, rebuilds the steps Railpack marks as reading them (its build step) when a value changes,
 where BuildKit alone would reuse the layer, and `cache-key=deployment-<environment>`
 keeps one project's mount caches (npm's, pip's, apt's) from every other's on the daemon. The plan's
-excludes gain `.git`, `.just-dashboard` and buildx's metadata file, so the repository's history and the
-dashboard's files stay out of the image; the repository's own `.dockerignore` is Railpack's to read, as
-on Railway. A secret the plan lists that the environment has no build variable for — a
+excludes gain `.git`, `.just-dashboard` and the old name of buildx's metadata file, so the repository's
+history and the dashboard's files stay out of the image; the repository's own `.dockerignore` is
+Railpack's to read, as on Railway. buildx writes that file in a private temporary folder now, never in
+the context; the pattern stays in the plan and in the recipes' ignore file because dropping it would
+change every Railpack plan, and so its cache, for nothing. A secret the plan lists that the environment has no build variable for — a
 `railpack.json`'s own `secrets` — is refused at prepare_context by name, rather than left for BuildKit
 to report as a missing secret.
 

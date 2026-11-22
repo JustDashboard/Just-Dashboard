@@ -124,7 +124,7 @@ func (b *ArtifactBuilder) settleSiteImage(ctx context.Context, recipe *siteRecip
 	if recipe.image == fallback {
 		return
 	}
-	if _, err := b.backend.ResolveImage(ctx, recipe.image, ""); err == nil {
+	if _, err := b.resolveBase(ctx, recipe.image); err == nil {
 		return
 	}
 	declared := recipe.generator.version

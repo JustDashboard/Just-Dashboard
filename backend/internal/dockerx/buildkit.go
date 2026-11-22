@@ -44,6 +44,10 @@ type ImmutableBuildOptions struct {
 	// definition the frontend reads, such as a Railpack plan — through a
 	// BuildKit frontend image instead of BuildKit's own Dockerfile frontend.
 	Frontend *BuildxFrontend
+	// containerdStore is the daemon's own answer, never the caller's:
+	// BuildImmutable reads it, and it decides how the image is exported
+	// (build_export.go).
+	containerdStore bool
 }
 
 // BuildxFrontend is a BuildKit frontend image and the options the deployment
@@ -87,7 +91,8 @@ func (c *Client) BuildxAvailable(ctx context.Context) bool {
 
 // BuildImmutable is the deployment builder's Docker authority. It uses
 // Buildx/BuildKit explicitly, keeps secret values in its process environment,
-// streams plain progress, loads one host-platform image, and returns both OCI
+// streams plain progress, loads one host-platform image into the daemon's
+// store (zstd layers on containerd's, build_export.go), and returns both OCI
 // and config identities instead of treating a mutable tag as an artifact.
 func (c *Client) BuildImmutable(
 	ctx context.Context,
@@ -113,16 +118,17 @@ func (c *Client) BuildImmutable(
 	if strings.TrimSpace(opts.Tag) == "" || strings.ContainsAny(opts.Tag, "\x00\r\n") {
 		return ImmutableImage{}, fmt.Errorf("a safe image tag is required")
 	}
-	metadata, err := os.CreateTemp(opts.Dir, ".just-dashboard-build-metadata-")
+	// buildx writes what it built into the metadata file. It lives in a
+	// private folder of its own, never in the build context: a file there
+	// changed every build's context, so a user Dockerfile's `COPY . .` never
+	// reused its cache, and an empty copy of it shipped in the image.
+	metadataDir, err := os.MkdirTemp("", "just-dashboard-build-metadata-")
 	if err != nil {
-		return ImmutableImage{}, err
+		return ImmutableImage{}, fmt.Errorf("create the build's metadata folder: %w", err)
 	}
-	metadataPath := metadata.Name()
-	if err := metadata.Close(); err != nil {
-		_ = os.Remove(metadataPath)
-		return ImmutableImage{}, err
-	}
-	defer os.Remove(metadataPath)
+	defer os.RemoveAll(metadataDir)
+	metadataPath := filepath.Join(metadataDir, "metadata.json")
+	opts.containerdStore = c.containerdImageStore(ctx)
 	args, environment, err := BuildxCommand(opts, metadataPath)
 	if err != nil {
 		return ImmutableImage{}, err
@@ -163,8 +169,14 @@ func (c *Client) BuildImmutable(
 func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, []string, error) {
 	args := []string{
 		"buildx", "build", "--progress=plain", "--file", filepath.ToSlash(filepath.Clean(opts.Dockerfile)),
-		"--tag", ImageRef(opts.Tag), "--load", "--metadata-file", metadataPath,
+		"--tag", ImageRef(opts.Tag),
 	}
+	if opts.containerdStore {
+		args = append(args, "--output", containerdImageExport)
+	} else {
+		args = append(args, "--load")
+	}
+	args = append(args, "--metadata-file", metadataPath)
 	if opts.Pull {
 		args = append(args, "--pull")
 	}

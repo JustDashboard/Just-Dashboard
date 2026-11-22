@@ -71,8 +71,11 @@ var railpackRecipeProviders = map[string]string{
 var railpackEcosystemProviders = map[string]string{"cpp": "cpp", "zig": "zig"}
 
 // railpackExcludes keep the dashboard's own files — the plan itself, the
-// generated configuration, buildx's metadata file — and the repository's
-// history out of the image, as a recipe's ignore file does.
+// generated configuration — and the repository's history out of the image,
+// as a recipe's ignore file does. buildx's metadata file is written outside
+// the context now (dockerx.BuildImmutable); its pattern stays, here and in
+// the recipes' ignore file, because dropping it would change every Railpack
+// plan and so cost each project one cold build for nothing.
 var railpackExcludes = []string{".git", ".just-dashboard", ".just-dashboard-build-metadata-*"}
 
 const (

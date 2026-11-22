@@ -314,7 +314,9 @@ never into `docs/audits/`.
   start the dashboard's own fixed-name sibling containers. The fake records the `DOCKER_HOST` and
   arguments of each call, and fails like the real CLI for a socket named by `selfupdatetest.MissingHost`.
 - Changes to deployment builders or artifact handling also run the opt-in Docker boundary on a release
-  host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveC4ArtifactAdapters -count=1 -v`.
+  host: `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLiveC4ArtifactAdapters|TestLiveUserDockerfileContextIsReusedUnchanged' -count=1 -v`;
+  the second builds an unchanged user Dockerfile twice and requires the second build to reuse
+  `COPY . .` and the image to hold only the repository's files.
   Recipe/detection/default changes also run
   `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveDetectedFrameworkBuildAndServing -count=1 -v`,
   and changes to a recipe's base images

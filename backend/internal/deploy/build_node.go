@@ -329,7 +329,7 @@ func (b *ArtifactBuilder) settleBunImage(ctx context.Context, plan *nodeInstallP
 	if plan.bun == "" || plan.bun == fallback {
 		return
 	}
-	if _, err := b.backend.ResolveImage(ctx, plan.bun, ""); err == nil {
+	if _, err := b.resolveBase(ctx, plan.bun); err == nil {
 		return
 	}
 	plan.notes = append(plan.notes, "the declared Bun release has no "+plan.bun+" image; installing with "+fallback)

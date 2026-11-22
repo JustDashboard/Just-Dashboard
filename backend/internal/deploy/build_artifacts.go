@@ -237,6 +237,14 @@ type ArtifactBuilder struct {
 	// railpackValues are the plain RAILPACK_* build variables a Railpack
 	// plan is configured with (railpackPlanValues), set for one preparation.
 	railpackValues map[string]string
+	// bases remembers the registry's answers for reviewed bases, shared by
+	// every copy of the builder; baseNotes collects one preparation's notes
+	// about them (build_base_resolution.go).
+	bases     *baseResolutions
+	baseNotes *[]string
+	// composeParallelism bounds how many Compose services build at once;
+	// 0 is the server's own figure (hostBuildParallelism).
+	composeParallelism int
 }
 
 // withRailpackValues is the builder preparing one Railpack plan with the run's
@@ -251,7 +259,7 @@ func (b *ArtifactBuilder) withRailpackValues(values map[string]string) *Artifact
 }
 
 func NewArtifactBuilder(backend BuildBackend) *ArtifactBuilder {
-	return &ArtifactBuilder{backend: backend}
+	return &ArtifactBuilder{backend: backend, bases: newBaseResolutions()}
 }
 
 // LocalImage reads an image this server holds, by id or tag, without pulling:
@@ -279,6 +287,23 @@ func (b *ArtifactBuilder) Prepare(
 // build context may widen to an ancestor of root, never beyond boundary;
 // PreparedBuild.ContextDirectory then names it.
 func (b *ArtifactBuilder) PrepareWithin(
+	ctx context.Context,
+	boundary, root string,
+	config BuildPlanConfig,
+	forceNoCache bool,
+	tag string,
+	buildVariableNames ...string,
+) (PreparedBuild, error) {
+	notes := []string{}
+	prepared, err := b.withBaseNotes(&notes).prepareWithin(ctx, boundary, root, config, forceNoCache, tag, buildVariableNames...)
+	if err == nil {
+		// A base taken from the registry's last answer, with when.
+		prepared.Notes = append(prepared.Notes, notes...)
+	}
+	return prepared, err
+}
+
+func (b *ArtifactBuilder) prepareWithin(
 	ctx context.Context,
 	boundary, root string,
 	config BuildPlanConfig,
@@ -550,7 +575,7 @@ func (b *ArtifactBuilder) Build(
 		image, err := b.backend.BuildImage(ctx, BuildInvocation{
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
-			Pull: true, Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
+			Pull: buildPulls(prepared), Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
 			Frontend: railpackFrontendFor(prepared, tag, secrets),
 		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
@@ -609,7 +634,17 @@ func (b *ArtifactBuilder) Build(
 			SourceDigest: compose.Digest, Files: append([]string(nil), compose.Files...),
 			Services: []ResolvedComposeService{}, PrimaryService: primary,
 		}
-		for _, service := range compose.Services {
+		// Each service is checked here, before anything builds, then built
+		// or pulled with the others (compose_parallel.go); what each one
+		// gives the release is kept by its place in the file.
+		type composeOutcome struct {
+			prepared *PreparedComposeService
+			service  ResolvedComposeService
+			artifact ReleaseArtifactInput
+		}
+		outcomes := make([]composeOutcome, len(compose.Services))
+		jobs := make([]composeJob, 0, len(compose.Services))
+		for index, service := range compose.Services {
 			if service.BuildContext != "" {
 				if strings.Contains(service.BuildContext, "$") || strings.Contains(service.BuildDockerfile, "$") {
 					return result, fmt.Errorf("%w: Compose service %s uses a dynamic build path", ErrUnsupportedBuilder, service.Name)
@@ -635,9 +670,6 @@ func (b *ArtifactBuilder) Build(
 				if err := validateCustomDockerfile(content); err != nil {
 					return result, fmt.Errorf("Compose service %s: %w", service.Name, err)
 				}
-				if err := emit(BuildLog{Stream: "status", Text: composeServiceBuildStatus + service.Name}); err != nil {
-					return result, err
-				}
 				serviceTag := composeServiceImageTag(tag, service.Name)
 				buildArgs, err := composeServiceBuildArgs(service, variables)
 				if err != nil {
@@ -655,52 +687,89 @@ func (b *ArtifactBuilder) Build(
 					servicePrepared.BuildArgNames = append(servicePrepared.BuildArgNames, arg.Name)
 				}
 				servicePrepared.BuildArgv = buildPreviewArgv(servicePrepared, serviceTag)
-				image, err := b.backend.BuildImage(ctx, BuildInvocation{
+				invocation := BuildInvocation{
 					ContextDir: contextRoot, Dockerfile: dockerfile, Tag: serviceTag,
-					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: true,
+					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: buildPulls(servicePrepared),
 					Target: target, BuildArgs: buildArgs,
-				}, redactBuildEmitter(redacted, emit))
-				if err != nil {
-					return result, &ComposeServiceError{Service: service.Name, Err: err}
 				}
-				if err := validateResolvedImage(image); err != nil {
-					return result, err
-				}
-				result.Prepared.ComposeServices = append(result.Prepared.ComposeServices, PreparedComposeService{
-					Name: service.Name, BuildContext: service.BuildContext, Dockerfile: dockerfile,
-					DockerfileDigest: servicePrepared.DockerfileDigest, BuildArgv: servicePrepared.BuildArgv,
-				})
-				resolved.Services = append(resolved.Services, composeResolvedService(service, image, "build"))
-				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, image, servicePrepared, "build"))
+				jobs = append(jobs, composeJob{service: service.Name, run: func(ctx context.Context, emit func(BuildLog) error) error {
+					if err := emit(BuildLog{Stream: "status", Text: composeServiceBuildStatus + service.Name}); err != nil {
+						return err
+					}
+					image, err := b.backend.BuildImage(ctx, invocation, redactBuildEmitter(redacted, emit))
+					if err != nil {
+						return &ComposeServiceError{Service: service.Name, Err: err}
+					}
+					if err := validateResolvedImage(image); err != nil {
+						return err
+					}
+					outcomes[index] = composeOutcome{
+						prepared: &PreparedComposeService{
+							Name: service.Name, BuildContext: service.BuildContext, Dockerfile: dockerfile,
+							DockerfileDigest: servicePrepared.DockerfileDigest, BuildArgv: servicePrepared.BuildArgv,
+						},
+						service:  composeResolvedService(service, image, "build"),
+						artifact: composeImageArtifact(service.Name, image, servicePrepared, "build"),
+					}
+					return nil
+				}})
 				continue
 			}
 			if service.Image == "" || strings.Contains(service.Image, "${") {
 				return result, fmt.Errorf("%w: Compose service %s has no immutable image or supported build", ErrUnsupportedBuilder, service.Name)
 			}
-			image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
-			if err != nil {
-				// The same answer an image source gets: a service image no
-				// registry has is the one this server built or was given.
-				local, localErr := b.localImage(ctx, service.Image, composeServiceImageTag(tag, service.Name), emit)
-				if localErr != nil {
-					return result, fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
+			jobs = append(jobs, composeJob{service: service.Name, run: func(ctx context.Context, emit func(BuildLog) error) error {
+				image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
+				if err != nil {
+					// The same answer an image source gets: a service image no
+					// registry has is the one this server built or was given.
+					local, localErr := b.localImage(ctx, service.Image, composeServiceImageTag(tag, service.Name), emit)
+					if localErr != nil {
+						return fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
+					}
+					outcomes[index] = composeOutcome{
+						service:  composeResolvedService(service, local, "local"),
+						artifact: composeImageArtifact(service.Name, local, prepared, "local"),
+					}
+					return nil
 				}
-				resolved.Services = append(resolved.Services, composeResolvedService(service, local, "local"))
-				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, local, prepared, "local"))
-				continue
-			}
-			if err := validateResolvedImage(image); err != nil {
+				if err := validateResolvedImage(image); err != nil {
+					return err
+				}
+				pulled, err := b.backend.PullImage(ctx, image.Reference+"@"+image.Digest, registryAuth, redactBuildEmitter(redacted, emit))
+				if err != nil {
+					return fmt.Errorf("pull Compose service %s image: %w", service.Name, err)
+				}
+				if err := validateResolvedImage(pulled); err != nil || pulled.Digest != image.Digest {
+					return fmt.Errorf("%w: Compose service %s pull did not preserve its resolved digest", ErrArtifactMissing, service.Name)
+				}
+				outcomes[index] = composeOutcome{
+					service:  composeResolvedService(service, pulled, "pull"),
+					artifact: composeImageArtifact(service.Name, pulled, prepared, "pull"),
+				}
+				return nil
+			}})
+		}
+		limit := b.composeParallelism
+		if limit <= 0 {
+			limit = hostBuildParallelism()
+		}
+		errs, failed := runComposeJobs(ctx, jobs, limit, emit)
+		if failed >= 0 {
+			return result, errs[failed]
+		}
+		for _, err := range errs {
+			if err != nil {
+				// Every service stopped together: the run was cancelled.
 				return result, err
 			}
-			pulled, err := b.backend.PullImage(ctx, image.Reference+"@"+image.Digest, registryAuth, redactBuildEmitter(redacted, emit))
-			if err != nil {
-				return result, fmt.Errorf("pull Compose service %s image: %w", service.Name, err)
+		}
+		for _, outcome := range outcomes {
+			if outcome.prepared != nil {
+				result.Prepared.ComposeServices = append(result.Prepared.ComposeServices, *outcome.prepared)
 			}
-			if err := validateResolvedImage(pulled); err != nil || pulled.Digest != image.Digest {
-				return result, fmt.Errorf("%w: Compose service %s pull did not preserve its resolved digest", ErrArtifactMissing, service.Name)
-			}
-			resolved.Services = append(resolved.Services, composeResolvedService(service, pulled, "pull"))
-			result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, pulled, prepared, "pull"))
+			resolved.Services = append(resolved.Services, outcome.service)
+			result.Artifacts = append(result.Artifacts, outcome.artifact)
 		}
 		result.Compose = resolved
 		metadata := mustJSON(resolved)
@@ -1058,7 +1127,7 @@ func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base 
 func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string) ([]ResolvedImage, error) {
 	resolved := make([]ResolvedImage, 0, len(references)+1)
 	for _, reference := range references {
-		image, err := b.backend.ResolveImage(ctx, reference, "")
+		image, err := b.resolveBase(ctx, reference)
 		if err != nil {
 			return nil, fmt.Errorf("%w: resolve reviewed base image %s: %v", ErrBuilderUnavailable, reference, err)
 		}
@@ -1088,7 +1157,10 @@ func requireBasePlatform(bases []ResolvedImage, platform string) error {
 }
 
 func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
-	argv := []string{"docker", "buildx", "build", "--progress=plain", "--file", prepared.Dockerfile, "--tag", tag, "--load", "--pull"}
+	argv := []string{"docker", "buildx", "build", "--progress=plain", "--file", prepared.Dockerfile, "--tag", tag, "--load"}
+	if buildPulls(prepared) {
+		argv = append(argv, "--pull")
+	}
 	if prepared.TargetPlatform != "" {
 		argv = append(argv, "--platform", prepared.TargetPlatform)
 	}

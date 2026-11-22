@@ -760,7 +760,25 @@ only renderer/executor/validation authority for their feature.
   same buildx path with that image as `BUILDKIT_SYNTAX`, so its image lands under the run's tag like a
   recipe's and nothing after the build branches on the method; its build variables are BuildKit
   secret mounts named in the plan, as the recipes' are. Reviewed base tags are resolved before rendering and every
-  generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
+  generated `FROM` is digest-pinned. Every reviewed base, and every Bun, Deno, site and language image a
+  recipe settles, is resolved through the builder's `resolveBase` (`build_base_resolution.go`): an
+  answer is reused for ten minutes (`baseResolutionTTL`, keyed by reference — the answer is the tag's
+  index digest and its platform list, the same whichever platform is built), and when the registry does
+  not answer after that (`registryOutageCode`: unreachable, rate-limited, or a 5xx) the last answer is
+  used and the run's transcript says so through `prepared.notes` ("Docker Hub did not answer; used
+  node:22-alpine as resolved at 14:02 UTC on 22 Nov 2026"). A registry that says the tag does not exist
+  is believed. The answers are kept in `<JD_DATA_DIR>/deploy-base-resolutions.json` (public references
+  and digests only), so a dashboard restarted during an outage still builds; a missing or unreadable
+  file starts empty. Before this, each preparation asked the registry for every base, 2–4 s a run, and
+  an outage or Docker Hub's anonymous limit failed a deploy whose bases were all on this server. The
+  daily scan's newer-base check does not go through this memory: it asks the registry itself
+  ([image vulnerabilities](image-vulnerabilities.md#whether-a-newer-base-exists)), so a moved tag is still
+  found. A recipe or static build whose generated Dockerfile names every image it reads by digest (its
+  frontend, each `FROM`, `COPY --from` and `RUN --mount from=` that is not a stage) builds without
+  `--pull` (`buildPulls`, read from the Dockerfile itself): there is nothing for the registry to answer,
+  and an image BuildKit does not hold is still fetched by its digest. A user Dockerfile, a Compose
+  service and a Railpack plan (whose builder and runtime images are tags inside the plan) keep `--pull`.
+  The preview argv says which. Build secrets are BuildKit environment-backed secret mounts and
   never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
   cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
@@ -773,6 +791,38 @@ only renderer/executor/validation authority for their feature.
   stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
   dashboard files stay out of the image whatever the repository's own ignore file says.
+- A Compose project's services are built and pulled a few at a time instead of one after another
+  (`compose_parallel.go`). Every service is checked first (its context, Dockerfile, arguments and
+  target), so a project that cannot build fails before anything runs. Then at most
+  `composeBuildParallelism` services run at once, a quarter of the cores and one per 2 GiB of memory,
+  between 1 and 3: BuildKit already parallelises one build's stages, so a second build mostly overlaps one
+  service's export and pulls with another's compile, and beyond that builds contend for the cores and
+  memory the server's own workloads use. Services start in the file's order. The transcript holds each
+  service's output whole and in the file's order (`orderedBuildOutput`): the first unfinished service
+  streams live, the others' lines are held (in memory up to 4 MiB each, then in a private temporary file
+  removed afterwards) and follow as soon as every service before them has finished, because each buildx
+  run numbers its steps from #1 and interleaved lines could not be read apart. The release's artifacts,
+  `ResolvedComposeSnapshot.Services` and `PreparedBuild.ComposeServices` are assembled in the file's
+  order. The first failure cancels the others; each service it stopped says `Stopped Compose service X:
+  service Y failed` after its own lines, and the error is Y's `ComposeServiceError`. Cancelling the run
+  cancels every build, and the executor records the cancellation as before.
+- Every build method's image reaches the daemon the same way (`dockerx/build_export.go`). On
+  containerd's image store (`docker info` driver status `driver-type io.containerd.snapshotter.v1`, read
+  once per process and not remembered when the daemon does not answer) buildx exports with
+  `--output type=image,unpack=true,compression=zstd,compression-level=3,oci-mediatypes=true` instead of
+  `--load`, whose gzip compression and unpack of every new layer were most of a large image's build:
+  on a 1.1 GB node_modules layer, 80 s exporting and 53 s unpacking with gzip, 35 s and 20 s with zstd,
+  and a smaller blob (303 MB against 336 MB). zstd level 1 was no faster and uncompressed blobs were
+  slower and three times the disk. Base layers keep the blobs they were pulled with (no
+  `force-compression`), so a manifest mixes gzip and zstd layers, which the daemon runs and retags and
+  `docker save` writes as they are. On a classic graph driver BuildKit writes into the driver with
+  nothing to compress, and the build keeps `--load`; the zstd output also works there, so a daemon that
+  changed stores under a running dashboard still builds. The recorded digest is the exporter's
+  `containerimage.digest` from `--metadata-file` either way. That file is written in a private
+  temporary folder (`os.MkdirTemp`, removed when the build returns), never in the build context: inside
+  it, it changed every user Dockerfile and Compose build's context, so `COPY . .` never reused its
+  cache, and an empty copy shipped in the image (`TestLiveUserDockerfileContextIsReusedUnchanged`). The build's preview argv
+  (`buildPreviewArgv`) still reads `--load`: it is written before the daemon is asked.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
   registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
@@ -1279,7 +1329,8 @@ only renderer/executor/validation authority for their feature.
   runner, a Go or Python release the recipe offers, `NODE_OPTIONS` sized to three quarters of the
   server's memory, `prisma generate` before the build, the detected output directory. A Compose
   service's build is announced on the status stream so its steps are read apart and named with the
-  service; an image or Compose pull failure is named from the registry's error, including a refusal the
+  service: the collector keeps each service's lines apart (`buildOutputCollector.forService`), so the
+  service that failed is read from its own output wherever the transcript put it; an image or Compose pull failure is named from the registry's error, including a refusal the
   daemon returns before the pull's stream starts (`dockerx` prefixes it `pull image:` like one inside
   the stream; only an unreachable daemon keeps its own error). A base image that cannot be resolved
   keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out

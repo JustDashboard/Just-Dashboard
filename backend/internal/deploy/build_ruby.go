@@ -19,7 +19,7 @@ func (b *ArtifactBuilder) settleRubyImage(ctx context.Context, recipe *rubyRecip
 	if recipe.version.exact == "" {
 		return nil
 	}
-	if _, err := b.backend.ResolveImage(ctx, recipe.version.image(), ""); err == nil {
+	if _, err := b.resolveBase(ctx, recipe.version.image()); err == nil {
 		return nil
 	}
 	exact := recipe.version.exact
