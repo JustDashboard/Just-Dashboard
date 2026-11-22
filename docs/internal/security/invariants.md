@@ -75,7 +75,14 @@ A change that weakens any of these has to say so explicitly.
      `system.admin` on every `/logs` route that reads a source — except the whole journal
      (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
      known gap rather than the boundary
-     ([observability-security](../backend/observability-security.md))).
+     ([observability-security](../backend/observability-security.md)));
+   - `githubrepos.Store` and `api.resolveGitHubRepoAccess` for the GitHub page: every route reads a
+     connection through the signed-in account (`WHERE id = ? AND owner_user_id = ?`), so another
+     account's connection, an administrator's included, answers exactly as a missing one (the one
+     read of them all is forgetting the App, which only revokes and deletes them), and
+     `githubrepos.ComputeAbilities` refuses an operation the person's role on the repository or the
+     App's grant on the installation does not cover before GitHub is asked
+     ([github-page](../backend/github-page.md)).
 
    An API key can be narrowed to one capability, and that fails closed too. A key with a `scope`
    (today only `metrics.read`, made by `CreateScopedAPIToken`, always on the read-only role) is
