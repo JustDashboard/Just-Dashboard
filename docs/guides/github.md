@@ -60,8 +60,9 @@ too — an IP, a tailnet name, a second domain behind your reverse proxy — eit
   App's settings on GitHub once, then choose **Sign in with a code** and type the code it shows at
   github.com/login/device.
 
-Plain `http://` addresses work for the redirect, because it is your own browser that follows it;
-GitHub recommends HTTPS, as does this dashboard.
+The redirect is followed by your own browser, so the address does not have to be reachable from the
+internet. Whether GitHub accepts a plain `http://` address other than `localhost` as a callback is
+GitHub's decision; if it refuses one, use an HTTPS address or sign in with a code.
 
 ## Cloning onto the server
 

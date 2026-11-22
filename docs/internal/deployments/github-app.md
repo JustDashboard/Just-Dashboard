@@ -1,7 +1,9 @@
 # GitHub App
 
 One GitHub App per dashboard, created through GitHub's manifest flow and installed on the accounts
-whose repositories deploy here. It replaces three manual steps: a webhook and secret per repository, a
+whose repositories deploy here. It is not the GitHub page's App: that one acts only as the person who
+connected their account and never decides what deploys here
+([`../backend/github-page.md`](../backend/github-page.md)). It replaces three manual steps: a webhook and secret per repository, a
 personal token for private clones and commit statuses, and reading a run log to find a preview's
 address.
 
