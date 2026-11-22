@@ -2028,8 +2028,7 @@ refusal is a named finding before Deploy (`preflight_go.go`):
   service in the workspace is selected.
 - **Download order and caches.** `go mod download` runs before `COPY . .` from the module files alone —
   `go.mod`, `go.sum` when committed, and the `go.mod` of each local replacement (`goModuleInputs`), copied
-  to their paths under `/src` and kept in the build context whatever the repository's `.dockerignore`
-  says — so a commit that changes only code keeps the download layer. The download, templ and the build
+  to their paths under `/src` — so a commit that changes only code keeps the download layer. The download, templ and the build
   mount the module cache (`/go/pkg/mod`) and the build cache (`/root/.cache/go-build`) the templ step and
   the build compile with, so a commit recompiles only the packages it changed ([Dependency
   caches](#dependency-caches)); the binary goes to `/out/app`, outside both. What keeps today's order: a
@@ -2341,7 +2340,7 @@ for a developer too — then checks `/out/<AssemblyName>.dll`, the assembly name
 `dotnet_project_selected` names the project and the context.
 
 **Restore order and caches.** The restore runs before `COPY . .`, from the files it reads copied to their
-paths under `/src` (`dotnetRestoreInputs`, kept in the context whatever `.dockerignore` says): every
+paths under `/src` (`dotnetRestoreInputs`): every
 project of the reference closure with its `packages.lock.json`, the `Directory.Build.props` chain,
 `Directory.Build.targets` and `Directory.Packages.props` that apply, `global.json` and the NuGet configs,
 so a commit that changes only code keeps the restored packages. It mounts NuGet's download cache
@@ -2563,14 +2562,13 @@ wins; with `symfony/asset-mapper` (or `importmap.php`) the build runs `importmap
 `asset-map:compile`, after `tailwind:build --minify` or `sass:build` for the SymfonyCasts bundles.
 
 **Install order and caches.** With a current `composer.lock`, `vendor` installs the locked packages before
-`COPY . .`, from `composer.json`, `composer.lock` and a committed `auth.json` copied first
-(`phpComposerInputs`): `composer install --no-dev --no-interaction --prefer-dist --no-scripts
+`COPY . .`, from `composer.json` and `composer.lock` copied first (`phpComposerInputs`): `composer install --no-dev --no-interaction --prefer-dist --no-scripts
 --no-autoloader`, so a commit that changes only code keeps them. Once the source and Laravel's
 directories are there, `composer dump-autoload --no-dev --optimize` writes the autoloader and runs the
 `post-autoload-dump` scripts (Laravel's `package:discover`), and `composer run-script post-install-cmd
 --no-dev` the install's own scripts (Symfony's `auto-scripts`), with the install's secrets as before. The
-install stays after the source, as before, when the build updates the lock, for a WordPress tree, and when
-the install reads the checkout: a `path` repository, `installer-paths`, `patches`, or a `pre-install-cmd`
+install stays after the source, as before, when the build updates the lock, for a WordPress tree, with a
+committed `auth.json` (its credentials stay with the source copy), and when the install reads the checkout: a `path` repository, `installer-paths`, `patches`, or a `pre-install-cmd`
 or package-event script. Every Composer install or update mounts Composer's download cache
 (`COMPOSER_CACHE_DIR=/root/.cache/composer`, [Dependency caches](#dependency-caches)); the asset stage is
 the JavaScript recipe's.
@@ -2675,10 +2673,10 @@ Dockerfile beside a Ruby root is judged the same way: `ruby_lock_platform_missin
 Dockerfile freezes the bundle (`BUNDLE_DEPLOYMENT`, `BUNDLE_FROZEN`, `--deployment`, `--frozen`) and a
 warning otherwise, and not raised when the Dockerfile's own `bundle lock --add-platform` names the
 server's platform before it installs. The bundle installs before `COPY . .`, from `Gemfile`,
-`Gemfile.lock`, `.ruby-version`, `.tool-versions` and a committed `.bundle/config` copied first
-(`rubyBundleInputs`), so a commit that changes only code keeps it; it stays after the source, as before,
-for a path gem or `gemspec` (the lock's `PATH` section), a Gemfile that evaluates, requires or reads other
-files, and a lock the build adds this server's platform to, since the source's copy of the lock would then
+`Gemfile.lock`, `.ruby-version` and `.tool-versions` copied first (`rubyBundleInputs`), so a commit that
+changes only code keeps it; it stays after the source, as before, for a path gem or `gemspec` (the lock's
+`PATH` section), a Gemfile that evaluates, requires or reads other files, a committed `.bundle/config`
+(its settings and credentials stay with the source copy), and a lock the build adds this server's platform to, since the source's copy of the lock would then
 replace the one the bundle was installed from. The build stage installs the headers the locked gems compile
 against (`libpq-dev` for `pg`, `default-libmysqlclient-dev` for `mysql2`, `libssl-dev` for `trilogy`,
 `libsqlite3-dev`, `libmagickwand-dev`, `libffi-dev`, always `build-essential`, `pkg-config` and
@@ -2863,6 +2861,10 @@ caches and when it keeps the old order.
 - **Scope.** A mount's id is `jd-deployment-<environment>-<cache>`: one environment never reads another's
   cache — not another project's, and not a preview's whose branch could seed production's.
 - **A forced build** (`no_cache`) renders no mount at all and builds from nothing, as before.
+- **The build context is unchanged.** An early copy never brings back a file the repository's
+  `.dockerignore` leaves out (`contextKeeps`): when the ignore file the recipe writes would leave out one
+  of a recipe's early inputs, that recipe installs after the source, as before, from what the context
+  holds.
 - **Nothing ships.** A mount's content never reaches a layer, so a cache cannot carry files or a secret
   into the image; whatever the image needs from a cached directory is copied out in the same step.
 - **Lost caches are cold builds.** Every tool treats its cache as disposable, and BuildKit's garbage

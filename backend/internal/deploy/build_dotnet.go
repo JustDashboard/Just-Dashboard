@@ -315,7 +315,11 @@ func selectDotnetRecipe(boundary, root string, config BuildPlanConfig) (dotnetPr
 			return dotnetProject{}, fmt.Errorf("%w: the .NET recipe writes %q into the Dockerfile, and it holds characters it does not quote; rename it or use a Dockerfile", ErrUnsupportedBuilder, written)
 		}
 	}
-	project.restoreInputs = dotnetRestoreInputs(boundary, reader, build)
+	var member []string
+	if project.member != "" {
+		member = []string{project.member + "/" + project.file}
+	}
+	project.restoreInputs = contextKeeps(filepath.Join(boundary, filepath.FromSlash(build.context)), "dotnet", member, dotnetRestoreInputs(boundary, reader, build))
 	if chosen.spaRoot != "" {
 		spa, err := dotnetSPAInstall(boundary, build.context, chosen.spaRoot, config.TargetPlatform)
 		if err != nil {

@@ -148,21 +148,13 @@ func TestGoDownloadsModulesBeforeTheSourceAndCachesTheBuild(t *testing.T) {
 	writeBuildFixture(t, root, "go.sum", "github.com/go-chi/chi/v5 v5.2.1 h1:x\ngithub.com/go-chi/chi/v5 v5.2.1/go.mod h1:y\n")
 	writeBuildFixture(t, root, "main.go", "package main\n\nimport _ \"github.com/go-chi/chi/v5\"\n\nfunc main() {}\n")
 	// A repository rule written for its own Dockerfile does not take the
-	// module files the download copies out of the context.
+	// root module files out of the context (recipeDockerignore keeps them).
 	writeBuildFixture(t, root, ".dockerignore", "*\n!main.go\n")
 	cached, forced := prepareCachedAndForced(t, root, root, BuildPlanConfig{Recipe: "go"})
 	modules, compile := cacheMountFor("go-mod", "/go/pkg/mod"), cacheMountFor("go-mod", "/go/pkg/mod")+cacheMountFor("go-build", "/root/.cache/go-build")
 	assertGoDockerfile(t, cached, "ENV CGO_ENABLED=0 GOTOOLCHAIN=local\nCOPY go.mod go.sum /src/\nRUN "+modules+"go mod download\nCOPY . .\n",
 		"RUN "+compile+"go build -trimpath")
 	assertGoDockerfile(t, forced, "COPY go.mod go.sum /src/\nRUN go mod download\nCOPY . .\n", "RUN go build -trimpath")
-	ignore, err := os.ReadFile(filepath.Join(root, ".just-dashboard", "Dockerfile.dockerignore"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if content, _ := recipeDockerignore([]byte("*\n!main.go\n"), []string{"go.mod", "go.sum", "main.go"}, "go", []string{"go.mod", "go.sum"}); string(ignore) != content ||
-		strings.Contains(content, "\n*\n") {
-		t.Fatalf("ignore file keeps the repository's * rule:\n%s", ignore)
-	}
 
 	// A private module's token is the download's alone, so the modules it
 	// fetches stay in the image; the build cache holds no module and stays.
@@ -468,4 +460,40 @@ func TestOtherRecipesFetchFromTheirManifestsBeforeTheSource(t *testing.T) {
 	writeBuildFixture(t, dart, "pubspec.yaml", "name: server\nenvironment:\n  sdk: ^3.5.0\ndependencies:\n  shelf: ^1.4.0\n  core:\n    path: ../core\n")
 	cached, _ = prepareCachedAndForced(t, dart, dart, config)
 	assertBefore(t, cached, "COPY . .", "dart pub get")
+}
+
+// The early copies never bring back what the repository's .dockerignore
+// leaves out: the install then runs after the source, as before.
+func TestEarlyInstallsKeepToWhatTheBuildContextHolds(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "requirements.txt", "-r requirements/base.txt\n")
+	writeBuildFixture(t, root, "requirements/base.txt", "flask==3.1.0\ngunicorn==23.0.0\n")
+	config := BuildPlanConfig{Recipe: "python", StartCommand: "gunicorn app:app"}
+	cached, _ := prepareCachedAndForced(t, root, root, config)
+	assertBefore(t, cached, "COPY requirements/base.txt", "COPY . .")
+	writeBuildFixture(t, root, ".dockerignore", "requirements/\n")
+	cached, _ = prepareCachedAndForced(t, root, root, config)
+	assertBefore(t, cached, "COPY . .", "pip install --requirement requirements.txt")
+	ignore, err := os.ReadFile(filepath.Join(root, ".just-dashboard", "Dockerfile.dockerignore"))
+	if err != nil || strings.Contains(string(ignore), "!requirements") {
+		t.Fatalf("the ignore file brings back what the repository left out (%v):\n%s", err, ignore)
+	}
+
+	// Credentials beside the manifests stay with the source copy.
+	ruby := t.TempDir()
+	copyFrameworkFixture(t, "sinatra", ruby)
+	writeBuildFixture(t, ruby, ".bundle/config", "BUNDLE_GEMS__EXAMPLE__TEST: \"token\"\n")
+	cached, _ = prepareCachedAndForced(t, ruby, ruby, BuildPlanConfig{Recipe: "ruby", StartCommand: "bundle exec rackup"})
+	assertBefore(t, cached, "COPY . .", "bundle install")
+	php := t.TempDir()
+	for name, content := range laravelTree(map[string]string{
+		"composer.lock": composerLockJSON(t, map[string]map[string]string{"laravel/framework v12.1.0": {"php": "^8.2"}}),
+		"auth.json":     `{"http-basic": {}}`,
+	}) {
+		writeBuildFixture(t, php, name, content)
+	}
+	cached, _ = prepareCachedAndForced(t, php, php, BuildPlanConfig{Recipe: "php", StartCommand: "frankenphp php-server --root /app/public"})
+	if strings.Contains(cached, "--no-autoloader") {
+		t.Fatalf("an auth.json project installs before its source:\n%s", cached)
+	}
 }

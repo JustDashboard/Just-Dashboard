@@ -775,9 +775,6 @@ func selectPythonRecipe(boundary, root string, config BuildPlanConfig) (pythonRe
 		return recipe, err
 	}
 	recipe.install = pythonDependenciesFirst(root, project, installChoice, install)
-	// What the dependencies install from must be in the context whatever
-	// the repository's .dockerignore says.
-	recipe.inputs = append(recipe.inputs, recipe.install.inputs...)
 	deps := memberProject.deps
 	recipe.servers = undeclaredPythonServers(config.StartCommand, deps)
 	if framework := matchPythonFramework(deps); framework != nil {
@@ -802,6 +799,11 @@ func selectPythonRecipe(boundary, root string, config BuildPlanConfig) (pythonRe
 		for _, input := range source.installInputs(plan) {
 			recipe.inputs = append(recipe.inputs, joinRoot(dir, input))
 		}
+	}
+	if contextKeeps(root, "python", recipe.inputs, recipe.install.inputs) == nil {
+		// The repository's .dockerignore leaves out a file the dependencies
+		// install from: everything installs after the source, as before.
+		recipe.install = install
 	}
 	return recipe, nil
 }

@@ -431,14 +431,15 @@ func dotnetRestoreInputs(boundary string, reader *dotnetReader, build dotnetBuil
 
 // rubyBundleInputs are the files bundle install reads, which the recipe
 // copies before the source so a commit that changes only code keeps the
-// bundle: the Gemfile, its lock, the Ruby version files a `ruby file:` line
-// names, and a committed .bundle/config. It is nil, and the install stays
-// after the source as before, when the bundle needs more of the checkout:
-// a path gem or gemspec (the lock's PATH section), a Gemfile that reads or
-// evaluates another file, and a lock the build adds this server's platform
+// bundle: the Gemfile, its lock and the Ruby version files a `ruby file:`
+// line names. It is nil, and the install stays after the source as before,
+// when the bundle needs more of the checkout: a path gem or gemspec (the
+// lock's PATH section), a Gemfile that reads or evaluates another file, a
+// committed .bundle/config (whose settings, credentials among them, stay
+// with the source copy), and a lock the build adds this server's platform
 // to, which the source's copy of the lock would then replace.
 func rubyBundleInputs(root string, recipe rubyRecipe) []string {
-	if recipe.addPlatform != "" {
+	if recipe.addPlatform != "" || pathExists(root, ".bundle") {
 		return nil
 	}
 	gemfile, err := readContainedRegular(root, "Gemfile", 256<<10)
@@ -453,7 +454,7 @@ func rubyBundleInputs(root string, recipe rubyRecipe) []string {
 		}
 		inputs = append(inputs, "Gemfile.lock")
 	}
-	for _, name := range []string{".ruby-version", ".tool-versions", ".bundle/config"} {
+	for _, name := range []string{".ruby-version", ".tool-versions"} {
 		if regularExists(root, name) {
 			inputs = append(inputs, name)
 		}
@@ -480,28 +481,25 @@ func phpComposerRun(cache recipeCache, command string) string {
 }
 
 // phpComposerInputs are the files a locked composer install reads with its
-// scripts and autoloader left for later: composer.json, composer.lock and a
-// committed auth.json. The install then runs before the source, and the
+// scripts and autoloader left for later: composer.json and composer.lock.
+// The install then runs before the source, and the
 // autoloader and the install scripts (Laravel's package:discover, Symfony's
 // auto-scripts) after it. It is nil, and the install stays after the
 // source as before, when the lock is updated in the build, for a WordPress
-// tree, and when the install itself reads the checkout: a path repository,
+// tree, with a committed auth.json (credentials, which stay with the source
+// copy), and when the install itself reads the checkout: a path repository,
 // installer paths a plugin installs into, patches a plugin applies, or a
 // script on an event the split install would run without the source
 // (pre-install-cmd, a package's install or update).
 func phpComposerInputs(root string, recipe phpRecipe) []string {
-	if !recipe.composer || len(recipe.lockUpdate) > 0 || recipe.wordpress != "" || !regularExists(root, "composer.lock") {
+	if !recipe.composer || len(recipe.lockUpdate) > 0 || recipe.wordpress != "" || !regularExists(root, "composer.lock") || pathExists(root, "auth.json") {
 		return nil
 	}
 	manifest, err := readContainedRegular(root, "composer.json", 512<<10)
 	if err != nil || phpComposerReadsTheCheckout.Match(manifest) {
 		return nil
 	}
-	inputs := []string{"composer.json", "composer.lock"}
-	if regularExists(root, "auth.json") {
-		inputs = append(inputs, "auth.json")
-	}
-	return inputs
+	return []string{"composer.json", "composer.lock"}
 }
 
 var phpComposerReadsTheCheckout = regexp.MustCompile(`"type"\s*:\s*"path"|"installer-paths"|"patches(?:-file)?"|"(?:pre-install-cmd|(?:pre|post)-package-(?:install|update))"`)
@@ -630,4 +628,25 @@ func jekyllBundleInputs(root string, site siteRecipe) ([]string, bool) {
 		return nil, false
 	}
 	return inputs, true
+}
+
+// contextKeeps returns inputs when the build context holds every one of
+// them under the ignore file the recipe writes for it, and nil otherwise,
+// which keeps that recipe's install after the source. The early copy never
+// brings back a file the repository's .dockerignore leaves out: a nested
+// NuGet.config, an auth.json or a config/ directory left out on purpose
+// stays out, exactly as the source copy leaves it out. installInputs are
+// the paths the ignore file already brings back (a Node stage's).
+func contextKeeps(contextRoot, kind string, installInputs, inputs []string) []string {
+	if len(inputs) == 0 {
+		return inputs
+	}
+	ignore, _ := recipeDockerignoreAt(contextRoot, kind, installInputs)
+	rules := parseDockerignore([]byte(ignore))
+	for _, input := range inputs {
+		if excluded, _ := dockerignoreExcludes(rules, strings.TrimSuffix(input, "/")); excluded {
+			return nil
+		}
+	}
+	return inputs
 }

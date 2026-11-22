@@ -26,10 +26,7 @@ func selectLanguageRecipe(root, kind string, config BuildPlanConfig) (selectedRe
 			recipe.nodeInputs = node.inputs
 		}
 		if err == nil {
-			// What the bundle installs from must be in the context whatever
-			// the repository's .dockerignore says.
-			recipe.language.ruby.bundleInputs = rubyBundleInputs(root, recipe.language.ruby)
-			recipe.nodeInputs = append(append([]string(nil), recipe.nodeInputs...), recipe.language.ruby.bundleInputs...)
+			recipe.language.ruby.bundleInputs = contextKeeps(root, kind, recipe.nodeInputs, rubyBundleInputs(root, recipe.language.ruby))
 		}
 	case "elixir":
 		recipe.language.elixir, err = selectElixirRecipe(root, config)
@@ -37,21 +34,16 @@ func selectLanguageRecipe(root, kind string, config BuildPlanConfig) (selectedRe
 			recipe.nodeInputs = node.inputs
 		}
 		if err == nil {
-			// What the dependencies come from must be in the context whatever
-			// the repository's .dockerignore says.
-			recipe.language.elixir.mixInputs = elixirMixInputs(root, recipe.language.elixir)
-			recipe.nodeInputs = append(append([]string(nil), recipe.nodeInputs...), recipe.language.elixir.mixInputs...)
+			recipe.language.elixir.mixInputs = contextKeeps(root, kind, recipe.nodeInputs, elixirMixInputs(root, recipe.language.elixir))
 		}
 	case "scala", "clojure":
 		recipe.language.jvm, err = selectJVMLanguageRecipe(root, kind)
 	case "dart":
 		recipe.language.dart, err = selectDartRecipe(root, config)
-		recipe.language.dart.pubInputs = dartPubInputs(root)
-		recipe.nodeInputs = recipe.language.dart.pubInputs
+		recipe.language.dart.pubInputs = contextKeeps(root, kind, nil, dartPubInputs(root))
 	case "gleam":
 		recipe.language.gleam, err = selectGleamRecipe(root)
-		recipe.language.gleam.depsInputs = gleamDepsInputs(root)
-		recipe.nodeInputs = recipe.language.gleam.depsInputs
+		recipe.language.gleam.depsInputs = contextKeeps(root, kind, nil, gleamDepsInputs(root))
 	default:
 		return selectedRecipe{}, fmt.Errorf("%w: no supported automatic recipe was selected", ErrUnsupportedBuilder)
 	}
