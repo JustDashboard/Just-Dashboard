@@ -76,7 +76,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | `handlers_network*.go` | 27 | Network |
 | `handlers_proxy*.go` | 18 | Proxy; with `handlers_certificates*.go`, `handlers_tls*.go`, `handlers_ports*.go` |
 | `handlers_assistant*.go` | 9 | The assistant |
-| `handlers_git*.go` | 9 | Git (4) and GitHub (5, `handlers_github*.go`) |
+| `handlers_git*.go` | 12 | Local Git (4), its GitHub half (5, `handlers_github*.go`) and the GitHub page (3, `handlers_githubrepos*.go`) |
 | `handlers_files*.go` | 8 | Files: browsing, the Trash, versions, what a folder is to the server, transfers, thumbnails, Find's index |
 | `handlers_mcp*.go` | 5 | The MCP endpoint and its keys |
 | other `handlers_*.go` | 58 | One to four files per remaining area |
@@ -172,7 +172,8 @@ segment under `/api/v1`.
 | Excalidraw | `excalidraw/` | `boards/` | `/boards` → `handlers_boards.go`, `boards_*.go` | none: lives in `api/` | `boards-ui.spec.ts` | [`boards.md`](../boards.md) |
 | Terminal | `terminal/` | `terminal/` | `/terminal` → `handlers_terminal*.go` | `term`, `ptyhold` | `terminal-*.spec.ts` | [`processes-terminal-github.md`](../backend/processes-terminal-github.md), [`../frontend/features/`](../frontend/features/README.md) |
 | Files | `files/` | `files/` | `/files` → `handlers_files*.go` | `files`, `filecontext`, `fileversions`, `thumbnail`, `safepath`, `contentguard` | `files-ui.spec.ts`, `files-context.spec.ts`, `files-transfer.spec.ts`, `files-trash.spec.ts`, `files-versions.spec.ts`, `files-viewing.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
-| Git | `git/` | `git/` | `/git` → `handlers_git*.go`, `handlers_github*.go` | `gitx`, `ghx`, `forgex` | `git-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md), [`git-workspace-expansion.md`](../backend/git-workspace-expansion.md) |
+| Local Git | `git/` | `git/` | `/git` → `handlers_git*.go`, `handlers_github*.go` | `gitx`, `ghx`, `forgex` | `git-*.spec.ts` | [`git-backups-users.md`](../backend/git-backups-users.md), [`git-workspace-expansion.md`](../backend/git-workspace-expansion.md) |
+| GitHub | `github/`, `github/[owner]/[repo]/`, `github/callback/` | `github/` | `/github` → `handlers_githubrepos*.go` | `githubrepos` (stand-in GitHub for tests: `githubrepos/githubfake`), `gitx` for the clone, tables in `store/schema_github_page.go` | `github-ui.spec.ts`, `github-repo.spec.ts` | [`github-page.md`](../backend/github-page.md), [`github-page-repository.md`](../backend/github-page-repository.md) |
 | Remote Desktop | `remote-desktop/` | `remote-desktop/` | `/remote-desktop` → `handlers_remote_desktop*.go` | `remotedesk` | `remote-desktop.spec.ts` | [`remote-desktop.md`](../backend/remote-desktop.md) |
 | **Network** | | | | | | |
 | Network (19 pages) | `network/` | `network/` | `/network` → `handlers_network*.go` | `netx`, and the ones below | `network-*.spec.ts` | [`network.md`](../backend/network.md) |

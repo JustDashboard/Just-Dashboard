@@ -142,8 +142,13 @@ export function SwitchRow({
   )
 }
 
-/** What in a row owns its own press, so a press on it is not a press on the row. */
-const CONTROL = "a, button, label, [role='switch']"
+/**
+ * What in a row owns its own press, so a press on it is not a press on the
+ * row. `input` is there for the switch's own: inside a `<form>` Radix keeps a
+ * hidden checkbox beside the switch and dispatches a `click` on it after each
+ * change, which bubbled here and threw the switch straight back.
+ */
+const CONTROL = "a, button, input, label, [role='switch']"
 
 /** A section holding a change that is not applied yet, in git's colour for a modified file. */
 export function EditedTag() {

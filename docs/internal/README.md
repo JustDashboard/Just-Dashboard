@@ -92,6 +92,13 @@ strategy, and feature ownership behind those rules.
   cron, PTYs, terminal organization, and GitHub device authentication.
 - [`backend/git-backups-users.md`](backend/git-backups-users.md) — Git working copies and mutations,
   backup scheduling/storage/restore, and host accounts/SSH keys.
+- [`backend/github-page.md`](backend/github-page.md) — the GitHub page's repository App: why it is a second
+  App, the manifest with no webhook, the web sign-in with PKCE and the device flow for addresses GitHub
+  cannot return to, state, token rotation and reconnecting, per-account connections, the route table,
+  abilities, caching and rate limits, and cloning with a downscoped token.
+- [`backend/github-page-repository.md`](backend/github-page-repository.md) — what is inside one repository
+  on the GitHub page: branches, protection and rulesets, commits, pull requests and merging, issues,
+  Actions with dispatch detection, collaborators, and what is not offered.
 - [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
   partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
 - [`backend/databases.md`](backend/databases.md) — the Databases section: the inventory of what is on

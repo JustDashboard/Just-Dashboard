@@ -203,7 +203,7 @@ describe("why a listing could not be read", () => {
   })
   test("the other reasons name their own fix", () => {
     expect(unavailableReason({ reason: "sign_in_required", repository: "acme/app" })).toMatch(
-      /Sign in to GitHub on the Git page/,
+      /Sign in to GitHub on the Local Git page/,
     )
     expect(unavailableReason({ reason: "not_installed", repository: "acme/app" })).toMatch(
       /GitHub CLI is not installed/,

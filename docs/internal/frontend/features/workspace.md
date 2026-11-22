@@ -1,7 +1,7 @@
 # Features: Workspace
 
 The route areas of sign-in, the boards, Remote Desktop, the dashboard's settings, the account, the
-audit log, the assistant, Files, Git, Logs and the terminal: what each page is responsible for,
+audit log, the assistant, Files, Local Git, Logs and the terminal: what each page is responsible for,
 then, under **Implementation**, the files that own it and the specs that check it.
 
 ## `/hub/enter`
@@ -555,7 +555,8 @@ says how many there are and when the file last changed, or why none are kept, an
 
 ## `/git`
 
-The checkouts under the git roots (`JD_GIT_ROOTS`) shelved by the account their remote belongs to
+**Local Git** in the rail and the tab (it was "Git" until 0.9.1, when GitHub became a page of its
+own: [`github.md`](github.md)). The checkouts under the git roots (`JD_GIT_ROOTS`) shelved by the account their remote belongs to
 (`lib/git-repos.ts`), as repository cards under the chips All, Uncommitted, Behind, Unpushed,
 Detached, Pull requests and Worktrees, with worktrees in a section of their own; Clone for
 `service.control` and the GitHub account beside them. A selected checkout takes the whole page as

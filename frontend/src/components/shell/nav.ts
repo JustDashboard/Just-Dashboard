@@ -14,6 +14,7 @@ import {
   FileText,
   FirewallCheck,
   FolderOpen,
+  GitBranch,
   GitHubMark,
   Globe,
   GridMasonry,
@@ -277,7 +278,13 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
       { title: "Excalidraw", href: "/excalidraw", icon: ExcalidrawGlyph },
       { title: "Terminal", href: "/terminal", icon: Terminal, capability: "terminal" },
       { title: "Files", href: "/files", icon: FolderOpen },
-      { title: "Git", href: "/git", icon: GitHubMark },
+      // Two pages, because they are two different things: the checkouts on
+      // this server and the git that works them (Local Git), and the
+      // repositories on GitHub that a person's own connected account reaches
+      // through the dashboard's repository App (GitHub). Neither needs the
+      // other; a clone from GitHub lands in Local Git.
+      { title: "Local Git", href: "/git", icon: GitBranch },
+      { title: "GitHub", href: "/github", icon: GitHubMark },
       {
         title: "Remote Desktop",
         href: "/remote-desktop",

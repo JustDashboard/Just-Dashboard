@@ -56,6 +56,7 @@ export const PAGE_PRODUCTS: Record<string, string> = {
   "/docker": "docker",
   "/docker/stacks": "docker-compose",
   "/git": "git",
+  "/github": "github",
   "/processes/pm2": "pm2",
   "/terminal": "terminal",
 }

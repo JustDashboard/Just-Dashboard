@@ -1,12 +1,15 @@
 package gitx
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -655,31 +658,15 @@ type CloneOptions struct {
 }
 
 func (s *Service) CloneWithOptions(ctx context.Context, parent, url, name string, options CloneOptions) (string, *Result, error) {
-	dir, err := s.ResolveDir(parent)
+	plan, err := s.PrepareClone(parent, url, name, options)
 	if err != nil {
 		return "", nil, err
 	}
-	if err := ValidateRemoteURL(url); err != nil {
-		return "", nil, err
-	}
-	args, err := cloneArgs(options)
-	if err != nil {
-		return "", nil, err
-	}
-	if name == "" {
-		name = nameFromURL(url)
-	}
-	if err := validateDirName(name); err != nil {
-		return "", nil, err
-	}
-	target := filepath.Join(dir, name)
-	if _, err := os.Lstat(target); err == nil {
-		return "", nil, fmt.Errorf("%w: %s already exists", ErrInvalidRef, target)
-	}
-	res, err := s.op(ctx, dir, 10*time.Minute, append(args, "--", strings.TrimSpace(url), name)...)
+	res, err := s.op(ctx, plan.Dir, 10*time.Minute, plan.args...)
 	if err != nil {
 		return "", res, err
 	}
+	target := plan.Target
 	if len(options.Sparse) > 0 {
 		selected, err := s.op(ctx, target, time.Minute, append([]string{"sparse-checkout", "set", "--cone", "--"}, options.Sparse...)...)
 		if err != nil {
@@ -689,6 +676,181 @@ func (s *Service) CloneWithOptions(ctx context.Context, parent, url, name string
 		res.Output += "\n" + selected.Output
 	}
 	return target, res, nil
+}
+
+// ClonePlan is a clone checked whole before it runs: the parent inside the
+// roots, the remote, the options, a new directory's name and that nothing is
+// there yet. Both clones go through it, so the rules cannot drift apart.
+type ClonePlan struct {
+	// Dir is the resolved parent, Target the new checkout inside it.
+	Dir    string
+	Target string
+	Name   string
+	URL    string
+	args   []string
+}
+
+// Command is the git command the plan runs, as a console shows it. It holds
+// nothing secret: a credential travels in the environment.
+func (p *ClonePlan) Command() string { return "git " + strings.Join(p.args, " ") }
+
+// PrepareClone checks a clone without running it.
+func (s *Service) PrepareClone(parent, url, name string, options CloneOptions) (*ClonePlan, error) {
+	dir, err := s.ResolveDir(parent)
+	if err != nil {
+		return nil, err
+	}
+	if err := ValidateRemoteURL(url); err != nil {
+		return nil, err
+	}
+	args, err := cloneArgs(options)
+	if err != nil {
+		return nil, err
+	}
+	if name == "" {
+		name = nameFromURL(url)
+	}
+	if err := validateDirName(name); err != nil {
+		return nil, err
+	}
+	target := filepath.Join(dir, name)
+	if _, err := os.Lstat(target); err == nil {
+		return nil, fmt.Errorf("%w: %s already exists", ErrInvalidRef, target)
+	}
+	url = strings.TrimSpace(url)
+	return &ClonePlan{Dir: dir, Target: target, Name: name, URL: url, args: append(args, "--", url, name)}, nil
+}
+
+// CloneStreaming runs a prepared clone with git's progress, handing each line
+// to line as it appears, for a job's console. extra is environment for this
+// one git (a credential scoped to the remote); it never reaches the argv.
+//
+// git redraws its progress in place with carriage returns, a few dozen times
+// a second; a console keeps at most one such line a second for each phase
+// and the phase's last one. A sparse clone is not offered here.
+func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map[string]string, line func(stream, text string)) error {
+	if plan == nil || len(plan.args) == 0 {
+		return fmt.Errorf("%w: no clone was prepared", ErrInvalidRef)
+	}
+	for _, arg := range plan.args {
+		if arg == "--sparse" {
+			return fmt.Errorf("%w: a sparse clone is not streamed", ErrInvalidRef)
+		}
+	}
+	// The directory may have appeared since the plan was checked.
+	if _, err := os.Lstat(plan.Target); err == nil {
+		return fmt.Errorf("%w: %s already exists", ErrInvalidRef, plan.Target)
+	}
+	args := append([]string{plan.args[0], "--progress"}, plan.args[1:]...)
+	cmd := gitCommand(ctx, plan.Dir, extra, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	var mu sync.Mutex
+	last := ""
+	emit := func(stream string) func(string) {
+		return func(text string) {
+			mu.Lock()
+			defer mu.Unlock()
+			if stream == "stderr" && strings.TrimSpace(text) != "" {
+				last = strings.TrimSpace(text)
+			}
+			line(stream, text)
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git could not be started: %w", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		collapseProgress(stdout, time.Now, emit("stdout"))
+	}()
+	go func() {
+		defer wg.Done()
+		collapseProgress(stderr, time.Now, emit("stderr"))
+	}()
+	wg.Wait()
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if last != "" {
+			return fmt.Errorf("git clone failed: %s", last)
+		}
+		return fmt.Errorf("git clone failed: %w", err)
+	}
+	return nil
+}
+
+// collapseProgress reads git's output, splitting it at newlines and carriage
+// returns. A segment ended by a carriage return is a progress redraw: for
+// its phase (the text before the first ": "), it is shown when a second has
+// passed since that phase's last shown line, and otherwise kept until the
+// phase's next line. A phase's final line ends with a newline and is always
+// shown; one still pending at the end is shown then.
+func collapseProgress(r io.Reader, now func() time.Time, emit func(string)) {
+	reader := bufio.NewReaderSize(r, 64*1024)
+	shown := map[string]time.Time{}
+	pending := map[string]string{}
+	order := []string{}
+	var segment []byte
+	flush := func(text string, redraw bool) {
+		phase := text
+		if i := strings.Index(text, ": "); i > 0 {
+			phase = text[:i]
+		}
+		if !redraw {
+			delete(pending, phase)
+			delete(shown, phase)
+			emit(text)
+			return
+		}
+		at := now()
+		if last, ok := shown[phase]; !ok || at.Sub(last) >= time.Second {
+			shown[phase] = at
+			delete(pending, phase)
+			emit(text)
+			return
+		}
+		if _, ok := pending[phase]; !ok {
+			order = append(order, phase)
+		}
+		pending[phase] = text
+	}
+	for {
+		b, err := reader.ReadByte()
+		if err != nil {
+			break
+		}
+		switch b {
+		case '\n', '\r':
+			text := string(segment)
+			segment = segment[:0]
+			if text != "" {
+				flush(text, b == '\r')
+			}
+		default:
+			if len(segment) < 64*1024 {
+				segment = append(segment, b)
+			}
+		}
+	}
+	if len(segment) > 0 {
+		flush(string(segment), false)
+	}
+	for _, phase := range order {
+		if text, ok := pending[phase]; ok {
+			emit(text)
+			delete(pending, phase)
+		}
+	}
 }
 
 func cloneArgs(options CloneOptions) ([]string, error) {

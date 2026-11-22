@@ -519,6 +519,10 @@ into the window instead wherever windows are held.
 
 ## GitHub sign-in
 
+This is the sign-in of the *host account* that owns a checkout, which git uses to push and pull on the
+Local Git page. The GitHub page (`/github`) signs in differently, through its own App and per dashboard
+account, and never stores a credential git can use: see [`github-page.md`](github-page.md).
+
 `internal/ghx` exists because the honest answer to "why did my push ask for a password" used to be an ssh
 session. It has since grown into the GitHub half of the git page — sign-in, pull requests listed, viewed,
 reviewed, merged and checked out, check runs, issues, comments and Actions logs — and the reader the

@@ -48,7 +48,7 @@ Nine engines, a SQL editor and assistant, point-in-time recovery and an MCP serv
 <td width="50%" valign="top">
 <a href="docs/features/workspace.md"><img src="docs/readme/terminal.png" alt="Split terminal panes"></a>
 <h3><a href="docs/features/workspace.md">Workspace</a></h3>
-A terminal that survives restarts, files, full Git, live drawings and your own computers in a tab.
+A terminal that survives restarts, files, full Git and GitHub, live drawings and your own computers in a tab.
 </td>
 <td width="50%" valign="top">
 <a href="docs/features/network.md"><img src="docs/readme/network.png" alt="The network topology"></a>
