@@ -1,6 +1,6 @@
 # The jd command line
 
-[← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [Security](../../SECURITY.md)
+[← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [GitHub](github.md) · [Security](../../SECURITY.md)
 
 Drive deployments from a terminal, a CI job or an AI client, over the dashboard's own API.
 

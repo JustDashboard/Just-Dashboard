@@ -62,6 +62,7 @@ Upgrade with **Update now** in the dashboard. [Everything about installing →](
 | [**The `jd` command line**](docs/guides/cli.md) | Deploy from a terminal, CI or an AI client |
 | [**Administration**](docs/guides/administration.md) | Account scripts, API keys, updates, backups and uninstalling |
 | [**Linking and the usage count**](docs/guides/linking-and-usage.md) | The two optional things that talk to just-dashboard.com, and connecting to a Just Hub on your tailnet |
+| [**Connecting GitHub**](docs/guides/github.md) | The GitHub page: setting up its App, signing in from any address, cloning onto the server |
 | [**Security**](SECURITY.md) | How the dashboard protects your server, and how to report a vulnerability |
 | [**Contributing**](CONTRIBUTING.md) | How to work on the project |
 

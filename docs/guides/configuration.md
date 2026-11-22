@@ -1,6 +1,6 @@
 # Configuration
 
-[← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [Security](../../SECURITY.md)
+[← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [GitHub](github.md) · [Security](../../SECURITY.md)
 
 The installer writes the settings that matter, and **Settings → Configuration** edits them afterwards. This is the full list, for tuning.
 

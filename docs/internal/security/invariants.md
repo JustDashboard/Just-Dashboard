@@ -666,7 +666,7 @@ the owner signs it there before `JD_HUB_SIGNIN=true` is set on any server.
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for seven deletion operations:
+Typed confirmation is reserved for eight deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -686,6 +686,12 @@ Typed confirmation is reserved for seven deletion operations:
   the server's host name, because it removes every deployment with its managed volumes and paths and
   deletes the dashboard's database and the key it is sealed with. Uninstalling and keeping everything
   takes ordinary confirmation: running `install.sh` again restores the dashboard as it was.
+- Deleting a repository on GitHub from the GitHub page
+  (`DELETE /github/connections/{connection}/repos/{owner}/{repo}`) requires its full name,
+  `<owner>/<name>`, because GitHub removes the code, issues, pull requests and settings with it and
+  the dashboard holds no copy. It also needs the repository's `delete` ability (the person's admin
+  role there and the App's Administration grant), checked before GitHub is asked. Deleting a branch,
+  removing a collaborator and changing visibility keep ordinary confirmation.
 - Deleting a host account along with its home directory and no archive (`DELETE /system-users/{name}`
   with `home=delete`) requires the account's name, because what a person keeps in a home exists nowhere
   else. Its preview (`GET /system-users/{name}/removal`) counts it first. Keeping the home, or archiving
@@ -707,7 +713,7 @@ beside `total`, which is what its confirmation has to show. The Redis console's 
 like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
 is where an operator types the statement itself.
 
-The server enforces the seven phrases inside their handlers. The browser sends an
+The server enforces the eight phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers
