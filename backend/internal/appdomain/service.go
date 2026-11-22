@@ -650,7 +650,17 @@ func (s *Service) View(ctx context.Context) (View, error) {
 	}
 	if v.Enabled && st.Offer != "" && !st.holdsDomain() {
 		v.Offer = &OfferView{Handle: st.Offer, Hostname: st.Offer + "." + s.zone(st)}
-		if st.OfferTried == st.Offer {
+		switch {
+		case st.Available == nil || !*st.Available:
+			// autoClaim does not run while the site offers no addresses, so
+			// the claim is not "under way": say what it waits for, which
+			// also stops a page that polls until the state settles.
+			why := "just-dashboard.com is not handing out addresses right now"
+			if st.AvailableReason != "" {
+				why += ": " + st.AvailableReason
+			}
+			v.Offer.Error = strPtr(why + ". The server claims the address once it does.")
+		case st.OfferTried == st.Offer:
 			v.Offer.Error = strPtr(st.OfferError)
 		}
 	}

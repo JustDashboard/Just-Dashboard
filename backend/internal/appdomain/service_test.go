@@ -720,6 +720,12 @@ func TestNoOfferMeansNoClaim(t *testing.T) {
 	if got := e.puts(); len(got) != 0 {
 		t.Fatalf("puts on a site that offers nothing = %v", got)
 	}
+	// The offer is then not "under way": it says what it waits for, so a
+	// page polling until the claim settles stops.
+	v, _ := e.svc.View(t.Context())
+	if v.Offer == nil || v.Offer.Error == nil || !strings.Contains(*v.Offer.Error, "not handing out addresses") {
+		t.Fatalf("offer on a site that offers nothing = %+v", v.Offer)
+	}
 }
 
 func TestOffersAreIgnoredWhenAppDomainsAreOff(t *testing.T) {

@@ -84,7 +84,9 @@ the transaction that starts a link, followed once it commits by `Service.LinkCha
 runs at a time. A failure keeps its sentence (`offerError`, shown on the card) and the same handle is not tried
 again for an hour (the site allows ten `PUT`s an hour per server and five new handles a day per account); the
 Claim button is never held back. Each automatic claim is audited as `app.domain.claim` by `system` with
-`automatic: true`. `JD_APP_DOMAINS=false` ignores offers.
+`automatic: true`. `JD_APP_DOMAINS=false` ignores offers. While the site offers no addresses (unreachable, or
+`available: false`), no claim runs, and the offer's `error` says what it waits for. A page that polls until
+`error` is set or a domain is held therefore stops polling.
 
 ## REST API (`api/handlers_appdomain.go`)
 
