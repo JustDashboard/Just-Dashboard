@@ -75,9 +75,9 @@ func pollingCheck(config string) PlannedCheck {
 
 var pollingTarget = CheckTarget{Host: "127.0.0.1", Port: 3000}
 
-// Run 18's application came up somewhere between 3 s and 6 s and was found
-// on the 6 s tick. Asked every quarter second at first, it is found within
-// a quarter second of answering.
+// An application that comes up 3.2 s into its check was found on the 6 s tick
+// when the check slept its whole interval. Asked every quarter second at first,
+// it is found within a quarter second of answering.
 func TestReadinessFindsAnApplicationSoonAfterItAnswers(t *testing.T) {
 	t.Parallel()
 	clock := newPollingClock()
