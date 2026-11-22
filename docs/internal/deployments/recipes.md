@@ -97,6 +97,26 @@ secret, or a name that would replace the builder's own environment (`DOCKER_*`, 
 qualifies as a build argument. A build argument
 stays in the image's history, which is why a secret is never one.
 
+A changed value rebuilds what read it. BuildKit leaves a secret mount's value out of the step's cache
+key, which on its own would let a redeploy of the same commit with a new `NEXT_PUBLIC_` or `VITE_` value
+reuse the build step and ship the bundle compiled with the old one. So one pass over every rendered
+recipe, whatever its language (`withBuildValueGuards` in `deploy/build_value_guard.go`, run by
+`renderRecipeDockerfile`), declares a guard build argument just before each RUN that mounts a value:
+`ARG JD_BUILD_VALUES_<n>`, one per distinct set of mounted values, declared once per stage. The build
+passes it as `--build-arg JD_BUILD_VALUES_<n>` with its value in buildx's environment, never in argv:
+an HMAC-SHA256 of exactly the values that RUN mounts, under a key the server derives from its master
+key (`Sealer.DeriveHMAC("deploy.build-values")`). A declared argument is part of the cache key of the
+RUN after it, so a changed value reruns that step and everything built on it, an unchanged one keeps
+the cache, and an install that mounts only install-mapped values keeps its layer when only a build
+step's value changes. The digest is keyed rather than a plain hash because a declared argument's value
+is recorded in the image history of the stage it runs in, and a plain hash of a short value could be
+guessed back; the Dockerfile and its preview hold only the name. A builder without the key (a test)
+keys with a random one per process. A user's Dockerfile build argument can never take the `JD_` prefix.
+Railpack builds have their own guard (`secrets-hash`, see [Railpack](#railpack)).
+`TestLiveBuildValueChangeRerunsTheStepThatReadIt` (`JD_DEPLOY_LIVE=1`) proves it on BuildKit: an
+unchanged value leaves every step `CACHED`, a changed build value reruns the build step and ships the
+new value, and the install stays cached.
+
 Neither generated Dockerfiles nor command arguments contain variable values. A build's log, its failure
 diagnosis and a builder error are redacted of the exact value of every secret build variable, and of a
 plain one whose value carries credential material anyway (a URL with a password, a private key, a

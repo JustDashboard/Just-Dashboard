@@ -477,6 +477,11 @@ func (s *Server) initModules() {
 	// path, which the data directory is on the server and in here alike.
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack"))
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
+	if s.Sealer != nil {
+		// A recipe's build-value guards are keyed digests of build values,
+		// stable across restarts so an unchanged value keeps its cache.
+		s.modules.deployArtifacts.WithBuildValueKey(s.Sealer.DeriveHMAC(deploy.BuildValueKeyLabel, nil))
+	}
 	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner

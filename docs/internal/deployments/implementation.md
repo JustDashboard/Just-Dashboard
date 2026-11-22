@@ -761,7 +761,12 @@ only renderer/executor/validation authority for their feature.
   recipe's and nothing after the build branches on the method; its build variables are BuildKit
   secret mounts named in the plan, as the recipes' are. Reviewed base tags are resolved before rendering and every
   generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
-  never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
+  never argv/build args. BuildKit leaves a secret's value out of a step's cache key, so every recipe
+  RUN that mounts build values is preceded by a guard `ARG JD_BUILD_VALUES_<n>` (one per set of mounted
+  values, `build_value_guard.go`) that the build fills with an HMAC of those values under a key derived
+  from the master key, in buildx's environment: a changed value reruns that step and what follows it,
+  and an install mounting none of the changed values keeps its layer ([build values](recipes.md#build-values)).
+  Custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
   cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
   cannot be guaranteed — and detection runs the same check, so preflight says so before Deploy. A custom

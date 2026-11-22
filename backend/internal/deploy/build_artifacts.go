@@ -176,6 +176,10 @@ type PreparedBuild struct {
 	// name) a custom Dockerfile build receives (build_dockerfile_args.go).
 	Target        string   `json:"target,omitempty"`
 	BuildArgNames []string `json:"buildArgNames,omitempty"`
+	// BuildValueGuards are the arguments a recipe declares before each RUN
+	// that mounts build values, which the build fills with a keyed digest
+	// of those values so a changed value reruns the step (build_value_guard.go).
+	BuildValueGuards []BuildValueGuard `json:"buildValueGuards,omitempty"`
 	// Install is the Node dependency install exactly as it runs, and Notes
 	// the decisions preparation made that the run log states: a non-frozen
 	// install, a command moved to the resolved manager's runner.
@@ -237,6 +241,8 @@ type ArtifactBuilder struct {
 	// railpackValues are the plain RAILPACK_* build variables a Railpack
 	// plan is configured with (railpackPlanValues), set for one preparation.
 	railpackValues map[string]string
+	// buildValueKey keys the build-value guards' digests (WithBuildValueKey).
+	buildValueKey []byte
 }
 
 // withRailpackValues is the builder preparing one Railpack plan with the run's
@@ -417,10 +423,11 @@ func (b *ArtifactBuilder) PrepareWithin(
 			return PreparedBuild{}, err
 		}
 		prepared.BaseImages = bases
-		content, err := renderRecipeDockerfile(recipe, config, bases)
+		content, guards, err := renderGuardedRecipe(recipe, config, bases)
 		if err != nil {
 			return PreparedBuild{}, err
 		}
+		prepared.BuildValueGuards = guards
 		prepared.SecretLayerGuarantee = "buildkit_ephemeral_mount"
 		contextRoot := root
 		if recipe.contextDir != "" {
@@ -547,6 +554,7 @@ func (b *ArtifactBuilder) Build(
 		if err != nil {
 			return result, err
 		}
+		buildArgs = append(buildArgs, b.buildValueGuardArgs(prepared, secrets)...)
 		image, err := b.backend.BuildImage(ctx, BuildInvocation{
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
@@ -967,8 +975,25 @@ func listContainedFiles(root, suffix string) []string {
 }
 
 func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) (string, error) {
+	content, _, err := renderGuardedRecipe(recipe, config, bases)
+	return content, err
+}
+
+// renderGuardedRecipe renders a recipe's Dockerfile with its build-value
+// guards (build_value_guard.go): whatever a language's renderer wrote, each
+// RUN that mounts a build value is keyed on that value.
+func renderGuardedRecipe(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) (string, []BuildValueGuard, error) {
+	lines, err := renderRecipeLines(recipe, config, bases)
+	if err != nil {
+		return "", nil, err
+	}
+	lines, guards := withBuildValueGuards(strings.Split(strings.Join(lines, "\n"), "\n"))
+	return strings.Join(lines, "\n") + "\n", guards, nil
+}
+
+func renderRecipeLines(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) ([]string, error) {
 	if len(bases) == 0 {
-		return "", ErrBuilderUnavailable
+		return nil, ErrBuilderUnavailable
 	}
 	installSecrets := buildSecretMounts(config.Secrets, "install")
 	buildSecrets := buildSecretMounts(config.Secrets, "build")
@@ -978,13 +1003,13 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 	case "node":
 		rendered, err := renderNodeDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "go":
 		rendered, err := renderGoDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "python":
@@ -996,7 +1021,7 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			rendered, err = renderPythonDockerfile(recipe.python, config, bases, installSecrets, buildSecrets)
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "rust", "java", "dotnet", "deno", "php":
@@ -1020,28 +1045,28 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			}
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "site":
 		rendered, err := renderSiteDockerfile(recipe.site, config, recipe.serving, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		rendered, err := renderLanguageDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	default:
-		return "", ErrUnsupportedBuilder
+		return nil, ErrUnsupportedBuilder
 	}
 	if recipe.emptyDotenv {
 		lines = withEmptyDotenv(lines)
 	}
-	return strings.Join(lines, "\n") + "\n", nil
+	return lines, nil
 }
 
 func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base ResolvedImage) (string, error) {
@@ -1100,6 +1125,9 @@ func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
 	}
 	for _, name := range prepared.BuildArgNames {
 		argv = append(argv, "--build-arg", name)
+	}
+	for _, guard := range prepared.BuildValueGuards {
+		argv = append(argv, "--build-arg", guard.Arg)
 	}
 	argv = append(argv, railpackPreviewArgs(prepared, tag)...)
 	for _, id := range prepared.SecretIDs {
