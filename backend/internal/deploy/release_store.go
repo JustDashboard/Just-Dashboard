@@ -77,6 +77,8 @@ type ReleaseArtifact struct {
 	RetainUntil *time.Time      `json:"retainUntil,omitempty"`
 	State       string          `json:"state"`
 	CreatedAt   time.Time       `json:"createdAt"`
+	// PrunedAt is when release retention removed it from this server.
+	PrunedAt *time.Time `json:"prunedAt,omitempty"`
 }
 
 type ReleaseArtifactInput struct {
@@ -723,16 +725,64 @@ type ArtifactRetentionDecision struct {
 	Artifact ReleaseArtifact `json:"artifact"`
 	Retain   bool            `json:"retain"`
 	Reason   string          `json:"reason"`
+	// Removed says this pass removed it, and Error why a removal it tried
+	// did not happen.
+	Removed bool   `json:"removed,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
 type ArtifactRetentionReport struct {
 	Decisions []ArtifactRetentionDecision `json:"decisions"`
 	Pruned    int                         `json:"pruned"`
 	Reclaimed int64                       `json:"reclaimedBytes"`
+	// Failed counts removals that were tried and did not happen; Deferred
+	// the artifacts outside retention a bounded pass left for the next.
+	Failed   int  `json:"failed,omitempty"`
+	Deferred int  `json:"deferred,omitempty"`
+	DryRun   bool `json:"dryRun,omitempty"`
 }
 
 type ArtifactRemover interface {
 	RemoveArtifact(context.Context, ReleaseArtifact) error
+}
+
+// ArtifactChecker is a remover that can say, without removing anything,
+// whether it would refuse an artifact — an image a container still uses, a
+// name the dashboard does not own — which a dry run reports.
+type ArtifactChecker interface {
+	CheckArtifact(context.Context, ReleaseArtifact) error
+}
+
+// PruneOptions bounds a pass: Limit removals at most (zero is no bound),
+// none at all when DryRun, and OnDecision told of every removal that
+// happened or failed, for the audit log. A refusal removed nothing and is
+// not told.
+type PruneOptions struct {
+	Limit      int
+	DryRun     bool
+	OnDecision func(context.Context, ArtifactRetentionDecision)
+}
+
+// heldRuntimeStates are the runtime states in which a release's container
+// may still exist: running, warm and paused, draining, stopped (a stopped or
+// sleeping environment starts the same container again), a candidate, or a
+// quarantined preview kept for inspection. Its image is kept whatever its
+// rank; the daemon is asked as well before anything is removed.
+const heldRuntimeStates = `'candidate', 'live', 'warm', 'draining', 'stopped', 'quarantined'`
+
+func runtimeHeldWhere(alias string) string {
+	return `EXISTS(SELECT 1 FROM deploy_release_runtimes hrt
+	  WHERE hrt.release_id = ` + alias + `.id AND hrt.state IN (` + heldRuntimeStates + `))`
+}
+
+// operationTargetRetainedWhere is a release an unfinished rollback, redeploy
+// or restart names as its target. Like a queued promotion's source, no lease
+// protects it until the run is claimed, and a prune in between would leave
+// the rollback with nothing to roll back to.
+func operationTargetRetainedWhere(alias string) string {
+	return `EXISTS(SELECT 1 FROM deploy_runs tgt
+	  WHERE tgt.` + activeRunWhere + `
+	    AND CAST(json_extract(tgt.metadata_json, '$.targetReleaseId') AS INTEGER) = ` + alias + `.id)`
 }
 
 func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time.Time) ([]ArtifactRetentionDecision, error) {
@@ -743,7 +793,9 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		       e.live_release_id, e.kind,
 		       EXISTS(SELECT 1 FROM deploy_queue_leases q JOIN deploy_runs dr ON dr.id = q.run_id
 		               WHERE dr.environment_id = r.environment_id),
-		       `+promotionRetainedWhere("r")+`
+		       `+promotionRetainedWhere("r")+`,
+		       `+runtimeHeldWhere("r")+`,
+		       `+operationTargetRetainedWhere("r")+`
 		  FROM deploy_release_artifacts a
 		  JOIN deploy_releases r ON r.id = a.release_id
 		  JOIN deploy_environments e ON e.id = r.environment_id
@@ -758,19 +810,22 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 		environmentID, number, liveReleaseID int64
 		releaseState, environmentKind        string
 		pinned, active, promoting            bool
+		held, targeted                       bool
 	}
 	items := []item{}
 	for rows.Next() {
 		var current item
 		var metadata string
 		var retainUntil, createdAt int64
-		var pinned, active, promoting int
+		var pinned, active, promoting, held, targeted int
 		if err := rows.Scan(&current.artifact.ID, &current.artifact.ReleaseID, &current.artifact.Kind,
 			&current.artifact.Reference, &current.artifact.Digest, &metadata, &current.artifact.SizeBytes,
 			&retainUntil, &current.artifact.State, &createdAt, &current.environmentID, &current.number,
-			&current.releaseState, &pinned, &current.liveReleaseID, &current.environmentKind, &active, &promoting); err != nil {
+			&current.releaseState, &pinned, &current.liveReleaseID, &current.environmentKind, &active, &promoting,
+			&held, &targeted); err != nil {
 			return nil, err
 		}
+		current.held, current.targeted = held != 0, targeted != 0
 		current.artifact.Metadata = json.RawMessage(metadata)
 		current.artifact.RetainUntil = unixTimePtr(retainUntil)
 		current.artifact.CreatedAt = unixTime(createdAt)
@@ -807,6 +862,10 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 			if current.environmentKind == string(EnvironmentPreview) {
 				decision.Reason = "source of an unfinished promotion to staging"
 			}
+		case current.held:
+			decision.Retain, decision.Reason = true, "a container of this release may still be on the server (running, warm, stopped or a candidate)"
+		case current.targeted:
+			decision.Retain, decision.Reason = true, "target of an unfinished rollback, redeploy or restart"
 		case current.artifact.ReleaseID == current.liveReleaseID || current.releaseState == "live":
 			decision.Retain, decision.Reason = true, "current live release"
 		case current.pinned:
@@ -828,6 +887,13 @@ func (s *OrchestrationStore) ArtifactRetentionPlan(ctx context.Context, now time
 }
 
 func (s *OrchestrationStore) PruneArtifacts(ctx context.Context, remover ArtifactRemover) (*ArtifactRetentionReport, error) {
+	return s.PruneArtifactsWith(ctx, remover, PruneOptions{})
+}
+
+// PruneArtifactsWith removes what retention no longer keeps, as
+// PruneArtifacts does, within options: at most Limit removals, or none in a
+// dry run, which still asks the remover what it would refuse.
+func (s *OrchestrationStore) PruneArtifactsWith(ctx context.Context, remover ArtifactRemover, options PruneOptions) (*ArtifactRetentionReport, error) {
 	if remover == nil {
 		return nil, fmt.Errorf("artifact remover is required")
 	}
@@ -835,14 +901,21 @@ func (s *OrchestrationStore) PruneArtifacts(ctx context.Context, remover Artifac
 	if err != nil {
 		return nil, err
 	}
-	report := &ArtifactRetentionReport{Decisions: decisions}
+	report := &ArtifactRetentionReport{Decisions: decisions, DryRun: options.DryRun}
 	retainedIdentity := map[string]bool{}
 	for _, decision := range decisions {
 		if decision.Retain {
 			retainedIdentity[artifactPhysicalKey(decision.Artifact)] = true
 		}
 	}
-	for index := range report.Decisions {
+	tell := func(decision ArtifactRetentionDecision) {
+		if options.OnDecision != nil {
+			options.OnDecision(context.WithoutCancel(ctx), decision)
+		}
+	}
+	// Oldest first, so a pass its limit cuts short has removed the releases
+	// furthest from a rollback.
+	for index := len(report.Decisions) - 1; index >= 0; index-- {
 		decision := &report.Decisions[index]
 		if decision.Retain {
 			continue
@@ -850,6 +923,21 @@ func (s *OrchestrationStore) PruneArtifacts(ctx context.Context, remover Artifac
 		identity := artifactPhysicalKey(decision.Artifact)
 		if retainedIdentity[identity] {
 			decision.Retain, decision.Reason = true, "physical artifact is shared by a retained release"
+			continue
+		}
+		if options.DryRun {
+			if checker, ok := remover.(ArtifactChecker); ok {
+				if err := checker.CheckArtifact(ctx, decision.Artifact); err != nil {
+					decision.Retain, decision.Reason = artifactRefusal(err)
+					if !decision.Retain {
+						decision.Error = err.Error()
+					}
+				}
+			}
+			continue
+		}
+		if options.Limit > 0 && report.Pruned+report.Failed >= options.Limit {
+			report.Deferred++
 			continue
 		}
 		if err := s.reserveArtifactPrune(ctx, decision.Artifact.ID); err != nil {
@@ -860,18 +948,48 @@ func (s *OrchestrationStore) PruneArtifacts(ctx context.Context, remover Artifac
 			return report, err
 		}
 		if err := remover.RemoveArtifact(ctx, decision.Artifact); err != nil {
+			if retain, reason := artifactRefusal(err); retain {
+				// Refused before anything was removed: the artifact is as it
+				// was, kept for the reason the remover gave.
+				_, _ = s.db.ExecContext(context.WithoutCancel(ctx),
+					`UPDATE deploy_release_artifacts SET state = 'available' WHERE id = ? AND state = 'pruning'`, decision.Artifact.ID)
+				decision.Retain, decision.Reason = true, reason
+				continue
+			}
 			_, _ = s.db.ExecContext(context.WithoutCancel(ctx),
 				`UPDATE deploy_release_artifacts SET state = 'prune_failed' WHERE id = ? AND state = 'pruning'`, decision.Artifact.ID)
+			decision.Error = err.Error()
+			report.Failed++
+			tell(*decision)
 			continue
 		}
+		now := s.now().UTC()
 		if _, err := s.db.ExecContext(ctx,
-			`UPDATE deploy_release_artifacts SET state = 'pruned' WHERE id = ? AND state = 'pruning'`, decision.Artifact.ID); err != nil {
+			`UPDATE deploy_release_artifacts SET state = 'pruned', pruned_at = ? WHERE id = ? AND state = 'pruning'`,
+			now.Unix(), decision.Artifact.ID); err != nil {
 			return report, err
 		}
+		decision.Removed, decision.Artifact.State, decision.Artifact.PrunedAt = true, "pruned", &now
 		report.Pruned++
 		report.Reclaimed += decision.Artifact.SizeBytes
+		tell(*decision)
 	}
 	return report, nil
+}
+
+// artifactRefusal reads a remover's refusal: an image a container uses, or
+// a name the dashboard does not own, keeps the artifact with that reason.
+// Anything else is a failed removal.
+func artifactRefusal(err error) (bool, string) {
+	switch {
+	case errors.Is(err, ErrArtifactInUse):
+		return true, "a container on this server uses this image"
+	case errors.Is(err, ErrArtifactNotOwned):
+		return true, "the image is named by something other than this release, so it is left in place"
+	case errors.Is(err, ErrArtifactUnguarded):
+		return true, "the image remover cannot ask Docker which containers use it, so nothing is removed"
+	}
+	return false, ""
 }
 
 func (s *OrchestrationStore) reserveArtifactPrune(ctx context.Context, artifactID int64) error {
@@ -893,6 +1011,7 @@ func (s *OrchestrationStore) reserveArtifactPrune(ctx context.Context, artifactI
 		          AND (
 		            tr.pinned = 1 OR tr.id = te.live_release_id OR tr.state = 'candidate'
 		            OR `+promotionRetainedWhere("tr")+`
+		            OR `+runtimeHeldWhere("tr")+` OR `+operationTargetRetainedWhere("tr")+`
 		            OR EXISTS(
 		                 SELECT 1 FROM deploy_release_artifacts shared
 		                 JOIN deploy_releases sr ON sr.id = shared.release_id
@@ -901,7 +1020,8 @@ func (s *OrchestrationStore) reserveArtifactPrune(ctx context.Context, artifactI
 		                  AND (target.kind = 'image' OR shared.reference = target.reference)
 		                  AND shared.id <> target.id AND shared.state = 'available'
 		                  AND (sr.pinned = 1 OR sr.id = e.live_release_id OR sr.state = 'candidate'
-		                       OR `+promotionRetainedWhere("sr")+`)
+		                       OR `+promotionRetainedWhere("sr")+`
+		                       OR `+runtimeHeldWhere("sr")+` OR `+operationTargetRetainedWhere("sr")+`)
 		               )
 		          )
 		       )`, artifactID).Scan(&active, &retained); err != nil {
@@ -974,7 +1094,7 @@ func artifactsForReleaseTx(ctx context.Context, queryer interface {
 }, releaseID int64) ([]ReleaseArtifact, error) {
 	rows, err := queryer.QueryContext(ctx, `
 		SELECT id, release_id, kind, reference, digest, metadata_json, size_bytes,
-		       retain_until, state, created_at
+		       retain_until, state, created_at, pruned_at
 		  FROM deploy_release_artifacts WHERE release_id = ? ORDER BY id`, releaseID)
 	if err != nil {
 		return nil, err
@@ -984,14 +1104,15 @@ func artifactsForReleaseTx(ctx context.Context, queryer interface {
 	for rows.Next() {
 		var artifact ReleaseArtifact
 		var metadata string
-		var retainUntil, createdAt int64
+		var retainUntil, createdAt, prunedAt int64
 		if err := rows.Scan(&artifact.ID, &artifact.ReleaseID, &artifact.Kind, &artifact.Reference,
 			&artifact.Digest, &metadata, &artifact.SizeBytes, &retainUntil, &artifact.State,
-			&createdAt); err != nil {
+			&createdAt, &prunedAt); err != nil {
 			return nil, err
 		}
 		artifact.Metadata = json.RawMessage(metadata)
 		artifact.RetainUntil, artifact.CreatedAt = unixTimePtr(retainUntil), unixTime(createdAt)
+		artifact.PrunedAt = unixTimePtr(prunedAt)
 		result = append(result, artifact)
 	}
 	return result, rows.Err()

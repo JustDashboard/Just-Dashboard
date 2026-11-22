@@ -11844,6 +11844,13 @@
             "title": "deploy.ArtifactKind",
             "type": "string"
           },
+          "prunedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "reason": {
             "type": "string"
           },

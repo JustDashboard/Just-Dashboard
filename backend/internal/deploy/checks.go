@@ -215,6 +215,15 @@ type CheckAttemptEvidence struct {
 	// RedirectOrigin is where an unfollowed redirect pointed: its scheme and
 	// host only, since a login redirect's query carries state tokens.
 	RedirectOrigin string `json:"redirectOrigin,omitempty"`
+
+	// Repeats is how many further attempts gave this one's answer straight
+	// after it and are folded into it, LastNumber the last of them and
+	// SpanMillis the time from this attempt's start to the end of that one:
+	// early polling asks every quarter second, and forty identical refusals
+	// say no more than "connection refused × 40 over 9.8 s".
+	Repeats    int   `json:"repeats,omitempty"`
+	LastNumber int   `json:"lastNumber,omitempty"`
+	SpanMillis int64 `json:"spanMillis,omitempty"`
 }
 
 type CheckEvidence struct {
@@ -232,6 +241,16 @@ type CheckEvidence struct {
 	Replica int `json:"replica,omitempty"`
 }
 
+// AttemptCount is how many times the check asked, counting the attempts
+// folded into a kept one.
+func (e CheckEvidence) AttemptCount() int {
+	count := 0
+	for _, attempt := range e.Attempts {
+		count += 1 + attempt.Repeats
+	}
+	return count
+}
+
 type ContainerCheckBackend interface {
 	ContainerHealth(context.Context, string) (string, error)
 	ExecCheck(context.Context, string, []string, time.Duration) (int, []byte, error)
@@ -242,6 +261,43 @@ type CheckRunner struct {
 	http       *http.Client
 	dial       func(context.Context, string, string) (net.Conn, error)
 	now        func() time.Time
+	// sleep waits between attempts, returning early when ctx ends; tests
+	// replace it to move a fake clock instead.
+	sleep func(context.Context, time.Duration)
+}
+
+// A check with an interval asks quickly at first: an application that comes
+// up 3.2 s after it starts used to be found at 6 s, on the next 3 s tick.
+// For the first earlyPollingWindow it asks every earlyPollingInterval, or as
+// long as its last attempt took when that is longer, so an application that
+// answers slowly is never asked again before it has answered; after the
+// window it asks at the configured interval. The waits add up to the same
+// budget as before — (attempts − 1) × interval — so a check that never
+// passes gives up when it did.
+const (
+	earlyPollingWindow   = 10 * time.Second
+	earlyPollingInterval = 250 * time.Millisecond
+)
+
+func sleepContext(ctx context.Context, wait time.Duration) {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+	case <-timer.C:
+	}
+}
+
+// checkPollWait is how long to wait before the next attempt: quick during
+// the early window, never shorter than the attempt that just ran, never
+// longer than the interval, and never past what is left of the budget.
+func checkPollWait(sinceStart, lastAttempt, interval, remaining time.Duration) time.Duration {
+	wait := interval
+	if sinceStart < earlyPollingWindow && interval > earlyPollingInterval {
+		wait = max(earlyPollingInterval, lastAttempt)
+		wait = min(wait, interval)
+	}
+	return min(wait, remaining)
 }
 
 // containerLivenessReader is the part of a check backend that reads a
@@ -295,8 +351,9 @@ func NewCheckRunner(containers ContainerCheckBackend) *CheckRunner {
 			Transport:     &http.Transport{Proxy: nil, DialContext: dialer.DialContext},
 			CheckRedirect: func(_ *http.Request, _ []*http.Request) error { return http.ErrUseLastResponse },
 		},
-		dial: dialer.DialContext,
-		now:  time.Now,
+		dial:  dialer.DialContext,
+		now:   time.Now,
+		sleep: sleepContext,
 	}
 }
 
@@ -327,33 +384,42 @@ func (r *CheckRunner) Run(ctx context.Context, check PlannedCheck, target CheckT
 		timeout = 3 * time.Second
 	}
 	interval := time.Duration(config.IntervalSeconds) * time.Second
-	for attempt := 1; attempt <= attempts; attempt++ {
+	// Without an interval the attempts run back to back and their number is
+	// the bound; with one, the waits between them are.
+	// The extra attempts early polling makes add their own time, so the
+	// check also stops where the configured attempts would have at the
+	// latest, every one of them timing out (what Settings shows as the time
+	// a check gives up after).
+	budget, waited := time.Duration(attempts-1)*interval, time.Duration(0)
+	latest := budget + time.Duration(attempts)*timeout
+	timed := []timedAttempt{}
+	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
 			break
 		}
+		attemptStarted := r.now()
 		result := r.runAttempt(ctx, CheckKind(check.Kind), config, target, timeout)
 		result.Number = attempt
+		attemptEnded := r.now()
+		done := result.Outcome == HealthPassed || result.Outcome == HealthDisabled || result.Outcome == HealthUnavailable
 		if result.Outcome == HealthFailed {
 			if state, gone := r.candidateGone(ctx, target, started); gone {
 				result.Code, result.ContainerState = "application_exited", state.Status
 				result.ExitCode, result.Restarts = state.ExitCode, state.RestartCount
-				evidence.Attempts = append(evidence.Attempts, result)
-				break
+				done = true
 			}
 		}
-		evidence.Attempts = append(evidence.Attempts, result)
-		if result.Outcome == HealthPassed || result.Outcome == HealthDisabled || result.Outcome == HealthUnavailable {
+		timed = append(timed, timedAttempt{result, attemptStarted, attemptEnded})
+		if done || interval == 0 && attempt >= attempts || interval > 0 && (waited >= budget || attemptEnded.Sub(started) >= latest) {
 			break
 		}
-		if attempt < attempts && interval > 0 {
-			timer := time.NewTimer(interval)
-			select {
-			case <-ctx.Done():
-				timer.Stop()
-			case <-timer.C:
-			}
+		if interval > 0 {
+			wait := checkPollWait(attemptEnded.Sub(started), attemptEnded.Sub(attemptStarted), interval, budget-waited)
+			r.sleep(ctx, wait)
+			waited += wait
 		}
 	}
+	evidence.Attempts = append(evidence.Attempts, collapseAttempts(timed)...)
 	evidence.Outcome = HealthFailed
 	if len(evidence.Attempts) == 0 {
 		evidence.Attempts = append(evidence.Attempts, CheckAttemptEvidence{Number: 1, Outcome: HealthFailed, Code: "cancelled"})
@@ -365,6 +431,42 @@ func (r *CheckRunner) Run(ctx context.Context, check PlannedCheck, target CheckT
 	}
 	evidence.CompletedAt = r.now().UTC()
 	return evidence
+}
+
+// timedAttempt is an attempt with when it ran, which folding its repeats
+// into the one before needs and the evidence keeps only as a span.
+type timedAttempt struct {
+	attempt        CheckAttemptEvidence
+	started, ended time.Time
+}
+
+// sameAnswer says two attempts got the same answer: everything the evidence
+// says about it but how long it took.
+func sameAnswer(a, b CheckAttemptEvidence) bool {
+	return a.Outcome == b.Outcome && a.Code == b.Code && a.StatusCode == b.StatusCode && a.Address == b.Address &&
+		a.ContainerState == b.ContainerState && a.ExitCode == b.ExitCode && a.Restarts == b.Restarts &&
+		a.OutputDigest == b.OutputDigest && a.RedirectOrigin == b.RedirectOrigin
+}
+
+// collapseAttempts keeps the first attempt, the last, and the first of every
+// run of a different answer, folding each run's repeats into its first
+// (Repeats, LastNumber, SpanMillis). The last attempt is always its own
+// entry, since the gate's outcome and message are read from it.
+func collapseAttempts(timed []timedAttempt) []CheckAttemptEvidence {
+	kept := make([]CheckAttemptEvidence, 0, min(len(timed), 4))
+	var runStarted time.Time
+	for index, current := range timed {
+		last := len(kept) - 1
+		if index > 0 && index < len(timed)-1 && sameAnswer(kept[last], current.attempt) {
+			kept[last].Repeats++
+			kept[last].LastNumber = current.attempt.Number
+			kept[last].SpanMillis = current.ended.Sub(runStarted).Milliseconds()
+			continue
+		}
+		kept = append(kept, current.attempt)
+		runStarted = current.started
+	}
+	return kept
 }
 
 func (r *CheckRunner) runAttempt(
@@ -625,7 +727,7 @@ func checkFailureMessage(phase string, outcome HealthOutcome, checks ...CheckEvi
 		if address != "" {
 			reason += " at " + address
 		}
-		return fmt.Sprintf("%s: %s — %s after %d attempt(s)", message, check.Name, reason, len(check.Attempts))
+		return fmt.Sprintf("%s: %s — %s after %d attempt(s)", message, check.Name, reason, check.AttemptCount())
 	}
 	return message
 }

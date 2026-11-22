@@ -30,7 +30,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 
 ## Releases you can trust
 
-- Immutable releases, one-click rollback and health-gated cutover
+- Immutable releases, one-click rollback and health-gated cutover; each environment keeps the images of its live release and the five before it, and older ones are removed for you, never one a container still uses
 - Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - Canary releases: a new release takes a share of the requests beside the live one, read side by side, and is removed if it does worse or promoted when it does not
 - Skew protection: a visitor stays on the release that first answered them for the warm window after a cutover, so a page loaded before it never asks the new release for scripts it does not have

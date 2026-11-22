@@ -350,6 +350,28 @@ only renderer/executor/validation authority for their feature.
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
   blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
   `certificate_available`.
+  **The work starts while the build runs** (`certificate_prewarm.go`). The domains are in the stored
+  plan before `build_artifact`, so that step starts the same `EnsureDeploymentCertificate` in the
+  background for the plan's HTTPS names (not a tunnel's) and says so in the build transcript; a first
+  deploy onto a new name used to spend about thirteen seconds ordering after a build that had nothing
+  to do with it. The step itself stays where it is, the gate before `start_candidate`: it waits for that
+  attempt ("which was started while the build ran"), shows its transcript, and answers from it — an
+  issued certificate as it is, so one run never orders twice, and a refused order as the step's own
+  failure. When the background attempt found the names already covered, or never got an answer (cut
+  short, or out of time waiting for certbot's turn), the step asks again itself as before, which finds
+  the certificate reused. Its evidence carries `prewarm` (`startedDuringBuild`, when it started and
+  finished, its own outcome, how long the step waited), and the audit entry of an order placed in the
+  background carries `startedDuringBuild: true`. Cancelling the run cancels the attempt
+  (`CleanupCancelledRun` and the run-finished `HousekeepingObserver`), and so does the step's own
+  context ending while it waits; the attempt is bounded at ten minutes. **A build that fails after the
+  order was placed** leaves the run's order to finish: the certificate stays on the host and the next
+  run's step reuses it; on a host the Docker Caddy ingress serves, the attempt may also have brought
+  the ingress up, which the next run finds in place. So that a build failing on every push cannot become an ACME loop, a background
+  attempt that fails keeps the same set of names from being ordered in the background for an hour
+  (in memory, so a restart forgets it); the step still orders after a build that passes, as it always
+  did. A run whose certificate step runs in another process than its build (a restart between them)
+  finds no attempt and orders as before. Redeploy, rollback and promotion have no build step and
+  order in the step as before.
   HTTP-01 issuance (`issueDeploymentHTTP`) runs through the same certbot — whose plugins
   `deploymentChallenge` reads, against probe directories, to choose webroot or standalone — names the
   same directory (`deploymentHTTPIssueArgs` appends `ACMEDirectory.certbotArgs`), skips the public-DNS
@@ -948,11 +970,48 @@ only renderer/executor/validation authority for their feature.
   would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
   the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
   reads the report as a sentence and a line of facts (`run-rehearsal.tsx`).
+- **Run workspaces** (`deployment-workspaces/run-N`, `workspace_sweep.go`): a run's source is
+  materialized there and `release_task` removes it, so a run that ended before that step (a failed
+  build, a refused preflight, a cancel) used to keep its checkout for good. A run's workspace is now
+  removed as the run finishes (the engine's run-finished `HousekeepingObserver`), and at start-up
+  `SweepWorkspaces` removes every `run-N` directory whose run is terminal or no longer recorded (its
+  project permanently deleted). Nothing reads a finished run's workspace again: the materializer
+  reuses one only for the same run through its marker, a retry is a new run with its own, and a
+  terminal run runs no further step. A run that is queued, running or anywhere short of terminal
+  (`failed_activation`, `restoring_previous`, `cancelling` included) keeps its workspace, and nothing
+  in the folder but a `run-N` directory is touched — a file or a link of that name is left alone.
+  The dashboard's backups already exclude the folder.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
-  an active deployment lease, and a staging release an unfinished promotion is about to take its image
-  from ([staging and promotion](staging-promotion.md)). Cleanup reports the reason for every retained row and removes a mutable
-  Docker tag only after inspection proves it still names the recorded config/digest. A run that fails
+  an active deployment lease, a staging release an unfinished promotion is about to take its image
+  from ([staging and promotion](staging-promotion.md)), every release whose runtime is in a state where
+  its container may still exist (`candidate`, `live`, `warm`, `draining`, `stopped` — a stopped or
+  sleeping environment starts the same container again — and a `quarantined` preview;
+  `heldRuntimeStates`), and the target of an unfinished rollback, redeploy or restart
+  (`operationTargetRetainedWhere`, since a queued run holds no lease yet). Cleanup reports the reason
+  for every retained row and removes a mutable Docker tag only after inspection proves it still names
+  the recorded config/digest.
+  **The retention sweep** (`ReleaseImageSweeper`, `release_retention_sweep.go`) is what removes the rest;
+  before it, `PruneArtifacts` had no caller and every release image stayed for good (about 1.6 GB per
+  Next.js release). A pass runs a minute after start-up, daily, and 30 s after any run finishes (the
+  engine's run observer), one pass at a time, oldest release first, at most 20 removals a pass (the
+  next pass carries on) and ten minutes long. Nothing is removed while any deployment holds a lease
+  (`reserveArtifactPrune`). Before each removal the remover (`DockerArtifactRemover`) asks the daemon
+  (`ImageUseReader.ImageUse`: the image's id, its names, and every container created from it in any
+  state — running, paused, exited, created) and refuses an image any container uses
+  (`ErrArtifactInUse`), a name outside the release namespace `just-dashboard/deployment-*` (a pulled
+  Compose service under its registry name, the dashboard's own images; `ErrArtifactNotOwned`), a
+  removal by id while another name holds the image, and any backend that cannot ask
+  (`ErrArtifactUnguarded`). A refusal leaves the artifact `available` with the reason; an image
+  already gone counts as removed. Each removal, and each removal that failed (`prune_failed`, tried
+  again next pass), is audited as `deploy.release.artifact.prune` (actor `system`; the reference,
+  release, digest, size, reason, trigger and any error). A removed artifact is `pruned` with
+  `pruned_at`, and the release's artifact readout (the release comparison's *Retained artifacts*)
+  shows it as *removed*, when, and that the release can no longer be rolled back to.
+  `ReleaseImageSweeper.DryRun` is the same pass removing and writing nothing, with the daemon's
+  refusals. Archived projects keep the same retention as any other (an archive is reversible and keeps
+  its history); a permanently deleted project's images are not in the store any more and stay on the
+  server, as [permanent deletion](permanent-deletion.md) says. A run that fails
   after `render_runtime` moves its candidate release to `failed` the moment the run itself reaches
   `failed`, `failed_activation`, `rolled_back` or `cancelled` — `TransitionRun` does it in the same
   transaction as the run's own state change — so it leaves `candidate` (which retention always keeps,
@@ -1113,6 +1172,22 @@ only renderer/executor/validation authority for their feature.
   attempt ran out: a start command that failed before the server listened used to wait out forty
   attempts. A running container, a target without one and a backend that cannot read it keep the
   attempts as configured.
+- A check with an interval asks quickly at first (`checkPollWait`, `checks.go`): every 250 ms for the
+  first ten seconds, then at the configured interval, so an application that answers 3.2 s after it
+  starts is found then rather than on the 6 s tick. The waits still add up to `(attempts − 1) ×
+  interval`, so a check that never passes gives up when it always did, and it also stops by `attempts
+  × timeout + (attempts − 1) × interval`, inside the time Settings shows. An early wait is never shorter than the
+  attempt before it took, and attempts run one at a time, so an application that answers slowly is
+  never asked again before it has answered. A check without an interval runs its attempts back to back
+  as before. Readiness, smoke, public-route, wake and rollback checks and every replica share this
+  runner, and the crash-loop grace above is measured from the check's start as before. Evidence folds
+  repeats: an attempt that gives the same answer as the one before (outcome, code, status, address,
+  container state, exit code, restarts, output digest, redirect origin) is counted into the first of
+  its run (`repeats`, `lastNumber`, `spanMillis` from that attempt's start to the last one's end), and
+  the first attempt, the first of every distinct answer and the last attempt are always kept
+  (`collapseAttempts`). Failure messages and the run page count the folded attempts too
+  (`CheckEvidence.AttemptCount`, `checkAttemptCount`); evidence saved before folding counts one per
+  entry.
 - HTTP, TCP, Docker-health, command and public-route checks have closed configuration, per-attempt
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime

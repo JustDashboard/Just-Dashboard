@@ -3,8 +3,12 @@ package deploy
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 	"sync"
+
+	"github.com/docker/docker/errdefs"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
@@ -175,6 +179,58 @@ func consumeDockerBuildLogs(
 	return result.image, result.err
 }
 
+// ImageUse is what Docker says about an image before it is removed: its
+// local id, every name it carries, and every container created from it, in
+// any state — running, paused (a warm release), stopped (a sleeping
+// environment starts the same container again) or created.
+type ImageUse struct {
+	ID         string
+	Tags       []string
+	Containers []string
+}
+
+// ErrImageGone is an image Docker no longer has.
+var ErrImageGone = errors.New("the image is no longer on this server")
+
+// ImageUseReader asks the daemon what holds an image. Release retention
+// removes nothing through a backend that cannot answer.
+type ImageUseReader interface {
+	ImageUse(context.Context, string) (ImageUse, error)
+}
+
+func (b *DockerArtifactBackend) ImageUse(ctx context.Context, reference string) (ImageUse, error) {
+	if b == nil || b.docker == nil {
+		return ImageUse{}, ErrBuilderUnavailable
+	}
+	detail, err := b.docker.InspectImage(ctx, reference)
+	if err != nil {
+		if errdefs.IsNotFound(err) {
+			return ImageUse{}, ErrImageGone
+		}
+		return ImageUse{}, err
+	}
+	containers, err := b.docker.ListContainers(ctx, true)
+	if err != nil {
+		return ImageUse{}, err
+	}
+	use := ImageUse{ID: detail.ID, Tags: append([]string(nil), detail.RepoTags...)}
+	for _, container := range containers {
+		if container.ImageID == detail.ID {
+			use.Containers = append(use.Containers, container.ID)
+		}
+	}
+	return use, nil
+}
+
+// releaseTagPrefix is the namespace of every tag the dashboard gives a
+// release's image (releaseImageTag, composeServiceImageTag): the only names
+// release retention removes.
+const releaseTagPrefix = "just-dashboard/deployment-"
+
+func ownedReleaseTag(reference string) bool {
+	return strings.HasPrefix(reference, releaseTagPrefix) && !strings.ContainsAny(reference, "@\x00")
+}
+
 type DockerArtifactRemover struct{ backend BuildBackend }
 
 func NewDockerArtifactRemover(backend BuildBackend) *DockerArtifactRemover {
@@ -182,13 +238,46 @@ func NewDockerArtifactRemover(backend BuildBackend) *DockerArtifactRemover {
 }
 
 func (r *DockerArtifactRemover) RemoveArtifact(ctx context.Context, artifact ReleaseArtifact) error {
+	target, err := r.removalTarget(ctx, artifact)
+	if err != nil || target == "" {
+		if errors.Is(err, ErrImageGone) {
+			// Already gone: nothing left to reclaim, and nothing to refuse.
+			return nil
+		}
+		return err
+	}
+	return r.backend.RemoveImage(ctx, target)
+}
+
+// CheckArtifact is RemoveArtifact without the removal, for a dry run.
+func (r *DockerArtifactRemover) CheckArtifact(ctx context.Context, artifact ReleaseArtifact) error {
+	_, err := r.removalTarget(ctx, artifact)
+	if errors.Is(err, ErrImageGone) {
+		return nil
+	}
+	return err
+}
+
+// removalTarget is the one name RemoveArtifact would hand Docker, or "" when
+// there is nothing to remove, after the daemon has said no container uses
+// the image and nothing outside the release's own names holds it.
+func (r *DockerArtifactRemover) removalTarget(ctx context.Context, artifact ReleaseArtifact) (string, error) {
 	if artifact.Kind != ArtifactImage {
 		// Compose/runtime/static-bundle rows are metadata records. Their bytes
 		// are either inside an image or recreated from the immutable snapshot.
-		return nil
+		return "", nil
 	}
 	if r == nil || r.backend == nil {
-		return ErrBuilderUnavailable
+		return "", ErrBuilderUnavailable
+	}
+	if !ownedReleaseTag(artifact.Reference) {
+		// A pulled Compose service image is recorded under its registry
+		// name, which other stacks and the operator share.
+		return "", ErrArtifactNotOwned
+	}
+	guard, ok := r.backend.(ImageUseReader)
+	if !ok {
+		return "", ErrArtifactUnguarded
 	}
 	var metadata struct {
 		ConfigDigest string `json:"configDigest"`
@@ -200,16 +289,41 @@ func (r *DockerArtifactRemover) RemoveArtifact(ctx context.Context, artifact Rel
 		// manifest digest is immutable but is not always a removable local id.
 		immutableReference = metadata.ConfigDigest
 	}
+	target := immutableReference
 	if current, err := r.backend.InspectImage(ctx, artifact.Reference); err == nil {
 		sameManifest := current.Digest != "" && current.Digest == artifact.Digest
 		sameConfig := metadata.ConfigDigest != "" && current.ConfigDigest == metadata.ConfigDigest
 		if sameManifest || sameConfig {
 			// The tag still names this release, so remove the tag. Docker will
 			// preserve shared content while another retained tag references it.
-			return r.backend.RemoveImage(ctx, artifact.Reference)
+			target = artifact.Reference
 		}
 	}
-	// The tag disappeared or moved. Never pass it to removal in that case: use
-	// only the config id/recorded digest belonging to the pruned release.
-	return r.backend.RemoveImage(ctx, immutableReference)
+	// Otherwise the tag disappeared or moved. Never pass it to removal in
+	// that case: use only the config id/recorded digest belonging to the
+	// pruned release.
+	use, err := guard.ImageUse(ctx, target)
+	if err != nil {
+		return "", err
+	}
+	if len(use.Containers) > 0 {
+		return "", fmt.Errorf("%w: %d container(s), %s first", ErrArtifactInUse, len(use.Containers), shortContainerID(use.Containers[0]))
+	}
+	if target != artifact.Reference {
+		// Removing by id removes every name the image has; refuse when one of
+		// them is not a release's.
+		for _, tag := range use.Tags {
+			if !ownedReleaseTag(tag) {
+				return "", fmt.Errorf("%w: it is also tagged %s", ErrArtifactNotOwned, tag)
+			}
+		}
+	}
+	return target, nil
+}
+
+func shortContainerID(id string) string {
+	if len(id) > 12 {
+		return id[:12]
+	}
+	return id
 }

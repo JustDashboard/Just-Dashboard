@@ -3965,6 +3965,8 @@ export type ReleaseArtifactStatus = {
   state: string
   retained: boolean
   reason: string
+  /** When release retention removed it from the server (`state` is "pruned"). */
+  prunedAt?: string
 }
 
 export type ReleaseComparison = {

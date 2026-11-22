@@ -21,6 +21,16 @@ var (
 	ErrBuilderUnavailable = errors.New("deployment builder is unavailable")
 	ErrArtifactMissing    = errors.New("deployment artifact is missing")
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
+	// ErrArtifactInUse is an image a container on this server uses, which
+	// release retention never removes, whatever the policy says.
+	ErrArtifactInUse = errors.New("a container on this server uses this image")
+	// ErrArtifactNotOwned is an image under a name the dashboard did not
+	// give it — a pulled Compose service, a tag someone else added — which
+	// release retention leaves in place.
+	ErrArtifactNotOwned = errors.New("the image is not named by a release tag the dashboard owns")
+	// ErrArtifactUnguarded is a remover that cannot ask Docker which
+	// containers use an image, so it removes none.
+	ErrArtifactUnguarded = errors.New("the image remover cannot ask Docker which containers use the image")
 )
 
 const AutomaticRecipeVersion = "just-dashboard-recipes-v5"

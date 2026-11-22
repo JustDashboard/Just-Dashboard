@@ -406,6 +406,20 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// Release retention's first pass waits a minute after start-up, then
+	// runs daily and after each finished run.
+	s.modules.releaseImages.Start(ctx)
+	// Workspaces finished runs left behind (one that failed before its
+	// release task kept its checkout) go now; a run that finishes from here
+	// on has its own removed as it ends. A run still under way keeps its.
+	safego.Go(ctx, s.Log, "deployment workspace sweep", func(ctx context.Context) {
+		removed, err := s.modules.deployExecutor.SweepWorkspaces(ctx)
+		if err != nil && s.Log != nil {
+			s.Log.Warn("deployment workspaces of finished runs could not all be removed", "removed", removed, "error", err)
+		} else if removed > 0 && s.Log != nil {
+			s.Log.Info("removed the workspaces of finished deployment runs", "removed", removed)
+		}
+	})
 	// The tunnel's connector and routes follow the deployments routed
 	// through it, so after the engine too.
 	s.modules.tunnel.Start(ctx)

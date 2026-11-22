@@ -107,17 +107,17 @@ func TestReadinessStopsWaitingForACandidateThatKeepsDying(t *testing.T) {
 			evidence := runner.Run(context.Background(), readiness, target)
 			last := evidence.Attempts[len(evidence.Attempts)-1]
 			if !test.stopped {
-				if len(evidence.Attempts) != 40 || last.Code != "connection_failed" {
-					t.Fatalf("a candidate that may still answer was given up on: %d attempts, last %+v", len(evidence.Attempts), last)
+				if evidence.AttemptCount() != 40 || last.Code != "connection_failed" {
+					t.Fatalf("a candidate that may still answer was given up on: %d attempts, last %+v", evidence.AttemptCount(), last)
 				}
 				return
 			}
-			if evidence.Outcome != HealthFailed || last.Code != "application_exited" || len(evidence.Attempts) >= 40 ||
+			if evidence.Outcome != HealthFailed || last.Code != "application_exited" || evidence.AttemptCount() >= 40 ||
 				last.ExitCode != test.state.ExitCode || last.Restarts != test.state.RestartCount || last.ContainerState != test.state.Status {
-				t.Fatalf("readiness did not stop for a candidate that is gone: %d attempts, last %+v", len(evidence.Attempts), last)
+				t.Fatalf("readiness did not stop for a candidate that is gone: %d attempts, last %+v", evidence.AttemptCount(), last)
 			}
-			if test.attempts > 0 && len(evidence.Attempts) != test.attempts {
-				t.Fatalf("attempts = %d, want %d", len(evidence.Attempts), test.attempts)
+			if test.attempts > 0 && evidence.AttemptCount() != test.attempts {
+				t.Fatalf("attempts = %d, want %d", evidence.AttemptCount(), test.attempts)
 			}
 			message := checkFailureMessage("readiness", evidence.Outcome, evidence)
 			if !strings.Contains(message, test.reason) || strings.Contains(message, "could not connect") {
@@ -142,7 +142,7 @@ func TestReadinessWithoutAContainerOrALivenessReaderKeepsAsking(t *testing.T) {
 		"no backend at all":          {nil, CheckTarget{ContainerID: "candidate", Host: "127.0.0.1", Port: port}},
 	} {
 		evidence := NewCheckRunner(test.backend).Run(context.Background(), readiness, test.target)
-		if len(evidence.Attempts) != 3 || evidence.Attempts[2].Code != "connection_failed" {
+		if evidence.AttemptCount() != 3 || evidence.Attempts[len(evidence.Attempts)-1].Code != "connection_failed" {
 			t.Fatalf("%s: %+v", name, evidence.Attempts)
 		}
 	}
