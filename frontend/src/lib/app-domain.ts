@@ -1,11 +1,7 @@
 import { ApiError, errorMessage } from "@/lib/api"
 import { calendarDate } from "@/lib/format"
 import type { DotTone } from "@/components/tone"
-import type {
-  AppDomainStatus,
-  DeploymentDomainRoute,
-  DeploymentHostnameSuggestion,
-} from "@/lib/types"
+import type { AppDomainStatus, DeploymentDomainRoute } from "@/lib/types"
 
 /**
  * The pure half of app domains: `<app>.<handle>.<zone>` names for deployed apps. The handle
