@@ -354,7 +354,9 @@ A change that weakens any of these has to say so explicitly.
     the installer never handles a link credential. See [account link](../backend/account-link.md). Claiming and
     releasing a just-dashboard.com address, which publish or withdraw the server's IP address in public DNS,
     are held to the same rule: a browser session of an administrator, never an API key or the assistant, and
-    releasing is in the destructive budget. The certbot hook that proves the address's wildcard reaches the
+    releasing is in the destructive budget. The one other way a claim starts is the person who approves the
+    link on just-dashboard.com, or the server's owner there, choosing the address (an offer): the server then
+    claims that handle itself with the same signed request from its own address, and never one nobody chose. The certbot hook that proves the address's wildcard reaches the
     backend only on loopback, with a credential the backend writes 0600 into its data directory, and can only
     publish or withdraw a challenge value for this server's own handle ([app domains](../backend/app-domains.md)).
 13. The dashboard's assistant is a person's, at the dashboard, and acts as them: no more than their role, and,

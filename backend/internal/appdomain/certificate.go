@@ -46,6 +46,22 @@ func (s *Service) certificate(ctx context.Context, st State) *Certificate {
 	return c
 }
 
+// WildcardCovers names the held handle's wildcard and reports whether it
+// covers the handle's names now: valid, or valid and due for renewal. It is
+// the state the Settings card shows, so a deployment page and the card never
+// disagree about it.
+func (s *Service) WildcardCovers(ctx context.Context) (string, bool) {
+	if !s.Enabled() || s.certs == nil {
+		return "", false
+	}
+	st, err := readState(ctx, s.st.DB)
+	if err != nil || !st.held() {
+		return "", false
+	}
+	current := s.certs.AppDomainCertificate(ctx, st.Handle, st.Zone)
+	return current.Name, current.State == "valid" || current.State == "expiring"
+}
+
 // IssueCertificate starts issuing or renewing the wildcard now, in the
 // background, and answers the view with the certificate issuing.
 func (s *Service) IssueCertificate(ctx context.Context, opts IssueOptions, by string) (View, error) {

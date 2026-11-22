@@ -128,7 +128,10 @@ func (s *Service) AppDomainCertificate(ctx context.Context, handle, zone string)
 			out.State, out.Error = "failed", certificate.Error
 		case certificate.Expired:
 			out.State, out.Error = "failed", "the certificate has expired"
-		case certificate.Staging:
+		case certificate.Staging && !acmeDirectory().staging():
+			// A test certificate is what a staging directory issues, and
+			// the server was told to use one (JD_ACME_DIRECTORY); under any
+			// other it is a certificate browsers refuse, to issue again.
 			out.State, out.Error = "failed", "the certificate is a test one from a staging authority"
 		case !certificateCoversAll(certificate.Domains, order.names()):
 			out.State, out.Error = "failed", "the certificate does not cover "+strings.Join(order.names(), " and ")

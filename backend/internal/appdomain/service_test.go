@@ -29,6 +29,10 @@ type fakeLink struct {
 	values    []string
 	calls     []string
 	fail      error
+	// offer is the handle the account chose on the site, and putFail a
+	// refusal every PUT meets.
+	offer   string
+	putFail error
 }
 
 func (f *fakeLink) Enabled() bool   { return true }
@@ -70,6 +74,10 @@ func (f *fakeLink) GetDomain(context.Context) (accountlink.DomainInfo, error) {
 		d := *f.domain
 		info.Domain = &d
 	}
+	if f.offer != "" {
+		offer := f.offer
+		info.Offer = &offer
+	}
 	return info, nil
 }
 
@@ -79,6 +87,11 @@ func (f *fakeLink) PutDomain(_ context.Context, handle, address string) (account
 	if err := f.call("PUT " + handle + " " + address); err != nil {
 		return accountlink.Domain{}, err
 	}
+	if f.putFail != nil {
+		return accountlink.Domain{}, f.putFail
+	}
+	// The site clears the offer once the server's domain is active.
+	f.offer = ""
 	f.domain = &accountlink.Domain{Handle: handle, Hostname: handle + ".just-dashboard.com", Address: address, Status: "active", CreatedAt: 1, UpdatedAt: 2}
 	return *f.domain, nil
 }
@@ -606,5 +619,140 @@ func TestBackendURL(t *testing.T) {
 		if got := BackendURL(addr); got != want {
 			t.Errorf("%s = %q, want %q", addr, got, want)
 		}
+	}
+}
+
+func (e *env) puts() []string {
+	var out []string
+	for _, call := range e.link.callLog() {
+		if strings.HasPrefix(call, "PUT ") {
+			out = append(out, call)
+		}
+	}
+	return out
+}
+
+// An approved link whose account chose an address claims it by itself, and
+// issues the wildcard, as the Claim button would.
+func TestAnApprovedLinkWithAnOfferClaimsItAndStartsTheWildcard(t *testing.T) {
+	e := newEnv(t, true)
+	e.link.linked = false
+	e.svc.linkEvery = time.Hour
+	e.svc.Start(t.Context())
+	// The approval: the link is stored, the site holds the offer, and the
+	// account link's OnClear follow-up tells the service.
+	e.link.mu.Lock()
+	e.link.linked, e.link.offer = true, "acme"
+	e.link.mu.Unlock()
+	e.svc.LinkChanged()
+	e.waitIssued(1)
+	if got := e.puts(); len(got) != 1 || got[0] != "PUT acme 203.0.113.10" {
+		t.Fatalf("puts = %v", got)
+	}
+	v, _ := e.svc.View(t.Context())
+	if v.Domain == nil || v.Domain.Hostname != "acme.just-dashboard.com" || v.Domain.Status != "active" || v.Offer != nil {
+		t.Fatalf("view = %+v offer %+v", v.Domain, v.Offer)
+	}
+	if v.Certificate == nil || v.Certificate.State != "valid" || e.certs.orders()[0].Handle != "acme" {
+		t.Fatalf("certificate = %+v", v.Certificate)
+	}
+	e.svc.Stop()
+	// Start-up does the same for a link made while the dashboard was down.
+	e2 := newEnv(t, true)
+	e2.link.offer = "shop"
+	e2.svc.Start(t.Context())
+	e2.waitIssued(1)
+	if got := e2.puts(); len(got) != 1 || got[0] != "PUT shop 203.0.113.10" {
+		t.Fatalf("start-up puts = %v", got)
+	}
+}
+
+// A failed automatic claim keeps its sentence for the card and is not tried
+// again for an hour; the Claim button is not held back.
+func TestAFailedAutomaticClaimIsKeptAndNotRetriedWithinTheHour(t *testing.T) {
+	e := newEnv(t, true)
+	clock := time.Unix(1795000000, 0).UTC()
+	e.svc.now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return clock }
+	e.link.offer = "acme"
+	e.link.putFail = &accountlink.DomainError{Status: 409, Code: "handle_taken", Message: "Another server already holds that handle. Choose another."}
+	e.svc.refresh(t.Context())
+	v, _ := e.svc.View(t.Context())
+	if v.Domain != nil || v.Offer == nil || v.Offer.Handle != "acme" || v.Offer.Hostname != "acme.just-dashboard.com" ||
+		v.Offer.Error == nil || !strings.Contains(*v.Offer.Error, "Another server already holds") {
+		t.Fatalf("offer = %+v", v.Offer)
+	}
+	e.svc.refresh(t.Context())
+	e.svc.refreshedAt = time.Time{}
+	e.svc.Refresh(t.Context())
+	if got := e.puts(); len(got) != 1 {
+		t.Fatalf("retried within the hour: %v", got)
+	}
+	e.mu.Lock()
+	clock = clock.Add(61 * time.Minute)
+	e.mu.Unlock()
+	e.svc.refresh(t.Context())
+	if got := e.puts(); len(got) != 2 {
+		t.Fatalf("not retried after the hour: %v", got)
+	}
+	// The Claim button is the person's, and is never held back.
+	e.link.putFail = nil
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	if v, _ := e.svc.View(t.Context()); v.Offer != nil || v.Domain == nil {
+		t.Fatalf("after the claim = %+v", v.Offer)
+	}
+}
+
+func TestNoOfferMeansNoClaim(t *testing.T) {
+	e := newEnv(t, true)
+	e.svc.refresh(t.Context())
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("puts = %v", got)
+	}
+	if v, _ := e.svc.View(t.Context()); v.Offer != nil || v.Domain != nil {
+		t.Fatalf("view = %+v", v)
+	}
+	// Nor when the site offers no addresses at all.
+	e.link.available, e.link.offer = false, "acme"
+	e.svc.refresh(t.Context())
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("puts on a site that offers nothing = %v", got)
+	}
+}
+
+func TestOffersAreIgnoredWhenAppDomainsAreOff(t *testing.T) {
+	e := newEnv(t, false)
+	e.link.offer = "acme"
+	e.svc.Start(t.Context())
+	e.svc.LinkChanged()
+	e.svc.Refresh(t.Context())
+	e.svc.refresh(t.Context())
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("JD_APP_DOMAINS=false claimed: %v", got)
+	}
+	if v, _ := e.svc.View(t.Context()); v.Offer != nil {
+		t.Fatalf("offer shown while off: %+v", v.Offer)
+	}
+}
+
+func TestAServerHoldingADomainIgnoresAnOffer(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	// A site that broke its own rule and sent both.
+	e.link.offer = "other"
+	e.svc.refresh(t.Context())
+	// And the guard itself, for a suspended domain.
+	e.svc.autoClaim(t.Context(), State{Handle: "acme", Status: StatusSuspended, Offer: "other", Available: ptr(true)})
+	if got := e.puts(); len(got) != 1 {
+		t.Fatalf("puts = %v", got)
+	}
+	v, _ := e.svc.View(t.Context())
+	if v.Offer != nil || v.Domain.Handle != "acme" {
+		t.Fatalf("view = %+v %+v", v.Domain, v.Offer)
 	}
 }

@@ -39,7 +39,10 @@ goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for 
 
 A linked server can hold one **handle** on just-dashboard.com, and every app it deploys can then have an
 address like `shop.acme.just-dashboard.com`, with HTTPS, and no DNS record or certificate to make for each
-one. Claim the handle under **Settings → just-dashboard.com link**: the site publishes `acme.just-dashboard.com`
+one. The simplest way to get one is when you link: the approval page on just-dashboard.com offers an
+**Address for this server's apps**, prefilled with a free handle from your account's name (clear it to skip),
+and the server claims it by itself once the link is approved. A linked server's page on the site offers the
+same later, or claim a handle under **Settings → just-dashboard.com link**. The site publishes `acme.just-dashboard.com`
 and `*.acme.just-dashboard.com` at this server's public IPv4 address, and the server issues one wildcard
 certificate for both through the site. **Claiming publishes this server's IP address in public DNS.**
 
@@ -54,7 +57,8 @@ certificate for both through the site. **Claiming publishes this server's IP add
   linked. Your server's outbound and inbound IPv4 address must be the same (no NAT in between), and
   `JD_ALLOWED_CIDRS` must keep `127.0.0.1/32`. Downgrading the dashboard below 0.9.1 breaks the renewal.
 - A deployment served through Cloudflare Tunnel is not offered one. `JD_APP_DOMAINS=false` switches the
-  feature off. The contract with the site is
+  feature off, and the server then ignores an address chosen on the site. If claiming the chosen address
+  fails, Settings says why and offers the Claim form; the server tries it again after an hour. The contract with the site is
   [`app-domains-protocol.md`](https://github.com/JustDashboard/frontend/blob/main/docs/app-domains-protocol.md).
 
 ## Connecting to Just Hub

@@ -63,7 +63,10 @@ The Settings page (`POST /dashboard/link`), the question in `install.sh` and `ma
    site key, server id, owner label and intervals are validated and stored in one transaction
    (`settings['account.link.state']`) and the request is deleted. `request_denied`, `request_expired` and an
    expiry by the local clock end the request with an outcome (`account.link.outcome`) that the page shows once.
-4. From then on the connector heartbeats and polls for commands.
+4. From then on the connector heartbeats and polls for commands. If the person approving it also chose an
+   address for the server's apps on the approval page, the transaction that stores the link runs the
+   `OnClear` hook, and once it commits the [app domain](app-domains.md#claiming-at-link-time-offers) service
+   asks the site at once and claims that handle by itself.
 
 **Who polls a pending request** is decided by its `Driver`. A request begun in Settings is polled by the
 running dashboard (every `pollSeconds`). A request begun by `--admin link` is polled only by that command, so

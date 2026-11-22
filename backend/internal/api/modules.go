@@ -642,7 +642,7 @@ func (s *Server) initAccountLink() {
 		Host: newAccountHost(s), Version: version.Version,
 		// The site deletes a server's records when its link ends, so a
 		// handle it held is detached in the transaction that ends it.
-		Hooks: accountlink.Hooks{OnClear: appDomainOnClear},
+		Hooks: accountlink.Hooks{OnClear: s.appDomainOnClear},
 	})
 	s.initAppDomain()
 }
