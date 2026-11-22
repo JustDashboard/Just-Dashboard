@@ -908,6 +908,17 @@ only renderer/executor/validation authority for their feature.
   would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
   the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
   reads the report as a sentence and a line of facts (`run-rehearsal.tsx`).
+- **Run workspaces** (`deployment-workspaces/run-N`, `workspace_sweep.go`): a run's source is
+  materialized there and `release_task` removes it, so a run that ended before that step (a failed
+  build, a refused preflight, a cancel) used to keep its checkout for good. A run's workspace is now
+  removed as the run finishes (the engine's run-finished `HousekeepingObserver`), and at start-up
+  `SweepWorkspaces` removes every `run-N` directory whose run is terminal or no longer recorded (its
+  project permanently deleted). Nothing reads a finished run's workspace again: the materializer
+  reuses one only for the same run through its marker, a retry is a new run with its own, and a
+  terminal run runs no further step. A run that is queued, running or anywhere short of terminal
+  (`failed_activation`, `restoring_previous`, `cancelling` included) keeps its workspace, and nothing
+  in the folder but a `run-N` directory is touched — a file or a link of that name is left alone.
+  The dashboard's backups already exclude the folder.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
   an active deployment lease, a staging release an unfinished promotion is about to take its image
