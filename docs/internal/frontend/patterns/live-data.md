@@ -28,8 +28,9 @@ level. Nothing else moves ([`../foundations/motion.md`](../foundations/motion.md
    page are not forty arrivals, and a re-render is not one.
 3. **A figure counts up once** when it lands (`NumberTicker`, `LandedFigures`). A figure that
    follows a draft as it is typed does not count.
-4. **A burst is let out a few lines a frame** (`useTranscriptDrip`), so a console does not jump,
-   and only while the reader is at the end and not searching.
+4. **A burst is let out over the next frames** (`useTranscriptDrip`), so a console does not jump,
+   and only while the reader is at the end and not searching. No line is held more than 300 ms
+   (`DRIP_LAG_MS`) after the batch that brought it, so the console keeps up with the build.
 5. **New things never move what is being read.** A list the reader has scrolled, a log they are
    searching and a row they are on stay put; what arrived is counted on a control that brings it
    into view.

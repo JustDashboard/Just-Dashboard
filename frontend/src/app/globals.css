@@ -808,9 +808,16 @@
  * push: things appear, and nothing already on the page moves. The first line
  * is for what follows the marker where it stands; the second is for the blocks
  * of the page under the one the marker is inside.
+ *
+ * The second names its subject as one of the page's own blocks. A selector is
+ * matched from the right: written `… ~ *`, every element restyled anywhere —
+ * each line of a build console, each frame of a shimmer — ran the `:has()`
+ * over the whole subtree of every sibling before it, and a run page with
+ * three thousand lines spent a quarter of a second a frame on it. Now an
+ * element that is not a block of the page fails at the first test.
  */
 [data-hold] ~ *,
-[data-slot="page"] > :has([data-hold]) ~ * {
+[data-slot="page"] > :has([data-hold]) ~ :is([data-slot="page"] > *) {
   display: none !important;
 }
 

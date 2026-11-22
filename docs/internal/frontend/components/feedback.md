@@ -71,12 +71,26 @@ same in `RunTranscript` and a deployment's `BuildConsole`.
 
 **States.** Whole, not the tail: when the polled end says it was trimmed, the console reads the
 whole file once and extends it from then on. While the run is live and the reader is at the end,
-`useTranscriptDrip` lets a burst of lines out a few a frame so the page does not jump, each rising
-once (§11); with reduced or paused motion they are simply there. `TranscriptRow gutter` takes
-`gutterCh` of the last number, so the number column is as wide as the run needs.
+`useTranscriptDrip` lets a burst of lines out evenly over the frames that follow so the page does
+not jump, each rising once (§11), and every line is on screen within `DRIP_LAG_MS` (300 ms) of the
+batch that brought it, however fast the batches come; with reduced or paused motion they are simply
+there. It used to let out a twenty-fourth of what it held a frame and, at its 400-line cap under a
+steady build, stopped asking for frames and held the last 400 lines for as long as the reader
+followed. `TranscriptRow gutter` takes `gutterCh` of the last number, so the number column is as
+wide as the run needs.
+
+**A deployment's build console** (`BuildConsole`) holds what its stream wrote in a
+`TranscriptBuffer` (`components/deploy/transcript-buffer.ts`): events that follow the last are read
+alone and appended, so a batch costs its own lines rather than the whole transcript, and a line
+keeps its number when the oldest events go past the 5,000-event cap. The lines are memoised rows in
+blocks of 100 (`ConsoleBlock`), each block `content-visibility: auto`, so a frame lays out the
+blocks and the lines of the one growing rather than every line; the steps' running times tick on
+their own clocks, so the page's second does not draw the console again. Find, a selection across
+blocks, Copy, Download and the scroll position see one transcript.
 
 **Accessibility.** The lines are an `ol` of `li`, so a screen reader can count and step through
-them.
+them. In the build console the blocks and their lists are `role="none"` and each line says
+`role="listitem"`, so a step's list still holds only its lines.
 
 ## JobConsole
 

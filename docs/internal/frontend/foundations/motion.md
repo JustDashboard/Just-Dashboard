@@ -177,8 +177,8 @@ around the transcript console and around the Restart or Rebuild card while that 
 the request path's wires pulse while this tab's own requests go down them and stand still and
 amber while a restart replaces the containers,
 `TextShimmer` lights the stage it is at (`components/run-phases.tsx`, drawn with the release path's
-own `Segment`), and the transcript's new lines *arrive* — a poll's forty lines are let out a few a
-frame, each taking `animate-rise` once, so a live log reads line by line instead of jumping; scrolled
+own `Segment`), and the transcript's new lines *arrive* — a poll's forty lines are let out over the
+next frames, all within 300 ms, each taking `animate-rise` once, so a live log reads line by line instead of jumping; scrolled
 up, searching or with reduced motion they are simply drawn. A deployment's build console draws its
 lines through the same painter and the same drip (`components/transcript-line.tsx`), so the two
 consoles cannot drift into two answers to what a live log looks like. The version history's
