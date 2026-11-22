@@ -15,8 +15,8 @@ import {
   matchesQuery,
   type FleetGrouping,
 } from "@/components/database/fleet/fleet"
-import { FleetBand } from "@/components/database/fleet/fleet-band"
 import { FleetCard } from "@/components/database/fleet/fleet-card"
+import { FleetProtection } from "@/components/database/fleet/fleet-protection"
 import { McpServer } from "@/components/database/fleet/mcp-server-dialog"
 import { MetricsExport } from "@/components/database/fleet/metrics-export-dialog"
 import { Shelves } from "@/components/database/fleet/shelves"
@@ -76,13 +76,19 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  * keys, and scanning the server again. They were three grey controls beside
  * the command, and the line is drawn in every state of the page — loading,
  * failed and with no database yet — so it is where it will be from the first
- * paint. Under it
- * the band (`fleet-band.tsx`) reads the fleet three ways the cards cannot:
- * who holds the bytes, who is connected, and how old every newest dump is,
- * each database in its own hue (`fleetHues`) from the bar to its card's
- * edge. Then the fleet itself: every saved connection as a card you open,
- * drawn as its engine with its own readings on it, shelved by where it runs.
- * Under it, what discovery found on this machine that is not connected yet.
+ * paint. Under it two reading lines (`fleet-protection.tsx`) say whether
+ * every database is backed up on a schedule and whether anything would tell
+ * you when one goes down, each ending on the one press that makes it so when
+ * it is not. Then the fleet itself: every saved connection as a card you open,
+ * drawn as its engine with its own readings on it, shelved by where it runs,
+ * each in its own hue (`fleetHues`). Under it, what discovery found on this
+ * machine that is not connected yet.
+ *
+ * A band of storage, sessions and backups stood where the two lines are until
+ * 0.9.1, when the operator asked what would be more use: it split totals the
+ * line above already gave across the databases, which led nowhere, and showed
+ * the one problem it found — databases never backed up — as an amber span
+ * with nothing to press.
  *
  * Two things it drew are gone at the operator's word. The table the cards
  * could be laid out as: the cards are the one way the fleet is drawn. And the
@@ -134,13 +140,18 @@ export function ControlCenter() {
   const [query, setQuery] = useTypedParam("q")
   const { fleet, entries, backups, feeds, concernsOf, storedOf, topology, dumps } = data
   // Each database's hue, dealt once for the whole fleet so a filter never
-  // repaints one: the band's spans and keys, the cards' size bars.
+  // repaints one: the line of its last hour on its card.
   const hues = useMemo(() => fleetHues(entries), [entries])
   const hueOf = useCallback(
     (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",
     [hues],
   )
-  const newestOf = useCallback((entry: DbFleetEntry) => backups.get(entry.id)?.newest, [backups])
+  // A first scheduled run has started: the dumps the cards read are behind it.
+  const refreshSummary = data.summary.refresh
+  const refreshDumps = useCallback(() => {
+    refreshSummary()
+    refreshFleet()
+  }, [refreshSummary, refreshFleet])
 
   const engines = useMemo(() => {
     const seen = new Map<string, { engine: Engine; count: number }>()
@@ -401,15 +412,7 @@ export function ControlCenter() {
         foot
       />
 
-      <FleetBand
-        entries={entries}
-        hueOf={hueOf}
-        engineOf={engineFor}
-        storedOf={storedOf}
-        newestOf={newestOf}
-        dumps={dumps}
-        feeds={feeds}
-      />
+      <FleetProtection entries={entries} dumps={dumps} admin={admin} onScheduled={refreshDumps} />
 
       <Section
         title="All databases"

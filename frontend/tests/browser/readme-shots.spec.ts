@@ -1,7 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { mockKeys } from "./api-keys-fixture"
 import { mockCommandSearch } from "./command-search-fixture"
-import { mockFleet } from "./database-fleet-fixture"
+import { backupJob, mockFleet } from "./database-fleet-fixture"
 import { mockNewProject, mockProject } from "./deploy-fixture"
 import { mockDockerEngine } from "./docker-engine-fixture"
 import { mockHost, user as operator } from "./host-fixture"
@@ -223,7 +223,44 @@ const frames: { name: string; take: (page: Page) => Promise<void> }[] = [
   {
     name: "databases",
     take: async (page) => {
-      await mockFleet(page, { dumps: { 4: null, 5: 60 } })
+      // Three of the five on a nightly job and every one watched, so the
+      // frame shows both lines: one that offers Schedule, one that is answered.
+      const now = Date.now()
+      await mockFleet(page, {
+        dumps: { 4: null, 5: 60 },
+        jobs: [
+          backupJob(3, {
+            name: "Databases",
+            databaseDumps: [1, 2, 7],
+            lastRun: {
+              id: 9,
+              jobId: 3,
+              status: "success",
+              startedAt: new Date(now - 3 * 3_600_000).toISOString(),
+              endedAt: new Date(now - 3 * 3_600_000 + 40_000).toISOString(),
+              sizeBytes: 26_400_000,
+            },
+          }),
+        ],
+        alerts: {
+          rules: ["down", "disk", "connections", "backup_failed", "backup_missed"].map(
+            (kind, index) => ({
+              id: index + 1,
+              connectionId: null,
+              kind,
+              threshold: 0,
+              minutes: 2,
+              cooldownMinutes: 30,
+              notifyRecovery: true,
+              channels: [],
+              enabled: true,
+              createdAt: new Date(now).toISOString(),
+              updatedAt: new Date(now).toISOString(),
+            }),
+          ),
+        },
+        channels: [{ id: 1, name: "Ops Slack", kind: "slack", enabled: true }],
+      })
       await page.goto("/databases")
     },
   },

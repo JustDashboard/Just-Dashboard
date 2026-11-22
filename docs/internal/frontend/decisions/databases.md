@@ -31,23 +31,39 @@ databases, what they store, the sessions open, how many things read them (a link
 how many were dumped in the last day and, in amber, how many never were; at its right end the
 verdict — how many do not answer, else how many are stopped, else *All N answering* — beside
 Scan and Add a database, which left the page's own row. Under it
-`components/database/fleet/fleet-band.tsx`, over the unit-tested `fleet/band.ts`, reads the fleet
-three ways the cards cannot, in three bar readings (§10): **Storage**, what each database holds as
-spans of one bar with the five largest named; **Sessions**, the open sessions — a key–value store's
-clients — as one bar, a server that did not answer counted at the strip's end rather than drawn
-as zero, the line giving the products that read each; and **Backups**, every database the dashboard
-can dump counted never, over a week ago — the age every other reading of the section calls stale —
-this week and today on one bar, worst first, the line naming the worst database in that standing
-with its newest dump's age. A press opens the database, or under Backups its Backups page. Until
-0.8.5 each block's five were rows under its bar, Backups' on a `StandingBar` (removed after 0.8.5). Backups and
+`components/database/fleet/fleet-protection.tsx`, over the unit-tested `fleet/protection.ts`, says
+in two `ReadingLine`s what protects the databases. **Backups** reads whether every database the
+dashboard can dump is in a backup job that runs by itself (switched on, on a schedule, this
+server's own: a paused job, one run by hand and one imported from a destination protect nothing),
+and says when — "All 6 backed up every day at 03:00", the last run's age and size and the next —
+or how many are not, naming them. **Alerts** reads whether a switched-on rule watches every
+database, and whether a notification channel would hear it: "All 6 watched" with the rules and the
+channels told, "Alerts have nowhere to go" (a way to Notification channels) when none is on, and
+what is firing before anything else, as the database and the kind ("blog: disk filling up"), a way
+to its Alerts page. When a line is not the answer a server wants, it ends on its one press, for an
+administrator: *Schedule* puts the databases no job dumps into the database-only scheduled job
+that already dumps the most of them, one `POST /backups/{id}/database-dumps` each, or makes one —
+*Databases*, every night at 03:00 into `/var/backups/just-dashboard`, keeping the last 7, the
+backup form's own defaults — and starts its run at once, so "never backed up" ends now rather
+than tonight; a job that also archives files is never added to. *Turn on* creates rules over every
+database (`connectionId: null`) for down, disk, connections and a failed or missed backup, with
+each kind's defaults and every switched-on channel, skipping a kind that already has such a rule,
+paused or not, and its question says when no channel is on yet. Both ask first, naming what they
+will make. Anyone else reads the same lines as ways to Backups and the Alerts page. Both lines are
+one height in every state, the press shorter than the line, so the cards under them hold still as
+the jobs, the rules and the channels are read. They took the place, in 0.9.1 at the operator's
+request, of a band of three bar readings (§10) — **Storage**, **Sessions** and **Backups**, each
+database a span in its own hue — which split totals the identity line already gave across the
+databases, which led nowhere, and showed databases never backed up as an amber span with nothing
+to press. Until 0.8.5 each block's five were rows under its bar,
+Backups' on a `StandingBar` (removed after 0.8.5). Backups and
 the Sites page's Certificates had also drawn a track under every row with a dot on it until 0.7.5, which
 went at the operator's request: the track had no scale, so the dot said less than the age beside
 it, a database never backed up was drawn at a place it did not have, and the track's hairline
 under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
 lane hue without slate dealt in the order the connections were saved, so five databases are
-five hues and a new one moves nobody's) on its span and its mark's rule in the strip; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
-the operator's request), and its Stored figure carries a short bar in that hue
-against the largest database. Until 0.8.6 the cards could be laid across as a table and the page
+five hues and a new one moves nobody's), the line of its last hour on its card; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
+the operator's request). Until 0.8.6 the cards could be laid across as a table and the page
 carried a picture of what the databases feed — two lanes of marks drawn the way Configuration
 draws the path a request takes, with a line of the databases nothing was seen reading under it —
 and the map was the same picture with a list of readers beside it. In 0.8.6, at the operator's
@@ -78,9 +94,10 @@ them, *Add a database* as the one command and a `⋯` menu holding the rest (Met
 server, Scan this server again, which were three grey controls beside the command). The line is
 drawn while the fleet is being read, when the read failed and with no database connected, so it is
 in place from the first paint; an empty server keeps it and leaves the command to its empty state.
-Then a band of storage, sessions and backups (each Backups standing marked with the engine of the
-database its line names, not a bare count), then the saved databases as cards with search, engine
-chips and how they are shelved. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
+Then two lines that say what protects the databases — backed up on a schedule, watched by an
+alert — each ending on the press that answers it (the band of storage, sessions and backups stood
+there until 0.9.1), then the saved databases as cards with search, engine chips and how they are
+shelved. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
 Individual database cards retain the facts needed to compare connections, and read them as one line
 rather than three figures under three labels (`fleet/fleet-card.tsx`, 0.8.7): who is connected in

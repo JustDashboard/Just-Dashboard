@@ -710,6 +710,10 @@ export type FleetMock = DatabaseMock & {
   topology?: typeof TOPOLOGY
   /** The databases map's arrangement as the account last kept it (`GET /map/layout`). */
   layout?: unknown
+  /** The backup jobs (`GET /backups/`), each made with `backupJob`. None unless given. */
+  jobs?: ReturnType<typeof backupJob>[]
+  /** The notification channels (`GET /deploy/notifications`). None unless given. */
+  channels?: { id: number; name: string; kind?: string; enabled: boolean }[]
   /**
    * The two lists the fleet itself carries of servers found running and not
    * connected: containers that state no usable password, and servers
@@ -725,6 +729,33 @@ export type FleetMock = DatabaseMock & {
       user?: string
       database?: string
     }[]
+  }
+}
+
+/**
+ * A backup job as `GET /backups/` lists it: a nightly one that dumps nothing
+ * until `databaseDumps` says what, never run unless `lastRun` says so.
+ */
+export function backupJob(id: number, overrides: Record<string, unknown> = {}) {
+  return {
+    id,
+    revision: 1,
+    name: `Job ${id}`,
+    sources: [] as string[],
+    excludes: [] as string[],
+    targetKind: "local",
+    target: { path: "/var/backups/just-dashboard" },
+    schedule: "0 3 * * *",
+    retention: 7,
+    retentionDays: 0,
+    enabled: true,
+    createdAt: new Date(Date.now() - 86_400_000).toISOString(),
+    hasCredentials: false,
+    nextRun: new Date(Date.now() + 9 * 3_600_000).toISOString(),
+    stored: { runs: 0, bytes: 0 },
+    databaseDumps: [] as number[],
+    lastRun: undefined as Record<string, unknown> | undefined,
+    ...overrides,
   }
 }
 
@@ -751,6 +782,13 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
   const forgotten = new Set<number>()
   let nextId = 20
   let layout: unknown = options.layout ?? null
+  // Backup jobs and alert rules are kept as the page changes them, so a
+  // press that makes one is read back by the next poll.
+  const jobs = [...(options.jobs ?? [])]
+  let nextJob = 100
+  const alerts = (options.alerts as { rules?: Record<string, unknown>[] } | undefined) ?? {}
+  const rules = [...(alerts.rules ?? [])]
+  let nextRule = 100
 
   const list = () =>
     (options.empty ? [] : CONNECTIONS)
@@ -823,6 +861,37 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
         }
       case "GET /databases/topology":
         return { body: options.topology ?? TOPOLOGY }
+      case "GET /backups/":
+        return { body: jobs }
+      case "POST /backups/": {
+        const job = backupJob(nextJob++, body)
+        jobs.push(job)
+        return { status: 201, body: job }
+      }
+      case "GET /databases/alerts":
+        return {
+          body: { subjects: [], events: [], everySeconds: 30, ...alerts, rules },
+        }
+      case "POST /databases/alerts/rules": {
+        const now = new Date().toISOString()
+        const rule = {
+          id: nextRule++,
+          connectionId: body.connectionId ?? null,
+          kind: body.kind,
+          threshold: 0,
+          minutes: 0,
+          cooldownMinutes: 30,
+          notifyRecovery: true,
+          channels: body.channels ?? [],
+          enabled: true,
+          createdAt: now,
+          updatedAt: now,
+        }
+        rules.push(rule)
+        return { status: 201, body: rule }
+      }
+      case "GET /deploy/notifications":
+        return { body: options.channels ?? [] }
       case "GET /map/":
         return {
           body: serverMapOf(
@@ -927,6 +996,24 @@ export async function mockFleet(page: Page, options: FleetMock = {}) {
             lines: [],
           },
         }
+    }
+
+    const job = /^POST \/backups\/(\d+)\/(database-dumps|run)$/.exec(call)
+    if (job) {
+      const found = jobs.find((one) => one.id === Number(job[1]))
+      if (!found) return refusal(404, "not_found", "backup job not found")
+      if (job[2] === "run") {
+        found.lastRun = {
+          id: 1,
+          jobId: found.id,
+          status: "running",
+          startedAt: new Date().toISOString(),
+        }
+        return { status: 202, body: found.lastRun }
+      }
+      const id = Number(body.connectionId)
+      if (!found.databaseDumps.includes(id)) found.databaseDumps = [...found.databaseDumps, id]
+      return { body: found }
     }
 
     const one = /^(\w+) \/databases\/(\d+)(\/.*)?$/.exec(call)

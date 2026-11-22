@@ -241,7 +241,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `RankList`, `RankSkeleton`, `RankItem` (type), `SplitPart` (type) | [Readings](readings.md) | `components/rank-list.tsx` | A ranked list read in columns (a name, a figure, its share), and its rows waiting. | keep |
 | `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent; `sharePercent` from `lib/format.ts` is it. | retired (0.9.0) |
 | `SplitBar`, `splitWidths` | [Readings](readings.md) | `components/rank-list.tsx` | One whole as one strip of coloured parts, with an optional legend that names or narrows. | keep |
-| `ReadingLine`, `ReadingLines`, `readingLineHeight` | [Readings](readings.md) | `components/reading-line.tsx` | One reading as a sentence on a mark with its last hour at the end; two columns from `xl`; and the one height every state of a line keeps, for a line drawn by hand. | keep |
+| `ReadingLine`, `ReadingLines`, `readingLineHeight` | [Readings](readings.md) | `components/reading-line.tsx` | One reading as a sentence on a mark with its last hour, or the verb that answers it, at the end; two columns from `xl`; and the one height every state of a line keeps, for a line drawn by hand. | keep |
 | `ReadingMark` | [Readings](readings.md) | `components/reading-line.tsx` | A reading's glyph on its measure's hue, or on the tone of what is wrong with it. | keep |
 | `NoReading` | [Readings](readings.md) | `components/reading-line.tsx` | A reading that has not arrived, in the reading's own place and height. | keep |
 | `Sparkline` | [Readings](readings.md) | `components/sparkline.tsx` | A trend the width of a table cell, as one SVG path. | keep |

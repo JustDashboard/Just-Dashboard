@@ -717,7 +717,8 @@ requested dump, and publishes only that list with a revision precondition. A con
 retries against the latest list up to five attempts, then returns the same conflict; other definition
 fields and sealed keys are untouched.
 It audits as `backup.job.database_dump.add` and reloads the schedule like other job edits.
-The deployment Databases settings helper uses this route instead of a stale full-job save.
+The deployment Databases settings helper uses this route instead of a stale full-job save, and so
+does the Databases control center's *Schedule*, once per database it adds to a database-only job.
 `store_update_test.go`, `recovery_migration_test.go`, `backup_job_updates_test.go`,
 `backups-ui.spec.ts` and `deploy-settings-b.spec.ts` cover fault-injected publication, canceled saves,
 competing editors, pause conflicts, simultaneous dump additions, legacy migration, authorization,

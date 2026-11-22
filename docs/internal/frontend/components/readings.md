@@ -40,7 +40,10 @@ part of a whole (`SplitBar`) or a ranked set (`RankList`).
 
 **Props.** `href` makes the line a link and `label` names where it goes; `onPress` makes it a
 button laid over the line (a lens narrowing the log) and `label` is what the press does; neither
-and it is a reading with no hover and no tab stop. `ReadingMark({ tone, hue, glyph | children })`
+and it is a reading with no hover and no tab stop. `action` ends the line on the verb that answers
+it, a small outline `Button` (*Schedule* beside "None of the 6 is backed up on a schedule"), shown
+on every width; it is then the line's one press, so `href` and `onPress` are not read beside it, and
+it takes the trend's place when there is no trend. `ReadingMark({ tone, hue, glyph | children })`
 draws the measure's glyph on its own hue (`HUE.cpu`) and switches to the warning or danger tile
 once the reading is past a line; `success` is not a reading's worry and draws as the hue.
 
@@ -53,7 +56,8 @@ that has not landed is `NoReading` ("No reading yet", "Not running") in the read
 (the trend carries its own `label` as an image).
 
 **Example.** `components/procs/pm2-app-overview.tsx` (`AppReadings`), the database home's
-activity lines (`database/home/activity-lines.tsx`).
+activity lines (`database/home/activity-lines.tsx`), and with `action` the control center's lines of
+what protects the databases (`database/fleet/fleet-protection.tsx`).
 
 ```tsx
 <ReadingLine

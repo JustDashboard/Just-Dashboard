@@ -18,8 +18,7 @@ const card = (page: Page, name: string) =>
   page
     .locator("[data-card=database]")
     .filter({ has: page.getByRole("link", { name: `Open ${name}` }) })
-const band = (page: Page) => page.locator("[data-slot=fleet-band]")
-const backups = (page: Page) => band(page).getByRole("region", { name: "Backups" })
+const identity = (page: Page) => page.locator("[data-slot=host-identity]")
 const scroller = (page: Page) => page.locator("[data-slot=page]").first().locator("xpath=..")
 /** An age as the page writes it: "5h ago", or "5h 12m ago" once the clock has moved on. */
 const backedUp = (hours: number) => new RegExp(`backed up ${hours}h(?: \\d+[ms])? ago`)
@@ -45,7 +44,7 @@ const NOTHING: FleetMock = {
 }
 
 test.describe("the last backup the control center reads", () => {
-  test("a backup job's run is a backup on the card and in the band", async ({ page }) => {
+  test("a backup job's run is a backup on the card and on the identity line", async ({ page }) => {
     await mockFleet(page, JOBS)
     await page.goto("/databases")
 
@@ -58,19 +57,8 @@ test.describe("the last backup the control center reads", () => {
     await expect(card(page, "blog")).toContainText(backedUp(1))
     await expect(card(page, "app").getByText("never backed up")).toHaveClass(/text-warning/)
 
-    await expect(backups(page)).toContainText(/4\s*of 5 in the last day/)
-    await expect(
-      backups(page).getByRole("img", {
-        name: /^Backups: 1 never, 4 today$/,
-      }),
-    ).toBeVisible()
-    // Never backed up first; each standing opens the oldest in it.
-    expect(
-      await backups(page)
-        .getByRole("list", { name: "Databases by last backup" })
-        .getByRole("link")
-        .evaluateAll((links) => links.map((link) => link.getAttribute("aria-label"))),
-    ).toEqual(["Backups of app", "Backups of shop"])
+    await expect(identity(page)).toContainText("4 of 5 backed up in the last day")
+    await expect(identity(page)).toContainText("1 never backed up")
   })
 
   test("a database neither dumped nor in a backup job is still never backed up", async ({
@@ -81,7 +69,8 @@ test.describe("the last backup the control center reads", () => {
     for (const name of ["shop", "blog", "cache", "app", "notes"]) {
       await expect(card(page, name).getByText("never backed up")).toBeVisible()
     }
-    await expect(backups(page).getByRole("img", { name: /^Backups: 5 never$/ })).toBeVisible()
+    await expect(identity(page)).toContainText("0 of 5 backed up in the last day")
+    await expect(identity(page)).toContainText("5 never backed up")
   })
 
   test("when the dump directories cannot be read, the fleet still says when each was backed up", async ({
@@ -121,18 +110,16 @@ test.describe("the last backup the control center reads", () => {
     ).toBe(false)
   })
 
-  test("the readings a backup job's run changes @shots", async ({ page }) => {
+  test("the cards a backup job's run changes @shots", async ({ page }) => {
     test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the screenshots go to")
     const shot = (name: string) => page.screenshot({ path: `${process.env.JD_SHOTS}/${name}.png` })
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockFleet(page, JOBS)
     await page.goto("/databases")
-    await expect(backups(page)).toContainText(/4\s*of 5 in the last day/)
-    await backups(page).scrollIntoViewIfNeeded()
-    await shot("fleet-band-1440")
+    await expect(identity(page)).toContainText("4 of 5 backed up in the last day")
 
     // The shelves from their top, so every card is in the picture rather than
-    // the band with the first row under it.
+    // the lines above them with the first row under it.
     await expect(card(page, "shop")).toContainText(backedUp(5))
     await page
       .getByRole("list", { name: "Containers" })
