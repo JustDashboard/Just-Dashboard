@@ -237,6 +237,11 @@ type ArtifactBuilder struct {
 	// railpackValues are the plain RAILPACK_* build variables a Railpack
 	// plan is configured with (railpackPlanValues), set for one preparation.
 	railpackValues map[string]string
+	// bases remembers the registry's answers for reviewed bases, shared by
+	// every copy of the builder; baseNotes collects one preparation's notes
+	// about them (build_base_resolution.go).
+	bases     *baseResolutions
+	baseNotes *[]string
 }
 
 // withRailpackValues is the builder preparing one Railpack plan with the run's
@@ -251,7 +256,7 @@ func (b *ArtifactBuilder) withRailpackValues(values map[string]string) *Artifact
 }
 
 func NewArtifactBuilder(backend BuildBackend) *ArtifactBuilder {
-	return &ArtifactBuilder{backend: backend}
+	return &ArtifactBuilder{backend: backend, bases: newBaseResolutions()}
 }
 
 // LocalImage reads an image this server holds, by id or tag, without pulling:
@@ -279,6 +284,23 @@ func (b *ArtifactBuilder) Prepare(
 // build context may widen to an ancestor of root, never beyond boundary;
 // PreparedBuild.ContextDirectory then names it.
 func (b *ArtifactBuilder) PrepareWithin(
+	ctx context.Context,
+	boundary, root string,
+	config BuildPlanConfig,
+	forceNoCache bool,
+	tag string,
+	buildVariableNames ...string,
+) (PreparedBuild, error) {
+	notes := []string{}
+	prepared, err := b.withBaseNotes(&notes).prepareWithin(ctx, boundary, root, config, forceNoCache, tag, buildVariableNames...)
+	if err == nil {
+		// A base taken from the registry's last answer, with when.
+		prepared.Notes = append(prepared.Notes, notes...)
+	}
+	return prepared, err
+}
+
+func (b *ArtifactBuilder) prepareWithin(
 	ctx context.Context,
 	boundary, root string,
 	config BuildPlanConfig,
@@ -550,7 +572,7 @@ func (b *ArtifactBuilder) Build(
 		image, err := b.backend.BuildImage(ctx, BuildInvocation{
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
-			Pull: true, Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
+			Pull: buildPulls(prepared), Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
 			Frontend: railpackFrontendFor(prepared, tag, secrets),
 		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
@@ -1058,7 +1080,7 @@ func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base 
 func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string) ([]ResolvedImage, error) {
 	resolved := make([]ResolvedImage, 0, len(references)+1)
 	for _, reference := range references {
-		image, err := b.backend.ResolveImage(ctx, reference, "")
+		image, err := b.resolveBase(ctx, reference)
 		if err != nil {
 			return nil, fmt.Errorf("%w: resolve reviewed base image %s: %v", ErrBuilderUnavailable, reference, err)
 		}
@@ -1088,7 +1110,10 @@ func requireBasePlatform(bases []ResolvedImage, platform string) error {
 }
 
 func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
-	argv := []string{"docker", "buildx", "build", "--progress=plain", "--file", prepared.Dockerfile, "--tag", tag, "--load", "--pull"}
+	argv := []string{"docker", "buildx", "build", "--progress=plain", "--file", prepared.Dockerfile, "--tag", tag, "--load"}
+	if buildPulls(prepared) {
+		argv = append(argv, "--pull")
+	}
 	if prepared.TargetPlatform != "" {
 		argv = append(argv, "--platform", prepared.TargetPlatform)
 	}

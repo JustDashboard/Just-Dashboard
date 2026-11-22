@@ -476,7 +476,8 @@ func (s *Server) initModules() {
 	// The Railpack planner writes its plan into a folder Docker binds by
 	// path, which the data directory is on the server and in here alike.
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack"))
-	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
+	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend).
+		WithBaseResolutionFile(filepath.Join(s.Cfg.DataDir, "deploy-base-resolutions.json"))
 	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner

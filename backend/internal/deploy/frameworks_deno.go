@@ -283,7 +283,7 @@ func (b *ArtifactBuilder) settleDenoImage(ctx context.Context, recipe *denoRecip
 	if len(fallback) == 0 || recipe.image == fallback[0] {
 		return nil
 	}
-	if _, err := b.backend.ResolveImage(ctx, recipe.image, ""); err == nil {
+	if _, err := b.resolveBase(ctx, recipe.image); err == nil {
 		return nil
 	}
 	note := "the declared Deno release " + recipe.release + " has no " + recipe.image + " image; building with " + fallback[0]

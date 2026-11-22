@@ -12,7 +12,7 @@ func (b *ArtifactBuilder) settleElixirImage(ctx context.Context, recipe *elixirR
 	if recipe.version.exact == "" {
 		return nil
 	}
-	if _, err := b.backend.ResolveImage(ctx, recipe.version.image(), ""); err == nil {
+	if _, err := b.resolveBase(ctx, recipe.version.image()); err == nil {
 		return nil
 	}
 	exact := recipe.version.image()

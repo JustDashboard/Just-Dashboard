@@ -102,7 +102,9 @@ version) are marked `fromBase`: a newer base may fix those; the rest came with t
 it with **the digest the release pinned**, not with whatever the tag names on this server today. For a
 release that is an upstream image (an image source), its own tag is compared the same way; an image that
 exists only on this server is `local`, with no tag to have moved. Each base is `current`, `outdated` or
-`unknown` with the registry's reason. It is read at scan time and stored with the scan, so the alert,
+`unknown` with the registry's reason. The read goes to the registry every time: the ten-minute memory and
+the outage fallback a build's preparation resolves bases through (`build_base_resolution.go`) are the
+builder's, not this check's, so a build that reused an answer never hides a tag that has moved since. It is read at scan time and stored with the scan, so the alert,
 which reads every minute, never asks a registry anything.
 
 ## What is kept

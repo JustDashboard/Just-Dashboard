@@ -7,10 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
+// artifactBackendFake records what the builder asked of it. Compose builds
+// run concurrently, so every method holds mu.
 type artifactBackendFake struct {
+	mu         sync.Mutex
 	builds     []BuildInvocation
 	pulls      []string
 	resolves   []string
@@ -25,10 +29,18 @@ type artifactBackendFake struct {
 	local        map[string]string
 	unregistered map[string]bool
 	tags         [][2]string
+	// resolveErr is what every registry read answers while it is set: an
+	// outage, a rate limit.
+	resolveErr error
 }
 
 func (f *artifactBackendFake) ResolveImage(_ context.Context, reference, _ string) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.resolves = append(f.resolves, reference)
+	if f.resolveErr != nil {
+		return ResolvedImage{}, f.resolveErr
+	}
 	if f.unregistered[reference] {
 		return ResolvedImage{}, errors.New("manifest unknown")
 	}
@@ -43,19 +55,22 @@ func (f *artifactBackendFake) BuildImage(
 	invocation BuildInvocation,
 	emit func(BuildLog) error,
 ) (ResolvedImage, error) {
+	f.mu.Lock()
 	f.builds = append(f.builds, invocation)
+	printed, failBuild := f.printed, f.failBuild
+	f.mu.Unlock()
 	if len(invocation.Secrets) > 0 {
 		if err := emit(BuildLog{Stream: "stdout", Text: "tool output " + invocation.Secrets[0].Value}); err != nil {
 			return ResolvedImage{}, err
 		}
 	}
-	for _, line := range f.printed {
+	for _, line := range printed {
 		if err := emit(BuildLog{Stream: "stdout", Text: line}); err != nil {
 			return ResolvedImage{}, err
 		}
 	}
-	if f.failBuild != nil {
-		return ResolvedImage{}, f.failBuild
+	if failBuild != nil {
+		return ResolvedImage{}, failBuild
 	}
 	return ResolvedImage{
 		Reference: invocation.Tag, Digest: fakeContentDigest(invocation.Tag),
@@ -65,6 +80,8 @@ func (f *artifactBackendFake) BuildImage(
 }
 
 func (f *artifactBackendFake) PullImage(_ context.Context, reference, _ string, _ func(BuildLog) error) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.pulls = append(f.pulls, reference)
 	name, digest, ok := strings.Cut(reference, "@")
 	if !ok {
@@ -74,6 +91,8 @@ func (f *artifactBackendFake) PullImage(_ context.Context, reference, _ string, 
 }
 
 func (f *artifactBackendFake) TagImage(_ context.Context, source, target string) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	id, ok := f.local[source]
 	if !ok {
 		return ResolvedImage{}, errors.New("No such image: " + source)
@@ -86,6 +105,8 @@ func (f *artifactBackendFake) TagImage(_ context.Context, source, target string)
 }
 
 func (f *artifactBackendFake) InspectImage(_ context.Context, reference string) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.inspectErr != nil {
 		return ResolvedImage{}, f.inspectErr
 	}
@@ -96,6 +117,8 @@ func (f *artifactBackendFake) InspectImage(_ context.Context, reference string) 
 }
 
 func (f *artifactBackendFake) RemoveImage(_ context.Context, reference string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.removed = append(f.removed, reference)
 	return nil
 }

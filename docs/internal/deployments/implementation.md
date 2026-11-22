@@ -760,7 +760,25 @@ only renderer/executor/validation authority for their feature.
   same buildx path with that image as `BUILDKIT_SYNTAX`, so its image lands under the run's tag like a
   recipe's and nothing after the build branches on the method; its build variables are BuildKit
   secret mounts named in the plan, as the recipes' are. Reviewed base tags are resolved before rendering and every
-  generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
+  generated `FROM` is digest-pinned. Every reviewed base, and every Bun, Deno, site and language image a
+  recipe settles, is resolved through the builder's `resolveBase` (`build_base_resolution.go`): an
+  answer is reused for ten minutes (`baseResolutionTTL`, keyed by reference — the answer is the tag's
+  index digest and its platform list, the same whichever platform is built), and when the registry does
+  not answer after that (`registryOutageCode`: unreachable, rate-limited, or a 5xx) the last answer is
+  used and the run's transcript says so through `prepared.notes` ("Docker Hub did not answer; used
+  node:22-alpine as resolved at 14:02 UTC on 22 Nov 2026"). A registry that says the tag does not exist
+  is believed. The answers are kept in `<JD_DATA_DIR>/deploy-base-resolutions.json` (public references
+  and digests only), so a dashboard restarted during an outage still builds; a missing or unreadable
+  file starts empty. Before this, each preparation asked the registry for every base, 2–4 s a run, and
+  an outage or Docker Hub's anonymous limit failed a deploy whose bases were all on this server. The
+  daily scan's newer-base check does not go through this memory: it asks the registry itself
+  ([image vulnerabilities](image-vulnerabilities.md#whether-a-newer-base-exists)), so a moved tag is still
+  found. A recipe or static build whose generated Dockerfile names every image it reads by digest (its
+  frontend, each `FROM`, `COPY --from` and `RUN --mount from=` that is not a stage) builds without
+  `--pull` (`buildPulls`, read from the Dockerfile itself): there is nothing for the registry to answer,
+  and an image BuildKit does not hold is still fetched by its digest. A user Dockerfile, a Compose
+  service and a Railpack plan (whose builder and runtime images are tags inside the plan) keep `--pull`.
+  The preview argv says which. Build secrets are BuildKit environment-backed secret mounts and
   never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
   cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
