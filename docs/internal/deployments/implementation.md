@@ -474,7 +474,9 @@ only renderer/executor/validation authority for their feature.
   `nodeBuild.findings` (with `nodeBuild.devScripts`, the scripts that start a development server);
   `build_node_frameworks.go` renders what the plan's own commands need around the build (adapter-node for
   adapter-auto, `NITRO_PRESET`, Next.js standalone assets, the fallback page a static site's framework
-  writes, the entry check). An Nx workspace's application projects are candidates at its root
+  writes, the entry check); a Next.js app whose config sets `output: 'standalone'` is proposed its
+  standalone server, and a start command that runs that server alone ships only `.next/standalone`
+  (`frameworks_next_standalone.go`). An Nx workspace's application projects are candidates at its root
   (`frameworks_node_nx.go`), and a workspace member builds its workspace dependencies first
   (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Litestar,
   Starlette, Sanic, Quart, Falcon, Bottle, Flask, aiohttp, Tornado and the application frameworks
@@ -779,7 +781,12 @@ only renderer/executor/validation authority for their feature.
   and an image BuildKit does not hold is still fetched by its digest. A user Dockerfile, a Compose
   service and a Railpack plan (whose builder and runtime images are tags inside the plan) keep `--pull`.
   The preview argv says which. Build secrets are BuildKit environment-backed secret mounts and
-  never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
+  never argv/build args. BuildKit leaves a secret's value out of a step's cache key, so every recipe
+  RUN that mounts build values is preceded by a guard `ARG JD_BUILD_VALUES_<n>` (one per set of mounted
+  values, `build_value_guard.go`) that the build fills with an HMAC of those values under a key derived
+  from the master key, in buildx's environment: a changed value reruns that step and what follows it,
+  and an install mounting none of the changed values keeps its layer ([build values](recipes.md#build-values)).
+  Custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
   cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
   cannot be guaranteed — and detection runs the same check, so preflight says so before Deploy. A custom
@@ -790,7 +797,21 @@ only renderer/executor/validation authority for their feature.
   secret ever becomes a build argument or argv. A browser-public value typed into a new project is
   stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
-  dashboard files stay out of the image whatever the repository's own ignore file says.
+  dashboard files stay out of the image whatever the repository's own ignore file says. A JavaScript
+  install (`nodeInstallStage`) copies only the files it reads, installs, and then copies the source, and
+  the Node server image copies `node_modules` as a layer of its own before the rest, so a source-only
+  commit reuses both; anything that could let the install read past its inputs (a lifecycle script, a
+  `file:` dependency, Prisma, a pnpmfile, zero-installs) keeps the source-first order, and the run's
+  notes say which ([JavaScript installs](recipes.md#javascript-installs)).
+  Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
+  package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
+  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
+  alone and mapped to the install step when a draft supplies it (`Draft.withEnvironmentMetadata`), and
+  `registry_token_missing` names one that cannot reach the install, for the PHP asset stage too. Preparation logs its install decisions (an unfrozen install, a moved runner, a
+  `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter
+  selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
+  behavior are defined in [the recipe contract](recipes.md), including the exact limits of live
+  framework verification.
 - A Compose project's services are built and pulled a few at a time instead of one after another
   (`compose_parallel.go`). Every service is checked first (its context, Dockerfile, arguments and
   target), so a project that cannot build fails before anything runs. Then at most
@@ -823,15 +844,6 @@ only renderer/executor/validation authority for their feature.
   it, it changed every user Dockerfile and Compose build's context, so `COPY . .` never reused its
   cache, and an empty copy shipped in the image (`TestLiveUserDockerfileContextIsReusedUnchanged`). The build's preview argv
   (`buildPreviewArgv`) still reads `--load`: it is written before the daemon is asked.
-  Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
-  package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
-  registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
-  alone and mapped to the install step when a draft supplies it (`Draft.withEnvironmentMetadata`), and
-  `registry_token_missing` names one that cannot reach the install, for the PHP asset stage too. Preparation logs its install decisions (an unfrozen install, a moved runner, a
-  `.dockerignore` exception) to the run transcript from `prepared.notes`. Serving defaults per framework, the Python install shapes and interpreter
-  selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
-  behavior are defined in [the recipe contract](recipes.md), including the exact limits of live
-  framework verification.
 - Enqueue atomically freezes exact variable revision ids plus canonical dependency/check JSON. The header
   exists for an empty set, digests are checked before variable decryption, and retry copies the original
   snapshots instead of observing later rotations. Release runtime snapshots store the actual secret-free

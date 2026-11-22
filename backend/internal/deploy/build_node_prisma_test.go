@@ -133,7 +133,7 @@ func TestNodeRecipeGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			assertDockerfile(t, prepared.DockerfilePreview, test.want, test.absent)
+			assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), test.want, test.absent)
 			if strings.Contains(prepared.DockerfilePreview, "hunter2") {
 				t.Fatal("a value entered the Dockerfile")
 			}
@@ -241,7 +241,7 @@ func TestIncidentRepositoryGeneratesPrismaWithoutADatabaseValue(t *testing.T) {
 		t.Fatal(err)
 	}
 	database := `DATABASE_URL="${DATABASE_URL:-postgresql://127.0.0.1:5432/prisma-generate}"`
-	assertDockerfile(t, prepared.DockerfilePreview, []string{
+	assertDockerfile(t, withoutNodeCacheMounts(prepared.DockerfilePreview), []string{
 		"RUN apk add --no-cache openssl\n",
 		"RUN export " + database + " && bun install --frozen-lockfile\n",
 		"RUN export " + database + " && bunx prisma generate\n",

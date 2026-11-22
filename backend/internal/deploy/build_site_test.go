@@ -146,7 +146,7 @@ func TestSiteRecipeRendersEachGenerator(t *testing.T) {
 			if candidate.Recipe != "site" || prepared.Recipe != "site" || prepared.Toolchain != test.toolchain {
 				t.Fatalf("recipe %q toolchain %q:\n%s", prepared.Recipe, prepared.Toolchain, prepared.DockerfilePreview)
 			}
-			assertDockerfileLines(t, prepared.DockerfilePreview, test.want, test.absent)
+			assertDockerfileLines(t, withoutNodeCacheMounts(prepared.DockerfilePreview), test.want, test.absent)
 			for _, base := range prepared.BaseImages {
 				if !strings.Contains(prepared.DockerfilePreview, base.Reference+"@"+base.Digest) {
 					t.Fatalf("base %s is not named by digest:\n%s", base.Reference, prepared.DockerfilePreview)

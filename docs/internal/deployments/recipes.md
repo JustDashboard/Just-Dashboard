@@ -97,6 +97,26 @@ secret, or a name that would replace the builder's own environment (`DOCKER_*`, 
 qualifies as a build argument. A build argument
 stays in the image's history, which is why a secret is never one.
 
+A changed value rebuilds what read it. BuildKit leaves a secret mount's value out of the step's cache
+key, which on its own would let a redeploy of the same commit with a new `NEXT_PUBLIC_` or `VITE_` value
+reuse the build step and ship the bundle compiled with the old one. So one pass over every rendered
+recipe, whatever its language (`withBuildValueGuards` in `deploy/build_value_guard.go`, run by
+`renderRecipeDockerfile`), declares a guard build argument just before each RUN that mounts a value:
+`ARG JD_BUILD_VALUES_<n>`, one per distinct set of mounted values, declared once per stage. The build
+passes it as `--build-arg JD_BUILD_VALUES_<n>` with its value in buildx's environment, never in argv:
+an HMAC-SHA256 of exactly the values that RUN mounts, under a key the server derives from its master
+key (`Sealer.DeriveHMAC("deploy.build-values")`). A declared argument is part of the cache key of the
+RUN after it, so a changed value reruns that step and everything built on it, an unchanged one keeps
+the cache, and an install that mounts only install-mapped values keeps its layer when only a build
+step's value changes. The digest is keyed rather than a plain hash because a declared argument's value
+is recorded in the image history of the stage it runs in, and a plain hash of a short value could be
+guessed back; the Dockerfile and its preview hold only the name. A builder without the key (a test)
+keys with a random one per process. A user's Dockerfile build argument can never take the `JD_` prefix.
+Railpack builds have their own guard (`secrets-hash`, see [Railpack](#railpack)).
+`TestLiveBuildValueChangeRerunsTheStepThatReadIt` (`JD_DEPLOY_LIVE=1`) proves it on BuildKit: an
+unchanged value leaves every step `CACHED`, a changed build value reruns the build step and ships the
+new value, and the install stays cached.
+
 Neither generated Dockerfiles nor command arguments contain variable values. A build's log, its failure
 diagnosis and a builder error are redacted of the exact value of every secret build variable, and of a
 plain one whose value carries credential material anyway (a URL with a password, a private key, a
@@ -719,8 +739,7 @@ Railway; `RAILPACK_CONFIG_FILE` is the setting's, and a secret one reaches the b
 which preflight says with `railpack_variables_configure_plan`). Every build variable is added to the
 plan's secrets by name and reaches BuildKit as a secret mount from buildx's environment, as a recipe's
 does; Railpack mounts each in every command of its plan, which is its model, so the recipes' per-step
-mapping (`build.secrets`) is refused. A `secrets-hash` over the values, in buildx's environment and
-never argv, rebuilds the steps Railpack marks as reading them (its build step) when a value changes,
+mapping (`build.secrets`) is refused. A `secrets-hash` over the values, in buildx's environment and never argv, rebuilds the steps Railpack marks as reading them (its build step) when a value changes,
 where BuildKit alone would reuse the layer, and `cache-key=deployment-<environment>`
 keeps one project's mount caches (npm's, pip's, apt's) from every other's on the daemon. The plan's
 excludes gain `.git`, `.just-dashboard` and the old name of buildx's metadata file, so the repository's
@@ -860,7 +879,7 @@ except where the framework has a build command of its own (KeystoneJS, RedwoodJS
 | KeystoneJS 6 | `@keystone-6/core` | server, 3000 | `<runner> keystone start --with-migrations`; `<runner> keystone build` without a build script |
 | AdonisJS 6 (5) | `@adonisjs/core` | server, 3333 | `node build/bin/server.js` (5: `build/server.js`), after `node build/ace.js migration:run --force` (5: `build/ace`) with `@adonisjs/lucid` and `database/migrations`; the template's `start` runs inside `build/` and is not used |
 | RedwoodJS | `@redwoodjs/core` | server, 8910 | `<runner> rw serve` (after `rw prisma migrate deploy` with `api/db/migrations`); `<runner> rw build` |
-| Next.js | `next` | server, 3000 / site `out` | `<manager> run start` (`<runner> next start` without a script); `output: 'export'` is a static site in `out` (or its `distDir`) under its `basePath`; Payload is Next.js |
+| Next.js | `next` | server, 3000 / site `out` | `<manager> run start` (`<runner> next start` without a script); `output: 'export'` is a static site in `out` (or its `distDir`) under its `basePath`; `output: 'standalone'` starts `node .next/standalone/server.js` (`.next/standalone/<member>/server.js` for a workspace member), unless a start script does more than `next start` or a `distDir`/`outputFileTracingRoot` moves it; Payload is Next.js |
 | SvelteKit | `@sveltejs/kit` | server, 3000 / site `build` | the adapter `svelte.config.js` imports: `node build` (Bun: `bun ./build/index.js`), or adapter-node's `out`, for adapter-node, and for adapter-auto or a provider adapter, built with a pinned adapter-node; adapter-static's `pages` and `fallback` |
 | Astro | `astro` (+ `@astrojs/node`) | site `dist` / server, 4321 | `node ./dist/server/entry.mjs` (every Node server's runtime stage sets `HOST=0.0.0.0`); a provider adapter, middleware mode, or `output: 'server'` without an adapter is a decision |
 | Nuxt 3/4 | `nuxt` | server, 3000 / site `.output/public` for `nuxt generate` or the `static` preset | `node .output/server/index.mjs`; a provider preset builds with `NITRO_PRESET=node-server`; Nuxt 2 runs `nuxt start` |
@@ -973,8 +992,15 @@ output directory the plan serves.
   (`nitro_preset_overridden`).
 - Next.js standalone started from `.next/standalone/…/server.js`: after the build,
   `.next/static` and `public` are copied beside the server (Next.js's own Docker example does the same),
-  the runtime stage sets `HOSTNAME=0.0.0.0`, which the server binds, and the server file is the entry
-  checked.
+  the runtime stage sets `HOSTNAME=0.0.0.0`, which the server binds (it listens on the `PORT` the runtime
+  sets), and the server file is the entry checked. When the start command is that server alone
+  (`node .next/standalone/…/server.js`), the runtime stage copies only `.next/standalone` — the server,
+  the traced `node_modules` it needs and the assets beside it — not `/app` (`nodeStandaloneCopy`), an
+  image several times smaller; a start command that runs anything else, or plan-added runtime steps,
+  keep the whole application. A new detection of an app whose `next.config` sets `output: 'standalone'`
+  proposes that command (`frameworks_next_standalone.go`); a stored `next start` is never rewritten, and
+  Next.js has no switch to make an app standalone that does not set it (16.4 has no
+  `NEXT_PRIVATE_STANDALONE`), so the recipe never wraps a repository's `next.config`.
 - The entry check: a server framework's entry (`.output/server/index.mjs`, `build/index.js`,
   `dist/src/main.js`, `build/bin/server.js`, …) is checked after the build when the start command is the
   framework's own or runs the entry, directly or through a package script (`npm run serve:ssr:app`), so a
@@ -1013,6 +1039,7 @@ is judged against the plan as it stands, from what detection recorded (`nodeBuil
 | `sveltekit_adapter_substituted` (warning) | SvelteKit's configuration names adapter-auto or a provider adapter, and the plan serves the server |
 | `nitro_preset_overridden` (warning) | a Nitro provider preset is replaced by `node-server` |
 | `next_export_images` (warning) | the plan exports a Next.js site, a page imports `next/image` and `next.config` sets neither `images.unoptimized` nor a custom loader; the build would stop with "Image Optimization using the default loader is not compatible with export" |
+| `next_standalone_start` (pass) | `next.config` sets `output: 'standalone'` and the start command does not run the standalone server alone; the action is the command that does, whose image ships only `.next/standalone` |
 | `nest_output_layout` (warning) | the plan runs the start detection proposed past a `start:prod` that looks for `dist/main` |
 | `start_command_dev_server` (warning) | the configured start command runs a development server or a watcher, directly or through a package script |
 | `node_decision_open` (warning) | a question detection left open about the framework (an output set by an expression, Astro's middleware mode, a Vike or TanStack Start entry, an entry only Bun serves, TypeScript on plain Node, an Nx executor it does not know, …) while the setting that answers it — named by the finding's field, the start command, output directory or package manager, else the whole build — still holds detection's guess; the questions one setting answers are one finding |
@@ -1295,6 +1322,62 @@ data, and detection (which records the plan on the candidate for every package m
 renders it) all use the same plan, so they cannot disagree. Reads go through an `os.Root` and never
 follow a symlink to a file; nothing in the checkout is executed.
 
+**The install runs before the source arrives, and `node_modules` ships as its own layer.** The install
+stage (`nodeInstallStage`, shared by the Node recipe, a Hugo site's dependencies and the Python and Go
+recipes' asset stages) copies only the files the install reads (`installInputs`: the root's, the member's
+and every workspace member's `package.json`, the lockfile, `.npmrc`, `.yarnrc.yml`, `.yarnrc`,
+`bunfig.toml`, `pnpm-workspace.yaml`, `patches/` and `.yarn/{releases,patches,plugins}/`) with
+`COPY --parents`, installs, and only then copies the source (`COPY . /app/`), so a commit that changes no
+input reuses the install's layer instead of reinstalling. The server image copies the build stage's
+`node_modules` — the root's and the built member's — first, each as a layer of its own
+(`COPY --from=build /app/node_module[s] /app/node_modules/`, a glob so a package without dependencies
+creates none), then the rest with `COPY --exclude=node_modules`; BuildKit keys a copy on its content, so a
+source-only commit reuses the `node_modules` layer and does not compress or unpack it again. The image's
+files are the same either way. Measured on a Next.js app on Bun (the deploy-speed report of
+22 Nov 2026), a source-only commit went from 153 s to 46 s.
+
+That order is kept only when nothing the install runs can read a file outside those inputs
+(`build_node_install_order.go`, read as data with the rest of the plan). Otherwise the install runs over
+the whole source as before, and the run's notes say which order it used and why
+(`Dependencies install after the source is copied, …`):
+
+- a `preinstall`, `install`, `postinstall` or `prepare` script (or their `pre`/`post` forms) in the root's,
+  the member's or any workspace member's `package.json` — except a Git hook installer (`husky`,
+  `is-ci || husky`, `simple-git-hooks`) or `patch-package`, which read only inputs — and a `binding.gyp`
+  beside one, which npm compiles;
+- a `file:`, `link:`, `portal:`, `exec:` or relative dependency, resolution or override; a Yarn `patch:`
+  outside `.yarn/patches`; an npm lock that links a package to a directory whose `package.json` is not an
+  input; pnpm's injected workspace packages (`dependenciesMeta.*.injected`, `injectWorkspacePackages`);
+- Prisma (`prisma` or `@prisma/client`), whose install generates from the schema;
+- a pnpmfile, which is code, and a setting that names another file (`.npmrc`'s `cafile`, `userconfig`, …;
+  `.yarnrc.yml`'s `httpsCaFilePath`, `injectEnvironmentFiles`, a `yarnPath` or plugin outside `.yarn/`;
+  `bunfig.toml`'s `cafile`);
+- Yarn Berry's committed `.yarn/cache` (zero-installs) or `.pnp.cjs`, which the install reads or rewrites;
+- a lockfile out of sync with `package.json`, which the unfrozen install rewrites;
+- a manifest that cannot be read or parsed, or an input whose name a `COPY` would read as a pattern.
+
+Files the install reads that are not among the fixed inputs are added to them instead: a patch
+`patchedDependencies` names (pnpm's, in `package.json` or `pnpm-workspace.yaml`, and Bun's), a member's own
+`.npmrc`, Yarn's `.env.yarn`, and a workspace member's committed `bin` file, which the install links.
+**Download and compiler caches.** The install RUN mounts its manager's download cache from BuildKit's
+cache (`build_node_caches.go`, through `recipeCache`, so the id is scoped to the environment,
+`jd-deployment-<environment>-<name>`, and a forced build mounts none): npm's `/root/.npm`, pnpm's store at
+`/root/.local/share/pnpm/store`, Yarn 1's `/usr/local/share/.cache/yarn`, Yarn Berry's global folder
+`/root/.yarn/berry` (its global cache, or the mirror a project cache is filled from) and Bun's
+`/root/.bun/install/cache`, in every stage that installs (the Node recipe, a Hugo site's dependencies,
+the Python, Go and PHP asset stages). So a lockfile change downloads only what changed. A Next.js build
+also mounts the compiler caches `next build` keeps under the package's `.next/cache` — `webpack`,
+`turbopack` and `swc`, the persistence Next.js recommends for CI — but not its `fetch-cache` or `images`,
+which stay in the image as before: a persisted fetch cache would answer a build-time `fetch` with an
+earlier build's data. A mount's content never reaches the image; BuildKit keeps these caches for its own
+garbage-collection window, so a cold cache only costs a slower build.
+
+What the plan adds after the install (system packages' runs, Prisma's `generate`, SvelteKit's
+`BeforeBuild` adapter install) still runs after the source is copied. `TestLiveNodeInstallLayerOutlivesASourceChange`
+(`JD_DEPLOY_LIVE=1`) builds a Next.js app on Bun and on npm twice across a one-line page change and
+checks the install and the `node_modules` copy stay `CACHED`, and that the same app with a `postinstall`
+reinstalls.
+
 **Lockfiles are compared, not only named.** Every committed lockfile — `bun.lock`, `bun.lockb`,
 `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock` — is read under a budget of its
 own (16 MiB a file, 32 MiB a detection or build, never counted as detection truncation) and compared with
@@ -1371,8 +1454,10 @@ the same way (`script_runtime_added`); `deno` cannot be, and is refused (`comman
 manifest declaring another manager than the committed lockfile's runs with `COREPACK_ENABLE_STRICT=0`
 (`package_manager_declaration_conflict`).
 
-**Yarn Plug'n'Play.** Berry keeps its cache inside the build (`YARN_ENABLE_GLOBAL_CACHE=false`) so it is
-copied with the application. When the linker is Plug'n'Play and a command runs outside `yarn` — a
+**Yarn Plug'n'Play.** Under Plug'n'Play, or with a committed `.yarn/cache` (zero-installs), Berry keeps
+its cache inside the build (`YARN_ENABLE_GLOBAL_CACHE=false`), because the application resolves packages
+from its archives at run time and the cache is copied with it. With any other linker the cache is global
+(`YARN_ENABLE_GLOBAL_CACHE=true`), under `/root/.yarn/berry`, and does not ship. When the linker is Plug'n'Play and a command runs outside `yarn` — a
 framework's `node build` — the install sets `YARN_NODE_LINKER=node-modules`; the lockfile does not depend
 on the linker (`yarn_linker_adjusted`).
 
@@ -1836,7 +1921,8 @@ A Django or Flask application whose `package.json` builds its CSS or JavaScript 
 Tailwind, Vite, webpack, esbuild, PostCSS or Sass, and no server of its own — a `start` script that only
 watches, as django-tailwind's `"start": "npm run dev"` does, is not one) at the root or in
 django-tailwind's `theme/static_src` gets a Node stage: the same install planner as the JavaScript recipe
-installs and runs the build over a copy of the application, drops `node_modules`, and the Python image
+installs (before the application's source when it can, see [JavaScript installs](#javascript-installs))
+and runs the build over a copy of the application, drops `node_modules`, and the Python image
 copies the result in place of the source (`python_assets_built`). The package is not offered as a site
 of its own, and `build.packageManager` chooses its manager among competing lockfiles, as `build.nodeVersion`
 chooses its Node major.

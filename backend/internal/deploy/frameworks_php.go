@@ -902,12 +902,10 @@ func phpAssetStage(recipe phpRecipe, bases []ResolvedImage, installSecrets, buil
 	for _, env := range plan.image.buildEnv {
 		lines = append(lines, "ENV "+env)
 	}
-	if plan.berry {
-		lines = append(lines, "ENV YARN_ENABLE_GLOBAL_CACHE=false")
-	}
+	lines = append(lines, plan.yarnSettings()...)
 	if recipe.devInstall {
 		lines = append(lines, "RUN "+installSecrets+"composer install --no-interaction --prefer-dist --no-scripts")
 	}
-	lines = append(lines, nodeRunWith(installSecrets, plan.installDefaults(), plan.installLine()), build)
+	lines = append(lines, plan.installRun(config.cache, installSecrets), build)
 	return lines, nil
 }
