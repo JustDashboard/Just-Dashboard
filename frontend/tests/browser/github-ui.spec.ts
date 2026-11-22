@@ -46,7 +46,9 @@ test("search finds both pages by git and by github", async ({ page }) => {
   await mockGitHubPage(page)
   await page.goto("/github")
   await expect(identity(page)).toBeVisible()
-  const trigger = page.locator('[data-slot="sidebar-header"]').getByRole("button", { name: /Search/ })
+  const trigger = page
+    .locator('[data-slot="sidebar-header"]')
+    .getByRole("button", { name: /Search/ })
   await trigger.focus()
   await page.keyboard.press("Control+k")
   const palette = page.getByRole("dialog", { name: "Command palette" })

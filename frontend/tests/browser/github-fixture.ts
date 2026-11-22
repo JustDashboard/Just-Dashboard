@@ -207,7 +207,9 @@ export async function mockGitHubPage(page: Page, options: PageMockOptions = {}) 
         deviceReads++
         await json(
           route,
-          deviceReads < 2 ? { status: "pending" } : { status: "complete", connection: conns[0] ?? baseConnections[0] },
+          deviceReads < 2
+            ? { status: "pending" }
+            : { status: "complete", connection: conns[0] ?? baseConnections[0] },
         )
         return true
       }
