@@ -41,7 +41,7 @@ type baseResolutions struct {
 
 type baseResolution struct {
 	Image ResolvedImage `json:"image"`
-	At    time.Time     `json:"resolvedAt"`
+	At    time.Time     `json:"resolvedAt,omitzero"`
 }
 
 func newBaseResolutions() *baseResolutions {
