@@ -40,6 +40,11 @@ func (a auditedCertificateIssuer) EnsureDeploymentCertificate(
 	if result.Name != "" {
 		detail["certificate"] = result.Name
 	}
+	// The build step orders in the background while the image builds; the
+	// entry says so, since the run's certificate step comes minutes later.
+	if deploy.CertificateStartedDuringBuild(ctx) {
+		detail["startedDuringBuild"] = true
+	}
 	if err != nil {
 		detail["error"] = err.Error()
 	}

@@ -350,6 +350,28 @@ only renderer/executor/validation authority for their feature.
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
   blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
   `certificate_available`.
+  **The work starts while the build runs** (`certificate_prewarm.go`). The domains are in the stored
+  plan before `build_artifact`, so that step starts the same `EnsureDeploymentCertificate` in the
+  background for the plan's HTTPS names (not a tunnel's) and says so in the build transcript; a first
+  deploy onto a new name used to spend about thirteen seconds ordering after a build that had nothing
+  to do with it. The step itself stays where it is, the gate before `start_candidate`: it waits for that
+  attempt ("which was started while the build ran"), shows its transcript, and answers from it — an
+  issued certificate as it is, so one run never orders twice, and a refused order as the step's own
+  failure. When the background attempt found the names already covered, or never got an answer (cut
+  short, or out of time waiting for certbot's turn), the step asks again itself as before, which finds
+  the certificate reused. Its evidence carries `prewarm` (`startedDuringBuild`, when it started and
+  finished, its own outcome, how long the step waited), and the audit entry of an order placed in the
+  background carries `startedDuringBuild: true`. Cancelling the run cancels the attempt
+  (`CleanupCancelledRun` and the run-finished `HousekeepingObserver`), and so does the step's own
+  context ending while it waits; the attempt is bounded at ten minutes. **A build that fails after the
+  order was placed** leaves the run's order to finish: the certificate stays on the host and the next
+  run's step reuses it; on a host the Docker Caddy ingress serves, the attempt may also have brought
+  the ingress up, which the next run finds in place. So that a build failing on every push cannot become an ACME loop, a background
+  attempt that fails keeps the same set of names from being ordered in the background for an hour
+  (in memory, so a restart forgets it); the step still orders after a build that passes, as it always
+  did. A run whose certificate step runs in another process than its build (a restart between them)
+  finds no attempt and orders as before. Redeploy, rollback and promotion have no build step and
+  order in the step as before.
   HTTP-01 issuance (`issueDeploymentHTTP`) runs through the same certbot — whose plugins
   `deploymentChallenge` reads, against probe directories, to choose webroot or standalone — names the
   same directory (`deploymentHTTPIssueArgs` appends `ACMEDirectory.certbotArgs`), skips the public-DNS

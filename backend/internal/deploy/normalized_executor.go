@@ -63,6 +63,9 @@ type NormalizedStepExecutor struct {
 	notifications *AutomationStore
 
 	certificates CertificateIssuer
+	// prewarms are the certificate attempts build steps started in the
+	// background for their runs (certificate_prewarm.go).
+	prewarms certificatePrewarms
 
 	// tailnet publishes a preview's loopback port on the node's tailnet
 	// address; nil on hosts without Tailscale Serve. tailnetProbe is the
@@ -618,6 +621,9 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	// The collector reads the transcript as it is logged, after the builder
 	// has redacted it, so a failure can be named from its own output.
 	collector := newBuildOutputCollector(func() int64 { return lastLogMark(execution.Output) })
+	// The certificate does not depend on the image, so it is resolved while
+	// the image builds; provision_certificate stays the gate before start.
+	e.startCertificatePrewarm(ctx, execution, plan)
 	result, err := e.builder.Build(
 		ctx, preparedEvidence.BuildRoot,
 		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),

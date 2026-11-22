@@ -559,6 +559,9 @@ func (s *Server) initModules() {
 		// What a run read from the secret stores is held for its own steps
 		// and dropped the moment it finishes.
 		s.modules.deployPlanning.SecretStoreRunObserver(),
+		// And what the executor held for it: the certificate its build
+		// started ordering.
+		normalizedExecutor.HousekeepingObserver(),
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)

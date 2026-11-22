@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
@@ -70,5 +71,28 @@ func TestDeploymentCertificateOrdersAreAudited(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// An order the build step placed in the background says so, since the run's
+// certificate step that reads it comes minutes later.
+func TestDeploymentCertificateOrderStartedDuringTheBuildSaysSo(t *testing.T) {
+	var entries []audit.Entry
+	issuer := auditedCertificateIssuer{issuer: fixedCertificateIssuer{result: proxysvc.DeploymentCertificate{
+		Outcome: proxysvc.CertificateIssued, Name: "app.example.com", Method: "nginx",
+	}}, record: func(_ context.Context, entry audit.Entry) { entries = append(entries, entry) }}
+	ctx := deploy.MarkCertificateStartedDuringBuild(context.Background())
+	if _, err := issuer.EnsureDeploymentCertificate(ctx, []string{"app.example.com"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || !strings.Contains(entries[0].Detail, `"startedDuringBuild":true`) {
+		t.Fatalf("entries = %#v", entries)
+	}
+	entries = nil
+	if _, err := issuer.EnsureDeploymentCertificate(context.Background(), []string{"app.example.com"}, nil); err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || strings.Contains(entries[0].Detail, "startedDuringBuild") {
+		t.Fatalf("an order the step placed itself = %#v", entries)
 	}
 }
