@@ -1,6 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
+import {
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   ChevronDown,
@@ -1127,11 +1135,18 @@ function RepositoryRow({
       }
       trailing={
         <span className="flex items-center gap-3 text-xs text-muted-foreground">
-          <span className="hidden w-44 justify-end gap-1 overflow-hidden lg:flex">
-            {tags.map((tag) => (
-              <Tag key={tag} tone={tag === "Archived" ? "warning" : "default"}>
-                {tag}
-              </Tag>
+          {/* A tag is a bare word, so two side by side read as one phrase
+              ("Shared with you Write") without the dot between them. */}
+          <span className="hidden w-44 items-center justify-end gap-1 overflow-hidden lg:flex">
+            {tags.map((tag, index) => (
+              <Fragment key={tag}>
+                {index > 0 && (
+                  <span aria-hidden className="text-faint">
+                    ·
+                  </span>
+                )}
+                <Tag tone={tag === "Archived" ? "warning" : "default"}>{tag}</Tag>
+              </Fragment>
             ))}
           </span>
           <span className="hidden w-4 justify-center sm:flex">
