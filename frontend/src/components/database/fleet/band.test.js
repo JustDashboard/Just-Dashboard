@@ -1,17 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import {
-  backupAges,
-  backupCounts,
-  DATABASE_HUES,
-  fleetHues,
-  fleetMarks,
-  fleetVerdict,
-  readerCount,
-  shares,
-} from "./band"
-
-const NOW = Date.parse("2026-10-11T12:00:00Z")
-const hoursAgo = (hours) => new Date(NOW - hours * 3_600_000).toISOString()
+import { DATABASE_HUES, fleetHues, fleetMarks, fleetVerdict, readerCount } from "./band"
 
 function entry(overrides = {}) {
   return {
@@ -59,88 +47,6 @@ describe("a database's hue", () => {
     const after = fleetHues([entry({ id: 1 }), entry({ id: 2 }), entry({ id: 9 })])
     expect(after.get(1)).toBe(before.get(1))
     expect(after.get(2)).toBe(before.get(2))
-  })
-})
-
-describe("a figure shared across the fleet", () => {
-  const fleet = [
-    entry({ id: 1, name: "a", bytes: 50 }),
-    entry({ id: 2, name: "b", bytes: 400 }),
-    entry({ id: 3, name: "c", bytes: 0 }),
-    entry({ id: 4, name: "d", bytes: 100 }),
-    entry({ id: 5, name: "e", sizesKnown: false }),
-  ]
-  const valueOf = (e) => (e.sizesKnown === false ? undefined : e.bytes)
-
-  test("the largest first, the rest one span, a size nobody reported counted apart", () => {
-    const read = shares(fleet, valueOf, 2)
-    expect(read.top.map((s) => s.entry.name)).toEqual(["b", "d"])
-    expect(read.total).toBe(550)
-    expect(read.rest).toBe(50)
-    expect(read.more).toBe(1)
-    expect(read.unknown).toBe(1)
-    expect(read.largest).toBe(400)
-  })
-
-  test("a zero takes no span and is not one more", () => {
-    const read = shares(fleet, valueOf)
-    expect(read.top.map((s) => s.entry.name)).toEqual(["b", "d", "a"])
-    expect(read.more).toBe(0)
-    expect(read.rest).toBe(0)
-  })
-
-  test("nothing reported is an empty bar, not a division by zero", () => {
-    const read = shares([entry({ sizesKnown: false })], valueOf)
-    expect(read).toMatchObject({ top: [], total: 0, rest: 0, unknown: 1, largest: 0 })
-  })
-})
-
-describe("the backups block", () => {
-  const newest = new Map([
-    [1, hoursAgo(2)],
-    [2, hoursAgo(24 * 3)],
-    [3, hoursAgo(24 * 10)],
-    [5, hoursAgo(24 * 40)],
-  ])
-  const fleet = [
-    entry({ id: 1, name: "fresh" }),
-    entry({ id: 2, name: "aging" }),
-    entry({ id: 3, name: "stale" }),
-    entry({ id: 4, name: "never" }),
-    entry({ id: 5, name: "ancient" }),
-    entry({ id: 6, name: "cache", driver: "redis" }),
-    entry({ id: 7, name: "gone", state: "broken", broken: true }),
-  ]
-  const rows = backupAges(fleet, {
-    newestOf: (e) => newest.get(e.id),
-    dumps: (e) => e.driver !== "redis",
-    now: NOW,
-  })
-
-  test("never first, then the oldest, and nothing an engine cannot dump or a row cannot open", () => {
-    expect(rows.map((r) => r.entry.name)).toEqual(["never", "ancient", "stale", "aging", "fresh"])
-  })
-
-  test("each stands by the same day and week the readings and the cards use", () => {
-    const by = Object.fromEntries(rows.map((r) => [r.entry.name, r.standing]))
-    expect(by).toEqual({
-      never: "never",
-      ancient: "stale",
-      stale: "stale",
-      aging: "aging",
-      fresh: "fresh",
-    })
-  })
-
-  test("a never-dumped database has no age, rather than the oldest one", () => {
-    const age = Object.fromEntries(rows.map((r) => [r.entry.name, r.age]))
-    expect(age.never).toBeUndefined()
-    expect(age.aging).toBe(3 * 24 * 3_600_000)
-  })
-
-  test("the bar counts each standing once, and a standing nobody holds as zero", () => {
-    expect(backupCounts(rows)).toEqual({ fresh: 1, aging: 1, stale: 2, never: 1 })
-    expect(backupCounts([])).toEqual({ fresh: 0, aging: 0, stale: 0, never: 0 })
   })
 })
 

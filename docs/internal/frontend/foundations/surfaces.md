@@ -160,8 +160,8 @@ taking a frame:
   four red cards said it four times. The release path on a deployment page is not a wiring
   picture but a timeline: one bar in seven segments, each as long as its stage took,
   `components/deploy/run-pipeline.tsx`), and so are the
-  Databases section's reading pages — the control center's identity line, band of storage, sessions
-  and backups, fleet, picture and found servers, a database's home, its Performance, Advisor, Search
+  Databases section's reading pages — the control center's identity line, its lines of what
+  protects the databases, fleet, picture and found servers, a database's home, its Performance, Advisor, Search
   and Generate — each a title, a toolbar
   and a hairline, with every database, found server, generator and search hit on them a lit card,
   and every block on the four Processes pages — the live table under its band of workloads, the

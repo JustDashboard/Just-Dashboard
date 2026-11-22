@@ -25,6 +25,12 @@ import { WireMark } from "@/components/wire/wire"
  * hold; a page used to lay its own. Without either it is a reading and nothing
  * else, so it takes no hover wash and no place in the tab order.
  *
+ * With `action` the line ends on the verb that answers it — a small outline
+ * button, *Schedule* beside "None of the 6 is backed up on a schedule" — and
+ * that verb is the line's one press: the line is then neither a link nor a
+ * button, since a control cannot sit inside either. The button is shorter
+ * than the line, so a reading that gains or loses its verb keeps its height.
+ *
  * `BarReading`'s line under a band is another thing with its own slot
  * (`bar-reading-line`): a spec that counts the one must not count the other.
  */
@@ -47,6 +53,7 @@ export function ReadingLine({
   children,
   hint,
   trend,
+  action,
   className,
 }: {
   href?: string
@@ -61,6 +68,11 @@ export function ReadingLine({
   hint?: React.ReactNode
   /** The reading's last hour, a `TileTrend`. Hidden below `sm`. */
   trend?: React.ReactNode
+  /**
+   * The verb that answers the reading, at the line's end on every width. The
+   * line's one press: `href` and `onPress` are not read beside it.
+   */
+  action?: React.ReactNode
   className?: string
 }) {
   const reading = useId()
@@ -83,10 +95,22 @@ export function ReadingLine({
           </span>
         </span>
       </span>
-      <span className="hidden w-32 shrink-0 sm:block 2xl:w-48">{trend}</span>
+      {/* The trend's place is kept on a line without one, so the words of a
+          run of lines end at one edge; a line that ends on a verb has the
+          verb there instead. */}
+      {(trend || !action) && (
+        <span className="hidden w-32 shrink-0 sm:block 2xl:w-48">{trend}</span>
+      )}
+      {action && <span className="flex shrink-0 items-center gap-2">{action}</span>}
     </>
   )
   const shape = cn("flex min-w-0 items-center gap-3.5 rounded-lg px-2 py-2.5", readingLineHeight)
+  if (action)
+    return (
+      <div data-slot="reading-line" className={cn(shape, className)}>
+        {body}
+      </div>
+    )
   if (!href && onPress)
     return (
       <div
