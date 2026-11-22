@@ -81,9 +81,9 @@ func githubResourceErr(err error) error {
 	return githubPageErr(err)
 }
 
-// githubPathNumber reads a positive integer path parameter before anything
+// ghResourceNumber reads a positive integer path parameter before anything
 // is resolved, so a malformed address costs no request to GitHub.
-func githubPathNumber(r *http.Request, param, what string) (int64, error) {
+func ghResourceNumber(r *http.Request, param, what string) (int64, error) {
 	n, err := githubrepos.ParsePositive(chi.URLParam(r, param), what)
 	if err != nil {
 		return 0, githubResourceErr(err)
@@ -91,31 +91,31 @@ func githubPathNumber(r *http.Request, param, what string) (int64, error) {
 	return n, nil
 }
 
-func githubQueryPage(r *http.Request) int {
+func ghResourcePage(r *http.Request) int {
 	page, _ := strconv.Atoi(r.URL.Query().Get("page"))
 	return page
 }
 
-// githubRepoTarget is the audit target of a change: GitHub's own spelling
+// ghResourceTarget is the audit target of a change: GitHub's own spelling
 // of the repository.
-func githubRepoTarget(access *githubrepos.RepoAccess) string {
+func ghResourceTarget(access *githubrepos.RepoAccess) string {
 	return access.Owner + "/" + access.Name
 }
 
-// githubChanged records a mutation that GitHub accepted or refused, and on
+// ghResourceChanged records a mutation that GitHub accepted or refused, and on
 // success drops what is cached about the repository so the next read asks
 // GitHub again.
-func (s *Server) githubChanged(r *http.Request, access *githubrepos.RepoAccess, action string, detail map[string]any, err error) {
+func (s *Server) ghResourceChanged(r *http.Request, access *githubrepos.RepoAccess, action string, detail map[string]any, err error) {
 	detail["ok"] = err == nil
-	httpx.SetAudit(r, action, githubRepoTarget(access), detail)
+	httpx.SetAudit(r, action, ghResourceTarget(access), detail)
 	if err == nil {
 		s.forgetGitHubRepo(access)
 	}
 }
 
-// githubAccess resolves the repository and answers its error in the page's
+// ghResourceAccess resolves the repository and answers its error in the page's
 // words.
-func (s *Server) githubAccess(r *http.Request) (*githubrepos.RepoAccess, error) {
+func (s *Server) ghResourceAccess(r *http.Request) (*githubrepos.RepoAccess, error) {
 	access, err := s.githubRepo(r)
 	if err != nil {
 		return nil, githubResourceErr(err)
@@ -123,9 +123,9 @@ func (s *Server) githubAccess(r *http.Request) (*githubrepos.RepoAccess, error) 
 	return access, nil
 }
 
-// githubRead is the shape of every read: resolve, ask, answer 200.
-func githubRead[T any](s *Server, w http.ResponseWriter, r *http.Request, read func(*githubrepos.RepoAccess) (T, error)) error {
-	access, err := s.githubAccess(r)
+// ghResourceRead is the shape of every read: resolve, ask, answer 200.
+func ghResourceRead[T any](s *Server, w http.ResponseWriter, r *http.Request, read func(*githubrepos.RepoAccess) (T, error)) error {
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
@@ -140,8 +140,8 @@ func githubRead[T any](s *Server, w http.ResponseWriter, r *http.Request, read f
 // --- branches ---
 
 func (s *Server) handleGitHubRepoBranches(w http.ResponseWriter, r *http.Request) error {
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.BranchPage, error) {
-		return access.Branches(r.Context(), githubQueryPage(r))
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.BranchPage, error) {
+		return access.Branches(r.Context(), ghResourcePage(r))
 	})
 }
 
@@ -150,7 +150,7 @@ func (s *Server) handleGitHubRepoBranchProtection(w http.ResponseWriter, r *http
 	if err := githubrepos.ValidBranchName(name); err != nil {
 		return githubResourceErr(err)
 	}
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.BranchProtection, error) {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.BranchProtection, error) {
 		return access.BranchProtection(r.Context(), name)
 	})
 }
@@ -166,12 +166,12 @@ func (s *Server) handleGitHubRepoBranchCreate(w http.ResponseWriter, r *http.Req
 	if err := githubrepos.ValidBranchName(req.Name); err != nil {
 		return githubResourceErr(err)
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	branch, err := access.CreateBranch(r.Context(), req.Name, req.From)
-	s.githubChanged(r, access, "github.branch.create", map[string]any{"branch": req.Name}, err)
+	s.ghResourceChanged(r, access, "github.branch.create", map[string]any{"branch": req.Name}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -184,12 +184,12 @@ func (s *Server) handleGitHubRepoBranchDelete(w http.ResponseWriter, r *http.Req
 	if err := githubrepos.ValidBranchName(name); err != nil {
 		return githubResourceErr(err)
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	err = access.DeleteBranch(r.Context(), name)
-	s.githubChanged(r, access, "github.branch.delete", map[string]any{"branch": name}, err)
+	s.ghResourceChanged(r, access, "github.branch.delete", map[string]any{"branch": name}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -200,31 +200,31 @@ func (s *Server) handleGitHubRepoBranchDelete(w http.ResponseWriter, r *http.Req
 // --- commits ---
 
 func (s *Server) handleGitHubRepoCommits(w http.ResponseWriter, r *http.Request) error {
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.CommitPage, error) {
-		return access.Commits(r.Context(), r.URL.Query().Get("sha"), githubQueryPage(r))
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.CommitPage, error) {
+		return access.Commits(r.Context(), r.URL.Query().Get("sha"), ghResourcePage(r))
 	})
 }
 
 // --- pull requests ---
 
 func (s *Server) handleGitHubRepoPulls(w http.ResponseWriter, r *http.Request) error {
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.PullPage, error) {
-		return access.Pulls(r.Context(), r.URL.Query().Get("state"), githubQueryPage(r))
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.PullPage, error) {
+		return access.Pulls(r.Context(), r.URL.Query().Get("state"), ghResourcePage(r))
 	})
 }
 
 func (s *Server) handleGitHubRepoPull(w http.ResponseWriter, r *http.Request) error {
-	number, err := githubPathNumber(r, "number", "pull request")
+	number, err := ghResourceNumber(r, "number", "pull request")
 	if err != nil {
 		return err
 	}
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.PullDetail, error) {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.PullDetail, error) {
 		return access.Pull(r.Context(), number)
 	})
 }
 
 func (s *Server) handleGitHubRepoPullMerge(w http.ResponseWriter, r *http.Request) error {
-	number, err := githubPathNumber(r, "number", "pull request")
+	number, err := ghResourceNumber(r, "number", "pull request")
 	if err != nil {
 		return err
 	}
@@ -237,12 +237,12 @@ func (s *Server) handleGitHubRepoPullMerge(w http.ResponseWriter, r *http.Reques
 	if !githubrepos.IsFullSHA(strings.ToLower(strings.TrimSpace(req.SHA))) {
 		return httpx.BadRequest("the merge needs the full 40-character head commit you reviewed")
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	result, err := access.Merge(r.Context(), number, req)
-	s.githubChanged(r, access, "github.pull.merge", map[string]any{"number": number, "method": req.Method}, err)
+	s.ghResourceChanged(r, access, "github.pull.merge", map[string]any{"number": number, "method": req.Method}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -251,7 +251,7 @@ func (s *Server) handleGitHubRepoPullMerge(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) handleGitHubRepoPullState(w http.ResponseWriter, r *http.Request) error {
-	number, err := githubPathNumber(r, "number", "pull request")
+	number, err := ghResourceNumber(r, "number", "pull request")
 	if err != nil {
 		return err
 	}
@@ -261,12 +261,12 @@ func (s *Server) handleGitHubRepoPullState(w http.ResponseWriter, r *http.Reques
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	pull, err := access.SetPullState(r.Context(), number, req.State)
-	s.githubChanged(r, access, "github.pull.state", map[string]any{"number": number, "state": req.State}, err)
+	s.ghResourceChanged(r, access, "github.pull.state", map[string]any{"number": number, "state": req.State}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -283,17 +283,17 @@ func (s *Server) handleGitHubRepoIssues(w http.ResponseWriter, r *http.Request) 
 			labels = append(labels, label)
 		}
 	}
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.IssuePage, error) {
-		return access.Issues(r.Context(), r.URL.Query().Get("state"), labels, githubQueryPage(r))
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.IssuePage, error) {
+		return access.Issues(r.Context(), r.URL.Query().Get("state"), labels, ghResourcePage(r))
 	})
 }
 
 func (s *Server) handleGitHubRepoIssue(w http.ResponseWriter, r *http.Request) error {
-	number, err := githubPathNumber(r, "number", "issue")
+	number, err := ghResourceNumber(r, "number", "issue")
 	if err != nil {
 		return err
 	}
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.Issue, error) {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.Issue, error) {
 		return access.Issue(r.Context(), number)
 	})
 }
@@ -303,7 +303,7 @@ func (s *Server) handleGitHubRepoIssueCreate(w http.ResponseWriter, r *http.Requ
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
@@ -312,7 +312,7 @@ func (s *Server) handleGitHubRepoIssueCreate(w http.ResponseWriter, r *http.Requ
 	if issue != nil {
 		detail["number"] = issue.Number
 	}
-	s.githubChanged(r, access, "github.issue.create", detail, err)
+	s.ghResourceChanged(r, access, "github.issue.create", detail, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -321,7 +321,7 @@ func (s *Server) handleGitHubRepoIssueCreate(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleGitHubRepoIssueUpdate(w http.ResponseWriter, r *http.Request) error {
-	number, err := githubPathNumber(r, "number", "issue")
+	number, err := ghResourceNumber(r, "number", "issue")
 	if err != nil {
 		return err
 	}
@@ -329,7 +329,7 @@ func (s *Server) handleGitHubRepoIssueUpdate(w http.ResponseWriter, r *http.Requ
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
@@ -349,7 +349,7 @@ func (s *Server) handleGitHubRepoIssueUpdate(w http.ResponseWriter, r *http.Requ
 	if req.State != nil {
 		detail["state"] = *req.State
 	}
-	s.githubChanged(r, access, "github.issue.update", detail, err)
+	s.ghResourceChanged(r, access, "github.issue.update", detail, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -358,7 +358,7 @@ func (s *Server) handleGitHubRepoIssueUpdate(w http.ResponseWriter, r *http.Requ
 }
 
 func (s *Server) handleGitHubRepoLabels(w http.ResponseWriter, r *http.Request) error {
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) ([]githubrepos.Label, error) {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) ([]githubrepos.Label, error) {
 		return access.Labels(r.Context())
 	})
 }
@@ -366,7 +366,7 @@ func (s *Server) handleGitHubRepoLabels(w http.ResponseWriter, r *http.Request) 
 // --- actions ---
 
 func (s *Server) handleGitHubRepoWorkflows(w http.ResponseWriter, r *http.Request) error {
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.WorkflowList, error) {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.WorkflowList, error) {
 		return access.Workflows(r.Context())
 	})
 }
@@ -380,13 +380,13 @@ func (s *Server) handleGitHubRepoRuns(w http.ResponseWriter, r *http.Request) er
 		}
 		workflow = n
 	}
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.RunPage, error) {
-		return access.Runs(r.Context(), workflow, r.URL.Query().Get("branch"), githubQueryPage(r))
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.RunPage, error) {
+		return access.Runs(r.Context(), workflow, r.URL.Query().Get("branch"), ghResourcePage(r))
 	})
 }
 
 func (s *Server) handleGitHubRepoWorkflowDispatch(w http.ResponseWriter, r *http.Request) error {
-	workflow, err := githubPathNumber(r, "workflow", "workflow")
+	workflow, err := ghResourceNumber(r, "workflow", "workflow")
 	if err != nil {
 		return err
 	}
@@ -394,14 +394,14 @@ func (s *Server) handleGitHubRepoWorkflowDispatch(w http.ResponseWriter, r *http
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	result, err := access.Dispatch(r.Context(), workflow, req)
 	// The input names may say what a run is for; their values may be
 	// secrets someone pasted, so only the count is kept.
-	s.githubChanged(r, access, "github.workflow.dispatch", map[string]any{"workflow": workflow, "ref": req.Ref, "inputs": len(req.Inputs)}, err)
+	s.ghResourceChanged(r, access, "github.workflow.dispatch", map[string]any{"workflow": workflow, "ref": req.Ref, "inputs": len(req.Inputs)}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -410,7 +410,7 @@ func (s *Server) handleGitHubRepoWorkflowDispatch(w http.ResponseWriter, r *http
 }
 
 func (s *Server) handleGitHubRepoRunRerun(w http.ResponseWriter, r *http.Request) error {
-	run, err := githubPathNumber(r, "run", "run")
+	run, err := ghResourceNumber(r, "run", "run")
 	if err != nil {
 		return err
 	}
@@ -420,12 +420,12 @@ func (s *Server) handleGitHubRepoRunRerun(w http.ResponseWriter, r *http.Request
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	err = access.Rerun(r.Context(), run, req.FailedOnly)
-	s.githubChanged(r, access, "github.run.rerun", map[string]any{"run": run, "failedOnly": req.FailedOnly}, err)
+	s.ghResourceChanged(r, access, "github.run.rerun", map[string]any{"run": run, "failedOnly": req.FailedOnly}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -434,16 +434,16 @@ func (s *Server) handleGitHubRepoRunRerun(w http.ResponseWriter, r *http.Request
 }
 
 func (s *Server) handleGitHubRepoRunCancel(w http.ResponseWriter, r *http.Request) error {
-	run, err := githubPathNumber(r, "run", "run")
+	run, err := ghResourceNumber(r, "run", "run")
 	if err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	err = access.CancelRun(r.Context(), run)
-	s.githubChanged(r, access, "github.run.cancel", map[string]any{"run": run}, err)
+	s.ghResourceChanged(r, access, "github.run.cancel", map[string]any{"run": run}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -454,12 +454,12 @@ func (s *Server) handleGitHubRepoRunCancel(w http.ResponseWriter, r *http.Reques
 // --- collaborators ---
 
 func (s *Server) handleGitHubRepoCollaborators(w http.ResponseWriter, r *http.Request) error {
-	return githubRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.Collaborators, error) {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.Collaborators, error) {
 		return access.Collaborators(r.Context())
 	})
 }
 
-func githubPathUsername(r *http.Request) (string, error) {
+func ghResourceUsername(r *http.Request) (string, error) {
 	login := chi.URLParam(r, "username")
 	if !githubrepos.ValidOwner(login) {
 		return "", httpx.BadRequest("%q is not a GitHub username", login)
@@ -468,7 +468,7 @@ func githubPathUsername(r *http.Request) (string, error) {
 }
 
 func (s *Server) handleGitHubRepoCollaboratorSet(w http.ResponseWriter, r *http.Request) error {
-	login, err := githubPathUsername(r)
+	login, err := ghResourceUsername(r)
 	if err != nil {
 		return err
 	}
@@ -478,7 +478,7 @@ func (s *Server) handleGitHubRepoCollaboratorSet(w http.ResponseWriter, r *http.
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
@@ -487,7 +487,7 @@ func (s *Server) handleGitHubRepoCollaboratorSet(w http.ResponseWriter, r *http.
 	if result != nil {
 		detail["invited"] = result.Invited
 	}
-	s.githubChanged(r, access, "github.collaborator.set", detail, err)
+	s.ghResourceChanged(r, access, "github.collaborator.set", detail, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -496,16 +496,16 @@ func (s *Server) handleGitHubRepoCollaboratorSet(w http.ResponseWriter, r *http.
 }
 
 func (s *Server) handleGitHubRepoCollaboratorRemove(w http.ResponseWriter, r *http.Request) error {
-	login, err := githubPathUsername(r)
+	login, err := ghResourceUsername(r)
 	if err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	err = access.RemoveCollaborator(r.Context(), login)
-	s.githubChanged(r, access, "github.collaborator.remove", map[string]any{"username": login}, err)
+	s.ghResourceChanged(r, access, "github.collaborator.remove", map[string]any{"username": login}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
@@ -514,16 +514,16 @@ func (s *Server) handleGitHubRepoCollaboratorRemove(w http.ResponseWriter, r *ht
 }
 
 func (s *Server) handleGitHubRepoInvitationCancel(w http.ResponseWriter, r *http.Request) error {
-	invitation, err := githubPathNumber(r, "invitation", "invitation")
+	invitation, err := ghResourceNumber(r, "invitation", "invitation")
 	if err != nil {
 		return err
 	}
-	access, err := s.githubAccess(r)
+	access, err := s.ghResourceAccess(r)
 	if err != nil {
 		return err
 	}
 	err = access.CancelInvitation(r.Context(), invitation)
-	s.githubChanged(r, access, "github.invitation.cancel", map[string]any{"invitation": invitation}, err)
+	s.ghResourceChanged(r, access, "github.invitation.cancel", map[string]any{"invitation": invitation}, err)
 	if err != nil {
 		return githubResourceErr(err)
 	}
