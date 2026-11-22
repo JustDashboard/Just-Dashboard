@@ -1,6 +1,6 @@
 # Automatic recipes and serving defaults
 
-`just-dashboard-recipes-v4` prepares immutable Dockerfiles using digest-pinned catalogue bases. Build
+`just-dashboard-recipes-v5` prepares immutable Dockerfiles using digest-pinned catalogue bases, parsed by the Dockerfile frontend pinned by digest in `recipeDockerfileSyntax` (1.22). Build
 commands execute inside the build container; source inspection never executes repository configuration
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot
 redirect output outside the build context. Detection ignores this generated directory.

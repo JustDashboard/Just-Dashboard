@@ -23,7 +23,7 @@ var (
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v4"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v5"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -300,6 +300,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 	if config.NoCache || forceNoCache {
 		prepared.CachePolicy = "no_cache"
 	}
+	config.cache = newRecipeCache(tag, prepared.CachePolicy)
 	for _, secret := range config.Secrets {
 		prepared.SecretIDs = append(prepared.SecretIDs, secret.Variable)
 	}
@@ -972,7 +973,7 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 	installSecrets := buildSecretMounts(config.Secrets, "install")
 	buildSecrets := buildSecretMounts(config.Secrets, "build")
 	var lines []string
-	lines = append(lines, "# syntax=docker/dockerfile:1.10")
+	lines = append(lines, recipeDockerfileSyntax)
 	switch recipe.kind {
 	case "node":
 		rendered, err := renderNodeDockerfile(recipe, config, bases, installSecrets, buildSecrets)
@@ -1050,7 +1051,7 @@ func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base 
 	} else if !validOutputDirectory(output) {
 		return "", fmt.Errorf("%w: static output directory is invalid", ErrUnsupportedBuilder)
 	}
-	lines := append([]string{"# syntax=docker/dockerfile:1.10"}, serving.stage(base, "", filepath.ToSlash(output)+"/")...)
+	lines := append([]string{recipeDockerfileSyntax}, serving.stage(base, "", filepath.ToSlash(output)+"/")...)
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
