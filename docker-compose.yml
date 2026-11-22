@@ -132,6 +132,9 @@ services:
       # URL is an origin: https, or http for localhost while developing the site.
       JD_ACCOUNT_LINK: ${JD_ACCOUNT_LINK:-true}
       JD_ACCOUNT_URL: ${JD_ACCOUNT_URL:-https://just-dashboard.com}
+      # App domains (<app>.<handle>.just-dashboard.com) through the account
+      # link; nothing happens until an administrator claims a handle.
+      JD_APP_DOMAINS: ${JD_APP_DOMAINS:-true}
       JD_USAGE_PING: ${JD_USAGE_PING:-true}
       # Connecting this server to a Just Hub on its own tailnet. Nothing is
       # sent until an administrator connects it (Settings, or
