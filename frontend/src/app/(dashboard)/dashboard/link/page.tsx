@@ -9,6 +9,8 @@ import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
 import { useAccountLink } from "@/hooks/use-account-link"
+import { useAppDomain } from "@/hooks/use-app-domain"
+import { AppDomainSection } from "@/components/account-link/app-domain-section"
 import { ConnectPicture } from "@/components/account-link/connect-picture"
 import { LinkPanel } from "@/components/account-link/link-panel"
 import { Policy } from "@/components/account-link/policy"
@@ -46,10 +48,16 @@ import { TextShimmer } from "@/components/ui/text-shimmer"
  * switched off, which explains the switch and offers nothing. The backend decides all four; the
  * page only asks, every five seconds while a request waits and every fifteen otherwise, so
  * approving in the other tab flips this one to linked.
+ *
+ * The last section is the server's just-dashboard.com address (`app-domain-section.tsx`), read
+ * here rather than in the section because Unlink's confirmation names the app names it would stop.
  */
 export default function AccountLinkPage() {
   const account = useAccountLink()
   const { status } = account
+  // Asked only where linking is on: with JD_ACCOUNT_LINK=false there is no address to have.
+  const appDomain = useAppDomain({ enabled: Boolean(status?.enabled) })
+  const held = appDomain.status?.domain
   // Least access first: the person who only presses Link has chosen the scope that cannot act.
   const [choice, setChoice] = useState<AccountLinkScope>("observe")
 
@@ -110,6 +118,11 @@ export default function AccountLinkPage() {
             <LinkActions
               site={site}
               owner={link.owner}
+              appDomain={
+                held && held.status !== "detached"
+                  ? { hostname: held.hostname, usedBy: appDomain.status?.usedBy ?? [] }
+                  : undefined
+              }
               onSync={account.sync}
               onUnlink={account.unlink}
             />
@@ -144,6 +157,7 @@ export default function AccountLinkPage() {
                   <Policy policy={link.updatePolicy} scope={link.scope} site={site} />
                   <Keys fingerprint={status.fingerprint} siteKeys={link.siteKeys} />
                 </div>
+                <AppDomainSection link={status} site={site} domain={appDomain} className={BLOCK} />
               </>
             ) : (
               <>
@@ -156,6 +170,7 @@ export default function AccountLinkPage() {
                   className={BLOCK}
                 />
                 <SharedFields scope={scope} className={BLOCK} />
+                <AppDomainSection link={status} site={site} domain={appDomain} className={BLOCK} />
               </>
             )}
           </div>

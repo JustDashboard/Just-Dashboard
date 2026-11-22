@@ -6,7 +6,7 @@ import { commandWords, heartbeatStale, scopeName } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { calendarDate, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { AccountLinkScope, AccountLinkStatus } from "@/lib/types"
+import type { AccountLinkScope, AccountLinkStatus, AppDomainUse } from "@/lib/types"
 import { useNow } from "@/hooks/use-now"
 import {
   ACTIVITY_ROW as ROW,
@@ -185,15 +185,23 @@ export function Keys({
   )
 }
 
-/** Sync now and Unlink, for the identity line: the two things done to a link that exists. */
+/**
+ * Sync now and Unlink, for the identity line: the two things done to a link that exists.
+ *
+ * Unlinking also releases this server's just-dashboard.com address on the site, so when
+ * deployments use it the confirmation names them: their names stop resolving.
+ */
 export function LinkActions({
   site,
   owner,
+  appDomain,
   onSync,
   onUnlink,
 }: {
   site: string
   owner: string
+  /** The address this server holds, and the deployment names under it. */
+  appDomain?: { hostname: string; usedBy: AppDomainUse[] }
   onSync: () => Promise<AccountLinkStatus>
   onUnlink: () => Promise<void>
 }) {
@@ -220,6 +228,25 @@ export function LinkActions({
       description: (
         <>
           <p>This server stops sending snapshots to {site} and ignores every command from it.</p>
+          {appDomain && appDomain.usedBy.length > 0 && (
+            <div className="space-y-1.5">
+              <p>
+                {site} also releases {appDomain.hostname}, so{" "}
+                {appDomain.usedBy.length === 1 ? "this name stops" : "these names stop"} resolving:
+              </p>
+              <ul aria-label="Names that stop resolving" className="space-y-0.5">
+                {appDomain.usedBy.map((use) => (
+                  <li key={`${use.environmentId}-${use.hostname}`} className="min-w-0 truncate">
+                    <span className="font-mono">{use.hostname}</span>
+                    <span className="text-muted-foreground">
+                      {" "}
+                      · {use.project} · {use.environment}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
           <p className="text-muted-foreground">
             Linked to {owner}. To use the site with this server again, link it again.
           </p>

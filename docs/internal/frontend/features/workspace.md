@@ -227,12 +227,30 @@ mirror of what the site set beside this server's key and the pinned site keys. N
 (§15 pass 2 dropped as `/git` drops it; the page's doc comment names where each figure went). Unlink
 asks first. A link request that ended without a link is said once, and dismissing it is remembered
 for the tab. With `JD_ACCOUNT_LINK=false` the page says so and offers nothing, picture included.
+The last section is **just-dashboard.com address** (named after the zone `GET
+/dashboard/link/domain` reports; [app domains](../../backend/app-domains.md)), one state at a time:
+not linked, a sentence on what it is and that the link above comes first; linked but not offered,
+the site's reason; site unreachable, a warning with the reason; ready, a **Handle** field whose four
+rules (`lib/app-domain.ts`, the protocol's section 3) are `FieldCheck`s lit while typing, a live
+preview `app.<handle>.<zone>` with the zone from the answer, one line that claiming publishes this
+server's IP address in public DNS, then **Claim**; held, a ruled `DetailList` of the address, the app
+names, the address it points at and the wildcard certificate's `Status` with **Issue** or **Renew**
+(issuing polls every three seconds until it settles), the *New deployments get this address* switch,
+which applies at once, **Used by** as rows leading to each deployment's Domains settings, and
+**Release** on the title line, destructive, confirmed, and off while anything uses the address
+(the line under the rows says why). Suspended and detached are a notice with the reason, what it
+means and the deployments it leaves without a name; detached offers the claim again with the old
+handle. Every refusal (protocol section 5, plus `domain_in_use`, `session_required`, `not_linked`)
+is a sentence from `refusalWords`, `address_mismatch` naming the address the site saw. Unlink's
+confirmation names the app names that stop resolving when the address is in use. A backend without
+the route (404) draws no section at all. `JD_APP_DOMAINS=false` is one line naming the switch.
 Configuration carries one line pointing here
 
 **Implementation:** `app/(dashboard)/dashboard/link/page.tsx`, `components/account-link/`
 (`connect-picture.tsx`, whose `LinkPicture` Settings → Hub draws too, `link-panel.tsx`,
-`status-panel.tsx`, `scope-cards.tsx`, `shared-fields.tsx`, `marks.tsx`, `policy.tsx`),
-`hooks/use-account-link.ts`, `hooks/use-now.ts`, `lib/account-link.ts` (unit-tested; the scope
+`status-panel.tsx`, `scope-cards.tsx`, `shared-fields.tsx`, `marks.tsx`, `policy.tsx`,
+`app-domain-section.tsx`), `hooks/use-account-link.ts`, `hooks/use-app-domain.ts`,
+`lib/app-domain.ts` (unit-tested), `tests/browser/app-domain-link.spec.ts`, `hooks/use-now.ts`, `lib/account-link.ts` (unit-tested; the scope
 wording is the contract's table, the command kinds' words are `commandWords`); checked by
 `tests/browser/account-link.spec.ts` (`system.admin` only)
 

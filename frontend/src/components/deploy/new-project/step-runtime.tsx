@@ -151,6 +151,7 @@ export function StepRuntime({
       {!worker && (
         <PublicAddress
           id={SECTION_IDS.address}
+          name={flow.name}
           domains={configuration.domains}
           suggestion={flow.hostname}
           onChange={(domains) => setConfiguration(synchronizePrimaryDomain(configuration, domains))}

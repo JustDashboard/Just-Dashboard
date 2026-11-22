@@ -189,8 +189,8 @@ segment under `/api/v1`.
 | **System** | | | | | | |
 | Settings → Version | `dashboard/` | `update/` | `/dashboard` → `handlers_selfupdate.go`, which mounts everything under `/dashboard` | `selfupdate`, `version` | `dashboard-ui.spec.ts` | [`platform.md`](../backend/platform.md) |
 | Settings → Configuration | `dashboard/configuration/` | `config/` | `/dashboard` → `handlers_selfconfig.go`, `handlers_uninstall.go` | `selfcfg`, `uninstall`, `stackports` | `dashboard-ui.spec.ts` | [`platform.md`](../backend/platform.md) |
-| Settings → Connect | `dashboard/link/` | `account-link/` | `/dashboard/link` → `handlers_accountlink.go` | `accountlink` | `account-link.spec.ts` | [`account-link.md`](../backend/account-link.md) |
-| Settings → Connect → just-dashboard.com address | `dashboard/link/` | `account-link/` | `/dashboard/link/domain` → `handlers_appdomain.go`; `/deploy/app-domain` | `appdomain`, `accountlink/domain.go`, `proxysvc/app_domain*.go` | | [`app-domains.md`](../backend/app-domains.md) |
+| Settings → Connect | `dashboard/link/` | `account-link/` | `/dashboard/link` → `handlers_accountlink.go` | `accountlink` | `account-link.spec.ts`, `app-domain-link.spec.ts` | [`account-link.md`](../backend/account-link.md) |
+| Settings → Connect → just-dashboard.com address | `dashboard/link/` | `account-link/` | `/dashboard/link/domain` → `handlers_appdomain.go`; `/deploy/app-domain` | `appdomain`, `accountlink/domain.go`, `proxysvc/app_domain*.go` | `app-domain-link.spec.ts`, `app-domain-deploy.spec.ts` | [`app-domains.md`](../backend/app-domains.md) |
 | Settings → Hub | `dashboard/hub/` | `hub-link/` | `/dashboard/hub` → `handlers_hublink.go`, `handlers_hubsignin.go` | `hublink` | `hub-link.spec.ts`, `hub-signin.spec.ts` | [`hub-link.md`](../backend/hub-link.md) |
 | **Account** (footer menu) | | | | | | |
 | Profile, Security, Sessions, Workspace, Users | `account/` | `account/` | `/account`, `/auth`, `/dashboard-users` → mounted in `routes.go`; `handlers_auth.go`, `handlers_account.go`, `handlers_passkeys.go` | `auth` | `account-ui.spec.ts`, `account-passkeys.spec.ts` | [`runtime-boundaries.md`](../architecture/runtime-boundaries.md) |
