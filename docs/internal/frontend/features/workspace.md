@@ -244,6 +244,13 @@ handle. Every refusal (protocol section 5, plus `domain_in_use`, `session_requir
 is a sentence from `refusalWords`, `address_mismatch` naming the address the site saw. Unlink's
 confirmation names the app names that stop resolving when the address is in use. A backend without
 the route (404) draws no section at all. `JD_APP_DOMAINS=false` is one line naming the switch.
+An address the account chose when it approved the link (`offer`, claimed by the server itself;
+[app domains](../../backend/app-domains.md)) is one line led by a live dot, *Claiming
+acme.just-dashboard.com, the address chosen when this server's link was approved…*, while the page
+asks every three seconds until it is held; a failed automatic claim is the backend's sentence in a
+notice over the claim form, filled in with the offered handle. While app domains are on, the link
+card before linking (choosing and waiting) ends with one line: when you approve the link on the
+site, you can give this server an address for its apps there.
 Configuration carries one line pointing here
 
 **Implementation:** `app/(dashboard)/dashboard/link/page.tsx`, `components/account-link/`

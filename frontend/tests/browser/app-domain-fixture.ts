@@ -40,6 +40,7 @@ export type DomainState = {
     environment: string
     hostname: string
   }[]
+  offer: { handle: string; hostname: string; error: string | null } | null
 }
 
 export const ZONE = "just-dashboard.com"
@@ -58,6 +59,7 @@ const base: DomainState = {
   domain: null,
   certificate: null,
   usedBy: [],
+  offer: null,
 }
 
 export const notLinked: DomainState = {
@@ -83,6 +85,15 @@ export const unreachable: DomainState = {
 }
 
 export const readyToClaim = (zone = ZONE): DomainState => ({ ...base, zone })
+
+/**
+ * The handle the account chose at approval, before the server has claimed it: under way, or
+ * failed with the sentence the backend keeps.
+ */
+export const offered = (error: string | null = null, handle = "acme"): DomainState => ({
+  ...base,
+  offer: { handle, hostname: `${handle}.${ZONE}`, error },
+})
 
 export const turnedOff: DomainState = { ...base, enabled: false, available: null, zone: null }
 
@@ -135,6 +146,8 @@ export async function mockAppDomain(page: Page, initial: DomainState) {
     refusal: undefined as Refusal | undefined,
     /** Reads left before an issuing certificate settles as valid. */
     issuingReads: 2,
+    /** Reads left before an offer under way is claimed (`null` keeps it under way). */
+    claimReads: 2 as number | null,
   }
   const respond = (route: Route, body: unknown, status = 200, headers = {}) =>
     route.fulfill({ status, contentType: "application/json", headers, body: JSON.stringify(body) })
@@ -144,7 +157,20 @@ export async function mockAppDomain(page: Page, initial: DomainState) {
     const path = new URL(request.url()).pathname.replace(/^\/api\/v1/, "")
     const method = request.method()
     if (method === "GET") {
-      if (world.state.certificate?.state === "issuing" && --world.issuingReads <= 0) {
+      const offer = world.state.offer
+      if (offer && !offer.error && world.claimReads !== null && --world.claimReads <= 0) {
+        // The server claimed it by itself, exactly as a manual claim would.
+        world.issuingReads = 2
+        world.state = {
+          ...held("active", { usedBy: world.state.usedBy }, offer.handle),
+          certificate: {
+            name: `jd-app-domain-${offer.handle}`,
+            state: "issuing",
+            expiresAt: null,
+            error: null,
+          },
+        }
+      } else if (world.state.certificate?.state === "issuing" && --world.issuingReads <= 0) {
         world.state = {
           ...world.state,
           certificate: { ...world.state.certificate, state: "valid", expiresAt: EXPIRES },

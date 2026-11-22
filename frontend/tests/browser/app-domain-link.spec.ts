@@ -6,6 +6,7 @@ import {
   mockAppDomain,
   notLinked,
   notOffered,
+  offered,
   readyToClaim,
   shopUse,
   turnedOff,
@@ -447,5 +448,126 @@ for (const [width, height] of [
       expect(await scrollsSideways(page), `${name} at ${width}`).toBe(false)
       await section(page).screenshot({ path: `test-results/app-domain-${name}-${width}.png` })
     }
+  })
+}
+
+// Claiming at link time (AUTOCLAIM.md) -------------------------------------------------------
+
+const pending = {
+  ...site,
+  state: "pending",
+  request: {
+    userCode: "ABCD-1234",
+    approveUrl: "https://just-dashboard.com/link?code=ABCD-1234",
+    expiresAt: iso(Date.now() + 14 * 60_000),
+    scope: "observe",
+  },
+}
+
+const ADDRESS_LINE =
+  "When you approve the link on just-dashboard.com, you can give this server an address for its apps there."
+
+for (const [name, link] of [
+  ["not linked", unlinked],
+  ["waiting for approval", pending],
+] as const) {
+  test(`${name}: the link card says the address is chosen on the approval page`, async ({
+    page,
+  }) => {
+    await mock(page, link, notLinked)
+    await page.goto("/dashboard/link")
+    const line = page.getByText(ADDRESS_LINE)
+    await expect(line).toBeVisible()
+    await expect(line).toHaveCount(1)
+    // It belongs to the link card, above the address section, and is only a line: nothing to press.
+    expect((await line.boundingBox())!.y).toBeLessThan((await section(page).boundingBox())!.y)
+    expect((await line.boundingBox())!.height).toBeLessThanOrEqual(40)
+  })
+}
+
+test("with app domains off the link card says nothing about an address", async ({ page }) => {
+  await mock(page, unlinked, turnedOff)
+  await page.goto("/dashboard/link")
+  await expect(page.getByRole("button", { name: "Link this server", exact: true })).toBeVisible()
+  await expect(page.getByText(ADDRESS_LINE)).toHaveCount(0)
+})
+
+test("an offered address is claimed by itself, and the page follows it to the end", async ({
+  page,
+}) => {
+  const { world } = await mock(page, linked, offered())
+  world.claimReads = 3
+  await page.goto("/dashboard/link")
+  const address = section(page)
+  await expect(address.getByRole("status")).toContainText(
+    "Claiming acme.just-dashboard.com, the address chosen when this server's link was approved",
+  )
+  // Nothing to decide while it is under way.
+  await expect(address.getByRole("textbox", { name: "Handle" })).toHaveCount(0)
+  await expect(address.getByRole("button")).toHaveCount(0)
+  // The page asks every three seconds until it settles: held, then the wildcard valid.
+  await expect(address.getByText("acme.just-dashboard.com", { exact: true })).toBeVisible({
+    timeout: 15_000,
+  })
+  await expect(address.getByText(/^Valid until /)).toBeVisible({ timeout: 15_000 })
+  await expect(address.getByText(/^Claiming/)).toHaveCount(0)
+  // The dashboard claimed it; the page sent nothing.
+  expect(world.calls).toEqual([])
+})
+
+test("a failed automatic claim says why, with the claim form filled in", async ({ page }) => {
+  const reason = "Another server holds that handle. Choose another."
+  const { world } = await mock(page, linked, offered(reason))
+  await page.goto("/dashboard/link")
+  const address = section(page)
+  const notice = address.getByText("Could not claim acme.just-dashboard.com")
+  await expect(notice).toBeVisible()
+  await expect(address.getByText(reason)).toBeVisible()
+  const field = address.getByRole("textbox", { name: "Handle" })
+  await expect(field).toHaveValue("acme")
+  // The reason stands above the form it is about.
+  expect((await notice.boundingBox())!.y).toBeLessThan((await field.boundingBox())!.y)
+  await expect(page.getByTestId("app-domain-preview")).toHaveText("app.acme.just-dashboard.com")
+
+  await field.fill("acme-shop")
+  await address.getByRole("button", { name: "Claim", exact: true }).click()
+  expect(world.calls).toEqual([
+    { method: "PUT", path: "/dashboard/link/domain", body: { handle: "acme-shop" } },
+  ])
+  await expect(address.getByText("acme-shop.just-dashboard.com", { exact: true })).toBeVisible()
+  await expect(address.getByText("Could not claim acme.just-dashboard.com")).toHaveCount(0)
+})
+
+for (const [width, height] of [
+  [390, 900],
+  [1280, 1400],
+]) {
+  test(`both auto-claim states fit the page at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height })
+    const { world } = await mock(page, linked, offered())
+    world.claimReads = null
+    for (const [name, state] of [
+      ["claiming", offered()],
+      ["claim-failed", offered("The site saw this server's request come from 198.51.100.7.")],
+    ] as const) {
+      world.state = state
+      await page.goto("/dashboard/link")
+      await expect(
+        section(page)
+          .getByText(/^Claiming|^Could not claim/)
+          .first(),
+      ).toBeVisible()
+      expect(await scrollsSideways(page), `${name} at ${width}`).toBe(false)
+      await section(page).screenshot({ path: `test-results/app-domain-${name}-${width}.png` })
+    }
+    // And the link card's line before linking.
+    await page.unroute("**/api/v1/**")
+    await mock(page, unlinked, notLinked)
+    await page.goto("/dashboard/link")
+    await expect(page.getByText(ADDRESS_LINE)).toBeVisible()
+    expect(await scrollsSideways(page)).toBe(false)
+    await page
+      .locator("section", { hasText: "Choose what the site can do" })
+      .screenshot({ path: `test-results/app-domain-link-card-${width}.png` })
   })
 }

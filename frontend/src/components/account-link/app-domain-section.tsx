@@ -15,7 +15,7 @@ import {
 } from "@/lib/app-domain"
 import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
-import type { AccountLinkStatus, AppDomainStatus, AppDomainUse } from "@/lib/types"
+import type { AccountLinkStatus, AppDomainOffer, AppDomainStatus, AppDomainUse } from "@/lib/types"
 import type { AppDomainControls } from "@/hooks/use-app-domain"
 import { ACTIVITY_ROW, MarkTile } from "@/components/account-link/marks"
 import { useConfirm } from "@/components/confirm-dialog"
@@ -24,7 +24,7 @@ import { Field, FieldCheck, FieldChecks, FormNote, OptionList, OptionRow } from 
 import { Row, RowList } from "@/components/row-list"
 import { Section } from "@/components/section"
 import { EmptyNote, Notice } from "@/components/state"
-import { Status } from "@/components/status-dot"
+import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import {
   InputGroup,
@@ -145,7 +145,9 @@ export function AppDomainSection({
           </p>
         ) : held?.status === "active" ? (
           <Active status={status} held={held} domain={domain} />
-        ) : held?.status === "suspended" ? null : status.available === false ? (
+        ) : held?.status === "suspended" ? null : status.offer && !held ? (
+          <Offered status={status} offer={status.offer} domain={domain} />
+        ) : status.available === false ? (
           <Notice icon={Globe} title={`${site} is not offering addresses`}>
             {status.reason ?? "The site has not set up the DNS it needs for them."}
           </Notice>
@@ -166,6 +168,41 @@ export function AppDomainSection({
         )}
       </div>
     </Section>
+  )
+}
+
+/**
+ * The address the account chose for this server when it approved the link, which the server
+ * claims by itself: under way, it is one line led by a live dot while the page asks every
+ * three seconds; failed, it is the reason and the ordinary claim form, filled in with that handle.
+ */
+function Offered({
+  status,
+  offer,
+  domain,
+}: {
+  status: AppDomainStatus
+  offer: AppDomainOffer
+  domain: AppDomainControls
+}) {
+  if (!offer.error) {
+    return (
+      <p role="status" className="flex max-w-3xl min-w-0 items-start gap-2 text-body">
+        <StatusDot tone="notice" live className="mt-1.5" />
+        <span className="min-w-0 text-muted-foreground">
+          Claiming <span className="font-mono break-all text-foreground">{offer.hostname}</span>,
+          the address chosen when this server&apos;s link was approved…
+        </span>
+      </p>
+    )
+  }
+  return (
+    <>
+      <Notice tone="danger" icon={Warning} title={`Could not claim ${offer.hostname}`}>
+        {offer.error}
+      </Notice>
+      <Claim key={offer.handle} status={status} domain={domain} initial={offer.handle} />
+    </>
   )
 }
 
