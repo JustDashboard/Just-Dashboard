@@ -3800,6 +3800,7 @@ type PullRequestWithPreview struct {
 
 // RecentRun is deploy.RecentRun in the dashboard's source.
 type RecentRun struct {
+	ClaimedAt   *time.Time      `json:"claimedAt,omitempty"`
 	EndedAt     *time.Time      `json:"endedAt,omitempty"`
 	ID          int64           `json:"id,omitempty"`
 	Operation   DeployOperation `json:"operation,omitempty"`

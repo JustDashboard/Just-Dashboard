@@ -1259,6 +1259,21 @@ only renderer/executor/validation authority for their feature.
   feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
   with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
   figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
+- A passed build says where its time went. The executor feeds the same redacted transcript to a
+  `buildTimingReader` (`build_timing.go`), which reads BuildKit's own figures as they stream: a
+  Dockerfile step's header (`#13 [build 3/4] RUN …`, not `[internal]` bookkeeping) and its `DONE`
+  seconds or `CACHED`, the `exporting to …` step and its `exporting layers` (or `sending tarball`) and
+  `unpacking` seconds, matched loosely because the exporter's wording follows the driver. A RUN of the
+  plan's build command (`prepared.buildCommand`, else the plan's) is the compile, one of the recipe's
+  install line (`prepared.install`) the install, a RUN that does both the compile; with neither named
+  the package managers' and toolchains' own verbs decide. A status line starts a new buildx run (a
+  Compose stack's next service), whose figures are added. The summary — install and compile seconds
+  or cached, export, unpack and the export step's seconds, the steps and how many were cached, and the
+  image's bytes (a stack's images added) — is the build step's evidence `timing`, absent when no
+  BuildKit ran (a pulled image). The run page says it in one sentence on the Build step's record, and
+  beside a run's running time how long runs of its kind usually take: the median, over the project's
+  `recentRuns` that succeeded (at least three), from `claimedAt` to `endedAt`. The tests read neutral
+  copies of real transcripts (`testdata/buildkit-timing/`).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -1876,7 +1891,7 @@ only renderer/executor/validation authority for their feature.
   refused in URLs can carry a token there — and left out when it does not parse), the desired build
   plan's `recipe` and `framework`, `images` (the distinct references the live release's runtime
   snapshot runs, read from the same snapshot as the service count) and `recentRuns` (the newest
-  fourteen, newest first). The strip and `lastRun` are one statement, `recentProjectRuns`: a
+  fourteen, newest first, each with its request, claim and end). The strip and `lastRun` are one statement, `recentProjectRuns`: a
   `ROW_NUMBER()` ranking of every card's runs that carries only ids, answered in order by
   `idx_deploy_runs_project_requested (project_id, requested_at DESC, id DESC)`, joined back to the
   whole rows it keeps, so `recentRuns[0]` is `lastRun` by construction. Ranking whole rows in a second

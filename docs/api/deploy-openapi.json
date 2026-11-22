@@ -11555,6 +11555,13 @@
       },
       "deploy.RecentRun": {
         "properties": {
+          "claimedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "endedAt": {
             "format": "date-time",
             "type": [

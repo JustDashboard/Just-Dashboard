@@ -1,0 +1,71 @@
+#0 building with "default" instance using docker driver
+
+#1 [internal] load build definition from Dockerfile.v1
+#1 transferring dockerfile: 1.37kB done
+#1 DONE 0.0s
+
+#2 resolve image config for docker-image://docker.io/docker/dockerfile:1.19
+#2 DONE 0.4s
+
+#3 docker-image://docker.io/docker/dockerfile:1.19@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6
+#3 resolve docker.io/docker/dockerfile:1.19@sha256:b6afd42430b15f2d2a4c5a02b919e98a525b785b1aaff16747d2f623364e39b6 0.1s done
+#3 CACHED
+
+#4 [internal] load metadata for docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#4 DONE 0.1s
+
+#5 [internal] load metadata for docker.io/oven/bun:1-alpine@sha256:da816670775f4c2b4e990b6b1847cf5540dcdc721a42033dd331ce7a88ba6a3b
+#5 DONE 0.1s
+
+#6 [internal] load build context
+#6 DONE 0.0s
+
+#7 FROM docker.io/oven/bun:1-alpine@sha256:da816670775f4c2b4e990b6b1847cf5540dcdc721a42033dd331ce7a88ba6a3b
+#7 resolve docker.io/oven/bun:1-alpine@sha256:da816670775f4c2b4e990b6b1847cf5540dcdc721a42033dd331ce7a88ba6a3b 0.2s done
+#7 DONE 0.2s
+
+#8 [toolchain 1/3] FROM docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a
+#8 resolve docker.io/library/node:22-alpine@sha256:1314fb30ec37592d5845e5a160d522c0e680972aa534549940b8d73bde88481a 0.2s done
+#8 DONE 0.2s
+
+#6 [internal] load build context
+#6 transferring context: 15.01kB 0.1s done
+#6 DONE 0.2s
+
+#9 [toolchain 2/3] COPY --from=oven/bun:1-alpine@sha256:da816670775f4c2b4e990b6b1847cf5540dcdc721a42033dd331ce7a88ba6a3b /usr/local/bin/bun /usr/local/bin/bun
+#9 CACHED
+
+#10 [build 2/5] COPY package.json bun.lock ./
+#10 CACHED
+
+#11 [build 3/5] RUN --mount=type=cache,id=jd-p13-bun,target=/root/.bun/install/cache bun install --frozen-lockfile
+#11 CACHED
+
+#12 [build 4/5] COPY . .
+#12 CACHED
+
+#13 [toolchain 3/3] RUN ln -s bun /usr/local/bin/bunx
+#13 CACHED
+
+#14 [build 1/5] WORKDIR /app
+#14 CACHED
+
+#15 [build 5/5] RUN --mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true bun run build
+#15 CACHED
+
+#16 [stage-2 2/3] COPY --from=build /app/node_modules /app/node_modules
+#16 CACHED
+
+#17 [stage-2 3/3] COPY --from=build --exclude=node_modules /app /app
+#17 CACHED
+
+#18 exporting to image
+#18 exporting layers done
+#18 exporting manifest sha256:36f5b67a31c419cb32db286772e83de89d5b7cb76ea431d69bf67384b191707d 0.0s done
+#18 exporting config sha256:7438b837faf9e5cccb8a8e4fbe5ba051bbb26a346e2f048bc06ac5706ef60ced done
+#18 exporting attestation manifest sha256:9ee77cad44b1d7407d262a3eac47800e56eb0e9a47401aed42b8c8c201916f7b
+#18 exporting attestation manifest sha256:9ee77cad44b1d7407d262a3eac47800e56eb0e9a47401aed42b8c8c201916f7b 0.1s done
+#18 exporting manifest list sha256:94e72c7aa80ca6a4eece15c1d1610cd6887da10d3d5096b2ab4cae7680f93ec7 0.1s done
+#18 naming to docker.io/example/shop:v1 0.0s done
+#18 unpacking to docker.io/example/shop:v1 0.1s done
+#18 DONE 0.5s
