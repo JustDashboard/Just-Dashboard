@@ -27,6 +27,11 @@ var causeTitles = map[string]string{
 	"build_env_missing":                  "Variable missing at build",
 	"build_sqlx_offline":                 "sqlx has no offline query data",
 	"build_database_unreachable":         "Database unreachable during build",
+	"build_database_schema_missing":      "Database schema missing during build",
+	"build_static_params_empty":          "generateStaticParams returned nothing",
+	"build_database_network":             "Build could not join the database network",
+	"build_schema_step_failed":           "Schema step before the build failed",
+	"build_seed_step_failed":             "Seed step before the build failed",
 	"build_prerender_failed":             "Page failed to prerender",
 	"build_next_image_export":            "next/image in a static export",
 	"build_prisma_client_missing":        "Prisma Client not generated",
@@ -549,11 +554,29 @@ func (c *BuildCause) explain() (string, string) {
 		return "sqlx checks its queries against a database at compile time, and the build has none",
 			"run `cargo sqlx prepare`, commit the .sqlx directory, and " + variableAction(fix, "SQLX_OFFLINE", "set SQLX_OFFLINE=true for the build")
 	case "build_database_unreachable":
-		what := "the build could not reach its database, which only the running application's network can reach"
-		if c.Detail == "next" && subject != "" {
-			what = "page " + subject + " queries the database while the build prerenders it, and the database is reachable only from the running application"
+		return c.databaseUnreachable(subject)
+	case "build_database_schema_missing":
+		what := "the build read " + orDefault(subjects, "a table") + ", which the database does not have yet: the migrations that create it run after the build"
+		if c.Detail == detailSchemaApplied {
+			return "the build read " + orDefault(subjects, "a table") + ", which the database still does not have after the plan's migrations ran",
+				"add it to the migrations the start command or release task runs, or read it on request rather than while the build prerenders"
 		}
-		return what, "render that page at request time (in Next.js, `export const dynamic = 'force-dynamic'`), or move database steps into the start command or a release task"
+		later := "or render the page that reads it on request (in Next.js, `export const dynamic = 'force-dynamic'`)"
+		if c.Detail == detailNextCacheComponents {
+			later = "or read it in a component under <Suspense> instead of in generateStaticParams or at the top of the page"
+		}
+		build := "the build"
+		if c.Command != "" {
+			build = "`" + c.Command + "`"
+		}
+		return what, "apply the schema before the build reads it, by running the migration at the start of the build command, before " + build + ", " + later
+	case "build_static_params_empty":
+		page := "a page"
+		if subject != "" {
+			page = "page " + subject
+		}
+		return "the generateStaticParams of " + page + " returned no params, and with Cache Components Next.js needs at least one to build the page; the table it reads is likely empty, as a new database's is",
+			"return a placeholder param when there are no rows (and answer it with notFound()), or add the first rows — the project's seed, run once from the console — and deploy again"
 	case "build_next_image_export":
 		return "next/image's default loader optimises images on a server, and next.config exports a static site with none",
 			"set images: { unoptimized: true } in next.config, or give next/image a custom loader"
@@ -741,6 +764,33 @@ func (c *BuildCause) explain() (string, string) {
 			"pin a release that exists, or deploy again if its download failed; mise's reason is in the build log"
 	}
 	return "", "the build log holds its output"
+}
+
+// databaseUnreachable explains a database the build did not reach. A linked
+// database is reached on the environment's network (build_database.go), so
+// what is left is a database that did not answer there, an address that
+// means the build container itself, or a database outside this server.
+func (c *BuildCause) databaseUnreachable(subject string) (string, string) {
+	request := "render the pages that read it at request time (in Next.js, `export const dynamic = 'force-dynamic'`)"
+	if c.Detail == detailNextCacheComponents {
+		request = "read its data in a component under <Suspense> rather than in generateStaticParams or at the top of the page, so the build does not need it"
+	}
+	host := strings.ToLower(subject)
+	if index := strings.LastIndex(host, ":"); index > 0 && !strings.Contains(host[index:], "]") {
+		host = host[:index]
+	}
+	switch {
+	case strings.HasSuffix(host, ".jd.internal"):
+		return "the build joined the environment's network and " + subject + " did not answer there",
+			"check that the database is running on its Databases page and deploy again, or " + request
+	case host == "localhost" || strings.HasPrefix(host, "127.") || host == "::1" || host == "[::1]":
+		return "the build was given " + subject + ", which inside the build is the build container itself",
+			"link the database in Variables, so the build and the application reach it on the environment's network, or " + request
+	case strings.HasPrefix(subject, "/"):
+		return "page " + subject + " queries a database the build could not reach",
+			"make sure the database accepts connections from this server, or " + request
+	}
+	return "the build could not reach its database", "make sure the database accepts connections from this server, or " + request
 }
 
 func (c *BuildCause) runtimeVersion(subject string) (string, string) {

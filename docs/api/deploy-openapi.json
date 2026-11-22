@@ -7338,6 +7338,9 @@
       },
       "deploy.DetectedNodeBuild": {
         "properties": {
+          "cacheComponents": {
+            "type": "boolean"
+          },
           "devScripts": {
             "additionalProperties": {
               "type": "string"

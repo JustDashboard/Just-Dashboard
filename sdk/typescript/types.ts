@@ -1788,6 +1788,7 @@ export interface DetectedNetworkVariable {
 
 /** deploy.DetectedNodeBuild in the dashboard's source. */
 export interface DetectedNodeBuild {
+  cacheComponents?: boolean
   devScripts?: Record<string, string> | null
   envClient?: string[] | null
   envSchema?: string

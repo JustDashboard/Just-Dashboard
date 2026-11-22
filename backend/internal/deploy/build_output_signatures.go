@@ -167,6 +167,19 @@ var buildSignatures = []buildSignature{
 	signature("build_sqlx_offline", "sqlx", "DATABASE_URL", "set `DATABASE_URL` to use query macros").naming("DATABASE_URL"),
 	signature("build_sqlx_offline", ".sqlx", "SQLX_OFFLINE", "`SQLX_OFFLINE=true` but there is no cached data|SQLX_OFFLINE=true but there is no cached data"),
 
+	// Pages rendered at build time that read a database which does not have
+	// what they read yet: the migrations that create it run after the build.
+	// A NOTICE from `DROP … IF EXISTS` says the same words and is no failure.
+	signature("build_database_schema_missing", "", "does not exist", `relation "([^"]+)" does not exist|column "?([\w."]+)"? does not exist|The (?:table|column) `+"`([^`]+)`"+` does not exist in the current database`).
+		unlessLine(`, skipping|NOTICE`),
+	signature("build_database_schema_missing", "", "doesn't exist", `Table '([^']+)' doesn't exist`),
+	signature("build_database_schema_missing", "", "Unknown column", `Unknown column '([^']+)' in`),
+	signature("build_database_schema_missing", "", "no such ", `(?:SqliteError|SQLITE_ERROR|OperationalError).*no such (?:table|column): ([\w.]+)`),
+	// With Cache Components, Next.js refuses a generateStaticParams that
+	// returns nothing, which is what one reading an empty table returns.
+	signature("build_static_params_empty", "next", "generateStaticParams", "all `generateStaticParams` functions must return at least one result|empty-generate-static-params").
+		collecting(`Failed to collect page data for (\S+)|Error occurred prerendering page "([^"]+)"`),
+
 	// Pages rendered at build time that needed something only runtime has.
 	signature("build_database_unreachable", "next", "prerender", `Error occurred prerendering page "([^"]+)"|Failed to collect page data for (\S+)|Export encountered an error on ([^\s,:]+)`).
 		requiring(databaseErrorPattern),

@@ -25,6 +25,14 @@ type releaseStoreFixture struct {
 
 func newReleaseStoreFixture(t *testing.T) *releaseStoreFixture {
 	t.Helper()
+	return newReleaseStoreFixtureAt(t, 0)
+}
+
+// newReleaseStoreFixtureAt is the fixture with its environment at the given
+// id, 0 for the next one: a live test that builds names its image after the
+// environment, and a small id is a release image this server may hold.
+func newReleaseStoreFixtureAt(t *testing.T, environmentID int64) *releaseStoreFixture {
+	t.Helper()
 	base, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -42,9 +50,15 @@ func newReleaseStoreFixture(t *testing.T) *releaseStoreFixture {
 		t.Fatal(err)
 	}
 	fixture.projectID, _ = result.LastInsertId()
-	result, err = base.DB.Exec(
-		"INSERT INTO deploy_environments(project_id, name, slug, kind, desired_revision, strategy, expected_downtime, protected, created_at, updated_at) VALUES(?, 'Production', 'production', 'production', 1, 'blue_green', 0, 1, ?, ?)",
-		fixture.projectID, fixture.now.Unix(), fixture.now.Unix())
+	if environmentID > 0 {
+		result, err = base.DB.Exec(
+			"INSERT INTO deploy_environments(id, project_id, name, slug, kind, desired_revision, strategy, expected_downtime, protected, created_at, updated_at) VALUES(?, ?, 'Production', 'production', 'production', 1, 'blue_green', 0, 1, ?, ?)",
+			environmentID, fixture.projectID, fixture.now.Unix(), fixture.now.Unix())
+	} else {
+		result, err = base.DB.Exec(
+			"INSERT INTO deploy_environments(project_id, name, slug, kind, desired_revision, strategy, expected_downtime, protected, created_at, updated_at) VALUES(?, 'Production', 'production', 'production', 1, 'blue_green', 0, 1, ?, ?)",
+			fixture.projectID, fixture.now.Unix(), fixture.now.Unix())
+	}
 	if err != nil {
 		t.Fatal(err)
 	}

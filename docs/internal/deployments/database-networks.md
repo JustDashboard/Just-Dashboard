@@ -70,6 +70,61 @@ address and published port; ambiguous localhost bindings and unsupported network
 Host-network plans retain the host DSN. External database URLs retain their existing hosts and options.
 SQLite and ambiguous MySQL driver-only URL options retain their existing explicit refusals.
 
+## Builds that read their database
+
+A build that reads its database — a page Next.js prerenders, `generateStaticParams`, a Nuxt or Astro
+route generated at build time, Rails or Django loading models — needs the database the application
+has. Docker's own builder cannot join a user-defined network ("network mode not supported by
+buildkit"), and `--network=host` would hand repository build code the server's loopback services, so
+until 0.9.1 such a build failed with `getaddrinfo ENOTFOUND db-N.jd.internal`. Every variable is build
+and runtime scoped by default, so this was most Next.js projects with a linked database.
+
+**The networked builder** (`deploy/build_database.go`, `dockerx/buildkit_network.go`). When a build
+value's host is one of the dashboard's database names — `db-N.jd.internal`, its pooler, a preview's
+branch — build_artifact asks `NetworksForRuntime` for the networks those values need, with the same
+bindings and refusals a release gets (staging isolation, data copies), and runs the build, whatever its
+method, on a builder of the environment's own: `jd-build-e<environment>`, buildx's `docker-container`
+driver with `moby/buildkit` pinned by digest (`dockerx.NetworkedBuilderImage`), created on the first
+network and joined to any other. Its steps share the builder container's network namespace
+(`--oci-worker-net=host`, which is the container's, never the server's), and its configuration names
+Docker's embedded resolver `127.0.0.11`, which BuildKit otherwise drops from a step's `resolv.conf`; so
+a step resolves `db-N.jd.internal` as the application does and reaches the internet through the same
+resolver. The step log limits are lifted to match Docker's builder. The builder is created for the
+step and removed after it (`buildx rm --keep-state`), so it holds no endpoint on the network between
+builds; its state volume `buildx_buildkit_jd-build-e<environment>0_state` keeps the cache. Builds of
+one environment take turns on it; two environments never share one, so one environment's build cannot
+reach another's database. Starting it takes 3 to 6 seconds and removing it under two, and an
+environment's first build on it fills its own cache. It pulls base images itself, as BuildKit does, so
+the daemon's registry mirrors (`daemon.json`) do not apply to it; registry sign-ins do, through the
+docker CLI's own configuration. A build whose values name no such host stays on Docker's builder.
+
+**The schema before the build.** A recipe build that fails reading a table or column the database does
+not have yet (`build_database_schema_missing`) gets the plan's own migration applied and is built again,
+once: the start command's leading migration step, or an image release task that applies one, never a
+step that migrates from what the build writes (Adonis's `build/ace.js`, Medusa's `.medusa/server`). The
+step runs from the build's own layers: `.just-dashboard/Dockerfile.schema` is the recipe's Dockerfile
+cut at the build command's `RUN`, with the migration in its place, `ARG JD_SCHEMA_RUN` before it so it is
+never served from the cache, and the runtime values (with a release task's own `release_task` values)
+mounted as BuildKit secrets; it runs cache-only on the same builder, so every instruction before it is
+the cache the build just filled. A plan with a backup gate has the gate checked first. An environment
+that rehearses its migrations on a copy keeps that order instead — the rehearsal needs the built image
+— and the build's failure stands, naming what to change.
+
+**The seed of a new database.** A recipe build that then fails for want of rows —
+`build_static_params_empty` (Next.js with Cache Components refuses a `generateStaticParams` that
+returns none) or `build_prerender_failed` — gets the project's detected seed (`seedCommand`) the same
+way, once, only when every linked database the build reaches holds no row of the application's
+(`DatabaseHasRows`, `api/deployment_database_contents.go`: PostgreSQL and MySQL tables, leaving out the
+migration tools' records, Django's content types and permissions and PostGIS's reference systems; any
+other engine, more than 500 tables, or an error counts as holding rows). A seed usually resets the
+tables it fills, so a database with any row is never seeded. The step's log says each of these as it
+happens, and build_artifact's evidence lists them (`databaseSteps`). A step that fails ends the build as
+`build_schema_step_failed` or `build_seed_step_failed` with the command's last line; a refusal to join
+the network ends it before anything builds, as `build_database_network`.
+
+Removing an environment's networks (`removeRuntimeNetworks`) removes its builder, one a stopped
+dashboard left on the network included, and its cache first.
+
 ## Runtime ownership and replacement
 
 The API's `deploymentDatabaseNetworks` adapter owns the join between Databases, Deployments and Docker.
@@ -169,6 +224,20 @@ IPv4. See [Supabase's connection guide](https://supabase.com/docs/guides/databas
 No hosted-provider account or live provider credentials are required by the local test fixtures.
 
 ## Verification
+
+- `build_database_test.go` covers the schema Dockerfile cut, which migration the plan runs (and that
+  one migrating from the build's output is not run first), which hosts send a build to the network,
+  the new signatures from each driver and Next.js, and remedies that follow Cache Components;
+  `build_database_executor_test.go` runs build_artifact through a first deploy (network, schema, seed,
+  build), a database with rows never seeded, a build off the network, and each failure.
+  `buildkit_network_test.go` covers the builder's arguments and configuration.
+- `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLiveBuildReachesItsDatabase|TestLiveBuildStepBuildsAnApplication'`
+  builds, with the real recipe and BuildKit, a package whose build reads a PostgreSQL that only its own
+  network reaches under a `db-N.jd.internal` alias: the build reaches it, gets the migration and then
+  the seed applied from its own layers, and bakes the row into the image, leaving no endpoint on the
+  network. `JD_BUILD_DATABASE_LIVE_REPO` names a real checkout to build the same way.
+  `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDatabaseContentsSaysWhenADatabaseIsNew` counts
+  rows in a provisioned PostgreSQL and MySQL.
 
 - `linked_database_reference_test.go` saves a draft the way the configure step does (the row in the
   dotenv, the database as a dependency), commits it and checks the variable is a reference that

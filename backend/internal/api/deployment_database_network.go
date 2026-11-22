@@ -647,6 +647,14 @@ func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, 
 	if err := o.server.modules.previewBranches.removeEnvironmentBranches(ctx, environmentID); err != nil {
 		return fmt.Errorf("the preview's database branches could not be removed: %w", err)
 	}
+	// And the builder the environment's builds reached its databases from,
+	// with its cache: one a stopped dashboard left running is still an
+	// endpoint on the network.
+	if o.server.modules.deployArtifacts != nil {
+		if err := o.server.modules.deployArtifacts.RemoveBuildState(ctx, environmentID); err != nil {
+			return fmt.Errorf("the environment's build cache could not be removed: %w", err)
+		}
+	}
 	n, err := o.network(ctx, environmentID, false)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil

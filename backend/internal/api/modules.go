@@ -481,7 +481,8 @@ func (s *Server) initModules() {
 	)
 	// The Railpack planner writes its plan into a folder Docker binds by
 	// path, which the data directory is on the server and in here alike.
-	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack"))
+	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack")).
+		WithBuilderDir(filepath.Join(s.Cfg.DataDir, "buildkit"))
 	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
 	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
@@ -518,6 +519,9 @@ func (s *Server) initModules() {
 		// Release tasks are rehearsed against copies the Databases owner
 		// makes from its own backups, when an environment asks for it.
 		WithMigrationRehearser(s.modules.rehearser).
+		// A build that needs rows loads the project's seed only into a
+		// linked database that has none yet.
+		WithDatabaseContents(deploymentDatabaseContents{server: s}).
 		// And where each linked database stands is recorded as a release
 		// goes live, for a copy of its data as of that release later.
 		WithDataPoints(releaseDataFacts{server: s}).

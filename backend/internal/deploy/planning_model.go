@@ -410,6 +410,11 @@ type DetectedNodeBuild struct {
 	// start command written later is judged without the source.
 	Findings   []PreflightFinding `json:"findings,omitempty"`
 	DevScripts map[string]string  `json:"devScripts,omitempty"`
+	// CacheComponents says next.config turns on Cache Components, where a
+	// page's route segment config (export const dynamic) is refused and
+	// generateStaticParams must return at least one param, so a failure's
+	// remedy names what that mode allows rather than what it removed.
+	CacheComponents bool `json:"cacheComponents,omitempty"`
 }
 
 // DetectedVariable is an environment variable the source reads, found in an

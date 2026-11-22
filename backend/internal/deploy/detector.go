@@ -1177,6 +1177,12 @@ func packageCandidate(marker *detectedMarkers, schemaPaths []string) []DetectedC
 	candidate.NeedsDecision = append(candidate.NeedsDecision, asked...)
 	candidate.NodeBuild = withNodeFrameworkFacts(detectedNodeBuild(facts, candidate.Framework, candidate.BuildCommand),
 		slices.Concat(resolution.Findings, nodeDecisionFindings(asked)), nodeDevScripts(manifest.Scripts))
+	if config, read := files.configText("next"); read && candidate.Framework == "nextjs" && nextCacheComponents(config.text) {
+		if candidate.NodeBuild == nil {
+			candidate.NodeBuild = &DetectedNodeBuild{}
+		}
+		candidate.NodeBuild.CacheComponents = true
+	}
 	applyNodePackageShape(&candidate, install, files, framework != nil)
 	return []DetectedCandidate{newDetectedCandidate(marker.root, BuildRecipe, candidate)}
 }
