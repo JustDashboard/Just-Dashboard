@@ -1313,6 +1313,49 @@ data, and detection (which records the plan on the candidate for every package m
 renders it) all use the same plan, so they cannot disagree. Reads go through an `os.Root` and never
 follow a symlink to a file; nothing in the checkout is executed.
 
+**The install runs before the source arrives, and `node_modules` ships as its own layer.** The install
+stage (`nodeInstallStage`, shared by the Node recipe, a Hugo site's dependencies and the Python and Go
+recipes' asset stages) copies only the files the install reads (`installInputs`: the root's, the member's
+and every workspace member's `package.json`, the lockfile, `.npmrc`, `.yarnrc.yml`, `.yarnrc`,
+`bunfig.toml`, `pnpm-workspace.yaml`, `patches/` and `.yarn/{releases,patches,plugins}/`) with
+`COPY --parents`, installs, and only then copies the source (`COPY . /app/`), so a commit that changes no
+input reuses the install's layer instead of reinstalling. The server image copies the build stage's
+`node_modules` — the root's and the built member's — first, each as a layer of its own
+(`COPY --from=build /app/node_module[s] /app/node_modules/`, a glob so a package without dependencies
+creates none), then the rest with `COPY --exclude=node_modules`; BuildKit keys a copy on its content, so a
+source-only commit reuses the `node_modules` layer and does not compress or unpack it again. The image's
+files are the same either way. Measured on a Next.js app on Bun (the deploy-speed report of
+22 Nov 2026), a source-only commit went from 153 s to 46 s.
+
+That order is kept only when nothing the install runs can read a file outside those inputs
+(`build_node_install_order.go`, read as data with the rest of the plan). Otherwise the install runs over
+the whole source as before, and the run's notes say which order it used and why
+(`Dependencies install after the source is copied, …`):
+
+- a `preinstall`, `install`, `postinstall` or `prepare` script (or their `pre`/`post` forms) in the root's,
+  the member's or any workspace member's `package.json` — except a Git hook installer (`husky`,
+  `is-ci || husky`, `simple-git-hooks`) or `patch-package`, which read only inputs — and a `binding.gyp`
+  beside one, which npm compiles;
+- a `file:`, `link:`, `portal:`, `exec:` or relative dependency, resolution or override; a Yarn `patch:`
+  outside `.yarn/patches`; an npm lock that links a package to a directory whose `package.json` is not an
+  input; pnpm's injected workspace packages (`dependenciesMeta.*.injected`, `injectWorkspacePackages`);
+- Prisma (`prisma` or `@prisma/client`), whose install generates from the schema;
+- a pnpmfile, which is code, and a setting that names another file (`.npmrc`'s `cafile`, `userconfig`, …;
+  `.yarnrc.yml`'s `httpsCaFilePath`, `injectEnvironmentFiles`, a `yarnPath` or plugin outside `.yarn/`;
+  `bunfig.toml`'s `cafile`);
+- Yarn Berry's committed `.yarn/cache` (zero-installs) or `.pnp.cjs`, which the install reads or rewrites;
+- a lockfile out of sync with `package.json`, which the unfrozen install rewrites;
+- a manifest that cannot be read or parsed, or an input whose name a `COPY` would read as a pattern.
+
+Files the install reads that are not among the fixed inputs are added to them instead: a patch
+`patchedDependencies` names (pnpm's, in `package.json` or `pnpm-workspace.yaml`, and Bun's), a member's own
+`.npmrc`, Yarn's `.env.yarn`, and a workspace member's committed `bin` file, which the install links.
+What the plan adds after the install (system packages' runs, Prisma's `generate`, SvelteKit's
+`BeforeBuild` adapter install) still runs after the source is copied. `TestLiveNodeInstallLayerOutlivesASourceChange`
+(`JD_DEPLOY_LIVE=1`) builds a Next.js app on Bun and on npm twice across a one-line page change and
+checks the install and the `node_modules` copy stay `CACHED`, and that the same app with a `postinstall`
+reinstalls.
+
 **Lockfiles are compared, not only named.** Every committed lockfile — `bun.lock`, `bun.lockb`,
 `package-lock.json`, `npm-shrinkwrap.json`, `pnpm-lock.yaml`, `yarn.lock` — is read under a budget of its
 own (16 MiB a file, 32 MiB a detection or build, never counted as detection truncation) and compared with
@@ -1854,7 +1897,8 @@ A Django or Flask application whose `package.json` builds its CSS or JavaScript 
 Tailwind, Vite, webpack, esbuild, PostCSS or Sass, and no server of its own — a `start` script that only
 watches, as django-tailwind's `"start": "npm run dev"` does, is not one) at the root or in
 django-tailwind's `theme/static_src` gets a Node stage: the same install planner as the JavaScript recipe
-installs and runs the build over a copy of the application, drops `node_modules`, and the Python image
+installs (before the application's source when it can, see [JavaScript installs](#javascript-installs))
+and runs the build over a copy of the application, drops `node_modules`, and the Python image
 copies the result in place of the source (`python_assets_built`). The package is not offered as a site
 of its own, and `build.packageManager` chooses its manager among competing lockfiles, as `build.nodeVersion`
 chooses its Node major.

@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"regexp"
 	"strings"
 	"testing"
 	"time"
@@ -57,13 +56,13 @@ func TestLiveBuildValueChangeRerunsTheStepThatReadIt(t *testing.T) {
 	if first != "https://one.example.test" || same != first || changed != "https://two.example.test" {
 		t.Fatalf("shipped site.txt: first %q, same %q, changed %q", first, same, changed)
 	}
-	if !liveStepCached(sameLogs, "site.txt") || !liveStepCached(sameLogs, "npm ci") {
+	if !liveInstructionCached(sameLogs, "site.txt") || !liveInstructionCached(sameLogs, "npm ci") {
 		t.Fatalf("an unchanged value rebuilt:\n%s", strings.Join(sameLogs, "\n"))
 	}
-	if liveStepCached(changedLogs, "site.txt") {
+	if liveInstructionCached(changedLogs, "site.txt") {
 		t.Fatalf("a changed build value reused the build step:\n%s", strings.Join(changedLogs, "\n"))
 	}
-	if !liveStepCached(changedLogs, "npm ci") {
+	if !liveInstructionCached(changedLogs, "npm ci") {
 		t.Fatalf("a build-step value change reran the install:\n%s", strings.Join(changedLogs, "\n"))
 	}
 	for _, logs := range [][]string{sameLogs, changedLogs} {
@@ -73,30 +72,4 @@ func TestLiveBuildValueChangeRerunsTheStepThatReadIt(t *testing.T) {
 			}
 		}
 	}
-}
-
-var liveStepHeaderRE = regexp.MustCompile(`^#(\d+) \[[^\]]+\] RUN (.*)$`)
-
-// liveStepCached reports whether BuildKit's plain progress marked the RUN
-// whose instruction contains needle as CACHED.
-func liveStepCached(logs []string, needle string) bool {
-	step := ""
-	for _, line := range logs {
-		for _, part := range strings.Split(line, "\n") {
-			if match := liveStepHeaderRE.FindStringSubmatch(strings.TrimSpace(part)); match != nil && strings.Contains(match[2], needle) {
-				step = match[1]
-			}
-		}
-	}
-	if step == "" {
-		return false
-	}
-	for _, line := range logs {
-		for _, part := range strings.Split(line, "\n") {
-			if strings.TrimSpace(part) == "#"+step+" CACHED" {
-				return true
-			}
-		}
-	}
-	return false
 }

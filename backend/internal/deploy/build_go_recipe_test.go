@@ -212,7 +212,7 @@ func TestGoServerEmbeddingAFrontEndBuildsItFirst(t *testing.T) {
 	writeBuildFixture(t, root, "web/dist/.gitkeep", "")
 	prepared := prepareGo(t, root, BuildPlanConfig{})
 	web := prepared.DockerfilePreview[:strings.Index(prepared.DockerfilePreview, "AS build")]
-	assertGoDockerfile(t, web, "FROM node:22-alpine@sha256:", "AS web\n", "WORKDIR /app\nCOPY . .\nWORKDIR /app/web\n", "npm run build")
+	assertGoDockerfile(t, web, "FROM node:22-alpine@sha256:", "AS web\n", "WORKDIR /app\nCOPY --parents [\"web/package.json\",\"./\"]\nWORKDIR /app/web\nRUN npm install --no-audit --no-fund\nCOPY . /app/\n", "npm run build")
 	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY --from=web /app/web/dist/ /src/web/dist/\nRUN go build")
 	detection, candidate := detectGo(t, root, "")
 	if selected := selectedDetectionCandidate(&detection); selected == nil || selected.ID != candidate.ID {

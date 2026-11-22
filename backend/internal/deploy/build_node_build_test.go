@@ -86,7 +86,7 @@ func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 		{name: "a start script's env file is created in the runtime image", files: map[string]string{
 			"package.json": `{"name":"api","scripts":{"build":"tsc","start":"node --env-file=.env dist/server.js"}}`},
 			config:   BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"},
-			want:     []string{"COPY --from=build /app /app\nRUN [ -e .env ] || : > .env\nCMD"},
+			want:     []string{"COPY --from=build --exclude=node_modules /app /app\nRUN [ -e .env ] || : > .env\nCMD"},
 			findings: []string{"env_file_placeholder"}},
 		{name: "a build script's env file is created before the build", files: map[string]string{
 			"package.json": `{"name":"api","scripts":{"build":"tsx --env-file './.env.local' scripts/build.ts","start":"node dist/server.js"}}`},
@@ -95,7 +95,7 @@ func TestNodeRecipeGivesTheBuildWhatItsToolchainNeeds(t *testing.T) {
 		{name: "an env file's missing directory is created with it", files: map[string]string{
 			"package.json": `{"name":"api","scripts":{"build":"tsc","start":"node --env-file=config/.env dist/server.js"}}`},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "npm run start"},
-			want:   []string{"COPY --from=build /app /app\nRUN [ -e config/.env ] || { mkdir -p config && : > config/.env; }\nCMD"}},
+			want:   []string{"COPY --from=build --exclude=node_modules /app /app\nRUN [ -e config/.env ] || { mkdir -p config && : > config/.env; }\nCMD"}},
 		{name: "a Procfile start command", files: map[string]string{"package.json": `{"name":"api","scripts":{"build":"tsc"}}`},
 			config: BuildPlanConfig{BuildCommand: "npm run build", StartCommand: "node --env-file .env.production dist/index.js"},
 			want:   []string{"RUN [ -e .env.production ] || : > .env.production\nCMD"}},

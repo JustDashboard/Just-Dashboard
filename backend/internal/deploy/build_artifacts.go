@@ -338,6 +338,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			if stage := recipe.goBuild.frontend; stage != nil {
 				b.settleBunImage(ctx, &stage.plan)
 				prepared.NodeVersion = stage.plan.node.label()
+				prepared.Notes = append(prepared.Notes, stage.plan.installOrderNote())
 			}
 			baseRefs = goRecipeBases(recipe)
 			prepared.Notes = append(prepared.Notes, goRecipeNotes(recipe)...)
@@ -354,6 +355,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 				b.settleBunImage(ctx, recipe.python.assets)
 				prepared.NodeVersion = recipe.python.assets.node.label()
 				prepared.Install = recipe.python.assets.installLine()
+				prepared.Notes = append(prepared.Notes, recipe.python.assets.installOrderNote())
 			}
 			prepared.PythonVersion = recipe.python.version.version
 			prepared.Toolchain = pythonRecipeToolchain(recipe.python)
@@ -390,6 +392,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 				prepared.NodeVersion = node.node.label()
 				prepared.Install = node.installLine()
 				prepared.Notes = append(prepared.Notes, node.notes...)
+				prepared.Notes = append(prepared.Notes, node.installOrderNote())
 			}
 			baseRefs = recipe.site.bases()
 		case "php":
@@ -410,6 +413,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			prepared.NodeVersion = recipe.nodeInstall.node.label()
 			prepared.Install = recipe.nodeInstall.installLine()
 			prepared.Notes = append(prepared.Notes, recipe.nodeInstall.notes...)
+			prepared.Notes = append(prepared.Notes, recipe.nodeInstall.installOrderNote())
 			baseRefs = recipe.nodeInstall.baseImages(config.OutputDirectory != "")
 		}
 		bases, err := b.resolveBases(ctx, baseRefs)

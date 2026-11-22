@@ -901,19 +901,11 @@ func renderPythonDockerfile(recipe pythonRecipe, config BuildPlanConfig, bases [
 	}
 	var lines []string
 	if recipe.assets != nil {
-		stage, _, err := nodeInstallStage(*recipe.assets, bases[1], bases, "assets-toolchain", "assets", installSecrets)
+		// The install and the build run in the asset package's own
+		// directory, over a copy of the whole application.
+		stage, _, err := nodeInstallStage(*recipe.assets, bases[1], bases, "assets-toolchain", "assets", recipe.assetsDir, installSecrets)
 		if err != nil {
 			return nil, err
-		}
-		if recipe.assetsDir != "" {
-			// The install and the build run in the asset package's own
-			// directory, over a copy of the whole application.
-			for index, line := range stage {
-				if line == "COPY . ." {
-					stage = append(stage[:index+1], append([]string{"WORKDIR /app/" + recipe.assetsDir}, stage[index+1:]...)...)
-					break
-				}
-			}
 		}
 		lines = append(stage, recipe.assets.buildRun(buildSecrets, recipe.assets.build, boundToBuild(config.Secrets)), "RUN rm -rf node_modules")
 	}

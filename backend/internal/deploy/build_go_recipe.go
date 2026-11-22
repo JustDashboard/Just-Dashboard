@@ -1021,16 +1021,11 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 	}
 	var lines []string
 	if stage := plan.frontend; stage != nil {
-		web, _, err := nodeInstallStage(stage.plan, bases[2], bases, "web-toolchain", "web", installSecrets)
-		if err != nil {
-			return nil, err
-		}
 		// The stage copies the whole context, so a package that reads a
 		// file beside it still finds it, and installs where package.json is.
-		if stage.root != "." {
-			if copied := slices.Index(web, "COPY . ."); copied >= 0 {
-				web = slices.Insert(web, copied+1, "WORKDIR /app/"+stage.root)
-			}
+		web, _, err := nodeInstallStage(stage.plan, bases[2], bases, "web-toolchain", "web", stage.root, installSecrets)
+		if err != nil {
+			return nil, err
 		}
 		lines = append(web, stage.plan.buildRun(buildSecrets, stage.plan.build, boundToBuild(config.Secrets)))
 	}

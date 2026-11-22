@@ -150,7 +150,8 @@ func TestNodeRecipeRendersEachManagersInstall(t *testing.T) {
 				"FROM node:22-alpine@sha256:", " AS toolchain",
 				"ENV COREPACK_HOME=/opt/corepack COREPACK_ENABLE_DOWNLOAD_PROMPT=0 COREPACK_ENABLE_AUTO_PIN=0\n",
 				"RUN corepack enable pnpm && corepack install -g pnpm@10.34.5\n",
-				"FROM toolchain AS build\nWORKDIR /app\nCOPY . .\nRUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\n",
+				"FROM toolchain AS build\nWORKDIR /app\nCOPY --parents [\"package.json\",\"pnpm-lock.yaml\",\"./\"]\n" +
+					"RUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\nCOPY . /app/\n",
 				nodeBuildRun("pnpm run build\n"),
 				"FROM toolchain\nWORKDIR /app\nENV NODE_ENV=production\nENV COREPACK_ENABLE_NETWORK=0\nENV PATH=/app/node_modules/.bin:$PATH\n",
 				`CMD ["/bin/sh","-c","pnpm run start"]`,
@@ -436,10 +437,13 @@ func TestWorkspaceMemberBuildsFromItsWorkspaceRoot(t *testing.T) {
 		t.Fatalf("the Dockerfile is not at the workspace root: %v", err)
 	}
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
-		"FROM toolchain AS build\nWORKDIR /app\nCOPY . .\nRUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\nWORKDIR /app/apps/web\n",
+		"FROM toolchain AS build\nWORKDIR /app\nCOPY --parents [\"package.json\",\"apps/web/package.json\",\"pnpm-lock.yaml\",\"pnpm-workspace.yaml\",\"packages/ui/package.json\",\"./\"]\n" +
+			"RUN pnpm install --frozen-lockfile --config.dangerously-allow-all-builds=true\nCOPY . /app/\nWORKDIR /app/apps/web\n",
 		"ENV PATH=/app/apps/web/node_modules/.bin:/app/node_modules/.bin:$PATH",
 		nodeBuildRun("pnpm exec turbo run build --filter=web...\n"),
-		"FROM toolchain\nWORKDIR /app/apps/web\n", "COPY --from=build /app /app",
+		"FROM toolchain\nWORKDIR /app/apps/web\n",
+		"COPY --from=build /app/node_module[s] /app/node_modules/\nCOPY --from=build /app/apps/web/node_module[s] /app/apps/web/node_modules/\n" +
+			"COPY --from=build --exclude=node_modules --exclude=apps/web/node_modules /app /app\n",
 	}, nil)
 }
 
@@ -499,7 +503,7 @@ func TestNPMWorkspaceMemberBuildsItsSiblingsWithTurbo(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN npm ci\nWORKDIR /app/apps/web\n", nodeBuildRun("npx turbo run build --filter=web...\n")}, []string{"apk add"})
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"COPY --parents [\"package.json\",\"apps/web/package.json\",\"package-lock.json\",\"apps/docs/package.json\",\"packages/shared/package.json\",\"./\"]\nRUN npm ci\nCOPY . /app/\nWORKDIR /app/apps/web\n", nodeBuildRun("npx turbo run build --filter=web...\n")}, []string{"apk add"})
 }
 
 // A member directory the recipe cannot write unquoted into WORKDIR, ENV and

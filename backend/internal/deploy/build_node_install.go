@@ -153,6 +153,8 @@ type nodeInstallFacts struct {
 	// workspaceManifests are the other workspace members' package.json
 	// files, by path under the install root, which the install reads too.
 	workspaceManifests []string
+	// reach is what could make the install read past its inputs.
+	reach nodeInstallReach
 	// runtime is what the image depends on: the Node and Bun releases the
 	// repository declares; prisma is the package's Prisma configuration.
 	runtime nodeRuntimeFacts
@@ -244,6 +246,8 @@ func readNodeInstallFacts(files nodeFiles, member string, manifest []byte, arch 
 		}
 	}
 	facts.workspaceManifests = nodeWorkspaceManifests(files, member)
+	facts.reach = readNodeInstallReach(files, member, facts.workspaceManifests)
+	facts.inputs = append(facts.inputs, facts.reach.extra...)
 
 	scriptTools := nodeCommandTools(facts.manifest.Scripts, nil)
 	signal := func(manager, reason string) { facts.signals[manager] = append(facts.signals[manager], reason) }
@@ -811,9 +815,16 @@ type nodeInstallPlan struct {
 	buildEnv nodeBuildPlan
 	// berry keeps Yarn's cache inside the build so a Plug'n'Play install
 	// is copied with the application.
-	berry     bool
-	toolchain string
-	reason    string
+	berry bool
+	// inputs are the files the install reads, by path in its install
+	// root, and sourceFirst why the install must instead run over the whole
+	// source (build_node_install_order.go); yarnCache says Yarn's cache is
+	// committed.
+	inputs      []string
+	sourceFirst string
+	yarnCache   bool
+	toolchain   string
+	reason      string
 	// build and start are the choice's commands on this manager's runner.
 	build, start string
 	findings     []PreflightFinding
@@ -1056,7 +1067,35 @@ func planNodeInstall(facts nodeInstallFacts, choice nodeInstallChoice) nodeInsta
 	}
 	planNodeBuild(facts, &plan, choice.assets)
 	planNodeRelease(facts, &plan)
+	planNodeInstallOrder(facts, &plan)
 	return plan
+}
+
+// planNodeInstallOrder records what the install reads and whether it can
+// run before the source is copied (build_node_install_order.go).
+func planNodeInstallOrder(facts nodeInstallFacts, plan *nodeInstallPlan) {
+	lockfiles := []string{}
+	if plan.lockfile != "" {
+		lockfiles = append(lockfiles, plan.lockfile)
+	}
+	plan.inputs = facts.inputsWith(lockfiles)
+	plan.sourceFirst, plan.yarnCache = facts.reach.sourceFirst, facts.reach.yarnCache
+	switch {
+	case plan.sourceFirst != "":
+	case plan.berry && facts.reach.yarnCache:
+		plan.sourceFirst = ".yarn/cache is committed (zero-installs), and the install reads it from the source"
+	case plan.berry && facts.reach.pnp:
+		plan.sourceFirst = ".pnp.cjs is committed, and the install rewrites it"
+	case plan.reading != nil && !plan.frozen:
+		plan.sourceFirst = plan.lockfile + " is out of sync with package.json, and the install rewrites it"
+	case plan.reading != nil:
+		for _, link := range plan.reading.links {
+			if !slices.Contains(plan.inputs, path.Join(path.Clean(link), "package.json")) {
+				plan.sourceFirst = plan.lockfile + " links a package to " + boundedFindingText(link) + ", a directory of the repository the install reads"
+				break
+			}
+		}
+	}
 }
 
 // installDefaults are the values the install RUN gives a variable the build

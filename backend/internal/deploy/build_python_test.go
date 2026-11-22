@@ -302,7 +302,7 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 				"package-lock.json": `{"name": "x", "lockfileVersion": 3, "packages": {"": {"devDependencies": {"tailwindcss": "3.4.17"}}, "node_modules/tailwindcss": {"version": "3.4.17"}}}`,
 			},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn site.wsgi"},
-			want:   []string{" AS assets\nWORKDIR /app\nCOPY . .\n", "RUN npm run build\nRUN rm -rf node_modules\nFROM python:3.13-slim-trixie", "COPY --from=assets /app /app\nRUN pip install"},
+			want:   []string{" AS assets\nWORKDIR /app\nCOPY --parents [\"package.json\",\"package-lock.json\",\"./\"]\nRUN npm ci\nCOPY . /app/\n", "RUN npm run build\nRUN rm -rf node_modules\nFROM python:3.13-slim-trixie", "COPY --from=assets /app /app\nRUN pip install"},
 			absent: []string{"\nCOPY . .\nRUN pip"},
 		},
 		{
@@ -313,7 +313,8 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 				"theme/static_src/package-lock.json": `{"name": "x", "lockfileVersion": 3, "packages": {"": {"devDependencies": {"tailwindcss": "3.4.17"}}, "node_modules/tailwindcss": {"version": "3.4.17"}}}`,
 			},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn site.wsgi"},
-			want:   []string{"COPY . .\nWORKDIR /app/theme/static_src\nRUN npm ci", "COPY --from=assets /app /app"},
+			want: []string{"COPY --parents [\"theme/static_src/package.json\",\"theme/static_src/package-lock.json\",\"./\"]\nWORKDIR /app/theme/static_src\nRUN npm ci\nCOPY . /app/\n",
+				"COPY --from=assets /app /app"},
 		},
 		{
 			name: "a uv workspace member builds from the workspace root",

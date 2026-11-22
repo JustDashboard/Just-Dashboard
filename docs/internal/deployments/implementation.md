@@ -777,7 +777,12 @@ only renderer/executor/validation authority for their feature.
   secret ever becomes a build argument or argv. A browser-public value typed into a new project is
   stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
-  dashboard files stay out of the image whatever the repository's own ignore file says.
+  dashboard files stay out of the image whatever the repository's own ignore file says. A JavaScript
+  install (`nodeInstallStage`) copies only the files it reads, installs, and then copies the source, and
+  the Node server image copies `node_modules` as a layer of its own before the rest, so a source-only
+  commit reuses both; anything that could let the install read past its inputs (a lifecycle script, a
+  `file:` dependency, Prisma, a pnpmfile, zero-installs) keeps the source-first order, and the run's
+  notes say which ([JavaScript installs](recipes.md#javascript-installs)).
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
   registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
