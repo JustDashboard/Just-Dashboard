@@ -119,6 +119,25 @@ the records to create by hand, leading to Certificates where a saved token is th
 `?record=` (`settings/dns-record-panel.tsx`, its words in the unit-tested `dns-record-model.ts`;
 [DNS records](../../deployments/dns-records.md)).
 
+**just-dashboard.com addresses** ([app domains](../../backend/app-domains.md)) meet deployments in
+two places, administrators only. On `/deploy/new` the public address step offers the names as an
+*Address* `Segments` above the Hostname field once the server holds an active address: the zone's
+name (the suggestion itself when new deployments get the address, otherwise asked for with
+`/deploy/hostname?name=…&method=app-domain`), the other suggestion (the operator's wildcard or
+sslip.io, or the sslip.io name made from the same app label when the app-domain name was the
+default) and *Your domain*, which empties the field and focuses it; a name already answered for is
+not checked again. A server that is not linked or holds no address gets one quiet line linking to
+Settings › Connect instead, never a blocking state, and this step has no tunnel choice to hide it
+from. On a deployment's Domains settings a switch row under the list, *<zone> address*, adds
+`<slug>.<handle>.<zone>` through the save Add domain uses and removes it as the menu's Remove does
+(into the draft, for the save bar); it is not drawn while every name is served through Cloudflare
+Tunnel, and a name under the address holds its Tunnel segment off. A name under a handle this
+server no longer holds leads its line of readings with a warning *Detached* that opens a popover —
+what it means, **Remove**, and the way to Settings › Connect — so the row keeps its height. Whether
+a name is detached is decided in one place, `appDomainStateOf` (`lib/app-domain.ts`): the backend's
+`appDomain` mark on the observed route first, the server's own address state otherwise
+(`tests/browser/app-domain-deploy.spec.ts`).
+
 Five of these pages took the deploy standard's last steps in 0.8.7. A project's Logs reads the hour in
 the Overview's `ReadingLine`s where four tiles stood and is one pane with a bottom bar on a phone
 ([request observability](../../deployments/request-observability.md)). Deployments opens Delivery on the

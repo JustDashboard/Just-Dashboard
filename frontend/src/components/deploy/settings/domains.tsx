@@ -25,7 +25,9 @@ import { plural, relativeTime, timestamp } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
+import { useAppDomain } from "@/hooks/use-app-domain"
 import { usePoll } from "@/hooks/use-poll"
+import { appDomainStateOf, zoneWords } from "@/lib/app-domain"
 import type {
   DeploymentDomainRoute,
   DeploymentEnvironmentConfiguration,
@@ -516,6 +518,16 @@ function DomainsForm({
 
   const routeFor = (hostname: string) =>
     routes?.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
+  // This server's just-dashboard.com address, for the control that adds its name and for
+  // marking a name under a handle the server no longer holds.
+  const appDomain = useAppDomain({ enabled: canAdmin })
+  const appStatus = appDomain.status
+  const appName = useAppDomainName(
+    project.detail.project.name,
+    appStatus?.enabled && appStatus.domain?.status === "active"
+      ? appStatus.domain.handle
+      : undefined,
+  )
   const { bindAddress } = configuration.runtime
   const publicBind = bindAddress === "0.0.0.0" || bindAddress === "::"
 
@@ -571,6 +583,32 @@ function DomainsForm({
   const leaving = (routes ?? []).filter(
     (route) => route.route === "served" && !drafted.has(route.hostname.toLowerCase()),
   )
+
+  const removeName = (hostname: string) => {
+    typePassword(hostname, "")
+    setRowError(undefined)
+    setDomains(withoutDomain(domains, hostname))
+  }
+
+  // Served through Cloudflare Tunnel, a deployment's names live in the operator's own zone.
+  const tunnelled = domains.length > 0 && domains.every((domain) => domain.tunnel)
+  const appNameHere = appName ? drafted.has(appName) : false
+  const [assigning, setAssigning] = useState(false)
+  const switchAppName = async (on: boolean) => {
+    if (!appName) return
+    if (!on) return removeName(appName)
+    // A saved name removed only in the draft comes back as it was saved.
+    const kept = configuration.domains.find((domain) => domain.hostname.toLowerCase() === appName)
+    if (kept) return setDomains([...domains, kept])
+    setAssigning(true)
+    try {
+      await persist([...toSave, { hostname: appName, https: true, ownership: "managed" }])
+    } catch (error) {
+      notify.error("Could not save domains", error)
+    } finally {
+      setAssigning(false)
+    }
+  }
 
   const verbsFor = (domain: DomainValue, index: number): Verb[] => {
     const route = routeFor(domain.hostname)
@@ -630,11 +668,7 @@ function DomainsForm({
         danger: true,
         // A name redirecting to the one removed would point nowhere, so it
         // goes back to serving the application rather than failing the save.
-        run: () => {
-          typePassword(domain.hostname, "")
-          setRowError(undefined)
-          setDomains(withoutDomain(domains, domain.hostname))
-        },
+        run: () => removeName(domain.hostname),
       })
     return verbs
   }
@@ -727,6 +761,12 @@ function DomainsForm({
                   onPassword={(password) => typePassword(domain.hostname, password)}
                   askRedirect={redirecting === domain.hostname}
                   onRedirectAsked={() => setRedirecting(undefined)}
+                  appDomain={appDomainStateOf(
+                    domain.hostname,
+                    routeFor(domain.hostname),
+                    appStatus,
+                  )}
+                  onRemove={canAdmin ? () => removeName(domain.hostname) : undefined}
                 />
               ))}
               {leaving.map((route) => {
@@ -749,6 +789,22 @@ function DomainsForm({
                 )
               })}
             </ul>
+          )}
+          {canAdmin && appName && appStatus && !tunnelled && (
+            <OptionList>
+              <OptionRow
+                title={`${zoneWords(appStatus)} address`}
+                hint={
+                  <>
+                    <span className="font-mono text-foreground">{appName}</span>, covered by this
+                    server&apos;s wildcard certificate
+                  </>
+                }
+                checked={appNameHere}
+                disabled={assigning}
+                onCheckedChange={(on) => void switchAppName(on)}
+              />
+            </OptionList>
           )}
         </SettingSection>
       </SettingForm>
@@ -806,6 +862,8 @@ function DomainRow({
   onPassword,
   askRedirect,
   onRedirectAsked,
+  appDomain,
+  onRemove,
 }: {
   /**
    * The row was just made a redirect from its menu: open where it sends
@@ -813,6 +871,10 @@ function DomainRow({
    */
   askRedirect?: boolean
   onRedirectAsked?: () => void
+  /** A name under the site's app-domain zone; `detached` when this server no longer holds its handle. */
+  appDomain?: "active" | "detached"
+  /** Removes the name from the draft, as the menu's Remove does. */
+  onRemove?: () => void
   domain: DomainValue
   route?: DeploymentDomainRoute
   pending: boolean
@@ -886,8 +948,9 @@ function DomainRow({
   // tooltip can still say why.
   const httpsHeld = tunnel || (gated && domain.https && !domain.redirectTo)
   const passwordHeld = gated && !protection
-  const tunnelHeld = !tunnel && (wildcard || fenced)
+  const tunnelHeld = !tunnel && (wildcard || fenced || Boolean(appDomain))
   const typedProblem = passwordProblem(password)
+  const [explaining, setExplaining] = useState(false)
   // The sign-in's fields open by themselves when Password is turned on, since
   // that press is a request to set them; after that the row's fact opens them.
   const [asking, setAsking] = useState(false)
@@ -998,6 +1061,49 @@ function DomainRow({
             The days left and who renews it were 11px beside 12px readings,
             two baselines for one row of facts. */}
         <div className="flex h-4.5 min-w-0 items-center gap-x-3 overflow-x-clip text-xs whitespace-nowrap">
+          {/* A name under a handle this server no longer holds does not resolve, so it leads
+              the line, and what to do about it is a layer over the row, never a band under it. */}
+          {appDomain === "detached" && (
+            <Popover open={explaining} onOpenChange={setExplaining}>
+              <PopoverTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`${host} is detached`}
+                  className="hit-area -m-1 inline-flex shrink-0 animate-rise items-center gap-1 rounded-sm p-1 font-medium text-warning focus-ring hover:bg-row-hover"
+                >
+                  <Warning aria-hidden className="size-3.5 shrink-0" />
+                  Detached
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-80 space-y-3">
+                <p className="text-body font-medium">Not this server&apos;s address any more</p>
+                <p className="text-xs leading-relaxed whitespace-normal text-muted-foreground">
+                  This server no longer holds the just-dashboard.com address {host} is under, so the
+                  name does not resolve. The next release leaves it out, or fails if it is the only
+                  public name. Claim the address again in Settings › Connect, or remove the name.
+                </p>
+                <div className="flex flex-wrap items-center gap-2">
+                  {onRemove && (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      className="text-destructive"
+                      onClick={() => {
+                        setExplaining(false)
+                        onRemove()
+                      }}
+                    >
+                      <Trash />
+                      Remove
+                    </Button>
+                  )}
+                  <Button size="sm" variant="ghost" asChild>
+                    <Link href="/dashboard/link#app-domain">Settings › Connect</Link>
+                  </Button>
+                </div>
+              </PopoverContent>
+            </Popover>
+          )}
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
           {/* The sign-in is a mark on the row and its two fields a layer over
               it, so the list never grows under a row (PGD-26). The mark takes
@@ -1265,7 +1371,7 @@ function DomainRow({
           </HoverTip>
           {/* Always drawn, so the rows' segments line up down the list and a
               wildcard's says why it is not offered. */}
-          <HoverTip tip={tunnelTip({ tunnel, wildcard, fenced })}>
+          <HoverTip tip={tunnelTip({ tunnel, wildcard, fenced, appDomain: Boolean(appDomain) })}>
             <Segment
               value="tunnel"
               aria-label={`Cloudflare Tunnel on ${host}`}
@@ -1302,6 +1408,34 @@ function DomainRow({
       )}
     </li>
   )
+}
+
+/**
+ * The just-dashboard.com name for this project under the handle this server holds, as the
+ * hostname suggestion makes it (`method=app-domain`): the slug cut to one DNS label and kept
+ * clear of other projects' names. Asked once per handle, and nothing while none is held.
+ */
+function useAppDomainName(name: string, handle: string | undefined) {
+  const [answer, setAnswer] = useState<{ key: string; hostname: string }>()
+  const key = handle ? `${handle}:${name}` : ""
+  useEffect(() => {
+    if (!key) return
+    const controller = new AbortController()
+    get<DeploymentHostnameSuggestion>(
+      "/deploy/hostname",
+      { name, method: "app-domain" },
+      controller.signal,
+    )
+      .then((suggestion) => {
+        if (suggestion.method === "app-domain" && suggestion.hostname)
+          setAnswer({ key, hostname: suggestion.hostname.toLowerCase() })
+      })
+      .catch(() => {
+        // Without the name the control is not drawn; the rest of the page is unaffected.
+      })
+    return () => controller.abort()
+  }, [key, name])
+  return answer?.key === key ? answer.hostname : undefined
 }
 
 /**
