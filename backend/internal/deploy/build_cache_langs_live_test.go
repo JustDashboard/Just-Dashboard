@@ -39,6 +39,31 @@ var liveCacheFixtures = map[string]struct {
 		return nil
 	}},
 	"trunk": {source: "src/main.rs", comment: "//", warm: notCompiledAgain("yew ")},
+	// The module download comes before the source, so a commit that
+	// changes only code reuses its layer; the cgo SQLite is in the build
+	// cache.
+	"go-embed": {source: "main.go", comment: "//", warm: stepCached("go mod download")},
+}
+
+// stepCached fails a log in which the RUN step naming part ran again
+// rather than being taken from the layer cache.
+func stepCached(part string) func(logs []string) error {
+	return func(logs []string) error {
+		for _, line := range logs {
+			at := strings.Index(line, "] RUN ")
+			if at < 0 || !strings.Contains(line, part) || !strings.HasPrefix(line, "#") {
+				continue
+			}
+			step, _, _ := strings.Cut(line, " ")
+			for _, other := range logs {
+				if strings.TrimSpace(other) == step+" CACHED" {
+					return nil
+				}
+			}
+			return fmt.Errorf("the step %q ran again", line)
+		}
+		return fmt.Errorf("no step runs %q", part)
+	}
 }
 
 // notCompiledAgain fails a log in which Cargo compiled one of the crates.

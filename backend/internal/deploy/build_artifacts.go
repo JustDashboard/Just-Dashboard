@@ -850,11 +850,15 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if mainErr != nil {
 			return selectedRecipe{}, mainErr
 		}
+		build.downloadInputs = goModuleInputs(boundary, root, build)
 		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
 			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir}
 		if stage := build.frontend; stage != nil {
 			recipe.nodeInputs = stage.inputs
 		}
+		// The module files the download copies first must be in the context
+		// whatever the repository's .dockerignore says.
+		recipe.nodeInputs = append(append([]string(nil), recipe.nodeInputs...), build.downloadInputs...)
 		return recipe, nil
 	case "python":
 		if strings.TrimSpace(config.OutputDirectory) != "" {

@@ -1,6 +1,8 @@
 package deploy
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -137,4 +139,63 @@ func TestLeptosAndTrunkCacheTheirBuildsApartFromTheMuslTarget(t *testing.T) {
 			t.Fatalf("build step %q lacks %q", build, want)
 		}
 	}
+}
+
+func TestGoDownloadsModulesBeforeTheSourceAndCachesTheBuild(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire github.com/go-chi/chi/v5 v5.2.1\n")
+	writeBuildFixture(t, root, "go.sum", "github.com/go-chi/chi/v5 v5.2.1 h1:x\ngithub.com/go-chi/chi/v5 v5.2.1/go.mod h1:y\n")
+	writeBuildFixture(t, root, "main.go", "package main\n\nimport _ \"github.com/go-chi/chi/v5\"\n\nfunc main() {}\n")
+	// A repository rule written for its own Dockerfile does not take the
+	// module files the download copies out of the context.
+	writeBuildFixture(t, root, ".dockerignore", "*\n!main.go\n")
+	cached, forced := prepareCachedAndForced(t, root, root, BuildPlanConfig{Recipe: "go"})
+	modules, compile := cacheMountFor("go-mod", "/go/pkg/mod"), cacheMountFor("go-mod", "/go/pkg/mod")+cacheMountFor("go-build", "/root/.cache/go-build")
+	assertGoDockerfile(t, cached, "ENV CGO_ENABLED=0 GOTOOLCHAIN=local\nCOPY go.mod go.sum /src/\nRUN "+modules+"go mod download\nCOPY . .\n",
+		"RUN "+compile+"go build -trimpath")
+	assertGoDockerfile(t, forced, "COPY go.mod go.sum /src/\nRUN go mod download\nCOPY . .\n", "RUN go build -trimpath")
+	ignore, err := os.ReadFile(filepath.Join(root, ".just-dashboard", "Dockerfile.dockerignore"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if content, _ := recipeDockerignore([]byte("*\n!main.go\n"), []string{"go.mod", "go.sum", "main.go"}, "go", []string{"go.mod", "go.sum"}); string(ignore) != content ||
+		strings.Contains(content, "\n*\n") {
+		t.Fatalf("ignore file keeps the repository's * rule:\n%s", ignore)
+	}
+
+	// A private module's token is the download's alone, so the modules it
+	// fetches stay in the image; the build cache holds no module and stays.
+	private := BuildPlanConfig{Recipe: "go", Secrets: []BuildSecretConfig{{Variable: "GIT_TOKEN", Step: "install"}}}
+	cached, _ = prepareCachedAndForced(t, root, root, private, "GIT_TOKEN")
+	if strings.Contains(cached, "go-mod") || !strings.Contains(cached, cacheMountFor("go-build", "/root/.cache/go-build")+"go build") {
+		t.Fatalf("a private download is cached:\n%s", cached)
+	}
+	assertBefore(t, cached, "--mount=type=secret,id=GIT_TOKEN", "COPY . .")
+
+	// A replacement without a go.mod cannot be downloaded from module files
+	// alone: the download stays after the source, as before.
+	writeBuildFixture(t, root, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire example.com/lib v0.0.0\n\nreplace example.com/lib => ./lib\n")
+	writeBuildFixture(t, root, "lib/lib.go", "package lib\n")
+	cached, _ = prepareCachedAndForced(t, root, root, BuildPlanConfig{Recipe: "go"})
+	assertBefore(t, cached, "COPY . .", "go mod download")
+	writeBuildFixture(t, root, "lib/go.mod", "module example.com/lib\n\ngo 1.26\n")
+	cached, _ = prepareCachedAndForced(t, root, root, BuildPlanConfig{Recipe: "go"})
+	assertGoDockerfile(t, cached, "COPY go.mod go.sum /src/\nCOPY lib/go.mod /src/lib/\nRUN "+modules+"go mod download\nCOPY . .\n")
+
+	// A vendored module downloads nothing; a workspace lists its imports
+	// once the source is there.
+	vendored := t.TempDir()
+	writeBuildFixture(t, vendored, "go.mod", "module example.com/app\n\ngo 1.26\n")
+	writeBuildFixture(t, vendored, "vendor/modules.txt", "# github.com/go-chi/chi/v5 v5.2.1\n")
+	writeBuildFixture(t, vendored, "main.go", "package main\nfunc main() {}\n")
+	cached, _ = prepareCachedAndForced(t, vendored, vendored, BuildPlanConfig{Recipe: "go"})
+	if strings.Contains(cached, "go mod download") || strings.Contains(cached, "COPY go.mod") {
+		t.Fatalf("a vendored module downloads:\n%s", cached)
+	}
+	workspace := t.TempDir()
+	writeBuildFixture(t, workspace, "go.work", "go 1.26\n\nuse ./api\n")
+	writeBuildFixture(t, workspace, "api/go.mod", "module example.com/api\n\ngo 1.26\n")
+	writeBuildFixture(t, workspace, "api/main.go", "package main\nfunc main() {}\n")
+	cached, _ = prepareCachedAndForced(t, workspace, workspace+"/api", BuildPlanConfig{Recipe: "go", RootDirectory: "api"})
+	assertGoDockerfile(t, cached, "COPY . .\nWORKDIR /src/api\nRUN "+modules+"go list -e -deps ./... >/dev/null\n")
 }

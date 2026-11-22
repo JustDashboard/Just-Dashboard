@@ -2002,6 +2002,18 @@ refusal is a named finding before Deploy (`preflight_go.go`):
   outside the checkout, or at an absolute path, is `go_local_replace_outside_root` (blocked) and the
   recipe's refusal; a module that is only a library is already `Go library` at low confidence, so the
   service in the workspace is selected.
+- **Download order and caches.** `go mod download` runs before `COPY . .` from the module files alone —
+  `go.mod`, `go.sum` when committed, and the `go.mod` of each local replacement (`goModuleInputs`), copied
+  to their paths under `/src` and kept in the build context whatever the repository's `.dockerignore`
+  says — so a commit that changes only code keeps the download layer. The download, templ and the build
+  mount the module cache (`/go/pkg/mod`) and the build cache (`/root/.cache/go-build`) the templ step and
+  the build compile with, so a commit recompiles only the packages it changed ([Dependency
+  caches](#dependency-caches)); the binary goes to `/out/app`, outside both. What keeps today's order: a
+  vendored module (it downloads nothing), a `go.work` workspace (its install step lists the packages'
+  imports, which needs the source), and a replacement without a `go.mod` or at a path `COPY` cannot name.
+  An install secret (`GIT_TOKEN` for a private module) keeps the module cache unmounted: the downloaded
+  modules stay in the image, so the build, which has no token, never fetches a private module again; the
+  build cache is still mounted.
 - **Generated code.** `.templ` components without their `_templ.go` are generated before the build:
   `go tool templ generate` when `go.mod` has the `tool github.com/a-h/templ/cmd/templ` directive, else
   `go run github.com/a-h/templ/cmd/templ@<the required version> generate`, so the generator and the
@@ -2773,7 +2785,7 @@ caches and when it keeps the old order.
   cold. The daemon's configuration is the operator's; the recipes never change it.
 - **Install secrets.** A secret mapped to install still reaches each install step as a secret mount. Where
   a later step without that secret would have to download again from a cache the collector emptied, the
-  recipe keeps the download in a layer instead (Rust's private registry crates).
+  recipe keeps the download in a layer instead (Rust's private registry crates, Go's private modules).
 
 ## Readiness, workers and start commands
 

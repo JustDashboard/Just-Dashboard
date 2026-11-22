@@ -776,6 +776,10 @@ type goBuildPlan struct {
 	templ, templFrom string
 	embeds           []goEmbedResolution
 	frontend         *goFrontendStage
+	// downloadInputs are the context files the module download reads,
+	// copied before the source (goModuleInputs); nil keeps the download
+	// after it.
+	downloadInputs []string
 }
 
 // modFlag is the -mod the build runs with: vendor/ when the module vendors,
@@ -1046,10 +1050,6 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 	if len(system) > 0 {
 		lines = append(lines, "RUN apk add --no-cache "+strings.Join(system, " "))
 	}
-	lines = append(lines, "COPY . .")
-	if plan.context.module != "" {
-		lines = append(lines, "WORKDIR /src/"+plan.context.module)
-	}
 	env := []string{"CGO_ENABLED=0", "GOTOOLCHAIN=local"}
 	if plan.cgo.enabled() {
 		env[0] = "CGO_ENABLED=1"
@@ -1064,8 +1064,13 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 		env = append(env, "GOPRIVATE="+plan.owner)
 	}
 	lines = append(lines, "ENV "+strings.Join(env, " "))
+	moduleDir := "/src"
+	if plan.context.module != "" {
+		moduleDir += "/" + plan.context.module
+	}
+	download := ""
 	if !plan.vendored {
-		download := "go mod download"
+		download = "go mod download"
 		if plan.context.workspace {
 			// In a workspace, go mod download fetches every requirement,
 			// even a sibling module the go.work provides and no proxy has
@@ -1081,7 +1086,27 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 			download = `export GIT_CONFIG_COUNT="1" GIT_CONFIG_KEY_0="url.https://x-access-token:${` + goPrivateTokenVariable +
 				`}@` + plan.ownerHost + `/.insteadOf" GIT_CONFIG_VALUE_0="https://` + plan.ownerHost + `/" && ` + download
 		}
-		lines = append(lines, "RUN "+installSecrets+download)
+		download = "RUN " + goModuleMount(config.cache, installSecrets) + installSecrets + download
+	}
+	if download != "" && len(plan.downloadInputs) > 0 {
+		// The download reads the module files alone, so it comes before
+		// the source and a commit that changes only code keeps it.
+		lines = append(lines, copyInputsTo("/src", plan.downloadInputs)...)
+		if moduleDir != "/src" {
+			lines = append(lines, "WORKDIR "+moduleDir)
+		}
+		lines = append(lines, download)
+		if moduleDir != "/src" {
+			lines = append(lines, "WORKDIR /src")
+		}
+		download = ""
+	}
+	lines = append(lines, "COPY . .")
+	if moduleDir != "/src" {
+		lines = append(lines, "WORKDIR "+moduleDir)
+	}
+	if download != "" {
+		lines = append(lines, download)
 	}
 	if plan.templ != "" {
 		// `go run pkg@version` runs outside the module, where -mod is not
@@ -1090,7 +1115,7 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 		if strings.HasPrefix(command, "go run ") {
 			command = "GOFLAGS= " + command
 		}
-		lines = append(lines, "RUN "+command)
+		lines = append(lines, "RUN "+goCompileMounts(config.cache, installSecrets)+command)
 	}
 	if stage := plan.frontend; stage != nil {
 		lines = append(lines, "COPY --from=web /app/"+stage.output+"/ /src/"+stage.target+"/")
@@ -1099,13 +1124,15 @@ func renderGoDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []R
 	if command == "go build ./..." {
 		// Old detection saved this literal default without an output path.
 		// Execute it, then produce the runtime binary under the current contract.
-		lines = append(lines, "RUN "+buildSecrets+command)
+		lines = append(lines, "RUN "+goCompileMounts(config.cache, installSecrets)+buildSecrets+command)
 		command = ""
 	}
 	if command == "" {
 		command = "go build -trimpath -tags " + plan.buildTags() + " " + plan.ldflags() + " -o /out/app " + packagePath
 	}
-	lines = append(lines, "RUN "+buildSecrets+command,
+	// The build cache makes a commit recompile only the packages it
+	// changed; /out/app is outside every mount.
+	lines = append(lines, "RUN "+goCompileMounts(config.cache, installSecrets)+buildSecrets+command,
 		`RUN test -f /out/app && test -x /out/app || (echo 'Go build command must write an executable to /out/app' >&2; exit 1)`)
 	source := "/src"
 	if plan.context.module != "" {
