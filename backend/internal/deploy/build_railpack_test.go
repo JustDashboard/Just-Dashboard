@@ -2,6 +2,8 @@ package deploy
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"os"
@@ -255,9 +257,17 @@ func TestRailpackPlanIsPreparedFromThePlannersOwnFiles(t *testing.T) {
 	if result.Image.Reference != "just-dashboard/deployment-12:run-34" || len(result.Artifacts) != 1 || result.Prepared.Railpack == nil {
 		t.Fatalf("result = %+v", result)
 	}
-	changed := railpackSecretsHash([]BuildSecretValue{{ID: "API_TOKEN", Value: "another"}, {ID: "RAILPACK_PACKAGES", Value: "jq@1.7"}})
-	if changed == invocation.Frontend.SecretsHash || railpackSecretsHash(invocation.Secrets) != invocation.Frontend.SecretsHash {
+	key := builder.valueKey()
+	changed := railpackSecretsHash(key, []BuildSecretValue{{ID: "API_TOKEN", Value: "another"}, {ID: "RAILPACK_PACKAGES", Value: "jq@1.7"}})
+	if changed == invocation.Frontend.SecretsHash || railpackSecretsHash(key, invocation.Secrets) != invocation.Frontend.SecretsHash {
 		t.Fatal("the secrets hash does not follow the values")
+	}
+	// Keyed: no plain hash of the values, and another key gives another
+	// digest, so the hash says nothing about a value without the key.
+	plain := sha256.Sum256([]byte("API_TOKEN=s3cr3t-value\nRAILPACK_PACKAGES=jq@1.7"))
+	if invocation.Frontend.SecretsHash == hex.EncodeToString(plain[:]) ||
+		railpackSecretsHash([]byte("another key"), invocation.Secrets) == invocation.Frontend.SecretsHash {
+		t.Fatal("the secrets hash is not keyed")
 	}
 }
 

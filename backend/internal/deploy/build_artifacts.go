@@ -588,7 +588,7 @@ func (b *ArtifactBuilder) Build(
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
 			Pull: buildPulls(prepared), Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
-			Frontend: railpackFrontendFor(prepared, tag, secrets),
+			Frontend: railpackFrontendFor(prepared, tag, secrets, b.valueKey()),
 		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
 			return result, err

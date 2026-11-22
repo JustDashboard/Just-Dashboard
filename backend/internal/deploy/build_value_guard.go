@@ -161,15 +161,21 @@ func (b *ArtifactBuilder) buildValueGuardArgs(prepared PreparedBuild, secrets []
 	if len(prepared.BuildValueGuards) == 0 {
 		return nil
 	}
-	key := b.buildValueKey
-	if len(key) == 0 {
-		key = processBuildValueKey()
-	}
+	key := b.valueKey()
 	args := make([]BuildArgValue, 0, len(prepared.BuildValueGuards))
 	for _, guard := range prepared.BuildValueGuards {
 		args = append(args, BuildArgValue{Name: guard.Arg, Value: buildValueMarker(key, guard, secrets)})
 	}
 	return args
+}
+
+// valueKey is the key build values are digested under: the server's, or
+// the process's own when the builder was given none.
+func (b *ArtifactBuilder) valueKey() []byte {
+	if b != nil && len(b.buildValueKey) > 0 {
+		return b.buildValueKey
+	}
+	return processBuildValueKey()
 }
 
 // processBuildValueKey is the key of a builder that was given none — a test

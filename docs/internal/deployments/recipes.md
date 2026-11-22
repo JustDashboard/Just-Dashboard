@@ -739,7 +739,9 @@ Railway; `RAILPACK_CONFIG_FILE` is the setting's, and a secret one reaches the b
 which preflight says with `railpack_variables_configure_plan`). Every build variable is added to the
 plan's secrets by name and reaches BuildKit as a secret mount from buildx's environment, as a recipe's
 does; Railpack mounts each in every command of its plan, which is its model, so the recipes' per-step
-mapping (`build.secrets`) is refused. A `secrets-hash` over the values, in buildx's environment and never argv, rebuilds the steps Railpack marks as reading them (its build step) when a value changes,
+mapping (`build.secrets`) is refused. A `secrets-hash` over the values (keyed HMAC-SHA256 under the
+build-value key, as a recipe's guard is, not the plain SHA-256 Railpack's CLI sends, so a short value
+cannot be guessed from it), in buildx's environment and never argv, rebuilds the steps Railpack marks as reading them (its build step) when a value changes,
 where BuildKit alone would reuse the layer, and `cache-key=deployment-<environment>`
 keeps one project's mount caches (npm's, pip's, apt's) from every other's on the daemon. The plan's
 excludes gain `.git`, `.just-dashboard` and the old name of buildx's metadata file, so the repository's

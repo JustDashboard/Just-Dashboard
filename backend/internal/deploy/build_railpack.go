@@ -3,6 +3,7 @@ package deploy
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
@@ -733,19 +734,27 @@ func railpackCacheKey(tag string) string {
 }
 
 // railpackSecretsHash changes when any build value does, so the frontend
-// rebuilds a step that read the old one instead of reusing its layer; it is
-// the hash Railpack's own CLI computes, over the sorted NAME=value lines.
-func railpackSecretsHash(secrets []BuildSecretValue) string {
+// rebuilds a step that read the old one instead of reusing its layer.
+// Railpack's own CLI sends a plain SHA-256 of the NAME=value lines; this is
+// keyed instead (HMAC-SHA256 under the build-value key, as a recipe's guard
+// is, build_value_guard.go), so a short value cannot be guessed from the
+// hash wherever BuildKit records the frontend's options. The frontend only
+// compares it, so any digest that follows the values serves.
+func railpackSecretsHash(key []byte, secrets []BuildSecretValue) string {
 	if len(secrets) == 0 {
 		return ""
 	}
-	lines := make([]string, 0, len(secrets))
-	for _, secret := range secrets {
-		lines = append(lines, secret.ID+"="+secret.Value)
+	sorted := append([]BuildSecretValue(nil), secrets...)
+	sort.Slice(sorted, func(i, j int) bool { return sorted[i].ID < sorted[j].ID })
+	pairs := make([][2]string, 0, len(sorted))
+	for _, secret := range sorted {
+		pairs = append(pairs, [2]string{secret.ID, secret.Value})
 	}
-	sort.Strings(lines)
-	sum := sha256.Sum256([]byte(strings.Join(lines, "\n")))
-	return hex.EncodeToString(sum[:])
+	encoded, _ := json.Marshal(pairs)
+	mac := hmac.New(sha256.New, key)
+	mac.Write([]byte("railpack-secrets-v1\x00"))
+	mac.Write(encoded)
+	return hex.EncodeToString(mac.Sum(nil))
 }
 
 // railpackPrepareSpec is the planner's container: the railpack binary of the
@@ -924,12 +933,12 @@ func railpackPreviewArgs(prepared PreparedBuild, tag string) []string {
 
 // railpackFrontendFor is the frontend a prepared Railpack build is built
 // through.
-func railpackFrontendFor(prepared PreparedBuild, tag string, secrets []BuildSecretValue) *BuildFrontend {
+func railpackFrontendFor(prepared PreparedBuild, tag string, secrets []BuildSecretValue, key []byte) *BuildFrontend {
 	if prepared.Method != BuildRailpack || prepared.Railpack == nil {
 		return nil
 	}
 	return &BuildFrontend{
-		Image: prepared.Railpack.Image, CacheKey: railpackCacheKey(tag), SecretsHash: railpackSecretsHash(secrets),
+		Image: prepared.Railpack.Image, CacheKey: railpackCacheKey(tag), SecretsHash: railpackSecretsHash(key, secrets),
 	}
 }
 
