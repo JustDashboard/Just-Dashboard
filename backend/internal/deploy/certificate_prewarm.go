@@ -237,8 +237,8 @@ func (e *NormalizedStepExecutor) startCertificatePrewarm(ctx context.Context, ex
 // background attempt it used.
 type prewarmEvidence struct {
 	StartedDuringBuild bool      `json:"startedDuringBuild"`
-	StartedAt          time.Time `json:"startedAt"`
-	FinishedAt         time.Time `json:"finishedAt,omitempty"`
+	StartedAt          time.Time `json:"startedAt,omitzero"`
+	FinishedAt         time.Time `json:"finishedAt,omitzero"`
 	// Outcome is the attempt's own answer: issued, reused, failed or
 	// interrupted (the step then asked itself).
 	Outcome string `json:"outcome"`
