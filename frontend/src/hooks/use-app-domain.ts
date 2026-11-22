@@ -9,33 +9,40 @@ import { usePoll } from "@/hooks/use-poll"
  * This server's just-dashboard.com address (`/dashboard/link/domain`).
  *
  * Opening the page is what asks the site again (the backend reads `GET /domain` on each read),
- * so the steady cadence is slow; while the wildcard is being issued the page asks every three
- * seconds until it settles. Each mutation's answer is drawn at once, as the link's own hook does.
+ * so the steady cadence is slow; while something is under way — the wildcard being issued, or
+ * an offered address being claimed by itself — the page asks every three seconds until it settles.
+ * Each mutation's answer is drawn at once, as the link's own hook does.
  *
  * A route that answers 404 is a backend without the feature: the hook reports `missing` and the
  * pages leave the offer out rather than show an error for something that is not there.
  */
 
-const ISSUING_POLL = 3000
+const SETTLING_POLL = 3000
 const STEADY_POLL = 60_000
 
+/** Whether the server is in the middle of something the page should watch closely. */
+function settling(status: AppDomainStatus) {
+  const claiming = Boolean(status.offer && !status.offer.error && !status.domain)
+  return claiming || status.certificate?.state === "issuing"
+}
+
 export function useAppDomain({ enabled = true }: { enabled?: boolean } = {}) {
-  const [issuing, setIssuing] = useState(false)
+  const [settle, setSettle] = useState(false)
   const [adopted, setAdopted] = useState<{ status: AppDomainStatus; at: number }>()
 
   const read = useCallback(async (signal?: AbortSignal) => {
     const next = await get<AppDomainStatus>("/dashboard/link/domain", undefined, signal)
-    setIssuing(next.certificate?.state === "issuing")
+    setSettle(settling(next))
     return next
   }, [])
 
-  const poll = usePoll(read, issuing ? ISSUING_POLL : STEADY_POLL, [], {
+  const poll = usePoll(read, settle ? SETTLING_POLL : STEADY_POLL, [], {
     enabled,
     key: "/dashboard/link/domain",
   })
 
   const adopt = useCallback((status: AppDomainStatus) => {
-    setIssuing(status.certificate?.state === "issuing")
+    setSettle(settling(status))
     setAdopted({ status, at: Date.now() })
   }, [])
 

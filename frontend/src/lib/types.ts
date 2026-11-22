@@ -8560,6 +8560,19 @@ export type AppDomainStatus = {
     error: string | null
   } | null
   usedBy: AppDomainUse[]
+  /**
+   * The handle the account chose for this server when it approved the link (or later on the
+   * site), which the server claims by itself. Null when there is none, or once a domain is held.
+   */
+  offer: AppDomainOffer | null
+}
+
+/** An address the site offers this server, claimed automatically (AUTOCLAIM.md). */
+export type AppDomainOffer = {
+  handle: string
+  hostname: string
+  /** Why the last automatic claim failed, in words; null while it has not run or is under way. */
+  error: string | null
 }
 
 /**

@@ -164,6 +164,7 @@ export default function AccountLinkPage() {
                 <LinkPanel
                   status={status}
                   scope={choice}
+                  addresses={Boolean(appDomain.status?.enabled)}
                   onScope={setChoice}
                   onBegin={account.begin}
                   onCancel={account.cancel}
