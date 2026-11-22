@@ -148,8 +148,8 @@ var ErrAppDomainHookMissing = errors.New("the jd command line is not installed w
 
 // IssueAppDomainCertificate orders the handle's wildcard through certbot's
 // manual plugin, with the jd hooks, and reads it back. It holds certbot's
-// turn (certbot_gate.go) and the route lock while certbot runs, as a
-// deployment's order does.
+// turn (certbot_gate.go) while certbot runs, as a deployment's order does,
+// but not the route lock: the hooks it runs call back into this process.
 func (s *Service) IssueAppDomainCertificate(ctx context.Context, order AppDomainOrder, log func(stream, text string)) (DeploymentCertificate, error) {
 	if order.Handle == "" || order.Zone == "" || order.Credentials == "" {
 		return DeploymentCertificate{}, errors.New("an app domain order needs a handle, a zone and the hook's credential")

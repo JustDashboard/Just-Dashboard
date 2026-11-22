@@ -7,6 +7,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -80,6 +81,9 @@ func (s *Service) startIssue(ctx context.Context, opts IssueOptions, by string) 
 	}
 	job := s.jobs.Start(jobs.Spec{
 		Kind: "app-domain.certificate", Title: title, StartedBy: by, Timeout: 15 * time.Minute,
+		// The routes that start it are the account link's, for
+		// administrators.
+		Capability: auth.CapSystemAdmin,
 	}, func(ctx context.Context, out jobs.Emitter) error {
 		defer func() {
 			s.mu.Lock()
