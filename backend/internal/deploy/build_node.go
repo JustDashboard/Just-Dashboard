@@ -68,6 +68,7 @@ func readNodeInstallSourceIn(root *os.Root, dir, arch string, budget *nodeReadBu
 	var parsed nodeManifest
 	parseNodeManifest(manifest, &parsed)
 	source.files = readNodeRootFiles(nodeFiles{root: root, dir: dir, budget: budget.nodeConfigBudget()}, parsed)
+	source.files.member = member
 	source.workspace = member == "" && len(nodeWorkspacePatterns(files)) > 0
 	source.facts = readNodeInstallFacts(nodeFiles{root: root, dir: source.context, budget: budget}, member, manifest, arch)
 	return source, nil
@@ -455,7 +456,12 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	for _, env := range append(append(append([]string(nil), plan.image.runtimeEnv...), nodeServerRuntimeEnv(recipe.node.name, defaults.Env)...), serving.runtimeEnv...) {
 		lines = append(lines, "ENV "+env)
 	}
-	lines = append(lines, nodeModulesCopy(recipe.member)...)
+	if standalone := nodeStandaloneCopy(config.StartCommand, workdir); standalone != nil && len(plan.image.runtimeRuns) == 0 {
+		// The standalone server carries its own traced node_modules.
+		lines = append(lines, standalone...)
+	} else {
+		lines = append(lines, nodeModulesCopy(recipe.member)...)
+	}
 	for _, run := range plan.image.runtimeRuns {
 		lines = append(lines, "RUN "+run)
 	}

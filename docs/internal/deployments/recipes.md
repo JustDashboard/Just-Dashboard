@@ -878,7 +878,7 @@ except where the framework has a build command of its own (KeystoneJS, RedwoodJS
 | KeystoneJS 6 | `@keystone-6/core` | server, 3000 | `<runner> keystone start --with-migrations`; `<runner> keystone build` without a build script |
 | AdonisJS 6 (5) | `@adonisjs/core` | server, 3333 | `node build/bin/server.js` (5: `build/server.js`), after `node build/ace.js migration:run --force` (5: `build/ace`) with `@adonisjs/lucid` and `database/migrations`; the template's `start` runs inside `build/` and is not used |
 | RedwoodJS | `@redwoodjs/core` | server, 8910 | `<runner> rw serve` (after `rw prisma migrate deploy` with `api/db/migrations`); `<runner> rw build` |
-| Next.js | `next` | server, 3000 / site `out` | `<manager> run start` (`<runner> next start` without a script); `output: 'export'` is a static site in `out` (or its `distDir`) under its `basePath`; Payload is Next.js |
+| Next.js | `next` | server, 3000 / site `out` | `<manager> run start` (`<runner> next start` without a script); `output: 'export'` is a static site in `out` (or its `distDir`) under its `basePath`; `output: 'standalone'` starts `node .next/standalone/server.js` (`.next/standalone/<member>/server.js` for a workspace member), unless a start script does more than `next start` or a `distDir`/`outputFileTracingRoot` moves it; Payload is Next.js |
 | SvelteKit | `@sveltejs/kit` | server, 3000 / site `build` | the adapter `svelte.config.js` imports: `node build` (Bun: `bun ./build/index.js`), or adapter-node's `out`, for adapter-node, and for adapter-auto or a provider adapter, built with a pinned adapter-node; adapter-static's `pages` and `fallback` |
 | Astro | `astro` (+ `@astrojs/node`) | site `dist` / server, 4321 | `node ./dist/server/entry.mjs` (every Node server's runtime stage sets `HOST=0.0.0.0`); a provider adapter, middleware mode, or `output: 'server'` without an adapter is a decision |
 | Nuxt 3/4 | `nuxt` | server, 3000 / site `.output/public` for `nuxt generate` or the `static` preset | `node .output/server/index.mjs`; a provider preset builds with `NITRO_PRESET=node-server`; Nuxt 2 runs `nuxt start` |
@@ -991,8 +991,15 @@ output directory the plan serves.
   (`nitro_preset_overridden`).
 - Next.js standalone started from `.next/standalone/…/server.js`: after the build,
   `.next/static` and `public` are copied beside the server (Next.js's own Docker example does the same),
-  the runtime stage sets `HOSTNAME=0.0.0.0`, which the server binds, and the server file is the entry
-  checked.
+  the runtime stage sets `HOSTNAME=0.0.0.0`, which the server binds (it listens on the `PORT` the runtime
+  sets), and the server file is the entry checked. When the start command is that server alone
+  (`node .next/standalone/…/server.js`), the runtime stage copies only `.next/standalone` — the server,
+  the traced `node_modules` it needs and the assets beside it — not `/app` (`nodeStandaloneCopy`), an
+  image several times smaller; a start command that runs anything else, or plan-added runtime steps,
+  keep the whole application. A new detection of an app whose `next.config` sets `output: 'standalone'`
+  proposes that command (`frameworks_next_standalone.go`); a stored `next start` is never rewritten, and
+  Next.js has no switch to make an app standalone that does not set it (16.4 has no
+  `NEXT_PRIVATE_STANDALONE`), so the recipe never wraps a repository's `next.config`.
 - The entry check: a server framework's entry (`.output/server/index.mjs`, `build/index.js`,
   `dist/src/main.js`, `build/bin/server.js`, …) is checked after the build when the start command is the
   framework's own or runs the entry, directly or through a package script (`npm run serve:ssr:app`), so a
@@ -1031,6 +1038,7 @@ is judged against the plan as it stands, from what detection recorded (`nodeBuil
 | `sveltekit_adapter_substituted` (warning) | SvelteKit's configuration names adapter-auto or a provider adapter, and the plan serves the server |
 | `nitro_preset_overridden` (warning) | a Nitro provider preset is replaced by `node-server` |
 | `next_export_images` (warning) | the plan exports a Next.js site, a page imports `next/image` and `next.config` sets neither `images.unoptimized` nor a custom loader; the build would stop with "Image Optimization using the default loader is not compatible with export" |
+| `next_standalone_start` (pass) | `next.config` sets `output: 'standalone'` and the start command does not run the standalone server alone; the action is the command that does, whose image ships only `.next/standalone` |
 | `nest_output_layout` (warning) | the plan runs the start detection proposed past a `start:prod` that looks for `dist/main` |
 | `start_command_dev_server` (warning) | the configured start command runs a development server or a watcher, directly or through a package script |
 | `node_decision_open` (warning) | a question detection left open about the framework (an output set by an expression, Astro's middleware mode, a Vike or TanStack Start entry, an entry only Bun serves, TypeScript on plain Node, an Nx executor it does not know, …) while the setting that answers it — named by the finding's field, the start command, output directory or package manager, else the whole build — still holds detection's guess; the questions one setting answers are one finding |

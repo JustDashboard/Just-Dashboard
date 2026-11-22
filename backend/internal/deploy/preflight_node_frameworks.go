@@ -46,6 +46,12 @@ func nodeFrameworkFindings(candidate *DetectedCandidate, configuration PlanConfi
 				if static {
 					continue
 				}
+			case "next_standalone_start":
+				// Said only while the start command does not run the
+				// standalone server itself, which is what slims the image.
+				if static || nodeStandaloneCopy(start, "/app") != nil {
+					continue
+				}
 			}
 			findings = append(findings, item)
 		}

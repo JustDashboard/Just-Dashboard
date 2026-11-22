@@ -103,6 +103,19 @@ func TestNodeFrameworkConfigurationDecidesTheServingPlan(t *testing.T) {
 			"package.json":    `{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.0.0"}}`,
 			"next.config.mjs": "const nextConfig = {\n  // output: 'export',\n  /* output: 'standalone' */\n};\nexport default nextConfig;\n",
 		}, framework: "nextjs", start: "npm run start", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh},
+		{name: "next standalone starts its own server", files: map[string]string{
+			"package.json":   `{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+			"next.config.ts": "const nextConfig = { output: 'standalone' }\nexport default nextConfig\n",
+		}, framework: "nextjs", start: "node .next/standalone/server.js", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh,
+			evidence: "output: 'standalone' writes a self-contained server", finding: "next_standalone_start"},
+		{name: "next standalone behind a start script of its own", files: map[string]string{
+			"package.json":    `{"scripts":{"build":"next build","start":"node scripts/migrate.js && node .next/standalone/server.js"},"dependencies":{"next":"16.0.0"}}`,
+			"next.config.mjs": "export default { output: 'standalone' }",
+		}, framework: "nextjs", start: "npm run start", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh},
+		{name: "next standalone under a distDir", files: map[string]string{
+			"package.json":    `{"scripts":{"build":"next build","start":"next start"},"dependencies":{"next":"16.0.0"}}`,
+			"next.config.mjs": "export default { output: 'standalone', distDir: 'build' }",
+		}, framework: "nextjs", start: "npm run start", port: 3000, profile: ProfileWeb, confidence: ConfidenceHigh},
 		{name: "next output from an expression", files: map[string]string{
 			"package.json":   `{"scripts":{"build":"next build"},"dependencies":{"next":"16.0.0"}}`,
 			"next.config.js": "module.exports = { output: process.env.STATIC ? 'export' : undefined }",

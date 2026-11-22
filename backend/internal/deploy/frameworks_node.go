@@ -329,6 +329,8 @@ func nextResolution(manifest nodeManifest, files nodeRootFiles, runner string) n
 				"The default image loader needs a server, so next build stops with \"Image Optimization using the default loader is not compatible with export\".",
 				"Set images: { unoptimized: true } in "+config.name+", or give next/image a custom loader.", "configuration.build"))
 		}
+	case "standalone":
+		resolution = nextStandaloneResolution(manifest, files, config, runner)
 	case "unknown":
 		resolution = server(nodeExecRunner(runner)+" next start", 3000, "")
 		resolution.decide(ConfidenceMedium, config.name+" sets output from an expression; confirm whether it exports a static site (output directory out) or runs next start")

@@ -137,3 +137,35 @@ func liveInstructionCached(logs []string, needle string) bool {
 	}
 	return true
 }
+
+// TestLiveNextStandaloneShipsOnlyItsServer is DS-9's measure: the same
+// standalone Next.js app built with the start command detection proposes,
+// which ships .next/standalone alone, and with next start, which ships
+// the whole application and node_modules.
+func TestLiveNextStandaloneShipsOnlyItsServer(t *testing.T) {
+	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
+		t.Skip("set JD_DEPLOY_LIVE=1 on a Docker/Buildx host to measure the standalone image")
+	}
+	client := liveC4Docker(t)
+	builder := NewArtifactBuilder(NewDockerArtifactBackend(client))
+	stamp := fmt.Sprintf("%d", time.Now().UnixNano())
+	prefix := firstNonEmpty(os.Getenv("JD_LIVE_IMAGE_PREFIX"), "just-dashboard-live")
+	root := t.TempDir()
+	copyFrameworkFixture(t, "next-standalone", root)
+	_ = os.Remove(filepath.Join(root, "install-check.cjs"))
+	rewriteLiveManifest(t, root, false)
+	sizes := map[string]int64{}
+	for index, start := range []string{"node .next/standalone/server.js", "npx next start"} {
+		tag := prefix + "/standalone-" + stamp + ":" + []string{"standalone", "next-start"}[index]
+		t.Cleanup(func() { _, _ = liveDockerOutput(context.Background(), "image", "rm", "--force", tag) })
+		result := livePrepareAndBuild(t, builder, root, tag, BuildPlanConfig{
+			Method: BuildRecipe, Recipe: "node", BuildCommand: "npm run build", StartCommand: start,
+		}, nil, nil, nil)
+		sizes[start] = result.Image.SizeBytes
+	}
+	slim, whole := sizes["node .next/standalone/server.js"], sizes["npx next start"]
+	t.Logf("standalone image %.1f MB, next start image %.1f MB", float64(slim)/1e6, float64(whole)/1e6)
+	if slim <= 0 || slim*2 > whole {
+		t.Fatalf("the standalone image (%d bytes) is not well under the next start image (%d bytes)", slim, whole)
+	}
+}

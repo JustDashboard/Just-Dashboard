@@ -474,7 +474,9 @@ only renderer/executor/validation authority for their feature.
   `nodeBuild.findings` (with `nodeBuild.devScripts`, the scripts that start a development server);
   `build_node_frameworks.go` renders what the plan's own commands need around the build (adapter-node for
   adapter-auto, `NITRO_PRESET`, Next.js standalone assets, the fallback page a static site's framework
-  writes, the entry check). An Nx workspace's application projects are candidates at its root
+  writes, the entry check); a Next.js app whose config sets `output: 'standalone'` is proposed its
+  standalone server, and a start command that runs that server alone ships only `.next/standalone`
+  (`frameworks_next_standalone.go`). An Nx workspace's application projects are candidates at its root
   (`frameworks_node_nx.go`), and a workspace member builds its workspace dependencies first
   (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Litestar,
   Starlette, Sanic, Quart, Falcon, Bottle, Flask, aiohttp, Tornado and the application frameworks
