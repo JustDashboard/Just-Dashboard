@@ -47,6 +47,7 @@ import {
 import type { ConsoleRow } from "@/components/deploy/build-console"
 import { CodeBlock, JsonCode } from "@/components/code"
 import { EvidenceView, StepTile, stepSummary } from "@/components/deploy/run-evidence"
+import { buildTimingOf, buildTimingSentence } from "@/components/deploy/build-timing"
 import { useBreakpoint } from "@/lib/breakpoints"
 import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
@@ -166,7 +167,8 @@ function drawnElsewhere(step: DeploymentStep): string[] {
         typeof result === "object" && result !== null && "artifacts" in result
           ? (result as { artifacts?: unknown[] }).artifacts
           : undefined
-      return artifacts?.length ? ["prepared", "image"] : ["prepared"]
+      // The timing is the sentence under the step's name.
+      return artifacts?.length ? ["prepared", "image", "timing"] : ["prepared", "timing"]
     }
     default:
       return []
@@ -554,6 +556,10 @@ function Inspector({
 }) {
   const seconds = stepSeconds(step, now)
   const evidence = step.evidence ?? {}
+  // Where a build's time went, in a sentence under its name: no row or bar.
+  const timing = buildTimingOf(step)
+  const spent =
+    timing && buildTimingSentence(timing, step.state === "running" ? undefined : seconds)
   const preflight = step.key === "analyze_plan" ? preflightOf(evidence) : undefined
   const rehearsal = step.key === "rehearse_migration" ? rehearsalOf(evidence) : undefined
   const replay = step.key === "replay_traffic" ? replayOf(evidence) : undefined
@@ -604,6 +610,8 @@ function Inspector({
           </Button>
         )}
       </header>
+
+      {spent && <p className="text-body text-muted-foreground">{spent}</p>}
 
       {step.errorCode && (
         <Group tone="danger" className="space-y-1.5">

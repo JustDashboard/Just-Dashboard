@@ -150,10 +150,12 @@ function SidebarProvider({
               ...style,
             } as React.CSSProperties
           }
-          className={cn(
-            "group/sidebar-wrapper flex min-h-svh w-full has-data-[variant=inset]:bg-sidebar",
-            className,
-          )}
+          // No `has-data-[variant=inset]:bg-sidebar` here, as the kit ships
+          // it: no sidebar of ours is inset, and a `:has()` on the element
+          // around every page was checked again on each node inserted under
+          // it — every line a build console drew. An inset sidebar would pass
+          // its wrapper the ground in `className`.
+          className={cn("group/sidebar-wrapper flex min-h-svh w-full", className)}
           {...props}
         >
           {children}

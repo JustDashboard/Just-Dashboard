@@ -26,6 +26,15 @@ only renderer/executor/validation authority for their feature.
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
   events before handing off to live events, including the terminal tail of an already completed run.
+- A state event carries the instants it records, because the run page reads the snapshot once and
+  follows the events after it (`withEventTimes`, `run_event_times.go`). `step.state` has the attempt's
+  `startedAt` and, once it ends, `endedAt` beside `key`, `state`, `attempt`, `evidence`, `errorCode`
+  and `errorMessage`; `run.state` has `claimedAt` on the claim (`preparing`) and `endedAt` on every
+  terminal state (a transition, a queued cancellation, a supersede, a preview's quarantine). A time
+  that is not recorded is left out, as the snapshot leaves it out. The page's `applyRunEvent`
+  (`components/deploy/run-events.ts`) reads them, and falls back to the event's own `ts`, written in
+  the same transaction, for an engine that sent none. The event data is not part of the OpenAPI
+  description, which documents the route as a socket.
 - A step's output is written a batch at a time. `storeStepOutput.Log` collects lines and
   `OrchestrationStore.AppendLogs` writes them in one transaction — one lease check, one read of the
   run's sequence, a row a line with consecutive sequences, one update of the step's `last_seq` and one
@@ -1387,6 +1396,21 @@ only renderer/executor/validation authority for their feature.
   feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
   with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
   figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
+- A passed build says where its time went. The executor feeds the same redacted transcript to a
+  `buildTimingReader` (`build_timing.go`), which reads BuildKit's own figures as they stream: a
+  Dockerfile step's header (`#13 [build 3/4] RUN …`, not `[internal]` bookkeeping) and its `DONE`
+  seconds or `CACHED`, the `exporting to …` step and its `exporting layers` (or `sending tarball`) and
+  `unpacking` seconds, matched loosely because the exporter's wording follows the driver. A RUN of the
+  plan's build command (`prepared.buildCommand`, else the plan's) is the compile, one of the recipe's
+  install line (`prepared.install`) the install, a RUN that does both the compile; with neither named
+  the package managers' and toolchains' own verbs decide. A status line starts a new buildx run (a
+  Compose stack's next service), whose figures are added. The summary — install and compile seconds
+  or cached, export, unpack and the export step's seconds, the steps and how many were cached, and the
+  image's bytes (a stack's images added) — is the build step's evidence `timing`, absent when no
+  BuildKit ran (a pulled image). The run page says it in one sentence on the Build step's record, and
+  beside a run's running time how long runs of its kind usually take: the median, over the project's
+  `recentRuns` that succeeded (at least three), from `claimedAt` to `endedAt`. The tests read neutral
+  copies of real transcripts (`testdata/buildkit-timing/`).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -2005,7 +2029,7 @@ only renderer/executor/validation authority for their feature.
   refused in URLs can carry a token there — and left out when it does not parse), the desired build
   plan's `recipe` and `framework`, `images` (the distinct references the live release's runtime
   snapshot runs, read from the same snapshot as the service count) and `recentRuns` (the newest
-  fourteen, newest first). The strip and `lastRun` are one statement, `recentProjectRuns`: a
+  fourteen, newest first, each with its request, claim and end). The strip and `lastRun` are one statement, `recentProjectRuns`: a
   `ROW_NUMBER()` ranking of every card's runs that carries only ids, answered in order by
   `idx_deploy_runs_project_requested (project_id, requested_at DESC, id DESC)`, joined back to the
   whole rows it keeps, so `recentRuns[0]` is `lastRun` by construction. Ranking whole rows in a second
@@ -2732,8 +2756,9 @@ image project's first line then names its registry); the traffic band says "No w
 flat rule for a project with no address on the web; and the footer never wraps, its words
 truncating instead. The list view carries the same readings from 1024 in columns two lines tall — the
 state over the address or pending changes and the run strip over the last run, with the traffic
-joining from 1280 — so a row stays one row's height. The fleet is read every five seconds and the traffic
-every thirty; the archive is read once, for the count beside its link, and again when a card
+joining from 1280 — so a row stays one row's height. The fleet is read every five seconds, every two
+while any run is in flight (`RUN_IN_FLIGHT_POLL_MS`, as a project's detail and run list are), and the
+traffic every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.
 `/deploy?view=archived` lists archived projects drawn as what they deployed (`ArchivedDeployment`),
 with Restore (`POST /deploy/{id}/unarchive`) and permanent deletion. `/deploy/notifications` holds

@@ -64,7 +64,7 @@ import {
   stepOperation,
 } from "@/components/deploy/vocabulary"
 import { useNow } from "@/hooks/use-now"
-import { BuildConsole, consoleRows, transcriptSummary } from "@/components/deploy/build-console"
+import { BuildConsole } from "@/components/deploy/build-console"
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
 import { RunDetails, initialStep } from "@/components/deploy/run-steps"
 import { RunHeader } from "@/components/deploy/run-header"
@@ -161,7 +161,6 @@ export function RunPage() {
   }>({ open: false })
   const stream = useRunStream(projectId, runId, { enabled: validIds, initial: initial.data })
   const setLiveSnapshot = stream.setSnapshot
-  const events = stream.events
   const snapshot = stream.snapshot ?? initial.data
 
   // A staging run is read against staging's own summary — its live release,
@@ -287,10 +286,10 @@ export function RunPage() {
   )
 
   const attempts = useMemo(() => latestAttempts(snapshot?.steps ?? []), [snapshot?.steps])
-  // The transcript is parsed once, here, for the console and for what
-  // Details and the failure read from it.
-  const rows = useMemo(() => consoleRows(events), [events])
-  const transcript = useMemo(() => transcriptSummary(rows), [rows])
+  // The transcript is read once, by the stream as its lines land, for the
+  // console and for what Details and the failure read from it.
+  const transcript = stream.transcript
+  const rows = transcript.rows
   const now = useNow(1000, isActiveRun(snapshot?.run.state))
   const releaseNumbers = useMemo(
     () => new Map((releases.data ?? []).map((release) => [release.id, release.number])),
@@ -785,8 +784,7 @@ export function RunPage() {
             <BuildConsole
               flush
               className="min-h-0 flex-1"
-              rows={rows}
-              summary={transcript}
+              transcript={transcript}
               capped={stream.capped}
               steps={attempts}
               active={active}
@@ -795,7 +793,7 @@ export function RunPage() {
               connected={stream.socket === "open"}
               startedAt={run.claimedAt ?? run.requestedAt}
               runNumber={run.runNumber}
-              now={clock}
+              stoppedAt={active ? undefined : run.endedAt}
               selectedStep={selectedStepId}
               onSelectStep={setSelectedStepId}
               focusLine={focusLine}
@@ -851,8 +849,7 @@ export function RunPage() {
           >
             <div id="build-logs" className="min-w-0 scroll-mt-16">
               <BuildConsole
-                rows={rows}
-                summary={transcript}
+                transcript={transcript}
                 capped={stream.capped}
                 steps={attempts}
                 active={active}
@@ -861,7 +858,7 @@ export function RunPage() {
                 connected={stream.socket === "open"}
                 startedAt={run.claimedAt ?? run.requestedAt}
                 runNumber={run.runNumber}
-                now={clock}
+                stoppedAt={active ? undefined : run.endedAt}
                 selectedStep={selectedStepId}
                 onSelectStep={setSelectedStepId}
                 focusLine={focusLine}

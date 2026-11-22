@@ -343,6 +343,6 @@ test("the stylesheet takes what follows a marker, and the page's blocks under it
   const css = readFileSync(join(import.meta.dir, "../app/globals.css"), "utf8")
   const rule = css.slice(css.indexOf("[data-hold] ~ *"))
   expect(rule.slice(0, rule.indexOf("}") + 1).replace(/\s+/g, " ")).toBe(
-    '[data-hold] ~ *, [data-slot="page"] > :has([data-hold]) ~ * { display: none !important; }',
+    '[data-hold] ~ *, [data-slot="page"] > :has([data-hold]) ~ :is([data-slot="page"] > *) { display: none !important; }',
   )
 })

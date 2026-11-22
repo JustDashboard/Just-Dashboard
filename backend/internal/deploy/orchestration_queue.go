@@ -157,7 +157,8 @@ func (s *OrchestrationStore) claimNextOnce(
 		return nil, ErrLeaseLost
 	}
 	event, err := appendEventTx(ctx, tx, now, runID, 0, EventRunState, "status", "",
-		mustJSON(map[string]any{"state": RunPreparing, "worker": worker}))
+		mustJSON(withEventTimes(map[string]any{"state": RunPreparing, "worker": worker},
+			"claimedAt", unixTimePtr(now.Unix()))))
 	if err != nil {
 		return nil, err
 	}
@@ -317,7 +318,8 @@ func (s *OrchestrationStore) TransitionRun(
 		}
 	}
 	event, err := appendEventTx(ctx, tx, now, runID, 0, EventRunState, "status", "",
-		mustJSON(map[string]any{"from": from, "state": to, "code": detail.Code, "reason": detail.Reason}))
+		mustJSON(withEventTimes(map[string]any{"from": from, "state": to, "code": detail.Code, "reason": detail.Reason},
+			"endedAt", unixTimePtr(ended))))
 	if err != nil {
 		return nil, err
 	}
@@ -390,7 +392,8 @@ func (s *OrchestrationStore) RequestCancellation(ctx context.Context, runID int6
 			return nil, err
 		}
 		event, err = appendEventTx(ctx, tx, now, runID, 0, EventRunState, "status", "",
-			mustJSON(map[string]any{"from": RunCancelling, "state": RunCancelled}))
+			mustJSON(withEventTimes(map[string]any{"from": RunCancelling, "state": RunCancelled},
+				"endedAt", unixTimePtr(now.Unix()))))
 		if err != nil {
 			return nil, err
 		}
@@ -602,9 +605,9 @@ func (s *OrchestrationStore) supersedeEligibleTx(
 			continue
 		}
 		event, err := appendEventTx(ctx, tx, now, candidate.id, 0, EventRunState,
-			"status", "", mustJSON(map[string]any{
+			"status", "", mustJSON(withEventTimes(map[string]any{
 				"state": RunSuperseded, "supersededBy": newRunID,
-			}))
+			}, "endedAt", unixTimePtr(now.Unix()))))
 		if err != nil {
 			return err
 		}

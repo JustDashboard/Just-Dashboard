@@ -179,6 +179,9 @@ type preparedStepEvidence struct {
 
 type builtStepEvidence struct {
 	Result BuildArtifactResult `json:"result"`
+	// Timing is where the build's time went, read from its transcript as it
+	// streamed (build_timing.go); absent for a build that ran no BuildKit.
+	Timing *BuildTiming `json:"timing,omitempty"`
 }
 
 type renderedStepEvidence struct {
@@ -624,6 +627,11 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	// The certificate does not depend on the image, so it is resolved while
 	// the image builds; provision_certificate stays the gate before start.
 	e.startCertificatePrewarm(ctx, execution, plan)
+	compile := preparedEvidence.Prepared.BuildCommand
+	if compile == "" {
+		compile = plan.Build.BuildCommand
+	}
+	timing := newBuildTimingReader(preparedEvidence.Prepared.Install, compile)
 	result, err := e.builder.Build(
 		ctx, preparedEvidence.BuildRoot,
 		releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
@@ -634,6 +642,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 				return err
 			}
 			collector.observe(line)
+			timing.observe(line)
 			return nil
 		},
 	)
@@ -654,7 +663,9 @@ func (e *NormalizedStepExecutor) buildArtifact(
 		failure.Cleanup = mustJSON(cleanup)
 		return failure
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{Result: result})}
+	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{
+		Result: result, Timing: timing.summary(builtImageBytes(result)),
+	})}
 }
 
 func (e *NormalizedStepExecutor) renderRuntime(

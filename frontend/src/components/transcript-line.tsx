@@ -40,55 +40,97 @@ export function jobLineToTranscript(line: JobLine): TranscriptLine {
   return { number: line.seq, text: line.text, kind: streamKind(line.stream) }
 }
 
+/** The most lines the drip holds back; a burst past it is drawn outright. */
+const DRIP_CAP = 400
+
+/** How long after a batch lands its last line may still be held back. */
+export const DRIP_LAG_MS = 300
+
+/**
+ * How many of `from` held lines may still be held `elapsed` ms after their
+ * batch's first frame: an even release, all of them out by `DRIP_LAG_MS`.
+ */
+export function dripRemaining(from: number, elapsed: number) {
+  if (from <= 0) return 0
+  return Math.ceil(from * Math.max(0, 1 - elapsed / DRIP_LAG_MS))
+}
+
+const IDLE = { held: 0, from: 0, since: 0 }
+
 /**
  * The drip: a poll or a burst of events lands forty lines at once, and forty
  * lines appearing in a frame is a page that jumped. While `drips` holds — the
  * run is live and the reader is at the end, not searching or filtering — new
- * lines are let out a few a frame, the whole batch well inside the poll that
- * brought it, and each line past `arrivedFrom` rises into place once (§11's
- * *arrived*). With reduced motion the lines are simply there.
+ * lines are let out evenly over the frames that follow, every one of them on
+ * screen within `DRIP_LAG_MS` of the batch that brought it, and each line past
+ * `arrivedFrom` rises into place once (§11's *arrived*). With reduced motion
+ * the lines are simply there.
  *
- * `text` is what the lines were read from. The lines count as appended only
- * when the new text starts with the old, so a switch that renumbers
- * everything — the tail replaced by the whole file — is drawn at once, and
- * `generation` moves so the caller can key its rows by it.
+ * It let out a twenty-fourth of what it held a frame, which was well under a
+ * second for one batch and never caught up with a build writing ten batches a
+ * second: at its cap of 400 a new batch put the count back where the last
+ * frame had taken it from, the frame loop was not asked again, and the last
+ * 400 lines stayed held until the reader scrolled. The loop now runs for as
+ * long as anything is held, and the release is by time, not by share.
+ *
+ * `text` is what the lines were read from. The lines count as appended when
+ * `appended(previous, text)` says so — by default when the new text starts
+ * with the old — so a switch that renumbers everything (the tail replaced by
+ * the whole file) is drawn at once, and `generation` moves so the caller can
+ * key its rows by it. A caller that knows its lines grew without rebuilding
+ * them passes a cheaper `text` and its own `appended`.
  */
-export function useTranscriptDrip<T>(text: string, lines: T[], drips: boolean) {
+export function useTranscriptDrip<T>(
+  text: string,
+  lines: T[],
+  drips: boolean,
+  appended: (previous: string, next: string) => boolean = (previous, next) =>
+    next.startsWith(previous),
+) {
   const reduced = useReducedMotion()
   const on = drips && !reduced
-  // `held` is how many lines at the end are not drawn yet.
   const [previous, setPrevious] = useState({ text, count: lines.length, generation: 0 })
-  const [held, setHeld] = useState(0)
+  // `held` lines at the end are not drawn yet; `from` is how many were held
+  // when the last batch landed, released evenly from `since`, its first frame.
+  const [drip, setDrip] = useState(IDLE)
   const [arrivedFrom, setArrivedFrom] = useState(lines.length)
   if (text !== previous.text) {
-    const appended = text.startsWith(previous.text)
+    const grew = appended(previous.text, text)
     setPrevious({
       text,
       count: lines.length,
-      generation: appended ? previous.generation : previous.generation + 1,
+      generation: grew ? previous.generation : previous.generation + 1,
     })
-    if (appended && on) {
-      // Four hundred is a screenful and then some; a burst past that is drawn
-      // outright rather than queued for longer than the next poll.
-      setHeld(Math.min(held + lines.length - previous.count, 400))
+    if (grew && on) {
+      // Four hundred is a screenful and then some; a burst past that is
+      // drawn outright rather than queued.
+      const held = Math.min(drip.held + Math.max(0, lines.length - previous.count), DRIP_CAP)
+      setDrip({ held, from: held, since: 0 })
     } else {
-      setHeld(0)
-      if (!appended) setArrivedFrom(lines.length)
+      if (drip.held !== 0) setDrip(IDLE)
+      if (!grew) setArrivedFrom(lines.length)
     }
   }
   // Whatever was held is drawn the moment the reader stops following, and
   // must not be held again when they come back to the end. Nor does it rise
   // then: lines drawn while paused did not arrive in front of the reader.
-  if (!on && held !== 0) setHeld(0)
+  if (!on && drip.held !== 0) setDrip(IDLE)
   if (!on && arrivedFrom !== lines.length) setArrivedFrom(lines.length)
-  const pending = on ? held : 0
+  const pending = on ? Math.min(drip.held, lines.length) : 0
+  const dripping = pending > 0
   useEffect(() => {
-    if (pending === 0) return
-    const frame = requestAnimationFrame(() =>
-      setHeld((h) => Math.max(0, h - Math.max(1, Math.ceil(h / 24)))),
-    )
+    if (!dripping) return
+    let frame = requestAnimationFrame(function release(at) {
+      setDrip((current) => {
+        if (current.held === 0) return current
+        if (current.since === 0) return { ...current, since: at }
+        const held = Math.min(current.held, dripRemaining(current.from, at - current.since))
+        return held === current.held ? current : { ...current, held }
+      })
+      frame = requestAnimationFrame(release)
+    })
     return () => cancelAnimationFrame(frame)
-  }, [pending])
+  }, [dripping])
 
   return {
     drawn: pending > 0 ? lines.slice(0, lines.length - pending) : lines,
@@ -121,6 +163,7 @@ export function TranscriptRow({
   anchor,
   marked,
   gutter,
+  inBlock,
 }: {
   line: TranscriptLine
   wrap: boolean
@@ -149,6 +192,12 @@ export function TranscriptRow({
    * last number; absent, the fixed column the deploy consoles align to.
    */
   gutter?: number
+  /**
+   * Drawn inside a console's block (`ConsoleBlock`): the block is skipped
+   * off screen rather than the line, and the block's list is presentation, so
+   * the line names its own role.
+   */
+  inBlock?: boolean
 }) {
   if (line.kind === "blank") return <li aria-hidden className="h-3" />
   const lane = laneFor(line.service)
@@ -264,9 +313,10 @@ export function TranscriptRow({
   return (
     <li
       id={anchor}
+      role={inBlock ? "listitem" : undefined}
       aria-current={marked ? "true" : undefined}
       // Long runs are a few thousand rows; the ones off screen are not laid out.
-      style={{ contentVisibility: "auto", containIntrinsicSize: "auto 24px" }}
+      style={inBlock ? undefined : { contentVisibility: "auto", containIntrinsicSize: "auto 24px" }}
       className={cn(
         "relative flex min-w-0 gap-3 px-3 hover:bg-row-hover sm:px-4",
         marked && "scroll-mt-10 ring-1 ring-destructive/60 ring-inset",

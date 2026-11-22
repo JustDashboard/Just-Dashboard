@@ -3820,6 +3820,7 @@ export interface PullRequestWithPreview {
 
 /** deploy.RecentRun in the dashboard's source. */
 export interface RecentRun {
+  claimedAt?: string | null
   endedAt?: string | null
   id?: number
   operation?: DeployOperation
