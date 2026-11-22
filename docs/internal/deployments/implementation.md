@@ -26,6 +26,15 @@ only renderer/executor/validation authority for their feature.
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
   events before handing off to live events, including the terminal tail of an already completed run.
+- A state event carries the instants it records, because the run page reads the snapshot once and
+  follows the events after it (`withEventTimes`, `run_event_times.go`). `step.state` has the attempt's
+  `startedAt` and, once it ends, `endedAt` beside `key`, `state`, `attempt`, `evidence`, `errorCode`
+  and `errorMessage`; `run.state` has `claimedAt` on the claim (`preparing`) and `endedAt` on every
+  terminal state (a transition, a queued cancellation, a supersede, a preview's quarantine). A time
+  that is not recorded is left out, as the snapshot leaves it out. The page's `applyRunEvent`
+  (`components/deploy/run-events.ts`) reads them, and falls back to the event's own `ts`, written in
+  the same transaction, for an engine that sent none. The event data is not part of the OpenAPI
+  description, which documents the route as a socket.
 - A step's output is written a batch at a time. `storeStepOutput.Log` collects lines and
   `OrchestrationStore.AppendLogs` writes them in one transaction — one lease check, one read of the
   run's sequence, a row a line with consecutive sequences, one update of the step's `last_seq` and one
