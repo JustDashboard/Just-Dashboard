@@ -68,7 +68,10 @@ export const setup: GitHubSetup = {
     settingsUrl: "https://github.com/settings/apps/jd-repos-3f2a",
     installUrl: "https://github.com/apps/jd-repos-3f2a/installations/new",
     public: true,
-    callbackUrls: ["http://127.0.0.1:43117/github/callback"],
+    // An address no spec server is ever on, so "this address is not
+    // registered" holds on every port, 43117 included; a spec that wants the
+    // web sign-in registers its own origin (github-fixture.ts setupFor).
+    callbackUrls: ["https://dashboard.example.net/github/callback"],
     permissions: {
       administration: "write",
       contents: "write",

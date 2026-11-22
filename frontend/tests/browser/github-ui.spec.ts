@@ -122,7 +122,7 @@ test.describe("set up, nothing connected", () => {
     const help = page.locator("[data-slot=github-connect-help]")
     await expect(help).toContainText("only sends a sign-in back")
     await expect(help.getByRole("list", { name: "Registered addresses" })).toContainText(
-      "http://127.0.0.1:43117/github/callback",
+      "https://dashboard.example.net/github/callback",
     )
     await expect(help.getByRole("button", { name: "Add this address" })).toBeVisible()
     await help.getByRole("button", { name: "Sign in with a code" }).click()
