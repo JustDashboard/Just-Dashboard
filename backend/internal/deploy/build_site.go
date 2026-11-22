@@ -346,8 +346,11 @@ func renderPythonSiteDockerfile(recipe siteRecipe, python pythonRecipe, config B
 	if sanitize := python.install.sanitizeLine(); sanitize != "" {
 		lines = append(lines, sanitize)
 	}
+	// A site builds from its source, so its install stays after it; the
+	// download caches still spare it the downloads.
 	for _, install := range recipe.pythonInstalls {
-		lines = append(lines, "RUN "+installSecrets+install)
+		mounts, cached := pythonCachedRun(config.cache, install)
+		lines = append(lines, "RUN "+mounts+installSecrets+cached)
 	}
 	lines = append(lines, "RUN "+buildSecrets+command)
 	source, err := staticOutputSource("/app", config.OutputDirectory)

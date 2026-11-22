@@ -199,3 +199,79 @@ func TestGoDownloadsModulesBeforeTheSourceAndCachesTheBuild(t *testing.T) {
 	cached, _ = prepareCachedAndForced(t, workspace, workspace+"/api", BuildPlanConfig{Recipe: "go", RootDirectory: "api"})
 	assertGoDockerfile(t, cached, "COPY . .\nWORKDIR /src/api\nRUN "+modules+"go list -e -deps ./... >/dev/null\n")
 }
+
+// sitePythonRun is the RUN a site build's Python install renders as, with
+// the download caches of a build tagged like prepareSite's.
+func sitePythonRun(command string) string {
+	mounts, cached := pythonCachedRun(newRecipeCache("site:1", "reuse"), command)
+	return "RUN " + mounts + cached + "\n"
+}
+
+func TestPythonInstallsDependenciesBeforeTheSourceWhereTheManifestsSayAll(t *testing.T) {
+	pip := cacheMountFor("pip", "/root/.cache/pip")
+	for _, fixture := range []struct {
+		name  string
+		files map[string]string
+		start string
+		// first is what installs before COPY . ., after what follows it;
+		// an empty first keeps the whole install after the source.
+		first, after string
+	}{
+		{name: "requirements with an include and a constraint",
+			files: map[string]string{"requirements.txt": "-r requirements/base.txt\n-c constraints.txt\ngunicorn==23.0.0\n", "requirements/base.txt": "flask==3.1.0\n", "constraints.txt": "werkzeug<4\n"},
+			start: "gunicorn app:app",
+			first: "COPY requirements.txt constraints.txt /app/\nCOPY requirements/base.txt /app/requirements/\nRUN " + pip + "pip install --requirement requirements.txt\nCOPY . .\n"},
+		{name: "a src layout installs the project after its source",
+			files: map[string]string{"requirements.txt": "flask==3.1.0\ngunicorn==23.0.0\n", "pyproject.toml": "[build-system]\nrequires = [\"setuptools\"]\nbuild-backend = \"setuptools.build_meta\"\n[project]\nname = \"app\"\n[tool.setuptools.packages.find]\nwhere = [\"src\"]\n"},
+			start: "gunicorn app:app",
+			first: "RUN " + pip + "pip install --requirement requirements.txt\nCOPY . .\nRUN " + pip + "pip install --no-deps .\n"},
+		{name: "Pipfile.lock",
+			files: map[string]string{"Pipfile": "[packages]\nflask = \"==3.1.0\"\ngunicorn = \"*\"\n", "Pipfile.lock": `{"_meta": {"hash": {"sha256": "x"}}, "default": {"flask": {"version": "==3.1.0"}, "gunicorn": {"version": "==23.0.0"}}}`},
+			start: "gunicorn app:app",
+			first: "COPY Pipfile Pipfile.lock /app/\nRUN " + pip + cacheMountFor("pipenv", "/root/.cache/pipenv") + "pip install pipenv==" + pythonPipenvRelease + " && pipenv install --system --deploy\nCOPY . .\n"},
+		{name: "an editable line needs the source", files: map[string]string{"requirements.txt": "-e .\nflask==3.1.0\n", "setup.py": "from setuptools import setup\nsetup(name='app')\n"},
+			start: "gunicorn app:app", after: "COPY . .\nRUN " + pip + "pip install --requirement requirements.txt\n"},
+		{name: "a local wheel needs the source", files: map[string]string{"requirements.txt": "flask==3.1.0\nvendor/lib-1.0-py3-none-any.whl\n"},
+			start: "gunicorn app:app", after: "COPY . .\nRUN " + pip + "pip install --requirement requirements.txt\n"},
+		{name: "a committed .venv would land on the installed one", files: map[string]string{"requirements.txt": "flask==3.1.0\n", ".venv/pyvenv.cfg": "home = /usr\n"},
+			start: "gunicorn app:app", after: "COPY . .\nRUN " + pip + "pip install --requirement requirements.txt\n"},
+		{name: "setup.py installs from its source", files: map[string]string{"setup.py": "from setuptools import setup\nsetup(name='app', install_requires=['flask'])\n"},
+			start: "gunicorn app:app", after: "COPY . .\nRUN " + pip + "pip install .\n"},
+		{name: "uv sources name directories of the checkout",
+			files: map[string]string{"pyproject.toml": "[project]\nname = \"x\"\ndependencies = [\"lib\"]\n[tool.uv.sources]\nlib = { path = \"./lib\" }\n", "uv.lock": "[[package]]\nname = \"x\"\nversion = \"0\"\nsource = { virtual = \".\" }\ndependencies = [{ name = \"lib\" }]\n"},
+			start: "uvicorn main:app", after: "COPY . .\nRUN " + pip + cacheMountFor("uv", "/root/.cache/uv") + "export UV_LINK_MODE=copy && pip install uv=="},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := t.TempDir()
+			for name, content := range fixture.files {
+				writeBuildFixture(t, root, name, content)
+			}
+			cached, forced := prepareCachedAndForced(t, root, root, BuildPlanConfig{Recipe: "python", StartCommand: fixture.start})
+			if fixture.first != "" {
+				assertGoDockerfile(t, cached, fixture.first)
+				// A forced build installs in the same order, with no cache
+				// for pip to keep in the layer.
+				if !strings.Contains(forced, "pip install --no-cache-dir") || strings.Index(forced, "RUN pip install --no-cache-dir") > strings.Index(forced, "COPY . .") {
+					t.Fatalf("forced build:\n%s", forced)
+				}
+				return
+			}
+			assertGoDockerfile(t, cached, fixture.after)
+			if strings.Contains(cached, "COPY requirements") || strings.Contains(cached, "COPY pyproject") {
+				t.Fatalf("an install that needs the source copies its manifests first:\n%s", cached)
+			}
+		})
+	}
+}
+
+func TestPythonInstallSecretsReachTheDependencyStep(t *testing.T) {
+	root := t.TempDir()
+	writeBuildFixture(t, root, "requirements.txt", "--extra-index-url https://${PIP_TOKEN}@pypi.example.test/simple\nflask==3.1.0\n")
+	config := BuildPlanConfig{Recipe: "python", StartCommand: "gunicorn app:app", Secrets: []BuildSecretConfig{{Variable: "PIP_TOKEN", Step: "install"}}}
+	cached, _ := prepareCachedAndForced(t, root, root, config, "PIP_TOKEN")
+	install := dockerfileLine(t, cached, "pip install --requirement requirements.txt")
+	if !strings.Contains(install, "--mount=type=secret,id=PIP_TOKEN") {
+		t.Fatalf("the dependency step lacks the install secret: %q", install)
+	}
+	assertBefore(t, cached, install, "COPY . .")
+}

@@ -1700,6 +1700,26 @@ normalized distribution name, is `recipe_unsupported`. A `[tool.uv.sources]` wor
 dependency built without its workspace is `recipe_unsupported`: pip would fetch an unrelated package of
 the same name from PyPI.
 
+**Install order and caches.** An install the manifests alone describe runs before `COPY . .`, from
+those files copied to their paths under `/app` (`pythonDependenciesFirst`), so a commit that changes only
+code keeps it: the requirement file with its `-r` includes and `-c` constraints (and the `pip freeze`
+rewrite over them, run again over the source's copies so the image holds what pip read); `uv.lock` with
+`pyproject.toml` as `uv sync --locked --no-dev --no-install-project`, the project synced once its source
+is there (a no-op for an application that is not a package); `poetry.lock` with `pyproject.toml` as
+`poetry install --only main --no-root`, the root installed after the source when the start command
+needs it; `pdm.lock`'s export; `Pipfile`/`Pipfile.lock`; and a bare pyproject's `tomllib` list. A project
+the start command needs installed (`pip install --no-deps .`) is installed after the source. An
+undeclared process manager is installed with the dependencies, or after the last install when one runs
+after the source (`uv sync` would remove it). Everything stays after the source, as before, for a stale
+lock (the build locks again, and the source's lock would replace the one the dependencies came from), a
+path, editable, `file:` or local-archive dependency, a local `--find-links`, a uv workspace member or
+`[tool.uv.sources]`, a Poetry project without its lock, `setup.py`, `pip install .`, `environment.yml`,
+and a checkout that carries a `.venv`. Every Python install step, the site generators' too, mounts pip's
+cache (`/root/.cache/pip`) in place of `--no-cache-dir`, and uv's (`UV_LINK_MODE=copy`, since the cache
+is another file system), Poetry's, Pipenv's or PDM's when the step runs that tool ([Dependency
+caches](#dependency-caches)); a forced build keeps `--no-cache-dir`. Install secrets reach the dependency
+step as before.
+
 **System packages.** The image is `python:<family>-slim-trixie`, named by its Debian release so the
 package names cannot drift, and a dependency that builds or loads against a system library gets it from
 Debian in one layer before the source is copied: `psycopg2` (gcc, libc6-dev, libpq-dev), `psycopg`

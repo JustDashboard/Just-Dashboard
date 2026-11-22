@@ -348,6 +348,11 @@ type pythonInstall struct {
 	// sanitize are the requirement files whose local-environment lines the
 	// build rewrites before pip reads them.
 	sanitize []string
+	// dependencies, when set, installs the dependencies from inputs alone
+	// before the source is copied, and command is then what needs the
+	// source, if anything (pythonDependenciesFirst).
+	dependencies string
+	inputs       []string
 }
 
 // pythonInstallChoice is what the install depends on beyond the manifests.
@@ -769,7 +774,10 @@ func selectPythonRecipe(boundary, root string, config BuildPlanConfig) (pythonRe
 	if err != nil {
 		return recipe, err
 	}
-	recipe.install = install
+	recipe.install = pythonDependenciesFirst(root, project, installChoice, install)
+	// What the dependencies install from must be in the context whatever
+	// the repository's .dockerignore says.
+	recipe.inputs = append(recipe.inputs, recipe.install.inputs...)
 	deps := memberProject.deps
 	recipe.servers = undeclaredPythonServers(config.StartCommand, deps)
 	if framework := matchPythonFramework(deps); framework != nil {
@@ -927,18 +935,45 @@ func renderPythonDockerfile(recipe pythonRecipe, config BuildPlanConfig, bases [
 	for _, env := range recipe.install.env {
 		lines = append(lines, "ENV "+env)
 	}
+	install := func(command string) string {
+		mounts, cached := pythonCachedRun(config.cache, command)
+		return "RUN " + mounts + installSecrets + cached
+	}
+	servers := []string{}
+	for _, server := range recipe.servers {
+		servers = append(servers, install(recipe.install.serverInstall+" '"+pythonServerRequirement(server)+"'"))
+	}
+	sanitize := recipe.install.sanitizeLine()
+	if recipe.install.dependencies != "" {
+		// The dependencies come from the manifests alone, so a commit that
+		// changes only code keeps them; the servers are the same for every
+		// commit.
+		lines = append(lines, copyInputsTo("/app", recipe.install.inputs)...)
+		if sanitize != "" {
+			lines = append(lines, sanitize)
+		}
+		lines = append(lines, install(recipe.install.dependencies))
+		if recipe.install.command == "" {
+			// Nothing installs after the source, so neither can remove them
+			// (uv sync removes what its lock does not name).
+			lines = append(lines, servers...)
+			servers = nil
+		}
+	}
 	if recipe.assets != nil {
 		lines = append(lines, "COPY --from=assets /app /app")
 	} else {
 		lines = append(lines, "COPY . .")
 	}
-	if sanitize := recipe.install.sanitizeLine(); sanitize != "" {
+	if sanitize != "" {
+		// Again over the source's copies, so the image holds the files the
+		// install read.
 		lines = append(lines, sanitize)
 	}
-	lines = append(lines, "RUN "+installSecrets+recipe.install.command)
-	for _, server := range recipe.servers {
-		lines = append(lines, "RUN "+installSecrets+recipe.install.serverInstall+" '"+pythonServerRequirement(server)+"'")
+	if recipe.install.command != "" {
+		lines = append(lines, install(recipe.install.command))
 	}
+	lines = append(lines, servers...)
 	if recipe.workdir != "" {
 		lines = append(lines, "WORKDIR /app/"+recipe.workdir)
 	}

@@ -43,6 +43,10 @@ var liveCacheFixtures = map[string]struct {
 	// changes only code reuses its layer; the cgo SQLite is in the build
 	// cache.
 	"go-embed": {source: "main.go", comment: "//", warm: stepCached("go mod download")},
+	// The dependencies install from the lock and the requirement file
+	// before the source.
+	"python-uv": {source: "main.py", comment: "#", warm: stepCached("--no-install-project")},
+	"fastapi":   {source: "main.py", comment: "#", warm: stepCached("pip install --requirement requirements.txt")},
 }
 
 // stepCached fails a log in which the RUN step naming part ran again
