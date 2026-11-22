@@ -95,9 +95,11 @@ describe("rowTags", () => {
       "Archived",
       "Fork",
     ])
-    expect(rowTags({ ...base, isTemplate: true, relation: "collaborator", role: "read" })).toEqual(
-      ["Template", "Shared with you", "Read only"],
-    )
+    expect(rowTags({ ...base, isTemplate: true, relation: "collaborator", role: "read" })).toEqual([
+      "Template",
+      "Shared with you",
+      "Read only",
+    ])
   })
 })
 

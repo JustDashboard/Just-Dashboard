@@ -1,5 +1,5 @@
 import { ApiError } from "@/lib/api"
-import { plural } from "@/lib/format"
+import { minuteAt, plural } from "@/lib/format"
 import type { GitHubConnection, GitHubRepository } from "@/lib/github-types"
 import type { GitHubListState } from "@/lib/github-list"
 
@@ -103,7 +103,7 @@ export function listFailure(error: unknown, now = Date.now()): ListFailure {
 
 /** "14:05", the clock time a wait ends at, in the reader's own zone. */
 export function clockTime(at: Date): string {
-  return at.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" })
+  return minuteAt(at)
 }
 
 const ROLE_WORD: Partial<Record<GitHubRepository["role"], string>> = {
