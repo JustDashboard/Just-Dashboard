@@ -49,7 +49,7 @@ func TestMavenSettingsCredentialsReachTheBuild(t *testing.T) {
 			}
 			// Maven resolves dependencies as it builds, so the install's
 			// credentials are mounted on the build that downloads.
-			command := "RUN --mount=type=secret,id=GITHUB_ACTOR,env=GITHUB_ACTOR,required=true --mount=type=secret,id=GITHUB_TOKEN,env=GITHUB_TOKEN,required=true mvn -B -ntp -DskipTests"
+			command := " --mount=type=secret,id=GITHUB_ACTOR,env=GITHUB_ACTOR,required=true --mount=type=secret,id=GITHUB_TOKEN,env=GITHUB_TOKEN,required=true mvn -B -ntp -DskipTests"
 			switch name {
 			case "committed settings.xml":
 				command += " -s settings.xml"

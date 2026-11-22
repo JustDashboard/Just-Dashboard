@@ -663,7 +663,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 		t.Fatal(err)
 	}
 	assertRendered(t, prepared, []string{
-		"FROM sbtscala/scala-sbt:eclipse-temurin-21_1.x@sha256:", "RUN sbt -batch update", "RUN sbt -batch stage",
+		"FROM sbtscala/scala-sbt:eclipse-temurin-21_1.x@sha256:", " sbt -batch update", " sbt -batch stage",
 		"FROM eclipse-temurin:21-jre@sha256:", "COPY --from=build --chown=10001:10001 /src/target/universal/stage/ /app/",
 		// A stock application.conf leaves the secret at "changeme"; the
 		// configuration the start loads reads it from the environment.
@@ -745,7 +745,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRendered(t, prepared, []string{"RUN sbt -batch assembly", "FROM eclipse-temurin:21-jre@sha256:", "exec java -jar /app/app.jar"}, nil)
+	assertRendered(t, prepared, []string{" sbt -batch assembly", "FROM eclipse-temurin:21-jre@sha256:", "exec java -jar /app/app.jar"}, nil)
 	if _, err := prepareFixture(t, map[string]string{"build.sbt": "name := \"x\"\n"}, BuildPlanConfig{Method: BuildRecipe, Recipe: "scala"}); err == nil ||
 		!strings.Contains(err.Error(), "sbt-native-packager") {
 		t.Fatalf("plain sbt err = %v", err)
@@ -764,7 +764,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRendered(t, prepared, []string{"FROM clojure:temurin-21-lein@sha256:", "RUN lein deps", "RUN lein uberjar", "cp \"$jar\" /out/app.jar",
+	assertRendered(t, prepared, []string{"FROM clojure:temurin-21-lein@sha256:", " lein deps", " lein uberjar", "cp \"$jar\" /out/app.jar",
 		"FROM eclipse-temurin:21-jre@sha256:", "COPY --from=build --chown=10001:10001 /out/app.jar /app/app.jar", "USER 10001"}, nil)
 	notAOT := map[string]string{"project.clj": "(defproject shop \"0.1.0\" :main ^:skip-aot shop.core)\n"}
 	if issue := selectedOf(detectShapeFixture(t, notAOT)).RecipeIssue; !strings.Contains(issue, ":aot :all") {
@@ -778,7 +778,7 @@ func TestScalaAndClojureBuildOnTheJVM(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertRendered(t, prepared, []string{"FROM clojure:temurin-21-tools-deps@sha256:", "RUN clojure -P && clojure -P -T:build", "RUN clojure -T:build uber"}, nil)
+	assertRendered(t, prepared, []string{"FROM clojure:temurin-21-tools-deps@sha256:", " clojure -P && clojure -P -T:build", " clojure -T:build uber"}, nil)
 	if _, err := prepareFixture(t, map[string]string{"deps.edn": "{:deps {}}\n"}, BuildPlanConfig{Method: BuildRecipe, Recipe: "clojure"}); err == nil ||
 		!strings.Contains(err.Error(), "b/uber") {
 		t.Fatalf("deps.edn without a build err = %v", err)

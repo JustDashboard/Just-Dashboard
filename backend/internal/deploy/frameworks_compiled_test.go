@@ -126,7 +126,7 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM eclipse-temurin:21-jdk@sha256:", `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`, "RUN ./gradlew --no-daemon --console=plain :bootJar",
+	for _, want := range []string{"FROM eclipse-temurin:21-jdk@sha256:", `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`, " ./gradlew --no-daemon --console=plain :bootJar",
 		"RUN cd /src/build/libs && (for f in *.jar;", "-plain.jar", `"java -Xmx256m -jar /app/app.jar"`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)

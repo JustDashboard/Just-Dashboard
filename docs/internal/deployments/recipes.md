@@ -2295,6 +2295,14 @@ convention plugin (`System.getenv`, `providers.environmentVariable`, and typed
 `publishing` block's credentials only publish. Each is a detected variable with step `install`, and
 `registry_token_missing` asks for the ones the plan does not give.
 
+**Download caches.** The build step mounts Maven's local repository (`/root/.m2/repository`) or
+Gradle's `caches` and `wrapper` (`/root/.gradle/…`, the wrapper distributions with them), outside the
+tree the runtime stage copies from, so a commit reuses the dependencies and the Gradle distribution the
+last build downloaded ([Dependency caches](#dependency-caches)). Maven and Gradle resolve as they build, in
+that one step, so the install's credentials still reach the download and no later step depends on the
+cache. The source is still copied before the build: a JVM build reads its whole tree to resolve (plugins,
+`buildSrc`, included builds), and the cache is what spares the downloads.
+
 ## .NET
 
 A `*.csproj`, `*.fsproj` or `*.vbproj` is read the way MSBuild and the dotnet CLI read it, as XML data
@@ -2757,6 +2765,14 @@ It takes precedence over a secret `application.conf` reads from another variable
 Akka and Pekko HTTP, Ring, Compojure, http-kit and Pedestal mark a web service on their conventional
 port. The drivers sbt, Leiningen and `deps.edn` name are database
 suggestions like a pom's. The readiness budget is a JVM's.
+
+**Download caches.** The fetch (`sbt -batch update`, `lein deps`, `clojure -P`) and the build mount the
+tool's caches in root's home — Coursier's and Ivy's for sbt (`/root/.cache/coursier`, `/root/.ivy2/cache`),
+the Maven repository for Leiningen and tools.deps (`/root/.m2/repository`) and tools.deps' git libraries
+(`/root/.gitlibs`) — so a commit reuses the last build's downloads ([Dependency caches](#dependency-caches)).
+A fetch that needs an install secret (a private repository's credentials) keeps what it fetched in the
+layer, unmounted, since the build has no credential to fetch it again from a cache the collector emptied.
+The source is still copied before the fetch, which reads the build's own definitions (`project/`, aliases).
 
 ## Dart and Gleam
 

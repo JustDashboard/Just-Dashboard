@@ -275,3 +275,34 @@ func TestPythonInstallSecretsReachTheDependencyStep(t *testing.T) {
 	}
 	assertBefore(t, cached, install, "COPY . .")
 }
+
+func TestJVMBuildsCacheTheirDownloadsOutsideTheTree(t *testing.T) {
+	for _, fixture := range []struct{ name, recipe, want string }{
+		{"java", "java", cacheMountFor("m2", "/root/.m2/repository")},
+		{"gradle", "java", cacheMountFor("gradle-caches", "/root/.gradle/caches") + cacheMountFor("gradle-wrapper", "/root/.gradle/wrapper")},
+		{"play", "scala", cacheMountFor("coursier", "/root/.cache/coursier") + cacheMountFor("ivy", "/root/.ivy2/cache")},
+		{"clojure", "clojure", cacheMountFor("m2", "/root/.m2/repository")},
+	} {
+		t.Run(fixture.name, func(t *testing.T) {
+			root := t.TempDir()
+			copyFrameworkFixture(t, fixture.name, root)
+			cached, _ := prepareCachedAndForced(t, root, root, BuildPlanConfig{Recipe: fixture.recipe})
+			if !strings.Contains(cached, fixture.want) {
+				t.Fatalf("no download cache %q:\n%s", fixture.want, cached)
+			}
+			if fixture.recipe == "java" {
+				return
+			}
+			// The fetch and the build read the same caches; with an install
+			// secret the fetch keeps its downloads in the layer for the
+			// build, which has no credential.
+			if strings.Count(cached, fixture.want) != 2 {
+				t.Fatalf("the fetch and the build do not share the caches:\n%s", cached)
+			}
+			secret := BuildPlanConfig{Recipe: fixture.recipe, Secrets: []BuildSecretConfig{{Variable: "REPO_TOKEN", Step: "install"}}}
+			if cached, _ = prepareCachedAndForced(t, root, root, secret, "REPO_TOKEN"); strings.Contains(cached, fixture.want) {
+				t.Fatalf("a credentialed fetch is cached:\n%s", cached)
+			}
+		})
+	}
+}

@@ -341,3 +341,22 @@ func pathExists(root, name string) bool {
 	_, err := os.Lstat(filepath.Join(root, name))
 	return err == nil
 }
+
+// jvmDependencyMounts are the download caches of a JVM build tool, all in
+// the build user's home, outside the tree the runtime stage copies from:
+// Gradle's caches and wrapper distributions, Maven's and the Clojure tools'
+// local repository, the git libraries tools.deps checks out, and sbt's
+// Coursier and Ivy caches. The images build as root.
+func jvmDependencyMounts(cache recipeCache, tool string) string {
+	switch tool {
+	case "gradle":
+		return cache.mount("gradle-caches", "/root/.gradle/caches") + cache.mount("gradle-wrapper", "/root/.gradle/wrapper")
+	case "maven", "lein":
+		return cache.mount("m2", "/root/.m2/repository")
+	case "tools-deps":
+		return cache.mount("m2", "/root/.m2/repository") + cache.mount("gitlibs", "/root/.gitlibs")
+	case "sbt-stage", "sbt-assembly":
+		return cache.mount("coursier", "/root/.cache/coursier") + cache.mount("ivy", "/root/.ivy2/cache")
+	}
+	return ""
+}

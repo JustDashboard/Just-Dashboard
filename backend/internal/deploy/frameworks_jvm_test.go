@@ -201,7 +201,7 @@ func TestMavenReactorBuildsTheApplicationModuleFromTheReactor(t *testing.T) {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	assertCompiledDockerfile(t, prepared.DockerfilePreview,
-		"FROM maven:3-eclipse-temurin-17@sha256:", "RUN mvn -B -ntp -DskipTests -pl :shop-app -am package",
+		"FROM maven:3-eclipse-temurin-17@sha256:", " mvn -B -ntp -DskipTests -pl :shop-app -am package",
 		"RUN cd /src/app/target && (for f in *.jar;", "FROM eclipse-temurin:17-jre@sha256:",
 		`CMD ["/bin/sh","-c","exec env SERVER_PORT=${PORT:-8080} java -jar /app/app.jar"]`)
 	// Preparation writes the Dockerfile where the build runs from.
@@ -227,7 +227,7 @@ func TestMavenModuleWithAnInRepositoryParentOnly(t *testing.T) {
 		t.Fatalf("candidates = %+v", result.Candidates)
 	}
 	prepared := prepareCompiled(t, root, "service", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "service"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN mvn -B -ntp -DskipTests -f service/pom.xml package",
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, " mvn -B -ntp -DskipTests -f service/pom.xml package",
 		"(for f in *-jar-with-dependencies.jar *-shaded.jar *-fat.jar *-all.jar *-runner.jar *-exec.jar *.jar;")
 }
 
@@ -277,7 +277,7 @@ func TestGradleInitBuildsTheApplicationProjectFromTheSettingsRoot(t *testing.T) 
 	prepared := prepareCompiled(t, root, "app", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "app"})
 	assertCompiledDockerfile(t, prepared.DockerfilePreview,
 		"FROM eclipse-temurin:21-jdk@sha256:", `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`,
-		"RUN ./gradlew --no-daemon --console=plain :app:installDist", "RUN cd /src/app/build/install && set -- */",
+		" ./gradlew --no-daemon --console=plain :app:installDist", "RUN cd /src/app/build/install && set -- */",
 		`{ [ "$name" = app ] || mv "/out/bin/$name" /out/bin/app; }`, "COPY --from=build /out/ /app/", `CMD ["/app/bin/app"]`)
 	if prepared.ContextDirectory != "." || prepared.Toolchain != "java 21 (gradle 8.14.3)" {
 		t.Fatalf("prepared = %+v", prepared)
@@ -302,7 +302,7 @@ func TestGradleCatalogAliasesNameTheFramework(t *testing.T) {
 		t.Fatalf("readiness = %+v", app.Readiness)
 	}
 	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "java"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk21@sha256:", "RUN gradle --no-daemon --console=plain :bootJar",
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk21@sha256:", " gradle --no-daemon --console=plain :bootJar",
 		"RUN cd /src/build/libs && (for f in *.jar;")
 }
 
@@ -348,7 +348,7 @@ func TestKotlinMultiplatformServerNamesTheAndroidSDKItNeeds(t *testing.T) {
 		t.Fatalf("server = %+v / %+v", server, result.Candidates)
 	}
 	prepared := prepareCompiled(t, root, "server", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "server"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN gradle --no-daemon --console=plain :server:buildFatJar",
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, " gradle --no-daemon --console=plain :server:buildFatJar",
 		"RUN cd /src/server/build/libs && (for f in *-all.jar *.jar;", `CMD ["java","-jar","/app/app.jar"]`)
 }
 
@@ -402,7 +402,7 @@ func TestGradleWrapperRunsOnAJDKItSupports(t *testing.T) {
 	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "java"})
 	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM eclipse-temurin:17-jdk@sha256:",
 		"COPY --from=eclipse-temurin:21-jdk@sha256:", " /opt/java/openjdk /opt/jdk-21",
-		"RUN ./gradlew --no-daemon --console=plain -Porg.gradle.java.installations.paths=/opt/jdk-21 :installDist", "FROM eclipse-temurin:21-jre@sha256:")
+		" ./gradlew --no-daemon --console=plain -Porg.gradle.java.installations.paths=/opt/jdk-21 :installDist", "FROM eclipse-temurin:21-jre@sha256:")
 	if prepared.Toolchain != "java 21 (gradle 8.4 on java 17)" || !slices.ContainsFunc(prepared.Notes, func(note string) bool { return strings.Contains(note, "/opt/jdk-21") }) {
 		t.Fatalf("prepared = %+v", prepared)
 	}
@@ -442,7 +442,7 @@ func TestGradleWrapperRunsOnAJDKItSupports(t *testing.T) {
 		t.Fatalf("findings = %+v", findings)
 	}
 	prepared = prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "java"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk21@sha256:", "RUN gradle --no-daemon --console=plain :installDist")
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk21@sha256:", " gradle --no-daemon --console=plain :installDist")
 	if strings.Contains(prepared.DockerfilePreview, "./gradlew") {
 		t.Fatalf("the wrapper without its jar ran:\n%s", prepared.DockerfilePreview)
 	}
@@ -587,7 +587,7 @@ func TestGradleSubprojectsInheritTheRootScriptsPlugins(t *testing.T) {
 		t.Fatalf("candidates = %+v", result.Candidates)
 	}
 	prepared := prepareCompiled(t, root, "web", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "web"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk11@", "RUN gradle --no-daemon --console=plain :web:bootJar", "FROM eclipse-temurin:11-jre@")
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk11@", " gradle --no-daemon --console=plain :web:bootJar", "FROM eclipse-temurin:11-jre@")
 }
 
 // A Gradle build below the checkout root builds from its own directory:
@@ -605,15 +605,15 @@ func TestGradleBuildBelowTheCheckoutRoot(t *testing.T) {
 		command string
 		copy    string
 	}{
-		{"standalone", map[string]string{"server/build.gradle.kts": spring}, "server", "", "RUN gradle --no-daemon --console=plain :bootJar", "RUN cd /src/build/libs && "},
+		{"standalone", map[string]string{"server/build.gradle.kts": spring}, "server", "", " gradle --no-daemon --console=plain :bootJar", "RUN cd /src/build/libs && "},
 		{"own settings", map[string]string{"server/settings.gradle.kts": "rootProject.name = \"server\"\n", "server/build.gradle.kts": spring,
 			"server/gradlew": "#!/bin/sh\n", "server/gradle/wrapper/gradle-wrapper.jar": "PK",
 			"server/gradle/wrapper/gradle-wrapper.properties": "distributionUrl=https\\://services.gradle.org/distributions/gradle-8.14.3-bin.zip\n"},
-			"server", "", "RUN ./gradlew --no-daemon --console=plain :bootJar", "RUN cd /src/build/libs && "},
+			"server", "", " ./gradlew --no-daemon --console=plain :bootJar", "RUN cd /src/build/libs && "},
 		{"multi-project settings root", map[string]string{"backend/settings.gradle.kts": "rootProject.name = \"shop\"\ninclude(\"app\", \"domain\")\n",
 			"backend/app/build.gradle.kts":    strings.Replace(spring, "dependencies {\n", "dependencies {\n    implementation(project(\":domain\"))\n", 1),
 			"backend/domain/build.gradle.kts": "plugins { `java-library` }\n"},
-			"backend/app", "backend", "RUN gradle --no-daemon --console=plain :app:bootJar", "RUN cd /src/app/build/libs && "},
+			"backend/app", "backend", " gradle --no-daemon --console=plain :app:bootJar", "RUN cd /src/app/build/libs && "},
 	} {
 		t.Run(fixture.name, func(t *testing.T) {
 			t.Parallel()
@@ -666,7 +666,7 @@ func TestGradleBuildLogicIsSetAside(t *testing.T) {
 		t.Fatalf("set aside = %+v", result.SetAside)
 	}
 	prepared := prepareCompiled(t, root, "app", BuildPlanConfig{Method: BuildRecipe, Recipe: "java", RootDirectory: "app"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk17@", "RUN gradle --no-daemon --console=plain :app:installDist")
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM gradle:8-jdk17@", " gradle --no-daemon --console=plain :app:installDist")
 
 	// A build-logic build's convention project names the Spring Boot
 	// plugin it puts on the classpath; it is not a Spring application.
@@ -710,7 +710,7 @@ func TestGradleCompositeBuildContextHoldsItsIncludedBuilds(t *testing.T) {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	assertCompiledDockerfile(t, prepared.DockerfilePreview, `RUN sed -i 's/\r$//' backend/gradlew && chmod +x backend/gradlew`,
-		"RUN ./backend/gradlew --no-daemon --console=plain -p backend :installDist", "RUN cd /src/backend/build/install && ")
+		" ./backend/gradlew --no-daemon --console=plain -p backend :installDist", "RUN cd /src/backend/build/install && ")
 }
 
 func TestGradleQuarkusUberJar(t *testing.T) {
@@ -724,6 +724,6 @@ func TestGradleQuarkusUberJar(t *testing.T) {
 		t.Fatalf("build = %+v", build)
 	}
 	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "java"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN gradle --no-daemon --console=plain :quarkusBuild",
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, " gradle --no-daemon --console=plain :quarkusBuild",
 		"RUN cd /src/build && (for f in *-runner.jar;", "java -jar /app/app.jar")
 }
