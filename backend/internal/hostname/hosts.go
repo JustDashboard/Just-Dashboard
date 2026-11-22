@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"syscall"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // A server has to be able to look its own name up without the network: sudo
@@ -38,7 +40,7 @@ func (s *Service) recordInHosts(name string) []string {
 	if err != nil {
 		return []string{fmt.Sprintf("/etc/hosts could not be read, so the server may not find itself by its new name: %v", err)}
 	}
-	if err := rewrite(hosts, data, name); err != nil {
+	if err := s.rewrite("/etc/hosts", data, name); err != nil {
 		warnings = append(warnings, fmt.Sprintf("/etc/hosts could not be updated, so the server may not find itself by its new name: %v", err))
 	}
 	if !bytes.Contains(data, []byte(cloudInitHosts)) {
@@ -48,7 +50,7 @@ func (s *Service) recordInHosts(name string) []string {
 	for _, template := range templates {
 		content, err := os.ReadFile(template)
 		if err == nil {
-			err = rewrite(template, content, name)
+			err = s.rewrite(strings.TrimPrefix(template, s.root), content, name)
 		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("cloud-init rewrites /etc/hosts when the server starts, and its template %s could not be updated: %v", filepath.Base(template), err))
@@ -57,12 +59,22 @@ func (s *Service) recordInHosts(name string) []string {
 	return warnings
 }
 
-func rewrite(path string, data []byte, name string) error {
+// rewrite gives the server's file at path, which holds data, the name.
+func (s *Service) rewrite(path string, data []byte, name string) error {
 	next := withServerName(data, name)
 	if bytes.Equal(next, data) {
 		return nil
 	}
-	return writeKeeping(path, next)
+	return s.replace(path, next)
+}
+
+// replace writes data to the server's file at path, as the server names it.
+func (s *Service) replace(path string, data []byte) error {
+	write := func(at string) error { return writeKeeping(at, data) }
+	if s.onServer == nil {
+		return write(filepath.Join(s.root, path))
+	}
+	return s.onServer(path, filepath.Join(s.root, path), write)
 }
 
 // withServerName returns a hosts file in which name resolves to this machine.
@@ -121,7 +133,9 @@ func hostsRecord(text string) (string, []string) {
 }
 
 // writeKeeping replaces a file through a temporary one and a rename, so no
-// reader sees half of it, and keeps the mode and owner the file had. Only a
+// reader sees half of it, and keeps the mode and owner the file had. A file
+// that is a mount point here cannot be renamed over and is written in place
+// (hostexec.RenameOver). Only a
 // regular file is replaced: a hosts file that is a link into a read-only
 // store is somebody's arrangement, and renaming over it would undo it.
 func writeKeeping(path string, data []byte) error {
@@ -164,5 +178,5 @@ func writeKeeping(path string, data []byte) error {
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmp.Name(), path)
+	return hostexec.RenameOver(tmp.Name(), path, data)
 }

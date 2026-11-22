@@ -78,7 +78,33 @@ func InHostMounts(fn func()) error {
 		}
 		return nil
 	}
+	_, entered := onHostThread(fd, fn, true)
+	return entered
+}
+
+// IntoHostMounts runs fn in the host's mount namespace only by moving into it
+// from another one, and otherwise does not run it and reports false: for work
+// that would reach something else under the same paths here, such as Docker's
+// own /etc/hosts in place of the server's. A process with no other namespace
+// to enter — a plain install, or a container without the host's PID namespace
+// — gets false and no error, and decides for itself where the work belongs.
+func IntoHostMounts(fn func()) (bool, error) {
+	fd, err := hostMountNamespace()
+	if err != nil {
+		return false, fmt.Errorf("open host mount namespace: %w", err)
+	}
+	if fd < 0 {
+		return false, nil
+	}
+	return onHostThread(fd, fn, false)
+}
+
+// onHostThread runs fn on a thread of its own that has entered the namespace
+// fd names. When entering fails, fn still runs there if always is set, which
+// is then the container's view; ran says whether it ran at all.
+func onHostThread(fd int, fn func(), always bool) (ran bool, entered error) {
 	type outcome struct {
+		ran      bool
 		entered  error
 		panicked bool
 		value    any
@@ -96,14 +122,17 @@ func InHostMounts(fn func()) error {
 			done <- result
 		}()
 		result.entered = enterHostMounts(fd)
-		fn()
+		if result.entered == nil || always {
+			result.ran = true
+			fn()
+		}
 		finished = true
 	}()
 	result := <-done
 	if result.panicked && result.value != nil {
 		panic(result.value)
 	}
-	return result.entered
+	return result.ran, result.entered
 }
 
 func enterHostMounts(fd int) error {

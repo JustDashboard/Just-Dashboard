@@ -288,6 +288,19 @@ answer (`httpx.WriteError`); requests that succeed are logged at debug.
   The runtime cannot discard the process's main thread, so `cmd/server` keeps it on the main goroutine
   with `runtime.LockOSThread` in `init`. Otherwise `/proc/<pid>/ns/mnt`, which `docker exec` and so the
   container health check join, can end up as the host's for good.
+- `IntoHostMounts(fn)` is the same move for work that is wrong anywhere else: where there is no other
+  namespace to enter, or entering fails, `fn` does not run and the caller is told so.
+- `OnServerPath(real, mirrored, write)` replaces one of the server's files by a path that can be
+  renamed over. The stack mounts the server's `/etc` over the container's, and Docker mounts its own
+  `hosts`, `hostname` and `resolv.conf` on top of those, so the server's files are mount points in the
+  container's namespace. The kernel refuses a rename over a mount point by whichever path the caller
+  names it, so `/host/etc/hosts` is as busy as `/etc/hosts` here (`EBUSY`). `write` runs with the
+  server's own path through `IntoHostMounts` and, where that cannot be entered, here with the
+  `/host` path. `RenameOver(tmp, path, data)` is the rename such writers make: where it is refused as
+  busy, it writes `data` over the file's old bytes and cuts it to length, so the file is never empty.
+  The same thing `hostnamectl` does, the server's namespace replacing the file, detaches Docker's
+  mount from the backend container's `/etc/hosts`, which then reads the server's own file until the
+  container next starts. With host networking that is what Docker's copy held anyway.
 - `Hostname()` is the server's name as its kernel has it. The container's own copy (`os.Hostname`)
   is the one Docker gave it when the container was created, and it does not follow a rename. So the name
   is read on a discarded thread that `setns`es into `/proc/1/ns/uts`, and the container's copy is set

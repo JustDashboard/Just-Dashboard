@@ -173,7 +173,11 @@ what each reads are tabled in
   same line goes into those templates. cloud-init leaves the name itself alone once it differs from
   the one it set (`update_hostname`), so nothing of its configuration is changed. A hosts file that
   is not an ordinary file is left as it is, and that, like any other failure here, is a warning on a
-  rename that has happened.
+  rename that has happened. In the shipped stack the server's `/etc/hosts` and `/etc/hostname` are
+  mount points in the backend's namespace (Docker's own files, mounted over the copies `- /etc:/etc`
+  gives it), and the kernel refuses to rename over them even by their `/host` paths. So these writes
+  go through `hostexec.OnServerPath`, made in the server's mount namespace by their own paths; see
+  [runtime boundaries](../architecture/runtime-boundaries.md).
 - **Reading the name.** The backend's container has a UTS namespace of its own, holding a copy of
   the host's name that Docker records when it creates the container, and a rename of the server
   never reaches a running container's copy. `hostexec.Hostname` reads the name in PID 1's namespace
