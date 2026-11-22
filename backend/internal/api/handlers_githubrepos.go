@@ -83,6 +83,9 @@ func (s *Server) githubRepo(r *http.Request) (*githubrepos.RepoAccess, error) {
 //	                           has no callback URL for; names the ones it has
 //	409 github_device_flow_disabled   the App's Enable Device Flow box is not
 //	                           ticked; says where to tick it
+//	400 bad_request            a value refused before GitHub was asked (a
+//	                           branch name git would not take, a merge
+//	                           without the head it was shown)
 //
 // GitHub refusing a sign-in exchange (a code that expired, a client secret
 // reset on GitHub) is github_validation with GitHub's reason in words, and a
@@ -101,7 +104,10 @@ func githubPageErr(err error) error {
 	var unregistered *githubrepos.CallbackUnregisteredError
 	var deviceDisabled *githubrepos.DeviceFlowDisabledError
 	var oauth *githubrepos.OAuthError
+	var invalid *githubrepos.InvalidError
 	switch {
+	case errors.As(err, &invalid):
+		return httpx.BadRequest("%s", invalid.Reason)
 	case errors.Is(err, githubrepos.ErrState):
 		return httpx.Err(http.StatusBadRequest, "github_state", err.Error())
 	case errors.As(err, &unregistered):

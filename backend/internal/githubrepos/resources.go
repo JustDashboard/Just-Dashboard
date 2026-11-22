@@ -8,7 +8,6 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
-	"time"
 	"unicode/utf8"
 )
 
@@ -33,9 +32,9 @@ func invalid(format string, a ...any) error {
 	return &InvalidError{Reason: fmt.Sprintf(format, a...)}
 }
 
-// notFound is the refusal GitHub would give, decided here: an issue number
+// notFoundBecause is the refusal GitHub would give, decided here: an issue number
 // that GitHub answers with a pull request.
-func notFound(path, message string) error {
+func notFoundBecause(path, message string) error {
 	return &APIError{Status: http.StatusNotFound, Kind: KindNotFound, Message: message, Path: path}
 }
 
@@ -183,14 +182,6 @@ func loginOf(user *rawUser) string {
 		return ""
 	}
 	return user.Login
-}
-
-// timeOf is a nullable GitHub time as a value; zero is left out of the JSON.
-func timeOf(t *time.Time) time.Time {
-	if t == nil {
-		return time.Time{}
-	}
-	return t.UTC()
 }
 
 // webURL keeps an address only when a browser would open it as a page. A

@@ -176,7 +176,7 @@ func (a *RepoAccess) rawIssue(ctx context.Context, number int64) (*rawIssue, err
 		return nil, err
 	}
 	if raw.isPull() {
-		return nil, notFound(a.issuePath(number), fmt.Sprintf("#%d is a pull request, not an issue", number))
+		return nil, notFoundBecause(a.issuePath(number), fmt.Sprintf("#%d is a pull request, not an issue", number))
 	}
 	return &raw, nil
 }

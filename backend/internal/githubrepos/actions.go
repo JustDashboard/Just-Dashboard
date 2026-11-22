@@ -462,12 +462,14 @@ func (a *RepoAccess) Dispatch(ctx context.Context, workflow int64, request Dispa
 	if err != nil {
 		return nil, err
 	}
-	body := map[string]any{"ref": ref, "return_run_details": true}
+	// ref and inputs are the only fields GitHub documents for this call; an
+	// undocumented one risks a 422 for every dispatch.
+	body := map[string]any{"ref": ref}
 	if len(inputs) > 0 {
 		body["inputs"] = inputs
 	}
-	// GitHub answers 204 with nothing, or 200 with the run it started when
-	// it supports return_run_details.
+	// GitHub documents a 200 naming the run it started; an older answer was
+	// a 204 with nothing, which leaves the run to be found in the list.
 	var started struct {
 		WorkflowRunID int64  `json:"workflow_run_id"`
 		HTMLURL       string `json:"html_url"`

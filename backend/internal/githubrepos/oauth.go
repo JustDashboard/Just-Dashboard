@@ -157,7 +157,7 @@ func challengeOf(verifier string) string {
 func (s *Service) AuthorizeURL(ctx context.Context, userID int64, origin string) (string, error) {
 	parsed, err := ParseOrigin(origin)
 	if err != nil {
-		return "", invalid(err.Error())
+		return "", refuse(err.Error())
 	}
 	app, err := s.store.LoadApp(ctx)
 	if err != nil {
@@ -190,7 +190,7 @@ func (s *Service) CompleteConnection(ctx context.Context, pending *PendingState,
 	}
 	code = strings.TrimSpace(code)
 	if !validCode(code) {
-		return Connection{}, invalid("the code GitHub sent back is malformed")
+		return Connection{}, refuse("the code GitHub sent back is malformed")
 	}
 	app, err := s.store.LoadApp(ctx)
 	if err != nil {

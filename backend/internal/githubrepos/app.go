@@ -265,7 +265,7 @@ func (s *Service) Setup(ctx context.Context) (Setup, error) {
 func (s *Service) BeginManifest(ctx context.Context, userID int64, request ManifestRequest) (ManifestStart, error) {
 	origin, err := ParseOrigin(request.Origin)
 	if err != nil {
-		return ManifestStart{}, invalid(err.Error())
+		return ManifestStart{}, refuse(err.Error())
 	}
 	if _, err := s.store.LoadApp(ctx); err == nil {
 		return ManifestStart{}, ErrAppExists
@@ -281,11 +281,11 @@ func (s *Service) BeginManifest(ctx context.Context, userID int64, request Manif
 		name = "Just Dashboard Repos " + suffix
 	}
 	if !appNameRE.MatchString(name) {
-		return ManifestStart{}, invalid("the App name may use letters, digits, spaces, dots, dashes and underscores, up to 34 characters")
+		return ManifestStart{}, refuse("the App name may use letters, digits, spaces, dots, dashes and underscores, up to 34 characters")
 	}
 	organization := strings.TrimSpace(request.Organization)
 	if organization != "" && !ValidOwner(organization) {
-		return ManifestStart{}, invalid("the organization must be a GitHub login")
+		return ManifestStart{}, refuse("the organization must be a GitHub login")
 	}
 	public := request.Public == nil || *request.Public
 	redirect := origin + CallbackPath
@@ -315,7 +315,7 @@ func (s *Service) CompleteApp(ctx context.Context, pending *PendingState, code s
 	}
 	code = strings.TrimSpace(code)
 	if !validCode(code) {
-		return App{}, invalid("the code GitHub sent back is malformed")
+		return App{}, refuse("the code GitHub sent back is malformed")
 	}
 	var converted struct {
 		ID           int64             `json:"id"`
@@ -374,7 +374,7 @@ func (s *Service) CompleteApp(ctx context.Context, pending *PendingState, code s
 func (s *Service) AddCallbackOrigin(ctx context.Context, origin string) (Setup, error) {
 	parsed, err := ParseOrigin(origin)
 	if err != nil {
-		return Setup{}, invalid(err.Error())
+		return Setup{}, refuse(err.Error())
 	}
 	app, err := s.store.LoadApp(ctx)
 	if err != nil {
@@ -383,7 +383,7 @@ func (s *Service) AddCallbackOrigin(ctx context.Context, origin string) (Setup, 
 	callback := parsed + CallbackPath
 	if !slices.Contains(app.CallbackURLs, callback) {
 		if len(app.CallbackURLs) >= maxCallbackURLs {
-			return Setup{}, invalid(fmt.Sprintf("GitHub allows at most %d callback URLs on an App, and this one has them all", maxCallbackURLs))
+			return Setup{}, refuse(fmt.Sprintf("GitHub allows at most %d callback URLs on an App, and this one has them all", maxCallbackURLs))
 		}
 		if err := s.store.SetCallbackURLs(ctx, append(app.CallbackURLs, callback)); err != nil {
 			return Setup{}, err
@@ -421,8 +421,8 @@ func (s *Service) ForgetApp(ctx context.Context) error {
 	return nil
 }
 
-// invalid is a refusal of the request's own values, decided before GitHub is
+// refuse is a refusal of the request's own values, decided before GitHub is
 // asked; the API answers it as GitHub's own validation refusals are.
-func invalid(reason string) *APIError {
+func refuse(reason string) *APIError {
 	return &APIError{Status: http.StatusUnprocessableEntity, Kind: KindValidation, Message: reason}
 }

@@ -562,10 +562,10 @@ const maxDescription = 350
 
 func validDescription(description string) error {
 	if utf8.RuneCountInString(description) > maxDescription {
-		return invalid(fmt.Sprintf("the description may be at most %d characters", maxDescription))
+		return refuse(fmt.Sprintf("the description may be at most %d characters", maxDescription))
 	}
 	if strings.ContainsAny(description, "\x00\r\n") {
-		return invalid("the description is one line of text")
+		return refuse("the description is one line of text")
 	}
 	return nil
 }
@@ -579,15 +579,15 @@ func (s *Service) Create(ctx context.Context, userID, id int64, request CreateRe
 	request.Description = strings.TrimSpace(request.Description)
 	switch {
 	case !ValidRepoName(request.Name):
-		return CreateResult{}, invalid("a repository name may use letters, digits, dots, dashes and underscores, up to 100 characters")
+		return CreateResult{}, refuse("a repository name may use letters, digits, dots, dashes and underscores, up to 100 characters")
 	case !ValidOwner(request.Owner):
-		return CreateResult{}, invalid("choose the account or organisation to create the repository under")
+		return CreateResult{}, refuse("choose the account or organisation to create the repository under")
 	case request.Visibility != "public" && request.Visibility != "private":
-		return CreateResult{}, invalid("visibility is public or private")
+		return CreateResult{}, refuse("visibility is public or private")
 	case request.GitignoreTemplate != "" && !templateRE.MatchString(request.GitignoreTemplate):
-		return CreateResult{}, invalid("that .gitignore template is not one GitHub offers")
+		return CreateResult{}, refuse("that .gitignore template is not one GitHub offers")
 	case request.LicenseTemplate != "" && !templateRE.MatchString(request.LicenseTemplate):
-		return CreateResult{}, invalid("that licence is not one GitHub offers")
+		return CreateResult{}, refuse("that licence is not one GitHub offers")
 	}
 	if err := validDescription(request.Description); err != nil {
 		return CreateResult{}, err
@@ -678,7 +678,7 @@ func (u RepositoryUpdate) githubFields() (map[string]any, error) {
 	if u.Name != nil {
 		name := strings.TrimSpace(*u.Name)
 		if !ValidRepoName(name) {
-			return nil, invalid("a repository name may use letters, digits, dots, dashes and underscores, up to 100 characters")
+			return nil, refuse("a repository name may use letters, digits, dots, dashes and underscores, up to 100 characters")
 		}
 		fields["name"] = name
 	}
@@ -694,7 +694,7 @@ func (u RepositoryUpdate) githubFields() (map[string]any, error) {
 		if homepage != "" {
 			parsed, err := url.Parse(homepage)
 			if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" || len(homepage) > 255 {
-				return nil, invalid("the website must be an http or https address")
+				return nil, refuse("the website must be an http or https address")
 			}
 		}
 		fields["homepage"] = homepage
@@ -702,7 +702,7 @@ func (u RepositoryUpdate) githubFields() (map[string]any, error) {
 	if u.DefaultBranch != nil {
 		branch := strings.TrimSpace(*u.DefaultBranch)
 		if !branchRE.MatchString(branch) || strings.HasPrefix(branch, "-") || strings.Contains(branch, "..") || strings.HasSuffix(branch, ".lock") {
-			return nil, invalid("that is not a branch name")
+			return nil, refuse("that is not a branch name")
 		}
 		fields["default_branch"] = branch
 	}
@@ -718,11 +718,11 @@ func (u RepositoryUpdate) githubFields() (map[string]any, error) {
 	}
 	if u.Topics != nil {
 		if len(*u.Topics) > 20 {
-			return nil, invalid("a repository may have at most 20 topics")
+			return nil, refuse("a repository may have at most 20 topics")
 		}
 		for _, topic := range *u.Topics {
 			if !topicRE.MatchString(topic) {
-				return nil, invalid(fmt.Sprintf("%q is not a topic: lowercase letters, digits and hyphens, up to 50 characters", topic))
+				return nil, refuse(fmt.Sprintf("%q is not a topic: lowercase letters, digits and hyphens, up to 50 characters", topic))
 			}
 		}
 	}
@@ -752,7 +752,7 @@ func (s *Service) Update(ctx context.Context, access *RepoAccess, update Reposit
 		return RepositoryDetail{}, err
 	}
 	if len(fields) == 0 && update.Topics == nil {
-		return RepositoryDetail{}, invalid("nothing to change")
+		return RepositoryDetail{}, refuse("nothing to change")
 	}
 	defer s.Forget(access.ConnectionID, access.Owner, access.Name)
 	var raw rawRepository
@@ -827,7 +827,7 @@ func (s *Service) SetArchived(ctx context.Context, access *RepoAccess, archived 
 // SetVisibility makes the repository public or private.
 func (s *Service) SetVisibility(ctx context.Context, access *RepoAccess, visibility string) (RepositoryDetail, error) {
 	if visibility != "public" && visibility != "private" {
-		return RepositoryDetail{}, invalid("visibility is public or private")
+		return RepositoryDetail{}, refuse("visibility is public or private")
 	}
 	if err := access.Require(access.Repository.Can.Administer, "administer"); err != nil {
 		return RepositoryDetail{}, err
