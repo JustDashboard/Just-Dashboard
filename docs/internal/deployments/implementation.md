@@ -26,6 +26,15 @@ only renderer/executor/validation authority for their feature.
   compacted history begins with a `resync` snapshot, and a slow subscriber is disconnected rather than
   allowed to stall execution. Streams replay all retained history in pages of at most 5,000 stored
   events before handing off to live events, including the terminal tail of an already completed run.
+- A state event carries the instants it records, because the run page reads the snapshot once and
+  follows the events after it (`withEventTimes`, `run_event_times.go`). `step.state` has the attempt's
+  `startedAt` and, once it ends, `endedAt` beside `key`, `state`, `attempt`, `evidence`, `errorCode`
+  and `errorMessage`; `run.state` has `claimedAt` on the claim (`preparing`) and `endedAt` on every
+  terminal state (a transition, a queued cancellation, a supersede, a preview's quarantine). A time
+  that is not recorded is left out, as the snapshot leaves it out. The page's `applyRunEvent`
+  (`components/deploy/run-events.ts`) reads them, and falls back to the event's own `ts`, written in
+  the same transaction, for an engine that sent none. The event data is not part of the OpenAPI
+  description, which documents the route as a socket.
 - A step's output is written a batch at a time. `storeStepOutput.Log` collects lines and
   `OrchestrationStore.AppendLogs` writes them in one transaction — one lease check, one read of the
   run's sequence, a row a line with consecutive sequences, one update of the step's `last_seq` and one
@@ -350,6 +359,28 @@ only renderer/executor/validation authority for their feature.
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
   blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
   `certificate_available`.
+  **The work starts while the build runs** (`certificate_prewarm.go`). The domains are in the stored
+  plan before `build_artifact`, so that step starts the same `EnsureDeploymentCertificate` in the
+  background for the plan's HTTPS names (not a tunnel's) and says so in the build transcript; a first
+  deploy onto a new name used to spend about thirteen seconds ordering after a build that had nothing
+  to do with it. The step itself stays where it is, the gate before `start_candidate`: it waits for that
+  attempt ("which was started while the build ran"), shows its transcript, and answers from it — an
+  issued certificate as it is, so one run never orders twice, and a refused order as the step's own
+  failure. When the background attempt found the names already covered, or never got an answer (cut
+  short, or out of time waiting for certbot's turn), the step asks again itself as before, which finds
+  the certificate reused. Its evidence carries `prewarm` (`startedDuringBuild`, when it started and
+  finished, its own outcome, how long the step waited), and the audit entry of an order placed in the
+  background carries `startedDuringBuild: true`. Cancelling the run cancels the attempt
+  (`CleanupCancelledRun` and the run-finished `HousekeepingObserver`), and so does the step's own
+  context ending while it waits; the attempt is bounded at ten minutes. **A build that fails after the
+  order was placed** leaves the run's order to finish: the certificate stays on the host and the next
+  run's step reuses it; on a host the Docker Caddy ingress serves, the attempt may also have brought
+  the ingress up, which the next run finds in place. So that a build failing on every push cannot become an ACME loop, a background
+  attempt that fails keeps the same set of names from being ordered in the background for an hour
+  (in memory, so a restart forgets it); the step still orders after a build that passes, as it always
+  did. A run whose certificate step runs in another process than its build (a restart between them)
+  finds no attempt and orders as before. Redeploy, rollback and promotion have no build step and
+  order in the step as before.
   HTTP-01 issuance (`issueDeploymentHTTP`) runs through the same certbot — whose plugins
   `deploymentChallenge` reads, against probe directories, to choose webroot or standalone — names the
   same directory (`deploymentHTTPIssueArgs` appends `ACMEDirectory.certbotArgs`), skips the public-DNS
@@ -474,7 +505,9 @@ only renderer/executor/validation authority for their feature.
   `nodeBuild.findings` (with `nodeBuild.devScripts`, the scripts that start a development server);
   `build_node_frameworks.go` renders what the plan's own commands need around the build (adapter-node for
   adapter-auto, `NITRO_PRESET`, Next.js standalone assets, the fallback page a static site's framework
-  writes, the entry check). An Nx workspace's application projects are candidates at its root
+  writes, the entry check); a Next.js app whose config sets `output: 'standalone'` is proposed its
+  standalone server, and a start command that runs that server alone ships only `.next/standalone`
+  (`frameworks_next_standalone.go`). An Nx workspace's application projects are candidates at its root
   (`frameworks_node_nx.go`), and a workspace member builds its workspace dependencies first
   (`detect_node_start.go`). `frameworks_python.go` names Django, FastAPI, Litestar,
   Starlette, Sanic, Quart, Falcon, Bottle, Flask, aiohttp, Tornado and the application frameworks
@@ -764,8 +797,31 @@ only renderer/executor/validation authority for their feature.
   runs, whatever its method, on the environment's own networked builder, and a recipe build that then
   reads a table its migrations create, or needs rows a new database lacks, gets the schema or the
   project's seed first ([database networks](database-networks.md#builds-that-read-their-database)). Reviewed base tags are resolved before rendering and every
-  generated `FROM` is digest-pinned. Build secrets are BuildKit environment-backed secret mounts and
-  never argv/build args; custom Dockerfiles with requested secrets, or a secret-named literal in an
+  generated `FROM` is digest-pinned. Every reviewed base, and every Bun, Deno, site and language image a
+  recipe settles, is resolved through the builder's `resolveBase` (`build_base_resolution.go`): an
+  answer is reused for ten minutes (`baseResolutionTTL`, keyed by reference — the answer is the tag's
+  index digest and its platform list, the same whichever platform is built), and when the registry does
+  not answer after that (`registryOutageCode`: unreachable, rate-limited, or a 5xx) the last answer is
+  used and the run's transcript says so through `prepared.notes` ("Docker Hub did not answer; used
+  node:22-alpine as resolved at 14:02 UTC on 22 Nov 2026"). A registry that says the tag does not exist
+  is believed. The answers are kept in `<JD_DATA_DIR>/deploy-base-resolutions.json` (public references
+  and digests only), so a dashboard restarted during an outage still builds; a missing or unreadable
+  file starts empty. Before this, each preparation asked the registry for every base, 2–4 s a run, and
+  an outage or Docker Hub's anonymous limit failed a deploy whose bases were all on this server. The
+  daily scan's newer-base check does not go through this memory: it asks the registry itself
+  ([image vulnerabilities](image-vulnerabilities.md#whether-a-newer-base-exists)), so a moved tag is still
+  found. A recipe or static build whose generated Dockerfile names every image it reads by digest (its
+  frontend, each `FROM`, `COPY --from` and `RUN --mount from=` that is not a stage) builds without
+  `--pull` (`buildPulls`, read from the Dockerfile itself): there is nothing for the registry to answer,
+  and an image BuildKit does not hold is still fetched by its digest. A user Dockerfile, a Compose
+  service and a Railpack plan (whose builder and runtime images are tags inside the plan) keep `--pull`.
+  The preview argv says which. Build secrets are BuildKit environment-backed secret mounts and
+  never argv/build args. BuildKit leaves a secret's value out of a step's cache key, so every recipe
+  RUN that mounts build values is preceded by a guard `ARG JD_BUILD_VALUES_<n>` (one per set of mounted
+  values, `build_value_guard.go`) that the build fills with an HMAC of those values under a key derived
+  from the master key, in buildx's environment: a changed value reruns that step and what follows it,
+  and an install mounting none of the changed values keeps its layer ([build values](recipes.md#build-values)).
+  Custom Dockerfiles with requested secrets, or a secret-named literal in an
   `ENV`/`ARG`, shell assignment, flag or heredoc (read over logical instructions, so a continuation line
   cannot hide one and `SECRET_KEY_BASE_DUMMY=1` is not one), fail closed because their layer history
   cannot be guaranteed — and detection runs the same check, so preflight says so before Deploy. A custom
@@ -776,7 +832,12 @@ only renderer/executor/validation authority for their feature.
   secret ever becomes a build argument or argv. A browser-public value typed into a new project is
   stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
-  dashboard files stay out of the image whatever the repository's own ignore file says.
+  dashboard files stay out of the image whatever the repository's own ignore file says. A JavaScript
+  install (`nodeInstallStage`) copies only the files it reads, installs, and then copies the source, and
+  the Node server image copies `node_modules` as a layer of its own before the rest, so a source-only
+  commit reuses both; anything that could let the install read past its inputs (a lifecycle script, a
+  `file:` dependency, Prisma, a pnpmfile, zero-installs) keeps the source-first order, and the run's
+  notes say which ([JavaScript installs](recipes.md#javascript-installs)).
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a
   registry credential detected in `.npmrc`, `.yarnrc.yml` or `bunfig.toml` is declared with build scope
@@ -786,6 +847,41 @@ only renderer/executor/validation authority for their feature.
   selection, the Rust, Java, .NET and Deno recipes, the single-page fallback and Go version/command
   behavior are defined in [the recipe contract](recipes.md), including the exact limits of live
   framework verification.
+- A Compose project's services are built and pulled a few at a time instead of one after another
+  (`compose_parallel.go`). Every service is checked first (its context, Dockerfile, arguments and
+  target), so a project that cannot build fails before anything runs. Then at most
+  `composeBuildParallelism` services run at once, a quarter of the cores and one per 2 GiB of memory,
+  between 1 and 3: BuildKit already parallelises one build's stages, so a second build mostly overlaps one
+  service's export and pulls with another's compile, and beyond that builds contend for the cores and
+  memory the server's own workloads use. Services start in the file's order. The transcript holds each
+  service's output whole and in the file's order (`orderedBuildOutput`): the first unfinished service
+  streams live, the others' lines are held (in memory up to 4 MiB each, then in a private temporary file
+  removed afterwards) and follow as soon as every service before them has finished, because each buildx
+  run numbers its steps from #1 and interleaved lines could not be read apart. The release's artifacts,
+  `ResolvedComposeSnapshot.Services` and `PreparedBuild.ComposeServices` are assembled in the file's
+  order. The first failure cancels the others; each service it stopped says `Stopped Compose service X:
+  service Y failed` after its own lines, and the error is Y's `ComposeServiceError`. Cancelling the run
+  cancels every build, and the executor records the cancellation as before.
+- Every build method's image reaches the daemon the same way (`dockerx/build_export.go`). On
+  containerd's image store (`docker info` driver status `driver-type io.containerd.snapshotter.v1`, read
+  once per process and not remembered when the daemon does not answer) buildx exports with
+  `--output type=image,unpack=true,compression=zstd,compression-level=3,oci-mediatypes=true` instead of
+  `--load`, whose gzip compression and unpack of every new layer were most of a large image's build:
+  on a 1.1 GB node_modules layer, 80 s exporting and 53 s unpacking with gzip, 35 s and 20 s with zstd,
+  and a smaller blob (303 MB against 336 MB). zstd level 1 was no faster and uncompressed blobs were
+  slower and three times the disk. Base layers keep the blobs they were pulled with (no
+  `force-compression`), so a manifest mixes gzip and zstd layers, which the daemon runs and retags and
+  `docker save` writes as they are. On a classic graph driver BuildKit writes into the driver with
+  nothing to compress, and the build keeps `--load`; the zstd output also works there, so a daemon that
+  changed stores under a running dashboard still builds. A build on an environment's networked builder
+  ([database networks](database-networks.md#builds-that-read-their-database)) keeps `--load` on either
+  store: that builder is a container of its own, and an image export there would land in its store, not
+  the daemon's. The recorded digest is the exporter's
+  `containerimage.digest` from `--metadata-file` either way. That file is written in a private
+  temporary folder (`os.MkdirTemp`, removed when the build returns), never in the build context: inside
+  it, it changed every user Dockerfile and Compose build's context, so `COPY . .` never reused its
+  cache, and an empty copy shipped in the image (`TestLiveUserDockerfileContextIsReusedUnchanged`). The build's preview argv
+  (`buildPreviewArgv`) still reads `--load`: it is written before the daemon is asked.
 - Enqueue atomically freezes exact variable revision ids plus canonical dependency/check JSON. The header
   exists for an empty set, digests are checked before variable decryption, and retry copies the original
   snapshots instead of observing later rotations. Release runtime snapshots store the actual secret-free
@@ -890,11 +986,48 @@ only renderer/executor/validation authority for their feature.
   would a deploy. Build settings carries the terms under the release tasks (`settings/rehearsal.tsx`),
   the Promote confirmation says the tasks are rehearsed first while the terms are on, and the run page
   reads the report as a sentence and a line of facts (`run-rehearsal.tsx`).
+- **Run workspaces** (`deployment-workspaces/run-N`, `workspace_sweep.go`): a run's source is
+  materialized there and `release_task` removes it, so a run that ended before that step (a failed
+  build, a refused preflight, a cancel) used to keep its checkout for good. A run's workspace is now
+  removed as the run finishes (the engine's run-finished `HousekeepingObserver`), and at start-up
+  `SweepWorkspaces` removes every `run-N` directory whose run is terminal or no longer recorded (its
+  project permanently deleted). Nothing reads a finished run's workspace again: the materializer
+  reuses one only for the same run through its marker, a retry is a new run with its own, and a
+  terminal run runs no further step. A run that is queued, running or anywhere short of terminal
+  (`failed_activation`, `restoring_previous`, `cancelling` included) keeps its workspace, and nothing
+  in the folder but a `run-N` directory is touched — a file or a link of that name is left alone.
+  The dashboard's backups already exclude the folder.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
-  an active deployment lease, and a staging release an unfinished promotion is about to take its image
-  from ([staging and promotion](staging-promotion.md)). Cleanup reports the reason for every retained row and removes a mutable
-  Docker tag only after inspection proves it still names the recorded config/digest. A run that fails
+  an active deployment lease, a staging release an unfinished promotion is about to take its image
+  from ([staging and promotion](staging-promotion.md)), every release whose runtime is in a state where
+  its container may still exist (`candidate`, `live`, `warm`, `draining`, `stopped` — a stopped or
+  sleeping environment starts the same container again — and a `quarantined` preview;
+  `heldRuntimeStates`), and the target of an unfinished rollback, redeploy or restart
+  (`operationTargetRetainedWhere`, since a queued run holds no lease yet). Cleanup reports the reason
+  for every retained row and removes a mutable Docker tag only after inspection proves it still names
+  the recorded config/digest.
+  **The retention sweep** (`ReleaseImageSweeper`, `release_retention_sweep.go`) is what removes the rest;
+  before it, `PruneArtifacts` had no caller and every release image stayed for good (about 1.6 GB per
+  Next.js release). A pass runs a minute after start-up, daily, and 30 s after any run finishes (the
+  engine's run observer), one pass at a time, oldest release first, at most 20 removals a pass (the
+  next pass carries on) and ten minutes long. Nothing is removed while any deployment holds a lease
+  (`reserveArtifactPrune`). Before each removal the remover (`DockerArtifactRemover`) asks the daemon
+  (`ImageUseReader.ImageUse`: the image's id, its names, and every container created from it in any
+  state — running, paused, exited, created) and refuses an image any container uses
+  (`ErrArtifactInUse`), a name outside the release namespace `just-dashboard/deployment-*` (a pulled
+  Compose service under its registry name, the dashboard's own images; `ErrArtifactNotOwned`), a
+  removal by id while another name holds the image, and any backend that cannot ask
+  (`ErrArtifactUnguarded`). A refusal leaves the artifact `available` with the reason; an image
+  already gone counts as removed. Each removal, and each removal that failed (`prune_failed`, tried
+  again next pass), is audited as `deploy.release.artifact.prune` (actor `system`; the reference,
+  release, digest, size, reason, trigger and any error). A removed artifact is `pruned` with
+  `pruned_at`, and the release's artifact readout (the release comparison's *Retained artifacts*)
+  shows it as *removed*, when, and that the release can no longer be rolled back to.
+  `ReleaseImageSweeper.DryRun` is the same pass removing and writing nothing, with the daemon's
+  refusals. Archived projects keep the same retention as any other (an archive is reversible and keeps
+  its history); a permanently deleted project's images are not in the store any more and stay on the
+  server, as [permanent deletion](permanent-deletion.md) says. A run that fails
   after `render_runtime` moves its candidate release to `failed` the moment the run itself reaches
   `failed`, `failed_activation`, `rolled_back` or `cancelled` — `TransitionRun` does it in the same
   transaction as the run's own state change — so it leaves `candidate` (which retention always keeps,
@@ -1055,6 +1188,22 @@ only renderer/executor/validation authority for their feature.
   attempt ran out: a start command that failed before the server listened used to wait out forty
   attempts. A running container, a target without one and a backend that cannot read it keep the
   attempts as configured.
+- A check with an interval asks quickly at first (`checkPollWait`, `checks.go`): every 250 ms for the
+  first ten seconds, then at the configured interval, so an application that answers 3.2 s after it
+  starts is found then rather than on the 6 s tick. The waits still add up to `(attempts − 1) ×
+  interval`, so a check that never passes gives up when it always did, and it also stops by `attempts
+  × timeout + (attempts − 1) × interval`, inside the time Settings shows. An early wait is never shorter than the
+  attempt before it took, and attempts run one at a time, so an application that answers slowly is
+  never asked again before it has answered. A check without an interval runs its attempts back to back
+  as before. Readiness, smoke, public-route, wake and rollback checks and every replica share this
+  runner, and the crash-loop grace above is measured from the check's start as before. Evidence folds
+  repeats: an attempt that gives the same answer as the one before (outcome, code, status, address,
+  container state, exit code, restarts, output digest, redirect origin) is counted into the first of
+  its run (`repeats`, `lastNumber`, `spanMillis` from that attempt's start to the last one's end), and
+  the first attempt, the first of every distinct answer and the last attempt are always kept
+  (`collapseAttempts`). Failure messages and the run page count the folded attempts too
+  (`CheckEvidence.AttemptCount`, `checkAttemptCount`); evidence saved before folding counts one per
+  entry.
 - HTTP, TCP, Docker-health, command and public-route checks have closed configuration, per-attempt
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
@@ -1254,6 +1403,21 @@ only renderer/executor/validation authority for their feature.
   feed attributes the stop and the start to; the summary's `asleepSince` makes the project read Asleep
   with Wake now (`POST …/sleep/wake`), the host's container alert reads it as fine and the availability
   figure leaves it out. `GET …/environments/{env}/sleep` is the reading.
+- A passed build says where its time went. The executor feeds the same redacted transcript to a
+  `buildTimingReader` (`build_timing.go`), which reads BuildKit's own figures as they stream: a
+  Dockerfile step's header (`#13 [build 3/4] RUN …`, not `[internal]` bookkeeping) and its `DONE`
+  seconds or `CACHED`, the `exporting to …` step and its `exporting layers` (or `sending tarball`) and
+  `unpacking` seconds, matched loosely because the exporter's wording follows the driver. A RUN of the
+  plan's build command (`prepared.buildCommand`, else the plan's) is the compile, one of the recipe's
+  install line (`prepared.install`) the install, a RUN that does both the compile; with neither named
+  the package managers' and toolchains' own verbs decide. A status line starts a new buildx run (a
+  Compose stack's next service), whose figures are added. The summary — install and compile seconds
+  or cached, export, unpack and the export step's seconds, the steps and how many were cached, and the
+  image's bytes (a stack's images added) — is the build step's evidence `timing`, absent when no
+  BuildKit ran (a pulled image). The run page says it in one sentence on the Build step's record, and
+  beside a run's running time how long runs of its kind usually take: the median, over the project's
+  `recentRuns` that succeeded (at least three), from `claimedAt` to `endedAt`. The tests read neutral
+  copies of real transcripts (`testdata/buildkit-timing/`).
 - A failed build names its cause instead of `internal_error` and exec's `exit status 1`. `dockerx`
   reads buildx's plain progress as it streams (over `os.Pipe`s read to EOF, because a `StdoutPipe` is
   closed by `Wait` and dropped BuildKit's closing lines; once buildx has exited a read waits at most
@@ -1283,7 +1447,8 @@ only renderer/executor/validation authority for their feature.
   runner, a Go or Python release the recipe offers, `NODE_OPTIONS` sized to three quarters of the
   server's memory, `prisma generate` before the build, the detected output directory. A Compose
   service's build is announced on the status stream so its steps are read apart and named with the
-  service; an image or Compose pull failure is named from the registry's error, including a refusal the
+  service: the collector keeps each service's lines apart (`buildOutputCollector.forService`), so the
+  service that failed is read from its own output wherever the transcript put it; an image or Compose pull failure is named from the registry's error, including a refusal the
   daemon returns before the pull's stream starts (`dockerx` prefixes it `pull image:` like one inside
   the stream; only an unreachable daemon keeps its own error). A base image that cannot be resolved
   keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
@@ -1871,7 +2036,7 @@ only renderer/executor/validation authority for their feature.
   refused in URLs can carry a token there — and left out when it does not parse), the desired build
   plan's `recipe` and `framework`, `images` (the distinct references the live release's runtime
   snapshot runs, read from the same snapshot as the service count) and `recentRuns` (the newest
-  fourteen, newest first). The strip and `lastRun` are one statement, `recentProjectRuns`: a
+  fourteen, newest first, each with its request, claim and end). The strip and `lastRun` are one statement, `recentProjectRuns`: a
   `ROW_NUMBER()` ranking of every card's runs that carries only ids, answered in order by
   `idx_deploy_runs_project_requested (project_id, requested_at DESC, id DESC)`, joined back to the
   whole rows it keeps, so `recentRuns[0]` is `lastRun` by construction. Ranking whole rows in a second
@@ -2598,8 +2763,9 @@ image project's first line then names its registry); the traffic band says "No w
 flat rule for a project with no address on the web; and the footer never wraps, its words
 truncating instead. The list view carries the same readings from 1024 in columns two lines tall — the
 state over the address or pending changes and the run strip over the last run, with the traffic
-joining from 1280 — so a row stays one row's height. The fleet is read every five seconds and the traffic
-every thirty; the archive is read once, for the count beside its link, and again when a card
+joining from 1280 — so a row stays one row's height. The fleet is read every five seconds, every two
+while any run is in flight (`RUN_IN_FLIGHT_POLL_MS`, as a project's detail and run list are), and the
+traffic every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.
 `/deploy?view=archived` lists archived projects drawn as what they deployed (`ArchivedDeployment`),
 with Restore (`POST /deploy/{id}/unarchive`) and permanent deletion. `/deploy/notifications` holds

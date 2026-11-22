@@ -3380,6 +3380,26 @@ export type DeploymentBuildEvidence = {
       railpack?: RailpackEvidence
     }
   }
+  /** Where the build's time went, read from BuildKit's lines; absent when it ran none. */
+  timing?: DeploymentBuildTiming
+}
+
+/**
+ * Where a build's time went (`BuildTiming`, `backend/internal/deploy/build_timing.go`):
+ * BuildKit's own seconds for the install and the build command, the image's
+ * export and unpack, and how many of the Dockerfile's steps the cache answered.
+ */
+export type DeploymentBuildTiming = {
+  installSeconds?: number
+  installCached?: boolean
+  compileSeconds?: number
+  compileCached?: boolean
+  exportSeconds?: number
+  unpackSeconds?: number
+  imageSeconds?: number
+  steps: number
+  cachedSteps: number
+  imageBytes?: number
 }
 
 /**
@@ -3965,6 +3985,8 @@ export type ReleaseArtifactStatus = {
   state: string
   retained: boolean
   reason: string
+  /** When release retention removed it from the server (`state` is "pruned"). */
+  prunedAt?: string
 }
 
 export type ReleaseComparison = {
@@ -4058,6 +4080,8 @@ export type DeploymentRecentRun = {
   state: DeploymentRunState
   operation: string
   requestedAt: string
+  /** When a slot took it: a run's own time is measured from here. */
+  claimedAt?: string
   endedAt?: string
 }
 

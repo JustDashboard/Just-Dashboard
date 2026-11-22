@@ -7,10 +7,14 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 )
 
+// artifactBackendFake records what the builder asked of it. Compose builds
+// run concurrently, so every method holds mu.
 type artifactBackendFake struct {
+	mu         sync.Mutex
 	builds     []BuildInvocation
 	pulls      []string
 	resolves   []string
@@ -25,10 +29,35 @@ type artifactBackendFake struct {
 	local        map[string]string
 	unregistered map[string]bool
 	tags         [][2]string
+	// resolveErr is what every registry read answers while it is set: an
+	// outage, a rate limit.
+	resolveErr error
+	// uses is what the daemon says holds an image, by the reference asked;
+	// an image not listed is one no container uses, named only by that.
+	uses   map[string]ImageUse
+	useErr error
+}
+
+func (f *artifactBackendFake) ImageUse(_ context.Context, reference string) (ImageUse, error) {
+	if f.useErr != nil {
+		return ImageUse{}, f.useErr
+	}
+	if use, ok := f.uses[reference]; ok {
+		return use, nil
+	}
+	if strings.HasPrefix(reference, "sha256:") {
+		return ImageUse{ID: reference}, nil
+	}
+	return ImageUse{ID: fakeContentDigest("id " + reference), Tags: []string{reference}}, nil
 }
 
 func (f *artifactBackendFake) ResolveImage(_ context.Context, reference, _ string) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.resolves = append(f.resolves, reference)
+	if f.resolveErr != nil {
+		return ResolvedImage{}, f.resolveErr
+	}
 	if f.unregistered[reference] {
 		return ResolvedImage{}, errors.New("manifest unknown")
 	}
@@ -43,19 +72,22 @@ func (f *artifactBackendFake) BuildImage(
 	invocation BuildInvocation,
 	emit func(BuildLog) error,
 ) (ResolvedImage, error) {
+	f.mu.Lock()
 	f.builds = append(f.builds, invocation)
+	printed, failBuild := f.printed, f.failBuild
+	f.mu.Unlock()
 	if len(invocation.Secrets) > 0 {
 		if err := emit(BuildLog{Stream: "stdout", Text: "tool output " + invocation.Secrets[0].Value}); err != nil {
 			return ResolvedImage{}, err
 		}
 	}
-	for _, line := range f.printed {
+	for _, line := range printed {
 		if err := emit(BuildLog{Stream: "stdout", Text: line}); err != nil {
 			return ResolvedImage{}, err
 		}
 	}
-	if f.failBuild != nil {
-		return ResolvedImage{}, f.failBuild
+	if failBuild != nil {
+		return ResolvedImage{}, failBuild
 	}
 	return ResolvedImage{
 		Reference: invocation.Tag, Digest: fakeContentDigest(invocation.Tag),
@@ -65,6 +97,8 @@ func (f *artifactBackendFake) BuildImage(
 }
 
 func (f *artifactBackendFake) PullImage(_ context.Context, reference, _ string, _ func(BuildLog) error) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.pulls = append(f.pulls, reference)
 	name, digest, ok := strings.Cut(reference, "@")
 	if !ok {
@@ -74,6 +108,8 @@ func (f *artifactBackendFake) PullImage(_ context.Context, reference, _ string, 
 }
 
 func (f *artifactBackendFake) TagImage(_ context.Context, source, target string) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	id, ok := f.local[source]
 	if !ok {
 		return ResolvedImage{}, errors.New("No such image: " + source)
@@ -86,6 +122,8 @@ func (f *artifactBackendFake) TagImage(_ context.Context, source, target string)
 }
 
 func (f *artifactBackendFake) InspectImage(_ context.Context, reference string) (ResolvedImage, error) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	if f.inspectErr != nil {
 		return ResolvedImage{}, f.inspectErr
 	}
@@ -96,6 +134,8 @@ func (f *artifactBackendFake) InspectImage(_ context.Context, reference string) 
 }
 
 func (f *artifactBackendFake) RemoveImage(_ context.Context, reference string) error {
+	f.mu.Lock()
+	defer f.mu.Unlock()
 	f.removed = append(f.removed, reference)
 	return nil
 }
@@ -487,7 +527,7 @@ func TestArtifactCleanupUsesTagOnlyWhileItNamesRecordedImage(t *testing.T) {
 	}{
 		{
 			name: "tag still exact", current: ResolvedImage{Digest: releaseDigest, ConfigDigest: configDigest},
-			metadata: mustJSON(map[string]any{"configDigest": configDigest}), wantRemove: "example/app:current",
+			metadata: mustJSON(map[string]any{"configDigest": configDigest}), wantRemove: "just-dashboard/deployment-4:run-12",
 		},
 		{
 			name: "tag moved", current: ResolvedImage{Digest: fakeContentDigest("release-v2"), ConfigDigest: fakeContentDigest("config-v2")},
@@ -499,9 +539,9 @@ func TestArtifactCleanupUsesTagOnlyWhileItNamesRecordedImage(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			backend := &artifactBackendFake{inspected: map[string]ResolvedImage{"example/app:current": test.current}}
+			backend := &artifactBackendFake{inspected: map[string]ResolvedImage{"just-dashboard/deployment-4:run-12": test.current}}
 			err := NewDockerArtifactRemover(backend).RemoveArtifact(context.Background(), ReleaseArtifact{
-				Kind: ArtifactImage, Reference: "example/app:current", Digest: releaseDigest, Metadata: test.metadata,
+				Kind: ArtifactImage, Reference: "just-dashboard/deployment-4:run-12", Digest: releaseDigest, Metadata: test.metadata,
 			})
 			if err != nil {
 				t.Fatal(err)

@@ -1,19 +1,17 @@
 "use client"
 
 import { useMemo, useRef, useState } from "react"
-import type {
-  DeploymentEngineRun,
-  DeploymentRunEvent,
-  DeploymentRunSnapshot,
-  DeploymentStepState,
-} from "@/lib/types"
+import type { DeploymentEngineRun, DeploymentRunEvent, DeploymentRunSnapshot } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
 import { isActiveRun, latestAttempts } from "@/components/deploy/vocabulary"
+import { applyRunEvent } from "@/components/deploy/run-events"
 import {
-  consoleRows,
-  transcriptSummary,
+  EMPTY_TRANSCRIPT,
+  appendTranscript,
+  clearTranscript,
   type BuildLogEvent,
-} from "@/components/deploy/build-console"
+  type TranscriptBuffer,
+} from "@/components/deploy/transcript-buffer"
 
 /**
  * A run's stream, read: its snapshot as the events move it, and the build
@@ -43,7 +41,7 @@ export function useRunStream(
   { enabled = true, initial }: { enabled?: boolean; initial?: DeploymentRunSnapshot } = {},
 ) {
   const [snapshot, setSnapshot] = useState<DeploymentRunSnapshot>()
-  const [events, setEvents] = useState<BuildLogEvent[]>([])
+  const [transcript, setTranscript] = useState<TranscriptBuffer>(EMPTY_TRANSCRIPT)
   const [complete, setComplete] = useState(false)
   const lastSeq = useRef(0)
   const state = useRef<DeploymentEngineRun["state"] | undefined>(undefined)
@@ -68,14 +66,15 @@ export function useRunStream(
     const resync = incoming.find((event) => event.type === "resync")
     if (resync && isSnapshot(resync.data.snapshot)) {
       setSnapshot(resync.data.snapshot)
-      setEvents([])
+      setTranscript(clearTranscript)
     }
     setSnapshot((current) =>
-      incoming.reduce((next, event) => applyEvent(next, event), current ?? initial),
+      incoming.reduce((next, event) => applyRunEvent(next, event), current ?? initial),
     )
     const lines = incoming.flatMap(logEvent)
     if (lines.length > 0) {
-      setEvents((current) => dedupeEvents([...current, ...lines]).slice(-TRANSCRIPT_CAP))
+      // Appended, not read again: the lines already held keep their rows.
+      setTranscript((current) => appendTranscript(current, lines, TRANSCRIPT_CAP))
     }
   }
 
@@ -92,8 +91,9 @@ export function useRunStream(
     snapshot,
     /** For a verb that changed the run and answered with it, ahead of the stream saying so. */
     setSnapshot,
-    events,
-    capped: events.length >= TRANSCRIPT_CAP,
+    /** The transcript as lines with their counts, kept up to date as events land. */
+    transcript,
+    capped: transcript.events.length >= TRANSCRIPT_CAP,
     socket: socket.state,
   }
 }
@@ -101,82 +101,17 @@ export function useRunStream(
 /** One run's transcript, as the Builds view draws it. */
 export function useRunTranscript(projectId: number, runId: number) {
   const stream = useRunStream(projectId, runId)
-  const rows = useMemo(() => consoleRows(stream.events), [stream.events])
-  const summary = useMemo(() => transcriptSummary(rows), [rows])
   const steps = useMemo(
     () => latestAttempts(stream.snapshot?.steps ?? []),
     [stream.snapshot?.steps],
   )
   return {
     snapshot: stream.snapshot,
-    rows,
-    summary,
+    transcript: stream.transcript,
     steps,
     capped: stream.capped,
     connected: stream.socket === "open",
   }
-}
-
-function applyEvent(
-  snapshot: DeploymentRunSnapshot | undefined,
-  event: DeploymentRunEvent,
-): DeploymentRunSnapshot | undefined {
-  if (!snapshot || event.type === "resync") return snapshot
-  if (event.type === "run.state" && typeof event.data.state === "string") {
-    return {
-      ...snapshot,
-      run: {
-        ...snapshot.run,
-        state: event.data.state as DeploymentEngineRun["state"],
-        terminalCode:
-          typeof event.data.code === "string" ? event.data.code : snapshot.run.terminalCode,
-        terminalReason:
-          typeof event.data.reason === "string" ? event.data.reason : snapshot.run.terminalReason,
-      },
-    }
-  }
-  if (event.type !== "step.state") return snapshot
-  const key = typeof event.data.key === "string" ? event.data.key : ""
-  const attempt = typeof event.data.attempt === "number" ? event.data.attempt : 1
-  const state =
-    typeof event.data.state === "string" ? (event.data.state as DeploymentStepState) : undefined
-  if (!state) return snapshot
-  let found = false
-  const steps = snapshot.steps.map((step) => {
-    if (step.id !== event.stepId) return step
-    found = true
-    return {
-      ...step,
-      state,
-      attempt,
-      evidence: isRecord(event.data.evidence) ? event.data.evidence : step.evidence,
-      errorCode: typeof event.data.errorCode === "string" ? event.data.errorCode : step.errorCode,
-      errorMessage:
-        typeof event.data.errorMessage === "string" ? event.data.errorMessage : step.errorMessage,
-      lastSeq: event.seq,
-    }
-  })
-  if (!found && key) {
-    const previous = [...snapshot.steps].reverse().find((step) => step.key === key)
-    steps.push({
-      ...(previous ?? {
-        id: event.stepId ?? event.seq,
-        runId: event.runId,
-        key,
-        ordinal: snapshot.steps.length,
-        timeoutSeconds: 0,
-        evidence: {},
-      }),
-      id: event.stepId ?? event.seq,
-      state,
-      attempt,
-      errorCode: typeof event.data.errorCode === "string" ? event.data.errorCode : undefined,
-      errorMessage:
-        typeof event.data.errorMessage === "string" ? event.data.errorMessage : undefined,
-      lastSeq: event.seq,
-    })
-  }
-  return { ...snapshot, steps }
 }
 
 function logEvent(event: DeploymentRunEvent): BuildLogEvent[] {
@@ -191,12 +126,6 @@ function logEvent(event: DeploymentRunEvent): BuildLogEvent[] {
       truncated: event.data.truncated === true,
     },
   ]
-}
-
-function dedupeEvents(events: BuildLogEvent[]) {
-  const bySequence = new Map<number, BuildLogEvent>()
-  for (const event of events) bySequence.set(event.seq, event)
-  return [...bySequence.values()].sort((a, b) => a.seq - b.seq)
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {

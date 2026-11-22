@@ -209,7 +209,7 @@ func TestIncidentRepositoryResolvesToBunAndWarnsWhenNPMIsForced(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"FROM node:22-alpine@sha256:", "COPY --from=oven/bun:1-alpine@sha256:", "RUN bun install --frozen-lockfile", nodeBuildRun("bun run build")} {
-		if !strings.Contains(automatic.DockerfilePreview, want) {
+		if !strings.Contains(withoutNodeCacheMounts(automatic.DockerfilePreview), want) {
 			t.Fatalf("automatic Dockerfile missing %q:\n%s", want, automatic.DockerfilePreview)
 		}
 	}
@@ -218,7 +218,7 @@ func TestIncidentRepositoryResolvesToBunAndWarnsWhenNPMIsForced(t *testing.T) {
 		t.Fatal(err)
 	}
 	for _, want := range []string{"RUN npm install --no-audit --no-fund", "COPY --from=oven/bun:1-alpine@sha256:", nodeBuildRun("npm run build")} {
-		if !strings.Contains(forced.DockerfilePreview, want) {
+		if !strings.Contains(withoutNodeCacheMounts(forced.DockerfilePreview), want) {
 			t.Fatalf("forced npm Dockerfile missing %q:\n%s", want, forced.DockerfilePreview)
 		}
 	}

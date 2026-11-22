@@ -103,7 +103,12 @@ func TestPHPDetectionAndRecipe(t *testing.T) {
 		"ENV COMPOSER_ALLOW_SUPERUSER=1 LOG_CHANNEL=stderr",
 		"RUN install-php-extensions pdo_mysql pdo_pgsql mysqli opcache intl redis",
 		"COPY --from=composer /usr/bin/composer /usr/bin/composer",
-		"composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist",
+		// The locked packages install before the source; the autoloader,
+		// whose post-autoload-dump runs package:discover, once the source
+		// and its cache directories are there.
+		"COPY composer.json composer.lock /app/\nRUN ", "composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-autoloader\nCOPY . .\n",
+		"chmod -R a+rwX storage bootstrap/cache database\n",
+		"RUN composer dump-autoload --no-dev --optimize --no-interaction && composer run-script post-install-cmd --no-dev --no-interaction\n",
 		"COPY --from=assets /app/public/build /app/public/build",
 		// json.Marshal writes && as \u0026\u0026, which Docker's JSON CMD reads back as &&.
 		"mkdir -p storage/framework/cache", `CMD ["/bin/sh","-c","php artisan migrate --force \u0026\u0026 frankenphp php-server --listen :80 --root /app/public"]`,

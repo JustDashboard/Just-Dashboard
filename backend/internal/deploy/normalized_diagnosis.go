@@ -171,16 +171,12 @@ func builderUnavailableFailure(err error) StepResult {
 	if image != "" {
 		subject = "the reviewed base image " + image
 	}
+	outage := registryOutageCode(lower)
 	switch {
-	case strings.Contains(lower, "toomanyrequests") || strings.Contains(lower, "pull rate limit") ||
-		strings.Contains(lower, "429 too many requests"):
+	case outage == "registry_rate_limited":
 		result.ErrorCode = "registry_rate_limited"
 		result.ErrorMessage = "Could not resolve " + subject + ": Docker Hub's anonymous pull limit for this server's address was reached; sign the server in to Docker Hub (`docker login`) or wait for the limit to reset"
-	case strings.Contains(lower, "no such host") || strings.Contains(lower, "i/o timeout") ||
-		strings.Contains(lower, "tls handshake timeout") || strings.Contains(lower, "temporary failure in name resolution") ||
-		strings.Contains(lower, "network is unreachable") || strings.Contains(lower, "connection refused") ||
-		strings.Contains(lower, "deadline exceeded") || strings.Contains(lower, "client.timeout exceeded") ||
-		strings.Contains(lower, "request canceled while waiting for connection") || strings.Contains(lower, "server misbehaving"):
+	case outage == "registry_unreachable":
 		result.ErrorCode = "registry_unreachable"
 		result.ErrorMessage = "Could not resolve " + subject + ": the registry could not be reached from this server; check its outbound network and DNS"
 	case strings.Contains(lower, "manifest unknown") || strings.Contains(lower, "not found"):

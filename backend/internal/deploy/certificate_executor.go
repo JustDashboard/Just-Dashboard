@@ -42,6 +42,9 @@ type certificateStepEvidence struct {
 	// AccountExisted distinguishes an order against an ACME account this host
 	// already had from one that registered a new account.
 	AccountExisted bool `json:"accountExisted,omitempty"`
+	// Prewarm is the background attempt the build step started, when the
+	// step used one (certificate_prewarm.go).
+	Prewarm *prewarmEvidence `json:"prewarm,omitempty"`
 }
 
 // provisionCertificate gets the certificate this run's own plan requires.
@@ -58,17 +61,65 @@ func (e *NormalizedStepExecutor) provisionCertificate(
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	names := make([]string, 0, len(snapshot.Domains))
-	for _, domain := range snapshot.Domains {
-		// Cloudflare terminates a tunnel's HTTPS; the route serves the name
-		// over plain HTTP to the connector, so there is nothing to issue.
-		if domain.HTTPS && !domain.Tunnel {
-			names = append(names, strings.ToLower(strings.TrimSpace(domain.Hostname)))
+	// Cloudflare terminates a tunnel's HTTPS; the route serves the name over
+	// plain HTTP to the connector, so there is nothing to issue.
+	names := certificateNames(snapshot.Domains)
+	log := func(stream, text string) {
+		_ = stepLog(execution, stream, text)
+	}
+	if attempt := e.prewarms.take(execution.Run.ID, names); attempt != nil {
+		return e.certificateStepAfterPrewarm(ctx, attempt, names, log)
+	}
+	return e.certificateStep(ctx, names, log)
+}
+
+// certificateStepAfterPrewarm waits for the background attempt the build
+// step started and answers from it: an issued certificate as it is, so one
+// run never orders twice, and a failure as the step's own. When the attempt
+// found the names covered, or was cut short before anyone answered, the step
+// asks itself, which finds the certificate reused or orders it as before.
+func (e *NormalizedStepExecutor) certificateStepAfterPrewarm(
+	ctx context.Context,
+	attempt *certificatePrewarm,
+	names []string,
+	log func(stream, text string),
+) StepResult {
+	waitStarted := e.prewarms.clock()
+	select {
+	case <-attempt.done:
+	default:
+		log("status", "Waiting for the certificate for "+strings.Join(names, ", ")+", which was started while the build ran")
+		select {
+		case <-attempt.done:
+		case <-ctx.Done():
+			// Cancelled with the run; the attempt stops on its own context.
+			attempt.cancel()
+			return normalizedStepFailure(ctx.Err())
 		}
 	}
-	return e.certificateStep(ctx, names, func(stream, text string) {
-		_ = stepLog(execution, stream, text)
-	})
+	prewarm := &prewarmEvidence{
+		StartedDuringBuild: true, StartedAt: attempt.startedAt, FinishedAt: attempt.finishedAt,
+		WaitedMillis: e.prewarms.clock().Sub(waitStarted).Milliseconds(),
+	}
+	for _, line := range attempt.lines {
+		log(line.stream, line.text)
+	}
+	switch {
+	case attempt.err == nil && attempt.result.Outcome == proxysvc.CertificateIssued:
+		prewarm.Outcome = "issued"
+		log("status", "The certificate was ordered while the build ran")
+		return e.certificateResult(names, attempt.result, nil, log, prewarm)
+	case attempt.err == nil:
+		prewarm.Outcome = "reused"
+	case prewarmInterrupted(attempt.err):
+		prewarm.Outcome = "interrupted"
+		log("status", "The certificate attempt started during the build did not finish; asking again")
+	default:
+		prewarm.Outcome = "failed"
+		log("status", "The certificate order started while the build ran failed")
+		return e.certificateResult(names, proxysvc.DeploymentCertificate{}, attempt.err, log, prewarm)
+	}
+	return e.askCertificate(ctx, names, log, prewarm)
 }
 
 // certificateStep is the decision, separated from reading the release so it can
@@ -77,6 +128,15 @@ func (e *NormalizedStepExecutor) certificateStep(
 	ctx context.Context,
 	names []string,
 	log func(stream, text string),
+) StepResult {
+	return e.askCertificate(ctx, names, log, nil)
+}
+
+func (e *NormalizedStepExecutor) askCertificate(
+	ctx context.Context,
+	names []string,
+	log func(stream, text string),
+	prewarm *prewarmEvidence,
 ) StepResult {
 	if len(names) == 0 {
 		return StepResult{State: StepSkipped, Evidence: mustJSON(map[string]any{
@@ -92,8 +152,20 @@ func (e *NormalizedStepExecutor) certificateStep(
 	}
 	log("status", "Resolving a certificate for "+strings.Join(names, ", "))
 	result, err := e.certificates.EnsureDeploymentCertificate(ctx, names, log)
+	return e.certificateResult(names, result, err, log, prewarm)
+}
+
+// certificateResult is the step's answer to what the issuer said, whether
+// the step asked or the build step's background attempt did.
+func (e *NormalizedStepExecutor) certificateResult(
+	names []string,
+	result proxysvc.DeploymentCertificate,
+	err error,
+	log func(stream, text string),
+	prewarm *prewarmEvidence,
+) StepResult {
 	if err != nil {
-		evidence := mustJSON(certificateStepEvidence{Domains: names, Outcome: "failed"})
+		evidence := mustJSON(certificateStepEvidence{Domains: names, Outcome: "failed", Prewarm: prewarm})
 		// "This host has no certbot" and "the authority refused the order" are
 		// different problems for the operator: one is a host to fix, the other
 		// is a name or a firewall. Unavailable is the honest state for the
@@ -144,5 +216,6 @@ func (e *NormalizedStepExecutor) certificateStep(
 	return StepResult{State: StepPassed, Evidence: mustJSON(certificateStepEvidence{
 		Domains: names, Outcome: string(result.Outcome), Name: result.Name,
 		Method: result.Method, DNSProvider: result.DNSProvider, AccountExisted: result.Registered,
+		Prewarm: prewarm,
 	})}
 }

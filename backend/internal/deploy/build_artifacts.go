@@ -21,9 +21,19 @@ var (
 	ErrBuilderUnavailable = errors.New("deployment builder is unavailable")
 	ErrArtifactMissing    = errors.New("deployment artifact is missing")
 	ErrArtifactRetained   = errors.New("deployment artifact is retained")
+	// ErrArtifactInUse is an image a container on this server uses, which
+	// release retention never removes, whatever the policy says.
+	ErrArtifactInUse = errors.New("a container on this server uses this image")
+	// ErrArtifactNotOwned is an image under a name the dashboard did not
+	// give it — a pulled Compose service, a tag someone else added — which
+	// release retention leaves in place.
+	ErrArtifactNotOwned = errors.New("the image is not named by a release tag the dashboard owns")
+	// ErrArtifactUnguarded is a remover that cannot ask Docker which
+	// containers use an image, so it removes none.
+	ErrArtifactUnguarded = errors.New("the image remover cannot ask Docker which containers use the image")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v4"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v5"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -180,6 +190,10 @@ type PreparedBuild struct {
 	// name) a custom Dockerfile build receives (build_dockerfile_args.go).
 	Target        string   `json:"target,omitempty"`
 	BuildArgNames []string `json:"buildArgNames,omitempty"`
+	// BuildValueGuards are the arguments a recipe declares before each RUN
+	// that mounts build values, which the build fills with a keyed digest
+	// of those values so a changed value reruns the step (build_value_guard.go).
+	BuildValueGuards []BuildValueGuard `json:"buildValueGuards,omitempty"`
 	// Install is the Node dependency install exactly as it runs, and Notes
 	// the decisions preparation made that the run log states: a non-frozen
 	// install, a command moved to the resolved manager's runner.
@@ -241,6 +255,16 @@ type ArtifactBuilder struct {
 	// railpackValues are the plain RAILPACK_* build variables a Railpack
 	// plan is configured with (railpackPlanValues), set for one preparation.
 	railpackValues map[string]string
+	// bases remembers the registry's answers for reviewed bases, shared by
+	// every copy of the builder; baseNotes collects one preparation's notes
+	// about them (build_base_resolution.go).
+	bases     *baseResolutions
+	baseNotes *[]string
+	// composeParallelism bounds how many Compose services build at once;
+	// 0 is the server's own figure (hostBuildParallelism).
+	composeParallelism int
+	// buildValueKey keys the build-value guards' digests (WithBuildValueKey).
+	buildValueKey []byte
 	// builderName is the networked builder one build runs on (withBuilder).
 	builderName string
 }
@@ -268,7 +292,7 @@ func (b *ArtifactBuilder) withRailpackValues(values map[string]string) *Artifact
 }
 
 func NewArtifactBuilder(backend BuildBackend) *ArtifactBuilder {
-	return &ArtifactBuilder{backend: backend}
+	return &ArtifactBuilder{backend: backend, bases: newBaseResolutions()}
 }
 
 // LocalImage reads an image this server holds, by id or tag, without pulling:
@@ -303,6 +327,23 @@ func (b *ArtifactBuilder) PrepareWithin(
 	tag string,
 	buildVariableNames ...string,
 ) (PreparedBuild, error) {
+	notes := []string{}
+	prepared, err := b.withBaseNotes(&notes).prepareWithin(ctx, boundary, root, config, forceNoCache, tag, buildVariableNames...)
+	if err == nil {
+		// A base taken from the registry's last answer, with when.
+		prepared.Notes = append(prepared.Notes, notes...)
+	}
+	return prepared, err
+}
+
+func (b *ArtifactBuilder) prepareWithin(
+	ctx context.Context,
+	boundary, root string,
+	config BuildPlanConfig,
+	forceNoCache bool,
+	tag string,
+	buildVariableNames ...string,
+) (PreparedBuild, error) {
 	bindings, err := recipeBuildBindings(config, buildVariableNames)
 	if err != nil {
 		return PreparedBuild{}, err
@@ -317,6 +358,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 	if config.NoCache || forceNoCache {
 		prepared.CachePolicy = "no_cache"
 	}
+	config.cache = newRecipeCache(tag, prepared.CachePolicy)
 	for _, secret := range config.Secrets {
 		prepared.SecretIDs = append(prepared.SecretIDs, secret.Variable)
 	}
@@ -348,6 +390,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			if stage := recipe.goBuild.frontend; stage != nil {
 				b.settleBunImage(ctx, &stage.plan)
 				prepared.NodeVersion = stage.plan.node.label()
+				prepared.Notes = append(prepared.Notes, stage.plan.installOrderNote())
 			}
 			baseRefs = goRecipeBases(recipe)
 			prepared.Notes = append(prepared.Notes, goRecipeNotes(recipe)...)
@@ -364,6 +407,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 				b.settleBunImage(ctx, recipe.python.assets)
 				prepared.NodeVersion = recipe.python.assets.node.label()
 				prepared.Install = recipe.python.assets.installLine()
+				prepared.Notes = append(prepared.Notes, recipe.python.assets.installOrderNote())
 			}
 			prepared.PythonVersion = recipe.python.version.version
 			prepared.Toolchain = pythonRecipeToolchain(recipe.python)
@@ -400,6 +444,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 				prepared.NodeVersion = node.node.label()
 				prepared.Install = node.installLine()
 				prepared.Notes = append(prepared.Notes, node.notes...)
+				prepared.Notes = append(prepared.Notes, node.installOrderNote())
 			}
 			baseRefs = recipe.site.bases()
 		case "php":
@@ -420,6 +465,7 @@ func (b *ArtifactBuilder) PrepareWithin(
 			prepared.NodeVersion = recipe.nodeInstall.node.label()
 			prepared.Install = recipe.nodeInstall.installLine()
 			prepared.Notes = append(prepared.Notes, recipe.nodeInstall.notes...)
+			prepared.Notes = append(prepared.Notes, recipe.nodeInstall.installOrderNote())
 			baseRefs = recipe.nodeInstall.baseImages(config.OutputDirectory != "")
 		}
 		bases, err := b.resolveBases(ctx, baseRefs)
@@ -433,10 +479,11 @@ func (b *ArtifactBuilder) PrepareWithin(
 			return PreparedBuild{}, err
 		}
 		prepared.BaseImages = bases
-		content, err := renderRecipeDockerfile(recipe, config, bases)
+		content, guards, err := renderGuardedRecipe(recipe, config, bases)
 		if err != nil {
 			return PreparedBuild{}, err
 		}
+		prepared.BuildValueGuards = guards
 		prepared.SecretLayerGuarantee = "buildkit_ephemeral_mount"
 		contextRoot := root
 		if recipe.contextDir != "" {
@@ -563,11 +610,12 @@ func (b *ArtifactBuilder) Build(
 		if err != nil {
 			return result, err
 		}
+		buildArgs = append(buildArgs, b.buildValueGuardArgs(prepared, secrets)...)
 		image, err := b.backend.BuildImage(ctx, BuildInvocation{
 			ContextDir: root, Dockerfile: prepared.Dockerfile, Tag: tag,
 			Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache",
-			Pull: true, Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
-			Frontend: railpackFrontendFor(prepared, tag, secrets), Builder: b.builderName,
+			Pull: buildPulls(prepared), Secrets: secrets, Target: prepared.Target, BuildArgs: buildArgs,
+			Frontend: railpackFrontendFor(prepared, tag, secrets, b.valueKey()), Builder: b.builderName,
 		}, redactBuildEmitter(redacted, emit))
 		if err != nil {
 			return result, err
@@ -625,7 +673,17 @@ func (b *ArtifactBuilder) Build(
 			SourceDigest: compose.Digest, Files: append([]string(nil), compose.Files...),
 			Services: []ResolvedComposeService{}, PrimaryService: primary,
 		}
-		for _, service := range compose.Services {
+		// Each service is checked here, before anything builds, then built
+		// or pulled with the others (compose_parallel.go); what each one
+		// gives the release is kept by its place in the file.
+		type composeOutcome struct {
+			prepared *PreparedComposeService
+			service  ResolvedComposeService
+			artifact ReleaseArtifactInput
+		}
+		outcomes := make([]composeOutcome, len(compose.Services))
+		jobs := make([]composeJob, 0, len(compose.Services))
+		for index, service := range compose.Services {
 			if service.BuildContext != "" {
 				if strings.Contains(service.BuildContext, "$") || strings.Contains(service.BuildDockerfile, "$") {
 					return result, fmt.Errorf("%w: Compose service %s uses a dynamic build path", ErrUnsupportedBuilder, service.Name)
@@ -651,9 +709,6 @@ func (b *ArtifactBuilder) Build(
 				if err := validateCustomDockerfile(content); err != nil {
 					return result, fmt.Errorf("Compose service %s: %w", service.Name, err)
 				}
-				if err := emit(BuildLog{Stream: "status", Text: composeServiceBuildStatus + service.Name}); err != nil {
-					return result, err
-				}
 				serviceTag := composeServiceImageTag(tag, service.Name)
 				buildArgs, err := composeServiceBuildArgs(service, variables)
 				if err != nil {
@@ -671,52 +726,89 @@ func (b *ArtifactBuilder) Build(
 					servicePrepared.BuildArgNames = append(servicePrepared.BuildArgNames, arg.Name)
 				}
 				servicePrepared.BuildArgv = buildPreviewArgv(servicePrepared, serviceTag)
-				image, err := b.backend.BuildImage(ctx, BuildInvocation{
+				invocation := BuildInvocation{
 					ContextDir: contextRoot, Dockerfile: dockerfile, Tag: serviceTag,
-					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: true,
+					Platform: prepared.TargetPlatform, NoCache: prepared.CachePolicy == "no_cache", Pull: buildPulls(servicePrepared),
 					Target: target, BuildArgs: buildArgs, Builder: b.builderName,
-				}, redactBuildEmitter(redacted, emit))
-				if err != nil {
-					return result, &ComposeServiceError{Service: service.Name, Err: err}
 				}
-				if err := validateResolvedImage(image); err != nil {
-					return result, err
-				}
-				result.Prepared.ComposeServices = append(result.Prepared.ComposeServices, PreparedComposeService{
-					Name: service.Name, BuildContext: service.BuildContext, Dockerfile: dockerfile,
-					DockerfileDigest: servicePrepared.DockerfileDigest, BuildArgv: servicePrepared.BuildArgv,
-				})
-				resolved.Services = append(resolved.Services, composeResolvedService(service, image, "build"))
-				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, image, servicePrepared, "build"))
+				jobs = append(jobs, composeJob{service: service.Name, run: func(ctx context.Context, emit func(BuildLog) error) error {
+					if err := emit(BuildLog{Stream: "status", Text: composeServiceBuildStatus + service.Name}); err != nil {
+						return err
+					}
+					image, err := b.backend.BuildImage(ctx, invocation, redactBuildEmitter(redacted, emit))
+					if err != nil {
+						return &ComposeServiceError{Service: service.Name, Err: err}
+					}
+					if err := validateResolvedImage(image); err != nil {
+						return err
+					}
+					outcomes[index] = composeOutcome{
+						prepared: &PreparedComposeService{
+							Name: service.Name, BuildContext: service.BuildContext, Dockerfile: dockerfile,
+							DockerfileDigest: servicePrepared.DockerfileDigest, BuildArgv: servicePrepared.BuildArgv,
+						},
+						service:  composeResolvedService(service, image, "build"),
+						artifact: composeImageArtifact(service.Name, image, servicePrepared, "build"),
+					}
+					return nil
+				}})
 				continue
 			}
 			if service.Image == "" || strings.Contains(service.Image, "${") {
 				return result, fmt.Errorf("%w: Compose service %s has no immutable image or supported build", ErrUnsupportedBuilder, service.Name)
 			}
-			image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
-			if err != nil {
-				// The same answer an image source gets: a service image no
-				// registry has is the one this server built or was given.
-				local, localErr := b.localImage(ctx, service.Image, composeServiceImageTag(tag, service.Name), emit)
-				if localErr != nil {
-					return result, fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
+			jobs = append(jobs, composeJob{service: service.Name, run: func(ctx context.Context, emit func(BuildLog) error) error {
+				image, err := b.backend.ResolveImage(ctx, service.Image, registryAuth)
+				if err != nil {
+					// The same answer an image source gets: a service image no
+					// registry has is the one this server built or was given.
+					local, localErr := b.localImage(ctx, service.Image, composeServiceImageTag(tag, service.Name), emit)
+					if localErr != nil {
+						return fmt.Errorf("resolve Compose service %s image: %w", service.Name, err)
+					}
+					outcomes[index] = composeOutcome{
+						service:  composeResolvedService(service, local, "local"),
+						artifact: composeImageArtifact(service.Name, local, prepared, "local"),
+					}
+					return nil
 				}
-				resolved.Services = append(resolved.Services, composeResolvedService(service, local, "local"))
-				result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, local, prepared, "local"))
-				continue
-			}
-			if err := validateResolvedImage(image); err != nil {
+				if err := validateResolvedImage(image); err != nil {
+					return err
+				}
+				pulled, err := b.backend.PullImage(ctx, image.Reference+"@"+image.Digest, registryAuth, redactBuildEmitter(redacted, emit))
+				if err != nil {
+					return fmt.Errorf("pull Compose service %s image: %w", service.Name, err)
+				}
+				if err := validateResolvedImage(pulled); err != nil || pulled.Digest != image.Digest {
+					return fmt.Errorf("%w: Compose service %s pull did not preserve its resolved digest", ErrArtifactMissing, service.Name)
+				}
+				outcomes[index] = composeOutcome{
+					service:  composeResolvedService(service, pulled, "pull"),
+					artifact: composeImageArtifact(service.Name, pulled, prepared, "pull"),
+				}
+				return nil
+			}})
+		}
+		limit := b.composeParallelism
+		if limit <= 0 {
+			limit = hostBuildParallelism()
+		}
+		errs, failed := runComposeJobs(ctx, jobs, limit, emit)
+		if failed >= 0 {
+			return result, errs[failed]
+		}
+		for _, err := range errs {
+			if err != nil {
+				// Every service stopped together: the run was cancelled.
 				return result, err
 			}
-			pulled, err := b.backend.PullImage(ctx, image.Reference+"@"+image.Digest, registryAuth, redactBuildEmitter(redacted, emit))
-			if err != nil {
-				return result, fmt.Errorf("pull Compose service %s image: %w", service.Name, err)
+		}
+		for _, outcome := range outcomes {
+			if outcome.prepared != nil {
+				result.Prepared.ComposeServices = append(result.Prepared.ComposeServices, *outcome.prepared)
 			}
-			if err := validateResolvedImage(pulled); err != nil || pulled.Digest != image.Digest {
-				return result, fmt.Errorf("%w: Compose service %s pull did not preserve its resolved digest", ErrArtifactMissing, service.Name)
-			}
-			resolved.Services = append(resolved.Services, composeResolvedService(service, pulled, "pull"))
-			result.Artifacts = append(result.Artifacts, composeImageArtifact(service.Name, pulled, prepared, "pull"))
+			resolved.Services = append(resolved.Services, outcome.service)
+			result.Artifacts = append(result.Artifacts, outcome.artifact)
 		}
 		result.Compose = resolved
 		metadata := mustJSON(resolved)
@@ -866,11 +958,17 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if mainErr != nil {
 			return selectedRecipe{}, mainErr
 		}
-		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
-			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir}
+		var frontendInputs []string
 		if stage := build.frontend; stage != nil {
-			recipe.nodeInputs = stage.inputs
+			frontendInputs = stage.inputs
 		}
+		contextRoot := root
+		if build.context.dir != "" {
+			contextRoot = filepath.Join(boundary, filepath.FromSlash(build.context.dir))
+		}
+		build.downloadInputs = contextKeeps(contextRoot, "go", frontendInputs, goModuleInputs(boundary, root, build))
+		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
+			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir, nodeInputs: frontendInputs}
 		return recipe, nil
 	case "python":
 		if strings.TrimSpace(config.OutputDirectory) != "" {
@@ -936,6 +1034,7 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		deno.installInputs = contextKeeps(root, "deno", nil, denoInstallInputs(root, deno))
 		recipe := selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno}
 		if strings.TrimSpace(config.OutputDirectory) != "" {
 			recipe.serving = readStaticServing(boundary, root, config, "", "")
@@ -946,15 +1045,21 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		recipe := selectedRecipe{kind: "php", catalogueKey: "php", php: php}
+		recipe := selectedRecipe{kind: "php", catalogueKey: "php"}
 		if php.assets != "" {
 			recipe.nodeInputs = php.inputs
 		}
+		php.composerInputs = contextKeeps(root, "php", recipe.nodeInputs, phpComposerInputs(root, php))
+		recipe.php = php
 		return recipe, nil
 	case "site":
 		site, err := selectSiteRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
+		}
+		site.bundleInputs, site.bundleFirst = jekyllBundleInputs(root, site)
+		if kept := contextKeeps(root, "site", site.nodeInputs, site.bundleInputs); kept == nil && site.bundleInputs != nil {
+			site.bundleInputs, site.bundleFirst = nil, false
 		}
 		return selectedRecipe{kind: "site", catalogueKey: "site:" + site.generator.name, site: site,
 			nodeInputs: site.nodeInputs, serving: readStaticServing(boundary, root, config, "", "")}, nil
@@ -983,24 +1088,41 @@ func listContainedFiles(root, suffix string) []string {
 }
 
 func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) (string, error) {
+	content, _, err := renderGuardedRecipe(recipe, config, bases)
+	return content, err
+}
+
+// renderGuardedRecipe renders a recipe's Dockerfile with its build-value
+// guards (build_value_guard.go): whatever a language's renderer wrote, each
+// RUN that mounts a build value is keyed on that value.
+func renderGuardedRecipe(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) (string, []BuildValueGuard, error) {
+	lines, err := renderRecipeLines(recipe, config, bases)
+	if err != nil {
+		return "", nil, err
+	}
+	lines, guards := withBuildValueGuards(strings.Split(strings.Join(lines, "\n"), "\n"))
+	return strings.Join(lines, "\n") + "\n", guards, nil
+}
+
+func renderRecipeLines(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage) ([]string, error) {
 	if len(bases) == 0 {
-		return "", ErrBuilderUnavailable
+		return nil, ErrBuilderUnavailable
 	}
 	installSecrets := buildSecretMounts(config.Secrets, "install")
 	buildSecrets := buildSecretMounts(config.Secrets, "build")
 	var lines []string
-	lines = append(lines, "# syntax=docker/dockerfile:1.10")
+	lines = append(lines, recipeDockerfileSyntax)
 	switch recipe.kind {
 	case "node":
 		rendered, err := renderNodeDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "go":
 		rendered, err := renderGoDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "python":
@@ -1012,7 +1134,7 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			rendered, err = renderPythonDockerfile(recipe.python, config, bases, installSecrets, buildSecrets)
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "rust", "java", "dotnet", "deno", "php":
@@ -1036,28 +1158,28 @@ func renderRecipeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases
 			}
 		}
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "site":
 		rendered, err := renderSiteDockerfile(recipe.site, config, recipe.serving, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	case "ruby", "elixir", "scala", "clojure", "dart", "gleam":
 		rendered, err := renderLanguageDockerfile(recipe, config, bases, installSecrets, buildSecrets)
 		if err != nil {
-			return "", err
+			return nil, err
 		}
 		lines = append(lines, rendered...)
 	default:
-		return "", ErrUnsupportedBuilder
+		return nil, ErrUnsupportedBuilder
 	}
 	if recipe.emptyDotenv {
 		lines = withEmptyDotenv(lines)
 	}
-	return strings.Join(lines, "\n") + "\n", nil
+	return lines, nil
 }
 
 func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base ResolvedImage) (string, error) {
@@ -1067,14 +1189,14 @@ func renderStaticDockerfile(config BuildPlanConfig, serving staticServing, base 
 	} else if !validOutputDirectory(output) {
 		return "", fmt.Errorf("%w: static output directory is invalid", ErrUnsupportedBuilder)
 	}
-	lines := append([]string{"# syntax=docker/dockerfile:1.10"}, serving.stage(base, "", filepath.ToSlash(output)+"/")...)
+	lines := append([]string{recipeDockerfileSyntax}, serving.stage(base, "", filepath.ToSlash(output)+"/")...)
 	return strings.Join(lines, "\n") + "\n", nil
 }
 
 func (b *ArtifactBuilder) resolveBases(ctx context.Context, references []string) ([]ResolvedImage, error) {
 	resolved := make([]ResolvedImage, 0, len(references)+1)
 	for _, reference := range references {
-		image, err := b.backend.ResolveImage(ctx, reference, "")
+		image, err := b.resolveBase(ctx, reference)
 		if err != nil {
 			return nil, fmt.Errorf("%w: resolve reviewed base image %s: %v", ErrBuilderUnavailable, reference, err)
 		}
@@ -1104,7 +1226,10 @@ func requireBasePlatform(bases []ResolvedImage, platform string) error {
 }
 
 func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
-	argv := []string{"docker", "buildx", "build", "--progress=plain", "--file", prepared.Dockerfile, "--tag", tag, "--load", "--pull"}
+	argv := []string{"docker", "buildx", "build", "--progress=plain", "--file", prepared.Dockerfile, "--tag", tag, "--load"}
+	if buildPulls(prepared) {
+		argv = append(argv, "--pull")
+	}
 	if prepared.TargetPlatform != "" {
 		argv = append(argv, "--platform", prepared.TargetPlatform)
 	}
@@ -1116,6 +1241,9 @@ func buildPreviewArgv(prepared PreparedBuild, tag string) []string {
 	}
 	for _, name := range prepared.BuildArgNames {
 		argv = append(argv, "--build-arg", name)
+	}
+	for _, guard := range prepared.BuildValueGuards {
+		argv = append(argv, "--build-arg", guard.Arg)
 	}
 	argv = append(argv, railpackPreviewArgs(prepared, tag)...)
 	for _, id := range prepared.SecretIDs {

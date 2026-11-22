@@ -3801,6 +3801,7 @@ type PullRequestWithPreview struct {
 
 // RecentRun is deploy.RecentRun in the dashboard's source.
 type RecentRun struct {
+	ClaimedAt   *time.Time      `json:"claimedAt,omitempty"`
 	EndedAt     *time.Time      `json:"endedAt,omitempty"`
 	ID          int64           `json:"id,omitempty"`
 	Operation   DeployOperation `json:"operation,omitempty"`
@@ -3869,6 +3870,7 @@ type Release struct {
 type ReleaseArtifactStatus struct {
 	Digest    string       `json:"digest,omitempty"`
 	Kind      ArtifactKind `json:"kind,omitempty"`
+	PrunedAt  *time.Time   `json:"prunedAt,omitempty"`
 	Reason    string       `json:"reason,omitempty"`
 	Reference string       `json:"reference,omitempty"`
 	Retained  bool         `json:"retained,omitempty"`

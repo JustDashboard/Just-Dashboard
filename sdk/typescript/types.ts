@@ -3821,6 +3821,7 @@ export interface PullRequestWithPreview {
 
 /** deploy.RecentRun in the dashboard's source. */
 export interface RecentRun {
+  claimedAt?: string | null
   endedAt?: string | null
   id?: number
   operation?: DeployOperation
@@ -3889,6 +3890,7 @@ export interface Release {
 export interface ReleaseArtifactStatus {
   digest?: string
   kind?: ArtifactKind
+  prunedAt?: string | null
   reason?: string
   reference?: string
   retained?: boolean

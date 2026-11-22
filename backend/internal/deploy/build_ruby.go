@@ -19,7 +19,7 @@ func (b *ArtifactBuilder) settleRubyImage(ctx context.Context, recipe *rubyRecip
 	if recipe.version.exact == "" {
 		return nil
 	}
-	if _, err := b.backend.ResolveImage(ctx, recipe.version.image(), ""); err == nil {
+	if _, err := b.resolveBase(ctx, recipe.version.image()); err == nil {
 		return nil
 	}
 	exact := recipe.version.exact
@@ -54,22 +54,31 @@ func renderRubyDockerfile(recipe rubyRecipe, config BuildPlanConfig, bases []Res
 	if recipe.node != nil {
 		lines = append(lines, recipe.node.copyLines()...)
 	}
-	lines = append(lines, "COPY . .")
 	deployment := ""
 	if recipe.locked {
 		deployment = "BUNDLE_DEPLOYMENT=1 "
+	}
+	install := "RUN " + installSecrets + deployment + "bundle install && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache /usr/local/bundle/ruby/*/bundler/gems/*/.git"
+	if len(recipe.bundleInputs) > 0 {
+		// The bundle comes from the Gemfile and its lock alone, so it is
+		// installed before the source and a commit that changes only code
+		// keeps it.
+		lines = append(lines, copyInputsTo("/app", recipe.bundleInputs)...)
+		lines = append(lines, install, "COPY . .")
+	} else {
+		lines = append(lines, "COPY . .")
 		if recipe.addPlatform != "" {
 			// A lock resolved on a Mac, or on the other architecture, has no
 			// platform for this server, and the frozen install refuses it.
 			lines = append(lines, "RUN "+installSecrets+"bundle lock --add-platform "+recipe.addPlatform)
 		}
+		lines = append(lines, install)
 	}
-	lines = append(lines, "RUN "+installSecrets+deployment+"bundle install && rm -rf ~/.bundle /usr/local/bundle/ruby/*/cache /usr/local/bundle/ruby/*/bundler/gems/*/.git")
 	if recipe.locked {
 		lines = append(lines, "ENV BUNDLE_DEPLOYMENT=1")
 	}
 	if recipe.node != nil {
-		lines = append(lines, recipe.node.installLines(installSecrets)...)
+		lines = append(lines, recipe.node.installLines(installSecrets, config.cache)...)
 	}
 	if recipe.precompile != "" {
 		lines = append(lines, "RUN "+buildSecrets+recipe.precompile)

@@ -80,13 +80,16 @@ type DeploymentSummary struct {
 }
 
 // RecentRun is one run in a deployment's history strip: its outcome and
-// where to open it, without the metadata a full run carries.
+// where to open it, without the metadata a full run carries. ClaimedAt is
+// when a slot took it, so a run's own time ("usually 2m 05s" on a run in
+// flight) is measured from where the run page measures it, not its queue.
 type RecentRun struct {
 	ID          int64      `json:"id"`
 	RunNumber   int64      `json:"runNumber"`
 	State       RunState   `json:"state"`
 	Operation   Operation  `json:"operation"`
 	RequestedAt time.Time  `json:"requestedAt"`
+	ClaimedAt   *time.Time `json:"claimedAt,omitempty"`
 	EndedAt     *time.Time `json:"endedAt,omitempty"`
 }
 
@@ -757,7 +760,7 @@ func (s *OrchestrationStore) recentProjectRuns(
 		}
 		recentRuns[run.ProjectID] = append(recentRuns[run.ProjectID], RecentRun{
 			ID: run.ID, RunNumber: run.RunNumber, State: run.State, Operation: run.Operation,
-			RequestedAt: run.RequestedAt, EndedAt: run.EndedAt,
+			RequestedAt: run.RequestedAt, ClaimedAt: run.ClaimedAt, EndedAt: run.EndedAt,
 		})
 	}
 	return lastRuns, recentRuns, rows.Err()

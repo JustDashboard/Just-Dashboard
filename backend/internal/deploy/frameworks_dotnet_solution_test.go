@@ -58,7 +58,7 @@ func TestDotnetSolutionPublishesTheWebProjectFromTheSolutionRoot(t *testing.T) {
 		t.Fatalf("prepared = %+v", prepared)
 	}
 	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM mcr.microsoft.com/dotnet/sdk:10.0@sha256:", "WORKDIR /src\nCOPY . .\nWORKDIR /src/src/MyApp.Api",
-		"RUN dotnet restore MyApp.Api.csproj\n", "RUN dotnet publish MyApp.Api.csproj -c Release --no-restore -o /out\n",
+		" dotnet restore MyApp.Api.csproj\n", "RUN dotnet publish MyApp.Api.csproj -c Release --no-restore -o /out\n",
 		"test -f /out/MyApp.Api.Host.dll", "FROM mcr.microsoft.com/dotnet/aspnet:10.0@sha256:", "dotnet /app/MyApp.Api.Host.dll")
 	findings := compiledRecipeFindings(&api, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}})
 	for _, code := range []string{"dotnet_toolchain", "dotnet_project_selected"} {
@@ -181,7 +181,7 @@ func TestDotnetNativePublishingIsTurnedOffOnBothSteps(t *testing.T) {
 	}
 	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"})
 	assertCompiledDockerfile(t, prepared.DockerfilePreview,
-		"RUN dotnet restore Api.csproj "+dotnetPublishDisabled+"\n", "RUN dotnet publish Api.csproj -c Release --no-restore -o /out "+dotnetPublishDisabled+"\n", "test -f /out/Api.dll")
+		" dotnet restore Api.csproj "+dotnetPublishDisabled+"\n", "RUN dotnet publish Api.csproj -c Release --no-restore -o /out "+dotnetPublishDisabled+"\n", "test -f /out/Api.dll")
 	if item := findingByCode(compiledRecipeFindings(&result.Candidates[0], PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"}}), "dotnet_aot_disabled"); item == nil {
 		t.Fatal("no dotnet_aot_disabled finding")
 	}
@@ -238,7 +238,9 @@ func TestDotnetSPABuildsWithNodeInTheSDKImage(t *testing.T) {
 	}
 	prepared := prepareCompiled(t, root, "", BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet"})
 	assertCompiledDockerfile(t, prepared.DockerfilePreview, "FROM node:22-bookworm-slim@sha256:", " AS spa-node", "COPY --from=spa-node /usr/local/ /usr/local/",
-		"WORKDIR /src/ClientApp\nRUN npm ci", "WORKDIR /src\nRUN dotnet restore Web.csproj")
+		"WORKDIR /src/ClientApp\nRUN npm ci",
+		// The restore reads the project alone and comes before the source.
+		"WORKDIR /src\nCOPY Web.csproj /src/\nRUN ", " dotnet restore Web.csproj\nCOPY . .\nWORKDIR /src/ClientApp\n")
 }
 
 func TestAspireAppHostIsSetAsideAndItsWiringNamed(t *testing.T) {
@@ -327,7 +329,7 @@ func TestDotnetRestoreAndTheProjectsItReferences(t *testing.T) {
 		t.Fatalf("candidates = %+v", result.Candidates)
 	}
 	prepared := prepareCompiled(t, root, "src/Api", BuildPlanConfig{Method: BuildRecipe, Recipe: "dotnet", RootDirectory: "src/Api"})
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN dotnet restore Api.csproj\n", "--framework net9.0")
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, " dotnet restore Api.csproj\n", "--framework net9.0")
 
 	// Retargeting a project whose references declare their own framework
 	// is refused before Deploy, naming them.
@@ -353,7 +355,7 @@ func TestDotnetRestoreAndTheProjectsItReferences(t *testing.T) {
 	_, root = detectCompiled(t, map[string]string{"src/Api/Api.csproj": strings.ReplaceAll(api("net7.0"), "TargetFrameworks", "TargetFramework"),
 		"src/Core/Core.csproj": strings.ReplaceAll(core("net7.0;net9.0"), "TargetFramework", "TargetFrameworks")})
 	prepared = prepareCompiled(t, root, "src/Api", retarget)
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN dotnet restore Api.csproj -p:TargetFramework=net9.0\n", "--framework net9.0")
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, " dotnet restore Api.csproj -p:TargetFramework=net9.0\n", "--framework net9.0")
 
 	// A sibling that needs a workload holds the restore, which a
 	// netstandard library cannot take.

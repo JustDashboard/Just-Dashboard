@@ -604,6 +604,9 @@ type BuildPlanConfig struct {
 	RailpackVersion  string `json:"railpackVersion,omitempty"`
 	RailpackProvider string `json:"railpackProvider,omitempty"`
 	RailpackConfig   string `json:"railpackConfig,omitempty"`
+	// cache is the build's cache-mount scope, set by PrepareWithin from the
+	// release tag and the cache policy; it is never stored with the plan.
+	cache recipeCache
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which

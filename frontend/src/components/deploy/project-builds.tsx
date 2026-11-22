@@ -222,13 +222,11 @@ function Transcript({ projectId, run }: { projectId: number; run: DeploymentEngi
   // lands, the list's copy says how the run stands.
   const current = transcript.snapshot?.run ?? run
   const active = isActiveRun(current.state)
-  const now = useNow(1000, active)
   return (
     <BuildConsole
       flush
       className="min-h-0 flex-1"
-      rows={transcript.rows}
-      summary={transcript.summary}
+      transcript={transcript.transcript}
       capped={transcript.capped}
       steps={transcript.steps}
       active={active}
@@ -237,7 +235,7 @@ function Transcript({ projectId, run }: { projectId: number; run: DeploymentEngi
       connected={transcript.connected}
       startedAt={current.claimedAt ?? current.requestedAt}
       runNumber={current.runNumber}
-      now={now}
+      stoppedAt={active ? undefined : current.endedAt}
       selectedStep={step}
       onSelectStep={setStep}
     />

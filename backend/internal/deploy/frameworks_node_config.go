@@ -87,6 +87,9 @@ type nodeRootFiles struct {
 	nextImage string
 	// nx is the Nx workspace nx.json and the project.json files describe.
 	nx *nxWorkspace
+	// member is the package's directory under the workspace root it
+	// installs from, "" for a package that installs on its own.
+	member string
 }
 
 // nodeConfigNames are the file names a configuration kind is read from.

@@ -41,9 +41,10 @@ type rustRecipe struct {
 	native      rustNativePlan
 	// output is where Cargo writes release binaries, relative to the
 	// context: target/release, target/<triple>/release, or the configured
-	// target-dir's release directory.
-	output      string
-	sqlxOffline bool
+	// target-dir's release directory. targetDir is Cargo's whole output
+	// directory, which the build caches between runs.
+	output, targetDir string
+	sqlxOffline       bool
 	// pinned says a rust-toolchain file sits in the build context, which
 	// rustup obeys over the image's own toolchain unless told otherwise.
 	pinned bool
@@ -119,7 +120,7 @@ func selectRustRecipe(boundary, root string, config BuildPlanConfig) (rustRecipe
 	if crate.targetDir != "" {
 		targetDir = strings.TrimSuffix(path.Clean(crate.targetDir), "/")
 	}
-	recipe.output = targetDir
+	recipe.output, recipe.targetDir = targetDir, targetDir
 	if crate.target != "" {
 		recipe.output += "/" + crate.target
 	}
@@ -224,10 +225,13 @@ func renderRustDockerfile(recipe rustRecipe, config BuildPlanConfig, serving sta
 		"RUN apk add --no-cache " + strings.Join(recipe.native.packages, " "),
 		"ENV " + strings.Join(env, " "),
 		"COPY . .",
-		"RUN " + installSecrets + "cargo fetch" + locked,
-		"RUN " + buildSecrets + rustBuildJobs + build,
-		"RUN mkdir -p /out && test -f " + binary + " && cp " + binary + " /out/app || (echo 'Rust build must produce " +
-			strings.TrimPrefix(binary, "/src/") + "; configure the build command and binary together' >&2; exit 1)",
+		"RUN " + rustDependencyMounts(config.cache, installSecrets) + installSecrets + "cargo fetch" + locked,
+		// The binary is copied out in the build's own step: a cached
+		// target/ is empty to every later step. Removing it first keeps a
+		// build command that writes elsewhere from shipping the last build's.
+		"RUN " + rustDependencyMounts(config.cache, installSecrets) + rustTargetMount(config.cache, recipe, "cargo-target") + buildSecrets + rustBuildJobs +
+			"rm -f " + binary + " && " + build + " && (mkdir -p /out && test -f " + binary + " && cp " + binary + " /out/app || (echo 'Rust build must produce " +
+			strings.TrimPrefix(binary, "/src/") + "; configure the build command and binary together' >&2; exit 1))",
 	}
 	start := config.StartCommand
 	var runtimeEnv []string
@@ -347,11 +351,23 @@ func renderLeptosDockerfile(recipe rustRecipe, config BuildPlanConfig, bases []R
 		copied += " && cp " + recipe.output + "/" + hashFile + " /out/" + hashFile
 		produced += " and " + recipe.output + "/" + hashFile
 	}
+	// The binary, the site and the hash file are copied out in the build's
+	// own step, since a cached target/ is empty to every later one, and
+	// removed first, so a build that writes elsewhere cannot ship the last
+	// build's and the site holds this build's bundle alone.
+	stale := "rm -rf " + binary
+	if hashFile != "" {
+		stale += " " + recipe.output + "/" + hashFile
+	}
+	if target := rustTargetPath(recipe); target != "" && strings.HasPrefix(path.Clean("/src/"+siteRoot)+"/", target+"/") {
+		stale += " " + siteRoot
+	}
 	lines = append(lines,
 		"COPY . .",
-		"RUN "+installSecrets+"cargo fetch"+locked,
-		"RUN "+buildSecrets+rustBuildJobs+build,
-		"RUN mkdir -p /out && test -f "+binary+" && "+copied+" || (echo 'cargo leptos build must produce "+produced+"' >&2; exit 1)",
+		"RUN "+rustDependencyMounts(config.cache, installSecrets)+installSecrets+"cargo fetch"+locked,
+		"RUN "+rustDependencyMounts(config.cache, installSecrets)+rustTargetMount(config.cache, recipe, "cargo-target-debian")+
+			config.cache.mount("cargo-leptos-tools", "/root/.cache/cargo-leptos")+buildSecrets+rustBuildJobs+
+			stale+" && "+build+" && (mkdir -p /out && test -f "+binary+" && "+copied+" || (echo 'cargo leptos build must produce "+produced+"' >&2; exit 1))",
 		"FROM "+immutableImageReference(bases[1]),
 		"RUN "+debianInstall(append([]string{"ca-certificates", "tzdata"}, runtimePackages...))+" && useradd -u 10001 -m app",
 		"USER app",
@@ -416,9 +432,12 @@ func renderTrunkDockerfile(recipe rustRecipe, config BuildPlanConfig, serving st
 	if recipe.member != "" {
 		lines = append(lines, "WORKDIR /src/"+recipe.member)
 	}
+	// Trunk writes the site to /out/dist, outside the cached target/, and
+	// keeps the wasm-bindgen and wasm-opt it downloads in its own cache.
 	lines = append(lines,
-		"RUN "+installSecrets+"cargo fetch"+locked,
-		"RUN "+buildSecrets+rustBuildJobs+build,
+		"RUN "+rustDependencyMounts(config.cache, installSecrets)+installSecrets+"cargo fetch"+locked,
+		"RUN "+rustDependencyMounts(config.cache, installSecrets)+rustTargetMount(config.cache, recipe, "cargo-target-debian")+
+			config.cache.mount("trunk-tools", "/root/.cache/trunk")+buildSecrets+rustBuildJobs+build,
 		"RUN test -f /out/dist/index.html || (echo 'Trunk build must write /out/dist/index.html' >&2; exit 1)",
 	)
 	return append(lines, serving.stage(bases[1], "build", "/out/dist/")...)

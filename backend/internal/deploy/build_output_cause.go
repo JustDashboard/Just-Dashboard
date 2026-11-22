@@ -188,34 +188,63 @@ var (
 // redaction, and keeps just enough of it to name a failure: a ring per open
 // BuildKit step and one over the stream, less the steps that finished. It is
 // fed by one goroutine. seq names the line that was just logged.
+//
+// Each Compose service's build keeps a state of its own, chosen by the
+// status line that opens its output, so the service that failed is read
+// from its own lines whichever service's output the transcript holds last:
+// services build at once and the one that failed is not always the last
+// one written (compose_parallel.go).
 type buildOutputCollector struct {
-	seq      func() int64
-	service  string
+	seq func() int64
+	*collectorState
+	services map[string]*collectorState
+}
+
+// collectorState is what one buildx run printed.
+type collectorState struct {
 	vertices map[int]*lineRing
 	names    map[int]string
 	order    []int
 	stream   *lineRing
 }
 
+func newCollectorState() *collectorState {
+	return &collectorState{
+		vertices: map[int]*lineRing{}, names: map[int]string{},
+		stream: newLineRing(streamRingLines, streamRingBytes),
+	}
+}
+
 func newBuildOutputCollector(seq func() int64) *buildOutputCollector {
 	if seq == nil {
 		seq = func() int64 { return 0 }
 	}
-	return &buildOutputCollector{
-		seq: seq, vertices: map[int]*lineRing{}, names: map[int]string{},
-		stream: newLineRing(streamRingLines, streamRingBytes),
+	return &buildOutputCollector{seq: seq, collectorState: newCollectorState(), services: map[string]*collectorState{}}
+}
+
+// forService is the collector reading what one Compose service's build
+// printed, or the collector itself when that service printed nothing.
+func (c *buildOutputCollector) forService(service string) *buildOutputCollector {
+	state := c.services[service]
+	if service == "" || state == nil || state == c.collectorState {
+		return c
 	}
+	copied := *c
+	copied.collectorState = state
+	return &copied
 }
 
 func (c *buildOutputCollector) observe(line BuildLog) {
 	if line.Stream == "status" {
 		// The engine's own sentences separate one buildx run from the next.
-		c.vertices, c.names, c.order = map[int]*lineRing{}, map[int]string{}, nil
-		c.stream = newLineRing(streamRingLines, streamRingBytes)
-		c.service = ""
 		if service, ok := strings.CutPrefix(line.Text, composeServiceBuildStatus); ok {
-			c.service = service
+			if c.services[service] == nil {
+				c.services[service] = newCollectorState()
+			}
+			c.collectorState = c.services[service]
+			return
 		}
+		c.collectorState = newCollectorState()
 		return
 	}
 	text := strings.TrimRight(truncateUTF8Prefix(line.Text, collectedLineBytes), "\r")
@@ -483,6 +512,7 @@ func buildFailureCause(err error, collector *buildOutputCollector, context cause
 	service := ""
 	if errors.As(err, &composeFailure) {
 		service = composeFailure.Service
+		collector = collector.forService(service)
 	}
 	if redact == nil {
 		redact = func(value string) string { return value }

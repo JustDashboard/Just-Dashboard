@@ -41,6 +41,9 @@ type dartRecipe struct {
 	// refuses, so the install keeps the locked versions without it.
 	mirror bool
 	serve  []string
+	// pubInputs are what dart pub get reads, copied before the source
+	// (dartPubInputs); nil keeps the fetch after it.
+	pubInputs []string
 }
 
 func (r dartRecipe) image() string { return "dart:" + r.version }
@@ -175,11 +178,14 @@ func renderDartDockerfile(recipe dartRecipe, config BuildPlanConfig, bases []Res
 	if recipe.locked && !recipe.mirror {
 		fetch += " --enforce-lockfile"
 	}
-	lines := []string{
-		"FROM " + immutableImageReference(dart) + " AS build",
-		"WORKDIR /app",
-		"COPY . .",
-		"RUN " + installSecrets + fetch,
+	lines := []string{"FROM " + immutableImageReference(dart) + " AS build", "WORKDIR /app"}
+	if len(recipe.pubInputs) > 0 {
+		// The packages come from the pubspec and its lock alone, so they are
+		// fetched before the source and a commit that changes only code
+		// keeps them.
+		lines = append(append(lines, copyInputsTo("/app", recipe.pubInputs)...), "RUN "+installSecrets+fetch, "COPY . .")
+	} else {
+		lines = append(lines, "COPY . .", "RUN "+installSecrets+fetch)
 	}
 	build := strings.TrimSpace(config.BuildCommand)
 	switch {

@@ -389,7 +389,15 @@ func renderJVMLanguageDockerfile(recipe jvmLanguageRecipe, config BuildPlanConfi
 			build = "clojure -T:build " + recipe.task
 		}
 	}
-	lines = append(lines, "RUN "+installSecrets+fetch, "RUN "+buildSecrets+build, output)
+	// The fetch fills the tool's download caches and the build reads them.
+	// A fetch that needs an install secret keeps what it fetched in the
+	// layer instead, since the build has no credential to fetch it again
+	// from a cache the collector emptied between the two steps.
+	mounts := ""
+	if installSecrets == "" {
+		mounts = jvmDependencyMounts(config.cache, recipe.tool)
+	}
+	lines = append(lines, "RUN "+mounts+installSecrets+fetch, "RUN "+mounts+buildSecrets+build, output)
 	lines = append(lines, "FROM "+immutableImageReference(runtime))
 	lines = append(lines, unprivilegedDebianUser, "WORKDIR /app")
 	if recipe.tool == "sbt-stage" {

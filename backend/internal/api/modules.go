@@ -163,6 +163,8 @@ type moduleSet struct {
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
+	// releaseImages removes release images retention no longer keeps.
+	releaseImages *deploy.ReleaseImageSweeper
 	// sleeper stops environments that sleep once nobody visits and wakes
 	// them on the next request (deploy/sleep.go).
 	sleeper    *deploy.Sleeper
@@ -483,7 +485,13 @@ func (s *Server) initModules() {
 	// path, which the data directory is on the server and in here alike.
 	artifactBackend := deploy.NewDockerArtifactBackend(s.modules.docker).WithRailpackDir(filepath.Join(s.Cfg.DataDir, "railpack")).
 		WithBuilderDir(filepath.Join(s.Cfg.DataDir, "buildkit"))
-	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend)
+	s.modules.deployArtifacts = deploy.NewArtifactBuilder(artifactBackend).
+		WithBaseResolutionFile(filepath.Join(s.Cfg.DataDir, "deploy-base-resolutions.json"))
+	if s.Sealer != nil {
+		// A recipe's build-value guards are keyed digests of build values,
+		// stable across restarts so an unchanged value keeps its cache.
+		s.modules.deployArtifacts.WithBuildValueKey(s.Sealer.DeriveHMAC(deploy.BuildValueKeyLabel, nil))
+	}
 	s.modules.promotionImages = s.modules.deployArtifacts
 	runtimeOwner := deploy.NewDockerRuntimeOwner(s.modules.docker).WithNetworks(s.modules.deployDatabases)
 	s.modules.deployRuntime = runtimeOwner
@@ -534,6 +542,11 @@ func (s *Server) initModules() {
 		normalizedExecutor.WithRequestRecord(s.modules.requests)
 	}
 	s.modules.deployExecutor = normalizedExecutor
+	// Release retention: images outside the policy are removed after runs,
+	// at start-up and daily, each removal audited, never one a container
+	// uses (release_retention_sweep.go).
+	s.modules.releaseImages = deploy.NewReleaseImageSweeper(s.modules.deployRuns,
+		deploy.NewDockerArtifactRemover(artifactBackend), s.auditReleaseImagePrune, s.Log)
 	s.modules.deployEngine = deploy.NewEngine(
 		s.modules.deployRuns,
 		deploy.NewDeploymentStepExecutor(
@@ -569,6 +582,12 @@ func (s *Server) initModules() {
 		// What a run read from the secret stores is held for its own steps
 		// and dropped the moment it finishes.
 		s.modules.deployPlanning.SecretStoreRunObserver(),
+		// And what the executor held for it: the certificate its build
+		// started ordering.
+		normalizedExecutor.HousekeepingObserver(),
+		// A finished run may have retired a release, or let go of the
+		// lease that held every image back, so retention gets a pass.
+		s.modules.releaseImages,
 	)
 	s.modules.deploySchedule = deploy.NewAutomationScheduler(s.modules.deployAutomation, s.dispatchDeploymentSchedule).
 		WithSweep(notifications.RetryFailedDeliveries)

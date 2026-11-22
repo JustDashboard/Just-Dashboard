@@ -11558,6 +11558,13 @@
       },
       "deploy.RecentRun": {
         "properties": {
+          "claimedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
           "endedAt": {
             "format": "date-time",
             "type": [
@@ -11846,6 +11853,13 @@
             ],
             "title": "deploy.ArtifactKind",
             "type": "string"
+          },
+          "prunedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
           },
           "reason": {
             "type": "string"

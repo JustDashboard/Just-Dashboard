@@ -63,6 +63,9 @@ type NormalizedStepExecutor struct {
 	notifications *AutomationStore
 
 	certificates CertificateIssuer
+	// prewarms are the certificate attempts build steps started in the
+	// background for their runs (certificate_prewarm.go).
+	prewarms certificatePrewarms
 
 	// tailnet publishes a preview's loopback port on the node's tailnet
 	// address; nil on hosts without Tailscale Serve. tailnetProbe is the
@@ -182,6 +185,9 @@ type preparedStepEvidence struct {
 
 type builtStepEvidence struct {
 	Result BuildArtifactResult `json:"result"`
+	// Timing is where the build's time went, read from its transcript as it
+	// streamed (build_timing.go); absent for a build that ran no BuildKit.
+	Timing *BuildTiming `json:"timing,omitempty"`
 	// DatabaseSteps are the steps that ran against the build's databases
 	// before it built: the schema, the seed of a new database.
 	DatabaseSteps []builtDatabaseStep `json:"databaseSteps,omitempty"`
@@ -653,7 +659,18 @@ func (e *NormalizedStepExecutor) buildArtifact(
 	// The collector reads the transcript as it is logged, after the builder
 	// has redacted it, so a failure can be named from its own output.
 	collector := newBuildOutputCollector(func() int64 { return lastLogMark(execution.Output) })
+	// The certificate does not depend on the image, so it is resolved while
+	// the image builds; provision_certificate stays the gate before start.
+	e.startCertificatePrewarm(ctx, execution, plan)
+	compile := preparedEvidence.Prepared.BuildCommand
+	if compile == "" {
+		compile = plan.Build.BuildCommand
+	}
+	// Each attempt is timed on its own, so the summary is the build that
+	// made the image, not the one a schema step ran between.
+	var timing *buildTimingReader
 	build := func() (BuildArtifactResult, error) {
+		timing = newBuildTimingReader(preparedEvidence.Prepared.Install, compile)
 		return builder.Build(
 			ctx, preparedEvidence.BuildRoot,
 			releaseImageTag(execution.Run.EnvironmentID, execution.Run.ID),
@@ -664,6 +681,7 @@ func (e *NormalizedStepExecutor) buildArtifact(
 					return err
 				}
 				collector.observe(line)
+				timing.observe(line)
 				return nil
 			},
 		)
@@ -727,7 +745,9 @@ func (e *NormalizedStepExecutor) buildArtifact(
 		failure.Cleanup = mustJSON(cleanup)
 		return failure
 	}
-	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{Result: result, DatabaseSteps: databaseSteps})}
+	return StepResult{State: StepPassed, Evidence: mustJSON(builtStepEvidence{
+		Result: result, Timing: timing.summary(builtImageBytes(result)), DatabaseSteps: databaseSteps,
+	})}
 }
 
 func (e *NormalizedStepExecutor) renderRuntime(

@@ -50,6 +50,10 @@ type ImmutableBuildOptions struct {
 	// CacheOnly runs the build for its side effects and keeps nothing but
 	// the cache: no image is loaded, so Tag is not needed.
 	CacheOnly bool
+	// containerdStore is the daemon's own answer, never the caller's:
+	// BuildImmutable reads it, and it decides how the image is exported
+	// (build_export.go).
+	containerdStore bool
 }
 
 // BuildxFrontend is a BuildKit frontend image and the options the deployment
@@ -93,7 +97,8 @@ func (c *Client) BuildxAvailable(ctx context.Context) bool {
 
 // BuildImmutable is the deployment builder's Docker authority. It uses
 // Buildx/BuildKit explicitly, keeps secret values in its process environment,
-// streams plain progress, loads one host-platform image, and returns both OCI
+// streams plain progress, loads one host-platform image into the daemon's
+// store (zstd layers on containerd's, build_export.go), and returns both OCI
 // and config identities instead of treating a mutable tag as an artifact.
 func (c *Client) BuildImmutable(
 	ctx context.Context,
@@ -107,16 +112,17 @@ func (c *Client) BuildImmutable(
 	if strings.TrimSpace(opts.Tag) == "" || strings.ContainsAny(opts.Tag, "\x00\r\n") {
 		return ImmutableImage{}, fmt.Errorf("a safe image tag is required")
 	}
-	metadata, err := os.CreateTemp(opts.Dir, ".just-dashboard-build-metadata-")
+	// buildx writes what it built into the metadata file. It lives in a
+	// private folder of its own, never in the build context: a file there
+	// changed every build's context, so a user Dockerfile's `COPY . .` never
+	// reused its cache, and an empty copy of it shipped in the image.
+	metadataDir, err := os.MkdirTemp("", "just-dashboard-build-metadata-")
 	if err != nil {
-		return ImmutableImage{}, err
+		return ImmutableImage{}, fmt.Errorf("create the build's metadata folder: %w", err)
 	}
-	metadataPath := metadata.Name()
-	if err := metadata.Close(); err != nil {
-		_ = os.Remove(metadataPath)
-		return ImmutableImage{}, err
-	}
-	defer os.Remove(metadataPath)
+	defer os.RemoveAll(metadataDir)
+	metadataPath := filepath.Join(metadataDir, "metadata.json")
+	opts.containerdStore = c.containerdImageStore(ctx)
 	args, environment, err := BuildxCommand(opts, metadataPath)
 	if err != nil {
 		return ImmutableImage{}, err
@@ -205,9 +211,15 @@ func BuildxCommand(opts ImmutableBuildOptions, metadataPath string) ([]string, [
 		args = append(args, "--builder", opts.Builder)
 	}
 	args = append(args, "--progress=plain", "--file", filepath.ToSlash(filepath.Clean(opts.Dockerfile)))
-	if opts.CacheOnly {
+	switch {
+	case opts.CacheOnly:
 		args = append(args, "--output", "type=cacheonly")
-	} else {
+	case opts.containerdStore && opts.Builder == "":
+		args = append(args, "--tag", ImageRef(opts.Tag), "--output", containerdImageExport, "--metadata-file", metadataPath)
+	default:
+		// A networked builder is a container of its own: an image export
+		// there would land in that container's store, not the daemon's, so
+		// its image comes back through `--load` on either store.
 		args = append(args, "--tag", ImageRef(opts.Tag), "--load", "--metadata-file", metadataPath)
 	}
 	if opts.Pull {

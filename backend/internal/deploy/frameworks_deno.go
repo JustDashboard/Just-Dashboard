@@ -226,6 +226,9 @@ type denoRecipe struct {
 	locked         bool
 	entry          string
 	versionFrom    string
+	// installInputs are what deno install reads, copied before the source
+	// (denoInstallInputs); nil keeps the install after it.
+	installInputs []string
 }
 
 func selectDenoRecipe(boundary, root string, config BuildPlanConfig) (denoRecipe, error) {
@@ -283,7 +286,7 @@ func (b *ArtifactBuilder) settleDenoImage(ctx context.Context, recipe *denoRecip
 	if len(fallback) == 0 || recipe.image == fallback[0] {
 		return nil
 	}
-	if _, err := b.backend.ResolveImage(ctx, recipe.image, ""); err == nil {
+	if _, err := b.resolveBase(ctx, recipe.image); err == nil {
 		return nil
 	}
 	note := "the declared Deno release " + recipe.release + " has no " + recipe.image + " image; building with " + fallback[0]
@@ -298,7 +301,13 @@ func renderDenoDockerfile(recipe denoRecipe, config BuildPlanConfig, bases []Res
 	lines := []string{
 		"FROM " + immutableImageReference(bases[0]) + " AS build",
 		"WORKDIR /app",
-		"COPY . .",
+	}
+	if len(recipe.installInputs) == 0 {
+		lines = append(lines, "COPY . .")
+	} else {
+		// The install reads the manifests alone, so it comes before the
+		// source and a commit that changes only code keeps it.
+		lines = append(lines, copyInputsTo("/app", recipe.installInputs)...)
 	}
 	if recipe.major != 1 {
 		// Deno 1's install is a script installer; its cache step below is
@@ -308,6 +317,9 @@ func renderDenoDockerfile(recipe denoRecipe, config BuildPlanConfig, bases []Res
 			install += " --frozen"
 		}
 		lines = append(lines, "RUN "+installSecrets+install)
+	}
+	if len(recipe.installInputs) > 0 {
+		lines = append(lines, "COPY . .")
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		lines = append(lines, "RUN "+buildSecrets+command)

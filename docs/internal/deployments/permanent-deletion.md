@@ -24,7 +24,11 @@ run-to-variable revision references intentionally do not cascade from the variab
 log is outside this cascade and survives deletion.
 
 This operation does not invoke Docker, Proxy, Files, Backups, or a host command. Containers, images,
-routes, database networks, persistent storage, checkouts, and on-disk artifacts remain. Database network
+routes, database networks, persistent storage, checkouts, and on-disk artifacts remain. Release
+retention's sweep reads only the store, so the deleted project's release images are no longer its to
+remove either; they are removed, if at all, from the Docker images page. While a project is only
+archived, its releases keep the ordinary retention (the live release and the five before it, pins and
+the rest), so an unarchived project can still roll back. Database network
 reconciliation ends when its binding records are deleted. Their deployment ownership and
 rollback history are forgotten. Operators wanting managed resources removed must use the existing
 previewed Configuration removal flow first; managed Compose stacks there also require a typed phrase,

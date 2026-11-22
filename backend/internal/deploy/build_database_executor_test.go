@@ -334,6 +334,71 @@ func TestBuildReachesItsDatabaseAppliesTheSchemaAndSeedsANewDatabase(t *testing.
 	}
 }
 
+// guardedDatabaseBuildRecipe is databaseBuildRecipe as the recipes render it
+// now: the install and a later stage each follow a build-value guard.
+const guardedDatabaseBuildRecipe = `# syntax=docker/dockerfile:1.10
+FROM node:22-alpine@sha256:1 AS build
+WORKDIR /app
+COPY package.json bun.lock ./
+ARG JD_BUILD_VALUES_1
+RUN --mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true bun install --frozen-lockfile
+COPY . .
+RUN --mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true bun run build
+FROM node:22-alpine@sha256:1
+ARG JD_BUILD_VALUES_2
+RUN --mount=type=secret,id=DATABASE_URL,env=DATABASE_URL,required=true --mount=type=secret,id=SITE_URL,env=SITE_URL,required=true node prune.js
+COPY --from=build /app /app
+CMD ["/bin/sh","-c","bunx drizzle-kit migrate && bun run start"]
+`
+
+// The schema step runs the recipe's own instructions up to the build
+// command, and BuildKit serves them from the build's cache only when each
+// guard they follow carries the build's digest: the step is handed the
+// guards its Dockerfile still declares, at the build's values, and no other.
+func TestTheSchemaStepCarriesTheBuildsOwnGuards(t *testing.T) {
+	t.Parallel()
+	backend := &databaseBuildBackend{attempts: []scriptedAttempt{schemaMissingAttempt}}
+	workspace := filepath.Join(t.TempDir(), "run-guarded")
+	if err := os.MkdirAll(filepath.Join(workspace, ".just-dashboard"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".just-dashboard", "Dockerfile"), []byte(guardedDatabaseBuildRecipe), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	prepared := PreparedBuild{
+		Method: BuildRecipe, Recipe: "node", Dockerfile: ".just-dashboard/Dockerfile", DockerfilePreview: guardedDatabaseBuildRecipe,
+		CachePolicy: "reuse", SecretBindings: []BuildSecretConfig{{Variable: "DATABASE_URL", Step: "build"}},
+		BuildValueGuards: []BuildValueGuard{
+			{Arg: "JD_BUILD_VALUES_1", IDs: []string{"DATABASE_URL"}},
+			{Arg: "JD_BUILD_VALUES_2", IDs: []string{"DATABASE_URL", "SITE_URL"}},
+		},
+	}
+	executor, execution, plan := databaseBuildRun(t, databaseBuildOptions{
+		backend: backend, value: "postgres://app:hunter2@db-8.jd.internal:5432/app", build: databaseBuildPlan(),
+		workspace: workspace, prepared: &prepared,
+	})
+	executor.buildNetworks, executor.databases = &fakeBuildNetworks{}, &fakeDatabaseContents{}
+	result := executor.buildArtifact(context.Background(), execution, plan)
+	if result.State != StepPassed {
+		t.Fatalf("result = %+v\n%s", result, stepTranscript(t, execution))
+	}
+	if len(backend.builds) == 0 || len(backend.steps) != 1 {
+		t.Fatalf("builds %d, steps %d", len(backend.builds), len(backend.steps))
+	}
+	built := map[string]string{}
+	for _, arg := range backend.builds[0].BuildArgs {
+		built[arg.Name] = arg.Value
+	}
+	if built["JD_BUILD_VALUES_1"] == "" || built["JD_BUILD_VALUES_2"] == "" {
+		t.Fatalf("the build's guards = %+v", backend.builds[0].BuildArgs)
+	}
+	step := backend.steps[0]
+	if len(step.BuildArgs) != 2 || step.BuildArgs[0].Name != "JD_BUILD_VALUES_1" || step.BuildArgs[0].Value != built["JD_BUILD_VALUES_1"] ||
+		step.BuildArgs[1].Name != schemaRunArg {
+		t.Fatalf("the schema step's arguments = %+v, the build's = %+v", step.BuildArgs, backend.builds[0].BuildArgs)
+	}
+}
+
 // A database that holds any row is never seeded: the build's own failure,
 // named, is what the run ends with.
 func TestBuildNeverSeedsADatabaseThatHoldsRows(t *testing.T) {

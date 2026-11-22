@@ -70,6 +70,10 @@ func (e *NormalizedStepExecutor) CleanupCancelledRun(
 	run EngineRun,
 	claimToken string,
 ) (json.RawMessage, error) {
+	if e != nil {
+		// A certificate the build step started ordering stops with the run.
+		e.prewarms.finish(run.ID, true)
+	}
 	if e == nil || e.store == nil || e.runtime == nil || operationTargetsLiveRelease(run.Operation) {
 		return mustJSON(map[string]any{"completed": true, "reason": "no candidate runtime cleanup required"}), nil
 	}

@@ -35,6 +35,11 @@ A `Spinner` is only for inside a control or beside its own words. Work of unknow
 2. **Everything below the fold waits its turn.** When an upper block's height depends on its read,
    `Hold` keeps what follows off the page until that read answers, then lets go once and for good.
    It also lets go after `HOLD_AT_MOST_MS`: a hanging read must not hide the rest of the page.
+   The rule in `globals.css` that hides the page's later blocks names its subject as one of the
+   page's own blocks (`… ~ :is([data-slot="page"] > *)`): written `… ~ *`, every element restyled
+   anywhere ran its `:has()` over the subtree of every sibling before it, a quarter of a second a
+   frame on a run page with three thousand lines of build log. A rule with `:has()` stays off
+   elements that hold long lists for the same reason.
 3. **Arrival is one motion.** A block that lands rises once (`animate-rise`, `Page rise`); a row
    that is new since the page opened rises (`useArrivals`); a figure counts up once. A refresh, a
    save and a re-render are not arrivals and move nothing.

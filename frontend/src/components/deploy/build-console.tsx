@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { memo, useEffect, useMemo, useRef, useState } from "react"
 import { Copy, Download, Logs } from "@/components/icons"
 import { Pane, PaneFooter, PaneHeader } from "@/components/panel"
 import { SearchInput } from "@/components/search-input"
@@ -27,72 +27,31 @@ import {
 } from "@/components/deploy/vocabulary"
 import { clock, duration, plural } from "@/lib/format"
 import { copyText } from "@/lib/clipboard"
-import { transcriptLine, type TranscriptLine } from "@/lib/transcript"
 import { cn } from "@/lib/utils"
+import { useNow } from "@/hooks/use-now"
 import type { DeploymentRunState, DeploymentStep, DeploymentSummary } from "@/lib/types"
 import { StepTile } from "@/components/deploy/run-evidence"
 import { WireMark } from "@/components/wire/wire"
 import { saveText } from "@/lib/download"
 import { useBreakpoint } from "@/lib/breakpoints"
 import { elapsed, stampColumnCh } from "./build-stamp"
+import {
+  consoleRows,
+  type BuildLogEvent,
+  type ConsoleRow,
+  type TranscriptBuffer,
+  type TranscriptCounts,
+} from "./transcript-buffer"
 
-/**
- * One `step.log` event as the stream delivers it: a chunk, not a line, from
- * the step that wrote it, on the stream it was written to — `status` for the
- * engine's own sentences, `stdout`/`stderr` for what the step ran.
- */
-export type BuildLogEvent = {
-  seq: number
-  stepId: number
-  ts: string
-  stream: string
-  text: string
-  truncated: boolean
-}
-
-/** A line of the console: the transcript's shape, plus where and when it was written. */
-export type ConsoleRow = {
-  id: string
-  stepId: number
-  ts: string
-  truncated: boolean
-  line: TranscriptLine
-}
-
-/**
- * Persisted events are chunks, not lines. Each displayed line keeps its
- * event's identity and gets a stable number, including when one chunk holds
- * several lines, and is read into the shapes `lib/transcript.ts` knows —
- * except that a line on the `status` stream is the engine's own voice
- * ("Resolved main to a12bc34") whatever it looks like, which only the stream
- * can say.
- */
-export function consoleRows(events: BuildLogEvent[]): ConsoleRow[] {
-  let number = 0
-  return events.flatMap((event) => {
-    // Terminal escape sequences are presentation, never markup from the build.
-    const clean = event.text.replace(/\x1b\[[0-?]*[ -/]*[@-~]/g, "").replace(/\r\n?/g, "\n")
-    const parts = clean.replace(/\n$/, "").split("\n")
-    return parts.map((text, index) => {
-      number += 1
-      return {
-        id: `${event.seq}:${index}`,
-        stepId: event.stepId,
-        ts: event.ts,
-        // The engine marks the chunk; the note goes after its last line.
-        truncated: event.truncated && index === parts.length - 1,
-        line: transcriptLine(number, text, event.stream === "status"),
-      }
-    })
-  })
-}
+export { consoleRows }
+export type { BuildLogEvent, ConsoleRow }
 
 /**
  * The transcript in three numbers, for the console's own counts and the
  * readings outside it — the view strip's count and its error mark, and
  * Details' lines per step. Read once from the parsed rows, by the page.
  */
-export function transcriptSummary(rows: ConsoleRow[]) {
+export function transcriptSummary(rows: ConsoleRow[]): TranscriptCounts {
   const perStep = new Map<number, number>()
   let lines = 0
   let errors = 0
@@ -138,9 +97,8 @@ function lineAnchor(id: string) {
  * select above it — chosen once by width (§12), so the picker is in the
  * document once.
  */
-export function BuildConsole({
-  rows,
-  summary,
+export const BuildConsole = memo(function BuildConsole({
+  transcript,
   capped,
   steps,
   active,
@@ -149,7 +107,7 @@ export function BuildConsole({
   connected,
   startedAt,
   runNumber,
-  now,
+  stoppedAt,
   selectedStep,
   onSelectStep,
   focusLine,
@@ -157,10 +115,11 @@ export function BuildConsole({
   deployment,
   className,
 }: {
-  /** The transcript as lines, read once by the page (`consoleRows`). */
-  rows: ConsoleRow[]
-  /** Those lines' counts (`transcriptSummary`), which the page reads too. */
-  summary: ReturnType<typeof transcriptSummary>
+  /**
+   * The transcript as lines with their counts, kept by the stream as it
+   * writes on (`appendTranscript`); the page reads the same copy.
+   */
+  transcript: Pick<TranscriptBuffer, "rows" | "epoch" | "errors" | "perStep">
   /** The stream kept only its newest events. */
   capped: boolean
   steps: DeploymentStep[]
@@ -173,7 +132,8 @@ export function BuildConsole({
   /** When the run was claimed: the zero of the time column. */
   startedAt: string
   runNumber: number
-  now: number
+  /** When the run ended, past which no step of it is measured. */
+  stoppedAt?: string
   selectedStep?: number
   onSelectStep: (id: number | undefined) => void
   /**
@@ -205,9 +165,11 @@ export function BuildConsole({
   const wide = useBreakpoint("sm")
   const stamped = time && wide
 
-  // Grows by appending while events arrive in order, which is what lets the
-  // drip tell a new batch from a stream that was replaced.
-  const signature = useMemo(() => rows.map((row) => `${row.id},`).join(""), [rows])
+  const { rows } = transcript
+  // The transcript's epoch moves only when its lines were rebuilt rather than
+  // appended to, which is what lets the drip tell a new batch from a stream
+  // that was replaced without comparing every line's id.
+  const signature = `${transcript.epoch}:${rows.length}`
   const needle = query.trim().toLowerCase()
   // Lines drip in and rise only while the reader is watching the whole
   // transcript arrive; searching, filtering or picking a stage draws them.
@@ -215,6 +177,7 @@ export function BuildConsole({
     signature,
     rows,
     active && follow && !needle && !errorsOnly && !selectedStep,
+    sameEpoch,
   )
   const visible = useMemo(
     () =>
@@ -226,7 +189,7 @@ export function BuildConsole({
       ),
     [drawn, selectedStep, errorsOnly, needle],
   )
-  const { errors, perStep } = summary
+  const { errors, perStep } = transcript
   const stepById = useMemo(() => new Map(steps.map((step) => [step.id, step])), [steps])
   // The visible lines in runs by the step that wrote them, so each run can
   // carry its step's rule — counted over what is shown, so a filtered view
@@ -242,11 +205,14 @@ export function BuildConsole({
   }, [visible, stepById])
   const zero = new Date(startedAt).getTime()
   // Sized from the longest stamp, so a line an hour in does not print over
-  // its text.
+  // its text. Lines are written in order, so the last is the furthest in.
+  const lastTs = rows.at(-1)?.ts
   const stampCh = useMemo(
-    () => stampColumnCh(rows.map((row) => elapsed(row.ts, zero))),
-    [rows, zero],
+    () => stampColumnCh(lastTs ? [elapsed(lastTs, zero)] : []),
+    [lastTs, zero],
   )
+  // A line's number past which it rose into place, for the memoised rows.
+  const arrivedAfter = arrivedFrom > 0 ? (drawn[arrivedFrom - 1]?.line.number ?? 0) : 0
 
   useEffect(() => {
     if (!follow || !body.current) return
@@ -418,8 +384,8 @@ export function BuildConsole({
             steps={steps}
             perStep={perStep}
             total={rows.length}
-            now={now}
             operation={operation}
+            stoppedAt={stoppedAt}
             selected={selectedStep}
             onSelect={onSelectStep}
           />
@@ -461,45 +427,25 @@ export function BuildConsole({
                       step={group.step}
                       operation={operation}
                       lines={perStep.get(group.step.id) ?? 0}
-                      now={now}
+                      stoppedAt={stoppedAt}
                     />
                   )}
                   <ol
                     aria-label={group.step ? stepName(group.step.key, operation) : "Engine"}
                     // A command opens with a rule of its own; directly under
                     // the step's rule that is two lines for one edge.
-                    className="[&>li:first-child]:mt-0 [&>li:first-child]:border-t-0"
+                    className="[&>li:first-child>ol>li:first-child]:mt-0 [&>li:first-child>ol>li:first-child]:border-t-0"
                   >
-                    {group.rows.map((row) => (
-                      <TranscriptRow
-                        key={row.id}
-                        anchor={lineAnchor(row.id)}
-                        marked={focusSeq !== undefined && row.id.startsWith(focusSeq)}
-                        line={row.line}
+                    {blocks(group.rows).map((block) => (
+                      <ConsoleBlock
+                        key={block[0].id}
+                        rows={block}
+                        focusSeq={focusSeq}
                         wrap={wrap}
                         needle={needle}
-                        tokens
-                        arrived={row.line.number > arrivedFrom}
-                        stamp={
-                          stamped ? (
-                            <time
-                              dateTime={row.ts}
-                              title={clock(row.ts)}
-                              style={{ width: `${stampCh}ch` }}
-                              className="numeric shrink-0 text-right text-faint select-none"
-                            >
-                              {elapsed(row.ts, zero)}
-                            </time>
-                          ) : undefined
-                        }
-                        trailing={
-                          row.truncated && (
-                            <span className="font-sans text-hint text-muted-foreground italic">
-                              {" "}
-                              · output truncated
-                            </span>
-                          )
-                        }
+                        arrivedAfter={arrivedAfter}
+                        stampCh={stamped ? stampCh : 0}
+                        zero={zero}
                       />
                     ))}
                   </ol>
@@ -540,6 +486,161 @@ export function BuildConsole({
       </PaneFooter>
     </Pane>
   )
+})
+
+/** Lines are appended by the transcript and never rebuilt, so the drip compares epochs. */
+function sameEpoch(previous: string, next: string) {
+  return previous.split(":")[0] === next.split(":")[0]
+}
+
+/** How many lines a block of the console holds. */
+const BLOCK = 100
+
+const BLOCK_STYLE = {
+  contentVisibility: "auto",
+  containIntrinsicSize: `auto ${BLOCK * 24}px`,
+} as const
+
+/** A step's lines in blocks of `BLOCK`, the last one growing as lines land. */
+function blocks(rows: ConsoleRow[]) {
+  const out: ConsoleRow[][] = []
+  for (let at = 0; at < rows.length; at += BLOCK) out.push(rows.slice(at, at + BLOCK))
+  return out
+}
+
+type BlockProps = {
+  rows: ConsoleRow[]
+  focusSeq?: string
+  wrap: boolean
+  needle: string
+  arrivedAfter: number
+  stampCh: number
+  zero: number
+}
+
+/**
+ * A hundred lines of a step's list, laid out and painted only while on screen
+ * (`content-visibility`), and drawn again only when a line of it changed.
+ *
+ * A browser lays a list out by walking every child, and three thousand lines
+ * in one list cost tens of milliseconds a frame even with each line skipped
+ * on its own. In blocks it walks thirty, and the lines of the one block that
+ * is growing; a block off screen is not styled or laid out at all. The lines
+ * stay in the page — the browser's find, a selection across blocks, Copy and
+ * the scroll position all see one transcript — and stay the list's only
+ * items: the block and its list are presentation, each line says it is one.
+ */
+const ConsoleBlock = memo(
+  function ConsoleBlock({ rows, focusSeq, wrap, needle, arrivedAfter, stampCh, zero }: BlockProps) {
+    return (
+      <li
+        role="none"
+        // One size for every block, guessed from a full one at a line's
+        // height until it has been drawn once: a size that followed the
+        // growing block's line count restyled the block on every line.
+        style={BLOCK_STYLE}
+      >
+        <ol role="none" className="[&>li:first-child]:mt-0 [&>li:first-child]:border-t-0">
+          {rows.map((row) => (
+            <ConsoleLine
+              key={row.id}
+              row={row}
+              marked={focusSeq !== undefined && row.id.startsWith(focusSeq)}
+              wrap={wrap}
+              needle={needle}
+              arrived={row.line.number > arrivedAfter}
+              stampCh={stampCh}
+              zero={zero}
+            />
+          ))}
+        </ol>
+      </li>
+    )
+  },
+  // A block's lines are a slice of the transcript, new every render; it is
+  // the same block while it starts and ends on the same lines.
+  (before, after) =>
+    before.rows.length === after.rows.length &&
+    before.rows[0] === after.rows[0] &&
+    before.rows.at(-1) === after.rows.at(-1) &&
+    before.focusSeq === after.focusSeq &&
+    before.wrap === after.wrap &&
+    before.needle === after.needle &&
+    before.arrivedAfter === after.arrivedAfter &&
+    before.stampCh === after.stampCh &&
+    before.zero === after.zero,
+)
+
+/**
+ * One line of the console, drawn again only when something about it changed:
+ * three thousand lines re-rendered on every frame the drip let one out, and
+ * on every second the run's clock ticked, was the console's own lag.
+ */
+const ConsoleLine = memo(function ConsoleLine({
+  row,
+  marked,
+  wrap,
+  needle,
+  arrived,
+  stampCh,
+  zero,
+}: {
+  row: ConsoleRow
+  marked: boolean
+  wrap: boolean
+  needle: string
+  arrived: boolean
+  /** The time column's width; 0 draws none. */
+  stampCh: number
+  /** When the run was claimed, the time column's zero. */
+  zero: number
+}) {
+  return (
+    <TranscriptRow
+      anchor={lineAnchor(row.id)}
+      // Its block is what the browser skips; inside the list's presentation
+      // the line says it is one of the step's items.
+      inBlock
+      marked={marked}
+      line={row.line}
+      wrap={wrap}
+      needle={needle}
+      tokens
+      arrived={arrived}
+      stamp={
+        stampCh > 0 ? (
+          <time
+            dateTime={row.ts}
+            title={clock(row.ts)}
+            style={{ width: `${stampCh}ch` }}
+            className="numeric shrink-0 text-right text-faint select-none"
+          >
+            {elapsed(row.ts, zero)}
+          </time>
+        ) : undefined
+      }
+      trailing={
+        row.truncated && (
+          <span className="font-sans text-hint text-muted-foreground italic">
+            {" "}
+            · output truncated
+          </span>
+        )
+      }
+    />
+  )
+})
+
+/**
+ * A step's running time on its own clock, so the second that ticks is drawn
+ * by the rule and the rail rather than by the console around the lines.
+ */
+function useStepSeconds(step: DeploymentStep, stoppedAt?: string) {
+  const stopped = stoppedAt ? Date.parse(stoppedAt) : NaN
+  const now = useNow(1000, step.state === "running" && Number.isNaN(stopped))
+  // A finished run's clock stops where the run did, so no step of it reads
+  // as still going.
+  return stepSeconds(step, Number.isNaN(stopped) ? now : Math.min(now, stopped))
 }
 
 /**
@@ -597,14 +698,14 @@ function StepRule({
   step,
   operation,
   lines,
-  now,
+  stoppedAt,
 }: {
   step: DeploymentStep
   operation?: string
   lines: number
-  now: number
+  stoppedAt?: string
 }) {
-  const seconds = stepSeconds(step, now)
+  const seconds = useStepSeconds(step, stoppedAt)
   return (
     <div
       aria-hidden
@@ -644,16 +745,16 @@ function StageRail({
   steps,
   perStep,
   total,
-  now,
   operation,
+  stoppedAt,
   selected,
   onSelect,
 }: {
   steps: DeploymentStep[]
   perStep: Map<number, number>
   total: number
-  now: number
   operation?: string
+  stoppedAt?: string
   selected?: number
   onSelect: (id: number | undefined) => void
 }) {
@@ -682,48 +783,78 @@ function StageRail({
         <span className="min-w-0 flex-1 truncate font-medium">All stages</span>
         <span className="numeric shrink-0 text-hint text-muted-foreground">{total}</span>
       </button>
-      {steps.map((step) => {
-        const seconds = stepSeconds(step, now)
-        const lines = perStep.get(step.id) ?? 0
-        const pressed = selected === step.id
-        return (
-          <button
-            key={step.id}
-            ref={(element) => {
-              if (element) buttons.current.set(step.id, element)
-              else buttons.current.delete(step.id)
-            }}
-            type="button"
-            aria-pressed={pressed}
-            onClick={() => onSelect(step.id)}
-            className={row(pressed)}
-          >
-            <StepMark state={step.state} />
-            <span
-              className={cn(
-                "min-w-0 flex-1 truncate",
-                pressed || lines > 0 ? "text-foreground" : "",
-                (step.state === "failed" || step.state === "blocked") && "text-destructive",
-              )}
-            >
-              {stepName(step.key, operation)}
-            </span>
-            {seconds !== undefined && (
-              <span className="numeric shrink-0 text-hint text-muted-foreground">
-                {duration(seconds)}
-              </span>
-            )}
-            <span
-              className={cn(
-                "numeric w-6 shrink-0 text-right text-hint",
-                lines ? "text-muted-foreground" : "text-faint",
-              )}
-            >
-              {lines}
-            </span>
-          </button>
-        )
-      })}
+      {steps.map((step) => (
+        <StageButton
+          key={step.id}
+          step={step}
+          lines={perStep.get(step.id) ?? 0}
+          operation={operation}
+          stoppedAt={stoppedAt}
+          pressed={selected === step.id}
+          className={row(selected === step.id)}
+          onSelect={() => onSelect(step.id)}
+          buttonRef={(element) => {
+            if (element) buttons.current.set(step.id, element)
+            else buttons.current.delete(step.id)
+          }}
+        />
+      ))}
     </div>
+  )
+}
+
+/** One stage on the rail, with its own clock while it runs. */
+function StageButton({
+  step,
+  lines,
+  operation,
+  stoppedAt,
+  pressed,
+  className,
+  onSelect,
+  buttonRef,
+}: {
+  step: DeploymentStep
+  lines: number
+  operation?: string
+  stoppedAt?: string
+  pressed: boolean
+  className: string
+  onSelect: () => void
+  buttonRef: (element: HTMLButtonElement | null) => void
+}) {
+  const seconds = useStepSeconds(step, stoppedAt)
+  return (
+    <button
+      ref={buttonRef}
+      type="button"
+      aria-pressed={pressed}
+      onClick={onSelect}
+      className={className}
+    >
+      <StepMark state={step.state} />
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate",
+          pressed || lines > 0 ? "text-foreground" : "",
+          (step.state === "failed" || step.state === "blocked") && "text-destructive",
+        )}
+      >
+        {stepName(step.key, operation)}
+      </span>
+      {seconds !== undefined && (
+        <span className="numeric shrink-0 text-hint text-muted-foreground">
+          {duration(seconds)}
+        </span>
+      )}
+      <span
+        className={cn(
+          "numeric w-6 shrink-0 text-right text-hint",
+          lines ? "text-muted-foreground" : "text-faint",
+        )}
+      >
+        {lines}
+      </span>
+    </button>
   )
 }

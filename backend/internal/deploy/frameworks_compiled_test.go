@@ -126,7 +126,7 @@ func TestJavaDetectionAndRecipe(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, want := range []string{"FROM eclipse-temurin:21-jdk@sha256:", `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`, "RUN ./gradlew --no-daemon --console=plain :bootJar",
+	for _, want := range []string{"FROM eclipse-temurin:21-jdk@sha256:", `RUN sed -i 's/\r$//' gradlew && chmod +x gradlew`, " ./gradlew --no-daemon --console=plain :bootJar",
 		"RUN cd /src/build/libs && (for f in *.jar;", "-plain.jar", `"java -Xmx256m -jar /app/app.jar"`} {
 		if !strings.Contains(prepared.DockerfilePreview, want) {
 			t.Fatalf("Dockerfile missing %q:\n%s", want, prepared.DockerfilePreview)
@@ -324,9 +324,9 @@ func TestDotnetMultiTargetBuildRestoresAndPublishesOneSupportedTarget(t *testing
 	// Restore resolves every framework the SDK image can; only a sibling
 	// that needs a workload or a newer SDK holds it to the published one.
 	for frameworks, restore := range map[string]string{
-		"net8.0;net10.0": "RUN dotnet restore Api.csproj\n", "net10.0;net8.0": "RUN dotnet restore Api.csproj\n",
-		"net6.0;net10.0-windows;net10.0": "RUN dotnet restore Api.csproj\n",
-		"net10.0;net10.0-android":        "RUN dotnet restore Api.csproj -p:TargetFramework=net10.0\n",
+		"net8.0;net10.0": " dotnet restore Api.csproj\n", "net10.0;net8.0": " dotnet restore Api.csproj\n",
+		"net6.0;net10.0-windows;net10.0": " dotnet restore Api.csproj\n",
+		"net10.0;net10.0-android":        " dotnet restore Api.csproj -p:TargetFramework=net10.0\n",
 	} {
 		t.Run(frameworks, func(t *testing.T) {
 			root := t.TempDir()

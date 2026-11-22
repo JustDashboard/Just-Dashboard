@@ -503,7 +503,7 @@ are dated evidence, not proof of current attachment ownership.
   extends it with each tail, finding where the tail begins in the whole copy (`extendTranscript`) and
   reading the file again only when the two stop overlapping. A read that fails during the restart leaves
   the tail on screen. While a run is live and the reader is at the end, the lines a poll brought are let
-  out a few a frame rather than landing at once; scrolled up, searching or with reduced motion they are
+  out over the next frames rather than landing at once, all of them within 300 ms; scrolled up, searching or with reduced motion they are
   drawn outright. `lib/transcript.test.js` covers the line shapes and the merge.
 - **There is one theme.** The light palette was removed: every tinted surface, status hue, chart colour
   and terminal ANSI slot had to be chosen twice and verified twice, and the second set was seen by almost

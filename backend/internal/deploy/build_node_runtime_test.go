@@ -235,7 +235,7 @@ func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
 	}{
 		{name: "bcrypt gets compilers in the build stage only", files: map[string]string{"package.json": manifest(`"dependencies":{"bcrypt":"^5.1.1"}`)},
 			config: server, findings: []string{"native_addon_toolchain"},
-			want:   []string{" AS build\nRUN apk add --no-cache g++ make python3\nWORKDIR /app\nCOPY . .\n", "\nFROM node:22-alpine@sha256:"},
+			want:   []string{" AS build\nRUN apk add --no-cache g++ make python3\nWORKDIR /app\nCOPY --parents [\"package.json\",\"./\"]\n", "\nFROM node:22-alpine@sha256:"},
 			absent: []string{"cairo"}},
 		{name: "a lockfile's native addon counts", files: map[string]string{"package.json": manifest(`"dependencies":{"auth":"^1.0.0"}`),
 			"package-lock.json": `{"lockfileVersion":3,"packages":{"":{"dependencies":{"auth":"^1.0.0"}},"node_modules/auth":{"version":"1.0.0"},"node_modules/better-sqlite3":{"version":"8.7.0"}}}`},
@@ -288,7 +288,7 @@ func TestNodeRecipeAddsTheSystemPackagesDependenciesNeed(t *testing.T) {
 		{name: "Playwright downloads Chromium into the application on Debian", files: map[string]string{"package.json": manifest(`"dependencies":{"playwright":"^1.48.0"}`), "package-lock.json": npmLock},
 			config: server, findings: []string{"headless_browser", "glibc_image_selected"},
 			want: []string{"FROM node:22-bookworm-slim@sha256:", "ENV PLAYWRIGHT_BROWSERS_PATH=/app/.cache/ms-playwright\nWORKDIR /app\n",
-				"RUN npx playwright install chromium\n" + nodeBuildRun("npm run build\n"), "COPY --from=build /app /app\nRUN npx playwright install-deps chromium\nCMD"}},
+				"RUN npx playwright install chromium\n" + nodeBuildRun("npm run build\n"), "COPY --from=build --exclude=node_modules /app /app\nRUN npx playwright install-deps chromium\nCMD"}},
 		{name: "Playwright for tests changes nothing", files: map[string]string{"package.json": manifest(`"devDependencies":{"@playwright/test":"^1.48.0","playwright":"^1.48.0"}`), "package-lock.json": npmLock},
 			config: server, absent: []string{"bookworm", "playwright", "apk add"}},
 	} {

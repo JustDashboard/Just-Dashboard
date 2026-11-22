@@ -139,7 +139,10 @@ Retention: a staging release referenced by an unfinished promotion is retained (
 promotion to production") by `ArtifactRetentionPlan` and refused by `reserveArtifactPrune`, because a
 queued run holds no lease yet. Once promoted, production's release holds its own tag and digest, so the
 physical image survives as long as production keeps that release (live, the five prior successful
-releases, pinned) even after staging's release ages out — the existing shared-digest rule.
+releases, pinned) even after staging's release ages out — the existing shared-digest rule. The
+retention sweep that removes what is left (implementation.md, "The retention sweep") also asks the
+daemon first and never removes an image a container uses, so a staging tag whose image production
+runs is kept.
 
 `GET /api/v1/deploy/{id}/environments/{production}/promotion?releaseId=N` is the confirmation's read
 (any signed-in reader; `…/{staging}/promotion?source=preview&preview=N` reads a preview's into staging,

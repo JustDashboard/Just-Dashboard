@@ -108,7 +108,7 @@ func TestIncidentRepositoryResolvesToBunWithItsReadinessVariablesAndVolume(t *te
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
 		"bun install --frozen-lockfile",
 		`DATABASE_URL="${DATABASE_URL:-file:./prisma-generate.db}"`,
-		"ENV HOST=0.0.0.0\nCOPY --from=build /app /app",
+		"ENV HOST=0.0.0.0\nCOPY --from=build /app/node_module[s] /app/node_modules/\nCOPY --from=build --exclude=node_modules /app /app",
 	}, []string{"npm ci"})
 }
 

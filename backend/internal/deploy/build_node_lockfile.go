@@ -268,6 +268,9 @@ type nodeLockfileReading struct {
 	// install clones; gitSSH says one of them is fetched over SSH.
 	git    []string
 	gitSSH bool
+	// links are the directories of the checkout an npm lock links a
+	// package to (a workspace member or a file: dependency).
+	links []string
 	// names are the packages the lock installs, when the format lists them.
 	names map[string]string
 }
@@ -465,7 +468,7 @@ func nodeFixedReading(reading nodeLockfileReading) nodeLockfileComparer {
 // withFacts gives a comparison's reading what its lockfile records whichever
 // package is compared. The lists are shared, and never modified.
 func (r nodeLockfileReading) withFacts(facts nodeLockfileReading) nodeLockfileReading {
-	r.names, r.peers, r.optional, r.hosts, r.git, r.gitSSH = facts.names, facts.peers, facts.optional, facts.hosts, facts.git, facts.gitSSH
+	r.names, r.peers, r.optional, r.hosts, r.git, r.gitSSH, r.links = facts.names, facts.peers, facts.optional, facts.hosts, facts.git, facts.gitSSH, facts.links
 	return r
 }
 
@@ -588,6 +591,7 @@ func readNPMLockfile(files nodeFiles, lockfile, arch string) nodeLockfileCompare
 	hosts := map[string]bool{}
 	git := map[string]bool{}
 	gitSSH := false
+	links := map[string]bool{}
 	fail := func() nodeLockfileComparer {
 		return nodeFixedReading(nodeUnreadLockfile(lockfile, "npm", lockfile+" is not valid JSON"))
 	}
@@ -631,6 +635,9 @@ func readNPMLockfile(files nodeFiles, lockfile, arch string) nodeLockfileCompare
 				if entry.Link {
 					// A workspace package or a file: directory: its resolved
 					// is a path in the checkout, and nothing is downloaded.
+					if len(links) < nodeWorkspaceManifestLimit {
+						links[entry.Resolved] = true
+					}
 					continue
 				}
 				if host := npmResolvedHost(entry.Resolved); host != "" {
@@ -691,7 +698,7 @@ func readNPMLockfile(files nodeFiles, lockfile, arch string) nodeLockfileCompare
 	if version == "" {
 		return nodeFixedReading(nodeUnreadLockfile(lockfile, "npm", lockfile+" records no lockfileVersion"))
 	}
-	facts := nodeLockfileReading{git: sortedNames(git), gitSSH: gitSSH}
+	facts := nodeLockfileReading{git: sortedNames(git), gitSSH: gitSSH, links: sortedNames(links)}
 	if len(workspaces) == 0 {
 		facts.names = v1
 		return func(own string) nodeLockfileReading {

@@ -459,10 +459,15 @@ func (e *NormalizedStepExecutor) runDatabaseStep(
 		output.add(collectedLine{text: truncateUTF8Prefix(line.Text, collectedLineBytes)})
 		return nil
 	})
+	buildValues, _, err := e.buildScopeVariables(ctx, execution.Run)
+	if err != nil {
+		return schemaRetry{failure: ptr(normalizedStepFailure(err))}
+	}
+	buildArgs := append(builder.declaredBuildValueGuardArgs(prepared.Prepared, buildValues, dockerfile),
+		BuildArgValue{Name: schemaRunArg, Value: strconv.FormatInt(execution.Run.ID, 10) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)})
 	err = builder.runSchemaStep(ctx, BuildInvocation{
 		ContextDir: prepared.BuildRoot, Dockerfile: schemaPath, Platform: prepared.Prepared.TargetPlatform,
-		Secrets:   secrets,
-		BuildArgs: []BuildArgValue{{Name: schemaRunArg, Value: strconv.FormatInt(execution.Run.ID, 10) + "-" + strconv.FormatInt(time.Now().UnixNano(), 10)}},
+		Secrets: secrets, BuildArgs: buildArgs,
 	}, emit)
 	if err != nil {
 		if ctx.Err() != nil {

@@ -75,7 +75,7 @@ func TestCargoWorkspaceMembersBuildWithinTheirWorkspace(t *testing.T) {
 	if prepared.ContextDirectory != "." {
 		t.Fatalf("context = %q", prepared.ContextDirectory)
 	}
-	assertGoDockerfile(t, prepared.DockerfilePreview, "RUN cargo fetch --locked\n", "cargo build --release --locked -p server --bin server\n",
+	assertGoDockerfile(t, prepared.DockerfilePreview, " cargo fetch --locked\n", "cargo build --release --locked -p server --bin server && (",
 		"cp /src/target/release/server /out/app", "COPY --from=build --chown=app:app /src/crates/server/templates /home/app/templates")
 	if item := findingByCode(rustBuildFindings(server, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe, Recipe: "rust"}}), "cargo_workspace_member"); item == nil || item.Severity != PreflightPass {
 		t.Fatalf("cargo_workspace_member = %+v", item)
@@ -87,7 +87,7 @@ func TestCargoWorkspaceMembersBuildWithinTheirWorkspace(t *testing.T) {
 	writeBuildFixture(t, outside, "tools/gen/Cargo.toml", "[package]\nname = \"gen\"\n")
 	writeBuildFixture(t, outside, "tools/gen/src/main.rs", "fn main() {}\n")
 	prepared = prepareRust(t, outside, outside+"/tools/gen", BuildPlanConfig{RootDirectory: "tools/gen"})
-	if prepared.ContextDirectory != "" || !strings.Contains(prepared.DockerfilePreview, "cargo build --release --bin gen\n") {
+	if prepared.ContextDirectory != "" || !strings.Contains(prepared.DockerfilePreview, "cargo build --release --bin gen && (") {
 		t.Fatalf("excluded crate built in the workspace: %q\n%s", prepared.ContextDirectory, prepared.DockerfilePreview)
 	}
 }
@@ -272,7 +272,7 @@ func TestRustFullStackFrameworksBuildTheirOwnWay(t *testing.T) {
 	}
 	prepared := prepareRust(t, leptos, leptos, BuildPlanConfig{})
 	assertGoDockerfile(t, prepared.DockerfilePreview, "FROM rust:1-bookworm@sha256:", "RUN rustup target add wasm32-unknown-unknown\n",
-		"RUN cargo install cargo-leptos --locked --version "+cargoLeptosVersion, "cargo leptos build --release\n",
+		"RUN cargo install cargo-leptos --locked --version "+cargoLeptosVersion, "cargo leptos build --release && (",
 		"cp target/release/start-axum /out/app && cp -r target/site /out/site ||", "FROM debian:bookworm-slim@sha256:",
 		"COPY --from=build --chown=app:app /out/site /home/app/site", "ENV LEPTOS_SITE_ROOT=site LEPTOS_ENV=PROD LEPTOS_OUTPUT_NAME=start-axum\n",
 		`CMD ["/bin/sh","-c","exec env LEPTOS_SITE_ADDR=0.0.0.0:${PORT:-3000} /app"]`)

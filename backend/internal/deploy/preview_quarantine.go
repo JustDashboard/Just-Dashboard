@@ -159,9 +159,13 @@ func failQuarantinedPreviewRunsTx(ctx context.Context, tx *sql.Tx, environmentID
 			states = []RunState{RunFailedActivation, RunFailed}
 		}
 		for _, state := range states {
-			event, err := appendEventTx(ctx, tx, now, run.id, 0, EventRunState, "status", "", mustJSON(map[string]any{
+			var ended *time.Time
+			if state.Terminal() {
+				ended = unixTimePtr(now.Unix())
+			}
+			event, err := appendEventTx(ctx, tx, now, run.id, 0, EventRunState, "status", "", mustJSON(withEventTimes(map[string]any{
 				"from": run.state, "state": state, "code": "preview_quarantined", "reason": previewQuarantineReason,
-			}))
+			}, "endedAt", ended)))
 			if err != nil {
 				return nil, err
 			}

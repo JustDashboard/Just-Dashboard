@@ -1,5 +1,6 @@
 "use client"
 
+import { usualRunSeconds } from "@/components/deploy/build-timing"
 import Link from "next/link"
 import { Stopwatch } from "@/components/icons"
 import { plural, relativeTime, timestamp } from "@/lib/format"
@@ -127,6 +128,9 @@ export function RunHeader({
         ? `waiting for a ${run.slotClass} build slot`
         : "never reached a build slot"
   const working = active ? steps.find((step) => step.state === "running") : undefined
+  // How long a run like this one usually takes, from the project's recent
+  // runs the page already holds, beside the time it has taken so far.
+  const usual = active && !unclaimed ? usualRunSeconds(deployment?.recentRuns, run) : undefined
   const forge = deployment && git ? sourceProduct(deployment) : undefined
 
   return (
@@ -155,6 +159,11 @@ export function RunHeader({
             <Stopwatch aria-hidden className="size-3.5" />
             <span>{unclaimed ? "Queued for" : active ? "Running for" : "Took"}</span>
             <span className="numeric font-medium text-foreground">{formatDuration(seconds)}</span>
+            {usual !== undefined && (
+              <span data-slot="run-usual" className="numeric">
+                · usually {formatDuration(usual)}
+              </span>
+            )}
           </span>
         </span>
       }

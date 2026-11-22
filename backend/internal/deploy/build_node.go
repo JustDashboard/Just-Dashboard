@@ -68,6 +68,7 @@ func readNodeInstallSourceIn(root *os.Root, dir, arch string, budget *nodeReadBu
 	var parsed nodeManifest
 	parseNodeManifest(manifest, &parsed)
 	source.files = readNodeRootFiles(nodeFiles{root: root, dir: dir, budget: budget.nodeConfigBudget()}, parsed)
+	source.files.member = member
 	source.workspace = member == "" && len(nodeWorkspacePatterns(files)) > 0
 	source.facts = readNodeInstallFacts(nodeFiles{root: root, dir: source.context, budget: budget}, member, manifest, arch)
 	return source, nil
@@ -329,7 +330,7 @@ func (b *ArtifactBuilder) settleBunImage(ctx context.Context, plan *nodeInstallP
 	if plan.bun == "" || plan.bun == fallback {
 		return
 	}
-	if _, err := b.backend.ResolveImage(ctx, plan.bun, ""); err == nil {
+	if _, err := b.resolveBase(ctx, plan.bun); err == nil {
 		return
 	}
 	plan.notes = append(plan.notes, "the declared Bun release has no "+plan.bun+" image; installing with "+fallback)
@@ -362,13 +363,17 @@ func (s nodeInstallSource) detectedInstallInputs() []string {
 }
 
 func (s nodeInstallSource) inputsWith(lockfiles []string) []string {
+	return s.facts.inputsWith(lockfiles)
+}
+
+func (f nodeInstallFacts) inputsWith(lockfiles []string) []string {
 	inputs := []string{"package.json"}
-	if member := s.member(); member != "" {
-		inputs = append(inputs, path.Join(member, "package.json"))
+	if f.member != "" {
+		inputs = append(inputs, path.Join(f.member, "package.json"))
 	}
 	inputs = append(inputs, lockfiles...)
-	inputs = append(inputs, s.facts.inputs...)
-	return append(inputs, s.facts.workspaceManifests...)
+	inputs = append(inputs, f.inputs...)
+	return append(inputs, f.workspaceManifests...)
 }
 
 // renderNodeDockerfile renders the Node recipe: an optional toolchain stage
@@ -379,7 +384,7 @@ func (s nodeInstallSource) inputsWith(lockfiles []string) []string {
 // same release offline.
 func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
 	plan := recipe.nodeInstall
-	lines, base, err := nodeInstallStage(plan, bases[0], bases, "toolchain", "build", installSecrets)
+	lines, base, err := nodeInstallStage(plan, bases[0], bases, "toolchain", "build", "", installSecrets, config.cache)
 	if err != nil {
 		return nil, err
 	}
@@ -407,7 +412,11 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		plan.buildEnv.framework = defaults.BuildEnv
-		lines = append(lines, plan.buildRun(buildSecrets, command, boundToBuild(config.Secrets)))
+		mounts := buildSecrets
+		if recipe.node.name == "nextjs" {
+			mounts = nextBuildCaches(config.cache, workdir) + mounts
+		}
+		lines = append(lines, plan.buildRun(mounts, command, boundToBuild(config.Secrets)))
 	}
 	if serving.entry != "" {
 		// The start command runs the framework's entry, so a build that did
@@ -447,20 +456,28 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	for _, env := range append(append(append([]string(nil), plan.image.runtimeEnv...), nodeServerRuntimeEnv(recipe.node.name, defaults.Env)...), serving.runtimeEnv...) {
 		lines = append(lines, "ENV "+env)
 	}
-	lines = append(lines, "COPY --from=build /app /app")
+	if standalone := nodeStandaloneCopy(config.StartCommand, workdir); standalone != nil && len(plan.image.runtimeRuns) == 0 {
+		// The standalone server carries its own traced node_modules.
+		lines = append(lines, standalone...)
+	} else {
+		lines = append(lines, nodeModulesCopy(recipe.member)...)
+	}
 	for _, run := range plan.image.runtimeRuns {
 		lines = append(lines, "RUN "+run)
 	}
 	return append(lines, shellCMD(config.StartCommand)), nil
 }
 
-// nodeInstallStage renders what the Node recipe and a site generator's
-// dependency stage (build_site.go) share, so the two cannot install
-// differently: the toolchain stage when the plan needs one, then a stage that
-// copies the source and runs the planned install. base is what a later stage
-// starts from to have the same tools. The PHP recipe's asset stage runs the
-// same plan's install on its vendor stage instead (phpAssetStage).
-func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []ResolvedImage, toolchainStage, stage, installSecrets string) ([]string, string, error) {
+// nodeInstallStage renders what the Node recipe, a site generator's
+// dependency stage (build_site.go) and the Python and Go recipes' asset
+// stages share, so they cannot install differently: the toolchain stage
+// when the plan needs one, then a stage that runs the planned install in
+// /app/dir and copies the source — after the install's inputs and the
+// install when the plan allows it (nodeInstallLines), before them
+// otherwise. base is what a later stage starts from to have the same tools.
+// The PHP recipe's asset stage runs the same plan's install on its vendor
+// stage instead (phpAssetStage).
+func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []ResolvedImage, toolchainStage, stage, dir, installSecrets string, cache recipeCache) ([]string, string, error) {
 	bun := ""
 	if plan.bun != "" {
 		image, err := resolveCatalogueImage(bases, plan.bun)
@@ -483,11 +500,8 @@ func nodeInstallStage(plan nodeInstallPlan, node ResolvedImage, bases []Resolved
 	for _, env := range plan.image.buildEnv {
 		lines = append(lines, "ENV "+env)
 	}
-	lines = append(lines, "WORKDIR /app", "COPY . .")
-	if plan.berry {
-		lines = append(lines, "ENV YARN_ENABLE_GLOBAL_CACHE=false")
-	}
-	return append(lines, nodeRunWith(installSecrets, plan.installDefaults(), plan.installLine())), base, nil
+	lines = append(lines, "WORKDIR /app")
+	return append(lines, nodeInstallLines(plan, dir, plan.installRun(cache, installSecrets))...), base, nil
 }
 
 // readNodeInstalls reads the install inputs of every package detection

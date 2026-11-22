@@ -230,12 +230,15 @@ func (s *OrchestrationStore) TransitionStep(
 		}
 	}
 
+	// The times ride on the event because a reader following the stream
+	// never reads the snapshot again: a step that starts after it connected
+	// would otherwise have no clock until the page was reloaded.
 	event, err := appendEventTx(ctx, tx, now, runID, updated.ID, EventStepState,
-		"status", "", mustJSON(map[string]any{
+		"status", "", mustJSON(withEventTimes(map[string]any{
 			"key": updated.Key, "state": updated.State, "attempt": updated.Attempt,
 			"evidence": updated.Evidence, "errorCode": updated.ErrorCode,
 			"errorMessage": updated.ErrorMessage,
-		}))
+		}, "startedAt", updated.StartedAt, "endedAt", updated.EndedAt)))
 	if err != nil {
 		return nil, err
 	}

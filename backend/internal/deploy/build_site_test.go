@@ -146,7 +146,7 @@ func TestSiteRecipeRendersEachGenerator(t *testing.T) {
 			if candidate.Recipe != "site" || prepared.Recipe != "site" || prepared.Toolchain != test.toolchain {
 				t.Fatalf("recipe %q toolchain %q:\n%s", prepared.Recipe, prepared.Toolchain, prepared.DockerfilePreview)
 			}
-			assertDockerfileLines(t, prepared.DockerfilePreview, test.want, test.absent)
+			assertDockerfileLines(t, withoutNodeCacheMounts(prepared.DockerfilePreview), test.want, test.absent)
 			for _, base := range prepared.BaseImages {
 				if !strings.Contains(prepared.DockerfilePreview, base.Reference+"@"+base.Digest) {
 					t.Fatalf("base %s is not named by digest:\n%s", base.Reference, prepared.DockerfilePreview)
@@ -240,21 +240,21 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 		{
 			name:  "mkdocs from its requirements",
 			files: map[string]string{"mkdocs.yml": "site_name: x\ntheme: material\n", "requirements.txt": "mkdocs-material==9.7.7\n", ".python-version": "3.12\n"},
-			want: []string{"FROM python:3.12-slim-trixie@sha256:", " AS build\n", "RUN pip install --no-cache-dir --requirement requirements.txt\n",
+			want: []string{"FROM python:3.12-slim-trixie@sha256:", " AS build\n", sitePythonRun("pip install --no-cache-dir --requirement requirements.txt"),
 				"RUN mkdocs build\n", "FROM nginx:1.29-alpine@sha256:", "COPY --from=build /app/site/ /usr/share/nginx/html/\n"},
 			absent: []string{"CMD ", "gunicorn"},
 		},
 		{
 			name:  "mkdocs with nothing declared installs pinned releases",
 			files: map[string]string{"mkdocs.yml": "site_name: x\ntheme:\n  name: material\nplugins:\n  - search\n  - git-revision-date-localized\n"},
-			want: []string{"RUN pip install --no-cache-dir mkdocs==1.6.1 mkdocs-material==9.7.7 mkdocs-git-revision-date-localized-plugin==1.6.0\n",
+			want: []string{sitePythonRun("pip install --no-cache-dir mkdocs==1.6.1 mkdocs-material==9.7.7 mkdocs-git-revision-date-localized-plugin==1.6.0"),
 				// The plugin dates pages from their commits.
 				"apt-get install -y --no-install-recommends git"},
 		},
 		{
 			name:  "a project whose manifest lacks the generator gets it pinned beside",
 			files: map[string]string{"mkdocs.yml": "site_name: x\n", "requirements.txt": "requests==2.32.3\n"},
-			want:  []string{"RUN pip install --no-cache-dir --requirement requirements.txt\n", "RUN pip install --no-cache-dir mkdocs==1.6.1\n"},
+			want:  []string{sitePythonRun("pip install --no-cache-dir --requirement requirements.txt"), sitePythonRun("pip install --no-cache-dir mkdocs==1.6.1")},
 		},
 		{
 			// A library's documentation tool lives in a dependency group the
@@ -263,7 +263,7 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			files: map[string]string{"mkdocs.yml": "site_name: x\ntheme: material\n",
 				"pyproject.toml": "[project]\nname = \"lib\"\nversion = \"1.0\"\ndependencies = [\"requests>=2\"]\n\n[dependency-groups]\ndocs = [\"mkdocs-material>=9.5\"]\n",
 				"uv.lock":        "version = 1\n[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n[[package]]\nname = \"mkdocs-material\"\nversion = \"9.7.7\"\n"},
-			want:   []string{"RUN pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --frozen --all-groups --python /usr/local/bin/python\n", "RUN mkdocs build\n"},
+			want:   []string{sitePythonRun("pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --frozen --all-groups --python /usr/local/bin/python"), "RUN mkdocs build\n"},
 			absent: []string{"--no-dev", "mkdocs==1.6.1"},
 		},
 		{
@@ -271,7 +271,7 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			files: map[string]string{"mkdocs.yml": "site_name: x\n",
 				"pyproject.toml": "[tool.poetry]\nname = \"lib\"\n[tool.poetry.dependencies]\npython = \"^3.12\"\nrequests = \"^2\"\n[tool.poetry.group.docs.dependencies]\nmkdocs = \"^1.6\"\n",
 				"poetry.lock":    "[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n"},
-			want:   []string{"RUN pip install --no-cache-dir poetry==" + pythonPoetryRelease + " && poetry install --all-groups --no-root --no-interaction\n"},
+			want:   []string{sitePythonRun("pip install --no-cache-dir poetry==" + pythonPoetryRelease + " && poetry install --all-groups --no-root --no-interaction")},
 			absent: []string{"--only main", "mkdocs==1.6.1"},
 		},
 		{
@@ -279,19 +279,19 @@ func TestPythonAndDenoRecipesServeTheirSiteOutput(t *testing.T) {
 			files: map[string]string{"mkdocs.yml": "site_name: x\n",
 				"pyproject.toml": "[project]\nname = \"site\"\nversion = \"1.0\"\ndependencies = [\"mkdocs>=1.6\"]\n",
 				"uv.lock":        "version = 1\n[[package]]\nname = \"mkdocs\"\nversion = \"1.6.1\"\n"},
-			want:   []string{"RUN pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --locked --no-dev --python /usr/local/bin/python\n"},
+			want:   []string{sitePythonRun("pip install --no-cache-dir uv==" + pythonUVRelease + " && uv sync --locked --no-dev --python /usr/local/bin/python")},
 			absent: []string{"--all-groups", "mkdocs==1.6.1"},
 		},
 		{
 			name:  "mkdocs on its own theme installs PyMdown for pymdownx",
 			files: map[string]string{"mkdocs.yml": "site_name: x\nmarkdown_extensions:\n  - admonition\n  - pymdownx.superfences\n"},
-			want:  []string{"RUN pip install --no-cache-dir mkdocs==1.6.1 pymdown-extensions==10.21.3\n"},
+			want:  []string{sitePythonRun("pip install --no-cache-dir mkdocs==1.6.1 pymdown-extensions==10.21.3")},
 		},
 		{
 			name: "sphinx from what Read the Docs installs",
 			files: map[string]string{"docs/conf.py": "project = 'x'\n", "docs/index.rst": "x\n",
 				".readthedocs.yaml": "version: 2\nsphinx:\n  configuration: docs/conf.py\npython:\n  install:\n    - requirements: docs/requirements.txt\n    - method: pip\n      path: .\n      extra_requirements:\n        - docs\n"},
-			want: []string{"RUN pip install --no-cache-dir --requirement docs/requirements.txt\n", "RUN pip install --no-cache-dir '.[docs]'\n",
+			want: []string{sitePythonRun("pip install --no-cache-dir --requirement docs/requirements.txt"), sitePythonRun("pip install --no-cache-dir '.[docs]'"),
 				"RUN sphinx-build -b html docs docs/_build/html\n", "COPY --from=build /app/docs/_build/html/ /usr/share/nginx/html/\n"},
 		},
 		{

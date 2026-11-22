@@ -31,7 +31,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 
 ## Releases you can trust
 
-- Immutable releases, one-click rollback and health-gated cutover
+- Immutable releases, one-click rollback and health-gated cutover; each environment keeps the images of its live release and the five before it, and older ones are removed for you, never one a container still uses
 - Up to eight replicas of a stateless release behind one route, cut over and rolled back together
 - Canary releases: a new release takes a share of the requests beside the live one, read side by side, and is removed if it does worse or promoted when it does not
 - Skew protection: a visitor stays on the release that first answered them for the warm window after a cutover, so a page loaded before it never asks the new release for scripts it does not have
@@ -90,6 +90,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 ## Knowing what happened
 
 - Build logs, runtime, console, request logs and traffic alerts per project
+- A build says where its time went (install, compile, image export and how many steps were cached), and a run in flight how long runs like it usually take
 - A failed run named from its own output, and on request explained by your own model, secrets masked
 - An assistant on your own model, with a page of its own for each project and a chat for the whole server: ask it anything, as you would any assistant, with a screenshot pasted in if that says it better, and it reads your project's code, logs, requests, metrics and your databases, changes settings, domains and variables, runs backups and deploys, and reaches the rest of the dashboard, as you and with your whole role. It asks before changes unless you give it full access, every change is audited as the assistant's, secret values are masked before your model sees them, and each change comes with a shortcut to where it shows
 - Chats are saved: open one again later, from another browser or after a restart, and take over one still running in another tab

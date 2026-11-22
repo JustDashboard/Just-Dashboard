@@ -71,6 +71,9 @@ type Client struct {
 	hostMu     sync.Mutex
 	hostMemory int64
 	hostCPUs   int
+
+	// Which image store builds export into (build_export.go).
+	imageStore imageStoreReading
 }
 
 // HostCapacity is the memory and CPU this server has, as Docker sees it.

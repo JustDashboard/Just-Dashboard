@@ -107,7 +107,9 @@ step runs from the build's own layers: `.just-dashboard/Dockerfile.schema` is th
 cut at the build command's `RUN`, with the migration in its place, `ARG JD_SCHEMA_RUN` before it so it is
 never served from the cache, and the runtime values (with a release task's own `release_task` values)
 mounted as BuildKit secrets; it runs cache-only on the same builder, so every instruction before it is
-the cache the build just filled. A plan with a backup gate has the gate checked first. An environment
+the cache the build just filled. It is handed the build's own guard arguments (`JD_BUILD_VALUES_<n>`,
+[build values](recipes.md#build-values)) at the digests the build gave them, those its Dockerfile still
+declares, since a guard without its value would make the install and every step after it run again. A plan with a backup gate has the gate checked first. An environment
 that rehearses its migrations on a copy keeps that order instead — the rehearsal needs the built image
 — and the build's failure stands, naming what to change.
 
