@@ -918,6 +918,9 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 			project.seeds = withoutContextIgnored(filepath.Join(boundary, filepath.FromSlash(project.context)), project.member, project.seeds)
 			recipe.dotnet = project
 		}
+		// The files the restore copies first must be in the context
+		// whatever the repository's .dockerignore says.
+		recipe.nodeInputs = append(recipe.nodeInputs, project.restoreInputs...)
 		return recipe, nil
 	case "deno":
 		deno, err := selectDenoRecipe(boundary, root, config)

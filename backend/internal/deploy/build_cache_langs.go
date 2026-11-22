@@ -360,3 +360,71 @@ func jvmDependencyMounts(cache recipeCache, tool string) string {
 	}
 	return ""
 }
+
+// dotnetHTTPCache is NuGet's download cache in the SDK image, which runs as
+// root. The packages the restore extracts stay in the layer: publish runs
+// --no-restore and reads them there, so they must outlive any cache.
+const dotnetHTTPCache = "/root/.local/share/NuGet/http-cache"
+
+// dotnetRestoreInputs are the files dotnet restore reads, relative to the
+// build context, so the restore can run before the source is copied: every
+// project of the reference closure with its packages.lock.json, the
+// Directory.Build.props chain, Directory.Build.targets and
+// Directory.Packages.props that apply to it, global.json and the NuGet
+// configs. It is nil, and the restore stays after the source, when one of
+// them imports another file, a referenced project could not be read, or a
+// project commits its obj/ directory, which the source copy would land on
+// top of the restore's assets file.
+func dotnetRestoreInputs(boundary string, reader *dotnetReader, build dotnetBuild) []string {
+	files := []string{}
+	add := func(file string) bool {
+		content, ok := reader.files.read(file, 512<<10)
+		if !ok || strings.Contains(strings.ToLower(string(content)), "<import ") {
+			return false
+		}
+		files = append(files, file)
+		return true
+	}
+	read := map[string]bool{}
+	for _, project := range build.closure {
+		read[project.file] = true
+	}
+	for _, project := range build.closure {
+		for _, reference := range project.references {
+			if !read[cleanBuildPath(reference)] {
+				return nil
+			}
+		}
+		if !add(project.file) || pathExists(filepath.Join(boundary, filepath.FromSlash(project.dir)), "obj") {
+			return nil
+		}
+		if lock := joinRootDir(project.dir, "packages.lock.json"); reader.files.regular(lock) {
+			files = append(files, lock)
+		}
+		for _, props := range project.props {
+			if !add(props) {
+				return nil
+			}
+		}
+		for _, name := range []string{"Directory.Build.targets", "Directory.Packages.props"} {
+			if file := reader.nearestFile(project.dir, name); file != "" && !add(file) {
+				return nil
+			}
+		}
+	}
+	if len(build.closure) > 0 {
+		if file := reader.nearestFile(build.closure[0].dir, "global.json"); file != "" {
+			files = append(files, file)
+		}
+	}
+	files = append(files, build.nuget...)
+	inputs := make([]string, 0, len(files))
+	for _, file := range uniqueOrdered(files) {
+		input := relativeBuildPath(build.context, file)
+		if input == "" || !recipeCopyPathRE.MatchString(input) || strings.Contains(input, "..") {
+			return nil
+		}
+		inputs = append(inputs, input)
+	}
+	return inputs
+}

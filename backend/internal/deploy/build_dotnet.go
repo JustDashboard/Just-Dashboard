@@ -257,6 +257,9 @@ type dotnetProject struct {
 	// (recipe_runtime_files.go), relative to the project's directory.
 	seeds []string
 	spa   *dotnetSPA
+	// restoreInputs are the context files the restore reads, copied before
+	// the source (dotnetRestoreInputs); nil keeps the restore after it.
+	restoreInputs []string
 }
 
 // dotnetSPA is a front end the project's publish builds with a Node
@@ -312,6 +315,7 @@ func selectDotnetRecipe(boundary, root string, config BuildPlanConfig) (dotnetPr
 			return dotnetProject{}, fmt.Errorf("%w: the .NET recipe writes %q into the Dockerfile, and it holds characters it does not quote; rename it or use a Dockerfile", ErrUnsupportedBuilder, written)
 		}
 	}
+	project.restoreInputs = dotnetRestoreInputs(boundary, reader, build)
 	if chosen.spaRoot != "" {
 		spa, err := dotnetSPAInstall(boundary, build.context, chosen.spaRoot, config.TargetPlatform)
 		if err != nil {
@@ -420,20 +424,10 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, servi
 			}
 		}
 	}
-	lines = append(lines, "WORKDIR /src", "COPY . .")
-	if project.spa != nil && project.spa.install {
-		spaDir := "/src"
-		if project.spa.dir != "" {
-			spaDir += "/" + project.spa.dir
-		}
-		lines = append(lines, "WORKDIR "+spaDir, nodeRunWith(installSecrets, project.spa.plan.installDefaults(), project.spa.plan.installLine()))
-	}
+	lines = append(lines, "WORKDIR /src")
 	workdir := "/src"
 	if project.member != "" {
 		workdir += "/" + project.member
-	}
-	if workdir != "/src" || (project.spa != nil && project.spa.install) {
-		lines = append(lines, "WORKDIR "+workdir)
 	}
 	build := strings.TrimSpace(config.BuildCommand)
 	restore := "dotnet restore " + project.file
@@ -455,10 +449,40 @@ func renderDotnetDockerfile(project dotnetProject, config BuildPlanConfig, servi
 		native = " " + dotnetPublishDisabled
 		restore += native
 	}
+	// NuGet's download cache spares a changed project the packages the last
+	// restore downloaded; what it extracts stays in the layer for publish.
+	restore = "RUN " + config.cache.mount("nuget-http", dotnetHTTPCache) + installSecrets + restore
+	if len(project.restoreInputs) > 0 {
+		// The restore reads the project files alone, so it comes before the
+		// source and a commit that changes only code keeps it.
+		lines = append(lines, copyInputsTo("/src", project.restoreInputs)...)
+		if workdir != "/src" {
+			lines = append(lines, "WORKDIR "+workdir)
+		}
+		lines = append(lines, restore)
+		if workdir != "/src" {
+			lines = append(lines, "WORKDIR /src")
+		}
+		restore = ""
+	}
+	lines = append(lines, "COPY . .")
+	if project.spa != nil && project.spa.install {
+		spaDir := "/src"
+		if project.spa.dir != "" {
+			spaDir += "/" + project.spa.dir
+		}
+		lines = append(lines, "WORKDIR "+spaDir, nodeRunWith(installSecrets, project.spa.plan.installDefaults(), project.spa.plan.installLine()))
+	}
+	if workdir != "/src" || (project.spa != nil && project.spa.install) {
+		lines = append(lines, "WORKDIR "+workdir)
+	}
 	if build == "" {
 		build = "dotnet publish " + project.file + " -c Release --no-restore -o /out" + framework + native
 	}
-	lines = append(lines, "RUN "+installSecrets+restore, "RUN "+buildSecrets+build)
+	if restore != "" {
+		lines = append(lines, restore)
+	}
+	lines = append(lines, "RUN "+buildSecrets+build)
 	if project.kind == dotnetKindBlazorWasm {
 		output := strings.TrimSpace(config.OutputDirectory)
 		if output == "" {

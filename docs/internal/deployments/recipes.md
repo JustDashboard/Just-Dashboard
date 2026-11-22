@@ -2336,6 +2336,17 @@ Release --no-restore -o /out` in the project's own directory — where the dotne
 for a developer too — then checks `/out/<AssemblyName>.dll`, the assembly name resolved through the props.
 `dotnet_project_selected` names the project and the context.
 
+**Restore order and caches.** The restore runs before `COPY . .`, from the files it reads copied to their
+paths under `/src` (`dotnetRestoreInputs`, kept in the context whatever `.dockerignore` says): every
+project of the reference closure with its `packages.lock.json`, the `Directory.Build.props` chain,
+`Directory.Build.targets` and `Directory.Packages.props` that apply, `global.json` and the NuGet configs,
+so a commit that changes only code keeps the restored packages. It mounts NuGet's download cache
+(`/root/.local/share/NuGet/http-cache`), so a changed project downloads only new packages ([Dependency
+caches](#dependency-caches)); the packages it extracts stay in the layer, because publish runs
+`--no-restore` and must find them whatever the collector did to a cache. The restore stays after the
+source, as before, when one of those files `<Import>`s another file, a referenced project could not be
+read, or a project commits its `obj/`, which the source copy would land on the restore's assets file.
+
 **The release and the SDK.** The target comes from `<TargetFramework>` or the newest supported portable
 entry of `<TargetFrameworks>` (net8.0, net9.0 and net10.0); publish names it (`--framework`) when there are
 several. `build.dotnetVersion` chooses the release instead, and retargets a project that declares another,

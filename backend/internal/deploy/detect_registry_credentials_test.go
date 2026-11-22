@@ -134,7 +134,7 @@ func TestNuGetConfigCredentialsAreInstallVariables(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertCompiledDockerfile(t, prepared.DockerfilePreview, "RUN --mount=type=secret,id=ACME_FEED_TOKEN,env=ACME_FEED_TOKEN,required=true dotnet restore Api.csproj\n",
+	assertCompiledDockerfile(t, prepared.DockerfilePreview, " --mount=type=secret,id=ACME_FEED_TOKEN,env=ACME_FEED_TOKEN,required=true dotnet restore Api.csproj\n",
 		"RUN dotnet publish Api.csproj")
 	if !slices.ContainsFunc(api.Evidence, func(evidence DetectionEvidence) bool { return strings.Contains(evidence.Reason, "published from .") }) {
 		t.Fatalf("evidence = %+v", api.Evidence)

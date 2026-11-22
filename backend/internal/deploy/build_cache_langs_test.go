@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -305,4 +306,47 @@ func TestJVMBuildsCacheTheirDownloadsOutsideTheTree(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDotnetRestoresFromTheProjectFilesBeforeTheSource(t *testing.T) {
+	boundary := t.TempDir()
+	copyFrameworkFixture(t, "dotnet-solution", boundary)
+	detection, err := (Detector{}).DetectPath(t.Context(), boundary, SourceIdentity{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	candidate := selectedDetectionCandidate(&detection)
+	if candidate == nil || candidate.Recipe != "dotnet" {
+		t.Fatalf("candidate = %+v", candidate)
+	}
+	root := filepath.Join(boundary, filepath.FromSlash(candidate.Root))
+	config := BuildPlanConfig{Recipe: "dotnet", RootDirectory: candidate.Root}
+	cached, forced := prepareCachedAndForced(t, boundary, root, config)
+	nuget := cacheMountFor("nuget-http", "/root/.local/share/NuGet/http-cache")
+	restore := dockerfileLine(t, cached, "dotnet restore")
+	if !strings.HasPrefix(restore, "RUN "+nuget) {
+		t.Fatalf("restore = %q", restore)
+	}
+	for _, input := range []string{"Directory.Build.props", "Directory.Packages.props", "global.json", ".csproj"} {
+		assertBefore(t, cached, input, restore)
+	}
+	assertBefore(t, cached, restore, "COPY . .")
+	assertBefore(t, forced, "dotnet restore", "COPY . .")
+
+	// A project that imports a file of its own, or commits obj/, restores
+	// from its source as before.
+	project := dockerfileLine(t, cached, ".csproj /src/")
+	file := strings.Fields(project)[1]
+	content, err := os.ReadFile(filepath.Join(boundary, filepath.FromSlash(file)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeBuildFixture(t, boundary, file, strings.Replace(string(content), "</Project>", "<Import Project=\"build/common.props\" /></Project>", 1))
+	writeBuildFixture(t, boundary, "build/common.props", "<Project />")
+	cached, _ = prepareCachedAndForced(t, boundary, root, config)
+	assertBefore(t, cached, "COPY . .", "dotnet restore")
+	writeBuildFixture(t, boundary, file, string(content))
+	writeBuildFixture(t, boundary, path.Join(path.Dir(file), "obj/project.assets.json"), "{}")
+	cached, _ = prepareCachedAndForced(t, boundary, root, config)
+	assertBefore(t, cached, "COPY . .", "dotnet restore")
 }
