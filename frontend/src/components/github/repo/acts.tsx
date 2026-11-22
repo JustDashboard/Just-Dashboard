@@ -26,8 +26,8 @@ export function useRepoActs() {
     name: <span className="font-mono">{repo.fullName}</span>,
     facts: (
       <>
-        <FormFact>{repo.visibility}</FormFact>
-        {repo.archived && <FormFact>archived</FormFact>}
+        <FormFact label="Visibility">{repo.visibility}</FormFact>
+        {repo.archived && <FormFact label="State">archived</FormFact>}
       </>
     ),
   }
