@@ -86,6 +86,14 @@ var hubSessionRefused = []string{
 	"POST /api/v1/git/github/auth/configure",
 	"POST /api/v1/deploy/github-app/manifest",
 	"POST /api/v1/deploy/github-app/callback",
+	// The GitHub page: starting and finishing a sign-in, creating its App,
+	// deleting a repository on GitHub.
+	"POST /api/v1/github/app/manifest",
+	"POST /api/v1/github/callback",
+	"POST /api/v1/github/connections/authorize",
+	"POST /api/v1/github/connections/device",
+	"GET /api/v1/github/connections/device/{flow}",
+	"DELETE /api/v1/github/connections/{connection}/repos/{owner}/{repo}/",
 	// DNS credentials and TLS keys.
 	"POST /api/v1/certificates/dns-credentials",
 	"POST /api/v1/certificates/import",
