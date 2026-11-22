@@ -306,6 +306,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `pollLoop`, `PollPage` (type), `PollFailure` (type), `PollHandle` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/poll-loop.ts` | Fetches, then schedules the next fetch once the last settled. | keep |
 | `sharedPoll`, `createPollShare`, `forgetSharedPolls`, `releaseSharedPolls`, `FRESH_MS`, `KEEP_MS`, `NO_SHARED_ANSWER`, `SharedSnapshot` (type), `SharedReader` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/poll-share.ts` | One answer for every reader of a key, kept a while for whoever opens the page again. | keep |
 | `useAccountLink` | [Data and reads](../patterns/data-flow.md) | `hooks/use-account-link.ts` | This server's link to a just-dashboard.com account. | keep |
+| `useAppDomain`, `AppDomainControls` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-app-domain.ts` | This server's just-dashboard.com address, and claiming, releasing and issuing it. | keep |
 | `useArrivals` | [Data and reads](../patterns/data-flow.md) | `hooks/use-arrivals.ts` | The rows a poll just brought, for them to rise in (§11). | keep |
 | `useAuth`, `AuthProvider` | [Data and reads](../patterns/data-flow.md) | `hooks/use-auth.tsx` | The signed-in account and what it can do. | keep |
 | `useContainerLive`, `useContainerFrame`, `ContainerLive` (type) | [Data and reads](../patterns/data-flow.md) | `hooks/use-container-live.ts` | One container's stats socket as a reading and a rolling window, and its newest frame. | keep |
