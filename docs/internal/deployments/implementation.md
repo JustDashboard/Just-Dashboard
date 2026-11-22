@@ -791,6 +791,21 @@ only renderer/executor/validation authority for their feature.
   stored plain (`suppliedVariableSensitivity`); every other typed value is stored secret. Recipe and static builds write a
   generated `Dockerfile.dockerignore` beside the generated Dockerfile, so repository metadata and
   dashboard files stay out of the image whatever the repository's own ignore file says.
+- A Compose project's services are built and pulled a few at a time instead of one after another
+  (`compose_parallel.go`). Every service is checked first (its context, Dockerfile, arguments and
+  target), so a project that cannot build fails before anything runs. Then at most
+  `composeBuildParallelism` services run at once, a quarter of the cores and one per 2 GiB of memory,
+  between 1 and 3: BuildKit already parallelises one build's stages, so a second build mostly overlaps one
+  service's export and pulls with another's compile, and beyond that builds contend for the cores and
+  memory the server's own workloads use. Services start in the file's order. The transcript holds each
+  service's output whole and in the file's order (`orderedBuildOutput`): the first unfinished service
+  streams live, the others' lines are held (in memory up to 4 MiB each, then in a private temporary file
+  removed afterwards) and follow as soon as every service before them has finished, because each buildx
+  run numbers its steps from #1 and interleaved lines could not be read apart. The release's artifacts,
+  `ResolvedComposeSnapshot.Services` and `PreparedBuild.ComposeServices` are assembled in the file's
+  order. The first failure cancels the others; each service it stopped says `Stopped Compose service X:
+  service Y failed` after its own lines, and the error is Y's `ComposeServiceError`. Cancelling the run
+  cancels every build, and the executor records the cancellation as before.
 - Every build method's image reaches the daemon the same way (`dockerx/build_export.go`). On
   containerd's image store (`docker info` driver status `driver-type io.containerd.snapshotter.v1`, read
   once per process and not remembered when the daemon does not answer) buildx exports with
@@ -1314,7 +1329,8 @@ only renderer/executor/validation authority for their feature.
   runner, a Go or Python release the recipe offers, `NODE_OPTIONS` sized to three quarters of the
   server's memory, `prisma generate` before the build, the detected output directory. A Compose
   service's build is announced on the status stream so its steps are read apart and named with the
-  service; an image or Compose pull failure is named from the registry's error, including a refusal the
+  service: the collector keeps each service's lines apart (`buildOutputCollector.forService`), so the
+  service that failed is read from its own output wherever the transcript put it; an image or Compose pull failure is named from the registry's error, including a refusal the
   daemon returns before the pull's stream starts (`dockerx` prefixes it `pull image:` like one inside
   the stream; only an unreachable daemon keeps its own error). A base image that cannot be resolved
   keeps its cause (`registry_rate_limited`, `registry_unreachable` — DNS, TLS, refused and timed-out
