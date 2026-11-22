@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -389,4 +390,32 @@ func appDomainHookProblem(conf renewalConf, missing map[string]bool) string {
 		return "It renews through " + AppDomainHookBinary + ", which is missing where certbot runs. Run sudo ./scripts/manage.sh install-cli."
 	}
 	return ""
+}
+
+// DeleteAppDomainCertificate removes a handle's lineage once the server no
+// longer holds the handle, so certbot's timer stops trying to renew a name
+// the site will not prove for it. A lineage that is not there is no error.
+func (s *Service) DeleteAppDomainCertificate(ctx context.Context, handle string) error {
+	name := AppDomainLineage(handle)
+	if handle == "" || !certNameRe.MatchString(name) {
+		return fmt.Errorf("%q is not an app domain lineage", name)
+	}
+	if _, err := os.Stat(filepath.Join(letsencryptDir, "renewal", name+".conf")); errors.Is(err, os.ErrNotExist) {
+		return nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	release, err := HoldCertbot(ctx, "removing the certificate of a released just-dashboard.com address", nil)
+	if err != nil {
+		return err
+	}
+	defer release()
+	cmd, err := CertbotCommand(ctx, nil, "delete", "--cert-name", name, "--non-interactive")
+	if err != nil {
+		return err
+	}
+	if out, err := cmd.CombinedOutput(); err != nil {
+		return fmt.Errorf("certbot could not delete %s: %s", name, lastMeaningfulLine(string(out)))
+	}
+	return nil
 }
