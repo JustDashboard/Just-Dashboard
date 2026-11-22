@@ -2795,7 +2795,8 @@ own domains (a locale prefix, a login page, the https form of the same URL, a na
 domain), is followed on the candidate — at most four times; a redirect anywhere else is never requested
 and is reported with its origin.
 
-Budgets follow the start: 20 attempts 3 s apart by default; 40 for a JVM service (Java, Scala, Clojure) or a start command
+Budgets follow the start (the runner asks every 250 ms for the first ten seconds of that budget; see
+implementation.md): 20 attempts 3 s apart by default; 40 for a JVM service (Java, Scala, Clojure) or a start command
 that applies migrations (a detected schema step counts only when the start runs it, not beside a
 Procfile's web process that leaves it to a release task); 60 attempts 5 s apart for Wagtail's first migrations; 60 attempts 10 s apart
 when a Python application loads a model while it starts (`from_pretrained(`, `pipeline(`,

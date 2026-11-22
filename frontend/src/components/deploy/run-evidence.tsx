@@ -58,6 +58,7 @@ import {
   sourceProduct,
   type ReleaseNodeState,
 } from "@/components/deploy/vocabulary"
+import { checkAttemptCount } from "@/components/deploy/check-attempts-model"
 import { rehearsalOf, rehearsalSummary } from "@/components/deploy/rehearsal-model"
 import { replayOf, replaySummary } from "@/components/deploy/replay-model"
 
@@ -659,7 +660,7 @@ function CheckRow({ check }: { check: Json }) {
       {/* Which of a replicated release's containers was asked. */}
       {typeof check.replica === "number" && check.replica > 0 && <Tag>replica {check.replica}</Tag>}
       <span className="numeric ml-auto text-hint text-muted-foreground">
-        {plural(attempts.length, "attempt")}
+        {plural(checkAttemptCount(attempts), "attempt")}
         {typeof last?.statusCode === "number" && ` · ${last.statusCode}`}
         {typeof last?.durationMillis === "number" &&
           ` in ${formatDuration(last.durationMillis / 1000)}`}

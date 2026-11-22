@@ -1051,6 +1051,22 @@ only renderer/executor/validation authority for their feature.
   attempt ran out: a start command that failed before the server listened used to wait out forty
   attempts. A running container, a target without one and a backend that cannot read it keep the
   attempts as configured.
+- A check with an interval asks quickly at first (`checkPollWait`, `checks.go`): every 250 ms for the
+  first ten seconds, then at the configured interval, so an application that answers 3.2 s after it
+  starts is found then rather than on the 6 s tick. The waits still add up to `(attempts − 1) ×
+  interval`, so a check that never passes gives up when it always did, and it also stops by `attempts
+  × timeout + (attempts − 1) × interval`, inside the time Settings shows. An early wait is never shorter than the
+  attempt before it took, and attempts run one at a time, so an application that answers slowly is
+  never asked again before it has answered. A check without an interval runs its attempts back to back
+  as before. Readiness, smoke, public-route, wake and rollback checks and every replica share this
+  runner, and the crash-loop grace above is measured from the check's start as before. Evidence folds
+  repeats: an attempt that gives the same answer as the one before (outcome, code, status, address,
+  container state, exit code, restarts, output digest, redirect origin) is counted into the first of
+  its run (`repeats`, `lastNumber`, `spanMillis` from that attempt's start to the last one's end), and
+  the first attempt, the first of every distinct answer and the last attempt are always kept
+  (`collapseAttempts`). Failure messages and the run page count the folded attempts too
+  (`CheckEvidence.AttemptCount`, `checkAttemptCount`); evidence saved before folding counts one per
+  entry.
 - HTTP, TCP, Docker-health, command and public-route checks have closed configuration, per-attempt
   timeouts and bounded retries. Persisted evidence contains status/state/error codes and a digest of
   bounded command output, never response bodies, command output, URL credentials/queries or runtime
