@@ -397,7 +397,7 @@ test.describe("settings and the danger zone", () => {
     const form = page.getByRole("form", { name: "Repository settings" })
     await form.getByLabel("Description").fill("Orders, billing and refunds")
     await form.getByRole("switch", { name: "Wiki" }).click()
-    await expect(page.getByText("2 changes")).toBeVisible()
+    await expect(page.getByText("2 unsaved changes")).toBeVisible()
     await page.getByRole("button", { name: "Save", exact: true }).click()
     await expect
       .poll(() => mock.calls.find((c) => c.method === "PATCH")?.body)
