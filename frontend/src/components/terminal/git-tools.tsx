@@ -394,7 +394,7 @@ function PullList({
         className="m-3"
         icon={SourcePull}
         title="Not signed in to GitHub"
-        description="Sign in from the Git page and this repository's pull requests show up here."
+        description="Sign in from the Local Git page and this repository's pull requests show up here."
         action={
           <Button size="sm" variant="outline" asChild>
             <Link href={gitPage}>Open in Git</Link>

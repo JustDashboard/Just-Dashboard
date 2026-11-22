@@ -258,7 +258,7 @@ test.describe("the control center", () => {
     await page.getByRole("radio", { name: "Where it runs" }).click()
   })
 
-  test("the band reads where the bytes are, who is connected and how old each dump is, each database in its card's hue", async ({
+  test("each card draws its last hour in the database's own hue, and the identity line keeps the totals", async ({
     page,
   }) => {
     const server = await mockFleet(page, {
@@ -268,61 +268,14 @@ test.describe("the control center", () => {
     server.answer("GET /databases/1/stats/history", () => ({ body: sqlHour(3) }))
     server.answer("GET /databases/4/stats/history", () => ({ body: redisHour(2) }))
     await page.goto("/databases")
-    const band = page.locator("[data-slot=fleet-band]")
-    const names = (list: string) =>
-      band
-        .getByRole("list", { name: list })
-        .getByRole("link")
-        .evaluateAll((links) => links.map((link) => link.getAttribute("aria-label")))
 
-    // Largest first, the file weighed on disk among them.
-    await expect(band.getByRole("region", { name: "Storage" })).toContainText(/33\.6 MB\s*stored/)
-    expect(await names("Largest databases")).toEqual([
-      "Open shop",
-      "Open cache",
-      "Open blog",
-      "Open app",
-      "Open notes",
-    ])
+    // The band that split these across the databases is gone; the line says them once.
+    await expect(page.locator("[data-slot=fleet-band]")).toHaveCount(0)
+    await expect(identity(page)).toContainText("33.6 MB stored")
+    await expect(identity(page)).toContainText(/3 of 5 backed up in the last day/)
+    await expect(identity(page)).toContainText("1 never backed up")
 
-    // Busiest first, in the engine's own word, and a server that did not answer is
-    // counted apart rather than drawn as an empty span.
-    const sessions = band.getByRole("region", { name: "Sessions" })
-    expect(await names("Busiest databases")).toEqual(["Open app", "Open shop", "Open cache"])
-    await sessions.getByRole("link", { name: "Open cache" }).hover()
-    await expect(sessions.locator("[data-slot=bar-reading-line]")).toContainText(/3\s*clients/)
-    await expect(sessions).toContainText("1 server not answering")
-
-    // Never dumped first, then the oldest; a standing opens the dumps of the
-    // worst database in it, which its line names.
-    const backups = band.getByRole("region", { name: "Backups" })
-    await expect(backups).toContainText(/3\s*of 5 in the last day/)
-    await expect(backups.getByRole("img", { name: /^Backups: 1 never, .*3 today$/ })).toBeVisible()
-    expect(await names("Databases by last backup")).toEqual([
-      "Backups of cache",
-      "Backups of app",
-      "Backups of blog",
-    ])
-    const never = backups.getByRole("link", { name: "Backups of cache" })
-    await expect(never).toHaveAttribute("href", "/databases/4/backups")
-    const reading = backups.locator("[data-slot=bar-reading-line]")
-    await expect(reading).toContainText("cache")
-    await expect(reading.getByText("never backed up")).toHaveClass(/text-warning/)
-    await backups.getByRole("link", { name: "Backups of blog" }).hover()
-    await expect(reading).toContainText("3 today")
-    await expect(reading).toContainText("blog")
-    // Each standing is marked with the engine of the database its line names, as the
-    // other two blocks mark theirs: a bare count stood there and read as a stray digit.
-    const marks = backups.getByRole("list", { name: "Databases by last backup" })
-    await expect(marks.locator("img")).toHaveCount(3)
-    await expect(marks.locator("img").first()).toHaveAttribute("src", /redis/)
-    expect(await marks.getByRole("link").allTextContents()).toEqual(["", "", ""])
-
-    // One database, one hue: its span in the band is the line of its last hour on
-    // its card, and the card's edge carries none. The span holds the colour since the
-    // band's marks were drawn bare, without a rule in their part's colour under each.
-    const hue = (el: Element) => getComputedStyle(el).backgroundColor
-    const edge = async (name: string) =>
+    const stroke = async (name: string) =>
       card(page, name)
         .locator("[data-slot=fleet-trend] path[stroke]")
         .evaluate((line) => getComputedStyle(line).stroke)
@@ -336,45 +289,9 @@ test.describe("the control center", () => {
     await expect(card(page, "blog").locator("[data-slot=fleet-trend] svg")).toHaveCount(0)
     await expect(card(page, "app").locator("[data-slot=fleet-trend] svg")).toHaveCount(0)
     await expect(page.locator("[data-slot=fleet-size]")).toHaveCount(0)
-    const fills = band
-      .getByRole("region", { name: "Storage" })
-      .locator("[data-slot=reading-span] > i > i")
-    const key = (name: string) =>
-      band
-        .getByRole("region", { name: "Storage" })
-        .locator(`[data-slot=reading-span][title^="${name} holds "] > i > i`)
-        .evaluate(hue)
-    expect(await key("shop")).toBe(await edge("shop"))
-    expect(await key("cache")).toBe(await edge("cache"))
     await expect(page.locator("[data-slot=fleet-hue]")).toHaveCount(0)
-    // Five databases are five hues.
-    const edges = await fills.evaluateAll((spans) =>
-      spans.map((span) => getComputedStyle(span).backgroundColor),
-    )
-    expect(edges).toHaveLength(5)
-    expect(new Set(edges).size).toBe(5)
-
-    await band.getByRole("list", { name: "Largest databases" }).getByRole("link").first().click()
-    await expect(page).toHaveURL(/\/databases\/1$/)
-  })
-
-  test("every block of the band is one height, whatever it has to say", async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 900 })
-    // Nothing connected: Sessions says so in a line, beside two blocks with bars.
-    await mockFleet(page, {
-      fleet: Object.fromEntries([1, 2, 3, 4, 5].map((id) => [id, { sessions: 0 }])),
-    })
-    await page.goto("/databases")
-    const blocks = page.locator("[data-slot=fleet-band] [data-slot=bar-reading]")
-    await expect(blocks).toHaveCount(3)
-    await expect(page.getByRole("region", { name: "Sessions" })).toContainText(
-      "Nothing is connected to any database right now.",
-    )
-    await risen(page)
-    const heights = await blocks.evaluateAll((all) =>
-      all.map((block) => block.getBoundingClientRect().height),
-    )
-    expect(new Set(heights).size).toBe(1)
+    // Two databases, two hues.
+    expect(await stroke("shop")).not.toBe(await stroke("cache"))
   })
 
   test("what the attention list fixed is fixed from the database's own card", async ({ page }) => {
@@ -483,12 +400,10 @@ test.describe("the control center", () => {
     server.answer("GET /databases/backups/summary", () => ({ body: { connections: [] } }))
     await page.goto("/databases")
     await expect(page.locator("[data-card=database]")).toHaveCount(40)
-    // The band names five of each and counts the rest.
-    const band = page.locator("[data-slot=fleet-band]")
+    // The backups line names three of those no job dumps and counts the rest.
     await expect(
-      band.getByRole("list", { name: "Largest databases" }).getByRole("link"),
-    ).toHaveCount(5)
-    await expect(band.getByRole("region", { name: "Storage" })).toContainText("35 more databases")
+      page.locator("[data-slot=fleet-protection] [data-slot=reading-line]").first(),
+    ).toContainText(/and \d+ more/)
 
     // Nothing spills out of a card or the page, whatever the names and figures are.
     expect(

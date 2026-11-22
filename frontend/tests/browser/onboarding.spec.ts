@@ -70,7 +70,7 @@ test("a new account is asked what the server is for, and the answer shapes the s
   await expect(page.getByRole("button", { name: "Go to dashboard" })).toBeInViewport()
   expect(saved).toHaveLength(1)
   expect([...saved[0]].sort()).toEqual(
-    ["excalidraw", "files", "git", "network", "remote-desktop", "terminal"].sort(),
+    ["excalidraw", "files", "git", "github", "network", "remote-desktop", "terminal"].sort(),
   )
 
   await page.getByRole("button", { name: "Go to dashboard" }).click()
@@ -86,7 +86,7 @@ test("a new account is asked what the server is for, and the answer shapes the s
   ]) {
     await expect(rail(page).getByRole("link", { name: shown, exact: true })).toBeVisible()
   }
-  for (const hidden of ["Network", "Terminal", "Excalidraw", "Git"]) {
+  for (const hidden of ["Network", "Terminal", "Excalidraw", "Local Git", "GitHub"]) {
     await expect(rail(page).getByRole("link", { name: hidden, exact: true })).toHaveCount(0)
   }
   // Workspace held only hidden sections, so a label with nothing left under it

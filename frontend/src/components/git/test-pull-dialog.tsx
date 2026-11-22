@@ -232,7 +232,7 @@ export function TestPullDialog({
         {!live.headSha && (
           <FormNote tone="warning">
             The listing did not carry this pull request&apos;s head commit, so there is no exact
-            revision to build. Open it on the Git page to test it.
+            revision to build. Open it on the Local Git page to test it.
           </FormNote>
         )}
         {info && info.releaseTasks > 0 && (

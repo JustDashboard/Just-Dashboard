@@ -280,7 +280,7 @@ function CloneDialogBody({ open, onOpenChange, github, onDone }: CloneDialogProp
               />
             </Field>
             <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">
-              <Field label="Into" hint="One of the folders the Git page looks in.">
+              <Field label="Into" hint="One of the folders Local Git looks in.">
                 <Select value={destination} onValueChange={setParent}>
                   <SelectTrigger className="w-full font-mono">
                     <SelectValue

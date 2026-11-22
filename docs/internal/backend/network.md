@@ -653,8 +653,10 @@ a manager that sets the default route itself follows it.
 
 ### Host records
 
-Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` reaches the real host;
-bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
+Host records occupy a marked `/etc/hosts` block. In Docker, `/host/etc/hosts` reaches the real host
+for reading; a save is made in the server's mount namespace (`hostexec.OnServerPath`), because Docker's
+own hosts file is mounted over the server's in the backend's and the kernel refuses to rename over it
+there. Bytes outside the block, symlinks and permissions are preserved. Malformed ownership markers refuse
 writes. `POST /dns/hosts/preview` validates records as a save would and, changing nothing, returns the
 block it would write, added/removed records and overlaps: `duplicate` (same name and address twice in
 the block), `conflict` (one name, two addresses of a family in the block), `shadowed` (a line before the

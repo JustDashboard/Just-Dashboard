@@ -38,8 +38,17 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   sign-in for fifteen minutes. Regenerating recovery codes and turning two-factor off take the current
   password.
 - Capabilities are checked on every backend route, never in the UI alone.
-- Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout or a
-  host account's home, and uninstalling with a wipe, asks for a typed phrase checked on the server.
+- Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout, a
+  host account's home or a repository on GitHub, and uninstalling with a wipe, asks for a typed phrase
+  checked on the server.
+- The GitHub page acts on GitHub only as the person who connected their own GitHub account, through
+  this dashboard's own GitHub App (no personal access tokens). A connection is used only by the
+  dashboard account that made it, administrators included. The App's client secret and private key
+  and each connection's access and refresh tokens are sealed under the master key, never sent to a
+  browser, a log or the audit trail. A sign-in carries a single-use state bound to the account that
+  started it, and PKCE. A private clone gets a one-repository, read-only token through git's
+  environment, never its arguments or the checkout's configuration, and the token is revoked when the
+  clone ends. See [Connecting GitHub](docs/guides/github.md).
 - Every state-changing request lands in the audit log.
 - The Files page keeps the earlier contents of each file it saves over, so a save can be undone. They
   are copies of whatever those files held, `.env` files and keys included, kept under the data

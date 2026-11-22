@@ -75,7 +75,14 @@ A change that weakens any of these has to say so explicitly.
      `system.admin` on every `/logs` route that reads a source — except the whole journal
      (`journal:`), which stays `read` as it was before the gate; those lines are in it unfiltered, a
      known gap rather than the boundary
-     ([observability-security](../backend/observability-security.md))).
+     ([observability-security](../backend/observability-security.md)));
+   - `githubrepos.Store` and `api.resolveGitHubRepoAccess` for the GitHub page: every route reads a
+     connection through the signed-in account (`WHERE id = ? AND owner_user_id = ?`), so another
+     account's connection, an administrator's included, answers exactly as a missing one (the one
+     read of them all is forgetting the App, which only revokes and deletes them), and
+     `githubrepos.ComputeAbilities` refuses an operation the person's role on the repository or the
+     App's grant on the installation does not cover before GitHub is asked
+     ([github-page](../backend/github-page.md)).
 
    An API key can be narrowed to one capability, and that fails closed too. A key with a `scope`
    (today only `metrics.read`, made by `CreateScopedAPIToken`, always on the read-only role) is
@@ -543,7 +550,7 @@ either names a route the router does not refuse, or leaves one out:
 | Proxy basic-auth users | `POST /proxy/auth-files/`, `POST /proxy/import/npm`, `POST /proxy/import/npm/apply` |
 | Deployment secrets and saved credentials | `POST /deploy/`, `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
 | Deployment secret variables | `GET /deploy/{id}/env/reveal`, `GET /deploy/{id}/environments/{env}/variables/{name}/reveal`, `POST /deploy/{id}/environments/{env}/variables/{name}/generate`, `POST /deploy/{id}/environments/{env}/variables/{name}/rotate`, `GET /deploy/shared-variables/{name}/reveal`, `GET /deploy/{id}/shared-variables/{name}/reveal` |
-| Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account` |
+| Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account`, `POST /github/app/manifest`, `POST /github/callback`, `POST /github/connections/authorize`, `POST /github/connections/device`, `GET /github/connections/device/{flow}`, `DELETE /github/connections/{connection}/repos/{owner}/{repo}/` |
 | DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
 | Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `GET /network/vpn/wireguard/{iface}/peers/{id}/config`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |
 | Remote Desktop | `POST /remote-desktop/computers`, `PUT /remote-desktop/computers/{id}`, `POST /remote-desktop/computers/{id}/stream/pair` |
@@ -666,7 +673,7 @@ the owner signs it there before `JD_HUB_SIGNIN=true` is set on any server.
 
 ## Invariant 3: which routes take a typed phrase
 
-Typed confirmation is reserved for seven deletion operations:
+Typed confirmation is reserved for eight deletion operations:
 
 - Permanently deleting an archived deployment project (`DELETE /deploy/{id}/permanent`) requires the
   project's name. Archiving a project is reversible and uses ordinary confirmation.
@@ -686,6 +693,12 @@ Typed confirmation is reserved for seven deletion operations:
   the server's host name, because it removes every deployment with its managed volumes and paths and
   deletes the dashboard's database and the key it is sealed with. Uninstalling and keeping everything
   takes ordinary confirmation: running `install.sh` again restores the dashboard as it was.
+- Deleting a repository on GitHub from the GitHub page
+  (`DELETE /github/connections/{connection}/repos/{owner}/{repo}`) requires its full name,
+  `<owner>/<name>`, because GitHub removes the code, issues, pull requests and settings with it and
+  the dashboard holds no copy. It also needs the repository's `delete` ability (the person's admin
+  role there and the App's Administration grant), checked before GitHub is asked. Deleting a branch,
+  removing a collaborator and changing visibility keep ordinary confirmation.
 - Deleting a host account along with its home directory and no archive (`DELETE /system-users/{name}`
   with `home=delete`) requires the account's name, because what a person keeps in a home exists nowhere
   else. Its preview (`GET /system-users/{name}/removal`) counts it first. Keeping the home, or archiving
@@ -707,7 +720,7 @@ beside `total`, which is what its confirmation has to show. The Redis console's 
 like `DROP DATABASE` through the SQL query route, take the destructive capability and no phrase: a console
 is where an operator types the statement itself.
 
-The server enforces the seven phrases inside their handlers. The browser sends an
+The server enforces the eight phrases inside their handlers. The browser sends an
 `encodeURIComponent`-encoded value in `X-Confirm` with `X-Confirm-Encoding: uri`; the backend decodes
 it once, requires valid UTF-8, and compares the exact phrase. Legacy unencoded headers remain
 supported. Only the Compose WebSocket action accepts a phrase in a query parameter because browsers

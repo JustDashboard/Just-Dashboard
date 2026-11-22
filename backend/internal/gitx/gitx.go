@@ -971,11 +971,28 @@ func (s *Service) executeInput(ctx context.Context, dir string, timeout time.Dur
 func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Duration, input string, extra map[string]string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", args...)
-	cmd.Dir = dir
+	cmd := gitCommand(ctx, dir, extra, args...)
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
+	return cmd.CombinedOutput()
+}
+
+// gitCommand is every git this package runs: the safe environment below, the
+// caller's extra variables over it, and the checkout owner's account.
+func gitCommand(ctx context.Context, dir string, extra map[string]string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = gitEnvironment(extra, args...)
+	// A server's repositories usually belong to a service or login account,
+	// not to root. Running as that owner means git's "dubious ownership"
+	// refusal never arises, a fetch or checkout leaves correctly-owned files
+	// behind, and an ssh remote finds that account's keys rather than root's.
+	hostexec.AsOwner(cmd)
+	return cmd
+}
+
+func gitEnvironment(extra map[string]string, args ...string) []string {
 	// A prompt would hang the request forever: fail instead of asking. The
 	// terminal variable covers ssh, the git one covers credential helpers,
 	// and GIT_EDITOR=true is the editor that accepts whatever git proposes —
@@ -1016,13 +1033,7 @@ func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Durat
 		}
 		env = append(filtered, key+"="+value)
 	}
-	cmd.Env = env
-	// A server's repositories usually belong to a service or login account,
-	// not to root. Running as that owner means git's "dubious ownership"
-	// refusal never arises, a fetch or checkout leaves correctly-owned files
-	// behind, and an ssh remote finds that account's keys rather than root's.
-	hostexec.AsOwner(cmd)
-	return cmd.CombinedOutput()
+	return env
 }
 
 func nonEmptyLines(s string) []string {

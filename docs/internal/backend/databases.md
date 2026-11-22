@@ -1959,6 +1959,10 @@ ntfy, Gotify, Pushover and e-mail, through
 over. There is no second delivery system and no second poll: the server kinds are judged on the
 recorder's own thirty-second pass (`api/database_metrics.go` hands `dbAlerts.Evaluate` what it read),
 and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
+The control center's *Alerts* line (`components/database/fleet/fleet-protection.tsx`) reads every
+rule and the channels, and its *Turn on* creates the usual kinds as rules over every database
+(`connectionId: null`, no channels, each kind's defaults), skipping a kind that already has such a
+rule, paused or not.
 
 - **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
   database of an engine can be watched for, and the create route refuses a rule for one database

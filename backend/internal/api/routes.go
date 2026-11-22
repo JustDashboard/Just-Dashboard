@@ -175,6 +175,7 @@ func (s *Server) Routes() http.Handler {
 			s.mountBackupRoutes(r)
 			s.mountDeployRoutes(r)
 			s.mountJobRoutes(r)
+			s.mountGitHubPageRoutes(r)
 			s.mountRemoteDesktopRoutes(r)
 			s.mountMapRoutes(r)
 			s.mountCLIRoutes(r)

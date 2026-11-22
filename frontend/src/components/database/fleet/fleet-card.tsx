@@ -116,10 +116,12 @@ export function workPages(engine: Engine) {
  * facts an amber `staging` sat beside an amber "never backed up" and nobody
  * could tell which of them was the problem.
  *
- * The line of its last hour is drawn in the database's hue — the same as its
- * span on the band's bars and its key in a row there — so "the blue one is
- * shop" holds from the bar to the card. The card's edge carries no hue: the
- * operator found the coloured stripe down it noise rather than a reading.
+ * The line of its last hour is drawn in the database's own hue, dealt in the
+ * order the connections were saved, so five cards side by side are five
+ * colours; until 0.9.1 the band of storage, sessions and backups above the
+ * cards drew each database's spans in the same one. The card's edge carries
+ * no hue: the operator found the coloured stripe down it noise rather than a
+ * reading.
  */
 export function FleetCard({
   entry,

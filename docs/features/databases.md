@@ -2,7 +2,7 @@
 
 A control center for every database on the server, even the ones nothing has connected to yet.
 
-<a href="../readme/databases.png"><img src="../readme/databases.png" alt="Databases, with storage, sessions, backups and every database as a card"></a>
+<a href="../readme/databases.png"><img src="../readme/databases.png" alt="Databases, with whether each is backed up on a schedule and watched by an alert, and every database as a card"></a>
 
 <p align="center"><sub><b>Databases</b> — every engine on the server, each as itself</sub></p>
 
@@ -14,6 +14,7 @@ A control center for every database on the server, even the ones nothing has con
 - A PgBouncer connection pooler in front of PostgreSQL, started, stopped and removed with its database
 - Import from another server, kept current by logical replication on PostgreSQL until you cut over
 - Alerts when a database goes down, fills its disk, runs low on connections, lags or misses a backup
+- The Databases page says whether every database is backed up on a schedule and watched by an alert, and one press puts the rest on a nightly backup or turns alerts on for all of them
 
 ## Working in the data
 

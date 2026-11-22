@@ -14,7 +14,6 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -65,6 +64,10 @@ type Service struct {
 	// stack, because Docker mounts its own hosts and hostname files over
 	// the container's, and a write to those never reaches the server.
 	root string
+	// onServer runs a write of one of the server's files by a path that can
+	// replace it: hostexec.OnServerPath, since the files Docker mounts over
+	// are busy under /host too. Nil writes under root.
+	onServer func(real, mirrored string, write func(path string) error) error
 }
 
 // New returns the service for the server this process manages.
@@ -77,9 +80,10 @@ func New() *Service {
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {
 			return hostexec.CommandOnHost(ctx, name, args...).CombinedOutput()
 		},
-		has:     hostexec.AvailableOnHost,
-		current: hostexec.Hostname,
-		root:    root,
+		has:      hostexec.AvailableOnHost,
+		current:  hostexec.Hostname,
+		root:     root,
+		onServer: hostexec.OnServerPath,
 	}
 }
 
@@ -188,8 +192,7 @@ func (s *Service) set(ctx context.Context, name string) error {
 			return nil
 		}
 	}
-	file := filepath.Join(s.root, "/etc/hostname")
-	if err := writeKeeping(file, []byte(name+"\n")); err != nil {
+	if err := s.replace("/etc/hostname", []byte(name+"\n")); err != nil {
 		return errors.Join(managed, fmt.Errorf("write %s: %w", "/etc/hostname", err))
 	}
 	if err := s.command(ctx, "hostname", name); err != nil {

@@ -251,7 +251,7 @@ export function canTest(pull: Pick<GitPullRequest, "state" | "headSha">): boolea
 export function unavailableReason(info: Pick<ProjectPullRequests, "reason" | "repository">) {
   switch (info.reason) {
     case "sign_in_required":
-      return "Sign in to GitHub on the Git page to read this repository's pull requests."
+      return "Sign in to GitHub on the Local Git page to read this repository's pull requests."
     case "app_not_installed":
       return `Install the GitHub App on ${info.repository} to read its pull requests; the GitHub CLI is not installed on this host.`
     case "not_installed":

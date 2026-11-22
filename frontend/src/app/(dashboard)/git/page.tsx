@@ -213,7 +213,7 @@ export default function GitPage() {
     ) : (
       <Page fill="workspace">
         {/* Named while the list is read, as the workspace it opens on is. */}
-        <PageContext title="Git" />
+        <PageContext title="Local Git" />
         <LoadingPanel rows={8} />
       </Page>
     )
@@ -254,7 +254,7 @@ export default function GitPage() {
       }}
     >
       <Page rise>
-        <PageContext title="Git" />
+        <PageContext title="Local Git" />
 
         {selected && repos.data && !active && (
           <ErrorState
@@ -274,7 +274,7 @@ export default function GitPage() {
             products={["git"]}
             icon={GitHubMark}
             title="git is not installed on this host"
-            description="Repositories are read and changed with the server's own git. Once it is in, the ones under the configured roots appear here, and cloning one is a button."
+            description="Local Git reads and changes repositories with the server's own git. Once it is in, the ones under the configured roots appear here, and cloning one is a button."
             onInstalled={repos.refresh}
             phases={false}
           />

@@ -20,32 +20,7 @@ func TestCloneBranchDepthAndSparseAgainstGitDaemon(t *testing.T) {
 	git("add", "-A")
 	git("commit", "-qm", "feature files")
 	git("config", "uploadpack.allowFilter", "true")
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
-	port := listener.Addr().(*net.TCPAddr).Port
-	listener.Close()
-	cmd := exec.Command("git", "daemon", "--listen=127.0.0.1", fmt.Sprintf("--port=%d", port),
-		"--export-all", "--base-path="+filepath.Dir(dir), "--reuseaddr")
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = cmd.Process.Kill(); _ = cmd.Wait() })
-	address := fmt.Sprintf("127.0.0.1:%d", port)
-	ready := false
-	for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
-		conn, err := net.DialTimeout("tcp", address, 50*time.Millisecond)
-		if err == nil {
-			conn.Close()
-			ready = true
-			break
-		}
-		time.Sleep(20 * time.Millisecond)
-	}
-	if !ready {
-		t.Fatal("temporary git daemon did not start")
-	}
+	address := startGitDaemon(t, filepath.Dir(dir))
 	destination := t.TempDir()
 	s := New([]string{destination})
 	target, result, err := s.CloneWithOptions(context.Background(), destination,
@@ -70,6 +45,65 @@ func TestCloneBranchDepthAndSparseAgainstGitDaemon(t *testing.T) {
 	if err != nil || len(commits) != 1 {
 		t.Fatalf("depth: %+v, %v", commits, err)
 	}
+}
+
+// startGitDaemon serves base over git:// and answers its address. A free port
+// is found by listening and letting go, so another test's server can take it
+// before the daemon binds; the daemon then exits, a probe of the port reaches
+// that other server, and the clone fails as "Could not read from remote
+// repository". So the daemon counts as ready only while it is still running,
+// and a lost port is tried again with another.
+func startGitDaemon(t *testing.T, base string) string {
+	t.Helper()
+	for attempt := 0; attempt < 5; attempt++ {
+		listener, err := net.Listen("tcp", "127.0.0.1:0")
+		if err != nil {
+			t.Fatal(err)
+		}
+		port := listener.Addr().(*net.TCPAddr).Port
+		listener.Close()
+		cmd := exec.Command("git", "daemon", "--listen=127.0.0.1", fmt.Sprintf("--port=%d", port),
+			"--export-all", "--base-path="+base, "--reuseaddr")
+		if err := cmd.Start(); err != nil {
+			t.Fatal(err)
+		}
+		exited := make(chan struct{})
+		go func() { _ = cmd.Wait(); close(exited) }()
+		stop := func() {
+			_ = cmd.Process.Kill()
+			<-exited
+		}
+		address := fmt.Sprintf("127.0.0.1:%d", port)
+		ready := false
+		for deadline := time.Now().Add(3 * time.Second); time.Now().Before(deadline); {
+			select {
+			case <-exited:
+				deadline = time.Time{}
+				continue
+			default:
+			}
+			conn, err := net.DialTimeout("tcp", address, 50*time.Millisecond)
+			if err == nil {
+				conn.Close()
+				// The port answered; it is the daemon's only if the daemon
+				// is still there a moment later.
+				select {
+				case <-exited:
+				case <-time.After(100 * time.Millisecond):
+					ready = true
+				}
+				break
+			}
+			time.Sleep(20 * time.Millisecond)
+		}
+		if ready {
+			t.Cleanup(stop)
+			return address
+		}
+		stop()
+	}
+	t.Fatal("temporary git daemon did not start")
+	return ""
 }
 
 func TestSignatureReportsUncheckedAndTrustedSSHKeys(t *testing.T) {

@@ -25,6 +25,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gameserver"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/ghx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubapp"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/githubrepos"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostname"
@@ -250,6 +251,10 @@ type moduleSet struct {
 	// githubApp is the dashboard's own GitHub identity: one App, installed on
 	// the accounts whose repositories deploy here.
 	githubApp *githubapp.Service
+	// githubRepos is the GitHub page's repository App: a second App that
+	// acts as each person who connects an account, never as itself
+	// (handlers_githubrepos*.go, internal/githubrepos).
+	githubRepos *githubrepos.Service
 	// Upstream game-version metadata, behind one bounded client and a short
 	// cache so opening the wizard does not hammer somebody else's API.
 	gameVersions *gameserver.Adapter
@@ -456,6 +461,7 @@ func (s *Server) initModules() {
 		WithSecretStores(s.modules.secretStores)
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
+	s.modules.githubRepos = githubrepos.New(s.Store.DB, s.Sealer)
 	s.modules.deployAutomation = deploy.NewAutomationStore(s.Store, s.Sealer)
 	s.modules.deploySources = deploy.NewHostSourceAnalyzer(
 		s.Cfg.DeployRoots,

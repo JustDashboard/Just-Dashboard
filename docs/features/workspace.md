@@ -1,6 +1,6 @@
 # Workspace
 
-A real terminal, files, Git, drawings and your own computers, all in the same browser tab.
+A real terminal, files, Git on the server and on GitHub, drawings and your own computers, all in the same browser tab.
 
 <a href="../readme/terminal.png"><img src="../readme/terminal.png" alt="Two terminal panes side by side showing the state of a Compose stack"></a>
 
@@ -24,6 +24,17 @@ A real terminal, files, Git, drawings and your own computers, all in the same br
 - A full Git workspace: staging by line, history, branches, conflicts, PR reviews
 - GitHub, GitLab and Gitea pull requests and Actions logs, with the screenshots and videos a pull request embeds drawn in place
 - One pane at a time on a phone, with a bottom bar for changes, history, branches, GitHub and files
+
+## GitHub
+
+**Local Git** is the checkouts on this server; **GitHub** is the repositories on GitHub, through an
+App the dashboard sets up for itself and each person's own GitHub sign-in ([how to connect it](../guides/github.md)).
+
+- Every repository your accounts and organisations reach, with what the App was given on each installation, counts of public and private, search, filters by owner, language, visibility and archived, and sorting
+- New repositories with a README, a .gitignore template and a licence, under your account or an organisation
+- A page per repository: branches with their protection and rules, commits, pull requests with reviews and checks (merge, close, reopen), issues with labels, Actions (run a workflow with its inputs, re-run, cancel), collaborators and invitations, and its settings, archiving, visibility and deletion
+- Every control checks your role on the repository and what the App was granted, and says which is missing when it is off
+- Clone to server copies a repository into a Git root with a read-only token for that repository alone, and opens it in Local Git when it lands
 
 <table>
 <tr>

@@ -408,7 +408,7 @@ export function ProjectOverview() {
               info.checkoutPath
                 ? {
                     href: `/git?${new URLSearchParams({ repo: info.checkoutPath })}`,
-                    label: "Git page",
+                    label: "Local Git page",
                   }
                 : undefined
             }

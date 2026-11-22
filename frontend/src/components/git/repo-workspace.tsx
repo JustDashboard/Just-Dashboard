@@ -634,7 +634,7 @@ export function RepoWorkspace({
               className={cn(reading && "max-lg:hidden")}
               back={{
                 label: "Back to repositories",
-                hint: "Back to all repositories",
+                hint: "Back to Local Git",
                 onClick: onBack,
               }}
               heading={repo.name}

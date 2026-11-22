@@ -1735,7 +1735,7 @@ test("the overview lists the repository's pull requests with the preview built f
     // The panel replaced the read-only preview list; the previews are on the
     // rows of the pull requests they were built from.
     await expect(page.getByRole("heading", { name: "Preview environments" })).toHaveCount(0)
-    await expect(page.getByRole("link", { name: "Git page" })).toHaveAttribute(
+    await expect(page.getByRole("link", { name: "Local Git page" })).toHaveAttribute(
       "href",
       "/git?repo=%2Fsrv%2Fapi-production",
     )
@@ -2261,7 +2261,9 @@ test("a pull-request listing the server cannot answer hides the panel, and an un
   await page.goto("/deploy/7")
   await expect(page.getByRole("heading", { name: "Pull requests", exact: true })).toBeVisible()
   await expect(
-    page.getByText("Sign in to GitHub on the Git page to read this repository's pull requests."),
+    page.getByText(
+      "Sign in to GitHub on the Local Git page to read this repository's pull requests.",
+    ),
   ).toBeVisible()
   const list = page.getByRole("list", { name: "Pull requests" })
   const row = list.getByRole("listitem").filter({ hasText: "Add checkout retries" })
