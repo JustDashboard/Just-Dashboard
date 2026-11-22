@@ -81,7 +81,7 @@ func TestPHPExtensionsFromTheLockAndTheCode(t *testing.T) {
 	}))
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
 		"RUN install-php-extensions pdo_mysql pdo_pgsql mysqli opcache intl gd zip exif bcmath\n",
-		"RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist\n",
+		" composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-autoloader\n",
 	}, []string{"imaginary", "mbstring"})
 	facts := candidate.PHP
 	if facts == nil || facts.Lock != "read" || len(facts.Unsupported) != 1 || facts.Unsupported[0].Name != "imaginary" ||
@@ -195,7 +195,7 @@ func TestComposerLockStaleOrMissing(t *testing.T) {
 		t.Fatalf("lock facts = %+v", facts)
 	}
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
-		"RUN composer update --no-dev --optimize-autoloader --no-interaction --prefer-dist --with-all-dependencies monolog/monolog psr/container\n",
+		" composer update --no-dev --optimize-autoloader --no-interaction --prefer-dist --with-all-dependencies monolog/monolog psr/container\n",
 	}, []string{"composer install"})
 	for _, code := range []string{"composer_lock_missing_packages", "composer_lock_outdated", "composer_lock_dev_outdated"} {
 		if item := findingByCode(findings, code); item == nil || item.Severity != PreflightWarning {
@@ -413,7 +413,7 @@ func TestSymfonyProductionEnvironment(t *testing.T) {
 	})
 	assertDockerfile(t, prepared.DockerfilePreview, []string{
 		"ENV COMPOSER_ALLOW_SUPERUSER=1 LOG_CHANNEL=stderr APP_ENV=prod APP_DEBUG=0\n",
-		"RUN composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist\nRUN php bin/console tailwind:build --minify\nRUN php bin/console importmap:install\nRUN php bin/console asset-map:compile\n",
+		" composer install --no-dev --optimize-autoloader --no-interaction --prefer-dist\nRUN php bin/console tailwind:build --minify\nRUN php bin/console importmap:install\nRUN php bin/console asset-map:compile\n",
 	}, nil)
 	secret := slices.IndexFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == "APP_SECRET" })
 	uri := slices.IndexFunc(candidate.Variables, func(variable DetectedVariable) bool { return variable.Name == "DEFAULT_URI" })
@@ -627,7 +627,7 @@ func TestWordPressShapes(t *testing.T) {
 		!slices.ContainsFunc(candidate.PersistentPaths, func(state DetectedPersistentPath) bool { return state.Target == "/app/web/app/uploads" }) {
 		t.Fatalf("bedrock = %+v", candidate)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN composer install --no-dev"}, []string{"AS wordpress", "> wp-config.php"})
+	assertDockerfile(t, prepared.DockerfilePreview, []string{" composer install --no-dev"}, []string{"AS wordpress", "> wp-config.php"})
 }
 
 // Private Composer repositories need credentials the install receives as

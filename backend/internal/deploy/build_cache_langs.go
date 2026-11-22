@@ -465,3 +465,43 @@ func rubyBundleInputs(root string, recipe rubyRecipe) []string {
 // beside it: a gemspec, a path gem, another Gemfile evaluated into it, or a
 // file it reads or requires.
 var rubyGemfileReadsTheCheckout = regexp.MustCompile(`(?m)^\s*(?:gemspec\b|eval_gemfile\b|require_relative\b|load\b)|\bpath\s*(?::|=>)|\bFile\.|\bDir\.|__dir__|__FILE__|\bIO\.`)
+
+// phpComposerCache is where the recipe's Composer keeps downloaded
+// archives, named on each command so the image's HOME layout cannot move it.
+const phpComposerCache = "/root/.cache/composer"
+
+// phpComposerRun prefixes a Composer command with the mounted download
+// cache, or leaves it as it was on a forced build.
+func phpComposerRun(cache recipeCache, command string) string {
+	if !cache.enabled() {
+		return command
+	}
+	return cache.mount("composer", phpComposerCache) + "COMPOSER_CACHE_DIR=" + phpComposerCache + " " + command
+}
+
+// phpComposerInputs are the files a locked composer install reads with its
+// scripts and autoloader left for later: composer.json, composer.lock and a
+// committed auth.json. The install then runs before the source, and the
+// autoloader and the install scripts (Laravel's package:discover, Symfony's
+// auto-scripts) after it. It is nil, and the install stays after the
+// source as before, when the lock is updated in the build, for a WordPress
+// tree, and when the install itself reads the checkout: a path repository,
+// installer paths a plugin installs into, patches a plugin applies, or a
+// script on an event the split install would run without the source
+// (pre-install-cmd, a package's install or update).
+func phpComposerInputs(root string, recipe phpRecipe) []string {
+	if !recipe.composer || len(recipe.lockUpdate) > 0 || recipe.wordpress != "" || !regularExists(root, "composer.lock") {
+		return nil
+	}
+	manifest, err := readContainedRegular(root, "composer.json", 512<<10)
+	if err != nil || phpComposerReadsTheCheckout.Match(manifest) {
+		return nil
+	}
+	inputs := []string{"composer.json", "composer.lock"}
+	if regularExists(root, "auth.json") {
+		inputs = append(inputs, "auth.json")
+	}
+	return inputs
+}
+
+var phpComposerReadsTheCheckout = regexp.MustCompile(`"type"\s*:\s*"path"|"installer-paths"|"patches(?:-file)?"|"(?:pre-install-cmd|(?:pre|post)-package-(?:install|update))"`)

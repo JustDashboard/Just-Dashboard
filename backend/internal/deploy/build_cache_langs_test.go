@@ -380,3 +380,34 @@ func TestRubyInstallsTheBundleBeforeTheSource(t *testing.T) {
 		assertBefore(t, cached, "COPY . .", "bundle install")
 	}
 }
+
+func TestPHPInstallsLockedPackagesBeforeTheSource(t *testing.T) {
+	root := t.TempDir()
+	files := laravelTree(map[string]string{
+		"composer.json": `{"require":{"php":"^8.2","laravel/framework":"^12.0"},"scripts":{"post-autoload-dump":["@php artisan package:discover --ansi"]}}`,
+		"composer.lock": composerLockJSON(t, map[string]map[string]string{"laravel/framework v12.1.0": {"php": "^8.2"}}),
+	})
+	for name, content := range files {
+		writeBuildFixture(t, root, name, content)
+	}
+	config := BuildPlanConfig{Recipe: "php", StartCommand: "frankenphp php-server --root /app/public"}
+	cached, forced := prepareCachedAndForced(t, root, root, config)
+	composer := cacheMountFor("composer", "/root/.cache/composer") + "COMPOSER_CACHE_DIR=/root/.cache/composer "
+	assertGoDockerfile(t, cached, "COPY composer.json composer.lock /app/\nRUN "+composer+"composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-autoloader\nCOPY . .\n")
+	assertGoDockerfile(t, forced, "COPY composer.json composer.lock /app/\nRUN composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-autoloader\nCOPY . .\n")
+	// package:discover runs with the autoloader, once the source and the
+	// cache directories it writes are there.
+	assertBefore(t, cached, "bootstrap/cache database", "composer dump-autoload --no-dev --optimize")
+
+	manifest, err := os.ReadFile(filepath.Join(root, "composer.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, change := range []string{`"repositories": [{"type": "path", "url": "packages/*"}],`, `"extra": {"installer-paths": {"web/": ["type:x"]}},`, `"scripts": {"pre-install-cmd": "php check.php"},`} {
+		writeBuildFixture(t, root, "composer.json", strings.Replace(string(manifest), "{", "{"+change, 1))
+		cached, _ = prepareCachedAndForced(t, root, root, config)
+		if strings.Contains(cached, "--no-autoloader") || !strings.Contains(cached, composer+"composer install --no-dev --optimize-autoloader") {
+			t.Fatalf("%s installs before the source:\n%s", change, cached)
+		}
+	}
+}

@@ -2552,6 +2552,19 @@ dev bundles are `require-dev`, which `--no-dev` leaves out — and a runtime `AP
 wins; with `symfony/asset-mapper` (or `importmap.php`) the build runs `importmap:install` and
 `asset-map:compile`, after `tailwind:build --minify` or `sass:build` for the SymfonyCasts bundles.
 
+**Install order and caches.** With a current `composer.lock`, `vendor` installs the locked packages before
+`COPY . .`, from `composer.json`, `composer.lock` and a committed `auth.json` copied first
+(`phpComposerInputs`): `composer install --no-dev --no-interaction --prefer-dist --no-scripts
+--no-autoloader`, so a commit that changes only code keeps them. Once the source and Laravel's
+directories are there, `composer dump-autoload --no-dev --optimize` writes the autoloader and runs the
+`post-autoload-dump` scripts (Laravel's `package:discover`), and `composer run-script post-install-cmd
+--no-dev` the install's own scripts (Symfony's `auto-scripts`), with the install's secrets as before. The
+install stays after the source, as before, when the build updates the lock, for a WordPress tree, and when
+the install reads the checkout: a `path` repository, `installer-paths`, `patches`, or a `pre-install-cmd`
+or package-event script. Every Composer install or update mounts Composer's download cache
+(`COMPOSER_CACHE_DIR=/root/.cache/composer`, [Dependency caches](#dependency-caches)); the asset stage is
+the JavaScript recipe's.
+
 composer.lock is compared with composer.json as data. A `require` package the lock lacks (or that no
 locked package provides or replaces) is `composer_lock_missing_packages`, and one whose locked version no
 longer satisfies its constraint is `composer_lock_outdated` — both warnings, the Composer twin of the

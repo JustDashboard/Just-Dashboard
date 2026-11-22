@@ -937,6 +937,7 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		php.composerInputs = phpComposerInputs(root, php)
 		recipe := selectedRecipe{kind: "php", catalogueKey: "php", php: php}
 		if php.assets != "" {
 			recipe.nodeInputs = php.inputs
