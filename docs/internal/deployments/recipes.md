@@ -2103,6 +2103,21 @@ charges each `Cargo.lock` (read once per workspace, at most 8 MiB) to the same 1
 sources it reads; past it a lock is present but unread, and only the recipe, which reads it whole, acts on
 it.
 
+**Caches.** `cargo fetch` and the build mount Cargo's registry and git checkouts
+(`/usr/local/cargo/registry`, `/usr/local/cargo/git`) and the build mounts the target directory
+(`target/`, or `.cargo/config.toml`'s relative `target-dir`), so a commit recompiles the crates it changed
+and not every dependency ([Dependency caches](#dependency-caches)). A cached `target/` is empty to every
+later step, so the build step itself removes the last build's binary, runs the build command and copies
+the binary to `/out` — a custom build command still has to leave it where Cargo writes it. Leptos removes
+the binary, hash file and a site root inside `target/` the same way before `cargo leptos build`, so the
+image holds this build's hashed bundle alone, and caches cargo-leptos's downloaded tools
+(`/root/.cache/cargo-leptos`); Trunk caches its tools (`/root/.cache/trunk`) and writes the site to
+`/out/dist`, outside the cache. The Debian builds keep a target cache of their own (`cargo-target-debian`).
+What falls back: an install secret (a private registry's token) keeps the registry out of the cache, so the
+build, which has no token, finds every crate the fetch downloaded in the image; an absolute `target-dir`, or
+one that holds the crate, is not mounted. The dependency fetch stays after `COPY . .`: a workspace's members
+each have a manifest the fetch needs, and with the registry cached it downloads only what changed.
+
 **Memory.** The build runs as many compile jobs as whole gigabytes are free when it starts
 (`CARGO_BUILD_JOBS`, read from `/proc/meminfo` inside the step, so the Dockerfile is the same on every
 host), and `build_memory_low` estimates 2 GiB for a release build and 3 GiB with fat LTO, one codegen
@@ -2736,6 +2751,29 @@ else 8000), or on mist's own 4000 when nothing calls `mist.port`. mist 3 and lat
 `localhost` unless the builder calls `mist.bind`, and the Wisp examples do not: a module under `src/`
 that builds a mist server with no `mist.bind` anywhere is a certain loopback listen fact, so preflight's
 `listen_loopback` blocks with the fix (`|> mist.bind("0.0.0.0")`) before Deploy.
+
+## Dependency caches
+
+The language recipes install their dependencies before `COPY . .` wherever the inputs are known — a
+lockfile, a manifest, a requirements file — so a commit that changes only source reuses the install layer,
+and give package managers and compilers BuildKit cache mounts (`recipeCache.mount`,
+`build_cache_mounts.go`; the recipes' own in `build_cache_langs.go`), so a lockfile or source change starts
+from what the last build downloaded or compiled. Each recipe's section says what it copies first, what it
+caches and when it keeps the old order.
+
+- **Scope.** A mount's id is `jd-deployment-<environment>-<cache>`: one environment never reads another's
+  cache — not another project's, and not a preview's whose branch could seed production's.
+- **A forced build** (`no_cache`) renders no mount at all and builds from nothing, as before.
+- **Nothing ships.** A mount's content never reaches a layer, so a cache cannot carry files or a secret
+  into the image; whatever the image needs from a cached directory is copied out in the same step.
+- **Lost caches are cold builds.** Every tool treats its cache as disposable, and BuildKit's garbage
+  collector decides how long mounts live. Docker's default policy keeps cache mounts, build contexts and
+  Git checkouts 48 hours and 5 GiB together (`docker buildx inspect default`, its first rule), against
+  60 days for layers, so a project deployed less often than that, or many projects on one host, starts
+  cold. The daemon's configuration is the operator's; the recipes never change it.
+- **Install secrets.** A secret mapped to install still reaches each install step as a secret mount. Where
+  a later step without that secret would have to download again from a cache the collector emptied, the
+  recipe keeps the download in a layer instead (Rust's private registry crates).
 
 ## Readiness, workers and start commands
 
