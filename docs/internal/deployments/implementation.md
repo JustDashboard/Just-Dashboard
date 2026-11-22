@@ -785,7 +785,10 @@ only renderer/executor/validation authority for their feature.
   `docker save` writes as they are. On a classic graph driver BuildKit writes into the driver with
   nothing to compress, and the build keeps `--load`; the zstd output also works there, so a daemon that
   changed stores under a running dashboard still builds. The recorded digest is the exporter's
-  `containerimage.digest` from `--metadata-file` either way. The build's preview argv
+  `containerimage.digest` from `--metadata-file` either way. That file is written in a private
+  temporary folder (`os.MkdirTemp`, removed when the build returns), never in the build context: inside
+  it, it changed every user Dockerfile and Compose build's context, so `COPY . .` never reused its
+  cache, and an empty copy shipped in the image (`TestLiveUserDockerfileContextIsReusedUnchanged`). The build's preview argv
   (`buildPreviewArgv`) still reads `--load`: it is written before the daemon is asked.
   Recipe build scope now supplies values automatically, with explicit install-stage restrictions for
   package credentials and an `install_and_build` mapping that mounts one value in both RUN steps; a

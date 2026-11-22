@@ -118,16 +118,16 @@ func (c *Client) BuildImmutable(
 	if strings.TrimSpace(opts.Tag) == "" || strings.ContainsAny(opts.Tag, "\x00\r\n") {
 		return ImmutableImage{}, fmt.Errorf("a safe image tag is required")
 	}
-	metadata, err := os.CreateTemp(opts.Dir, ".just-dashboard-build-metadata-")
+	// buildx writes what it built into the metadata file. It lives in a
+	// private folder of its own, never in the build context: a file there
+	// changed every build's context, so a user Dockerfile's `COPY . .` never
+	// reused its cache, and an empty copy of it shipped in the image.
+	metadataDir, err := os.MkdirTemp("", "just-dashboard-build-metadata-")
 	if err != nil {
-		return ImmutableImage{}, err
+		return ImmutableImage{}, fmt.Errorf("create the build's metadata folder: %w", err)
 	}
-	metadataPath := metadata.Name()
-	if err := metadata.Close(); err != nil {
-		_ = os.Remove(metadataPath)
-		return ImmutableImage{}, err
-	}
-	defer os.Remove(metadataPath)
+	defer os.RemoveAll(metadataDir)
+	metadataPath := filepath.Join(metadataDir, "metadata.json")
 	opts.containerdStore = c.containerdImageStore(ctx)
 	args, environment, err := BuildxCommand(opts, metadataPath)
 	if err != nil {
