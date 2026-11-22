@@ -23,6 +23,7 @@ import { mockGitHubRepo } from "./github-repo-fixture"
 import { mockStacks } from "./stacks-fixture"
 import { mockDockerHost } from "./docker-fixture"
 import { mockSections } from "./deploy-section-fixture"
+import { mockGitHubPage } from "./github-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -551,6 +552,7 @@ const ITEM_SURFACES: [path: string, mock: (page: Page) => Promise<unknown>][] = 
   ["/databases/1/performance/tables/public.orders", (page) => mockDatabases(page, LABELLED)],
   ["/databases/1/performance/sessions/52", (page) => mockDatabases(page, LABELLED)],
   ["/github/northwind/api?account=1", (page) => mockGitHubRepo(page)],
+  ["/github", (page) => mockGitHubPage(page)],
 ]
 
 for (const [label, viewport] of [
@@ -1197,6 +1199,7 @@ const ARRIVING: [path: string, mock: (page: Page) => Promise<unknown>][] = [
   ],
   ["/network/dns", (page) => mockNetwork(page)],
   ["/network/interfaces", (page) => mockNetwork(page)],
+  ["/github", (page) => mockGitHubPage(page)],
 ]
 
 for (const [label, viewport] of [
@@ -1417,6 +1420,7 @@ const IDENTITY_SURFACES: [path: string, mock: (page: Page) => Promise<unknown>][
   ["/network/interfaces/ens3", (page) => mockNetwork(page)],
   ["/network/dns/services/dns-fixture", (page) => mockDNSServicePage(page)],
   ["/github/northwind/api?account=1", (page) => mockGitHubRepo(page)],
+  ["/github", (page) => mockGitHubPage(page)],
 ]
 
 const DESTRUCTIVE = /^(terminate|kill|delete|drop|remove|stop|uninstall|revoke|reset)\b/i

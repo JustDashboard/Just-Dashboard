@@ -7,6 +7,7 @@ edits its own section's file.
 | File | Route areas |
 | --- | --- |
 | [`workspace.md`](workspace.md) | `/hub/enter`, `/login`, `/welcome`, `/excalidraw`, `/remote-desktop`, `/dashboard/*`, `/account`, `/audit`, `/assistant`, `/files`, `/git`, `/logs`, `/terminal` |
+| [`github.md`](github.md) | `/github`, `/github/callback` (the list, setup and sign-in; a repository's own page is its lane's section there) |
 | [`host.md`](host.md) | `/`, `/map`, `/backups`, `/docker/*`, `/metrics`, `/packages`, `/processes/*`, `/system-users/*` |
 | [`databases.md`](databases.md) | `/databases` |
 | [`deploy.md`](deploy.md) | `/deploy` |
