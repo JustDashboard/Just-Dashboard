@@ -36,11 +36,15 @@ type DeploymentRoute struct {
 	Canary *DeploymentCanary `json:"canary,omitempty"`
 	// Skew keeps each visitor on the release that first answered them, by
 	// a cookie, while that release is still served.
-	Skew       *DeploymentSkew `json:"skew,omitempty"`
-	TLS        bool            `json:"tls,omitempty"`
-	CertPath   string          `json:"certPath,omitempty"`
-	KeyPath    string          `json:"keyPath,omitempty"`
-	ForceHTTPS bool            `json:"forceHttps,omitempty"`
+	Skew     *DeploymentSkew `json:"skew,omitempty"`
+	TLS      bool            `json:"tls,omitempty"`
+	CertPath string          `json:"certPath,omitempty"`
+	KeyPath  string          `json:"keyPath,omitempty"`
+	// Certificates are names among Domains served with a certificate other
+	// than CertPath: an app domain's wildcard beside the route's own
+	// certificate (app_domain_routes.go). ApplyDeploymentRoute fills it.
+	Certificates []RouteCertificate `json:"certificates,omitempty"`
+	ForceHTTPS   bool               `json:"forceHttps,omitempty"`
 	// BasicAuth puts a password in front of the route. Each entry is a user
 	// and a bcrypt hash, which is what both proxies read.
 	BasicAuth []BasicAuthUser `json:"basicAuth,omitempty"`
@@ -607,7 +611,11 @@ type DeploymentRouteResult struct {
 // bytes/link are restored and reloaded before the failure is returned.
 func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRoute) (DeploymentRouteResult, error) {
 	route = s.onDashboardName(route)
+	route = s.withAppDomainCertificates(ctx, route)
 	if err := validateDeploymentRules(route); err != nil {
+		return DeploymentRouteResult{}, err
+	}
+	if err := validateRouteCertificates(route, false); err != nil {
 		return DeploymentRouteResult{}, err
 	}
 	if edge, err := s.dockerCaddy(ctx); err != nil {
@@ -835,6 +843,11 @@ func (s *Service) ResolveDeploymentCertificate(ctx context.Context, domains []st
 		if pair, ok := s.caddyEvidenceForEach(ctx, domains); ok {
 			return pair.Path, pair.KeyPath, nil
 		}
+		// An app domain beside other names: its wildcard serves it, and
+		// the rest resolve alone (app_domain_routes.go).
+		if certPath, keyPath, split, err := s.resolveAroundAppDomains(ctx, domains); split {
+			return certPath, keyPath, err
+		}
 		return "", "", errors.New("no available certificate covers every deployment domain")
 	}
 	return pairs[0].Path, pairs[0].KeyPath, nil
@@ -982,6 +995,7 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		AllowFrom: append([]string{}, route.AllowFrom...), DenyFrom: []string{}, Locations: []SiteLocation{},
 		ClientMaxBody: deploymentBodyLimit(route),
 		HostRedirects: append([]HostRedirect(nil), route.Redirects...),
+		certGroups:    append([]RouteCertificate(nil), route.Certificates...),
 		deployment:    true,
 		dropCookies:   append([]string(nil), route.DropCookies...),
 	}

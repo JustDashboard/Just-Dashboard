@@ -134,6 +134,13 @@ type Config struct {
 	// until they say yes; off, nobody is asked and nothing is ever sent.
 	UsagePing bool
 
+	// AppDomains is JD_APP_DOMAINS: whether this server may hold an app
+	// domain, <app>.<handle>.<zone>, through its account link. On, nothing
+	// happens until an administrator claims a handle; off, the offer is
+	// gone, nothing about domains is ever sent to the site and no wildcard
+	// is issued for one. A handle already held is left as it is on the site.
+	AppDomains bool
+
 	// HubLink is whether this server may be connected to a Just Hub on its
 	// tailnet. Off, there is no discovery answer, no connect and no terminal
 	// command, and a link already made stays stored but idle. Independent of
@@ -203,6 +210,7 @@ func Load() (*Config, error) {
 		UpdateDir:        env("JD_UPDATE_DIR", ""),
 		AccountLink:      l.boolean("JD_ACCOUNT_LINK", true),
 		UsagePing:        l.boolean("JD_USAGE_PING", true),
+		AppDomains:       l.boolean("JD_APP_DOMAINS", true),
 		HubLink:          l.boolean("JD_HUB_LINK", true),
 		HubSignIn:        l.boolean("JD_HUB_SIGNIN", false),
 	}

@@ -35,6 +35,28 @@ is written to the audit log as the site account. Unlink from Settings, with
 the feature off entirely: no page controls, no installer question, no command, and a link that exists
 goes quiet. `JD_ACCOUNT_URL` names the site, an origin only (`http://` just for `localhost`).
 
+## App domains
+
+A linked server can hold one **handle** on just-dashboard.com, and every app it deploys can then have an
+address like `shop.acme.just-dashboard.com`, with HTTPS, and no DNS record or certificate to make for each
+one. Claim the handle under **Settings → just-dashboard.com link**: the site publishes `acme.just-dashboard.com`
+and `*.acme.just-dashboard.com` at this server's public IPv4 address, and the server issues one wildcard
+certificate for both through the site. **Claiming publishes this server's IP address in public DNS.**
+
+- New deployments are offered `<app>.<handle>.just-dashboard.com` by default (switch that off on the same card);
+  sslip.io and your own domains still work. An existing deployment gets it from **Settings → Domains**.
+- A handle is 3 to 20 lowercase letters, digits or dashes. The site keeps a released handle for the same
+  account for 30 days, and refuses reserved names.
+- The address follows the server's IP within 15 minutes. Release it from the same card once no deployment
+  uses it. Unlinking the server, or the site's administrators suspending the address, takes its records down;
+  deployments using it say so and leave the name out of their next release.
+- The wildcard renews on certbot's own timer through `jd app-domain challenge`, which needs the server to stay
+  linked. Your server's outbound and inbound IPv4 address must be the same (no NAT in between), and
+  `JD_ALLOWED_CIDRS` must keep `127.0.0.1/32`. Downgrading the dashboard below 0.9.1 breaks the renewal.
+- A deployment served through Cloudflare Tunnel is not offered one. `JD_APP_DOMAINS=false` switches the
+  feature off. The contract with the site is
+  [`app-domains-protocol.md`](https://github.com/JustDashboard/frontend/blob/main/docs/app-domains-protocol.md).
+
 ## Connecting to Just Hub
 
 A Just Hub is a separate app that runs on its own machine on your tailnet and shows many dashboards in one

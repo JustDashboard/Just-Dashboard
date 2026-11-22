@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/appdomain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/cftunnel"
@@ -102,6 +103,9 @@ type moduleSet struct {
 	// accountLink links this dashboard to a just-dashboard.com account. Nil in
 	// agent mode, where the only caller is the hub and nothing here applies.
 	accountLink *accountlink.Service
+	// appDomain is this server's just-dashboard.com address, held through
+	// the account link. Nil in agent mode, like accountLink.
+	appDomain *appdomain.Service
 	// hubLink connects this dashboard to a Just Hub on its tailnet: a second
 	// instance of the account link's engine that shares none of its state.
 	// Nil in agent mode, whose mTLS hub is a different thing.
@@ -518,7 +522,10 @@ func (s *Server) initModules() {
 		// and activation still resolves an already-existing pair; what this
 		// join adds is that the run asks for one before it starts anything,
 		// instead of reaching a cutover that has nothing to serve.
-		WithCertificateIssuer(auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}).
+		WithCertificateIssuer(appDomainCertificateIssuer{s: s, issuer: auditedCertificateIssuer{issuer: s.modules.proxy, record: s.Audit.Record}}).
+		// A name under a just-dashboard.com address this server no longer
+		// holds is left out of every step (deploy/app_domains.go).
+		WithAppDomains(appDomainNames{s: s}).
 		WithNotifications(s.modules.deployAutomation).
 		WithTailnetPublisher(s.modules.tailnet).
 		// A tailnet-only environment that names its visitors is gated by
@@ -633,7 +640,11 @@ func (s *Server) initAccountLink() {
 		Store: s.Store, Sealer: s.Sealer, Audit: s.Audit, Log: s.Log,
 		SiteURL: s.Cfg.AccountURL, Enabled: s.Cfg.AccountLink,
 		Host: newAccountHost(s), Version: version.Version,
+		// The site deletes a server's records when its link ends, so a
+		// handle it held is detached in the transaction that ends it.
+		Hooks: accountlink.Hooks{OnClear: appDomainOnClear},
 	})
+	s.initAppDomain()
 }
 
 // initUsagePing makes the optional daily count. JD_ACCOUNT_LINK=false turns it

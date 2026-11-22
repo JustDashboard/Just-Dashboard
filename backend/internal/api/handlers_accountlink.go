@@ -22,6 +22,9 @@ func (s *Server) mountAccountLinkRoutes(r chi.Router) {
 		// A heartbeat now changes nothing on this machine and nothing about who
 		// the link belongs to, so a key may ask for one.
 		r.Method(http.MethodPost, "/sync", s.handle(s.handleAccountLinkSync))
+		// The just-dashboard.com address held through the link
+		// (handlers_appdomain.go).
+		s.mountAppDomainRoutes(r)
 
 		r.Group(func(r chi.Router) {
 			r.Use(httpx.RequireSession)

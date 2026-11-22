@@ -71,6 +71,11 @@ Drafts (how a deployment is created)
   drafts ls | create | show ID | save ID FILE | detect ID | preflight ID | commit ID [--ack CODE] | rm ID
   A key narrowed to some deployments makes drafts of its own and reaches what it commits.
 
+Server hooks
+  app-domain challenge add|remove [--credentials FILE]
+                                certbot's hook for the just-dashboard.com address's certificate;
+                                reads CERTBOT_VALIDATION and CERTBOT_DOMAIN
+
 APP is a deployment's name or id. Commands that act on an environment take
 --env NAME|ID; without it they use the deployment's production environment.
 
@@ -231,6 +236,8 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 		})
 	case "source":
 		return a.nested("source", pre, rest, map[string]func([]string) error{"set": a.sourceSet})
+	case "app-domain":
+		return a.appDomain(pre, rest)
 	case "drafts", "draft":
 		return a.nested("drafts", pre, rest, map[string]func([]string) error{
 			"ls": a.draftsList, "list": a.draftsList, "create": a.draftsCreate, "show": a.draftsShow,

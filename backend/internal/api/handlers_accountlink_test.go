@@ -276,7 +276,8 @@ func TestLinkRoutesAreNotMountedWhereTheConnectorDoesNotExist(t *testing.T) {
 		})
 		return out
 	}
-	if got := routes(); len(got) != 6 {
+	// Six of the link's own and five of the just-dashboard.com address's.
+	if got := routes(); len(got) != 11 {
 		t.Fatalf("link routes = %v", got)
 	}
 	s.modules.accountLink = nil

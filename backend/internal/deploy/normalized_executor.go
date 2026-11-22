@@ -63,6 +63,9 @@ type NormalizedStepExecutor struct {
 	notifications *AutomationStore
 
 	certificates CertificateIssuer
+	// appDomains places names against the app domain this server holds
+	// (app_domains.go).
+	appDomains AppDomainNames
 	// prewarms are the certificate attempts build steps started in the
 	// background for their runs (certificate_prewarm.go).
 	prewarms certificatePrewarms

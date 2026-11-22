@@ -7,6 +7,11 @@ an administrator does it, and can be switched off outright with `JD_ACCOUNT_LINK
 `backend/internal/accountlink`; the Settings page is `frontend/src/app/(dashboard)/dashboard/link`
 ([feature map](../frontend/features/README.md)).
 
+**App domains** (`<app>.<handle>.just-dashboard.com`) are new signed paths on the same link, under their own
+contract, [`docs/app-domains-protocol.md`](https://github.com/JustDashboard/frontend/blob/main/docs/app-domains-protocol.md);
+`domain_test.go` carries its vectors. They are only ever sent on an active account link, and the account link's
+`OnClear` hook marks a held handle detached in the transaction that ends the link. See [app-domains.md](app-domains.md).
+
 **The wire contract is not in this repository.** The protocol is
 [`docs/server-link-protocol.md`](https://github.com/JustDashboard/frontend/blob/main/docs/server-link-protocol.md)
 in the site's repository, and both sides build to that one file, including its test vectors, which
@@ -103,6 +108,7 @@ its own transaction, finds nothing left to clear, so an unlink is recorded once,
 | `engine.go` | What another instance reads and sets: `Health`, `Fingerprint`, `SetIdle`, `RecordNode`, `RecordRequestNode`, test timings, and the signed strings and canonical arguments for another implementation's vector tests |
 | `status.go` | `Status`, the JSON `GET /dashboard/link` returns |
 | `siteurl.go` | `ParseSiteURL`, used by `config` and the terminal command |
+| `domain.go` | The app domain calls (`GetDomain`, `PutDomain`, `DeleteDomain`, `AddChallenge`, `RemoveChallenge`): signed on the active account link, decoded strictly, every refusal of the protocol's section 5 turned into a `DomainError` with a sentence for the operator ([app domains](app-domains.md)) |
 | `linkstub/` | A signature-less stand-in site for the tests of the packages that drive a link |
 
 Outside the package: `api/handlers_accountlink.go` (routes), `api/accountlink_host.go` (the `Host`
@@ -135,6 +141,13 @@ built, so a number is on disk before it is on the wire and the dashboard and a t
 handed the same one. Two of this process's own requests can still reach the site in the opposite order to the
 numbers they took; a `replayed_sequence` refusal has not been acted on, so the client takes a new number and
 sends it again (up to three times).
+
+The [app domain](app-domains.md) calls take their numbers from the same counter and share that retry; they are
+not serialised against the heartbeat or the poll. Every number is committed before it is used, so two senders
+never hold the same one, and a request refused with `replayed_sequence` was not acted on, so sending it again
+with a new number is the whole fix (`TestDomainCallsShareTheHeartbeatsSequenceWhileTheyRunTogether` runs twenty
+of each at once). A lock around sign-and-send would make a claim wait behind a command poll the site holds for
+most of a minute.
 
 `account_link_commands` (additive, invariant 8) records every command that passed its signature:
 `id` (the site's ULID, the primary key), `kind`, `received_at`, `status` (`running`, then `succeeded`, `failed`
@@ -303,6 +316,7 @@ optional fields are omitted, never `null`.
 | `DELETE /request` | session; `account.link.cancel` | Forget the pending request (`204`) |
 | `PUT /scope` `{scope}` | session; `account.link.scope` | Change the scope; the next heartbeat tells the site. `409 not_linked` |
 | `DELETE /` | session, `s.destructive`; `account.unlink` | Unlink (`204`). `409 not_linked` |
+| `GET /domain`, `PUT /domain`, `DELETE /domain`, `POST /domain/certificate`, `PUT /domain/settings` | claim session-only, release session-only and destructive | The just-dashboard.com address held through the link ([app-domains.md](app-domains.md#rest-api-apihandlers_appdomaingo)) |
 | `POST /sync` | | A heartbeat now, then the status. `409 not_linked`; `409 site_changed` when `JD_ACCOUNT_URL` is no longer the site the link was made with. Held to the site's four a minute: if the window is full no heartbeat is sent and the status comes back as it was |
 
 ## Terminal, installer, `manage.sh`

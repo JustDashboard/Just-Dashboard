@@ -2772,6 +2772,7 @@ export interface Healthcheck {
 /** api.hostnameSuggestion in the dashboard's source. */
 export interface HostnameSuggestion {
   address?: string
+  appDomain?: string
   base?: string
   certificateDnsProvider?: string
   certificateIssue?: string
@@ -3087,6 +3088,15 @@ export const Mode = {
   Full: "full",
 } as const
 export type Mode = (typeof Mode)[keyof typeof Mode]
+
+/** appdomain.Names in the dashboard's source. */
+export interface Names {
+  autoAssign?: boolean
+  base?: string | null
+  enabled?: boolean
+  status?: string | null
+  zone?: string | null
+}
 
 /** deploy.NotificationAttempt in the dashboard's source. */
 export interface NotificationAttempt {

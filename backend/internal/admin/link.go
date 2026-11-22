@@ -2,6 +2,7 @@ package admin
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"fmt"
 	"io"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/appdomain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
@@ -142,6 +144,12 @@ func runLink(ctx context.Context, st *store.Store, args []string, out, errOut io
 	svc := accountlink.New(accountlink.Options{
 		Store: st, Sealer: sealer, Audit: logger, Log: quiet,
 		SiteURL: env.siteURL, Enabled: env.enabled, Version: version.Version,
+		// As the running dashboard's link does: the site releases a
+		// server's handle when its link ends, so it is detached here in
+		// the transaction that ends it.
+		Hooks: accountlink.Hooks{OnClear: func(ctx context.Context, tx *sql.Tx) (func(), error) {
+			return nil, appdomain.DetachInTx(ctx, tx, time.Now().Unix())
+		}},
 	})
 	switch args[0] {
 	case "link":

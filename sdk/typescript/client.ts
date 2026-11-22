@@ -123,6 +123,7 @@ import type {
   MaintenanceSwitchRequest,
   ManifestRequest,
   ManifestStart,
+  Names,
   NotificationChannel,
   NotificationDelivery,
   NotificationWrite,
@@ -407,6 +408,24 @@ export class Client {
     const text = await response.text()
     return (text === "" ? undefined : JSON.parse(text)) as T
   }
+}
+
+/**
+ * appDomainNames is GET /deploy/app-domain: say whether this server holds a just-dashboard.com
+ * address, the zone it is under, and the base every app name under it ends in, so a deployment's
+ * names can be placed.
+ *
+ * A deploy key: allowed.
+ */
+export function appDomainNames(client: Client, options?: RequestOptions): Promise<Names> {
+  return client.request<Names>(
+    {
+      method: "GET",
+      path: `/deploy/app-domain`,
+      accept: "json",
+    },
+    options,
+  )
 }
 
 /**
@@ -1867,9 +1886,14 @@ export interface DeploymentHostnameQuery {
   hostname?: string
   /**
    * 1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check
-   * and no certificate here.
+   * and no certificate here, and never a just-dashboard.com address.
    */
   tunnel?: string
+  /**
+   * app-domain to ask for the just-dashboard.com address of the deployment name even when it is
+   * not the default.
+   */
+  method?: string
 }
 
 /**

@@ -78,10 +78,11 @@ func servesExplicitCertificate(route DeploymentRoute) bool {
 
 // certificateSourceFor is the source a route records, when it serves a copy.
 func certificateSourceFor(route DeploymentRoute) (dockerCaddyCertificateSource, bool) {
-	if !servesExplicitCertificate(route) {
+	certPath, keyPath, ok := route.copySource()
+	if !ok {
 		return dockerCaddyCertificateSource{}, false
 	}
-	return dockerCaddyCertificateSource{CertPath: route.CertPath, KeyPath: route.KeyPath}, true
+	return dockerCaddyCertificateSource{CertPath: certPath, KeyPath: keyPath}, true
 }
 
 // parseDockerCaddyCertificate reads the source a managed route recorded.

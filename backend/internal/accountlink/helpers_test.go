@@ -293,6 +293,9 @@ type fakeSite struct {
 	// hold is how long a command poll with nothing to deliver is held; 150 ms
 	// when unset.
 	hold time.Duration
+	// domain answers the app domain paths, once the request's signature has
+	// passed; it runs with f.mu held.
+	domain func(w http.ResponseWriter, r *http.Request, path string, body []byte)
 }
 
 func newFakeSite(t *testing.T, now time.Time) *fakeSite {
@@ -547,6 +550,8 @@ func (f *fakeSite) signed(w http.ResponseWriter, r *http.Request, body []byte, p
 			f.mu.Lock()
 		}
 		w.WriteHeader(http.StatusNoContent)
+	case strings.HasPrefix(path, "/domain") && f.domain != nil:
+		f.domain(w, r, path, body)
 	default:
 		apiError(w, 404, "not_found", path)
 	}

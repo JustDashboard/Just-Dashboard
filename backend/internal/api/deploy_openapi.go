@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/appdomain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/assistant"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
@@ -307,7 +308,8 @@ var deployOperations = map[string]deployOperation{
 		Note: "Answers 409 scanner_unavailable without Docker, no_release before the first release, and scanning_off when the terms turn it off or the environment is a preview."},
 
 	// Domains: what the public route serves.
-	"GET /deploy/hostname":                             {Tag: "domains", Summary: "Suggest a public hostname under this server's domain for a deployment name, and say whether the name is taken and how a certificate would cover it.", Query: []openapiQuery{{"name", "string", "The deployment's name to derive a hostname from."}, {"hostname", "string", "A hostname to check instead of deriving one."}, {"tunnel", "string", "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here."}}, Response: hostnameSuggestion{}},
+	"GET /deploy/hostname":                             {Tag: "domains", Summary: "Suggest a public hostname under this server's domain for a deployment name, and say whether the name is taken and how a certificate would cover it.", Query: []openapiQuery{{"name", "string", "The deployment's name to derive a hostname from."}, {"hostname", "string", "A hostname to check instead of deriving one."}, {"tunnel", "string", "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here, and never a just-dashboard.com address."}, {"method", "string", "app-domain to ask for the just-dashboard.com address of the deployment name even when it is not the default."}}, Response: hostnameSuggestion{}},
+	"GET /deploy/app-domain":                           {Tag: "domains", Summary: "Say whether this server holds a just-dashboard.com address, the zone it is under, and the base every app name under it ends in, so a deployment's names can be placed.", Response: appdomain.Names{}},
 	"GET /deploy/{id}/environments/{env}/maintenance":  {Tag: "domains", Summary: "Read the maintenance switch of an environment's public route.", Response: proxysvc.MaintenanceSwitch{}},
 	"PUT /deploy/{id}/environments/{env}/maintenance":  {Tag: "domains", Summary: "Switch an environment's maintenance page on or off; it acts at once.", Request: maintenanceSwitchRequest{}, Response: proxysvc.MaintenanceSwitch{}, Note: "Destructive, as stopping the application is. Who is let past is runtime.maintenance.bypassFrom in the configuration, applied by the next release."},
 	"GET /deploy/{id}/environments/{env}/pages/{page}": {Tag: "domains", Summary: "Read one of the route's own pages, the maintenance page or an error page, as every visitor is shown it.", Response: (*proxysvc.SitePage)(nil)},
