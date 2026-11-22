@@ -49,14 +49,32 @@ func renderElixirDockerfile(recipe elixirRecipe, config BuildPlanConfig, bases [
 	if recipe.node != nil {
 		lines = append(lines, recipe.node.copyLines()...)
 	}
-	lines = append(lines, "COPY . .")
 	fetch := "mix deps.get --only prod"
 	if recipe.locked {
 		// A mix.lock that no longer matches mix.exs is refused rather than
 		// re-resolved, like every other recipe's lockfile.
 		fetch += " --check-locked"
 	}
-	lines = append(lines, "RUN "+installSecrets+fetch, "RUN mix deps.compile")
+	dependencies := []string{"RUN " + elixirMixMounts(config.cache) + installSecrets + fetch, "RUN mix deps.compile"}
+	if len(recipe.mixInputs) > 0 {
+		// The dependencies come from mix.exs, mix.lock and the compile-time
+		// configuration alone, so they are fetched and compiled before the
+		// source and a commit that changes only code keeps them.
+		files := []string{}
+		for _, input := range recipe.mixInputs {
+			if strings.HasSuffix(input, "/") {
+				lines = append(lines, "COPY "+input+" /app/"+input)
+			} else {
+				files = append(files, input)
+			}
+		}
+		lines = append(lines, copyInputsTo("/app", files)...)
+		lines = append(lines, dependencies...)
+		lines = append(lines, "COPY . .")
+	} else {
+		lines = append(lines, "COPY . .")
+		lines = append(lines, dependencies...)
+	}
 	if recipe.aliases["assets.setup"] {
 		lines = append(lines, "RUN "+installSecrets+"mix assets.setup")
 	}

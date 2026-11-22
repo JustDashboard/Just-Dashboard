@@ -184,11 +184,11 @@ func TestDenoEntryCachedAfterTheBuild(t *testing.T) {
 	}) {
 		t.Fatalf("fresh 2 = %+v", candidate)
 	}
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\nRUN deno task build\nCMD "}, []string{"--entrypoint", "deno cache"})
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\nCOPY . .\nRUN deno task build\nCMD "}, []string{"--entrypoint", "deno cache"})
 
 	app := map[string]string{"deno.json": `{"tasks":{"build":"deno run -A gen.ts","start":"deno run -A main.ts"}}`, "main.ts": `import "./routes.gen.ts";`}
 	_, prepared, _ = denoPlan(t, app, nil)
-	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\nRUN deno task build\nRUN deno install --entrypoint main.ts\nCMD "}, nil)
+	assertDockerfile(t, prepared.DockerfilePreview, []string{"RUN deno install\nCOPY . .\nRUN deno task build\nRUN deno install --entrypoint main.ts\nCMD "}, nil)
 	app[".dvmrc"] = "1.46.3\n"
 	_, prepared, _ = denoPlan(t, app, nil)
 	assertDockerfile(t, prepared.DockerfilePreview, []string{"COPY . .\nRUN deno task build\nRUN deno cache main.ts\nCMD "}, []string{"deno install"})

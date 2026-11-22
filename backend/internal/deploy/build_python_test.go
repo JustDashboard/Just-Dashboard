@@ -261,7 +261,7 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 			files:  map[string]string{"requirements.txt": "Django==5.1.4\npsycopg2==2.9.10\nmysqlclient==2.2.6\n", "Aptfile": "libgl1\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn app.wsgi", SystemPackages: []string{"libgl1"}},
 			want: []string{"FROM python:3.13-slim-trixie@sha256:",
-				"RUN apt-get update && apt-get install -y --no-install-recommends default-libmysqlclient-dev gcc libc6-dev libgl1 libpq-dev pkg-config && rm -rf /var/lib/apt/lists/*\nCOPY . ."},
+				"RUN apt-get update && apt-get install -y --no-install-recommends default-libmysqlclient-dev gcc libc6-dev libgl1 libpq-dev pkg-config && rm -rf /var/lib/apt/lists/*\nCOPY requirements.txt /app/\n"},
 		},
 		{
 			name:   "psycopg 3 without its binary extra loads libpq",
@@ -285,13 +285,15 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 			name:   "freeze leftovers are rewritten",
 			files:  map[string]string{"requirements.txt": "flask==3.1.0\npywin32==306\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn app:app"},
-			want:   []string{"COPY . .\nRUN sed -i -E -e", " requirements.txt\nRUN pip install --no-cache-dir --requirement requirements.txt"},
+			want:   []string{"COPY . .\nRUN sed -i -E -e", " requirements.txt\nRUN --mount=type=cache,id=jd-test-pip,target=/root/.cache/pip,sharing=locked pip install --requirement requirements.txt\n"},
 		},
 		{
 			name:   "uv never downloads its own interpreter",
 			files:  map[string]string{"pyproject.toml": "[project]\nname = \"x\"\ndependencies = [\"fastapi\"]\n", "uv.lock": "[[package]]\nname = \"x\"\nversion = \"0\"\nsource = { virtual = \".\" }\ndependencies = [{ name = \"fastapi\" }]\n", ".python-version": "3.13.1\n"},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "uvicorn main:app"},
-			want:   []string{"ENV UV_PYTHON_DOWNLOADS=never", "uv sync --locked --no-dev --python /usr/local/bin/python", "RUN uv pip install --no-cache 'uvicorn[standard]==0.35.0'"},
+			want: []string{"ENV UV_PYTHON_DOWNLOADS=never", "uv sync --locked --no-dev --python /usr/local/bin/python", "COPY pyproject.toml uv.lock /app/\nRUN --mount=type=cache,id=jd-test-pip,target=/root/.cache/pip,sharing=locked --mount=type=cache,id=jd-test-uv,target=/root/.cache/uv,sharing=locked export UV_LINK_MODE=copy && pip install uv==" + pythonUVRelease + " && uv sync --locked --no-dev --no-install-project --python /usr/local/bin/python\nCOPY . .\n",
+				// The server comes after the last sync, which would remove it.
+				"--python /usr/local/bin/python\nRUN --mount=type=cache,id=jd-test-pip,target=/root/.cache/pip,sharing=locked --mount=type=cache,id=jd-test-uv,target=/root/.cache/uv,sharing=locked export UV_LINK_MODE=copy && uv pip install 'uvicorn[standard]==0.35.0'"},
 			absent: []string{"ENV UV_PYTHON="},
 		},
 		{
@@ -302,7 +304,7 @@ func TestPythonRecipeRendersSystemPackagesAssetsAndWorkspaces(t *testing.T) {
 				"package-lock.json": `{"name": "x", "lockfileVersion": 3, "packages": {"": {"devDependencies": {"tailwindcss": "3.4.17"}}, "node_modules/tailwindcss": {"version": "3.4.17"}}}`,
 			},
 			config: BuildPlanConfig{Method: BuildRecipe, Recipe: "python", StartCommand: "gunicorn site.wsgi"},
-			want:   []string{" AS assets\nWORKDIR /app\nCOPY --parents [\"package.json\",\"package-lock.json\",\"./\"]\nRUN npm ci\nCOPY . /app/\n", "RUN npm run build\nRUN rm -rf node_modules\nFROM python:3.13-slim-trixie", "COPY --from=assets /app /app\nRUN pip install"},
+			want:   []string{" AS assets\nWORKDIR /app\nCOPY --parents [\"package.json\",\"package-lock.json\",\"./\"]\nRUN npm ci\nCOPY . /app/\n", "RUN npm run build\nRUN rm -rf node_modules\nFROM python:3.13-slim-trixie", "COPY requirements.txt /app/\nRUN --mount=type=cache,id=jd-test-pip,target=/root/.cache/pip,sharing=locked pip install --requirement requirements.txt\nCOPY --from=assets /app /app\n"},
 			absent: []string{"\nCOPY . .\nRUN pip"},
 		},
 		{

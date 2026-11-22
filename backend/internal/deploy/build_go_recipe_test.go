@@ -128,7 +128,7 @@ func TestGoDependencySourcesDecideTheInstall(t *testing.T) {
 	writeBuildFixture(t, unsummed, "go.mod", "module example.com/app\n\ngo 1.26\n\nrequire github.com/go-chi/chi/v5 v5.2.1\n")
 	writeBuildFixture(t, unsummed, "main.go", "package main\nfunc main() {}\n")
 	prepared = prepareGo(t, unsummed, BuildPlanConfig{})
-	assertGoDockerfile(t, prepared.DockerfilePreview, "GOFLAGS=-mod=mod", "RUN go mod download")
+	assertGoDockerfile(t, prepared.DockerfilePreview, "GOFLAGS=-mod=mod", "RUN --mount=type=cache,id=jd-fixture-go-mod,target=/go/pkg/mod,sharing=locked go mod download")
 	_, candidate = detectGo(t, unsummed, "")
 	if item := findingByCode(goBuildFindings(candidate, PlanConfiguration{Build: BuildPlanConfig{Method: BuildRecipe}}, nil), "go_sum_missing"); item == nil || item.Severity != PreflightWarning {
 		t.Fatalf("go_sum_missing = %+v", item)
@@ -184,13 +184,13 @@ func TestGoTemplComponentsAreGeneratedBeforeTheBuild(t *testing.T) {
 	writeBuildFixture(t, root, "views/layout.templ", "package views\n")
 	writeBuildFixture(t, root, "views/layout_templ.go", "package views\n")
 	prepared := prepareGo(t, root, BuildPlanConfig{})
-	assertGoDockerfile(t, prepared.DockerfilePreview, "RUN GOFLAGS= go run github.com/a-h/templ/cmd/templ@v0.3.1020 generate\n")
+	assertGoDockerfile(t, prepared.DockerfilePreview, "RUN --mount=type=cache,id=jd-fixture-go-mod,target=/go/pkg/mod,sharing=locked --mount=type=cache,id=jd-fixture-go-build,target=/root/.cache/go-build,sharing=locked GOFLAGS= go run github.com/a-h/templ/cmd/templ@v0.3.1020 generate\n")
 	if strings.Index(prepared.DockerfilePreview, "templ@v0.3.1020 generate") > strings.Index(prepared.DockerfilePreview, "go build -trimpath") {
 		t.Fatal("templ generated after the build")
 	}
 	writeBuildFixture(t, root, "go.mod", "module example.com/goth\n\ngo 1.26\n\ntool github.com/a-h/templ/cmd/templ\n\nrequire github.com/a-h/templ v0.3.1020\n")
 	prepared = prepareGo(t, root, BuildPlanConfig{})
-	assertGoDockerfile(t, prepared.DockerfilePreview, "RUN go tool templ generate\n")
+	assertGoDockerfile(t, prepared.DockerfilePreview, "RUN --mount=type=cache,id=jd-fixture-go-mod,target=/go/pkg/mod,sharing=locked --mount=type=cache,id=jd-fixture-go-build,target=/root/.cache/go-build,sharing=locked go tool templ generate\n")
 	_, candidate := detectGo(t, root, "")
 	if candidate.Go == nil || candidate.Go.Codegen != "go tool templ generate" {
 		t.Fatalf("templ = %+v", candidate.Go)
@@ -213,7 +213,7 @@ func TestGoServerEmbeddingAFrontEndBuildsItFirst(t *testing.T) {
 	prepared := prepareGo(t, root, BuildPlanConfig{})
 	web := withoutNodeCacheMounts(prepared.DockerfilePreview[:strings.Index(prepared.DockerfilePreview, "AS build")])
 	assertGoDockerfile(t, web, "FROM node:22-alpine@sha256:", "AS web\n", "WORKDIR /app\nCOPY --parents [\"web/package.json\",\"./\"]\nWORKDIR /app/web\nRUN npm install --no-audit --no-fund\nCOPY . /app/\n", "npm run build")
-	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY --from=web /app/web/dist/ /src/web/dist/\nRUN go build")
+	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY --from=web /app/web/dist/ /src/web/dist/\nRUN --mount=type=cache,id=jd-fixture-go-mod,target=/go/pkg/mod,sharing=locked --mount=type=cache,id=jd-fixture-go-build,target=/root/.cache/go-build,sharing=locked go build")
 	detection, candidate := detectGo(t, root, "")
 	if selected := selectedDetectionCandidate(&detection); selected == nil || selected.ID != candidate.ID {
 		t.Fatalf("the embedded front end tied with its server: %+v", detection.Candidates)
@@ -271,7 +271,7 @@ func TestGoWorkspaceAndLocalReplacementsWidenTheBuildContext(t *testing.T) {
 	// go mod download fetches every requirement in a workspace, the sibling
 	// the go.work provides included, which no proxy has; listing the
 	// packages' imports fetches only what the build compiles.
-	assertGoDockerfile(t, prepared.DockerfilePreview, "COPY . .\nWORKDIR /src/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local\nRUN go list -e -deps ./... >/dev/null\n",
+	assertGoDockerfile(t, prepared.DockerfilePreview, "ENV CGO_ENABLED=0 GOTOOLCHAIN=local\nCOPY . .\nWORKDIR /src/api\nRUN --mount=type=cache,id=jd-t-go-mod,target=/go/pkg/mod,sharing=locked go list -e -deps ./... >/dev/null\n",
 		"COPY --from=build --chown=app:app /src/api/templates /home/app/templates")
 	if strings.Contains(prepared.DockerfilePreview, "go mod download") {
 		t.Fatalf("a workspace build downloads its sibling module:\n%s", prepared.DockerfilePreview)
@@ -293,7 +293,7 @@ func TestGoWorkspaceAndLocalReplacementsWidenTheBuildContext(t *testing.T) {
 	writeBuildFixture(t, nested, "shared/go.mod", "module example.com/shared\n\ngo 1.26\n")
 	prepared, err = NewArtifactBuilder(&artifactBackendFake{}).PrepareWithin(t.Context(), nested, nested+"/api",
 		BuildPlanConfig{Method: BuildRecipe, Recipe: "go", RootDirectory: "api"}, false, "t:1")
-	if err != nil || prepared.ContextDirectory != "." || !strings.Contains(prepared.DockerfilePreview, "WORKDIR /src/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local\n") {
+	if err != nil || prepared.ContextDirectory != "." || !strings.Contains(prepared.DockerfilePreview, "ENV CGO_ENABLED=0 GOTOOLCHAIN=local\nCOPY . .\nWORKDIR /src/api\n") {
 		t.Fatalf("go.work beside the module: %v %q\n%s", err, prepared.ContextDirectory, prepared.DockerfilePreview)
 	}
 
@@ -306,7 +306,8 @@ func TestGoWorkspaceAndLocalReplacementsWidenTheBuildContext(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	assertGoDockerfile(t, prepared.DockerfilePreview, "WORKDIR /src/services/api\nENV CGO_ENABLED=0 GOTOOLCHAIN=local GOWORK=off\nRUN go mod download\n")
+	assertGoDockerfile(t, prepared.DockerfilePreview, "ENV CGO_ENABLED=0 GOTOOLCHAIN=local GOWORK=off\nCOPY services/api/go.mod /src/services/api/\nCOPY libs/shared/go.mod /src/libs/shared/\n"+
+		"WORKDIR /src/services/api\nRUN --mount=type=cache,id=jd-t-go-mod,target=/go/pkg/mod,sharing=locked go mod download\nWORKDIR /src\nCOPY . .\nWORKDIR /src/services/api\n")
 	if prepared.ContextDirectory != "." {
 		t.Fatalf("context = %q", prepared.ContextDirectory)
 	}

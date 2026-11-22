@@ -564,6 +564,9 @@ type phpRecipe struct {
 	wordpress       string
 	wordpressSlug   string
 	wordpressConfig bool
+	// composerInputs are the files the install reads, copied before the
+	// source (phpComposerInputs); nil keeps the install after it.
+	composerInputs []string
 }
 
 // phpAssetStageTools are what the asset stage has beside Node, since it
@@ -799,6 +802,15 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 	}
 	lines = append(lines, "COPY --from=composer /usr/bin/composer /usr/bin/composer", "FROM php-base AS vendor")
 	working := recipe.working()
+	flags := " --no-dev --optimize-autoloader --no-interaction --prefer-dist"
+	if len(recipe.composerInputs) > 0 {
+		// The locked packages come from composer.json and composer.lock
+		// alone, so they install before the source and a commit that changes
+		// only code keeps them; the autoloader and the scripts need the
+		// source and run after it.
+		lines = append(lines, copyInputsTo("/app", recipe.composerInputs)...)
+		lines = append(lines, "RUN "+installSecrets+phpComposerRun(config.cache, "composer install --no-dev --no-interaction --prefer-dist --no-scripts --no-autoloader"))
+	}
 	if working != "" {
 		lines = append(lines, "COPY --from=wordpress /usr/src/wordpress /app", "COPY . "+working+"/")
 	} else {
@@ -815,19 +827,23 @@ func renderPHPDockerfile(recipe phpRecipe, config BuildPlanConfig, bases []Resol
 		lines = append(lines, "RUN if [ -d public ] && [ ! -e public/storage ]; then ln -s /app/storage/app/public public/storage; fi")
 	}
 	if recipe.composer {
-		flags := " --no-dev --optimize-autoloader --no-interaction --prefer-dist"
 		if working != "" {
 			flags += " --working-dir=" + working
 		}
 		switch {
+		case len(recipe.composerInputs) > 0:
+			// What composer install would have done next: the optimized
+			// autoloader, whose post-autoload-dump scripts run with it, then
+			// the post-install scripts, with the install's secrets as before.
+			lines = append(lines, "RUN "+installSecrets+"composer dump-autoload --no-dev --optimize --no-interaction && composer run-script post-install-cmd --no-dev --no-interaction")
 		case len(recipe.lockUpdate) == 1 && recipe.lockUpdate[0] == "*":
-			lines = append(lines, "RUN "+installSecrets+"composer update"+flags)
+			lines = append(lines, "RUN "+installSecrets+phpComposerRun(config.cache, "composer update"+flags))
 		case len(recipe.lockUpdate) > 0:
 			// composer.lock no longer matches composer.json for these
 			// packages; updating just them keeps every other locked version.
-			lines = append(lines, "RUN "+installSecrets+"composer update"+flags+" --with-all-dependencies "+strings.Join(recipe.lockUpdate, " "))
+			lines = append(lines, "RUN "+installSecrets+phpComposerRun(config.cache, "composer update"+flags+" --with-all-dependencies "+strings.Join(recipe.lockUpdate, " ")))
 		default:
-			lines = append(lines, "RUN "+installSecrets+"composer install"+flags)
+			lines = append(lines, "RUN "+installSecrets+phpComposerRun(config.cache, "composer install"+flags))
 		}
 	}
 	for _, command := range recipe.symfony {

@@ -283,7 +283,10 @@ func renderJavaDockerfile(recipe javaRecipe, config BuildPlanConfig, bases []Res
 	// Maven and Gradle resolve dependencies as the build runs rather than in
 	// a step of their own, so a registry credential mapped to the install
 	// reaches the build that downloads with it.
-	lines = append(lines, "RUN "+javaSecretMounts(config.Secrets)+build)
+	// The download caches spare a commit the dependencies Maven or Gradle
+	// fetched for the last one; the build reads and writes them in its one
+	// step, so a credential that fetched them is never needed again later.
+	lines = append(lines, "RUN "+jvmDependencyMounts(config.cache, project.tool)+javaSecretMounts(config.Secrets)+build)
 	lines = append(lines, javaArtifactLines(recipe)...)
 	lines = append(lines,
 		"FROM "+immutableImageReference(bases[1]),

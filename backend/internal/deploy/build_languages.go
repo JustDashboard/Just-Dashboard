@@ -25,17 +25,25 @@ func selectLanguageRecipe(root, kind string, config BuildPlanConfig) (selectedRe
 		if node := recipe.language.ruby.node; node != nil {
 			recipe.nodeInputs = node.inputs
 		}
+		if err == nil {
+			recipe.language.ruby.bundleInputs = contextKeeps(root, kind, recipe.nodeInputs, rubyBundleInputs(root, recipe.language.ruby))
+		}
 	case "elixir":
 		recipe.language.elixir, err = selectElixirRecipe(root, config)
 		if node := recipe.language.elixir.node; node != nil {
 			recipe.nodeInputs = node.inputs
 		}
+		if err == nil {
+			recipe.language.elixir.mixInputs = contextKeeps(root, kind, recipe.nodeInputs, elixirMixInputs(root, recipe.language.elixir))
+		}
 	case "scala", "clojure":
 		recipe.language.jvm, err = selectJVMLanguageRecipe(root, kind)
 	case "dart":
 		recipe.language.dart, err = selectDartRecipe(root, config)
+		recipe.language.dart.pubInputs = contextKeeps(root, kind, nil, dartPubInputs(root))
 	case "gleam":
 		recipe.language.gleam, err = selectGleamRecipe(root)
+		recipe.language.gleam.depsInputs = contextKeeps(root, kind, nil, gleamDepsInputs(root))
 	default:
 		return selectedRecipe{}, fmt.Errorf("%w: no supported automatic recipe was selected", ErrUnsupportedBuilder)
 	}

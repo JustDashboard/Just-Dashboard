@@ -931,11 +931,17 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if mainErr != nil {
 			return selectedRecipe{}, mainErr
 		}
-		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
-			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir}
+		var frontendInputs []string
 		if stage := build.frontend; stage != nil {
-			recipe.nodeInputs = stage.inputs
+			frontendInputs = stage.inputs
 		}
+		contextRoot := root
+		if build.context.dir != "" {
+			contextRoot = filepath.Join(boundary, filepath.FromSlash(build.context.dir))
+		}
+		build.downloadInputs = contextKeeps(contextRoot, "go", frontendInputs, goModuleInputs(boundary, root, build))
+		recipe := selectedRecipe{kind: "go", catalogueKey: "go", mainPackage: main, goVersion: choice.version, goChoice: choice, goBuild: build,
+			runtimeAssets: compiledRuntimeAssets(root, ".go"), emptyDotenv: dotenvFileRequired(root, "go"), contextDir: build.context.dir, nodeInputs: frontendInputs}
 		return recipe, nil
 	case "python":
 		if strings.TrimSpace(config.OutputDirectory) != "" {
@@ -1001,6 +1007,7 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
+		deno.installInputs = contextKeeps(root, "deno", nil, denoInstallInputs(root, deno))
 		recipe := selectedRecipe{kind: "deno", catalogueKey: "deno", deno: deno}
 		if strings.TrimSpace(config.OutputDirectory) != "" {
 			recipe.serving = readStaticServing(boundary, root, config, "", "")
@@ -1011,15 +1018,21 @@ func selectRecipe(boundary, root string, config BuildPlanConfig) (selectedRecipe
 		if err != nil {
 			return selectedRecipe{}, err
 		}
-		recipe := selectedRecipe{kind: "php", catalogueKey: "php", php: php}
+		recipe := selectedRecipe{kind: "php", catalogueKey: "php"}
 		if php.assets != "" {
 			recipe.nodeInputs = php.inputs
 		}
+		php.composerInputs = contextKeeps(root, "php", recipe.nodeInputs, phpComposerInputs(root, php))
+		recipe.php = php
 		return recipe, nil
 	case "site":
 		site, err := selectSiteRecipe(boundary, root, config)
 		if err != nil {
 			return selectedRecipe{}, err
+		}
+		site.bundleInputs, site.bundleFirst = jekyllBundleInputs(root, site)
+		if kept := contextKeeps(root, "site", site.nodeInputs, site.bundleInputs); kept == nil && site.bundleInputs != nil {
+			site.bundleInputs, site.bundleFirst = nil, false
 		}
 		return selectedRecipe{kind: "site", catalogueKey: "site:" + site.generator.name, site: site,
 			nodeInputs: site.nodeInputs, serving: readStaticServing(boundary, root, config, "", "")}, nil

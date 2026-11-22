@@ -36,6 +36,9 @@ const mistDefaultPort = 4000
 
 type gleamRecipe struct {
 	locked bool
+	// depsInputs are what gleam deps download reads, copied before the
+	// source (gleamDepsInputs); nil keeps the download after it.
+	depsInputs []string
 }
 
 // gleamProject is what the recipe and detection read from a gleam.toml root.
@@ -199,11 +202,14 @@ func renderGleamDockerfile(recipe gleamRecipe, config BuildPlanConfig, bases []R
 	if err != nil {
 		return nil, err
 	}
-	lines := []string{
-		"FROM " + immutableImageReference(gleam) + " AS build",
-		"WORKDIR /app",
-		"COPY . .",
-		"RUN " + installSecrets + "gleam deps download",
+	lines := []string{"FROM " + immutableImageReference(gleam) + " AS build", "WORKDIR /app"}
+	if len(recipe.depsInputs) > 0 {
+		// The packages come from gleam.toml and manifest.toml alone, so they
+		// are downloaded before the source and a commit that changes only
+		// code keeps them.
+		lines = append(append(lines, copyInputsTo("/app", recipe.depsInputs)...), "RUN "+installSecrets+"gleam deps download", "COPY . .")
+	} else {
+		lines = append(lines, "COPY . .", "RUN "+installSecrets+"gleam deps download")
 	}
 	if command := strings.TrimSpace(config.BuildCommand); command != "" {
 		lines = append(lines, "RUN "+buildSecrets+command)
