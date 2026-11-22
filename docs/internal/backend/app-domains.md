@@ -16,7 +16,9 @@ side is `deploy/app_domains.go` and `api/handlers_deploy_hostname.go`.
 in the site's repository, an extension of the [link protocol](account-link.md). `accountlink/domain_test.go`
 carries its signed-request vectors (`GET /domain`, `PUT /domain`, `POST /domain/challenges`).
 
-It is optional and off until an administrator claims a handle. `JD_APP_DOMAINS=false` switches it off
+It is optional. Nothing is claimed until a person chooses a handle: on just-dashboard.com, on the link's
+approval page or the server's page there (an **offer**, which the server then claims by itself), or on the
+Settings card here. `JD_APP_DOMAINS=false` switches it off
 entirely (and `JD_ACCOUNT_LINK=false` with it): nothing about domains is sent, no wildcard is issued, the hook
 is refused, and every name under the zone is treated as not this server's.
 
@@ -60,7 +62,29 @@ One loop, through `safego`, started with the account link and only when the feat
   `appdomain.DetachInTx` in the transaction that ends it (the running dashboard's link and `--admin unlink`
   both carry the hook). A link found missing by the loop is detached too.
 
-Nothing else changes by itself.
+Nothing else changes by itself, except the claim of an offer below.
+
+## Claiming at link time (offers)
+
+The person approving the link on just-dashboard.com can give the server an address there, prefilled with a
+free handle made from the account's name; the server's page on the site can do the same later. That choice
+is an **offer**: `GET /domain` answers `offer: "<handle>"` (or `null`) beside `domain`, never both set
+(`accountlink.DomainInfo.Offer`, decoded strictly: a string that is not a handle, or one beside a domain,
+is a protocol error). An offer reserves nothing. The site clears it once the server's domain is active, on
+`DELETE /domain` (so a released address is not claimed straight back), when the server is removed, and when
+the owner clears it.
+
+`autoClaim` claims it with the ordinary signed `PUT /domain` from the server's own address, exactly as the
+Claim button does, and so issues the wildcard, when the feature is on, the stored link is active, the site
+says `available`, the server holds no domain (none, or a detached one) and the site named an offer. It is
+checked wherever `GET /domain` is asked: at start-up, hourly, when the Settings card asks (at most once a
+minute), and right after a link is approved. That last one is the account link's `OnClear` hook, which runs in
+the transaction that starts a link, followed once it commits by `Service.LinkChanged`; a link made by
+`--admin link` in another process is found by the loop's look at the stored link every 30 seconds. One claim
+runs at a time. A failure keeps its sentence (`offerError`, shown on the card) and the same handle is not tried
+again for an hour (the site allows ten `PUT`s an hour per server and five new handles a day per account); the
+Claim button is never held back. Each automatic claim is audited as `app.domain.claim` by `system` with
+`automatic: true`. `JD_APP_DOMAINS=false` ignores offers.
 
 ## REST API (`api/handlers_appdomain.go`)
 
@@ -80,7 +104,10 @@ site not asked or not reachable), `zone`, `reason`, `publicAddress`, `autoAssign
 `wildcard`, `address`, `status`, `reason`, `updatedAt`), `certificate` (`name`, `state` one of `missing`,
 `issuing`, `valid`, `expiring`, `failed`, `expiresAt`, `error`, `jobId`), `usedBy` (every configured deployment
 domain under the handle, across projects and environments), and `detached` (deployment domains under the zone
-that the handle does not cover). A field with nothing to say is `null`; the lists are never `null`.
+that the handle does not cover), and `offer` (`handle`, `hostname`, `error`: the address chosen on the site that
+the server claims by itself; `null` with no offer or while the server holds a domain; `error` is the last
+automatic claim's failure, `null` while it has not been tried or is under way). A field with nothing to say is
+`null`; the lists are never `null`.
 
 Site refusals keep the protocol's code (`handle_taken`, `handle_reserved`, `handle_quarantined`,
 `address_mismatch`, `limit_reached`, `rate_limited`, `dns_failed`, `domains_unavailable`, …) and a sentence for
@@ -97,7 +124,11 @@ gate and the Certificates page's runtime (`proxysvc.IssueAppDomainCertificate`).
 against staging, as the page's test runs are; a forced renewal is `--force-renewal`; otherwise
 `--keep-until-expiring`. It refuses before certbot runs when `jd` is missing on certbot's side. After an
 issuance the Docker Caddy ingress's copies are refreshed and nginx reloaded (`ServeAppDomainRenewal`).
-`certificate.state` comes from the lineage on disk (`AppDomainCertificate`). A release or a handle change
+`certificate.state` comes from the lineage on disk (`AppDomainCertificate`). A test certificate from a
+staging authority is `valid` while `JD_ACME_DIRECTORY` names a staging directory (it is what that directory
+issues) and `failed` under any other, where browsers refuse it; a deployment page's `covered` for an app name
+reads the same state (`WildcardCovers`), so the card and `GET /deploy/hostname` never disagree, and the release
+issues a failed wildcard again. A release or a handle change
 removes the old lineage (`certbot delete`), so the timer stops renewing a name the site will not prove.
 
 **Renewal is certbot's own timer**, which keeps the hooks in the lineage's renewal configuration. It works for
@@ -147,6 +178,7 @@ did not answer" rather than as Let's Encrypt's vague error.
 | --- | --- | --- |
 | Deployments that exist before a handle is claimed | Nothing changes; their names resolve and certify as before | `TestTheCertificateStepGivesAppNamesTheWildcardAndTheRestTheirOwn` (an sslip name goes to the Certificates feature) |
 | Moving an existing app over | Adding `<slug>.<handle>.<zone>` beside its names: the wildcard serves the app name, the route's own certificate the rest | `TestTheCertificateStepGivesAppNamesTheWildcardAndTheRestTheirOwn`, `TestAnNginxRouteServesItsAppNameWithTheWildcardInAServerOfItsOwn`, `TestACaddyRouteServesItsAppNameWithACopyOfTheWildcard` |
+| A link approved with an address chosen on the site | The server claims it by itself and issues the wildcard; a failure shows on the card and waits an hour | `TestAnApprovedLinkWithAnOfferClaimsItAndStartsTheWildcard`, `TestAFailedAutomaticClaimIsKeptAndNotRetriedWithinTheHour`, `TestNoOfferMeansNoClaim`, `TestOffersAreIgnoredWhenAppDomainsAreOff`, `TestAServerHoldingADomainIgnoresAnOffer` |
 | New project with `autoAssign` on | The app name is the default suggestion; sslip.io or a typed domain stay possible | `TestTheHostnameSuggestionOffersTheAppDomain` |
 | Redeploy, release or rollback of an app using it | The valid wildcard is reused; nothing is asked of the site | `TestADeploymentReusesAValidWildcardAndIssuesAMissingOne` |
 | Server not linked | The card says why; suggestions stay sslip.io | `TestTheViewSaysWhyNothingIsOffered`, `TestAClaimIsRefusedWithoutWhatItNeeds` |

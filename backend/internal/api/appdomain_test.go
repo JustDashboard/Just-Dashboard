@@ -226,7 +226,7 @@ func TestTheHostnameSuggestionOffersTheAppDomain(t *testing.T) {
 	s, _, _ := appDomainServer(t, true)
 	got := askHostname(t, s, "name=Shop")
 	if got.Method != "app-domain" || got.Hostname != "shop.acme.just-dashboard.com" || got.Base != "acme.just-dashboard.com" ||
-		got.AppDomain != "held" || got.CertificateMethod != "app-domain" || got.NameTaken == nil {
+		got.AppDomain != "held" || !got.Covered || got.CertificateName != "jd-app-domain-acme" || got.CertificateMethod != "" || got.NameTaken == nil {
 		t.Fatalf("default = %+v", got)
 	}
 	got = askHostname(t, s, "name=shop&method=app-domain&tunnel=1")
@@ -249,6 +249,30 @@ func TestTheHostnameSuggestionOffersTheAppDomain(t *testing.T) {
 	}
 	if got := askHostname(t, off, "name=shop&method=app-domain"); got.Hostname != "shop.acme.just-dashboard.com" {
 		t.Fatalf("asked for = %+v", got)
+	}
+}
+
+// The suggestion and the Settings card read one state for the wildcard: a
+// lineage the card calls failed (a staging certificate under a production
+// directory) is not "covered" on a deployment page, and the release issues
+// it again.
+func TestTheSuggestionAndTheCardAgreeAboutTheWildcard(t *testing.T) {
+	s, _, _ := appDomainServer(t, true)
+	certs := &appCerts{state: "failed"}
+	s.modules.appDomain = appdomain.New(appdomain.Options{
+		Store: s.Store, Link: &appLink{domain: &accountlink.Domain{Handle: "acme", Hostname: "acme.just-dashboard.com", Address: "203.0.113.10", Status: "active"}},
+		Certs: certs, Jobs: jobs.New(slog.New(slog.DiscardHandler)), Enabled: true,
+		DataDir: t.TempDir(), BackendURL: "http://127.0.0.1:8080", PublicAddress: func() string { return "203.0.113.10" },
+	})
+	got := askHostname(t, s, "hostname=shop.acme.just-dashboard.com")
+	view, _ := s.modules.appDomain.View(t.Context())
+	if got.Covered || got.CertificateMethod != "app-domain" || view.Certificate.State != "failed" {
+		t.Fatalf("failed wildcard: suggestion %+v, card %s", got, view.Certificate.State)
+	}
+	certs.state = "valid"
+	got = askHostname(t, s, "hostname=shop.acme.just-dashboard.com")
+	if !got.Covered || got.CertificateName != "jd-app-domain-acme" || got.CertificateMethod != "" {
+		t.Fatalf("valid wildcard: %+v", got)
 	}
 }
 

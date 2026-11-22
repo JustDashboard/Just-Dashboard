@@ -471,8 +471,17 @@ func (s *Server) appDomainHostname(ctx context.Context, hostname string) (hostna
 
 // coverAppDomain says how the wildcard covers an app name: covered when it is
 // valid, otherwise issued by the release through just-dashboard.com.
+//
+// The wildcard's own state decides, the one the Settings card shows and the
+// release acts on (appdomain.WildcardCovers), not the list of every
+// certificate on the host: a test certificate from a staging authority is on
+// that list, and covers an app name only while the server is told to use a
+// staging directory.
 func (s *Server) coverAppDomain(ctx context.Context, suggestion *hostnameSuggestion) {
-	suggestion.Covered, suggestion.CertificateName = s.certificateCovering(ctx, suggestion.Hostname)
+	suggestion.CertificateName, suggestion.Covered = s.modules.appDomain.WildcardCovers(ctx)
+	if !suggestion.Covered {
+		suggestion.CertificateName = ""
+	}
 	if suggestion.Covered {
 		suggestion.Detail = "Resolves to this server through its just-dashboard.com address with no DNS record to create. The " + suggestion.CertificateName + " certificate already covers it."
 		return

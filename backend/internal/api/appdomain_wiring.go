@@ -40,9 +40,19 @@ func (s *Server) initAppDomain() {
 }
 
 // appDomainOnClear is the account link's OnClear hook: the transaction that
-// ends a link (or replaces it) detaches the handle it held.
-func appDomainOnClear(ctx context.Context, tx *sql.Tx) (func(), error) {
-	return nil, appdomain.DetachInTx(ctx, tx, time.Now().Unix())
+// ends a link, or starts a new one, detaches the handle the old link held.
+// Once it has committed the app domain asks the site at once, so a link just
+// approved claims the address the account chose for it there (an offer)
+// without waiting for the hourly check.
+func (s *Server) appDomainOnClear(ctx context.Context, tx *sql.Tx) (func(), error) {
+	if err := appdomain.DetachInTx(ctx, tx, time.Now().Unix()); err != nil {
+		return nil, err
+	}
+	return func() {
+		if svc := s.modules.appDomain; svc != nil {
+			svc.LinkChanged()
+		}
+	}, nil
 }
 
 // appDomainNames is the deployment executor's view of the app domain.

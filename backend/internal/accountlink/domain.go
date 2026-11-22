@@ -36,6 +36,10 @@ type DomainInfo struct {
 	Zone       *string `json:"zone"`
 	MaxHandles int     `json:"maxHandles"`
 	Domain     *Domain `json:"domain"`
+	// Offer is the handle the account chose for this server, when the link
+	// was approved or later on the site, that the server has not claimed:
+	// nil when there is none. It is never set beside Domain.
+	Offer *string `json:"offer"`
 }
 
 // Domain is a handle this server holds on the site.
@@ -170,7 +174,7 @@ func (s *Service) GetDomain(ctx context.Context) (DomainInfo, error) {
 	if err := s.domainCall(ctx, http.MethodGet, "/domain", nil, &raw); err != nil {
 		return out, err
 	}
-	if err := requireKeys(raw, "available", "reason", "zone", "maxHandles", "domain"); err != nil {
+	if err := requireKeys(raw, "available", "reason", "zone", "maxHandles", "domain", "offer"); err != nil {
 		return out, err
 	}
 	if err := decodeStrict(raw, &out); err != nil {
@@ -184,6 +188,9 @@ func (s *Service) GetDomain(ctx context.Context) (DomainInfo, error) {
 		if err := checkDomain(wrapper.Domain, out.Domain); err != nil {
 			return out, err
 		}
+	}
+	if out.Offer != nil && (!ValidHandle(*out.Offer) || out.Domain != nil) {
+		return out, errors.New("the site's response is not what the app domain protocol describes: the offer is not a handle, or is given beside a domain")
 	}
 	if out.Available && (out.Zone == nil || *out.Zone == "") {
 		return out, errors.New("the site's response is not what the app domain protocol describes: available without a zone")

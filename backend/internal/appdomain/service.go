@@ -102,8 +102,16 @@ type Service struct {
 	jobID   string
 	// refreshedAt is when a page last had the site asked.
 	refreshedAt time.Time
-	cancel      context.CancelFunc
-	done        <-chan struct{}
+	// claimMu is one automatic claim at a time: the loop, a page and the
+	// link's approval can all find the same offer.
+	claimMu sync.Mutex
+	// kick asks the loop to ask the site now: a link was just approved.
+	kick chan struct{}
+	// linkEvery is how often the loop looks for a link made or replaced by
+	// another process (the terminal's --admin link).
+	linkEvery time.Duration
+	cancel    context.CancelFunc
+	done      <-chan struct{}
 }
 
 var (
@@ -140,6 +148,7 @@ func New(o Options) *Service {
 		enabled: o.Enabled && o.Link != nil && o.Link.Enabled(), dataDir: o.DataDir, backendURL: o.BackendURL,
 		address: o.PublicAddress, waitTXT: o.WaitTXT, now: o.Now,
 		addressEvery: 15 * time.Minute, refreshEvery: time.Hour, refreshAtMost: time.Minute, txtWait: 120 * time.Second,
+		linkEvery: 30 * time.Second, kick: make(chan struct{}, 1),
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -210,10 +219,13 @@ func (s *Service) run(ctx context.Context) {
 	}
 	s.refresh(ctx)
 	s.followAddress(ctx)
+	seen := s.serverID(ctx)
 	addresses := time.NewTicker(s.addressEvery)
 	refreshes := time.NewTicker(s.refreshEvery)
+	links := time.NewTicker(s.linkEvery)
 	defer addresses.Stop()
 	defer refreshes.Stop()
+	defer links.Stop()
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,7 +234,41 @@ func (s *Service) run(ctx context.Context) {
 			s.followAddress(ctx)
 		case <-refreshes.C:
 			s.refresh(ctx)
+		case <-s.kick:
+			seen = s.serverID(ctx)
+			s.refresh(ctx)
+		case <-links.C:
+			// A link the terminal made, or replaced, reaches this process
+			// here: the site may hold an offer for it.
+			if now := s.serverID(ctx); now != seen {
+				seen = now
+				if now != "" {
+					s.refresh(ctx)
+				}
+			}
 		}
+	}
+}
+
+// serverID is the stored link's server id, or "" with no link.
+func (s *Service) serverID(ctx context.Context) string {
+	st, ok, err := s.link.Linked(ctx)
+	if err != nil || !ok {
+		return ""
+	}
+	return st.ServerID
+}
+
+// LinkChanged asks the loop to ask the site now, without waiting for it: a
+// link was approved (or ended) in this process. It is the account link's
+// OnClear hook's follow-up, after its transaction has committed.
+func (s *Service) LinkChanged() {
+	if !s.Enabled() {
+		return
+	}
+	select {
+	case s.kick <- struct{}{}:
+	default:
 	}
 }
 
@@ -287,6 +333,10 @@ func (s *Service) refresh(ctx context.Context) {
 		if info.Zone != nil && *info.Zone != "" {
 			cur.Zone = strings.ToLower(*info.Zone)
 		}
+		cur.Offer = ""
+		if info.Offer != nil && info.Domain == nil {
+			cur.Offer = *info.Offer
+		}
 		switch {
 		case info.Domain != nil:
 			// The site's record is the truth: a suspension, an unsuspension,
@@ -302,6 +352,73 @@ func (s *Service) refresh(ctx context.Context) {
 	if err == nil && before.Status != after.Status && after.Handle != "" {
 		s.record(ctx, "app.domain."+after.Status, after.Hostname, true, map[string]any{"reason": after.Reason})
 	}
+	if err == nil {
+		s.autoClaim(ctx, after)
+	}
+}
+
+// autoRetry is how long a handle whose automatic claim failed is left
+// before it is tried again: the site allows ten PUT /domain an hour for a
+// server and five new handles a day for an account.
+const autoRetry = time.Hour
+
+// autoClaim claims the handle the account chose for this server on the site,
+// exactly as the Settings card's Claim does, when the feature is on, the
+// site offers addresses, the server holds none, and the site named one. A
+// person chose it, on the approval page or the server's page on the site;
+// an offer reserves nothing, and the claim is the ordinary signed PUT from
+// this server's own address.
+func (s *Service) autoClaim(ctx context.Context, st State) {
+	if !s.Enabled() || st.Offer == "" || st.holdsDomain() || st.Available == nil || !*st.Available {
+		return
+	}
+	if st.OfferTried == st.Offer && st.OfferError != "" && s.now().Sub(time.Unix(st.OfferTriedAt, 0)) < autoRetry {
+		return
+	}
+	if !s.claimMu.TryLock() {
+		return
+	}
+	defer s.claimMu.Unlock()
+	offer := st.Offer
+	if _, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
+		cur.OfferTried, cur.OfferTriedAt, cur.OfferError = offer, s.now().Unix(), ""
+		return true, nil
+	}); err != nil {
+		return
+	}
+	view, err := s.Claim(ctx, offer, "system")
+	if err != nil {
+		_, _ = update(context.WithoutCancel(ctx), s.st.DB, func(cur *State) (bool, error) {
+			if cur.OfferTried != offer {
+				return false, nil
+			}
+			cur.OfferError = claimSentence(err)
+			return true, nil
+		})
+		s.record(ctx, "app.domain.claim", offer, false, map[string]any{"automatic": true, "error": claimSentence(err)})
+		return
+	}
+	target := offer
+	if view.Domain != nil {
+		target = view.Domain.Hostname
+	}
+	s.record(ctx, "app.domain.claim", target, true, map[string]any{"automatic": true, "address": s.address()})
+}
+
+// claimSentence is a failed claim in words for the Settings card.
+func claimSentence(err error) string {
+	var site *accountlink.DomainError
+	if errors.As(err, &site) {
+		return site.Message
+	}
+	msg := err.Error()
+	if msg != "" {
+		msg = strings.ToUpper(msg[:1]) + msg[1:]
+	}
+	if !strings.HasSuffix(msg, ".") {
+		msg += "."
+	}
+	return msg
 }
 
 // Refresh asks the site now, for the Settings page, at most once a minute.
@@ -412,6 +529,8 @@ func (s *Service) Claim(ctx context.Context, handle, by string) (View, error) {
 	st, err = update(ctx, s.st.DB, func(cur *State) (bool, error) {
 		s.mirror(cur, domain)
 		cur.LastError, cur.CertificateError = "", ""
+		// The site clears an offer once the server's domain is active.
+		cur.Offer, cur.OfferError = "", ""
 		return true, nil
 	})
 	if err != nil {
@@ -528,6 +647,12 @@ func (s *Service) View(ctx context.Context) (View, error) {
 	}
 	if v.Detached, err = s.DetachedNames(ctx, st); err != nil {
 		return View{}, err
+	}
+	if v.Enabled && st.Offer != "" && !st.holdsDomain() {
+		v.Offer = &OfferView{Handle: st.Offer, Hostname: st.Offer + "." + s.zone(st)}
+		if st.OfferTried == st.Offer {
+			v.Offer.Error = strPtr(st.OfferError)
+		}
 	}
 	return v, nil
 }

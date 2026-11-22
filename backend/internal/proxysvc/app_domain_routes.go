@@ -38,7 +38,7 @@ func (s *Service) appDomainPairs(ctx context.Context) []certificatePair {
 	var pairs []certificatePair
 	for _, certificate := range certificates {
 		name := filepath.Base(filepath.Dir(certificate.Path))
-		if !isAppDomainLineage(name) || certificate.Error != "" || certificate.Expired || certificate.Staging {
+		if !isAppDomainLineage(name) || certificate.Error != "" || certificate.Expired || (certificate.Staging && !acmeDirectory().staging()) {
 			continue
 		}
 		pairs = append(pairs, certificatePair{

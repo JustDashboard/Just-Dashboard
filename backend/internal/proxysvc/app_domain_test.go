@@ -322,3 +322,32 @@ func TestNoDeploymentOrderIsPlacedForANameUnderTheAppDomainZone(t *testing.T) {
 		t.Fatalf("certbot ordered a name under the zone:\n%s", raw)
 	}
 }
+
+// A test certificate from a staging authority is the wildcard a staging
+// directory issues: valid while the server is told to use one
+// (JD_ACME_DIRECTORY), failed under any other, where browsers refuse it. The
+// address's status and every deployment page read this one state.
+func TestAStagingWildcardCountsOnlyUnderAStagingDirectory(t *testing.T) {
+	root := t.TempDir()
+	letsencrypt := filepath.Join(root, "letsencrypt")
+	t.Cleanup(UseCertificateDirsForTest(letsencrypt, filepath.Join(root, "imported")))
+	fake := newAuthority(t, "(STAGING) Pretend Pear X1", nil)
+	leaf, _, _ := fake.issue(t, []string{"*.acme.just-dashboard.com", "acme.just-dashboard.com"}, time.Now().Add(60*24*time.Hour))
+	writeLineage(t, letsencrypt, "jd-app-domain-acme", stagingACME, leaf)
+	service := New(root, filepath.Join(root, "Caddyfile"))
+
+	t.Setenv("JD_ACME_DIRECTORY", stagingACME)
+	if state := service.AppDomainCertificate(context.Background(), "acme", "just-dashboard.com"); state.State != "valid" || state.Error != "" {
+		t.Fatalf("under staging = %+v", state)
+	}
+	if pairs := service.appDomainPairs(context.Background()); len(pairs) != 1 {
+		t.Fatalf("under staging the wildcard serves no route: %v", pairs)
+	}
+	t.Setenv("JD_ACME_DIRECTORY", "")
+	if state := service.AppDomainCertificate(context.Background(), "acme", "just-dashboard.com"); state.State != "failed" || !strings.Contains(state.Error, "staging") {
+		t.Fatalf("under production = %+v", state)
+	}
+	if pairs := service.appDomainPairs(context.Background()); len(pairs) != 0 {
+		t.Fatalf("under production a test wildcard serves a route: %v", pairs)
+	}
+}

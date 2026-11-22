@@ -102,7 +102,9 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - A just-dashboard.com address (app domains) is optional and held through the same link. Claiming a handle
   **publishes this server's public IPv4 address in public DNS** under just-dashboard.com, so claiming and
   releasing are browser-session actions for an administrator, never an API key or the assistant, and
-  releasing is in the destructive budget. The new outbound calls are signed requests on the link
+  releasing is in the destructive budget. A handle can also be chosen by the account's owner on the site,
+  on the link's approval page or the server's page; the server then claims that one by itself, with the
+  same signed request from its own address, and `JD_APP_DOMAINS=false` ignores it. The new outbound calls are signed requests on the link
   (`GET/PUT/DELETE /domain`, the challenge values); the site keeps its DNS token and changes only this
   server's three names. The wildcard's certbot hook reaches the backend only on loopback with a credential
   the backend writes 0600 in its data directory, and can only publish a challenge for this server's own

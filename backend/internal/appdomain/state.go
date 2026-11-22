@@ -58,7 +58,20 @@ type State struct {
 	AvailableReason string `json:"availableReason,omitempty"`
 	// CertificateError is why the last issuance failed, until one succeeds.
 	CertificateError string `json:"certificateError,omitempty"`
+	// Offer is the handle the account chose for this server on the site
+	// (at link approval or later) that it has not claimed; GET /domain's
+	// offer. OfferTried and OfferTriedAt are the last automatic claim of
+	// one, and OfferError why it failed: the same handle is not tried
+	// again within the hour (autoClaim).
+	Offer        string `json:"offer,omitempty"`
+	OfferTried   string `json:"offerTried,omitempty"`
+	OfferTriedAt int64  `json:"offerTriedAt,omitempty"`
+	OfferError   string `json:"offerError,omitempty"`
 }
+
+// holdsDomain reports a handle the site holds for this server, usable or
+// suspended; a detached one is not held.
+func (s State) holdsDomain() bool { return s.Handle != "" && s.Status != StatusDetached }
 
 // held reports a handle this server holds and may use now.
 func (s State) held() bool { return s.Handle != "" && s.Status == StatusActive }

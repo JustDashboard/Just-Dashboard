@@ -89,6 +89,7 @@ type domainSite struct {
 	available bool
 	domain    map[string]any
 	values    []string
+	offer     string
 	refuse    struct {
 		status    int
 		code, msg string
@@ -122,7 +123,11 @@ func (d *domainSite) serve(w http.ResponseWriter, r *http.Request, path string, 
 		if d.domain != nil {
 			domain = d.domain
 		}
-		writeJSON(w, 200, map[string]any{"available": d.available, "reason": reason, "zone": zone, "maxHandles": 3, "domain": domain})
+		var offer any
+		if d.offer != "" {
+			offer = d.offer
+		}
+		writeJSON(w, 200, map[string]any{"available": d.available, "reason": reason, "zone": zone, "maxHandles": 3, "domain": domain, "offer": offer})
 	case "PUT /domain":
 		var in struct{ Handle, Address string }
 		_ = json.Unmarshal(body, &in)
@@ -164,9 +169,18 @@ func TestDomainCallsAreSignedOnTheActiveLink(t *testing.T) {
 	ctx := t.Context()
 
 	info, err := e.svc.GetDomain(ctx)
-	if err != nil || !info.Available || info.Zone == nil || *info.Zone != "just-dashboard.com" || info.Domain != nil {
+	if err != nil || !info.Available || info.Zone == nil || *info.Zone != "just-dashboard.com" || info.Domain != nil || info.Offer != nil {
 		t.Fatalf("get = %+v, %v", info, err)
 	}
+	d.mu.Lock()
+	d.offer = "acme"
+	d.mu.Unlock()
+	if info, err = e.svc.GetDomain(ctx); err != nil || info.Offer == nil || *info.Offer != "acme" {
+		t.Fatalf("offer = %+v, %v", info, err)
+	}
+	d.mu.Lock()
+	d.offer = ""
+	d.mu.Unlock()
 	dom, err := e.svc.PutDomain(ctx, "acme", "203.0.113.10")
 	if err != nil || dom.Handle != "acme" || dom.Status != DomainActive || dom.Hostname != "acme.just-dashboard.com" {
 		t.Fatalf("put = %+v, %v", dom, err)
@@ -184,7 +198,7 @@ func TestDomainCallsAreSignedOnTheActiveLink(t *testing.T) {
 	// Every call passed the fake site's signature, clock and sequence checks.
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	if len(d.calls) != 5 {
+	if len(d.calls) != 6 {
 		t.Fatalf("calls = %v", d.calls)
 	}
 }
@@ -230,12 +244,15 @@ func TestDomainCallsNeedAnActiveAccountLink(t *testing.T) {
 func TestDomainResponsesAreDecodedStrictly(t *testing.T) {
 	t.Parallel()
 	for name, reply := range map[string]string{
-		"unknown field":          `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":null,"extra":1}`,
+		"unknown field":          `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":null,"offer":null,"extra":1}`,
 		"missing field":          `{"available":true,"reason":null,"zone":"just-dashboard.com","domain":null}`,
-		"available, no zone":     `{"available":true,"reason":null,"zone":null,"maxHandles":3,"domain":null}`,
-		"bad status":             `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":{"handle":"acme","hostname":"acme.just-dashboard.com","address":"203.0.113.10","status":"pending","reason":null,"createdAt":1,"updatedAt":1}}`,
-		"domain missing a field": `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":{"handle":"acme","hostname":"acme.just-dashboard.com","address":"203.0.113.10","status":"active","createdAt":1,"updatedAt":1}}`,
-		"trailing":               `{"available":false,"reason":"x","zone":null,"maxHandles":3,"domain":null} {}`,
+		"available, no zone":     `{"available":true,"reason":null,"zone":null,"maxHandles":3,"domain":null,"offer":null}`,
+		"bad status":             `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":{"handle":"acme","hostname":"acme.just-dashboard.com","address":"203.0.113.10","status":"pending","reason":null,"createdAt":1,"updatedAt":1},"offer":null}`,
+		"domain missing a field": `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":{"handle":"acme","hostname":"acme.just-dashboard.com","address":"203.0.113.10","status":"active","createdAt":1,"updatedAt":1},"offer":null}`,
+		"no offer field":         `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":null}`,
+		"offer not a handle":     `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":null,"offer":"Not A Handle"}`,
+		"offer beside a domain":  `{"available":true,"reason":null,"zone":"just-dashboard.com","maxHandles":3,"domain":{"handle":"acme","hostname":"acme.just-dashboard.com","address":"203.0.113.10","status":"active","reason":null,"createdAt":1,"updatedAt":1},"offer":"acme"}`,
+		"trailing":               `{"available":false,"reason":"x","zone":null,"maxHandles":3,"domain":null,"offer":null} {}`,
 	} {
 		t.Run(name, func(t *testing.T) {
 			e, d := linkedDomainEnv(t)

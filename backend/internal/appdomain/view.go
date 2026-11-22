@@ -20,6 +20,20 @@ type View struct {
 	// Detached are deployment names under the zone that this server's
 	// handle does not cover: a released, suspended or older handle's.
 	Detached []Use `json:"detached"`
+	// Offer is the address the account chose for this server on the site,
+	// which the server claims by itself; nil when there is none, or the
+	// server already holds a domain.
+	Offer *OfferView `json:"offer"`
+}
+
+// OfferView is the handle chosen on the site that this server has not
+// claimed yet.
+type OfferView struct {
+	Handle   string `json:"handle"`
+	Hostname string `json:"hostname"`
+	// Error is why the last automatic claim failed; nil while it has not
+	// been tried or is under way.
+	Error *string `json:"error"`
 }
 
 // DomainView is the handle this server holds, or held.
