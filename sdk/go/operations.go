@@ -10,6 +10,19 @@ import (
 	"strconv"
 )
 
+// AppDomainNames is GET /deploy/app-domain: say whether this server holds a just-dashboard.com
+// address, the zone it is under, and the base every app name under it ends in, so a deployment's
+// names can be placed.
+//
+// A deploy key: allowed.
+func (c *Client) AppDomainNames(ctx context.Context, opts ...RequestOption) (*Names, error) {
+	var out Names
+	if err := c.do(ctx, "GET", "/deploy/app-domain", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // BlueprintGet is GET /deploy/blueprints/{id}: read a template, and whether this install can
 // deploy it.
 //
@@ -887,8 +900,12 @@ type DeploymentHostnameParams struct {
 	// A hostname to check instead of deriving one.
 	Hostname string
 	// 1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and
-	// no certificate here.
+	// no certificate here, and never a just-dashboard.com address.
 	Tunnel string
+	// app-domain to ask for the just-dashboard.com address of the deployment name even when it is not
+	// the default; standard for the suggestion without it (the operator's own wildcard, else
+	// sslip.io).
+	Method string
 }
 
 // DeploymentHostname is GET /deploy/hostname: suggest a public hostname under this server's domain
@@ -906,6 +923,9 @@ func (c *Client) DeploymentHostname(ctx context.Context, params *DeploymentHostn
 		}
 		if params.Tunnel != "" {
 			query.Set("tunnel", params.Tunnel)
+		}
+		if params.Method != "" {
+			query.Set("method", params.Method)
 		}
 	}
 	var out HostnameSuggestion

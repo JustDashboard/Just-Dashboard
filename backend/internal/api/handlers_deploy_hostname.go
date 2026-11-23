@@ -6,10 +6,12 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/appdomain"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -70,6 +72,10 @@ type hostnameSuggestion struct {
 	// project names, and `omitempty` on a bool would have made a free name
 	// indistinguishable from that silence.
 	NameTaken *bool `json:"nameTaken,omitempty"`
+	// AppDomain places a name under the just-dashboard.com address zone:
+	// "held" under the handle this server holds, "detached" under one it
+	// does not. Empty for any other name.
+	AppDomain string `json:"appDomain,omitempty"`
 }
 
 var hostnameSlugStripRE = regexp.MustCompile(`[^a-z0-9-]+`)
@@ -79,18 +85,33 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	ctx, cancel := timeoutCtx(r, 15*time.Second)
 	defer cancel()
 
+	// A name served through Cloudflare Tunnel is not reached at this
+	// server's address and needs no certificate here: the public-IP DNS
+	// check and the certificate question say nothing about it, and it is
+	// never offered a just-dashboard.com address, whose name has to live in
+	// the operator's own Cloudflare zone to be routed.
+	tunnel, err := httpx.QueryBool(r, "tunnel")
+	if err != nil {
+		return err
+	}
+	// method narrows the suggestion for a page offering a choice:
+	// "app-domain" is the just-dashboard.com name whatever the default, and
+	// "standard" is what would be suggested without it, the operator's own
+	// wildcard or sslip.io, so the page offers the name the backend would
+	// generate rather than one it composed.
+	method := strings.TrimSpace(r.URL.Query().Get("method"))
+	if method != "" && method != "app-domain" && method != "standard" {
+		return httpx.BadRequest("method must be app-domain or standard")
+	}
 	// A hostname that is given is being asked about, not replaced: the operator
 	// has typed their own domain and wants to know whether HTTPS will work.
 	if chosen := strings.ToLower(strings.TrimSpace(r.URL.Query().Get("hostname"))); chosen != "" {
-		// A name served through Cloudflare Tunnel is not reached at this
-		// server's address and needs no certificate here: the public-IP DNS
-		// check and the certificate question say nothing about it.
-		tunnel, err := httpx.QueryBool(r, "tunnel")
-		if err != nil {
-			return err
-		}
 		if tunnel {
 			httpx.JSON(w, http.StatusOK, s.tunnelHostnameSuggestion(ctx, chosen))
+			return nil
+		}
+		if suggestion, ok := s.appDomainHostname(ctx, chosen); ok {
+			httpx.JSON(w, http.StatusOK, suggestion)
 			return nil
 		}
 		suggestion := hostnameSuggestion{Hostname: chosen, Method: "custom"}
@@ -130,6 +151,14 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 	// same moment, and because the alternative — the schema's own UNIQUE
 	// refusal — arrives at commit, after the whole setup has been filled in.
 	taken := s.deploymentNameTaken(ctx, name)
+	// Asked for the just-dashboard.com address by name, the page can offer
+	// it beside the default.
+	if method == "app-domain" {
+		suggestion := s.appDomainSuggestion(ctx, name, tunnel)
+		suggestion.NameTaken = &taken
+		httpx.JSON(w, http.StatusOK, suggestion)
+		return nil
+	}
 	if base, certName := s.wildcardBase(ctx); base != "" {
 		slug := s.suggestHostnameSlug(ctx, name, base)
 		httpx.JSON(w, http.StatusOK, hostnameSuggestion{
@@ -138,6 +167,17 @@ func (s *Server) handleDeploymentHostname(w http.ResponseWriter, r *http.Request
 			Detail: "Covered by the existing wildcard certificate for *." + base + ".",
 		})
 		return nil
+	}
+
+	// Second: the just-dashboard.com address, while the handle is active
+	// and new deployments get it by default.
+	if !tunnel && method != "standard" && s.modules.appDomain != nil {
+		if _, autoAssign, ok := s.modules.appDomain.Active(ctx); ok && autoAssign {
+			suggestion := s.appDomainSuggestion(ctx, name, false)
+			suggestion.NameTaken = &taken
+			httpx.JSON(w, http.StatusOK, suggestion)
+			return nil
+		}
 	}
 
 	address := firstIPv4(proxysvc.PublicAddresses())
@@ -218,9 +258,15 @@ func (s *Server) certificateCovering(ctx context.Context, hostname string) (bool
 	return false, ""
 }
 
-// wildcardBase is the zone of the first wildcard certificate this host holds.
+// wildcardBase is the zone of the first wildcard certificate this host holds,
+// of the operator's own: the just-dashboard.com address's wildcard is offered
+// in its own place in the order (appDomainSuggestion).
 func (s *Server) wildcardBase(ctx context.Context) (string, string) {
 	for _, certificate := range s.liveCertificates(ctx) {
+		if strings.HasPrefix(certificate.Name, proxysvc.AppDomainLineagePrefix) ||
+			strings.HasPrefix(filepath.Base(filepath.Dir(certificate.Path)), proxysvc.AppDomainLineagePrefix) {
+			continue
+		}
 		for _, name := range certificate.Domains {
 			if base, ok := strings.CutPrefix(strings.ToLower(strings.TrimSpace(name)), "*."); ok && base != "" {
 				return base, certificate.Name
@@ -384,4 +430,84 @@ func firstIPv4(addresses []string) string {
 		}
 	}
 	return ""
+}
+
+// appDomainSuggestion is the just-dashboard.com address for a deployment
+// name: <slug>.<handle>.<zone>, covered when the wildcard is valid, otherwise
+// issued by the release (certificateMethod "app-domain"). When the address
+// cannot be offered, Hostname is empty and Detail says why.
+func (s *Server) appDomainSuggestion(ctx context.Context, name string, tunnel bool) hostnameSuggestion {
+	suggestion := hostnameSuggestion{Method: "app-domain"}
+	if tunnel {
+		suggestion.Detail = "A deployment served through Cloudflare Tunnel is not offered a just-dashboard.com address: a tunnel's name lives in your own Cloudflare zone."
+		return suggestion
+	}
+	if s.modules.appDomain == nil {
+		suggestion.Detail = "just-dashboard.com addresses are not available on this server."
+		return suggestion
+	}
+	base, _, ok := s.modules.appDomain.Active(ctx)
+	if !ok {
+		suggestion.Detail = "This server holds no active just-dashboard.com address. Claim one under Settings → just-dashboard.com link."
+		return suggestion
+	}
+	slug := hostnameSlug(name)
+	// One DNS label, at most 63 characters.
+	if len(slug) > 63 {
+		slug = strings.Trim(slug[:63], "-")
+	}
+	if s.hostnameDomainTaken(ctx, slug+"."+base) {
+		slug = s.suggestHostnameSlug(ctx, name, base)
+	}
+	suggestion.Hostname, suggestion.Base, suggestion.AppDomain = slug+"."+base, base, "held"
+	suggestion.Address = firstIPv4(proxysvc.PublicAddresses())
+	s.coverAppDomain(ctx, &suggestion)
+	return suggestion
+}
+
+// appDomainHostname answers for a typed name under the zone: one under the
+// handle this server holds is the wildcard's, one under any other handle is
+// not this server's to serve. ok is false for every other name.
+func (s *Server) appDomainHostname(ctx context.Context, hostname string) (hostnameSuggestion, bool) {
+	if s.modules.appDomain == nil || strings.HasPrefix(hostname, "*.") {
+		return hostnameSuggestion{}, false
+	}
+	switch s.modules.appDomain.Classify(ctx, hostname) {
+	case appdomain.Held:
+		suggestion := hostnameSuggestion{Hostname: hostname, Method: "app-domain", AppDomain: "held"}
+		if base, _, ok := s.modules.appDomain.Active(ctx); ok {
+			suggestion.Base = base
+		}
+		suggestion.Address = firstIPv4(proxysvc.PublicAddresses())
+		s.coverAppDomain(ctx, &suggestion)
+		return suggestion, true
+	case appdomain.Detached:
+		return hostnameSuggestion{
+			Hostname: hostname, Method: "app-domain", AppDomain: "detached",
+			CertificateIssue: "This name is under just-dashboard.com but not under the handle this server holds, so it resolves elsewhere or nowhere and no certificate is issued for it.",
+			Detail:           "This name is under just-dashboard.com but not under the handle this server holds. Claim that handle under Settings → just-dashboard.com link, or use another address.",
+		}, true
+	}
+	return hostnameSuggestion{}, false
+}
+
+// coverAppDomain says how the wildcard covers an app name: covered when it is
+// valid, otherwise issued by the release through just-dashboard.com.
+//
+// The wildcard's own state decides, the one the Settings card shows and the
+// release acts on (appdomain.WildcardCovers), not the list of every
+// certificate on the host: a test certificate from a staging authority is on
+// that list, and covers an app name only while the server is told to use a
+// staging directory.
+func (s *Server) coverAppDomain(ctx context.Context, suggestion *hostnameSuggestion) {
+	suggestion.CertificateName, suggestion.Covered = s.modules.appDomain.WildcardCovers(ctx)
+	if !suggestion.Covered {
+		suggestion.CertificateName = ""
+	}
+	if suggestion.Covered {
+		suggestion.Detail = "Resolves to this server through its just-dashboard.com address with no DNS record to create. The " + suggestion.CertificateName + " certificate already covers it."
+		return
+	}
+	suggestion.CertificateMethod = "app-domain"
+	suggestion.Detail = "Resolves to this server through its just-dashboard.com address with no DNS record to create. The release issues the address's wildcard certificate through just-dashboard.com first."
 }

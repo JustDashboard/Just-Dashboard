@@ -1177,6 +1177,27 @@
   deployment Domains sheet. Removing a provider's credentials also stops runs issuing wildcards in its
   zones; the next one is refused, naming this page.
   Site-validation rollback restores a replaced `sites-enabled` symlink to its exact previous target.
+- **`app_domain.go`, `app_domain_routes.go` — the app domain's wildcard** ([app domains](app-domains.md)).
+  One lineage per handle, `jd-app-domain-<handle>`, for `*.<handle>.<zone>` and `<handle>.<zone>`, ordered by
+  `IssueAppDomainCertificate` with certbot's manual plugin: `--manual --preferred-challenges dns`, the hooks
+  `/usr/local/bin/jd app-domain challenge add|remove --credentials <data dir>/app-domain-hook.json`, through the
+  certbot gate and the page's runtime, `--dry-run` for a test (staging, nothing saved), `--force-renewal` only when
+  asked, `--keep-until-expiring` otherwise. It refuses before certbot runs when `jd` is missing on certbot's side.
+  The renewal configuration keeps both hooks, so certbot's own timer renews it; `renewalProblems` reports an app
+  domain lineage whose authenticator is not `manual`, whose hooks are not `jd`'s, or whose `jd` is missing.
+  `AppDomainCertificate` reads the lineage's state from disk (`missing`, `valid`, `expiring`, `failed`).
+  `WaitForAuthoritativeTXT` finds the zone's nameservers (`zoneNameservers`), asks each of them directly
+  (`Query`) until every one answers the value, and is what the hook waits on. `SetAppDomainZone` makes
+  `EnsureDeploymentCertificate` refuse any name under the zone (`ErrAppDomainName`) before anything is ordered, on
+  nginx and on the Docker Caddy ingress alike: no per-app certificate is ever requested there.
+  A route whose names no single certificate covers because some are app names is split
+  (`DeploymentRoute.Certificates`, filled by `ApplyDeploymentRoute`): `ResolveDeploymentCertificate` sets the app
+  names aside for the wildcard and resolves the rest alone; nginx renders the app names as a server of their own
+  with the wildcard (the HTTP-to-HTTPS redirect covers every name), and the Docker Caddy ingress as a site block
+  of their own with a copy of it, which is the route's one copy that `RefreshIngressCertificates` keeps current. A
+  Caddy route that would serve two copies (an explicit certificate of its own and the wildcard) is refused, since
+  the refresh keeps one per route. Only app domain lineages split a route; every other route still resolves one
+  certificate for all its names.
 - **Raw configuration edits carry a content revision** (`config_checked.go`). `GET /proxy/config`
   returns `content` and its SHA-256 `revision` under the proxy writer lock, so it cannot expose
   another operator's transient nginx validation candidate. `PUT /proxy/config` requires that

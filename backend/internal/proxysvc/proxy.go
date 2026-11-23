@@ -17,6 +17,7 @@ import (
 	"regexp"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -56,6 +57,10 @@ func (k Kind) Known() bool {
 
 type Service struct {
 	dockerIngress bool
+	// appDomainZone names the app domain zone (app_domain.go), whose names
+	// this service never orders a certificate for: only the handle's
+	// wildcard covers them. Nil, or empty, when there is none.
+	appDomainZone atomic.Pointer[func() string]
 	// ingressContainer pins deployments to one Caddy container by name;
 	// empty discovers the host's public one.
 	ingressContainer string

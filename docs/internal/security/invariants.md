@@ -351,7 +351,14 @@ A change that weakens any of these has to say so explicitly.
     log whatever its outcome; the kinds are a closed set that call the services the pages call. Linking,
     changing the scope and unlinking are session-only in the browser (an API key is refused) and root-only at
     the terminal, the heartbeat is a fixed field set that names nothing on the machine below `operate`, and
-    the installer never handles a link credential. See [account link](../backend/account-link.md).
+    the installer never handles a link credential. See [account link](../backend/account-link.md). Claiming and
+    releasing a just-dashboard.com address, which publish or withdraw the server's IP address in public DNS,
+    are held to the same rule: a browser session of an administrator, never an API key or the assistant, and
+    releasing is in the destructive budget. The one other way a claim starts is the person who approves the
+    link on just-dashboard.com, or the server's owner there, choosing the address (an offer): the server then
+    claims that handle itself with the same signed request from its own address, and never one nobody chose. The certbot hook that proves the address's wildcard reaches the
+    backend only on loopback, with a credential the backend writes 0600 into its data directory, and can only
+    publish or withdraw a challenge value for this server's own handle ([app domains](../backend/app-domains.md)).
 13. The dashboard's assistant is a person's, at the dashboard, and acts as them: no more than their role, and,
     since 0.8.5, no less. Its routes are a session's (a deployment's, a new deployment's, a database connection's,
     `POST /databases/{id}/assistant`, and the server's, `POST /assistant/chat`). Every call it makes is a request through the dashboard's own router under the
@@ -568,6 +575,7 @@ either names a route the router does not refuse, or leaves one out:
 | Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
 | The assistant's provider keys | `PUT /assistant/providers/{preset}` |
 | The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
+| The just-dashboard.com address (JD 0.9.1) | `PUT /dashboard/link/domain/`, `DELETE /dashboard/link/domain/` |
 | The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
 | Hub sign-in | `PUT /account/hub-signin` |
 | The dashboard's own settings | `PUT /dashboard/config` |

@@ -3,6 +3,7 @@ package proxysvc
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -88,14 +89,55 @@ func renderNginx(spec *SiteSpec) (string, error) {
 			mainNames, plainServed = tlsServed, plain
 		}
 	}
+	// A deployment route's app names are served with their wildcard, in a
+	// server of their own beside the site's (app_domain_routes.go).
+	var groups []*SiteSpec
+	var groupNames [][]string
+	if main.TLS && len(spec.certGroups) > 0 {
+		set := map[string]bool{}
+		for _, group := range spec.certGroups {
+			served := *main
+			served.CertPath, served.KeyPath = group.CertPath, group.KeyPath
+			names := []string{}
+			for _, name := range group.Domains {
+				if slices.Contains(mainNames, name) {
+					names = append(names, name)
+					set[name] = true
+				}
+			}
+			if len(names) > 0 {
+				groups, groupNames = append(groups, &served), append(groupNames, names)
+			}
+		}
+		rest := []string{}
+		for _, name := range mainNames {
+			if !set[name] {
+				rest = append(rest, name)
+			}
+		}
+		if len(rest) == 0 && len(groups) > 0 {
+			main, rest = groups[0], groupNames[0]
+			groups, groupNames = groups[1:], groupNames[1:]
+		}
+		mainNames = rest
+	}
 	names := strings.Join(mainNames, " ")
 	if main.TLS && main.ForceHTTPS {
-		renderRedirectServer(l, names, main)
+		every := slices.Clone(mainNames)
+		for _, extra := range groupNames {
+			every = append(every, extra...)
+		}
+		renderRedirectServer(l, strings.Join(every, " "), main)
 		l.blank()
 	}
 	renderCanonicalServers(l, spec)
 	renderHostRedirectServers(l, spec)
 	renderServer(l, main, names)
+	for index, group := range groups {
+		l.blank()
+		l.add("# Served with its own certificate: %s.", strings.Join(groupNames[index], ", "))
+		renderServer(l, group, strings.Join(groupNames[index], " "))
+	}
 	if len(plainServed) > 0 {
 		l.blank()
 		for _, name := range plainServed {

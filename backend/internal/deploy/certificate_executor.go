@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -57,20 +58,53 @@ func (e *NormalizedStepExecutor) provisionCertificate(
 	ctx context.Context,
 	execution StepExecution,
 ) StepResult {
-	_, snapshot, err := e.releaseSnapshotForRun(ctx, execution.Run.ID)
+	release, err := e.store.ReleaseForRun(ctx, execution.Run.ID)
 	if err != nil {
 		return normalizedStepFailure(err)
 	}
-	// Cloudflare terminates a tunnel's HTTPS; the route serves the name over
-	// plain HTTP to the connector, so there is nothing to issue.
-	names := certificateNames(snapshot.Domains)
+	// Read as it was frozen, so the names left out can be named: every
+	// other step reads it without them.
+	snapshot, err := decodeReleaseRuntimeSnapshot(release)
+	if err != nil {
+		return normalizedStepFailure(err)
+	}
 	log := func(stream, text string) {
 		_ = stepLog(execution, stream, text)
 	}
-	if attempt := e.prewarms.take(execution.Run.ID, names); attempt != nil {
-		return e.certificateStepAfterPrewarm(ctx, attempt, names, log)
+	domains, detached := e.detachedDomains(ctx, snapshot.Domains)
+	if len(detached) > 0 {
+		if len(domains) == 0 {
+			return appDomainDetachedResult(detached)
+		}
+		log("status", detachedSentence(detached))
 	}
-	return e.certificateStep(ctx, names, log)
+	// Cloudflare terminates a tunnel's HTTPS; the route serves the name over
+	// plain HTTP to the connector, so there is nothing to issue.
+	names := certificateNames(domains)
+	result := StepResult{}
+	if attempt := e.prewarms.take(execution.Run.ID, names); attempt != nil {
+		result = e.certificateStepAfterPrewarm(ctx, attempt, names, log)
+	} else {
+		result = e.certificateStep(ctx, names, log)
+	}
+	return withDetachedWarning(result, detached)
+}
+
+// withDetachedWarning turns a passed or skipped certificate step into a
+// warning that names the app domain names left out of the route.
+func withDetachedWarning(result StepResult, detached []string) StepResult {
+	if len(detached) == 0 || (result.State != StepPassed && result.State != StepSkipped) {
+		return result
+	}
+	var evidence map[string]any
+	_ = json.Unmarshal(result.Evidence, &evidence)
+	if evidence == nil {
+		evidence = map[string]any{}
+	}
+	evidence["detached"] = detached
+	evidence["warning"] = detachedSentence(detached)
+	result.State, result.Evidence = StepWarning, mustJSON(evidence)
+	return result
 }
 
 // certificateStepAfterPrewarm waits for the background attempt the build

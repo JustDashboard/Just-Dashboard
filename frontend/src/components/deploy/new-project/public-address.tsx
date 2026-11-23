@@ -4,7 +4,12 @@ import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Plus, RefreshClockwise, Trash, Warning } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
+import { zoneWords } from "@/lib/app-domain"
+import { useAppDomain } from "@/hooks/use-app-domain"
+import { useAuth } from "@/hooks/use-auth"
 import { Field, FormNote, FormSection, OptionRow } from "@/components/form"
+import { INLINE_LINK } from "@/components/inline-link"
+import { Segments } from "@/components/segments"
 import { Notice } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
@@ -36,11 +41,14 @@ type Domain = DeploymentConfiguration["domains"][number]
  */
 export function PublicAddress({
   id,
+  name,
   domains,
   onChange,
   suggestion,
 }: {
   id?: string
+  /** The project's name, which the just-dashboard.com name is made from. */
+  name?: string
   /**
    * Every name this deployment will answer to. The first is the primary one,
    * with the suggestion and the certificate reading; the rest are a plain
@@ -53,6 +61,7 @@ export function PublicAddress({
   suggestion?: DeploymentHostnameSuggestion
 }) {
   const [checked, setChecked] = useState<DeploymentHostnameSuggestion | undefined>(suggestion)
+  const offer = useAppDomainOffer(name, suggestion)
   const [checking, setChecking] = useState(false)
   const [checkError, setCheckError] = useState<{ hostname: string; message: string }>()
   const checkRequest = useRef<AbortController | undefined>(undefined)
@@ -97,6 +106,29 @@ export function PublicAddress({
           ? { tone: "notice" as const, label: "Certificate on deploy" }
           : { tone: "warning" as const, label: "HTTPS unavailable" }
 
+  // The addresses the name can be: the just-dashboard.com one, the one that needs nothing from
+  // the site (the operator's wildcard, or sslip.io), and the reader's own.
+  const choices = addressChoices(suggestion, offer.suggestion, offer.zone, offer.standard)
+  const chosen = choices.find((choice) => choice.hostname === normalizedHostname)
+  const pick = (value: string) => {
+    if (value === "own") {
+      update({ hostname: "" })
+      setCheckError(undefined)
+      requestAnimationFrame(() => document.getElementById("public-hostname")?.focus())
+      return
+    }
+    const choice = choices.find((item) => item.value === value)
+    if (!choice) return
+    update({ hostname: choice.hostname })
+    // An answer already read is the answer: only a name nobody has asked about is checked.
+    if (choice.answer) {
+      checkRequest.current?.abort()
+      setChecking(false)
+      setCheckError(undefined)
+      setChecked(choice.answer)
+    } else void recheck(choice.hostname)
+  }
+
   const recheck = async (value: string) => {
     const trimmed = value.trim().toLowerCase()
     if (!trimmed) return
@@ -130,6 +162,18 @@ export function PublicAddress({
         }
       >
         <div className="space-y-3">
+          {choices.length > 1 && (
+            <Segments
+              label="Address"
+              value={chosen?.value ?? "own"}
+              options={[
+                ...choices.map((choice) => ({ value: choice.value, label: choice.label })),
+                { value: "own", label: "Your domain" },
+              ]}
+              onChange={pick}
+              onReselect={(value) => value === "own" && pick("own")}
+            />
+          )}
           {/* One field, not three controls that happen to be adjacent.
               The name, the scheme it is served over and the check on both are
               one decision, and they were three boxes at three heights in a
@@ -185,7 +229,17 @@ export function PublicAddress({
             <FormNote>
               {current.certificateMethod === "caddy"
                 ? "The managed Caddy ingress orders the certificate before the release starts, and renews it automatically."
-                : `Certbot orders the certificate over the ${current.certificateMethod} challenge before the release starts, and renews it automatically.`}
+                : current.certificateMethod === "app-domain"
+                  ? `The release issues this server's wildcard certificate for ${wildcardOf(current.hostname)} through ${zoneWords(offer)} before it starts, and renews it automatically.`
+                  : `Certbot orders the certificate over the ${current.certificateMethod} challenge before the release starts, and renews it automatically.`}
+            </FormNote>
+          )}
+          {offer.hint && choices.length < 2 && (
+            <FormNote>
+              {offer.hint}{" "}
+              <Link href="/dashboard/link#app-domain" className={INLINE_LINK}>
+                Settings › Connect
+              </Link>
             </FormNote>
           )}
           <OptionRow
@@ -321,4 +375,127 @@ export function PublicAddress({
       )}
     </FormSection>
   )
+}
+
+/** `*.acme.just-dashboard.com` for `shop.acme.just-dashboard.com`. */
+function wildcardOf(hostname: string) {
+  return `*.${hostname.split(".").slice(1).join(".")}`
+}
+
+type AddressChoice = {
+  value: string
+  label: string
+  hostname: string
+  /** What the server already said about the name, when it has. */
+  answer?: DeploymentHostnameSuggestion
+}
+
+/**
+ * The names the step offers as choices, the just-dashboard.com one first. Without one there is
+ * nothing to choose between: the field holds the suggestion, as it always has.
+ */
+function addressChoices(
+  suggestion: DeploymentHostnameSuggestion | undefined,
+  appSuggestion: DeploymentHostnameSuggestion | undefined,
+  zone: string | undefined,
+  standard: DeploymentHostnameSuggestion | undefined,
+): AddressChoice[] {
+  if (!appSuggestion?.hostname) return []
+  const app: AddressChoice = {
+    value: "app-domain",
+    label: zone ?? "just-dashboard.com",
+    hostname: appSuggestion.hostname.toLowerCase(),
+    answer: appSuggestion,
+  }
+  // The other name is the backend's own suggestion without the address: the default itself
+  // when that is not the app-domain name, else what `method=standard` answered.
+  const other = suggestion?.method !== "app-domain" ? suggestion : standard
+  if (other?.hostname && other.method !== "app-domain" && other.method !== "none") {
+    return [
+      app,
+      {
+        value: other.method,
+        label: other.method === "sslip" ? "sslip.io" : (other.base ?? "Wildcard"),
+        hostname: other.hostname.toLowerCase(),
+        answer: other,
+      },
+    ]
+  }
+  return [app]
+}
+
+/**
+ * Whether this server can give the project a just-dashboard.com name, and the name: the
+ * suggestion's own when it already is one (the address is the default for new deployments),
+ * otherwise asked for with `method=app-domain` while the server holds an active address.
+ * When it holds none, `hint` is the quiet line that says where one is set up. Administrators
+ * only, since the address is a link setting; anyone else sees the step as it was.
+ */
+function useAppDomainOffer(
+  name: string | undefined,
+  suggestion: DeploymentHostnameSuggestion | undefined,
+) {
+  const { can } = useAuth()
+  const { status } = useAppDomain({ enabled: can("system.admin") })
+  const active = status?.enabled && status.domain?.status === "active" ? status.domain : undefined
+  const own = suggestion?.method === "app-domain" ? suggestion : undefined
+  const [asked, setAsked] = useState<{ key: string; answer: DeploymentHostnameSuggestion }>()
+  const key = active && name && !own ? `${active.handle}:${name}` : ""
+  // With the app-domain name the default, the alternative is asked for too: the name the
+  // backend would suggest without it (`method=standard`), never one composed here.
+  const [standard, setStandard] = useState<{
+    key: string
+    answer: DeploymentHostnameSuggestion
+  }>()
+  const standardKey = own && name ? `${own.hostname}:${name}` : ""
+
+  useEffect(() => {
+    if (!standardKey || !name) return
+    const controller = new AbortController()
+    get<DeploymentHostnameSuggestion>(
+      "/deploy/hostname",
+      { name, method: "standard" },
+      controller.signal,
+    )
+      .then((answer) => {
+        if (answer.hostname && answer.method !== "none") setStandard({ key: standardKey, answer })
+      })
+      .catch(() => {
+        // Best-effort: without it the step offers the app-domain name and your own domain.
+      })
+    return () => controller.abort()
+  }, [standardKey, name])
+
+  useEffect(() => {
+    if (!key || !name) return
+    const controller = new AbortController()
+    get<DeploymentHostnameSuggestion>(
+      "/deploy/hostname",
+      { name, method: "app-domain" },
+      controller.signal,
+    )
+      .then((answer) => {
+        if (answer.method === "app-domain" && answer.hostname) setAsked({ key, answer })
+      })
+      .catch(() => {
+        // Best-effort, as the first suggestion is: the step works without the choice.
+      })
+    return () => controller.abort()
+  }, [key, name])
+
+  const hint =
+    !status?.enabled || status.available === false || active || own
+      ? undefined
+      : !status.linked
+        ? `Apps can answer at a ${zoneWords(status)} address once this server is linked and holds one:`
+        : status.domain?.status === "suspended"
+          ? `This server's ${zoneWords(status)} address is suspended:`
+          : `Apps can answer at a ${zoneWords(status)} address once this server claims one:`
+
+  return {
+    suggestion: own ?? (asked?.key === key ? asked.answer : undefined),
+    zone: status?.zone ?? undefined,
+    standard: standard?.key === standardKey ? standard.answer : undefined,
+    hint,
+  }
 }

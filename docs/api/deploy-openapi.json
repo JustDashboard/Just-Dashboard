@@ -2037,6 +2037,9 @@
           "address": {
             "type": "string"
           },
+          "appDomain": {
+            "type": "string"
+          },
           "base": {
             "type": "string"
           },
@@ -3002,6 +3005,36 @@
           }
         },
         "title": "api.watchSimulationRequest",
+        "type": "object"
+      },
+      "appdomain.Names": {
+        "properties": {
+          "autoAssign": {
+            "type": "boolean"
+          },
+          "base": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "status": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "zone": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "title": "appdomain.Names",
         "type": "object"
       },
       "assistant.ChatAbout": {
@@ -16958,6 +16991,42 @@
         "x-deploy-key": "refused (key_scope): a legacy project's settings are commands that run on this server; use a draft and its environment instead"
       }
     },
+    "/deploy/app-domain": {
+      "get": {
+        "operationId": "appDomainNames",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/appdomain.Names"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Say whether this server holds a just-dashboard.com address, the zone it is under, and the base every app name under it ends in, so a deployment's names can be placed.",
+        "tags": [
+          "domains"
+        ],
+        "x-deploy-key": "allowed"
+      }
+    },
     "/deploy/blueprints/": {
       "get": {
         "operationId": "blueprintList",
@@ -18054,9 +18123,18 @@
             }
           },
           {
-            "description": "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here.",
+            "description": "1 to ask about the hostname as one served through Cloudflare Tunnel: no public-IP DNS check and no certificate here, and never a just-dashboard.com address.",
             "in": "query",
             "name": "tunnel",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "app-domain to ask for the just-dashboard.com address of the deployment name even when it is not the default; standard for the suggestion without it (the operator's own wildcard, else sslip.io).",
+            "in": "query",
+            "name": "method",
             "required": false,
             "schema": {
               "type": "string"

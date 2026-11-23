@@ -1772,6 +1772,7 @@ route that carries it and fails when one in the table does not.
 | Backups | `POST /backups/key/import`, `POST /backups/key/export`, `POST /backups/`, `PUT /backups/{id}`, `POST /backups/import` |
 | The assistant's provider keys | `PUT /assistant/providers/{preset}` |
 | The account link | `POST /dashboard/link/`, `DELETE /dashboard/link/request`, `PUT /dashboard/link/scope` |
+| The just-dashboard.com address (JD 0.9.1) | `PUT /dashboard/link/domain/`, `DELETE /dashboard/link/domain/` |
 | The hub link | `POST /dashboard/hub`, `DELETE /dashboard/hub/request`, `PUT /dashboard/hub/scope` |
 | Hub sign-in | `PUT /account/hub-signin` |
 | The dashboard's own settings | `PUT /dashboard/config` |

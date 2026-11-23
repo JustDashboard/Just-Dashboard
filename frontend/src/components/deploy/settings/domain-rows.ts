@@ -161,12 +161,17 @@ export function tunnelTip({
   tunnel,
   wildcard,
   fenced,
+  appDomain,
 }: {
   tunnel: boolean
   wildcard: boolean
   /** The route has a saved address list. */
   fenced: boolean
+  /** A name under this server's just-dashboard.com address. */
+  appDomain?: boolean
 }) {
+  if (!tunnel && appDomain)
+    return "A just-dashboard.com address points at this server and is never routed through a tunnel."
   if (!tunnel && wildcard)
     return "A wildcard is not routed through a tunnel: each name is a route and a record of its own at Cloudflare."
   if (!tunnel && fenced)

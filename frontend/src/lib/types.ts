@@ -3883,6 +3883,12 @@ export type DeploymentDomainRoute = {
   deepLink?: string
   certificateLink?: string
   protected?: boolean
+  /**
+   * Set on a name under the site's app-domain zone: `detached` when this server no longer holds
+   * its handle, so the name does not resolve. Read only through `appDomainStateOf`
+   * (`lib/app-domain.ts`), the one place that decides it.
+   */
+  appDomain?: { status: "active" | "detached" }
 }
 
 export type DeploymentStorageMount = {
@@ -4969,11 +4975,16 @@ export type DeploymentHostnameSuggestion = {
    * The HTTP-01 challenge this host could issue one with now, if any — or, for a
    * wildcard, `dns-01` through the saved credentials of `certificateDnsProvider`.
    */
-  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01"
+  certificateMethod?: "nginx" | "webroot" | "standalone" | "caddy" | "dns-01" | "app-domain"
   certificateDnsProvider?: string
   certificateIssue?: string
   /** `tunnel` answers a name asked about with `tunnel=1`: whether a tunnel can serve it. */
-  method: "wildcard" | "sslip" | "custom" | "none" | "tunnel"
+  /**
+   * `app-domain` is a name under this server's just-dashboard.com handle: covered when the
+   * handle's wildcard is valid, and otherwise `certificateMethod: "app-domain"`, the release
+   * issuing that wildcard. Asked for with `method=app-domain`, it is answered whatever the default.
+   */
+  method: "wildcard" | "sslip" | "custom" | "none" | "tunnel" | "app-domain"
   detail: string
   /** This server's public IPv4 — for a typed hostname, what its A record should name. */
   address?: string
@@ -8497,6 +8508,71 @@ export type AccountLinkStatus = {
   }
   /** Why the most recent link request ended without a link, so the page can say so. */
   lastOutcome?: { result: "denied" | "expired" | "failed"; at: string; message?: string }
+}
+
+/**
+ * A deployment domain under the server's just-dashboard.com handle, as `usedBy` lists it.
+ * Mirrors `GET /dashboard/link/domain` (docs/internal/backend/app-domains.md).
+ */
+export type AppDomainUse = {
+  projectId: number
+  project: string
+  environmentId: number
+  /** The environment's kind, "production" or "staging", as `?env=` takes it. */
+  environment: string
+  hostname: string
+}
+
+/**
+ * This server's address under the site's zone: `<app>.<handle>.<zone>` names for deployed apps,
+ * through one wildcard record and one wildcard certificate. Mirrors `GET /dashboard/link/domain`.
+ * Unlike the link's own status, absent values are `null`, never left out, and times are Unix
+ * seconds.
+ */
+export type AppDomainStatus = {
+  /** JD_APP_DOMAINS. False switches the feature off entirely. */
+  enabled: boolean
+  linked: boolean
+  /** Whether the site offers addresses; null when unknown (not linked, or the site not reached). */
+  available: boolean | null
+  /** The site's zone, e.g. "just-dashboard.com". Null while unknown. */
+  zone: string | null
+  /** Why `available` is false or null, in words for the operator. */
+  reason: string | null
+  /** This server's public IPv4, which a claim publishes. */
+  publicAddress: string | null
+  /** New deployments are given the address by default. */
+  autoAssign: boolean
+  domain: {
+    handle: string
+    hostname: string
+    wildcard: string
+    address: string
+    status: "active" | "suspended" | "detached"
+    /** A suspension's or a detachment's stated reason. */
+    reason: string | null
+    updatedAt: number
+  } | null
+  certificate: {
+    name: string
+    state: "missing" | "issuing" | "valid" | "expiring" | "failed"
+    expiresAt: number | null
+    error: string | null
+  } | null
+  usedBy: AppDomainUse[]
+  /**
+   * The handle the account chose for this server when it approved the link (or later on the
+   * site), which the server claims by itself. Null when there is none, or once a domain is held.
+   */
+  offer: AppDomainOffer | null
+}
+
+/** An address the site offers this server, claimed automatically (AUTOCLAIM.md). */
+export type AppDomainOffer = {
+  handle: string
+  hostname: string
+  /** Why the last automatic claim failed, in words; null while it has not run or is under way. */
+  error: string | null
 }
 
 /**

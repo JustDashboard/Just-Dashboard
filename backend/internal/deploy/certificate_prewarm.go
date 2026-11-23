@@ -227,6 +227,9 @@ func (e *NormalizedStepExecutor) startCertificatePrewarm(ctx context.Context, ex
 	if err != nil {
 		return
 	}
+	// What the certificate step will ask for: without the app domain names
+	// this server no longer holds (app_domains.go).
+	domains, _ = e.detachedDomains(ctx, domains)
 	names := certificateNames(domains)
 	if e.prewarms.start(ctx, execution.Run.ID, names, e.certificates) {
 		_ = stepLog(execution, "status", "Resolving the certificate for "+strings.Join(names, ", ")+" while the build runs")

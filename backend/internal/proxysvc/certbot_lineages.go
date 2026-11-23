@@ -55,6 +55,8 @@ type renewalConf struct {
 	// ManualAuthHook is what answers a manual challenge; without one the
 	// manual plugin cannot run unattended.
 	ManualAuthHook string
+	// ManualCleanupHook takes a manual challenge down again.
+	ManualCleanupHook string
 	// PreHook runs before the renewal (the standard way to stop whatever
 	// holds port 80 for standalone), DeployHook after a renewed certificate
 	// is saved (--deploy-hook, stored as renew_hook), and PostHook once the
@@ -140,6 +142,7 @@ func readRenewalConf(path string) (renewalConf, error) {
 	conf.Authenticator = param("authenticator")
 	conf.Installer = param("installer")
 	conf.ManualAuthHook = param("manual_auth_hook")
+	conf.ManualCleanupHook = param("manual_cleanup_hook")
 	conf.PreHook = param("pre_hook")
 	conf.DeployHook = param("renew_hook")
 	conf.PostHook = param("post_hook")
@@ -286,12 +289,17 @@ func (s *Service) renewalProblems(ctx context.Context, rt *certbotRuntime, confs
 	}
 	var credentials []string
 	var standalone []renewalConf
+	var appDomains []renewalConf
 	for _, conf := range confs {
 		if conf.err != nil {
 			continue
 		}
 		auth := pluginName(conf.Authenticator)
 		switch {
+		case isAppDomainLineage(conf.Name):
+			// Renewed through jd and the account link (app_domain.go):
+			// the manual plugin with hooks is what it should name.
+			appDomains = append(appDomains, conf)
 		case auth == "":
 			add(conf.Name, "Its renewal configuration names no authenticator, so certbot skips it and the run fails.")
 		case rt != nil && rt.authenticators != nil && !builtinAuthenticators[auth] && !rt.authenticators[auth]:
@@ -303,6 +311,17 @@ func (s *Service) renewalProblems(ctx context.Context, rt *certbotRuntime, confs
 		}
 		if conf.Credentials != "" && filepath.IsAbs(conf.Credentials) {
 			credentials = append(credentials, conf.Credentials)
+		}
+	}
+	if len(appDomains) > 0 {
+		missing := map[string]bool{}
+		if rt != nil {
+			missing = rt.missingFiles(ctx, []string{AppDomainHookBinary})
+		}
+		for _, conf := range appDomains {
+			if problem := appDomainHookProblem(conf, missing); problem != "" {
+				add(conf.Name, "%s", problem)
+			}
 		}
 	}
 	if len(credentials) > 0 && rt != nil {

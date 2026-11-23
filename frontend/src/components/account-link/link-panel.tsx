@@ -30,6 +30,7 @@ const TERMINAL_COMMAND = "sudo ./scripts/manage.sh link"
 export function LinkPanel({
   status,
   scope,
+  addresses,
   onScope,
   onBegin,
   onCancel,
@@ -37,26 +38,51 @@ export function LinkPanel({
 }: {
   status: AccountLinkStatus
   scope: AccountLinkScope
+  /**
+   * App domains are on here, so the approval page can give this server an address for its
+   * apps, which it then claims by itself (AUTOCLAIM.md).
+   */
+  addresses?: boolean
   onScope: (scope: AccountLinkScope) => void
   onBegin: (scope: AccountLinkScope) => Promise<void>
   onCancel: () => Promise<void>
   className?: string
 }) {
+  const note = addresses ? <AddressNote host={siteHost(status.siteUrl)} /> : null
   if (status.state === "pending" && status.request) {
     return (
-      <Waiting status={status} request={status.request} onCancel={onCancel} className={className} />
+      <Waiting
+        status={status}
+        request={status.request}
+        note={note}
+        onCancel={onCancel}
+        className={className}
+      />
     )
   }
-  return <Choose scope={scope} onScope={onScope} onBegin={onBegin} className={className} />
+  return (
+    <Choose scope={scope} note={note} onScope={onScope} onBegin={onBegin} className={className} />
+  )
+}
+
+/** The one line that says where this server's app address is chosen. */
+function AddressNote({ host }: { host: string }) {
+  return (
+    <p className="text-xs text-muted-foreground">
+      When you approve the link on {host}, you can give this server an address for its apps there.
+    </p>
+  )
 }
 
 function Choose({
   scope,
+  note,
   onScope,
   onBegin,
   className,
 }: {
   scope: AccountLinkScope
+  note: React.ReactNode
   onScope: (scope: AccountLinkScope) => void
   onBegin: (scope: AccountLinkScope) => Promise<void>
   className?: string
@@ -96,6 +122,7 @@ function Choose({
           </Well>
         </div>
       </div>
+      {note}
       {refusal && (
         <div role="alert">
           <Notice tone="danger" icon={Warning} title="Could not start linking">
@@ -110,11 +137,13 @@ function Choose({
 function Waiting({
   status,
   request,
+  note,
   onCancel,
   className,
 }: {
   status: AccountLinkStatus
   request: NonNullable<AccountLinkStatus["request"]>
+  note: React.ReactNode
   onCancel: () => Promise<void>
   className?: string
 }) {
@@ -199,6 +228,7 @@ function Waiting({
           approve. Check that it matches.
         </p>
       )}
+      {note}
     </Section>
   )
 }

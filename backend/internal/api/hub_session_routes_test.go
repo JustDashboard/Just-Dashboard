@@ -105,6 +105,9 @@ var hubSessionRefused = []string{
 	"POST /api/v1/dashboard/link/",
 	"DELETE /api/v1/dashboard/link/request",
 	"PUT /api/v1/dashboard/link/scope",
+	// The just-dashboard.com address held through it.
+	"PUT /api/v1/dashboard/link/domain/",
+	"DELETE /api/v1/dashboard/link/domain/",
 	// The hub link.
 	"POST /api/v1/dashboard/hub",
 	"DELETE /api/v1/dashboard/hub/request",

@@ -294,7 +294,11 @@ only renderer/executor/validation authority for their feature.
   cloned onto this server yet. A repository name is validated as owner/name before it reaches gh's argv
   or a REST path.
 - `GET /deploy/hostname` proposes a public address and reports what HTTPS would take. A wildcard
-  certificate the host already holds wins; failing that the answer is `<slug>-<suffix>.<a-b-c-d>.sslip.io`,
+  certificate the host already holds wins (the just-dashboard.com address's own wildcard is not one of the
+  operator's); then, while this server holds an active [app domain](../backend/app-domains.md) with
+  `autoAssign` on and the deployment is not served through a tunnel, `<slug>.<handle>.<zone>` with
+  `method: "app-domain"` (`covered` once the wildcard is valid, `certificateMethod: "app-domain"` before);
+  `&method=app-domain` asks for that name even when it is not the default. Failing those the answer is `<slug>-<suffix>.<a-b-c-d>.sslip.io`,
   which resolves to this server with no DNS record to create. The suffix is
   `HMAC-SHA256(sha256("jd-derive-v1" || masterKey), "deploy.hostname" || 0x00 || ToLower(TrimSpace(name)))`
   truncated to three bytes, not a random draw, so the same name proposes the same hostname on every call —
@@ -326,6 +330,12 @@ only renderer/executor/validation authority for their feature.
   including Tailscale addresses. Go's `IsGlobalUnicast` and `IsPrivate` alone do not exclude CGNAT.
   A host without a public interface address gets no generated fallback; hosts behind provider NAT
   need an operator-supplied domain pointing to the provider's public address.
+- `provision_certificate` for [app domain](../backend/app-domains.md#deployments) names: a name under the
+  handle this server holds is covered by the handle's wildcard, issued through just-dashboard.com when missing
+  or expiring and never ordered one by one; the release's other names are resolved as below, and activation
+  serves each set with its own certificate. A name under the zone that the held handle does not cover is left
+  out of every step (`deploy/app_domains.go`): a warning naming it when other public names remain,
+  `app_domain_detached` when it was the only one.
 - `provision_certificate` is a step of the release path, ordered after `backup_gate` and before
   `start_candidate`. It reads the frozen release snapshot, and for every planned HTTPS domain resolves an
   existing certificate or orders one through `proxysvc.EnsureDeploymentCertificate`. Its position is the
@@ -1971,7 +1981,7 @@ only renderer/executor/validation authority for their feature.
   its operationId, and made through the router as the MCP key with the deploy key gate and every
   handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
-  destructive actions. 100 tools generated, 113 tools in all; previews' approvals, reveals, saved
+  destructive actions. 101 tools generated, 114 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
   [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters

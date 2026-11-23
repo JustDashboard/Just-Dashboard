@@ -63,6 +63,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 ## Domains and the edge
 
 - HTTPS issued during the deploy, wildcard domains too, through the DNS credentials under Certificates
+- An address for every app under just-dashboard.com, `shop.acme.just-dashboard.com`, from a handle the linked server holds: one wildcard record and one wildcard certificate, nothing to create per app ([app domains](../guides/linking-and-usage.md#app-domains))
 - A domain's DNS record created from its settings with those same credentials: the A and AAAA to this server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the connector runs as a container, and its routes and DNS records are set as each release goes live
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a rate limit per visitor, and CrowdSec's bans refused at the route

@@ -38,6 +38,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		})
 		r.Method(http.MethodGet, "/", s.handle(s.handleDeployList))
 		r.Method(http.MethodGet, "/hostname", s.handle(s.handleDeploymentHostname))
+		r.Method(http.MethodGet, "/app-domain", s.handle(s.handleAppDomainNames))
 		// Static, and registered before /{id} for the reason /hostname is.
 		s.mountTemplateReads(r)
 		// The OpenAPI description of this API (deploy_openapi.go): static,

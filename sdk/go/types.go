@@ -2740,6 +2740,7 @@ type Healthcheck struct {
 // HostnameSuggestion is api.hostnameSuggestion in the dashboard's source.
 type HostnameSuggestion struct {
 	Address                string `json:"address,omitempty"`
+	AppDomain              string `json:"appDomain,omitempty"`
 	Base                   string `json:"base,omitempty"`
 	CertificateDNSProvider string `json:"certificateDnsProvider,omitempty"`
 	CertificateIssue       string `json:"certificateIssue,omitempty"`
@@ -3057,6 +3058,15 @@ const (
 	ModeChanges Mode = "changes"
 	ModeFull    Mode = "full"
 )
+
+// Names is appdomain.Names in the dashboard's source.
+type Names struct {
+	AutoAssign bool    `json:"autoAssign,omitempty"`
+	Base       *string `json:"base,omitempty"`
+	Enabled    bool    `json:"enabled,omitempty"`
+	Status     *string `json:"status,omitempty"`
+	Zone       *string `json:"zone,omitempty"`
+}
 
 // NotificationAttempt is deploy.NotificationAttempt in the dashboard's source.
 type NotificationAttempt struct {

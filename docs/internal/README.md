@@ -30,6 +30,9 @@ strategy, and feature ownership behind those rules.
 
 ## Backend features
 
+- [`backend/app-domains.md`](backend/app-domains.md) — `<app>.<handle>.just-dashboard.com` addresses through the account
+  link: the handle's state and background work, the REST API, the wildcard over DNS-01 through certbot's manual hooks
+  and `jd app-domain challenge`, the deployment integration and the lifecycle table.
 - [`backend/account-link.md`](backend/account-link.md) — linking this server to a just-dashboard.com account: the
   protocol it implements (the site repository's `server-link-protocol.md`), the trust model, the three doors
   (Settings, `install.sh`, `manage.sh link`), the scope table and what the heartbeat carries, command
