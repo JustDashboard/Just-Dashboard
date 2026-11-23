@@ -386,9 +386,9 @@ func appDomainHookProblem(conf renewalConf, missing map[string]bool) string {
 	case pluginName(conf.Authenticator) != "manual":
 		return "It is the just-dashboard.com address's certificate, which renews only through the manual plugin and jd, and its renewal configuration names " + pluginName(conf.Authenticator) + "."
 	case !strings.HasPrefix(conf.ManualAuthHook, want):
-		return "It is the just-dashboard.com address's certificate, and its auth hook is not jd's (" + want + "), so certbot cannot publish the challenge when it renews. Issue it again from Settings → just-dashboard.com link."
+		return "It is the just-dashboard.com address's certificate, and its auth hook is not jd's (" + want + "), so certbot cannot publish the challenge when it renews. Issue it again from Settings → Connect."
 	case !strings.HasPrefix(conf.ManualCleanupHook, AppDomainHookBinary+" app-domain challenge remove"):
-		return "It is the just-dashboard.com address's certificate, and its cleanup hook is not jd's, so the challenge values stay published after a renewal. Issue it again from Settings → just-dashboard.com link."
+		return "It is the just-dashboard.com address's certificate, and its cleanup hook is not jd's, so the challenge values stay published after a renewal. Issue it again from Settings → Connect."
 	case missing[AppDomainHookBinary]:
 		return "It renews through " + AppDomainHookBinary + ", which is missing where certbot runs. Run sudo ./scripts/manage.sh install-cli."
 	}

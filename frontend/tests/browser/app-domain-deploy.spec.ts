@@ -237,6 +237,27 @@ const row = (page: Page, name: string) =>
 
 const api = { hostname: "api.example.test", https: true, ownership: "managed" }
 
+/** The observed routes with the backend's own mark on one name: detached. */
+function markedDetached(hostname: string) {
+  const operations = structuredClone(healthyOperations)
+  operations.domains = {
+    ...operations.domains,
+    status: "available",
+    domains: [
+      ...operations.domains.domains,
+      {
+        hostname,
+        https: true,
+        ownership: "managed",
+        route: "served",
+        certificate: "valid",
+        appDomain: { status: "detached" },
+      } as (typeof operations.domains.domains)[number],
+    ],
+  }
+  return operations
+}
+
 test("domains: the address is switched on beside the current names, and off again", async ({
   page,
 }) => {
@@ -284,16 +305,26 @@ test("domains: no address held, no control", async ({ page }) => {
 test("domains: a name under a handle this server no longer holds is marked, and removable", async ({
   page,
 }) => {
-  const old = `api-production.old.${ZONE}`
-  const { fixture } = await domainsPage(page, [
-    api,
-    { hostname: old, https: true, ownership: "managed" },
-    { hostname: "www.example.test", https: true, ownership: "managed" },
-  ])
+  // The handle this server held (acme), now detached. A name under a handle that was never
+  // this server's, or the zone's own name, is an ordinary domain and never marked.
+  const old = `api-production.acme.${ZONE}`
+  const { fixture } = await domainsPage(
+    page,
+    [
+      api,
+      { hostname: old, https: true, ownership: "managed" },
+      { hostname: "www.example.test", https: true, ownership: "managed" },
+      { hostname: ZONE, https: true, ownership: "managed" },
+      { hostname: `shop.other.${ZONE}`, https: true, ownership: "managed" },
+    ],
+    held("detached"),
+  )
   const line = row(page, old)
   const marker = line.getByRole("button", { name: `${old} is detached` })
   await expect(marker).toBeVisible()
   await expect(row(page, "api.example.test").getByText("Detached")).toHaveCount(0)
+  await expect(row(page, ZONE).getByText("Detached")).toHaveCount(0)
+  await expect(row(page, `shop.other.${ZONE}`).getByText("Detached")).toHaveCount(0)
 
   // The marker shares the row's one line of readings, so the row keeps its height: what it
   // means is a layer over the row, never a band under it.
@@ -318,7 +349,12 @@ test("domains: a name under a handle this server no longer holds is marked, and 
   await expect(row(page, old)).toHaveCount(0)
   await saveSettings(page)
   await expectSaved(page)
-  expect(saved(fixture)).toEqual(["api.example.test", "www.example.test"])
+  expect(saved(fixture)).toEqual([
+    "api.example.test",
+    "www.example.test",
+    ZONE,
+    `shop.other.${ZONE}`,
+  ])
 })
 
 test("domains: the backend's own mark says detached even when the handle matches", async ({
@@ -353,7 +389,12 @@ for (const width of [390, 1280]) {
   test(`domains: the control and the marker fit at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 900 })
     const old = `api-production.old.${ZONE}`
-    await domainsPage(page, [api, { hostname: old, https: true, ownership: "managed" }])
+    await domainsPage(
+      page,
+      [api, { hostname: old, https: true, ownership: "managed" }],
+      held("active"),
+      markedDetached(old),
+    )
     await expect(appSwitch(page)).toBeVisible()
     await expect(row(page, old).getByRole("button", { name: `${old} is detached` })).toBeVisible()
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true)

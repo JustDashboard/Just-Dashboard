@@ -448,7 +448,7 @@ func (s *Server) appDomainSuggestion(ctx context.Context, name string, tunnel bo
 	}
 	base, _, ok := s.modules.appDomain.Active(ctx)
 	if !ok {
-		suggestion.Detail = "This server holds no active just-dashboard.com address. Claim one under Settings → just-dashboard.com link."
+		suggestion.Detail = "This server holds no active just-dashboard.com address. Claim one under Settings → Connect."
 		return suggestion
 	}
 	slug := hostnameSlug(name)
@@ -485,7 +485,7 @@ func (s *Server) appDomainHostname(ctx context.Context, hostname string) (hostna
 		return hostnameSuggestion{
 			Hostname: hostname, Method: "app-domain", AppDomain: "detached",
 			CertificateIssue: "This name is under just-dashboard.com but not under the handle this server holds, so it resolves elsewhere or nowhere and no certificate is issued for it.",
-			Detail:           "This name is under just-dashboard.com but not under the handle this server holds. Claim that handle under Settings → just-dashboard.com link, or use another address.",
+			Detail:           "This name is under the just-dashboard.com address this server no longer holds. Claim it again under Settings → Connect, or use another address.",
 		}, true
 	}
 	return hostnameSuggestion{}, false

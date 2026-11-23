@@ -719,16 +719,39 @@ func (s *Service) Classify(ctx context.Context, hostname string) NameState {
 	if err != nil {
 		return NotAppDomain
 	}
-	zone := s.zone(st)
-	if zone == "" || (hostname != zone && !strings.HasSuffix(hostname, "."+zone)) {
+	// Only <handle>.<zone> and <app>.<handle>.<zone>, for the handle this
+	// server holds or held, are app names. Everything else under the zone is
+	// an ordinary domain: the zone's own name (the site that runs it is often
+	// deployed from a dashboard like this one), its www, the operator's other
+	// subdomains, and names under handles that were never this server's.
+	// Treating them as app names failed their releases as "detached".
+	if st.Handle == "" || appNameHandle(hostname, s.zone(st)) != st.Handle {
 		return NotAppDomain
 	}
 	if s.Enabled() && st.held() {
-		if base := st.base(); hostname == base || singleLabelUnder(hostname, base) {
-			return Held
-		}
+		return Held
 	}
 	return Detached
+}
+
+// appNameHandle is the handle an app name sits under, <handle>.<zone> or
+// <app>.<handle>.<zone>, or "" for any other name.
+func appNameHandle(hostname, zone string) string {
+	if zone == "" {
+		return ""
+	}
+	rest, ok := strings.CutSuffix(hostname, "."+zone)
+	if !ok || rest == "" {
+		return ""
+	}
+	labels := strings.Split(rest, ".")
+	switch len(labels) {
+	case 1:
+		return labels[0]
+	case 2:
+		return labels[1]
+	}
+	return ""
 }
 
 // Zone is the app domain zone, or "" when none is known.
@@ -741,11 +764,6 @@ func (s *Service) Zone(ctx context.Context) string {
 		return ""
 	}
 	return s.zone(st)
-}
-
-func singleLabelUnder(hostname, base string) bool {
-	prefix, ok := strings.CutSuffix(hostname, "."+base)
-	return ok && prefix != "" && !strings.Contains(prefix, ".")
 }
 
 // record writes an audit entry for what the service did on its own.
@@ -799,17 +817,20 @@ func (s *Service) UsedBy(ctx context.Context, st State) ([]Use, error) {
 	return s.uses(ctx, st.base(), nil)
 }
 
-// DetachedNames lists the deployment domains under the zone that the state's
-// handle does not cover now.
+// DetachedNames lists the deployment domains under the handle this server
+// held and no longer holds. Other names under the zone are not app names
+// (Classify) and are never listed.
 func (s *Service) DetachedNames(ctx context.Context, st State) ([]Use, error) {
+	if st.Handle == "" || (s.Enabled() && st.held()) {
+		return []Use{}, nil
+	}
 	zone := s.zone(st)
+	base := st.Handle + "." + zone
 	if zone == "" {
 		return []Use{}, nil
 	}
-	held := s.Enabled() && st.held()
-	base := st.base()
-	return s.uses(ctx, zone, func(hostname string) bool {
-		return !held || (hostname != base && !singleLabelUnder(hostname, base))
+	return s.uses(ctx, base, func(hostname string) bool {
+		return appNameHandle(hostname, zone) == st.Handle
 	})
 }
 
