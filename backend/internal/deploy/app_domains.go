@@ -67,7 +67,7 @@ func (e *NormalizedStepExecutor) detachedDomains(ctx context.Context, domains []
 func appDomainDetachedResult(detached []string) StepResult {
 	return StepResult{
 		State: StepFailed, ErrorCode: "app_domain_detached",
-		ErrorMessage: detachedSentence(detached) + " This release has no other public name. Claim the address again under Settings → just-dashboard.com link, or give the deployment another address under Settings → Domains, then deploy again.",
+		ErrorMessage: detachedSentence(detached) + " This release has no other public name. Claim the address again under Settings → Connect, or give the deployment another address under Settings → Domains, then deploy again.",
 		Evidence:     mustJSON(map[string]any{"detached": detached, "outcome": "failed"}),
 	}
 }

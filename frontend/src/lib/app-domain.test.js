@@ -56,12 +56,15 @@ test("a name is the server's, detached, or not an app name at all", () => {
   const active = status(held("active"))
   expect(appDomainStateOf("shop.acme.just-dashboard.com", undefined, active)).toBe("active")
   expect(appDomainStateOf("SHOP.Acme.just-dashboard.com", undefined, active)).toBe("active")
-  // Another handle: renamed, or a copy from another server.
-  expect(appDomainStateOf("shop.other.just-dashboard.com", undefined, active)).toBe("detached")
+  // Another handle was never this server's: an ordinary name, as the backend judges it.
+  expect(appDomainStateOf("shop.other.just-dashboard.com", undefined, active)).toBeUndefined()
   expect(
     appDomainStateOf("shop.acme.just-dashboard.com", undefined, status(held("suspended"))),
   ).toBe("detached")
-  expect(appDomainStateOf("shop.acme.just-dashboard.com", undefined, status(null))).toBe("detached")
+  expect(appDomainStateOf("shop.acme.just-dashboard.com", undefined, status(null))).toBeUndefined()
+  // The zone's own names: the site that runs it may well be deployed from this dashboard.
+  expect(appDomainStateOf("just-dashboard.com", undefined, status(null))).toBeUndefined()
+  expect(appDomainStateOf("www.just-dashboard.com", undefined, status(null))).toBeUndefined()
   // The server name and other names in the zone are not app names.
   expect(appDomainStateOf("acme.just-dashboard.com", undefined, active)).toBeUndefined()
   expect(appDomainStateOf("a.b.acme.just-dashboard.com", undefined, active)).toBeUndefined()

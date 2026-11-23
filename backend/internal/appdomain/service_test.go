@@ -485,10 +485,13 @@ func TestUnlinkingDetachesTheHandle(t *testing.T) {
 
 func TestNamesAreClassifiedAgainstTheHandleHeldNow(t *testing.T) {
 	e := newEnv(t, true)
-	// Nothing claimed: the zone is the site's own host, and nothing under
-	// it is this server's.
-	if e.svc.Classify(t.Context(), "shop.acme.just-dashboard.com") != Detached || e.svc.Classify(t.Context(), "shop.example.test") != NotAppDomain {
-		t.Fatal("before a claim")
+	// Nothing claimed: no name is an app name of this server's, the zone's
+	// own names least of all. The site that runs the zone is often deployed
+	// from a dashboard like this one, at just-dashboard.com itself.
+	for _, name := range []string{"shop.acme.just-dashboard.com", "just-dashboard.com", "www.just-dashboard.com", "shop.example.test"} {
+		if got := e.svc.Classify(t.Context(), name); got != NotAppDomain {
+			t.Errorf("before a claim, %s = %v", name, got)
+		}
 	}
 	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
 		t.Fatal(err)
@@ -496,7 +499,10 @@ func TestNamesAreClassifiedAgainstTheHandleHeldNow(t *testing.T) {
 	e.waitIssued(1)
 	for name, want := range map[string]NameState{
 		"shop.acme.just-dashboard.com": Held, "SHOP.Acme.just-dashboard.com.": Held, "acme.just-dashboard.com": Held,
-		"a.b.acme.just-dashboard.com": Detached, "shop.other.just-dashboard.com": Detached, "just-dashboard.com": Detached,
+		// Not app names: deeper than the wildcard reaches, another handle,
+		// the zone's own names, and anything outside the zone.
+		"a.b.acme.just-dashboard.com": NotAppDomain, "shop.other.just-dashboard.com": NotAppDomain,
+		"just-dashboard.com": NotAppDomain, "www.just-dashboard.com": NotAppDomain, "docs.just-dashboard.com": NotAppDomain,
 		"shop.example.test": NotAppDomain, "acme.just-dashboard.com.evil.test": NotAppDomain,
 	} {
 		if got := e.svc.Classify(t.Context(), name); got != want {
@@ -506,8 +512,34 @@ func TestNamesAreClassifiedAgainstTheHandleHeldNow(t *testing.T) {
 	if base, auto, ok := e.svc.Active(t.Context()); !ok || base != "acme.just-dashboard.com" || !auto {
 		t.Fatalf("active = %q %v %v", base, auto, ok)
 	}
+	e.deployment("site", "production", "just-dashboard.com")
 	e.deployment("old", "production", "old.other.just-dashboard.com")
-	if v, _ := e.svc.View(t.Context()); len(v.Detached) != 1 || v.Detached[0].Hostname != "old.other.just-dashboard.com" {
+	e.deployment("shop", "production", "shop.acme.just-dashboard.com")
+	if v, _ := e.svc.View(t.Context()); len(v.Detached) != 0 {
+		t.Fatalf("detached while held = %+v", v.Detached)
+	}
+
+	// Once the handle is no longer held, its own names are detached and
+	// nothing else is: the site's deployment keeps releasing.
+	tx, err := e.svc.st.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DetachInTx(t.Context(), tx, time.Now().Unix()); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	for name, want := range map[string]NameState{
+		"shop.acme.just-dashboard.com": Detached, "acme.just-dashboard.com": Detached,
+		"just-dashboard.com": NotAppDomain, "old.other.just-dashboard.com": NotAppDomain,
+	} {
+		if got := e.svc.Classify(t.Context(), name); got != want {
+			t.Errorf("detached, %s = %v, want %v", name, got, want)
+		}
+	}
+	if v, _ := e.svc.View(t.Context()); len(v.Detached) != 1 || v.Detached[0].Hostname != "shop.acme.just-dashboard.com" {
 		t.Fatalf("detached = %+v", v.Detached)
 	}
 }

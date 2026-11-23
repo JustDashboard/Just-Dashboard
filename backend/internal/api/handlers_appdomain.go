@@ -256,7 +256,7 @@ func (s *Server) handleAppDomainHook(w http.ResponseWriter, r *http.Request) err
 	}
 	token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
 	if !ok || !svc.CheckHookToken(r.Context(), token) {
-		return httpx.Err(http.StatusUnauthorized, "unauthorized", "the hook's credential is not this server's; issue the certificate again from Settings → just-dashboard.com link")
+		return httpx.Err(http.StatusUnauthorized, "unauthorized", "the hook's credential is not this server's; issue the certificate again from Settings → Connect")
 	}
 	var body appDomainHookBody
 	if err := httpx.DecodeJSON(r, &body); err != nil {

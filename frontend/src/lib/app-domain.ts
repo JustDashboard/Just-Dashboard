@@ -65,11 +65,14 @@ export function appDomainStateOf(
   const zone = status?.zone?.toLowerCase()
   const name = hostname.toLowerCase()
   if (!zone || !name.endsWith(`.${zone}`)) return undefined
-  // Only `<app>.<handle>.<zone>` is an app name; the server name and the zone's own names are not.
+  // Only `<app>.<handle>.<zone>` under the handle this server holds or held is an app name.
+  // The server name, the zone's own names (the site that runs it may be deployed here) and
+  // names under handles that were never this server's are ordinary domains, as the backend
+  // judges them (appdomain.Classify).
   const labels = name.slice(0, -zone.length - 1).split(".")
-  if (labels.length !== 2) return undefined
   const domain = status?.domain
-  return domain?.status === "active" && labels[1] === domain.handle ? "active" : "detached"
+  if (labels.length !== 2 || !domain || labels[1] !== domain.handle) return undefined
+  return domain.status === "active" ? "active" : "detached"
 }
 
 const seconds = (value: number | null | undefined) =>
