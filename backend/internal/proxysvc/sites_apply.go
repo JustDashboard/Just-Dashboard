@@ -219,7 +219,11 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 	}
 	s.keepLoaded(full, filepath.Join(s.nginxDir, "sites-enabled", spec.Name))
 	undoLink, undoBackup := func() {}, func() {}
+	// fit is the raise of nginx's server-name hash this save's test needed,
+	// which goes with the save when it is rolled back.
+	var fit *namesFit
 	rollback := func() {
+		fit.undo(ctx)
 		undoLink()
 		restoreConfig(full, original, existed)
 		undoBackup()
@@ -284,9 +288,16 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 	}
 
 	if trial != nil {
-		res.Validation = trial.validate(ctx)
+		// The trial is a test of the day the site is enabled: a raise of
+		// the server-name hash it needs is made then, not now.
+		res.Validation, _, _ = s.fitServerNames(ctx, trial.main, full, false, func() (*ValidationResult, error) {
+			return trial.validate(ctx), nil
+		})
+		res.Validation.Note = trial.rename(res.Validation.Note)
 	} else {
-		res.Validation = runValidator(ctx, "nginx", "-t")
+		res.Validation, fit, _ = s.fitServerNames(ctx, "", full, true, func() (*ValidationResult, error) {
+			return runValidator(ctx, "nginx", "-t"), nil
+		})
 	}
 	if !res.Validation.Valid && trial == nil {
 		rollback()
@@ -324,7 +335,7 @@ func (s *Service) saveSiteLocked(ctx context.Context, spec *SiteSpec, content st
 		return res, ErrServerNameConflict
 	}
 	if untested != "" {
-		res.Validation.Note = untested
+		res.Validation.Note = joinNotes(untested, res.Validation.Note)
 	}
 	record := func() {
 		s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,

@@ -658,7 +658,7 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 		// nginx's own reason travels with the refusal: "failed validation"
 		// alone left a first deployment failing with nothing to go on.
 		if errors.Is(err, ErrInvalidConf) && saved != nil && saved.Validation != nil {
-			err = fmt.Errorf("%w: %s", err, failureLine(saved.Validation.Output))
+			err = fmt.Errorf("%w: %s", err, FailureHeadline(saved.Validation))
 		}
 		recoveryCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		restoreErr := s.restoreDeploymentRouteLocked(recoveryCtx, snapshot)
@@ -1205,8 +1205,8 @@ func (s *Service) restoreDeploymentRouteLocked(ctx context.Context, snapshot Dep
 		}
 		s.recordChange(ctx, change)
 	}
-	if validation := runValidator(ctx, "nginx", "-t"); !validation.Valid {
-		return fmt.Errorf("restored nginx configuration did not validate: %s", validation.Output)
+	if validation := s.testNginx(ctx); !validation.Valid {
+		return fmt.Errorf("restored nginx configuration did not validate: %s", FailureHeadline(validation))
 	}
 	output, reloadErr := hostexec.Command(ctx, "nginx", "-s", "reload").CombinedOutput()
 	if reloadErr != nil {

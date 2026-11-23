@@ -172,7 +172,10 @@ func (s *Service) refreshNginxCrowdSec(ctx context.Context, banned []string) (Cr
 	if !s.nginxReadsCrowdSec() {
 		return result, nil
 	}
-	if _, err := s.Reload(ctx, KindNginx); err != nil {
+	if reload, err := s.Reload(ctx, KindNginx); err != nil {
+		if errors.Is(err, ErrInvalidConf) && reload != nil && reload.Validation != nil {
+			err = fmt.Errorf("%w: %s", err, FailureHeadline(reload.Validation))
+		}
 		return result, fmt.Errorf("nginx did not take the refreshed list: %w", err)
 	}
 	result.Reloaded = true

@@ -131,7 +131,7 @@ func (s *Service) BulkSites(ctx context.Context, action BulkAction, names []stri
 		return out, nil, nil
 	}
 	s.forgetEffective()
-	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+	if res := s.testNginx(ctx); !res.Valid {
 		if err := undoAll(); err != nil {
 			return nil, nil, err
 		}
@@ -532,7 +532,7 @@ func (s *Service) RenameSite(ctx context.Context, from, to string, reload bool) 
 	}
 
 	s.forgetEffective()
-	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+	if res := s.testNginx(ctx); !res.Valid {
 		if err := undo(); err != nil {
 			return nil, nil, err
 		}
