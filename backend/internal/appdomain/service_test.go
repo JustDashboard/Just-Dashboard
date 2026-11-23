@@ -794,3 +794,69 @@ func TestAServerHoldingADomainIgnoresAnOffer(t *testing.T) {
 		t.Fatalf("view = %+v %+v", v.Domain, v.Offer)
 	}
 }
+
+// Nobody presses Issue: a held address whose wildcard is missing gets one
+// at the next check; one that failed waits an hour (Let's Encrypt's limit on
+// failed validations) and is then tried again by itself, so a server mends
+// once the cause is gone, an update installing jd for instance.
+func TestAHeldAddressIssuesItsWildcardWithoutAButton(t *testing.T) {
+	e := newEnv(t, true)
+	clock := time.Unix(1795000000, 0)
+	e.svc.now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return clock }
+	advance := func(d time.Duration) { e.mu.Lock(); clock = clock.Add(d); e.mu.Unlock() }
+
+	e.certs.fail = errors.New("the jd command line is not installed where certbot runs it")
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1) // the claim's own issuance, which fails
+	if v, _ := e.svc.View(t.Context()); v.Certificate == nil || v.Certificate.State != "failed" {
+		t.Fatalf("after a failed issue = %+v", v.Certificate)
+	}
+
+	// Within the hour: the failure stands, nothing is ordered again.
+	advance(30 * time.Minute)
+	e.svc.refresh(t.Context())
+	if got := len(e.certs.orders()); got != 1 {
+		t.Fatalf("retried within the hour: %d orders", got)
+	}
+
+	// The cause is gone, the hour is over: the next check issues it.
+	e.certs.mu.Lock()
+	e.certs.fail = nil
+	e.certs.mu.Unlock()
+	advance(31 * time.Minute)
+	e.svc.refresh(t.Context())
+	e.waitIssued(2)
+	if v, _ := e.svc.View(t.Context()); v.Certificate == nil || v.Certificate.State != "valid" || v.Certificate.Error != nil {
+		t.Fatalf("after the automatic retry = %+v", v.Certificate)
+	}
+	// Valid: checks order nothing more.
+	advance(2 * time.Hour)
+	e.svc.refresh(t.Context())
+	if got := len(e.certs.orders()); got != 2 {
+		t.Fatalf("a valid wildcard was ordered again: %d orders", got)
+	}
+}
+
+// A wildcard that went missing (deleted by hand, a restore onto a new host)
+// is issued again at the next check, with no failure on record to wait for.
+func TestAMissingWildcardIsIssuedAtTheNextCheck(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	e.certs.mu.Lock()
+	e.certs.state = "missing"
+	e.certs.mu.Unlock()
+	e.svc.refresh(t.Context())
+	e.waitIssued(2)
+
+	// Switched off: nothing is issued, whatever the state.
+	off := newEnv(t, false)
+	off.svc.refresh(t.Context())
+	if got := len(off.certs.orders()); got != 0 {
+		t.Fatalf("issued while off: %d", got)
+	}
+}

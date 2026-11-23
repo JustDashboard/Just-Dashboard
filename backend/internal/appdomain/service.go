@@ -354,6 +354,7 @@ func (s *Service) refresh(ctx context.Context) {
 	}
 	if err == nil {
 		s.autoClaim(ctx, after)
+		s.autoIssue(ctx, after)
 	}
 }
 

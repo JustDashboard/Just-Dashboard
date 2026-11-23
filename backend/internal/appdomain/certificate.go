@@ -154,10 +154,7 @@ func (s *Service) issue(ctx context.Context, opts IssueOptions, log func(stream,
 		if err != nil {
 			msg = err.Error()
 		}
-		if cur.CertificateError == msg {
-			return false, nil
-		}
-		cur.CertificateError = msg
+		cur.CertificateError, cur.CertificateTriedAt = msg, s.now().Unix()
 		return true, nil
 	})
 	s.record(ctx, "app.domain.certificate", st.Hostname, err == nil, errorDetail(err))
@@ -268,4 +265,34 @@ func (s *Service) challengeState(ctx context.Context, domain string) (State, err
 		return State{}, fmt.Errorf("%w (%s, not %s)", ErrNotThisDomain, domain, st.Hostname)
 	}
 	return st, nil
+}
+
+// autoIssueRetry is how long a failed automatic issuance waits before the
+// next: Let's Encrypt refuses a name after five failed validations in an
+// hour, and a cause the operator fixes (a site that was not offering
+// addresses, a missing jd) is picked up at the next check.
+const autoIssueRetry = time.Hour
+
+// autoIssue issues the held handle's wildcard when it is missing, failed or
+// due, without anyone pressing Issue. It runs at every check (start-up, the
+// hourly refresh, a page asking), so a server whose first issuance failed
+// mends itself once the cause is gone, for example after an update. certbot's
+// own timer renews a valid wildcard. This also catches a timer that does not
+// run.
+func (s *Service) autoIssue(ctx context.Context, st State) {
+	if !s.Enabled() || !st.held() || s.certs == nil || s.jobs == nil || st.Zone == "" {
+		return
+	}
+	if current := s.certs.AppDomainCertificate(ctx, st.Handle, st.Zone); current.State == "valid" {
+		return
+	}
+	if st.CertificateError != "" && st.CertificateTriedAt > 0 &&
+		s.now().Sub(time.Unix(st.CertificateTriedAt, 0)) < autoIssueRetry {
+		return
+	}
+	if err := s.ensureHook(ctx); err != nil {
+		s.log.Warn("app domain hook credential", "err", err)
+		return
+	}
+	s.startIssue(ctx, IssueOptions{}, "system")
 }
