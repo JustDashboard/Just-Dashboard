@@ -128,16 +128,34 @@ https://apt.postgresql.org/pub/repos/apt bookworm-pgdg main" > /etc/apt/sources.
 # is what every other Mongo tool reads, so a backup taken here stays useful
 # somewhere else. The built-in path remains the fallback, and remains what runs
 # if this layer is ever dropped.
-RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://pgp.mongodb.com/server-7.0.asc \
-       -o /etc/apt/keyrings/mongodb.asc \
-    && chmod a+r /etc/apt/keyrings/mongodb.asc \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/mongodb.asc] \
-https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
-       > /etc/apt/sources.list.d/mongodb.list \
-    && apt-get update \
-    && apt-get install -y --no-install-recommends mongodb-database-tools \
-    && rm -rf /var/lib/apt/lists/*
+#
+# MongoDB's Debian repository carries amd64 only — its arm64 index is empty, so
+# apt-get install fails there with "Unable to locate package". On arm64 the
+# project's own Ubuntu 22.04 build is used instead (bookworm's glibc is newer,
+# so it runs), pinned and checked like the other downloads in this file. An
+# architecture with neither gets no tools and falls back to the built-in path.
+ARG MONGO_TOOLS_VERSION=100.20.1
+RUN set -eu; \
+    case "$(dpkg --print-architecture)" in \
+      amd64) \
+        install -m 0755 -d /etc/apt/keyrings; \
+        curl -fsSL https://pgp.mongodb.com/server-7.0.asc -o /etc/apt/keyrings/mongodb.asc; \
+        chmod a+r /etc/apt/keyrings/mongodb.asc; \
+        echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/mongodb.asc] https://repo.mongodb.org/apt/debian bookworm/mongodb-org/7.0 main" \
+          > /etc/apt/sources.list.d/mongodb.list; \
+        apt-get update; \
+        apt-get install -y --no-install-recommends mongodb-database-tools; \
+        rm -rf /var/lib/apt/lists/* ;; \
+      arm64) \
+        asset="mongodb-database-tools-ubuntu2204-arm64-${MONGO_TOOLS_VERSION}"; \
+        sum=02e492384155af7d0623148668bc9eaf228529c32555e33d450b3ec18c8dcdd0; \
+        curl -fsSL -o /tmp/mongo-tools.tgz "https://fastdl.mongodb.org/tools/db/${asset}.tgz"; \
+        echo "$sum  /tmp/mongo-tools.tgz" | sha256sum -c -; \
+        tar -xzf /tmp/mongo-tools.tgz -C /tmp; \
+        install -m 0755 /tmp/${asset}/bin/* /usr/local/bin/; \
+        rm -rf /tmp/mongo-tools.tgz /tmp/${asset} ;; \
+      *) echo "no MongoDB tools for $(dpkg --print-architecture); using the built-in dump" ;; \
+    esac
 
 # Debian ships neither a standalone docker CLI nor the compose v2 plugin, and
 # this image must not carry a second daemon — only the client that talks to
