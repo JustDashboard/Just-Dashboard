@@ -33,6 +33,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/healthprobe"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
@@ -328,6 +329,7 @@ func run(agentFlag, agentReset bool) error {
 	// purge still writing then is a write to a closed database.
 	janitorDone := safego.Go(ctx, log, "session janitor", func(ctx context.Context) { janitor(ctx, svc, log) })
 	refreshHostCLI(log)
+	proxysvc.InstallAppDomainHook = installHostCLI
 
 	if cfg.AgentMode {
 		tlsCfg, err := agentTLS(identity)
@@ -495,4 +497,16 @@ func refreshHostCLI(log *slog.Logger) {
 	case replaced:
 		log.Info("updated the server's jd to this build", "path", clihost.Path)
 	}
+}
+
+// installHostCLI puts the jd built beside this binary at the server's
+// /usr/local/bin/jd when nothing is there (internal/clihost). Only the
+// just-dashboard.com address's certificate asks for it: certbot on the host
+// runs that jd to prove and renew the wildcard.
+func installHostCLI() (bool, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return false, err
+	}
+	return clihost.Install("/host", filepath.Join(filepath.Dir(exe), "jd"))
 }
