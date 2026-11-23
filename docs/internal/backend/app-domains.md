@@ -131,7 +131,7 @@ certbot issues `jd-app-domain-<handle>` for `*.<handle>.<zone>` and `<handle>.<z
 --credentials <data dir>/app-domain-hook.json"` and the matching `--manual-cleanup-hook`, through the certbot
 gate and the Certificates page's runtime (`proxysvc.IssueAppDomainCertificate`). A dry run is `--dry-run`
 against staging, as the page's test runs are; a forced renewal is `--force-renewal`; otherwise
-`--keep-until-expiring`. It refuses before certbot runs when `jd` is missing on certbot's side. After an
+`--keep-until-expiring`. When certbot runs on the host and `/usr/local/bin/jd` is missing there, the dashboard installs the `jd` built beside it first (`clihost.Install`, which never replaces a file already at that path), and says so in the job's log; only if that fails does it refuse before certbot runs, naming `manage.sh install-cli`. After an
 issuance the Docker Caddy ingress's copies are refreshed and nginx reloaded (`ServeAppDomainRenewal`).
 `certificate.state` comes from the lineage on disk (`AppDomainCertificate`). A test certificate from a
 staging authority is `valid` while `JD_ACME_DIRECTORY` names a staging directory (it is what that directory

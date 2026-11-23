@@ -6,7 +6,7 @@ Drive deployments from a terminal, a CI job or an AI client, over the dashboard'
 
 `jd` drives your deployments from a terminal or a CI job, over the dashboard's own API. The installer
 puts it at `/usr/local/bin/jd` on the server, and the dashboard keeps that copy current after every
-update (`sudo ./scripts/manage.sh install-cli` installs it again by hand). For another Linux machine
+update (`sudo ./scripts/manage.sh install-cli` installs it again by hand). A server with a just-dashboard.com address needs it, because certbot runs `jd` to prove and renew the address's certificate: when it is missing, issuing that certificate installs it. For another Linux machine
 of the same architecture, **Account → API keys** links the same file (`GET /api/v1/cli/jd`, for any
 signed-in account); anywhere else, build it from a checkout with Go 1.26: `cd backend && go build ./cmd/jd`
 — it uses only Go's standard library.

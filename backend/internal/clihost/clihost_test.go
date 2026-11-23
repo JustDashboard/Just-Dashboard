@@ -57,3 +57,51 @@ func TestRefreshReplacesOnlyAnOlderJD(t *testing.T) {
 		t.Fatalf("a dashboard built without jd: replaced=%v %v", replaced, err)
 	}
 }
+
+// Install puts jd on the server only where nothing is: a jd that is there
+// already, or another program called jd, is never touched.
+func TestInstallPutsJDOnlyWhereNothingIs(t *testing.T) {
+	host := t.TempDir()
+	built := filepath.Join(t.TempDir(), "jd")
+	if err := os.WriteFile(built, []byte("this build\n"+Marker+"\n"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	target := filepath.Join(host, Path)
+
+	// /usr/local/bin may not exist yet on a minimal host.
+	if installed, err := Install(host, built); err != nil || !installed {
+		t.Fatalf("nothing there: installed=%v %v", installed, err)
+	}
+	info, err := os.Stat(target)
+	if err != nil || info.Mode().Perm() != 0o755 {
+		t.Fatalf("installed jd = %v, %v", info, err)
+	}
+	if raw, _ := os.ReadFile(target); string(raw) != "this build\n"+Marker+"\n" {
+		t.Fatalf("installed content = %q", raw)
+	}
+	if left, _ := filepath.Glob(filepath.Join(filepath.Dir(target), ".jd-*")); len(left) != 0 {
+		t.Fatalf("temporary files left: %v", left)
+	}
+
+	// Already there: left as it is, whatever it is.
+	for _, content := range []string{"older build\n" + Marker + "\n", "#!/bin/sh\necho someone else's jd\n"} {
+		if err := os.WriteFile(target, []byte(content), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if installed, err := Install(host, built); err != nil || installed {
+			t.Fatalf("%q: installed=%v %v", content, installed, err)
+		}
+		if raw, _ := os.ReadFile(target); string(raw) != content {
+			t.Fatalf("an existing file was replaced: %q", raw)
+		}
+	}
+
+	// A build that is not jd is never installed.
+	other := filepath.Join(t.TempDir(), "jd")
+	if err := os.WriteFile(other, []byte("not it"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if installed, err := Install(t.TempDir(), other); err == nil || installed {
+		t.Fatalf("not jd: installed=%v %v", installed, err)
+	}
+}
