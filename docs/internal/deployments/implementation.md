@@ -333,8 +333,8 @@ only renderer/executor/validation authority for their feature.
 - `provision_certificate` for [app domain](../backend/app-domains.md#deployments) names: a name under the
   handle this server holds is covered by the handle's wildcard, issued through just-dashboard.com when missing
   or expiring and never ordered one by one; the release's other names are resolved as below, and activation
-  serves each set with its own certificate. A name under the zone that the held handle does not cover is left
-  out of every step (`deploy/app_domains.go`): a warning naming it when other public names remain,
+  serves each set with its own certificate. An app name under the handle this server held and no longer holds
+  (`<app>.<handle>.<zone>`; the zone's other names are ordinary domains) is left out of every step (`deploy/app_domains.go`): a warning naming it when other public names remain,
   `app_domain_detached` when it was the only one.
 - `provision_certificate` is a step of the release path, ordered after `backup_gate` and before
   `start_candidate`. It reads the frozen release snapshot, and for every planned HTTPS domain resolves an

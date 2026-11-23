@@ -1187,9 +1187,10 @@
   domain lineage whose authenticator is not `manual`, whose hooks are not `jd`'s, or whose `jd` is missing.
   `AppDomainCertificate` reads the lineage's state from disk (`missing`, `valid`, `expiring`, `failed`).
   `WaitForAuthoritativeTXT` finds the zone's nameservers (`zoneNameservers`), asks each of them directly
-  (`Query`) until every one answers the value, and is what the hook waits on. `SetAppDomainZone` makes
-  `EnsureDeploymentCertificate` refuse any name under the zone (`ErrAppDomainName`) before anything is ordered, on
-  nginx and on the Docker Caddy ingress alike: no per-app certificate is ever requested there.
+  (`Query`) until every one answers the value, and is what the hook waits on. `SetAppDomainBase` makes
+  `EnsureDeploymentCertificate` refuse this server's handle and the app names under it (`ErrAppDomainName`) before
+  anything is ordered, on nginx and on the Docker Caddy ingress alike: no per-app certificate is ever requested
+  for them. The zone's other names (its apex, `www`, other subdomains) are ordered as any domain is.
   A route whose names no single certificate covers because some are app names is split
   (`DeploymentRoute.Certificates`, filled by `ApplyDeploymentRoute`): `ResolveDeploymentCertificate` sets the app
   names aside for the wildcard and resolves the rest alone; nginx renders the app names as a server of their own

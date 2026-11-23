@@ -20,7 +20,13 @@ It is optional. Nothing is claimed until a person chooses a handle: on just-dash
 approval page or the server's page there (an **offer**, which the server then claims by itself), or on the
 Settings card here. `JD_APP_DOMAINS=false` switches it off
 entirely (and `JD_ACCOUNT_LINK=false` with it): nothing about domains is sent, no wildcard is issued, the hook
-is refused, and every name under the zone is treated as not this server's.
+is refused, and no name is treated as an app name.
+
+**What an app name is.** Only `<handle>.<zone>` and `<app>.<handle>.<zone>`, for the handle this server holds or
+held (`appdomain.Classify`). Everything else under the zone is an ordinary domain, exactly as before app domains
+existed: the zone's own apex and `www`, the operator's other subdomains, and names under handles that were never
+this server's. The site that runs the zone is itself often deployed from a dashboard, at the zone's apex; an
+earlier rule that took every name under the zone as an app name failed each of its releases.
 
 ## Trust model
 
@@ -34,10 +40,11 @@ is refused, and every name under the zone is treated as not this server's.
 - **The DNS token never reaches a dashboard.** The site changes exactly three names for this server's handle.
   The server proves the address is its own by calling from it: the site refuses an address that is not the
   one the request came from (`address_mismatch`).
-- **No per-app certificate under the zone, ever.** Let's Encrypt's limits are per registered domain and shared
-  by every server. `proxysvc.SetAppDomainZone` makes `EnsureDeploymentCertificate` refuse any name under the
-  zone (`ErrAppDomainName`) before anything is ordered, on nginx and on the Docker Caddy ingress, and the
-  deployment issuer sends names under the held handle to the wildcard instead (`appDomainCertificateIssuer`).
+- **No per-app certificate for an app name, ever.** Let's Encrypt's limits are per registered domain and shared
+  by every server. `proxysvc.SetAppDomainBase` makes `EnsureDeploymentCertificate` refuse this server's handle
+  and the app names under it (`ErrAppDomainName`) before anything is ordered, on nginx and on the Docker Caddy
+  ingress, and the deployment issuer sends names under the held handle to the wildcard instead
+  (`appDomainCertificateIssuer`). The zone's other names are ordered as any domain is.
   Caddy never runs ACME for them: their site block serves a copy of the wildcard.
 
 ## State (`appdomain/state.go`)

@@ -306,20 +306,41 @@ func TestACaddyRouteServesItsAppNameWithACopyOfTheWildcard(t *testing.T) {
 	}
 }
 
-func TestNoDeploymentOrderIsPlacedForANameUnderTheAppDomainZone(t *testing.T) {
+func TestNoDeploymentOrderIsPlacedForANameUnderThisServersHandle(t *testing.T) {
 	root := t.TempDir()
 	letsencrypt := filepath.Join(root, "letsencrypt")
 	t.Cleanup(UseCertificateDirsForTest(letsencrypt, filepath.Join(root, "imported")))
 	argv := fakeIssuingCertbot(t, letsencrypt, []string{"shop.acme.just-dashboard.com"}, "webroot")
 	service := New(root, filepath.Join(root, "Caddyfile"))
-	service.SetAppDomainZone(func() string { return "just-dashboard.com" })
-	for _, names := range [][]string{{"shop.acme.just-dashboard.com"}, {"shop.example.test", "x.other.just-dashboard.com"}} {
+	service.SetAppDomainBase(func() string { return "acme.just-dashboard.com" })
+	for _, names := range [][]string{{"shop.acme.just-dashboard.com"}, {"shop.example.test", "acme.just-dashboard.com"}} {
 		if _, err := service.EnsureDeploymentCertificate(context.Background(), names, nil); !errors.Is(err, ErrAppDomainName) {
 			t.Fatalf("%v: err = %v", names, err)
 		}
 	}
 	if raw, _ := os.ReadFile(argv); strings.Contains(string(raw), "certonly") {
-		t.Fatalf("certbot ordered a name under the zone:\n%s", raw)
+		t.Fatalf("certbot ordered one of the handle's names:\n%s", raw)
+	}
+}
+
+// Only the handle's own names are the wildcard's. The rest of the zone is
+// ordinary names: the site that runs it is deployed from a dashboard too,
+// and refusing the zone's apex failed every one of its releases.
+func TestOnlyTheHandlesOwnNamesAreRefusedAnOrder(t *testing.T) {
+	service := New(t.TempDir(), "")
+	if err := service.refuseAppDomainNames([]string{"just-dashboard.com", "shop.acme.just-dashboard.com"}); err != nil {
+		t.Fatalf("with no handle = %v", err)
+	}
+	service.SetAppDomainBase(func() string { return "Acme.just-dashboard.com." })
+	for name, refused := range map[string]bool{
+		"acme.just-dashboard.com": true, "shop.acme.just-dashboard.com": true, "SHOP.acme.just-dashboard.com.": true,
+		"just-dashboard.com": false, "www.just-dashboard.com": false, "docs.just-dashboard.com": false,
+		"shop.other.just-dashboard.com": false, "a.b.acme.just-dashboard.com": false, "acme.just-dashboard.com.example.test": false,
+	} {
+		err := service.refuseAppDomainNames([]string{name})
+		if got := errors.Is(err, ErrAppDomainName); got != refused {
+			t.Errorf("%s: refused = %v, want %v", name, got, refused)
+		}
 	}
 }
 

@@ -190,18 +190,25 @@ func TestTheCertificateStepGivesAppNamesTheWildcardAndTheRestTheirOwn(t *testing
 	if len(inner.asked) != 1 || strings.Join(inner.asked[0], ",") != "shop.example.test" {
 		t.Fatalf("inner asked %v", inner.asked)
 	}
-	if _, err := issuer.EnsureDeploymentCertificate(ctx, []string{"shop.other.just-dashboard.com"}, nil); !errors.Is(err, appdomain.ErrNotHeldName) {
-		t.Fatalf("another handle = %v", err)
+	// The rest of the zone is ordinary names, with certificates from where
+	// they always came: the zone's own site (often deployed from a
+	// dashboard like this one), and names under another handle.
+	if _, err := issuer.EnsureDeploymentCertificate(ctx, []string{"just-dashboard.com", "shop.other.just-dashboard.com"}, nil); err != nil {
+		t.Fatalf("ordinary names under the zone = %v", err)
+	}
+	if len(inner.asked) != 2 || strings.Join(inner.asked[1], ",") != "just-dashboard.com,shop.other.just-dashboard.com" {
+		t.Fatalf("inner asked %v", inner.asked)
 	}
 	// Lifecycle: deployments that existed before a handle was claimed keep
 	// their names, and their certificates come from where they always did.
-	if _, err := issuer.EnsureDeploymentCertificate(ctx, []string{"app.203-0-113-10.sslip.io"}, nil); err != nil || len(inner.asked) != 2 {
+	if _, err := issuer.EnsureDeploymentCertificate(ctx, []string{"app.203-0-113-10.sslip.io"}, nil); err != nil || len(inner.asked) != 3 {
 		t.Fatalf("an sslip name = %v, inner %v", err, inner.asked)
 	}
-	if !(appDomainNames{s: s}).DetachedAppDomain(ctx, "shop.other.just-dashboard.com") ||
-		(appDomainNames{s: s}).DetachedAppDomain(ctx, "shop.acme.just-dashboard.com") ||
-		(appDomainNames{s: s}).DetachedAppDomain(ctx, "shop.example.test") {
-		t.Fatal("the executor's view of names")
+	names := appDomainNames{s: s}
+	for _, name := range []string{"shop.other.just-dashboard.com", "just-dashboard.com", "shop.acme.just-dashboard.com", "shop.example.test"} {
+		if names.DetachedAppDomain(ctx, name) {
+			t.Errorf("%s is detached in the executor's view", name)
+		}
 	}
 }
 

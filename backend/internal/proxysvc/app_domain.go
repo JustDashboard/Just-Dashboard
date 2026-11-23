@@ -49,26 +49,35 @@ func AppDomainHookCommand(action, credentials string) string {
 // tests, which run a jd of their own.
 var AppDomainHookBinary = "/usr/local/bin/jd"
 
-// SetAppDomainZone tells the service which zone holds app domains, read
-// each time a deployment asks for a certificate. A name under it is refused
-// by EnsureDeploymentCertificate before anything is ordered: the app domain
-// service answers for those names with the handle's wildcard.
-func (s *Service) SetAppDomainZone(zone func() string) { s.appDomainZone.Store(&zone) }
+// SetAppDomainBase tells the service the name of this server's
+// just-dashboard.com handle, <handle>.<zone>, held or held before, or ""
+// when it has none. It is read each time a deployment asks for a
+// certificate. That name and the app names under it are refused by
+// EnsureDeploymentCertificate before anything is ordered: the handle's
+// wildcard covers them, and is never ordered per name.
+//
+// Only those. The rest of the zone holds ordinary names: its own apex,
+// www and the operator's other subdomains. The site that runs the zone is
+// often deployed from a dashboard like this one, and refusing the whole
+// zone failed every release of it.
+func (s *Service) SetAppDomainBase(base func() string) { s.appDomainBase.Store(&base) }
 
 // ErrAppDomainName is a deployment asking this service to order a
-// certificate for a name under the app domain zone.
-var ErrAppDomainName = errors.New("names under the just-dashboard.com address zone are covered only by the handle's wildcard, which is never ordered per name")
+// certificate for one of this server's app names.
+var ErrAppDomainName = errors.New("names under this server's just-dashboard.com address are covered only by its wildcard, which is never ordered per name")
 
 func (s *Service) refuseAppDomainNames(names []string) error {
-	zone := ""
-	if f := s.appDomainZone.Load(); f != nil && *f != nil {
-		zone = strings.ToLower(strings.TrimSpace((*f)()))
+	base := ""
+	if f := s.appDomainBase.Load(); f != nil && *f != nil {
+		base = strings.ToLower(strings.TrimSuffix(strings.TrimSpace((*f)()), "."))
 	}
-	if zone == "" {
+	if base == "" {
 		return nil
 	}
 	for _, name := range names {
-		if name == zone || strings.HasSuffix(name, "."+zone) {
+		name = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(name), "."))
+		prefix, under := strings.CutSuffix(name, "."+base)
+		if name == base || (under && prefix != "" && !strings.Contains(prefix, ".")) {
 			return fmt.Errorf("%w: %s", ErrAppDomainName, name)
 		}
 	}
