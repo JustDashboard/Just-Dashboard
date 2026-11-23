@@ -704,8 +704,8 @@ const (
 	NotAppDomain NameState = iota
 	// Held is a name under the handle this server holds and may use.
 	Held
-	// Detached is a name under the zone that this server's handle does
-	// not cover now: released, suspended, detached, renamed, or never ours.
+	// Detached is an app name under the handle this server held and does
+	// not hold now: released on the site, suspended or detached.
 	Detached
 )
 
@@ -750,6 +750,22 @@ func appNameHandle(hostname, zone string) string {
 		return labels[0]
 	case 2:
 		return labels[1]
+	}
+	return ""
+}
+
+// HandleBase is <handle>.<zone> for the handle this server holds or held,
+// or "" when it has none.
+func (s *Service) HandleBase(ctx context.Context) string {
+	if s == nil || s.st == nil {
+		return ""
+	}
+	st, err := readState(ctx, s.st.DB)
+	if err != nil || st.Handle == "" {
+		return ""
+	}
+	if zone := s.zone(st); zone != "" {
+		return st.Handle + "." + zone
 	}
 	return ""
 }

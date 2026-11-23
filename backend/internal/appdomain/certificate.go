@@ -177,9 +177,9 @@ func errorDetail(err error) map[string]any {
 	return map[string]any{"error": err.Error()}
 }
 
-// ErrNotHeldName is a deployment name under the zone that this server's
-// handle does not cover.
-var ErrNotHeldName = errors.New("the name is under the just-dashboard.com address zone but not under the handle this server holds")
+// ErrNotHeldName is an app name under the handle this server held and no
+// longer holds.
+var ErrNotHeldName = errors.New("the name is under the just-dashboard.com address this server no longer holds")
 
 // EnsureCertificate is a deployment's certificate step for names under the
 // held handle: the wildcard as it is when it is valid, else issued now. It

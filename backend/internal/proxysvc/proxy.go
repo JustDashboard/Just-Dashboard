@@ -57,10 +57,11 @@ func (k Kind) Known() bool {
 
 type Service struct {
 	dockerIngress bool
-	// appDomainZone names the app domain zone (app_domain.go), whose names
-	// this service never orders a certificate for: only the handle's
+	// appDomainBase names this server's just-dashboard.com handle,
+	// <handle>.<zone> (app_domain.go). This service never orders a
+	// certificate for it or the app names under it: only the handle's
 	// wildcard covers them. Nil, or empty, when there is none.
-	appDomainZone atomic.Pointer[func() string]
+	appDomainBase atomic.Pointer[func() string]
 	// ingressContainer pins deployments to one Caddy container by name;
 	// empty discovers the host's public one.
 	ingressContainer string

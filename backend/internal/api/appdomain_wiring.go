@@ -28,13 +28,14 @@ func (s *Server) initAppDomain() {
 		DataDir: s.Cfg.DataDir, BackendURL: appdomain.BackendURL(s.Cfg.Addr),
 	})
 	if s.modules.proxy != nil {
-		// Neither proxy ever orders a certificate for a name under the
-		// zone: the handle's wildcard is the only one there.
+		// Neither proxy ever orders a certificate for this server's handle
+		// or an app name under it: the handle's wildcard is the only one
+		// there. The rest of the zone is ordinary names.
 		svc := s.modules.appDomain
-		s.modules.proxy.SetAppDomainZone(func() string {
+		s.modules.proxy.SetAppDomainBase(func() string {
 			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 			defer cancel()
-			return svc.Zone(ctx)
+			return svc.HandleBase(ctx)
 		})
 	}
 }
