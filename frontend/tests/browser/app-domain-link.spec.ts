@@ -332,6 +332,9 @@ test("a failed certificate says why and offers Issue", async ({ page }) => {
   await page.goto("/dashboard/link")
   const address = section(page)
   await expect(address.getByText("Issuing failed")).toBeVisible()
+  await expect(
+    address.getByText("This server tries again by itself within the hour."),
+  ).toBeVisible()
   await expect(address.getByText("The TXT record did not appear within 120 seconds.")).toBeVisible()
   await expect(address.getByRole("button", { name: /^Issue the certificate/ })).toBeVisible()
 })

@@ -422,6 +422,10 @@ function Active({
           {status.certificate?.state === "failed" && status.certificate.error && (
             <span role="alert" className="basis-full text-hint text-destructive">
               {status.certificate.error}
+              {/* The backend issues it again by itself (appdomain.autoIssue). */}{" "}
+              <span className="text-muted-foreground">
+                This server tries again by itself within the hour.
+              </span>
             </span>
           )}
         </Detail>

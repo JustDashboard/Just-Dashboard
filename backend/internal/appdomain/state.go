@@ -58,6 +58,9 @@ type State struct {
 	AvailableReason string `json:"availableReason,omitempty"`
 	// CertificateError is why the last issuance failed, until one succeeds.
 	CertificateError string `json:"certificateError,omitempty"`
+	// CertificateTriedAt is when the last issuance finished, for the
+	// automatic one's wait after a failure (autoIssue).
+	CertificateTriedAt int64 `json:"certificateTriedAt,omitempty"`
 	// Offer is the handle the account chose for this server on the site
 	// (at link approval or later) that it has not claimed; GET /domain's
 	// offer. OfferTried and OfferTriedAt are the last automatic claim of

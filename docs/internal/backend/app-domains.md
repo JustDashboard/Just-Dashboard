@@ -65,6 +65,11 @@ One loop, through `safego`, started with the account link and only when the feat
   hour), `GET /domain`. The site's record is mirrored: a suspension (`suspended`, with the admin's reason), an
   unsuspension, a handle held on the site that this store did not have. A handle the site no longer lists is
   `detached`. A site that cannot be reached changes nothing but `lastError`.
+- **The wildcard issues itself.** At each of those checks, a held handle whose wildcard is missing, failed or due
+  is issued without anyone pressing Issue (`autoIssue`): after the claim, after an update that removed what
+  stopped it (the host's `jd`, for one), after a restore onto a new host. A failure waits an hour
+  (`autoIssueRetry`; Let's Encrypt refuses a name after five failed validations in an hour) and the card says it
+  tries again by itself. A valid wildcard is left to certbot's own renewal timer.
 - **When the account link is cleared**, whatever the reason, the account link's `OnClear` hook runs
   `appdomain.DetachInTx` in the transaction that ends it (the running dashboard's link and `--admin unlink`
   both carry the hook). A link found missing by the loop is detached too.
