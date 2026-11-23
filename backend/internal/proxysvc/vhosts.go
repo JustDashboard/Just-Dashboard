@@ -981,7 +981,7 @@ func (s *Service) setVHostEnabledLocked(ctx context.Context, name, available str
 	if err != nil {
 		return err
 	}
-	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+	if res := s.testNginx(ctx); !res.Valid {
 		undo()
 		refused := &RefusedError{Validation: res}
 		// nginx stops at its first error and names the file it was reading,

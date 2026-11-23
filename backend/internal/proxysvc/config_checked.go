@@ -87,14 +87,19 @@ func (s *Service) WriteConfigChecked(ctx context.Context, kind Kind, path, conte
 			return nil, err
 		}
 		started := time.Now()
-		res, err = runTest(ctx, "nginx", "-t")
+		var fit *namesFit
+		res, fit, err = s.fitServerNames(ctx, "", full, true, func() (*ValidationResult, error) {
+			return runTest(ctx, "nginx", "-t")
+		})
 		candidate := ContentDigest(content)
 		if _, changed := target.check(candidate); changed != nil {
 			// A native writer replaced the staged candidate: rolling back
 			// would erase their edit just as surely as a stale save would.
+			fit.undo(ctx)
 			return nil, changed
 		}
 		if locationErr := target.location(); locationErr != nil {
+			fit.undo(ctx)
 			if restoreErr := target.restore(original, true, mode, candidate); restoreErr != nil {
 				return nil, restoreErr
 			}
@@ -110,6 +115,9 @@ func (s *Service) WriteConfigChecked(ctx context.Context, kind Kind, path, conte
 			return res, ErrInvalidConf
 		}
 		res.Note = s.includeNote(full)
+		if fit != nil {
+			res.Note = joinNotes(res.Note, fit.Note)
+		}
 		s.remember(KindNginx, started, res)
 	}
 	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,

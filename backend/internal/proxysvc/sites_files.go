@@ -250,7 +250,10 @@ func (s *Service) placeSiteLocked(ctx context.Context, dir, name, content string
 		}
 	}
 	s.forgetEffective()
-	out.Validation = runValidator(ctx, "nginx", "-t")
+	// A dry run puts back a raise of the server-name hash with the file.
+	out.Validation, _, _ = s.fitServerNames(ctx, "", full, commit, func() (*ValidationResult, error) {
+		return runValidator(ctx, "nginx", "-t"), nil
+	})
 	if !out.Validation.Valid || !commit {
 		undo()
 		if !out.Validation.Valid {

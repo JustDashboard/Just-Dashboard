@@ -438,7 +438,11 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 		return nil, err
 	}
 	defer release()
-	res, err := runTest(ctx, "nginx", "-t")
+	// A dry run: a raise of the server-name hash it needed is put back with
+	// the candidate, and the result says the save makes it.
+	res, _, err := s.fitServerNames(ctx, "", full, false, func() (*ValidationResult, error) {
+		return runTest(ctx, "nginx", "-t")
+	})
 	// Restore only our candidate; a native edit belongs to its writer.
 	if restoreErr := restore(); restoreErr != nil {
 		return nil, restoreErr
@@ -446,7 +450,7 @@ func (s *Service) validateNginx(ctx context.Context, path, content string) (*Val
 	if err != nil {
 		return nil, err
 	}
-	res.Note = s.includeNote(full)
+	res.Note = joinNotes(s.includeNote(full), res.Note)
 	return res, nil
 }
 
@@ -597,7 +601,9 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 	}
 	defer release()
 	started := time.Now()
-	after, err := runTest(ctx, "nginx", "-t")
+	after, fit, err := s.fitServerNames(ctx, "", full, true, func() (*ValidationResult, error) {
+		return runTest(ctx, "nginx", "-t")
+	})
 	if err != nil {
 		if restoreErr := restore(); restoreErr != nil {
 			return nil, restoreErr
@@ -614,6 +620,9 @@ func (s *Service) WriteConfig(ctx context.Context, kind Kind, path, content stri
 	s.remember(KindNginx, started, after)
 	s.recordChange(ctx, Change{Path: full, Action: ChangeWrite,
 		Before: []byte(original), BeforeExisted: existed, After: []byte(content)})
+	if fit != nil {
+		res.Note = joinNotes(s.includeNote(full), fit.Note)
+	}
 	return res, nil
 }
 

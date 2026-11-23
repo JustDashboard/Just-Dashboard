@@ -70,6 +70,42 @@ func TestSuggestHostnameSlugIsDeterministicAndAvoidsTakenDomains(t *testing.T) {
 	}
 }
 
+// A project name of any length makes a hostname DNS can carry: every label
+// at most 63 characters and the whole name at most 253, under an sslip.io
+// base and under a wildcard zone long enough to leave little room.
+func TestSuggestedHostnameStaysWithinDNSLimits(t *testing.T) {
+	s := testServer(t)
+	ctx := context.Background()
+	// 235 characters, which leaves a label of 17.
+	longZone := strings.Repeat(strings.Repeat("z", 60)+".", 3) + strings.Repeat("y", 40) + ".example.com"
+	label := regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+	for _, name := range []string{strings.Repeat("a", 100), strings.Repeat("riverside-garden-store ", 5), "shop"} {
+		for _, base := range []string{"203-0-113-7.sslip.io", longZone} {
+			slug := s.suggestHostnameSlug(ctx, name, base)
+			hostname := slug + "." + base
+			if len(hostname) > maxHostnameLength {
+				t.Fatalf("%q under %s is %d characters, past 253", slug, base, len(hostname))
+			}
+			if len(slug) > maxLabelLength || !label.MatchString(slug) {
+				t.Fatalf("suggestHostnameSlug(%q) = %q, not a DNS label", name, slug)
+			}
+			if !strings.HasSuffix(slug, "-"+s.hostnameSuffix(name, 0)) {
+				t.Fatalf("suggestHostnameSlug(%q) = %q lost its suffix", name, slug)
+			}
+		}
+	}
+	// A 100-character name keeps its 40-character slug under sslip.io: 47
+	// characters of label, 68 of hostname. Under the long zone the label
+	// takes what is left.
+	slug := s.suggestHostnameSlug(ctx, strings.Repeat("a", 100), "203-0-113-7.sslip.io")
+	if len(slug) != 47 {
+		t.Fatalf("slug = %q (%d characters), want the 40-character slug and its suffix", slug, len(slug))
+	}
+	if slug := s.suggestHostnameSlug(ctx, strings.Repeat("a", 100), longZone); len(slug)+1+len(longZone) != maxHostnameLength {
+		t.Fatalf("slug = %q under the long zone, want it cut to fill 253 exactly", slug)
+	}
+}
+
 func TestFirstIPv4SkipsUnusableAddresses(t *testing.T) {
 	if got := firstIPv4([]string{"100.110.34.31", "10.0.0.1", "8.8.8.8"}); got != "8.8.8.8" {
 		t.Fatalf("firstIPv4 = %q, selected a private/VPN address ahead of the public address", got)

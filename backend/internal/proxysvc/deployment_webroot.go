@@ -3,6 +3,7 @@ package proxysvc
 import (
 	"context"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 	"net"
@@ -100,7 +101,12 @@ func (s *Service) prepareDeploymentWebroot(ctx context.Context, names []string, 
 		return s.restoreDeploymentRouteLocked(restoreCtx, snapshot)
 	}
 	content := renderDeploymentChallenge(pending, root, listeners)
-	_, err = s.applySiteLocked(ctx, &SiteSpec{Name: name}, content, true, true, false)
+	saved, err := s.applySiteLocked(ctx, &SiteSpec{Name: name}, content, true, true, false)
+	if errors.Is(err, ErrInvalidConf) && saved != nil && saved.Validation != nil {
+		// nginx's own sentence, not "configuration failed validation": the
+		// operator of a first deploy has nothing else to go on.
+		err = &RefusedError{Validation: saved.Validation, Lead: "nginx refused the challenge site"}
+	}
 	if err == nil {
 		err = waitDeploymentWebroot(ctx, func(ctx context.Context) error { return probe(ctx, names) })
 	}

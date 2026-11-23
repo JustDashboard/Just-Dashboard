@@ -9,7 +9,11 @@
   standalone Certbot over occupied port 80. A temporary, validated challenge-only route and a file probe
   establish host/container filesystem visibility before ordering, with snapshot restoration on every
   exit. The fixed `/srv/just-dashboard-acme` root survives deployment route activation and site form
-  round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. Docker Caddy
+  round trips through `managedAcme`; ordinary site's ACME roots remain `/var/www/html`. A challenge route
+  nginx refuses fails the step with nginx's own first error and its file and line (`FailureHeadline`,
+  under "nginx refused the challenge site"), as a refused deployment route, its restore and a CrowdSec
+  list reload do, never the bare "configuration failed validation"; a name too long for nginx's
+  server-name hash is fitted before that (see the server-name hash under Sites). Docker Caddy
   ownership uses native automatic HTTPS and shared routes; unsupported owners are reported explicitly.
   See [the ingress decision](../deployments/caddy-ingress.md) for provisioning, recovery and live tests.
 - **Listening ports** (`ports.go`, `ports_owner.go`) are read from the kernel's own tables,
@@ -371,6 +375,45 @@
     variables under either ident. `TestEveryVariableFitsNginxsDefaultHash` renders every variable the
     form can name for the longest site name, and `TestLiveNginxTakesTheVariablesOfLongNames` passes
     them and environment 10's route through the real `nginx -t`.
+  - **A server name too long for nginx's hash is fitted, not refused** (`server_names_fit.go`). nginx
+    hashes the names of every address two or more servers share, in buckets of
+    `server_names_hash_bucket_size` bytes: the CPU's cache line (64) by default, and Debian's and
+    Ubuntu's nginx.conf leave the directive commented out. A name takes `align(len+2, 8)+16` bytes, so at
+    64 the longest is 46 characters and a 47th fails `nginx -t` for the whole configuration ("could not
+    build server_names_hash, you should increase server_names_hash_bucket_size: 64"), the same on nginx
+    1.18, 1.24 and 1.28. A generated `<slug>-<6 hex>.<a-b-c-d>.sslip.io` passes that only for a project
+    name of about 15 characters. Every test the dashboard runs on names it wrote goes through
+    `fitServerNames`: on that exact emerg (or the old `either server_names_hash_max_size … or …` form) it
+    reads the configuration from disk with each file in its blocks (`nginx -T` prints nothing for a
+    configuration that fails), writes the managed http-level file `conf.d/just-dashboard-server-names.conf`
+    (marker, `server_names_hash_bucket_size` the smallest power of two the longest name in http fits,
+    never below 128, and `server_names_hash_max_size` raised when the max-size form appears), tests again,
+    and puts the file back as it was when that test still fails. Up to six tests; it never lowers a value
+    and never rewrites an unchanged file. The file goes in conf.d when nginx.conf includes conf.d inside
+    http (Debian, Ubuntu, RHEL, nginx.org's packages and image), else in any other directory under the
+    nginx directory that http includes by a glob its name matches (Alpine's `http.d`), never in the site
+    directories; where there is none it is marked lines at the top of nginx.conf's http block,
+    `server_names_hash_bucket_size 128; # server names: added by Just Dashboard`, replaced in place by
+    the next raise. A directive the operator set anywhere in http is theirs: nothing is written (nginx
+    refuses a second one), and when its value is too small the test's first diagnostic is the
+    dashboard's, placed at that file and line, "server_names_hash_bucket_size is 64, too small for the
+    server name … (53 characters); set it to 128", so `FailureHeadline` names it. A raise a passing test
+    kept is recorded as a change to the managed file like any other config write; a save that is then
+    rolled back (a refused name conflict, a socket nginx could not bind, a staged file another writer
+    replaced) takes it back and records that too. Dry runs (`Validate`, an import's preview, a site saved
+    disabled and tested as enabled) put the raise back with their candidate, and the result's `note`
+    says what the change will set. The paths: `validateNginx`, `WriteConfig`, `WriteConfigChecked`, site
+    saves and their trials (so the deployment challenge site and the deployment route and its cutover,
+    both `applySiteLocked`), enable, bulk and rename operations, imports, the default site and a
+    deployment route's restore. A candidate for nginx.conf or for the managed file itself is never
+    fitted: what the editor holds is the operator's word on those directives. The Proxy settings panel
+    finds the managed file's value as the file that sets the directive and edits it there. nginx 1.5 and
+    later answer too many names for `server_names_hash_max_size` with a warning ("could not build
+    optimal server_names_hash … ignoring server_names_hash_bucket_size") and pass, so only the bucket is
+    written there. `server_names_fit_test.go` runs a fake nginx that measures names as nginx does;
+    `server_names_fit_live_test.go` (`JD_DEPLOY_LIVE=1`) runs the host's nginx at the 46/47 boundary, a
+    63-character label under a long base, 400 names, the operator's own value, a disabled save then
+    enabled, and a challenge site for a long sslip.io name served by a running nginx.
   - **WebSockets use the standard upgrade map**, per site: `map $http_upgrade $jd_<id>_connection
     { default upgrade; '' close; }`, with `Connection $jd_<id>_connection` in each upgrading location.
     It replaces passing the client's `$http_connection` through, whose comment wrongly said a map had

@@ -499,7 +499,7 @@ func (s *Service) ApplyDefaultSite(ctx context.Context, choice DefaultChoice, re
 			return nil, err
 		}
 	}
-	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+	if res := s.testNginx(ctx); !res.Valid {
 		undoLink()
 		restoreConfig(full, original, existed)
 		undoPage()

@@ -948,7 +948,7 @@ func (s *Service) ApplyNPMImport(ctx context.Context, token string, ids []string
 		}
 	}
 	s.forgetEffective()
-	if res := runValidator(ctx, "nginx", "-t"); !res.Valid {
+	if res := s.testNginx(ctx); !res.Valid {
 		undoAll()
 		refused := &RefusedError{Validation: res, Lead: fmt.Sprintf("nginx refuses the configuration with the %d imported items added", len(chosen))}
 		if before := runValidator(ctx, "nginx", "-t"); !before.Valid && FailureHeadline(before) == FailureHeadline(res) {
