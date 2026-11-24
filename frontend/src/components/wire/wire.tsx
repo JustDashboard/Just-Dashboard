@@ -59,11 +59,13 @@ export function WireNode({
       )}
     >
       {eyebrow && <p className="eyebrow">{eyebrow}</p>}
-      {/* A name in mono (a store's, a variable's) is set at its own size's
-          height: at the line's, the other face's taller ascent grew the line
-          two pixels, and a picture of five such nodes ten past the grey rows
-          it waited in. */}
-      <div className="text-body leading-snug font-medium break-words [&_.font-mono]:leading-none">
+      {/* A name in mono (a store's, a variable's) hangs from the line's top
+          rather than sitting on the sans baseline: there the other face's
+          taller ascent grew the line two pixels, and a picture of five such
+          nodes stood ten past the grey rows it waited in. Not `leading-none`:
+          a mono name that is its own block (an image's, a volume's) would
+          shrink to its glyphs' height and the picture land short instead. */}
+      <div className="text-body leading-snug font-medium break-words [&_.font-mono]:align-top">
         {title}
       </div>
       {hint && <div className="text-hint leading-snug text-muted-foreground">{hint}</div>}
