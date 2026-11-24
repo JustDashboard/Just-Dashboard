@@ -229,7 +229,7 @@ test.describe("under a mouse", () => {
 
     const create = page.getByRole("button", { name: "New user" })
     expect((await create.boundingBox())!.height).toBe(32)
-    expect(await fontSize(create)).toBe(13)
+    expect(await fontSize(create)).toBe(14)
     // The switch keeps a 24px box under a mouse, and no more.
     const maria = page.getByRole("switch", { name: "Maria Rusu can sign in" })
     expect(Math.round((await maria.boundingBox())!.height)).toBe(18)
@@ -242,6 +242,6 @@ test.describe("under a mouse", () => {
     const field = page.locator("input[data-slot=input]:visible").first()
     await expect(field).toBeVisible()
     expect((await field.boundingBox())!.height).toBe(36)
-    expect(await fontSize(field)).toBe(13)
+    expect(await fontSize(field)).toBe(14)
   })
 })

@@ -19,7 +19,7 @@ a name and a state is a `RowList` ([`list-row.md`](list-row.md)).
 ## Anatomy
 
 ```
- Name ▾          State        CPU      Memory   [ verbs ]     ← TableHead / SortHead, h-10, 11px muted
+ Name ▾          State        CPU      Memory   [ verbs ]     ← TableHead / SortHead, h-10, 12px muted
  ───────────────────────────────────────────────────────────
  [mark] web      ● Running    12%      180 MB   ⋯             ← TableRow, a hairline under it
         image    for 6d                                       ← the name cell's second line

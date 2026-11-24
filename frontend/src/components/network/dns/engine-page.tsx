@@ -619,18 +619,25 @@ function Identity({
           />
         </span>
       }
-      // Three short facts, so they stay one line beside the rail at 1280; on a
-      // phone they wrap to two, and two lines are held from the first frame.
+      // Three facts on the one line the waiting header holds. From `sm` they
+      // never wrap: beside the rail at 1280 the line is some 420px, which the
+      // three no longer fit at the type's size, and a second line under the
+      // name moved the views down when the read landed. The address is the
+      // fact that gives way, cut at its end and said whole behind the pointer;
+      // the engine and how it is changed are read whole. On a phone the
+      // header keeps its own single line and leaves off what does not fit.
       facts={
-        <IdentityFacts>
-          <Fact>
+        <IdentityFacts className="sm:[&>span]:flex-nowrap">
+          <Fact className="sm:shrink-0">
             {dnsEngineName(connection.engine)}
             {snapshot?.version ? ` ${snapshot.version}` : ""}
           </Fact>
-          <Fact>
+          <Fact title={connection.endpoint}>
             <span className="block truncate font-mono">{connection.endpoint}</span>
           </Fact>
-          <Fact>{connection.management ? "reviewed changes" : "read-only"}</Fact>
+          <Fact className="sm:shrink-0">
+            {connection.management ? "reviewed changes" : "read-only"}
+          </Fact>
         </IdentityFacts>
       }
       command={command}

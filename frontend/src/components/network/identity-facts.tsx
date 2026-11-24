@@ -1,3 +1,4 @@
+import { cn } from "@/lib/utils"
 import { FactLine } from "@/components/fact-line"
 import { Skeleton } from "@/components/ui/skeleton"
 
@@ -11,13 +12,15 @@ import { Skeleton } from "@/components/ui/skeleton"
  */
 export function IdentityFacts({
   loading,
+  className,
   children,
 }: {
   loading?: boolean
+  className?: string
   children: React.ReactNode
 }) {
   return (
-    <FactLine className="max-sm:min-h-9 [&>span]:gap-y-1">
+    <FactLine className={cn("max-sm:min-h-9 [&>span]:gap-y-1", className)}>
       {loading ? <LinePlaceholder className="h-3 w-64" /> : children}
     </FactLine>
   )

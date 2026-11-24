@@ -539,7 +539,10 @@ function StreamIdentity({
           <span className="truncate">{stream.name}</span>
           {!stream.error && (
             <span
-              className="numeric shrink-0 font-mono text-body font-normal text-muted-foreground"
+              // Set solid: on the body's 20px line the mono face hung a pixel
+              // under the name's 24, and the line the page opens on was that
+              // much taller than the one it had waited on.
+              className="numeric shrink-0 font-mono text-body leading-none font-normal text-muted-foreground"
               title={family ? `Every ${family} address` : undefined}
             >
               {listenLabel(stream)}

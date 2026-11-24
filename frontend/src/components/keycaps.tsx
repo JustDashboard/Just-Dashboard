@@ -6,15 +6,21 @@ import { useApple } from "@/lib/platform"
 import { useSingleKeyShortcuts } from "@/hooks/use-shortcuts"
 import { Switch } from "@/components/ui/switch"
 
-/** One key as a cap: the shape every shortcut hint in the product draws. */
+/**
+ * One key as a cap: the shape every shortcut hint in the product draws. It is
+ * set a step *into* whatever holds it (half the window's ground, lined at the
+ * white line), so in a raised field like the rail's search it reads as a key
+ * pressed into the face, as Just Hub draws it. Letters are in the sans: a cap
+ * reads as a key by its shape, not by a typewriter face.
+ */
 export const KEYCAP =
-  "inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-hairline bg-control px-1 font-mono text-micro leading-none text-muted-foreground"
+  "inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-line bg-ground/50 px-1 font-sans text-micro font-medium leading-none text-muted-foreground"
 
 /**
  * Keys drawn as a glyph rather than a letter: the arrows, Enter, and the
- * modifiers' signs. The mono face draws them a hairline thin, so beside a
- * letter's cap they read a step fainter; the sans face, a weight up, draws
- * them at the letters' ink.
+ * modifiers' signs. A glyph is drawn thinner than a letter, so beside a
+ * letter's cap it read a step fainter; a weight up draws it at the letters'
+ * ink.
  */
 const GLYPH_KEYS = /^[←↑→↓↵⏎⇧⌘⌥⌃]$/
 const GLYPH_CAP = "font-sans font-semibold"

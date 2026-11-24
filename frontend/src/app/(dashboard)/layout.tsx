@@ -118,6 +118,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               <SidebarProvider
                 desktopCollapsible={false}
                 style={{ "--sidebar-width": "15.5rem" } as React.CSSProperties}
+                className="bg-ground"
               >
                 <SkipToContent />
                 {/* Owns the metrics socket for the whole shell, so the Overview and
@@ -125,7 +126,13 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               nothing. */}
                 <MetricsStream />
                 <AppSidebar />
-                <div className="relative flex h-svh w-full min-w-0 flex-1 flex-col overflow-hidden bg-background">
+                {/* From `md` up the page is a sheet laid on the window: inset 8px
+              from its top, right and foot, with its own edge and corners,
+              while the rail stays on the window's ground beside it. The eye
+              always knows where the work is, and the navigation steps back
+              (Just Hub's frame). A phone has no room to spare for a margin,
+              so there the sheet is the screen. */}
+                <div className="relative flex h-svh w-full min-w-0 flex-1 flex-col overflow-hidden bg-background md:my-2 md:mr-2 md:h-[calc(100svh-1rem)] md:rounded-xl md:border md:border-line">
                   {/* The bar that used to run across the top of every page is gone
               (git history has it, as `components/top-bar.tsx`). It carried a
               breadcrumb every page already states in its own header. Below
@@ -141,7 +148,7 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
               Its three controls are the only navigation a phone has, so each
               is a finger's 44px box in a 48px strip; the strip's own padding
               is cut to keep the glyphs where a 32px control put them. */}
-                  <header className="flex h-12 shrink-0 items-center gap-0.5 border-b px-1 md:hidden">
+                  <header className="flex h-12 shrink-0 items-center gap-0.5 border-b bg-ground px-1 md:hidden">
                     <SidebarTrigger className="size-11 text-muted-foreground" />
                     {hub ? <ServerSwitcher hub={hub} strip /> : <Logo />}
                     {/* A phone has no ⌘K and the rail's search field is inside

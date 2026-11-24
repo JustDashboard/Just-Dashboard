@@ -36,13 +36,16 @@ import { WireMark } from "@/components/wire/wire"
  */
 /**
  * A reading line's height, for a cell that stands in a run of them without
- * being one — the Overview's one-disk storage band. 10 + 14 + 17.875 + 15.125
+ * being one — the Overview's one-disk storage band. 10 + 14 + 19.25 + 16.5
  * + 10: the padding, the eyebrow's micro line, the reading and its detail. The
  * band had it as `min-h-17`, the 68 the lines were while the eyebrow sat on a
  * 15px line; when the micro step took its own 14px line the lines became 67
  * and the band did not, so a server's sixth cell grew a pixel when it landed.
+ * It happened again when every type step grew a pixel: the reading and its
+ * detail are set at a ratio of their size, so the lines became 69.75 and the
+ * band, still 67, was three pixels under the bone that stood for it.
  */
-export const readingLineHeight = "min-h-[4.1875rem]"
+export const readingLineHeight = "min-h-[4.359375rem]"
 
 export function ReadingLine({
   href,

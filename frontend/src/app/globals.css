@@ -49,23 +49,35 @@
 :root {
   --radius: 0.5rem;
 
-  --background: oklch(0.16 0 0);
-  --foreground: oklch(1 0 0);
+  /* Two grounds under everything, as Just Hub draws them (its Spoke rule book,
+     `.stitch/DESIGN.md` in that repository). `--ground` is the window: the
+     rail, the phone's strip and the margin round the page. `--canvas` is the
+     sheet every page is drawn on, inset from the window from `md` up, so the
+     eye always knows where the work is and the navigation steps back. */
+  --ground: oklch(0.145 0 0); /* #0a0a0a */
+  --canvas: oklch(0.16 0 0);
+  --background: var(--canvas);
+  /* Text is a step off white, as the hub's is: pure white on a near-black
+     ground glares at 14px over a day's reading, and #fafafa holds the same
+     contrast to the eye. */
+  --foreground: oklch(0.985 0 0); /* #fafafa */
   --card: oklch(0.183 0 0);
-  --card-foreground: oklch(1 0 0);
+  --card-foreground: var(--foreground);
   --popover: oklch(0.2 0 0);
-  --popover-foreground: oklch(1 0 0);
+  --popover-foreground: var(--foreground);
 
   /* Primary is the neutral ink mark: a *reading* drawn as a fill rather than
      a command — the checked state of a checkbox or switch, a meter's bar. The
      pressable face belongs to the brand blue below, so white stays the one
      value on this ground that carries no hue and can never be read as the
      mark or as a warning. */
-  --primary: oklch(1 0 0);
-  --primary-foreground: oklch(0 0 0);
+  --primary: oklch(0.985 0 0);
+  --primary-foreground: oklch(0.17 0.02 240);
 
   --secondary: oklch(0.23 0 0);
-  --secondary-foreground: oklch(0.9461 0 0);
+  /* Body copy inside a surface and the rail's labels: a softer white than a
+     name or a value, so a row's title still leads the words around it. */
+  --secondary-foreground: oklch(0.88 0.004 286); /* #d4d4d8 */
   --muted: oklch(0.215 0 0);
   --muted-foreground: oklch(0.7118 0.0129 286.0665);
   /* The dimmest ink that is still text: a count, a timestamp, a unit, a label
@@ -82,7 +94,7 @@
      3.8:1, under AA for a 13px label, so the face at rest is the red a sixth
      of the way to black (5.5:1) and pressed it settles further (8.2:1); the
      token is its hover. */
-  --destructive-foreground: oklch(1 0 0);
+  --destructive-foreground: oklch(0.985 0 0);
   --destructive-face: color-mix(in oklab, var(--destructive) 85%, #000);
   --destructive-active: color-mix(in oklab, var(--destructive) 70%, #000);
 
@@ -116,17 +128,18 @@
    * because it is also the terminal's ANSI blue, and it is told apart from
    * `--chart-1` by lightness and chroma rather than by hue. */
   --brand: oklch(0.9185 0.0444 238.9); /* #CAE9FF — the mark's own blue */
-  /* The label on the brand face is black: the face is pale, so the type on it
-     has to be the darkest thing on the ground to read at all, and black is the
-     one value that carries no hue and cannot be mistaken for a status. */
-  --brand-foreground: oklch(0 0 0); /* #000000 */
+  /* The label on the brand face is Deep Harbour: the face is pale, so the type
+     on it has to be the darkest thing on the ground, and this is the darkest
+     value that still carries the brand's own hue, so the face and its words
+     read as one colour rather than as a black stamp on a blue one (15:1). */
+  --brand-foreground: oklch(0.2 0.03 240); /* #0b1620 */
   --signal: oklch(0.78 0.13 238.9);
 
   /* The command face's three steps, named once rather than re-mixed at every
      call site the way a `/90`, `/80` opacity pair leaves them. At rest it is
      the brand itself; hover pulls it a fifth of the way towards the vivid
      `--signal`, and press settles it a touch darker, so the gesture has a
-     direction. The black `--brand-foreground` holds its contrast against all three. */
+     direction. The dark `--brand-foreground` holds its contrast against all three. */
   --brand-hover: color-mix(in oklab, var(--brand) 78%, var(--signal) 22%);
   --brand-active: color-mix(in oklab, var(--brand) 94%, #000 6%);
 
@@ -134,8 +147,16 @@
   --success-foreground: oklch(0.18 0.05 162);
   --warning: oklch(0.79 0.152 78);
 
-  --border: oklch(0.275 0 0);
-  --input: oklch(0.275 0 0);
+  /* Lines are white at a low alpha rather than a solid grey, so one edge reads
+     the same on the canvas, a card, a popover and the rail: a solid grey was
+     a bright line on the page and a faint one on a popover. Three steps:
+     subtle between rows and under a header, the line round a block or a
+     field, strong under the pointer. */
+  --line-subtle: oklch(1 0 0 / 0.06);
+  --line: oklch(1 0 0 / 0.09);
+  --line-strong: oklch(1 0 0 / 0.16);
+  --border: var(--line);
+  --input: var(--line);
   /* The edge that says "this is a field": an input, a select, a checkbox, a
      switch's track. WCAG 1.4.11 asks 3:1 of the boundary that identifies a
      control, and `--input` is a hairline at 1.3:1 — decoration, which is right
@@ -166,13 +187,15 @@
      page and 7.2 on a card. */
   --chart-5: oklch(0.6959 0.115 200);
 
-  --sidebar: var(--background);
-  --sidebar-foreground: oklch(0.9461 0 0);
+  /* The rail sits on the window's ground, a step below the page, and its
+     labels in the body ink: navigation recedes and the page comes forward. */
+  --sidebar: var(--ground);
+  --sidebar-foreground: var(--secondary-foreground);
   /* The current nav entry is the product's selection ground, not a shade of
      its own. */
   --sidebar-accent: var(--accent);
-  --sidebar-accent-foreground: oklch(1 0 0);
-  --sidebar-border: oklch(0.245 0 0);
+  --sidebar-accent-foreground: var(--foreground);
+  --sidebar-border: var(--line-subtle);
 
   /* Git status. The convention every git client uses — green means added — so
      the hues are fixed. They are the tag ramp's own colours under the git
@@ -201,7 +224,11 @@
      `sm` the flow register's one focused surface, `md` a menu, popover or
      chart tooltip, `lg` a save bar, dock or sheet, `xl` a dialog. `xs` is
      what the shadcn fields still carry until they lose it. */
-  --tracking-normal: -0.02em;
+  /* Nearly the face's own spacing. It was −0.02em, which at 13px pressed each
+     letter a quarter of a pixel into the next and made a line of Source Sans 3
+     read as a block; Just Hub sets it at −0.005em and reads more easily for it.
+     Heads keep their own tighter value (`h1`–`h3` below). */
+  --tracking-normal: -0.005em;
   --shadow-xs: 0 1px 2px 0 oklch(0 0 0 / 0.4);
   --shadow-sm: 0 2px 6px -2px oklch(0 0 0 / 0.5);
   --shadow-md: 0 6px 16px -6px oklch(0 0 0 / 0.6);
@@ -253,12 +280,13 @@
 
   /* The rule between a panel header and its body. Softer than --border, which
      has to hold its own as an outline against the page. */
-  --hairline: color-mix(in oklab, var(--border) 70%, transparent);
+  --hairline: var(--line-subtle);
 
   /* The dots of a diagram's grid. A grid mark is a ruler, not a reading, and it
      repeats across the whole plane, so it sits below even the hairline: there
-     when looked for, gone when the tables are. */
-  --grid-dot: color-mix(in oklab, var(--border) 45%, transparent);
+     when looked for, gone when the tables are. Its own alpha rather than a
+     share of `--border`, which is itself translucent now. */
+  --grid-dot: oklch(1 0 0 / 0.05);
 
   /* The border an interactive card takes under the pointer: a step up from
      `--border`, so a card that leads somewhere answers the hover the way a
@@ -303,6 +331,15 @@
   --control: color-mix(in oklab, var(--card) 92%, var(--foreground) 8%);
   --control-hover: color-mix(in oklab, var(--control) 86%, var(--foreground) 14%);
   --control-active: color-mix(in oklab, var(--control) 90%, #000 10%);
+
+  /* The lit top edge of a control's face: one pixel of white along the top,
+     and nothing at the sides or the foot, as light catches the top of a key.
+     It is what makes a button sit a hair above the page without a shadow or
+     a border round it (Just Hub's search field draws it so). A face with a
+     border box carries it as its top border's colour (`border-t-edge`); a
+     face with none as an inset shadow (`shadow-edge`, and the brighter
+     `shadow-edge-brand` and `shadow-edge-danger` on the coloured faces). */
+  --edge: oklch(1 0 0 / 0.06);
 
   /* The tinted surfaces a *tone* takes. Three roles, so that each is decided
      once instead of by eye at every call site:
@@ -488,20 +525,17 @@
   --doc-label: oklch(0.99 0 0);
 }
 
-/* A touch screen gets the taller control box (see "Control sizes" above) and
- * the two smallest type steps one pixel up: 11 and 10px are the most-drawn
- * sizes in the product, and are read at arm's length on a phone. A desk
- * pointer keeps 11 and 10 exactly. The type steps live in a plain `@theme`
- * (below) so the utilities read these variables rather than inlining a size. */
+/* A touch screen gets the taller control box (see "Control sizes" above).
+ * It used to get the two smallest type steps one pixel up as well, 12 and
+ * 11px for a desk's 11 and 10; the desk reads those sizes now too (the type
+ * scale below), so a phone and a desk set the same type. The micro step keeps
+ * the taller line a phone gave it, so nothing on a phone moved. */
 @media (pointer: coarse) {
   :root {
     --control-dense: 2rem;
     --control-compact: 2.5rem;
     --control-regular: 2.75rem;
     --control-large: 3rem;
-    --text-hint: 0.75rem;
-    --text-hint--line-height: 1rem;
-    --text-micro: 0.6875rem;
     --text-micro--line-height: 0.9375rem;
   }
 }
@@ -526,6 +560,11 @@
      fixed name, and Excalifont's are hashed per release of the package. */
   --font-drawing: "Excalidraw Virgil", var(--font-source-sans-3), cursive;
   --color-background: var(--background);
+  --color-ground: var(--ground);
+  --color-canvas: var(--canvas);
+  --color-line: var(--line);
+  --color-line-subtle: var(--line-subtle);
+  --color-line-strong: var(--line-strong);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
   --color-card-foreground: var(--card-foreground);
@@ -595,6 +634,7 @@
   --color-control: var(--control);
   --color-control-hover: var(--control-hover);
   --color-control-active: var(--control-active);
+  --color-edge: var(--edge);
 
   --color-surface-header: var(--surface-header);
   --color-surface-sunken: var(--surface-sunken);
@@ -662,6 +702,12 @@
   --shadow-md: var(--shadow-md);
   --shadow-lg: var(--shadow-lg);
   --shadow-xl: var(--shadow-xl);
+  /* A control face's lit top edge, for a face with no border box to carry it
+     (see `--edge`). The coloured faces are pale or saturated, so their edge
+     is a brighter white to show at all. */
+  --shadow-edge: inset 0 1px 0 0 var(--edge);
+  --shadow-edge-brand: inset 0 1px 0 0 oklch(1 0 0 / 0.4);
+  --shadow-edge-danger: inset 0 1px 0 0 oklch(1 0 0 / 0.16);
   --tracking-normal: var(--tracking-normal);
   --tracking-tighter: calc(var(--tracking-normal) - 0.05em);
   --tracking-tight: calc(var(--tracking-normal) - 0.025em);
@@ -767,18 +813,29 @@
  * hint took its line box from whatever held it: 16.5px under the page, 14.7
  * inside a text-xs parent, 15.7 inside text-sm, so a row's words did not share
  * one centre line. A plain `@theme` rather than `inline`, so the utilities read
- * the variable and the touch step in the media query above retunes them.
+ * the variable and the touch step in the media query above retunes it.
+ *
+ * Every step is one pixel larger than it was until 0.9.1, which puts the four
+ * named steps exactly on Just Hub's (11, 12, 14, 16). Source Sans 3 sets small
+ * for its size, and a console read all day wants 14px body text. Each step
+ * keeps the line it sat on, so a row is the height it was and only its words
+ * grew; `text-xs` and `text-sm` are Tailwind's own names, retuned here to move
+ * with the rest.
  *
  * The breakpoints are Tailwind's own, written out because `lib/breakpoints.ts`
  * mirrors them for script and its test reads them from here. */
 @theme {
-  --text-micro: 0.625rem; /* 10px — eyebrows, tags, the smallest legible mark */
-  --text-micro--line-height: 0.875rem; /* 14 */
-  --text-hint: 0.6875rem; /* 11px — a row's secondary line */
+  --text-micro: 0.6875rem; /* 11px — eyebrows, tags, the smallest legible mark */
+  --text-micro--line-height: 0.875rem; /* 14; 15 on a touch screen */
+  --text-hint: 0.75rem; /* 12px — a row's secondary line */
   --text-hint--line-height: 1rem; /* 16 */
-  --text-body: 0.8125rem; /* 13px — body and row text; the product's default */
+  --text-xs: 0.8125rem; /* 13px — a table cell, a status word, a tooltip */
+  --text-xs--line-height: 1rem; /* 16 */
+  --text-body: 0.875rem; /* 14px — body and row text; the product's default */
   --text-body--line-height: 1.25rem; /* 20 */
-  --text-title: 0.9375rem; /* 15px — the title of a surface, and a section head */
+  --text-sm: 0.9375rem; /* 15px — an option row's title */
+  --text-sm--line-height: 1.25rem; /* 20 */
+  --text-title: 1rem; /* 16px — the title of a surface, and a section head */
   --text-title--line-height: 1.375rem; /* 22 */
 
   --breakpoint-sm: 40rem; /* 640 — a field row stops stacking */
@@ -1252,9 +1309,10 @@
    *
    * It appears often enough — and has to stay identical in all of them for the
    * page to read as one system — that it is a class rather than six copies of
-   * the same four utilities. */
+   * the same four utilities. Spaced 0.08em, as Just Hub's is: at 11px the
+   * 0.14em it had at 10 pulled a word apart into letters. */
   .eyebrow {
-    @apply text-micro font-semibold tracking-[0.14em] text-muted-foreground uppercase;
+    @apply text-micro font-semibold tracking-[0.08em] text-muted-foreground uppercase;
   }
 
   /* The quieter caps of a label on a thing rather than over a section: a

@@ -458,6 +458,17 @@ test("an environment is printed as the operator typed it", async ({ page }) => {
   await expect(tag).toHaveCSS("text-transform", "none")
 })
 
+/**
+ * Where the shell's page ends: the window's foot on a phone, and from `md` up
+ * the inner edge of the sheet the page is drawn on, which stands 8px in from
+ * the window with its own 1px edge.
+ */
+function shellFoot(page: Page) {
+  return page
+    .locator("[data-workspace-shell-scroll]")
+    .evaluate((el) => Math.round(el.getBoundingClientRect().bottom))
+}
+
 test("a workbench is exactly the window that the strip leaves", async ({ page }) => {
   await mockDatabases(page, { rows: { 1: { environment: "production", readOnly: true } } })
 
@@ -472,7 +483,8 @@ test("a workbench is exactly the window that the strip leaves", async ({ page })
       const surface = page.locator("[data-slot=page]").first()
       await expect(surface).toBeVisible()
       const bottom = await surface.evaluate((el) => Math.round(el.getBoundingClientRect().bottom))
-      expect(bottom, `${path} at ${width}`).toBe(height)
+      expect(bottom, `${path} at ${width}`).toBe(await shellFoot(page))
+      if (width < 768) expect(bottom, `${path} at ${width}`).toBe(height)
     }
   }
 })
@@ -726,7 +738,8 @@ test("the pages held to the window under the header end at its foot", async ({ p
       const head = (await header(page).boundingBox())!
       // Directly under the header, down to the window's foot, with nothing left to scroll.
       expect(Math.round(box.y), `${path} at ${width}`).toBe(Math.round(head.y + head.height))
-      expect(Math.round(box.y + box.height), `${path} at ${width}`).toBe(height)
+      expect(Math.round(box.y + box.height), `${path} at ${width}`).toBe(await shellFoot(page))
+      if (width < 768) expect(Math.round(box.y + box.height), `${path} at ${width}`).toBe(height)
       expect(
         await page
           .locator("[data-slot=database-pages]")

@@ -67,11 +67,17 @@ describe("the document", () => {
     const app = Object.fromEntries(
       [...root.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]),
     )
+    // A token globals.css spells as another (`--background: var(--canvas)`) is
+    // compared by the value it comes to.
+    const resolve = (value) => {
+      const ref = value?.match(/^var\(--([a-z0-9-]+)\)$/)
+      return ref ? resolve(app[ref[1]]) : value
+    }
     const names = Object.keys(own)
     expect(names).toContain("brand")
     for (const name of names) {
       const appName = name === "muted" ? "muted-foreground" : name
-      expect(`${name}: ${own[name]}`).toBe(`${name}: ${app[appName]}`)
+      expect(`${name}: ${own[name]}`).toBe(`${name}: ${resolve(app[appName])}`)
     }
   })
 

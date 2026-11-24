@@ -117,7 +117,7 @@ export function ContainerRows({
               <SortHead label="CPU" {...by("cpu")} align="right" className="w-32 2xl:w-44" />
               <SortHead label="Memory" {...by("memory")} align="right" className="w-36" />
               <TableHead className="hidden w-36 text-right 2xl:table-cell">Network</TableHead>
-              <TableHead className="w-32 2xl:w-36">Ports</TableHead>
+              <TableHead className="w-36 2xl:w-40">Ports</TableHead>
               <TableHead label="Actions" className="w-28" />
             </TableRow>
           </TableHeader>

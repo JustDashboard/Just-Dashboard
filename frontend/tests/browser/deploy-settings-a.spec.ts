@@ -251,12 +251,12 @@ test.describe("General settings", () => {
     await expect(picture.getByText(/^checked /)).toBeVisible()
     // The sentence sat in the head's status slot, which sets no size, and
     // rendered at 16px — louder than the section's own title. It is the
-    // picture's 12px now, beside the decision's status.
+    // picture's 13px now, beside the decision's status.
     const sentence = gitCard.getByText(
       "This commit already has a deployment run. Use Retry if it failed.",
     )
     await expect(sentence).toBeVisible()
-    expect(await sentence.evaluate((node) => getComputedStyle(node).fontSize)).toBe("12px")
+    expect(await sentence.evaluate((node) => getComputedStyle(node).fontSize)).toBe("13px")
     await expect(gitCard.getByText("Already deployed", { exact: true })).toBeVisible()
     await expect(gitCard.getByText("Automatic", { exact: true })).toBeVisible()
   })

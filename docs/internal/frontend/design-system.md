@@ -15,7 +15,8 @@ Dark only, three inks, colours named once in `globals.css`.
 
 ## 2. Nothing lifts
 
-Grounds, borders and hairlines instead of shadows; which blocks are framed (tables, panes, wells);
+Grounds, borders and hairlines instead of shadows; the frame (the rail on the window's ground, the
+page a sheet on it); a control face's one lit top pixel; which blocks are framed (tables, panes, wells);
 `WireFlow` and its loaded shape; the database workbench's one head; press feedback.
 [`foundations/surfaces.md`](foundations/surfaces.md#2-nothing-lifts).
 

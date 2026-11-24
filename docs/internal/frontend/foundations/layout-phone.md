@@ -95,7 +95,7 @@ column percentages stay arbitrary: they are layout.
 | A field keeps 16px text on a touch screen (iOS zooms on less), whatever class its caller passes. | spec `touch-targets.spec.ts` (*a field asked for text-xs is still 16px and 44 tall*) |
 | A pressable target is at least 24px, and 44px on touch. | spec `touch-targets.spec.ts` (`Button` sizes and `Switch`), `touch-targets-pages.spec.ts` (six pages), `shell-phone.spec.ts` (*the strip's controls and the drawer's rows are a finger tall*) |
 | A log at a page's foot is a card per source into the Logs page, never a console inside the page. | `EmbeddedLog` (`components/logs/embedded-log.tsx`); unit `embedded-log.test.js` |
-| On touch, `text-hint` is 12px and `text-micro` 11px (T1). | `globals.css` (`@media (pointer: coarse)` on the type tokens) |
+| `text-hint` is 12px and `text-micro` 11px, on a phone and a desk alike (T1, folded into the scale in 0.9.1); a phone keeps micro's 15px line. | `globals.css` (the type `@theme`, and `@media (pointer: coarse)` for the line) |
 | Hover reveals are for real pointers only; on touch the controls are drawn. | spec `design-system.spec.ts` (*row actions … are visible without a pointer*) |
 | The page clears the home indicator and the notch (`viewportFit: cover`, safe-area utilities). | `app/layout.tsx` (`viewportFit: cover`, `themeColor`, `interactiveWidget`); `pt-safe` … `mb-safe` |
 | Canvases (the server map, the ER diagram, the boards) pan and pinch like Excalidraw, and arrow keys pan and move on them (T10). | unit `canvas-move.test.js`, `canvas-keys.test.js`; spec `server-map.spec.ts`, `database-schema.spec.ts`, `boards-ui.spec.ts` |

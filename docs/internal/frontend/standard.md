@@ -31,7 +31,7 @@ below) and let the operator decide; it is never a defect.
 | **One mode** | Dark only. No light palette, no theme switch. | convention |
 | **Three inks** | `text-foreground`, `text-muted-foreground` and `text-faint`. Faint has a 4.5:1 floor. Text is never faded with opacity. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*, *no page fades its words with opacity*); coming: lint `ink-opacity` (WP-39) |
 | **Colours are tokens** | Every colour is named once, on `:root` in `app/globals.css`. | lint `hardcoded-palette`, `tone-tint`; coming: lint `colour-var` (WP-39) |
-| **Nothing lifts** | A surface separates by a step of ground and a border. Shadows only on popovers, menus, dialogs and the floating bars. A block is plain unless it can say why it needs an edge. | convention |
+| **Nothing lifts** | A surface separates by a step of ground and a border. Shadows only on popovers, menus, dialogs and the floating bars. A block is plain unless it can say why it needs an edge. A control's face carries one lit pixel along its top (`--edge`), no drop shadow. | convention |
 | **One blue, three jobs** | The brand blue is a command's face, where you are, and a location mark. Status has its own three hues. | convention |
 | **No descriptions under titles** | `PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`. | type |
 | **A verb is one word. Few words.** | D14. When the operator says "too much whitespace", cut content; do not rearrange it. | convention |
@@ -74,7 +74,7 @@ Each is a best-practice change that touches a decision above. The operator answe
 
 | Id | Best practice asked for | Answer | Where it lives |
 | --- | --- | --- | --- |
-| T1 | Raise 10px and 11px text on touch screens | **Adopted.** On `pointer: coarse` only, `text-hint` is 12px and `text-micro` 11px. Desktop is unchanged. | [`foundations/type.md`](foundations/type.md) |
+| T1 | Raise 10px and 11px text on touch screens | **Adopted, then folded into the scale** (0.9.1): every step went one pixel up on every pointer, so `text-hint` is 12px and `text-micro` 11px on a desk too. | [`foundations/type.md`](foundations/type.md) |
 | T2 | A way to pause endless live motion (WCAG 2.2.2) | **Adopted.** `data-motion="paused"` on `<html>` pauses every animation, as `prefers-reduced-motion` does. The control is Pause animations in the account menu, kept per browser. | [`foundations/motion.md`](foundations/motion.md) |
 | T3 | 3:1 edges on controls (WCAG 1.4.11) | **Adopted.** Inputs, selects, checkboxes and switches draw a 3:1 edge in the control-edge colour. Other borders are unchanged. | [`foundations/colour.md`](foundations/colour.md) |
 | T4 | Sortable tables for compare-and-sort lists | **Not adopted.** Things you open are cards. Ports becomes a `ChoiceList` with sort in its toolbar. | D5, D7 |

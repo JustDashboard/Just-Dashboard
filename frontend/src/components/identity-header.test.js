@@ -32,9 +32,9 @@ describe("IdentityHeader", () => {
     expect(html.match(/align-bottom/g)).toHaveLength(1)
   })
 
-  test("the name is the identity rung: 16px, weight 600", () => {
+  test("the name is the identity rung: 18px on its 24px line, weight 600", () => {
     const html = draw({ title: "api", facts: "x", state: "ok" })
-    expect(html).toContain("text-base font-semibold")
+    expect(html).toContain("text-lg/6 font-semibold")
     expect(html).not.toContain("text-title")
   })
 

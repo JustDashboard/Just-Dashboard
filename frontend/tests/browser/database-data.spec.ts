@@ -1270,7 +1270,9 @@ test("a row opened in a frame too narrow for three columns takes the rail's plac
   await page.keyboard.press("Space")
   await expect(panel).toContainText("Row 2")
   await expect(rail).toHaveCount(0)
-  expect(await widthOf(grid(page))).toBeGreaterThanOrEqual(640)
+  // The floor the rows keep beside the panel (`ROWS_BESIDE_PANEL`), not what one
+  // window happens to leave: the page is a sheet inset from the window's edge.
+  expect(await widthOf(grid(page))).toBeGreaterThanOrEqual(560)
   // Asking for the tables puts the row away: there is room for one of them.
   await headMenu(page, "Show the tables")
   await expect(rail).toBeVisible()

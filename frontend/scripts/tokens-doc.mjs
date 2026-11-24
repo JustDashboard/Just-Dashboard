@@ -32,10 +32,11 @@ const FAMILIES = [
   {
     part: "Colour",
     name: "Grounds",
-    match: /^--(background|card|popover|muted|secondary|control|surface-[a-z]+|panel-ground)$/,
+    match:
+      /^--(ground|canvas|background|card|popover|muted|secondary|control|surface-[a-z]+|panel-ground)$/,
     use: "bg",
     page: "surfaces.md",
-    for: "The ladder a surface steps up: page, block, floating surface, control; a panel's ground is the one its insides are drawn over.",
+    for: "The window under the page, then the ladder a surface steps up: page, block, floating surface, control; a panel's ground is the one its insides are drawn over.",
   },
   {
     part: "Colour",
@@ -48,10 +49,11 @@ const FAMILIES = [
   {
     part: "Colour",
     name: "Edges",
-    match: /^--(border|input|hairline|border-strong|control-edge|grid-dot|wire)$/,
+    match:
+      /^--(line|line-subtle|line-strong|border|input|hairline|border-strong|control-edge|edge|grid-dot|wire)$/,
     use: "border",
     page: "surfaces.md",
-    for: "A frame, a field, where a header meets a body, a destination's hover, a control's 3:1 edge (T3), a canvas's dots.",
+    for: "The three white lines, a frame, a field, where a header meets a body, a destination's hover, a control's 3:1 edge (T3), a control face's lit top, a canvas's dots.",
   },
   {
     part: "Colour",
@@ -196,9 +198,9 @@ const FAMILIES = [
   {
     part: "Scales",
     name: "Shadow",
-    match: /^--shadow-[a-z0-9]+$/,
+    match: /^--shadow-[a-z0-9]+(-[a-z]+)*$/,
     page: "surfaces.md",
-    for: "Only for what floats: a popover, a dropdown, a dialog. No control carries one.",
+    for: "Only for what floats: a popover, a dropdown, a dialog. The three `edge` steps are insets, a control face's lit top pixel, and cast nothing.",
   },
   {
     part: "Scales",

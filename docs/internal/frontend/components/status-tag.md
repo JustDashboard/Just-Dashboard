@@ -144,7 +144,7 @@ reads green, grey and red before a name is read. It has one size ladder:
 
 ## Tag
 
-**Anatomy.** The `.caps` class from `globals.css`: 10px (11 on touch), weight 500, tracked
+**Anatomy.** The `.caps` class from `globals.css`: 11px, weight 500, tracked
 0.06em, uppercase, in `--faint`. A `tone` takes the full-strength signal ink instead. There is no
 border, no ground and no padding.
 
@@ -176,7 +176,7 @@ ended without an answer (cancelled, superseded) is a quiet grey.
 
 ## The phone
 
-None of these change on a phone. Tag's text is 11px on touch, through the type tokens. A row's state
+None of these change on a phone. Tag's text is 11px, on a phone as on a desk. A row's state
 word that has no room at its end moves to the head of the second line (`PhoneState` on the
 diagnostic pages).
 

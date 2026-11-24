@@ -1248,7 +1248,14 @@ function Fanout({
         ),
         title,
         name: `${title}: ${hint}`,
-        hint,
+        // One line, cut short: a channel that hears three events wrapped onto
+        // a second, and the picture stood 8px taller than the grey rows it
+        // waited in. The card below says the whole of it.
+        hint: (
+          <span className="block truncate" title={hint}>
+            {hint}
+          </span>
+        ),
         line: lineOf(channel),
       }
     }),
