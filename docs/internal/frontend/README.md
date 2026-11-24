@@ -4,8 +4,8 @@
 
 1. **Pick the shape.** A page that reports is a reading page, a list of things you open is a list
    page, an item's detail is a page with a rail, settings are one column under one save bar, a
-   page where the reader decides a sequence is a flow page, and a workbench is one frame held to
-   the window. [`patterns/registers.md`](patterns/registers.md) has the test.
+   page where the reader decides a sequence is a flow page, and a workbench is one surface held to
+   the window, the sheet its frame. [`patterns/registers.md`](patterns/registers.md) has the test.
 2. **Open its recipe** in [`recipes/`](recipes/README.md): the reference route and its shot, the
    order of the regions, a skeleton, the four states, the phone shape, a checklist and the spec to
    add.

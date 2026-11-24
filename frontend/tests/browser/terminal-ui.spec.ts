@@ -517,10 +517,14 @@ test("from lg the three columns stand side by side and no bar is drawn", async (
   await expect(page.getByLabel("Terminal sessions")).toBeVisible()
   await expect(page.locator(".xterm-screen:visible")).toHaveCount(1)
   await expect(page.getByRole("button", { name: "Hide the sessions rail" })).toBeVisible()
-  // The frame stands in the page's gutter, rounded.
-  const frame = await page.locator("[data-slot=terminal-workspace]").boundingBox()
+  // The surface runs to the sheet's edges with no frame of its own: the sheet
+  // is its frame. In the page's gutter with a rounded border, it was a frame
+  // 12px inside the sheet's own (0.9.1).
+  const surface = page.locator("[data-slot=terminal-workspace]")
+  const frame = await surface.boundingBox()
   const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
-  expect(frame!.x).toBeGreaterThan(area!.x)
+  expect([frame!.x, frame!.width]).toEqual([area!.x, area!.width])
+  expect(await surface.evaluate((node) => getComputedStyle(node).borderTopWidth)).toBe("0px")
 })
 
 /** The terminal's listing with the feature switched off, for an account with these capabilities. */

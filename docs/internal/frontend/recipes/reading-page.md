@@ -156,7 +156,8 @@ redesigned now starts from them:
   step, the certbot option and the job console); a new page takes `MissingThing`.
 - **On a phone a page of several panels is one pane at a time** over a bar at the foot
   (`components/phone-panes.tsx`; the pages on it are listed in `patterns/keyboard-and-place.md`).
-- **A Remote Desktop session is the one workbench that keeps full bleed** (§16's table).
+- **A workbench runs to the sheet's edges and draws no frame**, the sheet being its frame; a
+  Remote Desktop session was the first to (§16's table, [`../foundations/surfaces.md`](../foundations/surfaces.md)).
 - **Every page of one database opens on the database's header**, with the exceptions decided in
   `shell/header-rule.ts`
   ([`../decisions/databases.md`](../decisions/databases.md#every-page-of-one-database-opens-on-the-databases-header)).

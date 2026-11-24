@@ -85,7 +85,10 @@ export function Logs() {
     // Below `lg` the log is the screen under the header, edge to edge, with
     // its views on a bar at the foot, as a project's Logs is: in the page's
     // gutter it was a framed box with its views as a strip across its top.
-    <SectionFrame section="logs" className="max-lg:gap-0 max-lg:p-0">
+    // From `lg` the framed pane keeps the page's gutter at its foot as at its
+    // sides; 12px over the sheet's foot, its bottom edge was a second line
+    // along the sheet's own.
+    <SectionFrame section="logs" className="max-lg:gap-0 max-lg:p-0 lg:pb-8">
       {found.error && !latest ? (
         // Where the server's log is could not be found out: said, with the
         // way to ask again, rather than left to the next poll.

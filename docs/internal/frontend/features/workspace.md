@@ -63,8 +63,8 @@ Routes: `/excalidraw`, `/excalidraw/[id]`
 Workspace Excalidraw drawings (`/boards` redirects here). The list opens on Excalidraw's logo and a
 line of facts over the drawings as lit cards, each drawn from the server's preview of its scene and
 sketched in on arrival, with the server items it links drawn as themselves. The editor is one
-workbench frame held to the window (rounded and in the page's gutter from `lg`, the screen below
-it) under a head bar: back, Excalidraw's mark, the name edited in place and the save state as a dot
+workbench surface held to the window, running to the sheet's edges with no frame of its own, under
+a head bar: back, Excalidraw's mark, the name edited in place and the save state as a dot
 and its words, then Add server item as the one command (Reload in its place while another tab's
 change stops saving) and a menu holding Save now, Reload and Delete drawing; a failed save offers
 Try again beside its words. The page names Excalidraw's menu trigger and takes the footer role off
@@ -645,8 +645,10 @@ split matters — the pane is reused by the compose runner and knows nothing abo
   and a button that is the stop before each terminal, drawn only under the keyboard. It is off by
   default because the mirror costs a busy terminal time, and a browser cannot tell that a screen
   reader is running. Bright black is `--faint` and `minimumContrastRatio` is 4.5.
-- The page is **one framed workbench**. The rail, the emulator and the Files/Git column are `Pane flush`
-  inside a single `rounded-xl border` wrapper, separated by a hairline each (drawn on the rail's right
+- The page is **one workbench surface**, run to the sheet's edges with no border of its own (the
+  sheet is its frame; 12px inside it, the `rounded-xl border` it had until 0.9.1 was a frame in a
+  frame). The rail, the emulator and the Files/Git column are `Pane flush`
+  inside it, separated by a hairline each (drawn on the rail's right
   edge and the tools column's left edge). Three framed panes with a gutter between them read as three
   boxes floating on the page; the screen is one working surface. The three columns' top strips are all
   40px (the rail's and the tools column's `PaneHeader` are pinned to `h-10`, the emulator's strip is

@@ -114,10 +114,11 @@ export function WorkbenchFrame({
         ref={ref}
         data-slot={slot}
         style={style}
-        // Edge to edge below the break, as the Git workspace is: a phone's
-        // bar at the foot is the screen's, not a card's.
+        // Edge to edge at every width, as the Git workspace is: the sheet is
+        // its frame from `md` up, and a phone's bar at the foot is the
+        // screen's, not a card's.
         className={cn(
-          "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border",
+          "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card",
           className,
         )}
       >
@@ -133,8 +134,12 @@ export function WorkbenchFrame({
   )
 }
 
-/** The gutters of a page whose frame is a `WorkbenchFrame`: none below the break. */
-export const WORKBENCH_PAGE = "max-lg:gap-0 max-lg:p-0"
+/**
+ * The class list of a `Notice` standing above a `WorkbenchFrame`: in from the
+ * sheet's edges, on its ground. The page has no gutter, so a notice with none
+ * of its own laid its border along the sheet's edge, a frame in a frame.
+ */
+export const NOTICE_ON_A_WORKBENCH = "m-3 shrink-0"
 
 /**
  * Draws its children among the head's verbs. Rendered by whichever part of

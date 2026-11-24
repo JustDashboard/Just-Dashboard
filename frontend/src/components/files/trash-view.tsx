@@ -219,7 +219,7 @@ export function TrashView() {
       <h1 className="sr-only">Trash</h1>
       <div
         style={{ "--panel-ground": "var(--card)" } as React.CSSProperties}
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card"
       >
         <PaneHeader className="gap-2 px-2 py-1.5">
           <IconAction label="Back to Files" variant="outline" className="size-8" asChild>
@@ -285,6 +285,9 @@ export function TrashView() {
             ) : !trash.data ? (
               <LoadingRows rows={6} className="p-3" />
             ) : items.length === 0 ? (
+              // Plain, as an empty column of any workbench is: the dashed box
+              // filled the listing to 12px over the sheet's foot, a frame in
+              // the frame.
               <EmptyState
                 icon={Trash}
                 title="The Trash is empty"
@@ -297,7 +300,7 @@ export function TrashView() {
                     </Link>
                   </Button>
                 }
-                className="m-3 flex-1"
+                className="m-3 flex-1 border-0"
               />
             ) : (
               <div className="min-h-0 flex-1 overflow-auto">

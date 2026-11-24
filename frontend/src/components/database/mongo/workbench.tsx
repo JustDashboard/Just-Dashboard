@@ -43,7 +43,6 @@ import {
 } from "@/components/database/mongo/use-mongo"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import {
-  WORKBENCH_PAGE,
   WorkbenchFrame,
   WorkbenchSide,
   sideVerbs,
@@ -254,7 +253,7 @@ export function MongoWorkbench({
   }
 
   return (
-    <SectionFrame section={section} className={WORKBENCH_PAGE}>
+    <SectionFrame section={section}>
       {dialog}
       {/* One frame around the workbench: the head that says which database,
           then the rail and the work as two columns of one surface, with a

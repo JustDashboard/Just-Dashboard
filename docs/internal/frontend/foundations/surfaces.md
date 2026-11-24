@@ -7,6 +7,19 @@ margin round the page. The page is a sheet on it, `--canvas` (`--background`), w
 (`--line`) and `rounded-xl` corners, so the work is always the lighter, framed thing and the
 navigation steps back (Just Hub's frame, 0.9.1). On a phone the sheet is the screen.
 
+**The sheet is the frame. Nothing inside it draws another along its edge.** A page held to the
+window (a workbench: the maps, the terminal, Files, Git, a board, the network tools, a database's
+Data, Query, Schema and Diagram, a Remote Desktop session) runs its working surface to the sheet's
+edges, `bg-card` with no border and no radius, and divides its panes with hairlines (`Pane flush`).
+A pane on a reading page stands on the page's gutter at its sides and its foot (32px from `md`).
+When the sheet arrived, each workbench still drew the rounded border it had drawn from `lg`, 12px in
+from the window, and that border became a second edge 12px inside the sheet's: a frame in a frame.
+So a workbench page is `Page fill="workspace"`, which has no inset at any width; its loading state
+is `LoadingPanel plain className={WORKBENCH_WAITING}`, not a framed panel; and a notice above its
+surface stands in from the sheet's edges (a 12px margin, `NOTICE_ON_A_WORKBENCH` on a
+database's), not against them. Full screen and immersive modes are the screen, so the surface fills
+it with no frame either.
+
 **Lines.** `--line-subtle`, `--line` and `--line-strong` are white at 6, 9 and 16%, so one edge reads
 the same on every ground. `--border` and `--input` are `--line`; `--hairline` is `--line-subtle`.
 
@@ -36,13 +49,14 @@ these carries a comment saying why.
 | mark | `rounded-sm` | 4 | a mono `Tag` ground, a menu row, a checkbox, inline code |
 | control | `rounded-md` | 6 | `Button`, `Input`, `Select`, `Toggle`, a tab trigger, a skeleton line |
 | fence, well, floating surface | `rounded-lg` | 8 | a well, a code block, dialog, popover, menu, hover card, tooltip |
-| block | `rounded-xl` | 12 | `Panel`, `Pane`, a `ChoiceRow` card, a workbench frame, the save bar, a dock |
+| block | `rounded-xl` | 12 | the page's sheet, `Panel`, `Pane`, a `ChoiceRow` card, the save bar, a dock |
 | tile mark | `rounded-tile-md`, `rounded-tile-lg` | 10, 14 | `WireMark` tiles |
 | round | `rounded-full` | full | a status dot, an avatar, a switch, a progress track |
 
 | Rule | Held by |
 | --- | --- |
 | Nothing lifts: no gradient, no glow, no drop shadow on a block or a control. A control's face carries one lit pixel along its top (`--edge`), and nothing else. | convention |
+| The sheet is the frame: no box with a border on three sides or more runs along the sheet's side or foot closer than 20px. | spec `design-system.spec.ts` (*nothing on … draws a frame inside the sheet*, every page held to the window at 1440, measured by `tests/browser/sheet-frame.ts`) |
 | A bare `rounded` is `rounded-sm` spelled twice; use the named step. | lint `radius-bare` |
 | Only the steps above. | lint `radius-scale`; coming: `radius-arbitrary` (WP-39) |
 | Press feedback is colour (`active:bg-control-active`), never movement or a shadow. | convention |

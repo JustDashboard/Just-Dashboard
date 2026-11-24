@@ -22,7 +22,7 @@ import { DbPicker } from "@/components/database/redis/db-picker"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import {
-  WORKBENCH_PAGE,
+  NOTICE_ON_A_WORKBENCH,
   WorkbenchFrame,
   WorkbenchSide,
   sideVerbs,
@@ -76,10 +76,10 @@ export function RedisConsole() {
   const helperVisible = view === "console" && (helper.beside ? helperShown : helperOver)
 
   return (
-    <SectionFrame section="query" className={WORKBENCH_PAGE}>
+    <SectionFrame section="query">
       {dialog}
       {server.data?.notice && (
-        <Notice title="This is not a single standalone server" className="shrink-0">
+        <Notice title="This is not a single standalone server" className={NOTICE_ON_A_WORKBENCH}>
           {server.data.notice}
         </Notice>
       )}

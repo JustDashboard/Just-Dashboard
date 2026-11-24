@@ -1,6 +1,6 @@
 # Workbench
 
-One frame held to the window, where the reader works for minutes rather than reads. Reference: a
+One surface held to the window, the sheet its frame, where the reader works for minutes rather than reads. Reference: a
 database's Data, `/databases/[id]/data`, and `/terminal`.
 
 **Reference:** `components/database/workbench/chrome.tsx` (`WorkbenchFrame`, the head every
@@ -22,9 +22,12 @@ Desktop session and the assistant.
    database's line and the open thing's verbs in `WorkbenchFrame`'s bar. A workbench that is a
    whole section (the terminal, Files, Logs) has no strip above its panes and says its name in a
    screen-reader `h1` (`PageContext`).
-2. **One frame**: a single rounded border from `lg`, the screen's edge below it. Inside it the
-   panes are `Pane flush` with a hairline between them, and their top strips are one height so the
-   hairlines meet as one rule.
+2. **One surface, no frame of its own**: the working surface runs to the sheet's edges at every
+   width, `bg-card` with no border or radius. The sheet the shell lays the page on is its frame
+   ([`../foundations/surfaces.md`](../foundations/surfaces.md)); a border drawn inside it, as the
+   workbenches drew one from `lg` until 0.9.1, is a frame in a frame. Inside the surface the panes
+   are `Pane flush` with a hairline between them, and their top strips are one height so the
+   hairlines meet as one rule. A notice above the surface stands in from the sheet's edges.
 3. **The side column** (a rail, a tree, a list of sessions): beside the work while the work keeps
    its room, over it otherwise. The reader can widen it (`ResizeHandle`), and the page keeps the
    width.
@@ -57,7 +60,7 @@ export function ThingWorkbench() {
           command={<Button size="sm">Run</Button>}
           menu={<VerbMenu verbs={verbs} label={`More actions for ${name}`} />}
         />
-        <div className="flex min-h-0 flex-1 overflow-hidden lg:rounded-xl lg:border">
+        <div className="flex min-h-0 flex-1 overflow-hidden bg-card">
           <Pane flush className={paneShown(shown === "list")} style={{ width: side.width }}>
             <PaneHeader>Tables</PaneHeader>
             <ThingList onOpen={() => setShown("work")} />
@@ -85,7 +88,7 @@ those rather than this skeleton.
 
 | State | What the page draws |
 | --- | --- |
-| Loading | The frame, the strip and every pane's head at once, at their final sizes; each pane waits as its own skeleton (the rail's rows, the grid's lines). The frame never changes size when a read lands. |
+| Loading | The surface, the strip and every pane's head at once, at their final sizes; each pane waits as its own skeleton (the rail's rows, the grid's lines). The surface never changes size when a read lands. A page that waits before it can draw any of that shows `LoadingPanel plain className={WORKBENCH_WAITING}`: the surface's ground with rows, never a framed panel against the sheet's edge. |
 | Empty | With nothing open, the work pane says what goes there and how to open one (`EmptyState`, or the landing a schema or a folder has). An empty rail says so in one line (`EmptyNote dense`). |
 | Unavailable | The thing the workbench works on is not there (no terminal backend, a database that is unreachable, a file that is gone): `MissingThing` in the frame, with the next step and the way back. Protected or read-only: the work is shown and the write controls are not drawn. |
 | Failed | A pane's failed read is its own `ErrorState`, or `Stale form="strip"` across its top when it still shows the last reading. The other panes keep working. |
@@ -102,7 +105,10 @@ with one finger and pinches to zoom. The pages on the bar and their stops are li
 ## Checklist
 
 - [ ] `Page fill="workspace"`: the frame is the window's height and nothing scrolls but the panes.
-- [ ] One frame, hairlines between panes, strips of one height. No framed panes with gutters.
+- [ ] No frame of its own: the surface runs to the sheet's edges, hairlines between panes, strips
+      of one height. No framed panes with gutters, no border round the whole.
+- [ ] The page is in `HELD_TO_THE_WINDOW` in `design-system.spec.ts` with a fixture that draws it
+      loaded, so the sheet rule is checked on it.
 - [ ] The top strip is `WorkbenchHeader` (or the database head), not a strip drawn by hand: an
       arrow back, one command, the rest behind `⋯`. One `h1`.
 - [ ] The side column resizes with a `ResizeHandle`, and its width is kept.
@@ -117,6 +123,8 @@ with one finger and pinches to zoom. The pages on the bar and their stops are li
 ## The spec to add
 
 1. At 1440 the shell does not scroll (`scrollHeight` equals `clientHeight`), and each pane does.
+   Add the page to `HELD_TO_THE_WINDOW` in `design-system.spec.ts`, which holds it to the sheet
+   rule (*nothing on … draws a frame inside the sheet*).
 2. The strip is found by its name, its back control leads to the list, and its command is there.
 3. A drag on the handle changes the column's width, arrows nudge it, and a reload keeps it.
 4. A failed read in one pane shows its error or its strip while the others still answer.

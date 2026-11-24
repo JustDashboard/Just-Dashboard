@@ -117,8 +117,10 @@ name for this one, so import it from `components/page.tsx`.
 cannot get it. Give it `skeleton` in the page's final shape. A page that opens on an identity line
 passes `<IdentityHeader loading … />`, not the default `LoadingPanel`.
 
-`Page({ fill?, bleed?, rise?, register? })`: `fill="workspace"` is `h-full`, the whole width, no gap,
-and an inset of 12px only from `lg`; `bleed` drops that inset (a remote screen).
+`Page({ fill?, rise?, register? })`: `fill="workspace"` is `h-full`, the whole width, no gap and no
+inset at any width, because the sheet is a workbench's frame and the workbench draws none of its own
+([`../foundations/surfaces.md`](../foundations/surfaces.md)). `bleed` is gone with the 12px inset it
+dropped (0.9.1).
 
 `IdentityHeader`:
 

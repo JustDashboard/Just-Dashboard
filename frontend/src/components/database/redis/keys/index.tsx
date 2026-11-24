@@ -18,7 +18,7 @@ import type { RedisBytes } from "@/components/database/redis/types"
 import { useFocusTrail } from "@/hooks/use-focus-return"
 import { useRedis } from "@/components/database/redis/use-redis"
 import {
-  WORKBENCH_PAGE,
+  NOTICE_ON_A_WORKBENCH,
   WorkbenchFrame,
   WorkbenchSide,
   sideVerbs,
@@ -107,10 +107,10 @@ export function RedisKeys() {
   const sentinel = server.data?.mode === "sentinel"
 
   return (
-    <SectionFrame section="data" className={WORKBENCH_PAGE}>
+    <SectionFrame section="data">
       {dialog}
       {server.data?.notice && !sentinel && (
-        <Notice title="This server is one node of a cluster" className="shrink-0">
+        <Notice title="This server is one node of a cluster" className={NOTICE_ON_A_WORKBENCH}>
           {server.data.notice}
         </Notice>
       )}

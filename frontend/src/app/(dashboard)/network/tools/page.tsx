@@ -8,10 +8,10 @@ import { ToolsPanel } from "@/components/network/tools-panel"
 // the App Router only hands out inside a Suspense boundary.
 export default function NetworkToolsPage() {
   return (
-    // A workbench: one frame held to the window, the rail and the pane each
-    // scrolling inside it. Below `md` it runs to the window's edges, one pane
-    // at a time (`phone-panes.tsx`).
-    <Page rise fill className="gap-3 p-0 md:px-3 md:py-3">
+    // A workbench held to the window, the rail and the pane each scrolling
+    // inside it, running to the sheet's edges with no frame of its own. Below
+    // `md` it shows one pane at a time (`phone-panes.tsx`).
+    <Page rise fill="workspace">
       <Suspense>
         <ToolsPanel />
       </Suspense>

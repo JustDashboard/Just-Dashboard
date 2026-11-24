@@ -2,8 +2,6 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { answerSystemUsers, mockSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
-import { overview as remoteDesktopOverview } from "./remote-desktop-fixture"
-import { busyMap } from "./server-map-fixture"
 import { risen } from "./risen"
 import { SHIFT_BUDGET, watchShifts } from "./layout-shift"
 import { mockWorkbench } from "./workbench-fixture"
@@ -24,6 +22,17 @@ import { mockStacks } from "./stacks-fixture"
 import { mockDockerHost } from "./docker-fixture"
 import { mockSections } from "./deploy-section-fixture"
 import { mockGitHubPage } from "./github-fixture"
+import { framesAlongTheSheet } from "./sheet-frame"
+import { busyMap, mockServerMap } from "./server-map-fixture"
+import { mockFleet } from "./database-fleet-fixture"
+import { mockContextFiles } from "./files-context-fixture"
+import { mockPanel } from "./git-panel-fixture"
+import { mockLensLogs, PG } from "./logs-lens-fixture"
+import {
+  mockRemoteDesktop,
+  OFFICE,
+  overview as remoteDesktopOverview,
+} from "./remote-desktop-fixture"
 
 /**
  * The design system's rules, checked in a browser rather than in a document.
@@ -1754,4 +1763,97 @@ for (const [label, viewport] of [
       )
     })
   }
+}
+
+/**
+ * The sheet is the frame (0.9.1). From `md` up the shell lays every page on a
+ * sheet with its own edge and corners, so nothing inside it draws a frame
+ * along that edge: a workbench runs to the sheet's edges with its panes
+ * divided by hairlines, and a pane on a reading page keeps the page's gutter
+ * at its sides and its foot (`sheet-frame.ts` says what is measured).
+ *
+ * When the sheet arrived, the workbenches kept the rounded frame each had
+ * drawn from `lg`, 12px in from the window, and every one of them became a
+ * frame in a frame: the maps, the terminal, Files and its editor and trash,
+ * Git, a board, the network tools, a database's Data, Query, Schema and
+ * Diagram on every engine, and a database's Logs 12px over the sheet's foot.
+ *
+ * Each page held to the window is opened with the fixture that draws it
+ * loaded, since an empty one may draw no workbench at all. A page that joins
+ * them (`Page fill`, `fill="workspace"`, or a section's workbench) joins this
+ * list.
+ */
+const DATABASE_WORKBENCH = (page: Page) => mockDatabases(page)
+async function mockBoard(page: Page) {
+  await page.route("**/api/v1/**", async (route) => {
+    const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
+    if (path === "/auth/session") return json(route, user)
+    if (path === "/boards/1")
+      return json(route, {
+        id: 1,
+        name: "Rollout",
+        revision: 1,
+        scene: { elements: [], appState: {}, files: {} },
+        fileIds: [],
+        createdAt: now,
+        updatedAt: now,
+      })
+    if (path === "/boards/library") return json(route, { libraryItems: [], revision: 0 })
+    if (path === "/databases/fleet") return json(route, { connections: [] })
+    return json(route, [])
+  })
+}
+/** The Files fixture, with a trash that is empty and says so. */
+async function mockTrash(page: Page) {
+  await mockContextFiles(page)
+  await page.route("**/api/v1/files/trash", (route) =>
+    json(route, { items: [], bytes: 0, partial: false, keepDays: 30 }),
+  )
+}
+const HELD_TO_THE_WINDOW: [path: string, mock: (page: Page) => Promise<unknown>][] = [
+  ["/map", (page) => mockServerMap(page)],
+  ["/databases/map", (page) => mockFleet(page)],
+  ["/terminal", (page) => mockWorkbench(page)],
+  ["/files?path=%2Fsrv%2Ffixture", (page) => mockContextFiles(page)],
+  ["/files/editor?path=%2Fsrv%2Ffixture%2Fcompose.yaml", (page) => mockContextFiles(page)],
+  ["/files/trash", mockTrash],
+  ["/git?repo=%2Fsrv%2Fjust-dashboard", (page) => mockPanel(page)],
+  ["/excalidraw/1", mockBoard],
+  ["/network/tools?tool=ping&target=192.0.2.9", (page) => mockNetwork(page)],
+  [`/logs?source=${encodeURIComponent(PG)}`, (page) => mockLensLogs(page)],
+  [`/remote-desktop/${OFFICE}`, (page) => mockRemoteDesktop(page)],
+  ["/deploy/7/logs", (page) => mockProject(page, { showcase: true })],
+  ["/databases/1/data?schema=public&table=orders", DATABASE_WORKBENCH],
+  ["/databases/1/query", DATABASE_WORKBENCH],
+  ["/databases/1/schema?schema=public&table=orders", DATABASE_WORKBENCH],
+  ["/databases/1/diagram?schema=public", DATABASE_WORKBENCH],
+  ["/databases/1/logs?view=queries", DATABASE_WORKBENCH],
+  ["/databases/4/data", DATABASE_WORKBENCH],
+  ["/databases/4/query", DATABASE_WORKBENCH],
+  ["/databases/5/data", DATABASE_WORKBENCH],
+  ["/databases/5/schema", DATABASE_WORKBENCH],
+]
+
+for (const [path, mock] of HELD_TO_THE_WINDOW) {
+  test(`nothing on ${path} draws a frame inside the sheet`, async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mock(page)
+    await page.goto(path)
+    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+    // At rest: a frame drawn only once the reads land is the one to find.
+    await expect
+      .poll(
+        () =>
+          page
+            .locator("[data-slot=skeleton], [data-slot=loading-panel], [aria-busy=true]")
+            .filter({ visible: true })
+            .count(),
+        { timeout: 10_000 },
+      )
+      .toBe(0)
+      .catch(() => undefined)
+    await page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => undefined)
+    await risen(page)
+    expect(await framesAlongTheSheet(page), `frames along the sheet's edge on ${path}`).toEqual([])
+  })
 }

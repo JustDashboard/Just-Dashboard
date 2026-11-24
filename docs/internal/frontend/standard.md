@@ -36,6 +36,7 @@ below) and let the operator decide; it is never a defect.
 | **No descriptions under titles** | `PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`. | type |
 | **A verb is one word. Few words.** | D14. When the operator says "too much whitespace", cut content; do not rearrange it. | convention |
 | **No colour bars** (19 Nov 2026) | No thin vertical bar or rule in a colour beside a name, down a row's edge, or on the current row: not the rail's current page, not a band's line, not a stack, service or network hue, not a staged change, a log level or an error. The fill, the word, the coloured figure or a wash says it. A chart whose lines are told apart only by colour keys them with a round dot. | spec `shell-phone.spec.ts` (the rail's current row has no `::before` bar); convention for the rest |
+| **The sheet is the frame** (24 Nov 2026) | From `md` up every page is a sheet with its own edge. Nothing inside it draws a frame along that edge: a workbench runs to the sheet's edges with hairlines between its panes, and a pane on a reading page keeps the page's gutter. A frame 12px inside the sheet is a frame in a frame. | spec `design-system.spec.ts` (*nothing on … draws a frame inside the sheet*); [`foundations/surfaces.md`](foundations/surfaces.md) |
 | **List rows never grow** | A row is one height in every state. Nothing expands under it. Details go in a popover or a page. | spec `design-system.spec.ts` (*nothing on … moves while its reads land*, *… first row stands where it lands*); convention |
 | **The identity line** (16 Nov 2026) | A phone's header is one row and one line of facts, danger and warning facts first. A command on a phone is its icon. No destructive verb takes the brand face: it goes behind the `⋯`. `?` ends the identity line, and has a row only where a back link shares it. | [`components/page-header.md`](components/page-header.md#the-identity-lines-rules); spec `deploy-header.spec.ts` (one row on a phone); unit `identity-header.test.js`; convention for the rest |
 | **No metric cards on a project's Overview** | That page is a real logo, a sentence and one coloured picture. | spec `deploy-project.spec.ts` (no `stat-tile` on the Overview) |
@@ -47,8 +48,8 @@ below) and let the operator decide; it is never a defect.
 ## The deploy standard, D1 to D14
 
 Copied from the 13 Nov 2026 UI map (`tools/rubric.md`), which rated every page against it. A
-workbench (the terminal, Files, a database's Data, Query, Schema and Diagram) is one frame held to
-the window: judge it on D3, D5, D11, D12, D13 and D14, and on whether its chrome matches the Git
+workbench (the terminal, Files, a database's Data, Query, Schema and Diagram) is one surface held
+to the window, the sheet its frame: judge it on D3, D5, D11, D12, D13 and D14, and on whether its chrome matches the Git
 workspace, the server map and the assistant. Say which traits do not apply rather than failing them.
 
 | Id | Trait | At the standard | Not | Held by |

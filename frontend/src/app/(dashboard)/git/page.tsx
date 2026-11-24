@@ -12,7 +12,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useGitHubAccount } from "@/hooks/use-github"
 import { closeRepo, openRepoPull, useQuerySelection } from "@/hooks/use-query-selection"
-import { Page, PageContext } from "@/components/page"
+import { Page, PageContext, WORKBENCH_WAITING } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
 import { Toolbar } from "@/components/toolbar"
 import { ChipCount, FilterChip } from "@/components/chips"
@@ -214,7 +214,7 @@ export default function GitPage() {
       <Page fill="workspace">
         {/* Named while the list is read, as the workspace it opens on is. */}
         <PageContext title="Local Git" />
-        <LoadingPanel rows={8} />
+        <LoadingPanel rows={8} plain className={WORKBENCH_WAITING} />
       </Page>
     )
   }

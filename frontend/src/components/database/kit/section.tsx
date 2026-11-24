@@ -8,11 +8,13 @@ import { useDatabase } from "@/components/database/shell/database-context"
 import { HEADED } from "@/components/database/shell/header-rule"
 
 /**
- * The gutters of a workbench: a grid or a canvas wants the window, so its
- * page takes the narrow inset the terminal and the file manager take, and the
- * strip above it lines up with the same edge.
+ * The gutters of a workbench: none. A grid or a canvas wants the window, and
+ * the sheet the shell lays the page on is its frame, so the workbench runs to
+ * the sheet's edges as the terminal and the file manager do. It took a 12px
+ * inset and drew a border of its own inside it until 0.9.1, which on the
+ * sheet was a frame in a frame.
  */
-export const WORKBENCH_FRAME = "gap-2 px-2 py-2 md:px-3 md:py-3"
+export const WORKBENCH_FRAME = "gap-0 p-0 md:gap-0 md:p-0"
 
 /**
  * The gutters of a page held to the window under the database's header (the

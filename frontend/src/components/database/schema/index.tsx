@@ -27,7 +27,6 @@ import { useCatalog, useTableDetail } from "@/components/database/data/use-table
 import { SchemaHeadSkeleton } from "@/components/database/kit/schema-head"
 import { SectionFrame } from "@/components/database/kit"
 import {
-  WORKBENCH_PAGE,
   WorkbenchFrame,
   WorkbenchSide,
   sideVerbs,
@@ -228,7 +227,7 @@ export function SqlSchema() {
       : undefined
 
   return (
-    <SectionFrame section="schema" className={WORKBENCH_PAGE}>
+    <SectionFrame section="schema">
       {/* One frame around the whole workbench (§7.2): the head that says
           which database, then the tree and the object as two columns of one
           surface, with a hairline between them. */}
