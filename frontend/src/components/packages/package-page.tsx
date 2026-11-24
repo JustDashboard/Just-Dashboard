@@ -71,7 +71,7 @@ type Reading = {
  * an install's outcome was read off the list behind it. A package is a
  * destination with a way back now, the way a service and a process are: its
  * identity line with its state and its one command, then its views as the
- * underlined strip, named for what the two reads hold. Overview is the
+ * view strip, named for what the two reads hold. Overview is the
  * picture of what it needs and what it gives; Files is what its file list put
  * on the server; Manual its man page; Depends everything it needs, one line
  * each; Log the package manager's own record, narrowed to it. There is no

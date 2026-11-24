@@ -532,7 +532,7 @@ ranking (exact name/address, prefix, substring, one-edit typo), result limits an
 logic. `domain:`/`site:`, `db:`/`database:`, `container:`, `stack:`, `project:`, `repo:`, `service:`,
 `pm2:`/`app:`, `backup:`, `board:`, `page:`, `command:`, `recent:` and — on a server linked to a Just Hub
 only — `server:` narrow the same input; a
-strip of scopes under the input — words on the Files search's underlined strip (`tabClasses`), no
+strip of scopes under the input — words as the Files search's quiet tabs (`tabClasses`), no
 glyphs, `role="group"`, one tab stop with arrow keys between them — makes the types discoverable,
 presses the scope a typed prefix names, and counts each kind's matches for the words typed. Global searches omit duplicate recent
 entries; the Recent scope searches history explicitly. At most 60 results are shown with a

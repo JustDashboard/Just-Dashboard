@@ -22,17 +22,31 @@ function Tabs({
   )
 }
 
+/**
+ * Radix's tabs, drawn as Just Hub draws its two switchers (its
+ * `.stitch/DESIGN.md` 4, Tabs and chips):
+ *
+ *   `default` — the segmented control inside a form: a control-filled track
+ *               with 3px of padding, the chosen tab on a raised face under the
+ *               strong line. The same mark `Segments` slides.
+ *   `line`    — quiet tabs: the muted ink, the chosen one in the foreground on
+ *               a control face, as `ViewTabs` draws them. Never an underline.
+ *
+ * A page's views are `ViewTabs` (`components/tabs.tsx`), not this.
+ */
 const tabsListVariants = cva(
   // max-w-full + scroll: four tab labels do not fit on a phone, and a strip
   // that runs off the screen drags the whole page sideways with it. The
-  // scrollbar is hidden because the cut-off tab is already the affordance —
-  // and a classic scrollbar would eat a third of a 36px-high strip.
-  "group/tabs-list inline-flex w-fit max-w-full [scrollbar-width:none] items-center justify-start overflow-x-auto rounded-lg p-[3px] text-muted-foreground [-ms-overflow-style:none] group-data-[orientation=horizontal]/tabs:h-8 group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col data-[variant=line]:rounded-none [&::-webkit-scrollbar]:hidden",
+  // scrollbar is hidden because the cut-off tab is already the affordance.
+  "group/tabs-list inline-flex w-fit max-w-full [scrollbar-width:none] items-center justify-start overflow-x-auto text-muted-foreground [-ms-overflow-style:none] group-data-[orientation=vertical]/tabs:h-fit group-data-[orientation=vertical]/tabs:flex-col [&::-webkit-scrollbar]:hidden",
   {
     variants: {
       variant: {
-        default: "bg-muted/70",
-        line: "gap-1 bg-transparent",
+        // 36px, a form's control height: a 1px edge and 3px of padding round
+        // a 28px segment.
+        default:
+          "gap-0.5 rounded-md border border-border bg-control p-0.75 group-data-[orientation=horizontal]/tabs:h-9",
+        line: "gap-1 rounded-none border-b border-hairline bg-transparent py-1 group-data-[orientation=horizontal]/tabs:h-10",
       },
     },
     defaultVariants: {
@@ -60,13 +74,16 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
   return (
     <TabsPrimitive.Trigger
       data-slot="tabs-trigger"
-      // One mode: the inks are the dark values the old `dark:` pairs chose, and
-      // the resting ink is the muted one rather than a faded foreground.
+      // One mode: the resting ink is the muted one rather than a faded
+      // foreground. The ring is inset in both: the list scrolls, and a
+      // scroller clips a ring drawn outside it.
       className={cn(
-        "relative inline-flex h-[calc(100%-1px)] flex-1 shrink-0 items-center justify-center gap-1.5 rounded-md border border-transparent px-2.5 py-1 text-body font-medium whitespace-nowrap text-muted-foreground focus-ring transition-all group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start hover:text-foreground disabled:pointer-events-none disabled:opacity-50 group-data-[variant=default]/tabs-list:data-[state=active]:bg-control [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        "group-data-[variant=line]/tabs-list:bg-transparent group-data-[variant=line]/tabs-list:data-[state=active]:border-transparent group-data-[variant=line]/tabs-list:data-[state=active]:bg-transparent",
-        "data-[state=active]:border-t-edge data-[state=active]:bg-control data-[state=active]:text-foreground",
-        "after:absolute after:bg-foreground after:opacity-0 after:transition-opacity group-data-[orientation=horizontal]/tabs:after:inset-x-0 group-data-[orientation=horizontal]/tabs:after:bottom-[-5px] group-data-[orientation=horizontal]/tabs:after:h-0.5 group-data-[orientation=vertical]/tabs:after:inset-y-0 group-data-[orientation=vertical]/tabs:after:-right-1 group-data-[orientation=vertical]/tabs:after:w-0.5 group-data-[variant=line]/tabs-list:data-[state=active]:after:opacity-100",
+        "relative inline-flex shrink-0 items-center justify-center gap-1.5 border border-transparent px-3 text-body font-medium whitespace-nowrap text-muted-foreground focus-ring-inset transition-colors group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        // The segment: a raised face under the strong line, with the lit top
+        // edge every raised control has (`shadow-edge`).
+        "group-data-[variant=default]/tabs-list:h-full group-data-[variant=default]/tabs-list:flex-1 group-data-[variant=default]/tabs-list:rounded-sm group-data-[variant=default]/tabs-list:data-[state=active]:border-border-strong group-data-[variant=default]/tabs-list:data-[state=active]:bg-popover group-data-[variant=default]/tabs-list:data-[state=active]:shadow-edge",
+        // The quiet tab: the chosen one is a filled face, never an underline.
+        "group-data-[variant=line]/tabs-list:h-8 group-data-[variant=line]/tabs-list:rounded-md group-data-[variant=line]/tabs-list:hover:bg-accent group-data-[variant=line]/tabs-list:data-[state=active]:bg-control",
         className,
       )}
       {...props}

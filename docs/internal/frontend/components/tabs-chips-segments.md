@@ -19,18 +19,51 @@ deprecated (below).
 | how far back a chart reaches (1h, 6h, 24h, 7d) | `WindowPicker` | radio group | a popover form with dates: that is `TimeWindow` |
 | which pane fills a phone's screen | `PaneBar` | navigation of buttons, one current | a view strip; a tab list |
 
-Editor tabs that close and rename (the query editor's `TabStrip`) and the pill switcher inside a form
-(`ui/tabs` `TabsList`, in the rule and site forms) are their own controls and stay apart.
+Editor tabs that close and rename (the query editor's `TabStrip`) and the segmented switcher inside a
+form (`ui/tabs` `TabsList`, in the rule and site forms) are their own controls and stay apart. All of
+them are drawn the way Just Hub draws them (its `.stitch/DESIGN.md` 4, Tabs and chips, and Segmented
+control); see *The look, from Just Hub* below.
+
+## The look, from Just Hub
+
+Since 0.9.1 the product's tabs and segments are Just Hub's. Selection, hover and focus stay three
+marks ([`../foundations/states.md`](../foundations/states.md)), and none of them is an underline: the
+blue strip under the chosen tab was a colour bar, the mark the product draws nowhere else.
+
+| Control | At rest | Hover | Chosen | Focus |
+| --- | --- | --- | --- | --- |
+| A quiet tab (`ViewTabs`, `tabClasses`, `ui/tabs` `line`) | muted ink, no ground | `--accent` face, foreground ink | `--control` face, foreground ink | the ring, 2px clear of the face |
+| A segment (`Segments`, a joined outline `ToggleGroup`, `ui/tabs` `default`) | muted ink on the track | foreground ink | a raised face: `--popover` under `--border-strong`, with the lit edge (`shadow-edge`) | the ring, inset in the segment |
+
+**The quiet tab's face is inside the tab.** A tab keeps its strip's height (40px, 36 in a pane, 44
+in a flow's source picker) as its press box, and draws its face 4px in from every side: a transparent
+4px border with the fill clipped inside it (`bg-clip-padding`). The face is therefore 32px in a page's
+strip. The inset ring (`focus-ring-inset`) lands in that border, 2px clear of the face. That is the
+Hub's ring, and a scroller cannot clip it, which an outside ring on a scrolling strip would be. The
+face takes the control's corner (`--radius-md`), so the tab's corner is that plus the border. The tab's
+padding is `px-2`, so the label sits 12px from the tab's edge, where the underline left it, and a
+strip is as wide as it was.
+Under forced colours the transparent border would be painted, so it comes off there. On a raised
+sheet (the command palette's scopes) the chosen tab takes `--control-hover`, one step up, as the
+Hub's palette does: on `--popover` the control face sat a shade off the hover face.
+
+**The segmented control is one track.** A control-filled track with a 1px line and 3px of padding;
+the segments sit in it and the chosen one is a raised face. With one answer the face is a single
+element measured onto the chosen segment, and it slides to the next one (`duration-base`,
+`ease-arrive`; reduced motion makes it a jump). With several answers (`type="multiple"`), or until it
+is measured, each chosen segment draws its own face. The whole track is the old control's height:
+`sm` is 32/40 round a 24/32 segment, `default` 36/44 round 28/36, and `Segments`' `inline` keeps 24/32
+with a 2px track round an 18/26 segment.
 
 ## ViewTabs
 
-The underlined strip of a page's views, on Radix Tabs: the arrow keys move along it, Home and End
-reach its ends, the focus roves, and each tab names the panel it shows.
+The strip of a page's views, on Radix Tabs: the arrow keys move along it, Home and End reach its
+ends, the focus roves, and each tab names the panel it shows.
 
 **Anatomy.** A strip with a bottom hairline. Each tab is the label at the body size (14px), medium,
-the muted ink at rest and the foreground chosen, with a 2px underline in the brand blue under the
-chosen one. A count sits after the label (`ChipCount`) and a dot marks a view that wants a look. A
-`trailing` slot at the right end holds a search or a verb, outside the tab list.
+the muted ink at rest and the foreground on a control face when chosen. A count sits after the label
+(`ChipCount`) and a dot marks a view that wants a look. A `trailing` slot at the right end holds a
+search or a verb, outside the tab list.
 
 ```tsx
 const VIEWS = [
@@ -62,9 +95,10 @@ const [view, setView] = useViewTab(VIEWS)
 | `hideWhenSingle` | Draws nothing with one view: one tab is a title, not a choice. |
 | `className`, `rootClassName` | The strip's box; the `Tabs` it holds. |
 
-**States.** Chosen: foreground ink and the blue underline, a count in the label's ink. At rest: the
-muted ink, a count in `--faint`. Hover: a grey underline and the foreground. Focus: the ring, inset,
-because the strip scrolls and a scroller clips a ring drawn outside it. Disabled: `--faint`, no hover.
+**States.** Chosen: the foreground ink on the `--control` face, a count in the label's ink. At rest:
+the muted ink, a count in `--faint`. Hover: the `--accent` face and the foreground. Focus: the ring,
+inset in the tab so the scrolling strip cannot clip it, 2px clear of the face. Disabled: `--faint`, no
+hover.
 
 **The phone.** The strip never wraps. When the views run past the edge it scrolls sideways with no
 scrollbar, and the edge they run under is shaded (a mask on the list, 32px), so the cut tab reads as
@@ -93,7 +127,8 @@ that shows no panel is `Segments`.
 **`tabClasses` is deprecated.** It is the look without the roles, and the 75 strips built on it gave
 the same mark four keyboard models. New code uses `ViewTabs`; the strips still on it move as
 their pages are touched, and WP-39 bans `TabsPrimitive.List` and `tabClasses` outside `ui/tabs`
-and `ViewTabs`. The editor's `TabStrip` keeps the look for its own control.
+and `ViewTabs`. The editor's `TabStrip` keeps the look for its own control: the statement in front
+is on the control face, and its close button sits beside the face.
 
 ## FilterChip, ChipStrip and ChipCount
 
@@ -153,8 +188,10 @@ A closed choice of two to five short words as one segmented control, the only si
 | `fill` | Shares the whole width between the segments. |
 
 Inside a `Field` it is also described by the field's hint and error. Labels are `text-xs`; the
-segments not chosen step back to the muted ink, because `bg-accent` alone is a step of ground the
-reader has to compare rather than a mark.
+segments not chosen step back to the muted ink, and the choice is the raised face that slides (*The
+look, from Just Hub*). A caller that pinned a segment's height for a dense header (the ER diagram's
+detail, the Data editor's boolean and JSON switches) pins the segment inside the track, so the whole
+control keeps the height it had.
 
 ```tsx
 <Field label="Python version" hint="The release the build image runs.">
@@ -163,7 +200,9 @@ reader has to compare rather than a mark.
 ```
 
 **Not this.** A group that may be emptied on purpose is a raw `ToggleGroup` with a lint exemption.
-A multi-select is chips. More than five or long words is a `Select`.
+A multi-select is chips. More than five or long words is a `Select`. A grid of presets that wraps
+onto a second row on a phone (a scheduled job's "When it runs") is a `ToggleGroup` with `spacing`: a
+track cannot wrap.
 
 ## WindowPicker
 
@@ -194,6 +233,9 @@ name.
 
 ## What enforces it
 
+- `components/tabs.test.js`: the chosen quiet tab is a control face with no underline, the face sits
+  inside a tab that keeps its height and an inset ring, and a segmented control is one track with a
+  raised face (24px at `inline`, separate controls with `spacing`).
 - `hooks/use-view-tab.test.js`: the address parameter, the remembered view, the fallback to the first.
 - `components/phone-panes.test.js`: no page draws a foot bar by hand; the bar is a nav of buttons
   with the shown stop current and its words at the hint size.

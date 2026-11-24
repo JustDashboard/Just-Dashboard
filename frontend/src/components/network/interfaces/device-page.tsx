@@ -49,7 +49,7 @@ const LABEL: Record<DeviceTab, string> = {
  * blocks of facts and five forms in a sheet's width, over a list nobody could
  * read behind it, and with no address to send anybody. So a device is a
  * destination with a way back, on the shape a process has
- * (`procs/process-page`): the line it opens on, its views as the underlined
+ * (`procs/process-page`): the line it opens on, its views as the view
  * strip under that line with the view in the address, and from `xl` the list
  * folded into a column beside it (`DeviceRail`) with the list's own search,
  * so checking the next device is one press, Alt+↑ and Alt+↓ walk it and the

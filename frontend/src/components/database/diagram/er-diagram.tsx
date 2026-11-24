@@ -994,7 +994,7 @@ function Canvas({
             { value: "names", label: "Names" },
           ]}
           onChange={(detail) => update({ detail })}
-          className="ml-1 [&_button]:h-7 [&_button]:px-2 [&_button]:text-hint"
+          className="ml-1 [&_button]:h-5 [&_button]:px-2 [&_button]:text-hint"
         />
         <span className="flex-1" />
 

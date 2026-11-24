@@ -137,7 +137,7 @@ export function RecordColumn({
               key={id}
               type="button"
               aria-pressed={view === id}
-              className={cn(tabClasses(view === id, "h-10"), "max-sm:px-2")}
+              className={tabClasses(view === id, "h-10")}
               onClick={() => onViewChange(id)}
             >
               {VIEW_LABEL[id]}

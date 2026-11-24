@@ -53,7 +53,7 @@ import { useBreakpoint } from "@/lib/breakpoints"
  * environment in one long drawer, over a table nobody could read behind it.
  * An image is a destination now, the way a container is
  * (`docker/container-detail`): its identity line with its verbs, a picture of
- * where it comes from and who runs it, and its views as the underlined strip
+ * where it comes from and who runs it, and its views as the view strip
  * with the open one in the address.
  *
  * What the sheet did well, the table beside the thing being read, is the

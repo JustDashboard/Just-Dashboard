@@ -89,7 +89,7 @@ const POLL = 10_000
  * container is (`docker/container-detail`): the identity line every
  * destination opens on (who made it, its driver and device, its subnet, how
  * many are on it, and where it stands beside its name), its views as the
- * underlined strip — the picture and its readings, the members, what Docker
+ * view strip — the picture and its readings, the members, what Docker
  * was told — and the view in the address.
  *
  * What the sheet did well — the table beside the thing being read — is the

@@ -62,7 +62,7 @@ export type AccountList = {
  * and the form that rewrites it, a document user's roles — each in a drawer's
  * width, over the list it came from. So an account is a destination with a
  * way back, the way a process and a unit are (`procs/process-page`): the line
- * it opens on, its views as the underlined strip with the view in the address
+ * it opens on, its views as the view strip with the view in the address
  * (`?tab=`), and from `xl` the list beside it as a rail in the list's own
  * filter, so the next account is one press, Alt+↑ and Alt+↓ walk it, and the
  * view on screen goes with the reader. On a phone it is one pane that scrolls

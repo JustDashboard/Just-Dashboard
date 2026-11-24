@@ -44,7 +44,7 @@ removes the containers:
   with the last run's state, its age and the environment. Health appears in that line only when it
   is not healthy; a pending-changes strip appears only when there are pending changes. Active work is
   a plain list above the fleet.
-- **Create:** the page is titled "New project"; the three ways in are the product's underline tab
+- **Create:** the page is titled "New project"; the three ways in are the product's view tab
   strip rather than toggle buttons. The import form and the "Start with something ready" catalogue
   are plain (`Panel plain`, `RowList`). The configure step opens with a one-line source row instead
   of a step indicator and a titled box, and its sections — settings, environment variables, database,
@@ -55,7 +55,7 @@ removes the containers:
   shape a settings page reads best in; "Life and colour" (2026-09-24) below replaced them with
   section heads in a rail and one Save at each form's foot.
 - **Run:** the summary is the page's own opening (facts, progress line, outcome) rather than a box;
-  the four views switch with the underline strip; execution details are a plain list. The build
+  the four views switch with the view strip; execution details are a plain list. The build
   transcript keeps its frame because it is a scrolling console.
 - **Archive:** a plain list with the search in its toolbar.
 

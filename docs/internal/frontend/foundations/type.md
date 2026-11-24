@@ -154,7 +154,7 @@ they had run down a narrow column beside the tile. These are primitives, so ever
 draws them — Docker, Security, Audit, the account pages and the rest — changed with the deployment
 section, not only `/deploy`.
 
-A **view strip** — the underlined tabs that switch between two readings of the *same* page — is
+A **view strip** — the quiet tabs that switch between two readings of the *same* page — is
 `text-body`. It was `text-xs` while the page title was 20px and the strip sat within two pixels of both
 the title and the panel titles; the earlier 24px title gave the strip a rank of its own, and 12px
 chrome under it read as an afterthought. There is no route-level strip to size: since 0.6.7
@@ -191,8 +191,8 @@ A wrapper around an inline status is a flex box (`flex`, or `flex flex-col items
 over its detail), or it carries its content's own type size. A glyph beside a title is nudged by
 the title's line box, not by habit: `mt-0.5` centres a 16px glyph on a 20px line and drops it two
 pixels below a `leading-tight` one. A field and its button in one row are `items-center`, since the
-field is 44px on a phone and a compact button is 40. A view strip's tabs carry `pt-0.5` against their
-2px underline, so their labels sit on the strip's centre line with whatever shares the strip.
+field is 44px on a phone and a compact button is 40. A view strip's tabs draw their face 4px inside
+the tab on every side, so their labels sit on the strip's centre line with whatever shares the strip.
 `design-system.spec.ts` checks the first of these on every surface it opens.
 
 `.eyebrow` is the small-caps label that opens a section, a panel header or a stat tile. `.numeric` is

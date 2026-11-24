@@ -818,14 +818,17 @@ function CronJobForm({
       </FormSection>
 
       <FormSection title="When it runs">
+        {/* Five presets in a grid of their own buttons, not a segmented track:
+            on a phone they take two rows, which a track cannot. */}
         <ToggleGroup
           type="single"
           value={preset}
           onValueChange={(next) => next && setPreset(next as CronPreset)}
           variant="outline"
           size="sm"
+          spacing={1}
           aria-label="Runs"
-          className="grid w-full grid-cols-3 gap-1.5 *:w-full *:rounded-md! *:border-l! sm:grid-cols-5"
+          className="grid w-full grid-cols-3 gap-1.5 *:w-full sm:grid-cols-5"
         >
           {CRON_PRESETS.map((p) => (
             <ToggleGroupItem

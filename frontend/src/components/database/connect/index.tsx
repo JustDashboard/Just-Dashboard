@@ -118,7 +118,7 @@ export function AddDatabase() {
               setWorking(false)
               address.set({ mode: option.key, engine: null, key: null })
             }}
-            className={tabClasses(mode === option.key, "h-11 max-sm:px-2")}
+            className={tabClasses(mode === option.key, "h-11")}
           >
             <option.icon
               aria-hidden

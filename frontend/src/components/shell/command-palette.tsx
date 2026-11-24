@@ -645,8 +645,8 @@ function Palette({
             a spinner competing with the results for the eye. */}
         {loading.length > 0 && <Sweep track={false} className="absolute inset-x-0 bottom-0 h-px" />}
       </div>
-      {/* The scopes as the Files search's underlined strip of words rather
-          than chips: fourteen chips each led by a glyph in its own hue were a
+      {/* The scopes as the Files search's strip of quiet tabs rather than
+          chips: fourteen chips each led by a glyph in its own hue were a
           second, louder list above the one being searched. A scope still
           says how many of the results are its kind before it is pressed, and
           typing `db:` presses the same one. */}
@@ -669,7 +669,9 @@ function Palette({
               onClick={() => chooseScope(scope)}
               className={cn(
                 tabClasses(current, "h-10"),
-                "px-2.5",
+                // On the palette's raised sheet the chosen scope takes the next
+                // step up, or it is a shade off the face the pointer draws.
+                current && "bg-control-hover",
                 count === 0 && !current && "opacity-45",
               )}
             >

@@ -43,7 +43,7 @@ type Frame = Omit<React.ComponentProps<typeof DetailPage>, "identity" | "childre
  * a chart and the lifecycle in a drawer's width, opened by a small "History"
  * button, with no address to send anybody. A tunnel is a destination with a
  * way back now, on the shape a process and a unit have (`procs/service-page`):
- * the line it opens on with its verbs, its views as the underlined strip
+ * the line it opens on with its verbs, its views as the view strip
  * (`?tab=`), and from `xl` the other tunnels beside it.
  *
  * - **Overview**: the picture with every peer, whether its clients' internet

@@ -28,23 +28,29 @@ import { StatusDot, type DotTone } from "@/components/status-dot"
  * pages: the rail drills into a section and lists its pages there.
  */
 
-// 13px, the body size (§8): with the title at 24 the strip has a rank of its
-// own, and 12px chrome under a 24px title read as an afterthought. The 2px top
-// padding balances the 2px underline, so the label sits on the strip's centre
-// line with whatever else shares the strip. The underline is the brand blue:
-// the tab says which view you are looking at, which is what the hue is for.
-// The label stays ink — it is not a command. The ring is inset because the
-// strip scrolls, and a scroller clips a ring drawn outside it.
-const TAB_BASE =
-  "inline-flex shrink-0 items-center gap-1.5 border-b-2 px-3 pt-0.5 text-body font-medium whitespace-nowrap transition-colors focus-ring-inset"
+// The quiet tab Just Hub draws (its `.stitch/DESIGN.md` 4, Tabs and chips):
+// the body size (§8) in the muted ink, and the view on screen in the
+// foreground on a control face. No underline: a blue strip under the chosen
+// word was a colour bar, the mark this product draws nowhere else.
+//
+// The face sits 4px in from every side of the tab: a transparent 4px border
+// with the fill clipped inside it. The tab keeps its strip's height (40px, 36
+// in a pane) as its press box, so no strip moved, and the inset ring lands in
+// that border, 2px clear of the face. That is the Hub's ring, and a scroller
+// cannot clip it. The face takes the control's corner, so the box's corner is
+// that plus the border. Forced colours paint a transparent border, so it comes
+// off there.
+const TAB_BASE = cn(
+  "inline-flex shrink-0 items-center gap-1.5 px-2 text-body font-medium whitespace-nowrap focus-ring-inset transition-colors",
+  "rounded-[calc(var(--radius-md)+4px)] border-4 border-transparent bg-clip-padding forced-colors:border-0 forced-colors:px-3",
+)
 
 /**
- * The underlined-tab look, for a switcher between views of the page you are
+ * The quiet-tab look, for a switcher between views of the page you are
  * already on.
  *
  * @deprecated use `ViewTabs`, which draws the strip, the roles and the
- * scrolling with it. The editor tabs (`database/query/tab-strip.tsx`) keep the
- * look for a different control, and the wave-2 passes move the other callers.
+ * scrolling with it. The wave-2 passes move the other callers.
  */
 export function tabClasses(selected: boolean | undefined, height: string) {
   return cn(
@@ -52,8 +58,8 @@ export function tabClasses(selected: boolean | undefined, height: string) {
     height,
     selected
       ? // A count inside the chosen tab takes the label's ink, not the faint one.
-        "border-brand text-foreground [--count-ink:currentColor]"
-      : "border-transparent text-muted-foreground hover:border-border hover:text-foreground",
+        "bg-control text-foreground [--count-ink:currentColor]"
+      : "text-muted-foreground hover:bg-accent hover:text-foreground",
   )
 }
 
@@ -61,8 +67,8 @@ export function tabClasses(selected: boolean | undefined, height: string) {
 // is drawn right without being told which tab is chosen.
 const TRIGGER = cn(
   TAB_BASE,
-  "data-[state=active]:border-brand data-[state=active]:text-foreground data-[state=active]:[--count-ink:currentColor]",
-  "data-[state=inactive]:border-transparent data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:border-border data-[state=inactive]:hover:text-foreground",
+  "data-[state=active]:bg-control data-[state=active]:text-foreground data-[state=active]:[--count-ink:currentColor]",
+  "data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-foreground",
   "disabled:pointer-events-none disabled:text-faint",
 )
 
@@ -220,7 +226,7 @@ export function ViewTabList<T extends string>({
 }
 
 /**
- * The underlined strip of a page's views, with real tab semantics: Radix Tabs,
+ * The strip of a page's views, with real tab semantics: Radix Tabs,
  * so the arrow keys move along it, Home and End reach its ends, and each tab
  * names the panel it shows.
  *

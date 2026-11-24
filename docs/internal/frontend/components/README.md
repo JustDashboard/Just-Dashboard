@@ -82,10 +82,10 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `DetailShell`, `DetailRail`, `RailRow`, `steps` | [Rail](rail.md) | `components/network/traffic/detail-shell.tsx` | The network detail pages' old frame; `DetailPage`, `Rail`, `RailRow` and `useSiblingSteps` do its job. | retired (0.9.0) |
 | `FilterChip`, `ChipStrip`, `ChipCount` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/chips.tsx` | A filter chip, the run chips sit in (scrolling on a phone), and a count beside a label. | keep |
 | `Segments`, `SegmentOption` (type), `SegmentsSize` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `components/segments.tsx` | A closed choice of two to five short words as one segmented control. | keep |
-| `tabClasses` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The underlined tab's look; the query editor's tabs keep it for a control of their own. | deprecated (use `ViewTabs`) |
+| `tabClasses` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The quiet tab's look (Just Hub's: the chosen one on a control face); the query editor's tabs keep it for a control of their own. | deprecated (use `ViewTabs`) |
 | `ViewTabs`, `TabView` (type) | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The one strip of views: Radix tabs that scroll on a phone, with counts and dots. | keep |
 | `ViewTabList` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/tabs.tsx` | The strip alone, inside a `Tabs` the caller holds, whose `TabsContent` are the panels. | keep |
-| `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `tabsListVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/tabs.tsx` | Radix tabs; the pill list is retired for `ViewTabs`. | keep (under `ViewTabs`) |
+| `Tabs`, `TabsList`, `TabsTrigger`, `TabsContent`, `tabsListVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/tabs.tsx` | Radix tabs; `TabsList` is the Hub's segmented track inside a form, and a page's views are `ViewTabs`. | keep (under `ViewTabs`) |
 | `ToggleGroup`, `ToggleGroupItem` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/toggle-group.tsx` | A Radix toggle group; a single choice is a `Segments`, which draws with it. | keep (inside `Segments` only) |
 | `Toggle`, `toggleVariants` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/ui/toggle.tsx` | A Radix toggle; a single choice is a `Segments`. | keep |
 | `WindowPicker` | [Tabs, chips, segments](tabs-chips-segments.md) | `components/window-picker.tsx` | The time window over a chart, on `Segments`. | keep |
@@ -486,7 +486,7 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   `ViewTabs` (the one strip of views, for a log pane's Live, History and Insights and the page's own
   views beside them, the packages page's installed, updates, search and log, the deploy wizard's source
   kinds), `ViewTabList` (the strip alone, in a `Tabs` the caller holds) and `useViewTab`
-  (`hooks/use-view-tab.ts`, the view held in `?tab=`); `tabClasses`, the underlined tab's look, is
+  (`hooks/use-view-tab.ts`, the view held in `?tab=`); `tabClasses`, the quiet tab's look, is
   deprecated; beside it, `components/chips.tsx` holds `FilterChip`, `ChipCount` and
   `ChipStrip`, the run every set of chips sits in (sideways-scrolling on a phone, wrapping from `sm`).
   The route-level strips were deleted in 0.6.7 when the rail started

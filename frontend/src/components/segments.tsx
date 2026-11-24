@@ -23,28 +23,27 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * It always has a name. Inside a `Field` it is named by the field's visible
  * label (a `<label for>` cannot name a group); elsewhere `label` names it.
  *
- * The segments that are not the choice step back to the muted ink. Pressed
- * is `bg-accent` (§3's selection), and on its own that is one step of ground
- * against its neighbours — a comparison the reader has to make, not a mark.
+ * It is drawn as Just Hub's segmented control (`ToggleGroup`): a
+ * control-filled track, the choice on a raised face under the strong line that
+ * slides to the next one, and the segments that are not the choice in the
+ * muted ink.
  */
 
 /**
  * The three heights, one per place it stands: `inline` in a toolbar or a row
  * (24px, 32 under a finger, with the press box made up to 44), `sm` beside a
  * section's title or over a chart (32/40), `field` on a form's line beside an
- * input (36/44).
+ * input (36/44). Each is the whole track's.
  */
 export type SegmentsSize = "inline" | "sm" | "field"
 
-// Each sets the item's `--control-h` and its coarse step; `ToggleGroupItem`
-// draws `h-(--control-h)`. Whole class names, for Tailwind.
-const SIZE: Record<SegmentsSize, { group: "sm" | "default"; item: string }> = {
-  inline: {
-    group: "sm",
-    item: "px-2 [--control-h:1.5rem] pointer-coarse:[--control-h:2rem]",
-  },
-  sm: { group: "sm", item: "" },
-  field: { group: "default", item: "" },
+// `ToggleGroup` sizes `sm` and `default` itself. `inline` keeps its 24px by a
+// 2px track round an 18px segment (26 under a finger). Whole class names, for
+// Tailwind.
+const SIZE: Record<SegmentsSize, { group: "sm" | "default"; track: string; item: string }> = {
+  inline: { group: "sm", track: "p-0.5", item: "h-4.5 px-2 pointer-coarse:h-6.5" },
+  sm: { group: "sm", track: "", item: "" },
+  field: { group: "default", track: "", item: "" },
 }
 
 export type SegmentOption<T extends string> = {
@@ -113,7 +112,7 @@ export function Segments<T extends string>({
         if (next) onChange(next as T)
         else if (value) onReselect?.(value)
       }}
-      className={cn("max-w-full", fill && "w-full", className)}
+      className={cn("max-w-full", sized.track, fill && "w-full", className)}
     >
       {options.map((option) => (
         <ToggleGroupItem

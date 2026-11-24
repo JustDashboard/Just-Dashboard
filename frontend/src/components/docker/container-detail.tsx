@@ -60,7 +60,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
  * deployment run is one.
  *
  * The tabs stayed *in* the page. They switch between views of one thing, which
- * is what the underlined tab is for; the route-level strip was retired in
+ * is what the view strip is for; the route-level strip was retired in
  * 0.6.7 and this is not the reason to bring it back (`shell.md`). What
  * the panel took as a `focusTab` prop is `?tab=` now — the same job, and it
  * survives a reload and a shared link.
@@ -70,7 +70,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
  * of four grey label-and-value pairs over three columns of grey fields, and
  * nothing on it that moved. It opens on the container's identity line (the
  * product it runs, its image, its project, how long it has been up, ticking,
- * and the verdict at the line's end) over the views as the underlined strip,
+ * and the verdict at the line's end) over the views as the view strip,
  * and the Overview reads, in order: what it is using, live, with its last
  * hour; a picture
  * of how it is reached and what it keeps; the containers it runs beside, as a

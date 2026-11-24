@@ -219,8 +219,8 @@ taking a frame:
   lit cards, the experimental one carrying its amber tag, beside the rail itself, the one frame, in the
   sidebar's ground with a switch on each row it may hide; and the four views on
   Packages — the installed and updates tables, the software search and the package Log (its `Pane`
-  on the page's ground, no panel around it), under one underlined strip
-  (`tabClasses`) rather than a filled tab list, beneath the host's identity and the band of software
+  on the page's ground, no panel around it), under one strip of quiet tabs
+  (`tabClasses`) rather than a segmented tab list, beneath the host's identity and the band of software
   size and updates waiting — each a toolbar and a hairline over a framed table or, for the
   catalogue, lit choices on the page's own edge. Security updates carry their command at the end of
   the Updates waiting block's strip;

@@ -81,7 +81,7 @@ const BACK = { href: SERVICES, label: "DNS" }
  *   reading is whole, its address, what the connection may do, its version
  *   and when it was read — with Review a change as the one command and
  *   updating the connection or disconnecting it in the `⋯`;
- * - its views as the underlined strip, in the address (`?tab=`): **Overview**
+ * - its views as the view strip, in the address (`?tab=`): **Overview**
  *   (who owns it, where it listens, what it forwards to), **Clients**,
  *   **Records**, **Queries**, **Filters**, **DHCP** and **Changes**, where a
  *   change is drafted and every retained review is listed. A review is part
