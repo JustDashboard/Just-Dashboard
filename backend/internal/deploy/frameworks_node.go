@@ -72,6 +72,9 @@ type nodeFrameworkDefaults struct {
 	// between the install and the build (adapter-node for adapter-auto).
 	BuildEnv    []nodeEnvDefault
 	BeforeBuild []string
+	// TypeCheckBeside says a Next.js build's type check can run as a stage
+	// beside the build (build_node_typecheck.go).
+	TypeCheckBeside bool
 }
 
 type nodeFrameworkResolution struct {
@@ -339,6 +342,9 @@ func nextResolution(manifest nodeManifest, files nodeRootFiles, runner string) n
 	}
 	if manifest.has("payload") && manifest.has("@payloadcms/next") {
 		resolution.note("package.json", "Payload runs inside Next.js (payload with @payloadcms/next)")
+	}
+	if mode != "export" {
+		resolution.TypeCheckBeside = nextTypeCheckBeside(manifest, files, config, configured)
 	}
 	return resolution
 }

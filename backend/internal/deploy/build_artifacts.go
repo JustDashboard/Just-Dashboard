@@ -33,7 +33,7 @@ var (
 	ErrArtifactUnguarded = errors.New("the image remover cannot ask Docker which containers use the image")
 )
 
-const AutomaticRecipeVersion = "just-dashboard-recipes-v5"
+const AutomaticRecipeVersion = "just-dashboard-recipes-v6"
 
 // The catalogue is deliberately small and reviewed. Tags are never written
 // into a release Dockerfile: the backend resolves each to a digest first.
@@ -267,6 +267,9 @@ type ArtifactBuilder struct {
 	buildValueKey []byte
 	// builderName is the networked builder one build runs on (withBuilder).
 	builderName string
+	// typeCheckBeside says whether this server can run a Next.js type check
+	// beside the build; nil is the server's own reading (hostTypeCheckBeside).
+	typeCheckBeside func() bool
 }
 
 // withBuilder is the builder running one build on a networked builder, so
@@ -359,6 +362,7 @@ func (b *ArtifactBuilder) prepareWithin(
 		prepared.CachePolicy = "no_cache"
 	}
 	config.cache = newRecipeCache(tag, prepared.CachePolicy)
+	config.typeCheckBeside = b.hostCanTypeCheckBeside()
 	for _, secret := range config.Secrets {
 		prepared.SecretIDs = append(prepared.SecretIDs, secret.Variable)
 	}

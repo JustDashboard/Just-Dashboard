@@ -384,14 +384,31 @@ func (f nodeInstallFacts) inputsWith(lockfiles []string) []string {
 // same release offline.
 func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases []ResolvedImage, installSecrets, buildSecrets string) ([]string, error) {
 	plan := recipe.nodeInstall
-	lines, base, err := nodeInstallStage(plan, bases[0], bases, "toolchain", "build", "", installSecrets, config.cache)
-	if err != nil {
-		return nil, err
-	}
 	workdir, binPath := "/app", "/app/node_modules/.bin"
 	if recipe.member != "" {
 		workdir = "/app/" + recipe.member
 		binPath = workdir + "/node_modules/.bin:" + binPath
+	}
+	defaults := recipe.node.resolution.nodeFrameworkDefaults
+	serving := recipe.node.serving
+	command := strings.TrimSpace(config.BuildCommand)
+	output := strings.TrimSpace(config.OutputDirectory)
+	standalone := nodeStandaloneCopy(config.StartCommand, workdir)
+	if len(plan.image.runtimeRuns) > 0 {
+		standalone = nil
+	}
+	// A Next.js build gets its type check in a stage beside the compile
+	// (build_node_typecheck.go): the install and the source go into a stage
+	// both start from.
+	typeCheck := config.typeCheckBeside && recipe.node.name == "nextjs" && defaults.TypeCheckBeside && command != "" && output == "" &&
+		!buildValueNamed(config.Secrets, nextAdapterEnv)
+	prebuild := "build"
+	if typeCheck {
+		prebuild = "source"
+	}
+	lines, base, err := nodeInstallStage(plan, bases[0], bases, "toolchain", prebuild, "", installSecrets, config.cache)
+	if err != nil {
+		return nil, err
 	}
 	if recipe.member != "" {
 		lines = append(lines, "WORKDIR "+workdir)
@@ -403,20 +420,25 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	if plan.prisma.generate != "" {
 		lines = append(lines, nodeRunWith(buildSecrets, plan.prisma.defaults, plan.prisma.generate))
 	}
-	defaults := recipe.node.resolution.nodeFrameworkDefaults
-	serving := recipe.node.serving
 	// A framework's own steps before the build install packages (SvelteKit's
 	// adapter-node), so they see what the install sees.
 	for _, step := range defaults.BeforeBuild {
 		lines = append(lines, nodeRunWith(installSecrets, nil, step))
 	}
-	if command := strings.TrimSpace(config.BuildCommand); command != "" {
+	if command != "" {
 		plan.buildEnv.framework = defaults.BuildEnv
 		mounts := buildSecrets
 		if recipe.node.name == "nextjs" {
 			mounts = nextBuildCaches(config.cache, workdir) + mounts
 		}
-		lines = append(lines, plan.buildRun(mounts, command, boundToBuild(config.Secrets)))
+		bound := boundToBuild(config.Secrets)
+		if typeCheck {
+			// Only the build names the adapter: the type check stage never
+			// has the file, and next typegen would fail to load it.
+			lines = append(lines, nextTypeCheckStage(plan, config.cache, buildSecrets, bound, prebuild)...)
+			plan.buildEnv.framework = append(slices.Clone(defaults.BuildEnv), nodeEnvDefault{nextAdapterEnv, nextAdapterPath})
+		}
+		lines = append(lines, plan.buildRun(mounts, command, bound))
 	}
 	if serving.entry != "" {
 		// The start command runs the framework's entry, so a build that did
@@ -428,7 +450,7 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	for _, step := range serving.afterBuild {
 		lines = append(lines, "RUN "+step)
 	}
-	if output := strings.TrimSpace(config.OutputDirectory); output != "" {
+	if output != "" {
 		static, err := resolveCatalogueImage(bases, recipeBaseCatalogue["static"][0])
 		if err != nil {
 			return nil, err
@@ -456,11 +478,16 @@ func renderNodeDockerfile(recipe selectedRecipe, config BuildPlanConfig, bases [
 	for _, env := range append(append(append([]string(nil), plan.image.runtimeEnv...), nodeServerRuntimeEnv(recipe.node.name, defaults.Env)...), serving.runtimeEnv...) {
 		lines = append(lines, "ENV "+env)
 	}
-	if standalone := nodeStandaloneCopy(config.StartCommand, workdir); standalone != nil && len(plan.image.runtimeRuns) == 0 {
+	if standalone != nil {
 		// The standalone server carries its own traced node_modules.
 		lines = append(lines, standalone...)
 	} else {
 		lines = append(lines, nodeModulesCopy(recipe.member)...)
+	}
+	if typeCheck {
+		// The image waits for the type check, so a type error still fails
+		// the build; what it copies is an empty file.
+		lines = append(lines, "COPY --from=typecheck "+nextTypeCheckMarker+" "+nextTypeCheckMarker)
 	}
 	for _, run := range plan.image.runtimeRuns {
 		lines = append(lines, "RUN "+run)

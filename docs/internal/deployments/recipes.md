@@ -1,6 +1,6 @@
 # Automatic recipes and serving defaults
 
-`just-dashboard-recipes-v5` prepares immutable Dockerfiles using digest-pinned catalogue bases, parsed by the Dockerfile frontend pinned by digest in `recipeDockerfileSyntax` (1.22). Build
+`just-dashboard-recipes-v6` prepares immutable Dockerfiles using digest-pinned catalogue bases, parsed by the Dockerfile frontend pinned by digest in `recipeDockerfileSyntax` (1.22). Build
 commands execute inside the build container; source inspection never executes repository configuration
 on the host. Generated Dockerfiles use root-relative, exclusive writes so a checkout symlink cannot
 redirect output outside the build context. Detection ignores this generated directory.
@@ -1377,6 +1377,31 @@ also mounts the compiler caches `next build` keeps under the package's `.next/ca
 which stay in the image as before: a persisted fetch cache would answer a build-time `fetch` with an
 earlier build's data. A mount's content never reaches the image; BuildKit keeps these caches for its own
 garbage-collection window, so a cold cache only costs a slower build.
+
+**A Next.js type check beside the build** (`build_node_typecheck.go`). `next build` type-checks a
+TypeScript project after it compiles, on one core, and from nothing on every build: Next.js keeps
+TypeScript's incremental state in `.next/cache/.tsbuildinfo`, beside the mounted caches rather than
+inside one. On a Next.js 16 application that was 30 to 50 s of a 60 to 106 s build. So the type check
+runs in a stage of its own, `typecheck`, beside the `build` stage, both from the `source` stage: BuildKit
+runs stages that do not depend on each other at once. It runs `next typegen`, which writes the route
+types and settles `tsconfig.json` as `next build` would, then `/opt/just-dashboard/typecheck.cjs`: what
+`next build`'s own check (`runTypeCheck`) does, on TypeScript's public API — the files `tsconfig.json`
+names less `.next/dev/types`, nothing emitted, errors less a configuration with no inputs and anything in
+a `__tests__` or `__mocks__` folder or a `.test.`/`.spec.` file, which `next build` leaves out too — run
+incrementally with its state in the environment's `next-typecheck` cache mount. The stage has the build's
+own values, guards and defaults, since `next typegen` loads `next.config` as `next build` does, but not
+the adapter. The build stage writes a one-line build adapter to `/opt/just-dashboard/next-adapter.mjs`,
+and the build command's RUN names it in `NEXT_ADAPTER_PATH`, which Next.js 16.4 reads as `adapterPath`;
+its `modifyConfig` sets `typescript.ignoreBuildErrors` and nothing else. The server image copies the
+empty file `/tmp/jd-typecheck-passed` from the `typecheck` stage, so the image waits for the check, and a
+type error still fails the build as `error TSnnnn` (`build_type_error`). It applies only where it is the
+check `next build` would make: a package that declares `typescript` and has a `tsconfig.json`, `next`
+declared at 16.4 or later, a `next.config` that names none of `ignoreBuildErrors`, `tsconfigPath` or
+`adapterPath`, no build value named `NEXT_ADAPTER_PATH`, a server rather than a static export, and a
+server with four cores and 6 GiB (`hostTypeCheckBeside`), since the check and the compile then peak
+together. Anything else keeps `next build`'s own check. A schema step before the build
+(database-networks.md) cuts the same file at the build command's RUN in the `build` stage, and never runs
+the check.
 
 What the plan adds after the install (system packages' runs, Prisma's `generate`, SvelteKit's
 `BeforeBuild` adapter install) still runs after the source is copied. `TestLiveNodeInstallLayerOutlivesASourceChange`
