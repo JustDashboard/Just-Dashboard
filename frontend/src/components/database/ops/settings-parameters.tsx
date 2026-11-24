@@ -420,10 +420,17 @@ export function ParametersSection() {
           data?.supported ? (
             <span className="numeric flex flex-wrap items-center gap-x-1.5">
               <EngineGlyph engine={engine} className="size-3.5" />
-              {plural(parameters.length, noun)}
-              {changed > 0
-                ? ` · ${changed} changed from the default`
-                : " · every one at its default"}
+              {/* One item, so the words stay a sentence. On a phone it stops at the
+                  count: at the full length the line left no room beside it for
+                  "Unsaved changes", which then landed on a row of its own and moved
+                  every parameter down 24px as the first one was typed in. */}
+              <span>
+                {plural(parameters.length, noun)}
+                {changed > 0 ? ` · ${changed} changed` : ""}
+                <span className="max-sm:hidden">
+                  {changed > 0 ? " from the default" : " · every one at its default"}
+                </span>
+              </span>
             </span>
           ) : undefined
         }

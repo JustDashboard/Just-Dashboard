@@ -42,6 +42,14 @@ export function AccountName({
   )
 }
 
+/**
+ * The name as an account's own page titles it. A block that truncates on a phone, as
+ * it already is in the header's flex title from `sm` up: left inline there, a 16px mono
+ * name rides the baseline of the header's 18px line, which sets it a pixel and a half
+ * under the row's centre and makes the line a pixel taller than its 24.
+ */
+export const ACCOUNT_TITLE = "text-title max-sm:block max-sm:truncate"
+
 /** One account as the sign-in picture draws it, whatever the engine calls it. */
 export type SignIn = {
   key: string

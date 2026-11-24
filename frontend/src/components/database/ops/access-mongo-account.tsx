@@ -29,7 +29,7 @@ import {
   mongoDropRequest,
   userTags,
 } from "@/components/database/ops/access-mongo-parts"
-import { AccountMark, AccountName } from "@/components/database/ops/access-parts"
+import { ACCOUNT_TITLE, AccountMark, AccountName } from "@/components/database/ops/access-parts"
 import type { MongoRoleRef, MongoUser, MongoUsers } from "@/components/database/ops/access-types"
 import { accessHref } from "@/components/database/ops/account-address"
 import {
@@ -153,7 +153,7 @@ export function MongoAccount({ name, db }: { name: string; db?: string }) {
       : []
 
   const mark = <AccountMark name={name} />
-  const title = <AccountName name={name} host={home} className="text-title" />
+  const title = <AccountName name={name} host={home} className={ACCOUNT_TITLE} />
   const identity = user ? (
     <IdentityHeader
       label={`About ${user.user}`}
