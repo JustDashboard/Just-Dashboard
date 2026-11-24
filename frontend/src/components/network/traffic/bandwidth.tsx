@@ -50,8 +50,12 @@ export function Bandwidth({
           title="Devices"
           actions={
             <span className="flex flex-wrap items-start justify-end gap-x-4 gap-y-2">
+              {/* From `sm`: on a phone the count and the windows are wider than
+                  the row beside "Devices", so the count landing put them on a
+                  row of their own and moved every device down. The devices
+                  are drawn under it, one each. */}
               {shown !== undefined && (
-                <span className="numeric flex h-8 items-center text-hint text-muted-foreground">
+                <span className="numeric flex h-8 items-center text-hint text-muted-foreground max-sm:hidden">
                   {plural(shown, "device")}
                 </span>
               )}

@@ -97,7 +97,10 @@ export function ExceptionList({
             <Row
               key={e.id}
               className={ROW_HEIGHT}
-              title={<Cidr cidr={e.address} />}
+              // A block, so the title's line is the mono face's own 20px: as a
+              // span in the body face's line it made the row a pixel taller
+              // than the waiting row (`ROW_HEIGHT`).
+              title={<Cidr className="block truncate" cidr={e.address} />}
               subtitle={
                 <>
                   {/* The figure has a column from `sm`; on a phone it leads

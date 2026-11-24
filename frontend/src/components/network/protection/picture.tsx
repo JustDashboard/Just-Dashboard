@@ -33,7 +33,10 @@ type MarkSize = "lg" | "md" | "sm"
 export const PICTURE_ROWS = LISTS_DRAWN + 1
 
 // Four rows of a mark beside three lines, their gaps and the picture's own
-// padding, where the picture is a column a side (`WireFlow`'s `data-form`). A
+// padding, where the picture is a column a side (`WireFlow`'s `data-form`):
+// four of 49.75px, three gaps of 20 and 32 of padding are 291px, so the frame
+// is the next quarter rem over that. At 18rem it was three pixels short of
+// four rows, and a server with fewer drew a shorter picture. A
 // phone's picture is rows of marks, one height already. Where the sides are
 // rows of nodes the frame is left off: four nodes are one row or two by the
 // room the page has, and the frame stood a third taller than two rows and
@@ -41,7 +44,7 @@ export const PICTURE_ROWS = LISTS_DRAWN + 1
 // because it draws as many nodes (`pictureRows`), each on the lines of a real
 // one.
 const FRAME =
-  "lg:data-[form=column]:grid lg:data-[form=column]:min-h-[18rem] lg:data-[form=column]:items-center"
+  "lg:data-[form=column]:grid lg:data-[form=column]:min-h-[18.25rem] lg:data-[form=column]:items-center"
 
 /**
  * The half of a node's line that is how its entry is set: the networks a list

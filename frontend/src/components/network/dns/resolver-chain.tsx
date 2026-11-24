@@ -73,6 +73,14 @@ export function EncryptionNote({
  */
 const LINE = "block truncate [&>*]:align-top"
 
+/**
+ * A title that is an address. A block, so the title's line is the mono face's
+ * own: as a span inside the body face's line it stood on another baseline and
+ * made the line two pixels taller than a named node's and than the bar it
+ * waits as, so an upstream with no provider's name was taller than one with.
+ */
+const MONO_TITLE = "block font-mono"
+
 /** A node not read yet, on the four lines an upstream's words stand on. */
 function ghost(id: string): WireFlowNode {
   return {
@@ -209,7 +217,7 @@ export function ResolverChain({
             {up.current && <span className="shrink-0 whitespace-pre"> · in use</span>}
           </span>
         ),
-        title: identity.bare ? <span className="font-mono">{identity.name}</span> : identity.name,
+        title: identity.bare ? <span className={MONO_TITLE}>{identity.name}</span> : identity.name,
         name: identity.name,
         hint: (
           <>
@@ -300,7 +308,7 @@ function hubOf(view: DNSView | undefined): WireFlowHub {
     ),
     eyebrow: stubbed ? "systemd-resolved" : resolvConf.path,
     title: (
-      <span className="font-mono">
+      <span className={MONO_TITLE}>
         {stubbed
           ? (resolvConf.nameservers[0] ?? "127.0.0.53")
           : resolvConf.nameservers.length > 0

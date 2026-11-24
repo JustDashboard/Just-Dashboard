@@ -330,7 +330,9 @@ for (const width of [1280, 390]) {
     expect(
       (await heights(view(page).getByRole("list", { name: "Alerts" }).locator("li"))).size,
     ).toBe(1)
-    // The bouncers: one with a unit beside its kind, one without.
+    // The bouncers: one with a unit beside its kind, one without. The row's
+    // face is what is measured: every item but the last carries the list's
+    // 1px divider under it as well.
     expect(
       (
         await heights(
@@ -339,7 +341,7 @@ for (const width of [1280, 390]) {
             .filter({ hasText: "Bouncers" })
             .locator("ul")
             .first()
-            .locator("> li"),
+            .locator("> li > *"),
         )
       ).size,
     ).toBe(1)

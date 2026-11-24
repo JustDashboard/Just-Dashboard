@@ -466,10 +466,11 @@ for (const width of [1280, 390]) {
     await expect(block.getByRole("button", { name: "Install tailscale" })).toHaveCount(0)
     await expect(block).toContainText("This server's package manager does not carry it")
     // The block held its place while the package manager was asked: the
-    // button's room was kept, and at most a line of the sentence changed.
+    // button's room was kept, and at most a line of the sentence changed
+    // (13px words on a relaxed line, 21.125px).
     const after = await block.boundingBox()
     expect(after!.y).toBe(before!.y)
-    expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(20)
+    expect(Math.abs(after!.height - before!.height)).toBeLessThanOrEqual(22)
     await block.scrollIntoViewIfNeeded()
     await page.screenshot({ path: testInfo.outputPath(`tailscale-missing-${width}.png`) })
   })

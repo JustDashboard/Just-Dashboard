@@ -63,13 +63,15 @@ export function ExposureIdentity({
       <IdentityHeader
         logo={<Skeleton className="size-12 rounded-xl" />}
         title={<Bone className="w-36" />}
+        // As wide as the facts of a tailnet-only panel, the grade the install
+        // sets up, so on a phone they wrap to the three lines those facts do.
         facts={
           <>
-            <Bone className="w-36" />
-            {/* The interfaces are tags, a pixel taller than the line's words. */}
-            <Bone className="h-[17px] w-24" />
             <Bone className="w-40" />
-            <Bone className="w-32" />
+            {/* The interfaces are tags, a tag's padding taller than the line's words. */}
+            <Bone className="h-[18.5px] w-28" />
+            <Bone className="w-40" />
+            <Bone className="w-52" />
           </>
         }
         aside={aside}
@@ -82,7 +84,10 @@ export function ExposureIdentity({
       mark={exposure.grade === "tailscale" ? "tailscale" : undefined}
       fallback={GRADE_GLYPH[exposure.grade]}
       title={
-        <span className="inline-flex min-w-0 items-center gap-2.5">
+        // A flex box of the name's own 24px line: inline, the grade's 22px
+        // line stood on the name's baseline and made the line 26px, two more
+        // than the bone it waits as.
+        <span className="flex h-6 min-w-0 items-center gap-2.5">
           <Status verdict={grade.verdict} label={grade.label} className="text-title" />
         </span>
       }
