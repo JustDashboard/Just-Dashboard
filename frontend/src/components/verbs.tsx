@@ -275,12 +275,20 @@ export function VerbMenu({
   align,
   label = "More actions",
   trigger,
+  glyphs = true,
 }: {
   verbs: VerbSpec[]
   align?: "start" | "end"
   label?: string
   /** A named trigger instead of the ellipsis, for a menu that stands alone in a header. */
   trigger?: React.ReactNode
+  /**
+   * Draw each verb's glyph beside its word. Off, the menu is words alone
+   * (a `mark` and a tick are still drawn, being what the item says): the
+   * operator asked for the Databases control center's menus without them
+   * (24 Nov 2026), a glyph earning its place only where it is necessary.
+   */
+  glyphs?: boolean
 }) {
   return (
     <DropdownMenu>
@@ -298,7 +306,7 @@ export function VerbMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align ?? "end"} className="min-w-44">
-        <VerbItems verbs={verbs} kind="dropdown" />
+        <VerbItems verbs={verbs} kind="dropdown" glyphs={glyphs} />
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -343,12 +351,29 @@ export type VerbMenuParts = {
  * a link, a `checked` one carries a tick, and a `submenu` opens one level
  * down.
  */
-export function VerbItems({ verbs, kind }: { verbs: VerbSpec[]; kind: "dropdown" | "context" }) {
-  return <VerbItemList verbs={verbs} parts={PARTS[kind]} />
+export function VerbItems({
+  verbs,
+  kind,
+  glyphs = true,
+}: {
+  verbs: VerbSpec[]
+  kind: "dropdown" | "context"
+  /** Draw each verb's glyph beside its word (`VerbMenu`'s `glyphs`). */
+  glyphs?: boolean
+}) {
+  return <VerbItemList verbs={verbs} parts={PARTS[kind]} glyphs={glyphs} />
 }
 
 /** `VerbItems` drawn with parts of the caller's. */
-export function VerbItemList({ verbs, parts }: { verbs: VerbSpec[]; parts: VerbMenuParts }) {
+export function VerbItemList({
+  verbs,
+  parts,
+  glyphs = true,
+}: {
+  verbs: VerbSpec[]
+  parts: VerbMenuParts
+  glyphs?: boolean
+}) {
   return verbs.map((verb, i) => {
     const previous = verbs[i - 1]
     const regroups = i > 0 && verb.group !== previous.group
@@ -356,15 +381,23 @@ export function VerbItemList({ verbs, parts }: { verbs: VerbSpec[]; parts: VerbM
       <Fragment key={verb.key}>
         {i > 0 && (regroups || (verb.danger && !previous.danger)) && <parts.Separator />}
         {verb.group && (i === 0 || regroups) && <parts.Label>{verb.group}</parts.Label>}
-        <VerbItem verb={verb} parts={parts} />
+        <VerbItem verb={verb} parts={parts} glyphs={glyphs} />
       </Fragment>
     )
   })
 }
 
-function VerbItem({ verb, parts }: { verb: VerbSpec; parts: VerbMenuParts }) {
+function VerbItem({
+  verb,
+  parts,
+  glyphs,
+}: {
+  verb: VerbSpec
+  parts: VerbMenuParts
+  glyphs: boolean
+}) {
   const { Item, Shortcut, Sub, SubTrigger, SubContent } = parts
-  const glyph = verb.mark ?? <verb.icon className="size-3.5" />
+  const glyph = verb.mark ?? (glyphs ? <verb.icon className="size-3.5" /> : null)
   if (verb.submenu) {
     return (
       <Sub>
@@ -374,7 +407,7 @@ function VerbItem({ verb, parts }: { verb: VerbSpec; parts: VerbMenuParts }) {
         </SubTrigger>
         <SubContent className="min-w-44">
           {verb.submenu.map((inner) => (
-            <VerbItem key={inner.key} verb={inner} parts={parts} />
+            <VerbItem key={inner.key} verb={inner} parts={parts} glyphs={glyphs} />
           ))}
         </SubContent>
       </Sub>

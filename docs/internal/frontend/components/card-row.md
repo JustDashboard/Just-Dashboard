@@ -53,6 +53,7 @@ The box is `CHOICE_ROW_BOX` (`min-h-14` with `px-3 py-2.5`) inside its 1px edge,
 | `disabled` | Something with nowhere to go yet: keeps its card and actions, loses the arrow, the pointer and the control. Never fade a row with an opacity |
 | `busy` | A light runs round its edge while the thing works (§11 *live*) |
 | `index` | The arrival stagger; leave it out for a list under a poll |
+| `arrow` | `false` leaves the arrow out, where the row's verb is drawn as a button's face in `trailing` instead (the Databases control center's found rows, at the operator's word: *No arrow on a card* in the [standard](../standard.md)) |
 | `workspaceItem` | The workspace's item id and name on the title control |
 
 ## The press

@@ -29,9 +29,10 @@ that take it — its rail by engine, its arrangement kept per account under its 
 `?database=<id>` opening on one ([server map](../../server-map.md#the-databases-map);
 `lib/database-systems.ts`, unit-tested). On a phone the map is one pane at a time, the databases, the
 canvas and the inspector, picked from a bar at the foot (`MapCanvas panes`; the server map keeps the
-canvas alone). The control center opens on the server's line with *Add a database* as its one
-command; a card reads who is connected with its last hour and its newest dumps as a strip; and the
-`⋯` menu at the line's end opens a Metrics export dialog (the
+canvas alone). The control center opens on the databases' line (*Databases* and its verdict) with
+*Add a database* as its one command; a card reads what it holds and who is connected as figures,
+what uses it as their marks, and what needs a hand at its foot; and the `⋯` menu at the line's
+end opens a Metrics export dialog (the
 Prometheus URL, a metrics-only API key, a scrape config and how long activity is kept) and an MCP
 server dialog (`fleet/mcp-server-dialog.tsx`: the MCP endpoint, the account's MCP keys with what
 each reaches, a key made for chosen databases each to read or change — protected ones and non-SQL

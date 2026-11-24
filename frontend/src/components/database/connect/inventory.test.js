@@ -11,6 +11,7 @@ import {
   instanceHref,
   instanceState,
   instanceWhere,
+  whereBesides,
   privateState,
   scanNotes,
   scanSilences,
@@ -245,6 +246,15 @@ describe("where a found instance is", () => {
         instance({ container: undefined, source: "host", host: { process: "mysqld" } }),
       ),
     ).toEqual({ kind: "process", text: "mysqld · 127.0.0.1:5433" })
+  })
+
+  test("a row's second line leaves out the name its title already says", () => {
+    expect(whereBesides(instance())).toBe("127.0.0.1:5433")
+    expect(whereBesides(instance({ name: "shop" }))).toBe("shop-db · 127.0.0.1:5433")
+    expect(whereBesides(instance({ endpoints: [] }))).toBe("")
+    expect(whereBesides(declared)).toBe("shop/db")
+    expect(whereBesides(native)).toBe("postgresql@17-main.service · 127.0.0.1:5438")
+    expect(whereBesides(file)).toBe("/srv/app/data.db")
   })
 
   test("the state word is the machine's own, except where ours says more", () => {

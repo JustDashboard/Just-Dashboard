@@ -8,7 +8,7 @@ import {
 } from "@/components/database/connect/inventory"
 import { useFound } from "@/components/database/connect/use-found"
 import { type Engine } from "@/components/database/engine"
-import { fleetHues, fleetMarks, fleetVerdict, readerCount } from "@/components/database/fleet/band"
+import { fleetVerdict, readers } from "@/components/database/fleet/band"
 import {
   fleetReadings,
   groupFleet,
@@ -48,7 +48,6 @@ import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { useHost } from "@/hooks/use-metrics"
 import { bytes, plural, relativeTime } from "@/lib/format"
 import type { DbFleetEntry } from "@/lib/types"
 import { useViewState } from "@/lib/view-state"
@@ -67,22 +66,28 @@ const OFFERED = ["postgres", "redis", "mongodb"]
 /**
  * The control center: every database on this server, drawn as what it is.
  *
- * A reading page (§15) that opens on the server's databases as one line, laid
- * out as a project's header is: their engines as their own marks, the server's
- * name with the verdict after it, then how many there are, what they store,
- * how many sessions are open, what reads them and how many were dumped in the
- * last day. At its end stands the one command, Add a database, and a menu
- * with the rest: where the recorded activity is exported, the MCP server's
- * keys, and scanning the server again. They were three grey controls beside
- * the command, and the line is drawn in every state of the page — loading,
+ * A reading page (§15) that opens on the databases as one line, laid out as
+ * a project's header is: a database's glyph, "Databases" with the verdict
+ * after it ("All 5 answering", "1 of 5 not answering"), then what they store,
+ * how many sessions are open and what uses them. At its end stands the one
+ * command, Add a database, and a menu of words with the rest: where the
+ * recorded activity is exported, the MCP server's keys, and scanning the
+ * server again. The line is drawn in every state of the page — loading,
  * failed and with no database yet — so it is where it will be from the first
- * paint. Under it two reading lines (`fleet-protection.tsx`) say whether
- * every database is backed up on a schedule and whether anything would tell
- * you when one goes down, each ending on the one press that makes it so when
- * it is not. Then the fleet itself: every saved connection as a card you open,
- * drawn as its engine with its own readings on it, shelved by where it runs,
- * each in its own hue (`fleetHues`). Under it, what discovery found on this
- * machine that is not connected yet.
+ * paint.
+ *
+ * Until 24 Nov 2026 the line was the server's name on the engines' marks,
+ * with how many were dumped in the last day and how many never were among
+ * its facts. The operator found it did not make sense: the marks read as the
+ * server being a PostgreSQL, the name is the server's and not the page's,
+ * and the backups were said again by the line under it.
+ *
+ * Under it one framed block (`fleet-protection.tsx`) says whether every
+ * database is backed up on a schedule and whether anything would tell you
+ * when one goes down, each line ending on the press that makes it so when it
+ * is not. Then the fleet itself: every saved connection as a card you open,
+ * drawn as its engine with its own readings on it, shelved by where it runs.
+ * Under it, what discovery found on this machine that is not connected yet.
  *
  * A band of storage, sessions and backups stood where the two lines are until
  * 0.9.1, when the operator asked what would be more use: it split totals the
@@ -116,7 +121,6 @@ const OFFERED = ["postgres", "redis", "mongodb"]
  */
 export function ControlCenter() {
   const { admin, engineFor, newHref } = useDatabases()
-  const host = useHost()
   const inventory = useInventory(admin)
   // What a file weighs, where the engine reports no size and discovery
   // measured the file: by the connection it was found to belong to.
@@ -139,13 +143,6 @@ export function ControlCenter() {
   const engineFilter = address.read("engine")
   const [query, setQuery] = useTypedParam("q")
   const { fleet, entries, backups, feeds, concernsOf, storedOf, topology, dumps } = data
-  // Each database's hue, dealt once for the whole fleet so a filter never
-  // repaints one: the line of its last hour on its card.
-  const hues = useMemo(() => fleetHues(entries), [entries])
-  const hueOf = useCallback(
-    (entry: DbFleetEntry) => hues.get(entry.id) ?? "var(--tag-blue)",
-    [hues],
-  )
   // A first scheduled run has started: the dumps the cards read are behind it.
   const refreshSummary = data.summary.refresh
   const refreshDumps = useCallback(() => {
@@ -217,6 +214,7 @@ export function ControlCenter() {
     <VerbMenu
       verbs={verbs}
       label="More about the databases"
+      glyphs={false}
       trigger={
         <Button
           ref={more}
@@ -245,7 +243,7 @@ export function ControlCenter() {
     <IdentityHeader
       label="About the databases on this server"
       fallback={Database}
-      title={host?.hostname ?? "This server"}
+      title="Databases"
       state={null}
       facts={facts}
       command={command || undefined}
@@ -332,18 +330,13 @@ export function ControlCenter() {
   const groups = groupFleet(shown, grouping, (entry) => engineFor(entry).label)
   const position = new Map(shown.map((entry, index) => [entry.id, index]))
 
-  // The server's databases as one line: their engines as the mark, then the
-  // figures the band breaks down, each said once here and never as a tile.
+  // The server's databases as one line: how many and whether they answer,
+  // then what they hold, who is connected and what uses them. Whether they
+  // are backed up is the Backups line's under it, said once.
   const readings = fleetReadings(fleet.data, { backups, dumps, storedOf })
   const verdict = fleetVerdict(readings)
-  // Engines as common as each other are drawn largest first.
-  const bySize = [...entries].sort((a, b) => (storedOf(b) ?? 0) - (storedOf(a) ?? 0))
-  const marks = fleetMarks(bySize.map((entry) => engineFor(entry).logo))
-  const readers = readerCount(topology.data)
+  const reading = readers(topology.data)
   const facts = [
-    <span key="count" className="numeric">
-      {plural(readings.total, "database")}
-    </span>,
     readings.sized > 0 && (
       <span
         key="stored"
@@ -362,25 +355,15 @@ export function ControlCenter() {
         {plural(readings.sessions, "session")} open
       </span>
     ),
-    readers > 0 && (
+    reading.count > 0 && (
       <Link
         key="readers"
         href={DATABASES_MAP_HREF}
-        title="Deployments, containers and machines seen reading these databases"
+        title="What uses them, on the map"
         className="numeric rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
       >
-        read by {readers}
+        used by {plural(reading.count, reading.nouns.one, reading.nouns.many)}
       </Link>
-    ),
-    readings.dumpable > 0 && (
-      <span key="fresh" className="numeric">
-        {readings.fresh} of {readings.dumpable} backed up in the last day
-      </span>
-    ),
-    readings.never > 0 && (
-      <span key="never" className="numeric font-medium text-warning">
-        {readings.never} never backed up
-      </span>
     ),
   ]
     // The line's own gap separates them: a dot between two was left hanging
@@ -394,21 +377,14 @@ export function ControlCenter() {
 
       <IdentityHeader
         label="About the databases on this server"
-        logo={
-          marks.length > 0 ? (
-            <span className="flex h-10 shrink-0 items-center">
-              <ProductLogos ids={marks} size="md" />
-            </span>
-          ) : undefined
-        }
         fallback={Database}
-        title={host?.hostname ?? "This server"}
+        title="Databases"
         state={verdict ? <Status tone={verdict.tone} label={verdict.label} /> : null}
         facts={facts}
         command={add || undefined}
         menu={menu}
-        // On a phone the command and the menu stand under the facts: beside
-        // the engines' marks they left the server's name a word to a line.
+        // Beside a rail the command and the menu stand under the facts,
+        // where they would leave the name and its facts a column a word wide.
         foot
       />
 
@@ -504,8 +480,6 @@ export function ControlCenter() {
                 backup={backups.get(entry.id)}
                 feeds={feeds.get(entry.id)}
                 stored={storedOf(entry)}
-                hue={hueOf(entry)}
-                dumps={dumps(entry)}
                 control={control}
                 index={position.get(entry.id) ?? 0}
               />

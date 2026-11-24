@@ -19,7 +19,7 @@ import { risen } from "./risen"
 
 const lines = (page: Page) => page.locator("[data-slot=fleet-protection]")
 const line = (page: Page, name: "Backups" | "Alerts") =>
-  lines(page).locator("[data-slot=reading-line]").filter({ hasText: name })
+  lines(page).locator(`[data-slot=protection-line][data-name=${name}]`)
 const dialog = (page: Page) => page.getByRole("alertdialog")
 const scroller = (page: Page) => page.locator("[data-slot=page]").first().locator("xpath=..")
 /** Every fixture database: shop, blog, cache, app and notes. */
@@ -35,12 +35,21 @@ test.describe("what protects the databases", () => {
     const backups = line(page, "Backups")
     await expect(backups).toContainText("None of the 5 is backed up on a schedule")
     await expect(backups).toContainText(/and 2 more/)
-    await expect(backups.getByRole("button", { name: "Schedule" })).toBeVisible()
+    // The press says what it does, straight after the words it answers.
+    await expect(backups.getByRole("button", { name: "Schedule backups" })).toBeVisible()
 
     const alerts = line(page, "Alerts")
     await expect(alerts).toContainText("Nothing tells you when one goes down")
-    await expect(alerts).toContainText("No alert rule watches them")
-    await expect(alerts.getByRole("button", { name: "Turn on" })).toBeVisible()
+    await expect(alerts.getByRole("button", { name: "Turn on alerts" })).toBeVisible()
+    const after = async (name: "Backups" | "Alerts") => {
+      const words = (await line(page, name).locator("[data-slot=check-words]").boundingBox())!
+      const press = (await line(page, name).getByRole("button").boundingBox())!
+      return press.x - (words.x + words.width)
+    }
+    expect(await after("Backups")).toBeLessThan(24)
+    expect(await after("Alerts")).toBeLessThan(24)
+    // Words, not a tinted archive and bell.
+    await expect(lines(page).locator("svg")).toHaveCount(0)
 
     // The band is gone, and nothing of it is drawn.
     await expect(page.locator("[data-slot=fleet-band]")).toHaveCount(0)
@@ -160,8 +169,11 @@ test.describe("what protects the databases", () => {
     }))
     await page.reload()
     await expect(backups).toContainText("The last run of Databases failed just now")
-    // The mark takes the warning's tint, as a reading past its line does.
-    await expect(backups.locator(".bg-plot-warning")).toHaveCount(1)
+    // The line takes the warning's tone: its dot and its words.
+    await expect(backups).toHaveAttribute("data-tone", "warning")
+    await expect(backups.getByText("All 5 backed up every day at 03:00")).toHaveClass(
+      /text-warning/,
+    )
   })
 
   test("Turn on adds the usual rules over every database, and none beside one somebody paused", async ({
@@ -301,7 +313,7 @@ test.describe("what protects the databases", () => {
     const before = (await heading.boundingBox())!.y
     const heights = () =>
       lines(page)
-        .locator("[data-slot=reading-line]")
+        .locator("[data-slot=protection-line]")
         .evaluateAll((all) => all.map((one) => one.getBoundingClientRect().height))
 
     // One line with its verb and one waiting: the same height.

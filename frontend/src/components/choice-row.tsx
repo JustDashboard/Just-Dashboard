@@ -134,6 +134,7 @@ export function ChoiceRow({
   disabled,
   busy,
   index,
+  arrow = true,
   children,
   className,
 }: {
@@ -188,6 +189,13 @@ export function ChoiceRow({
    * list that re-renders under a poll.
    */
   index?: number
+  /**
+   * Draw the arrow at the row's end. Off where the row's verb is drawn as a
+   * button's face in `trailing` instead, which says more than an arrow: the
+   * operator asked for the Databases control center's found rows without
+   * one (24 Nov 2026).
+   */
+  arrow?: boolean
   /**
    * What the row carries beneath its line at the full width of the card — a
    * container's live readings on a screen too narrow to hold them beside its
@@ -256,7 +264,7 @@ export function ChoiceRow({
       </span>
       <span className="flex shrink-0 items-center gap-2">
         {trailing}
-        {!disabled && (
+        {!disabled && arrow && (
           <ArrowRight
             aria-hidden
             className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"

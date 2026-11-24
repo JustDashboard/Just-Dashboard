@@ -224,7 +224,7 @@ const frames: { name: string; take: (page: Page) => Promise<void> }[] = [
     name: "databases",
     take: async (page) => {
       // Three of the five on a nightly job and every one watched, so the
-      // frame shows both lines: one that offers Schedule, one that is answered.
+      // frame shows both lines: one that offers Schedule backups, one answered.
       const now = Date.now()
       await mockFleet(page, {
         dumps: { 4: null, 5: 60 },
