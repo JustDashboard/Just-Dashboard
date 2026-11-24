@@ -571,7 +571,8 @@ A surface separates by a step of ground (`--background` → `--card` → `--cont
 `--hairline` where a header meets a body. `shadow-*` is reserved for the three things that genuinely
 float above the page: popover, dropdown, dialog. Press feedback is colour — `active:bg-control-active`
 on a control with a face, the accent wash on a ghost — so nothing translates and nothing casts a shadow
-to say it was pressed.
+to say it was pressed. Since 0.9.1 a control's face carries one lit pixel along its top (`--edge`) in
+place of its border, which is the whole of the height it claims ([`../foundations/surfaces.md`](../foundations/surfaces.md#2-nothing-lifts)).
 
 The nav's own treatment did not change with it, because it never used the lift: the current destination
 takes the sidebar accent fill, a brand-blue icon and a `font-medium` label against the `font-normal` of

@@ -27,7 +27,7 @@ Editor tabs that close and rename (the query editor's `TabStrip`) and the pill s
 The underlined strip of a page's views, on Radix Tabs: the arrow keys move along it, Home and End
 reach its ends, the focus roves, and each tab names the panel it shows.
 
-**Anatomy.** A strip with a bottom hairline. Each tab is the label at the body size (13px), medium,
+**Anatomy.** A strip with a bottom hairline. Each tab is the label at the body size (14px), medium,
 the muted ink at rest and the foreground chosen, with a 2px underline in the brand blue under the
 chosen one. A count sits after the label (`ChipCount`) and a dot marks a view that wants a look. A
 `trailing` slot at the right end holds a search or a verb, outside the tab list.
@@ -99,7 +99,7 @@ and `ViewTabs`. The editor's `TabStrip` keeps the look for its own control.
 
 A chip narrows a list to a subset. It is a toggle button (`aria-pressed`), so several can be on.
 
-**Anatomy.** 28px, squared (`rounded-md`), the hint size (11px, 12 under a finger), an edge at rest
+**Anatomy.** 28px, squared (`rounded-md`), the hint size (12px), an edge at rest
 (`--input`) and, chosen, the accent ground under `--border-strong`. It presses as 44px under a finger
 (`hit-area`) without growing the row. Pill shapes are reserved for nothing.
 

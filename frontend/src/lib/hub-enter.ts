@@ -226,8 +226,8 @@ export const HUB_ENTER_SCRIPT = `(function () {
 
 /** The style: the sign-in page's dark surface, tokens copied from globals.css. */
 const STYLE = `
-:root{color-scheme:dark;--background:oklch(0.16 0 0);--foreground:oklch(1 0 0);--card:oklch(0.183 0 0);
---muted:oklch(0.7118 0.0129 286.0665);--border:oklch(0.275 0 0);--brand:oklch(0.9185 0.0444 238.9);
+:root{color-scheme:dark;--background:oklch(0.16 0 0);--foreground:oklch(0.985 0 0);--card:oklch(0.183 0 0);
+--muted:oklch(0.7118 0.0129 286.0665);--border:oklch(1 0 0 / 0.09);--brand:oklch(0.9185 0.0444 238.9);
 --signal:oklch(0.78 0.13 238.9);--chart-2:oklch(0.72 0.152 258);--radius:0.5rem}
 *{box-sizing:border-box}
 html,body{margin:0;min-height:100%;background:var(--background);color:var(--foreground)}

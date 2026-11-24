@@ -386,7 +386,7 @@ const Plot = memo(function Plot({
           tickLine={false}
           axisLine={false}
           minTickGap={44}
-          fontSize={10}
+          fontSize={11}
         />
         <YAxis
           domain={domain}
@@ -399,7 +399,7 @@ const Plot = memo(function Plot({
           width={axisWidth ?? "auto"}
           tickLine={false}
           axisLine={false}
-          fontSize={10}
+          fontSize={11}
           // No trailing zeros in the gutter: "25.0%" beside "50.0%" spends
           // four characters saying nothing the scale did not already say.
           // Not rounded to whole numbers either — on a 0–1% scale every
@@ -449,7 +449,7 @@ const Plot = memo(function Plot({
             label={{
               value: t.label,
               position: "insideTopRight",
-              fontSize: 10,
+              fontSize: 11,
               fill: "var(--muted-foreground)",
             }}
           />

@@ -29,10 +29,12 @@ const buttonVariants = cva(
   "inline-flex h-(--control-h) shrink-0 items-center justify-center gap-2 rounded-md text-body font-medium whitespace-nowrap focus-ring transition-all disabled:pointer-events-none disabled:opacity-50 aria-invalid:border-destructive aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
-      // A button is a rectangle of ground with a border, and nothing else. The
-      // lift it used to carry — a gloss, a shine, a lip, a drop shadow and a
-      // one-pixel translate on press — is gone: 553 controls all standing off
-      // the page is a page with no foreground.
+      // A button is a face a hair above the page: its fill and one lit pixel
+      // along its top edge (`--edge`), as light catches the top of a key, and
+      // no border round it. The lift it once carried — a gloss, a shine, a
+      // lip, a drop shadow and a one-pixel translate on press — stays gone:
+      // 553 controls all standing off the page is a page with no foreground.
+      // The edge is the whole of the height it takes.
       //
       // Feedback is colour, in two steps. Hover moves the face *away* from the
       // card it sits on; press moves it back past its resting value, so the
@@ -42,7 +44,8 @@ const buttonVariants = cva(
         // The command face is the brand blue, not ink: the product's one
         // pressable action wears its one colour, and the token carries the
         // hover and press steps so no call site re-mixes an opacity pair.
-        default: "bg-brand text-brand-foreground hover:bg-brand-hover active:bg-brand-active",
+        default:
+          "bg-brand text-brand-foreground shadow-edge-brand hover:bg-brand-hover active:bg-brand-active",
         //
         // The danger face has the same three steps as opaque colours. At rest
         // it is the red a sixth of the way to black, because white on the
@@ -50,15 +53,17 @@ const buttonVariants = cva(
         // token, press settles it past rest. The steps are tokens in
         // globals.css (`--destructive-face`, `--destructive-active`).
         destructive:
-          "bg-destructive-face text-destructive-foreground hover:bg-destructive active:bg-destructive-active",
+          "bg-destructive-face text-destructive-foreground shadow-edge-danger hover:bg-destructive active:bg-destructive-active",
+        // The border box stays, transparent at the sides and the foot, so the
+        // button is the size it was and its top border is the lit edge.
         outline:
-          "border border-input bg-control hover:bg-control-hover hover:text-accent-foreground active:bg-control-active",
+          "border border-transparent border-t-edge bg-control hover:bg-control-hover hover:text-accent-foreground active:bg-control-active",
         /**
          * @deprecated one caller (xterm-pane.tsx); use `outline`. Kept on the
          * control steps until it moves.
          */
         secondary:
-          "bg-secondary text-secondary-foreground hover:bg-control-hover active:bg-control-active",
+          "bg-secondary text-secondary-foreground shadow-edge hover:bg-control-hover active:bg-control-active",
         ghost: "hover:bg-accent hover:text-accent-foreground active:bg-menu-hover",
         // Press steps the ink down to the muted one rather than fading it:
         // text never takes an opacity.

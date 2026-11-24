@@ -74,11 +74,21 @@ const tokens = Object.fromEntries(
   [...root.matchAll(/--([a-z0-9-]+):\s*([^;]+);/g)].map((m) => [m[1], m[2].trim()]),
 )
 
-/** A colour as OKLab, from an `oklch()`, a `#hex`, a `var()` or a `color-mix(in oklab …)`. */
+/**
+ * A colour as OKLab, from an `oklch()`, a `#hex`, a `var()` or a `color-mix(in oklab …)`. A
+ * translucent `oklch(… / a)`, as the lines are, is read as it lands on the page's ground.
+ */
 function oklab(value) {
   value = value.trim()
   const ref = value.match(/^var\(--([a-z0-9-]+)\)$/)
   if (ref) return oklab(tokens[ref[1]])
+  const alpha = value.match(/^oklch\(([0-9.]+ [0-9.]+ [0-9.]+) \/ ([0-9.]+)\)$/)
+  if (alpha) {
+    const a = Number(alpha[2])
+    const ink = oklab(`oklch(${alpha[1]})`)
+    const ground = oklab("var(--background)")
+    return ink.map((x, i) => x * a + ground[i] * (1 - a))
+  }
   const lch = value.match(/^oklch\(([0-9.]+) ([0-9.]+) ([0-9.]+)\)$/)
   if (lch) {
     const [L, C, h] = lch.slice(1).map(Number)

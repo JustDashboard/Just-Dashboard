@@ -218,7 +218,9 @@ export function IdentityHeader({
         <div
           className={cn("contents sm:block sm:min-w-0", bar ? "sm:space-y-0.5" : "sm:space-y-1")}
         >
-          <p className="min-w-0 truncate text-base font-semibold tracking-tight">{lineTitle}</p>
+          <p className="min-w-0 truncate text-lg/6 font-semibold tracking-tight">
+            {lineTitle}
+          </p>
           <p className="col-span-2 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
             {lineFacts}
           </p>
@@ -354,7 +356,7 @@ function ProjectLine({
             ends in an ellipsis rather than running under the verbs. */}
         <p
           ref={titleRef}
-          className="flex max-w-full min-w-0 text-base font-semibold tracking-tight max-sm:block max-sm:truncate"
+          className="flex max-w-full min-w-0 text-lg/6 font-semibold tracking-tight max-sm:block max-sm:truncate"
         >
           {title}
         </p>

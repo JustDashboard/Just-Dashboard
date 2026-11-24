@@ -16,11 +16,13 @@ layer, a radius, a duration), or tailwind-merge drops it ([`type.md`](type.md)).
 
 ### Grounds
 
-The ladder a surface steps up: page, block, floating surface, control; a panel's ground is the one its insides are drawn over. Rules: [`surfaces.md`](surfaces.md).
+The window under the page, then the ladder a surface steps up: page, block, floating surface, control; a panel's ground is the one its insides are drawn over. Rules: [`surfaces.md`](surfaces.md).
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--background` | `oklch(0.16 0 0)` | `bg-background` |  |
+| `--ground` | `oklch(0.145 0 0)` | `bg-ground` | #0a0a0a |
+| `--canvas` | `oklch(0.16 0 0)` | `bg-canvas` |  |
+| `--background` | `var(--canvas)` | `bg-background` |  |
 | `--card` | `oklch(0.183 0 0)` | `bg-card` |  |
 | `--popover` | `oklch(0.2 0 0)` | `bg-popover` |  |
 | `--secondary` | `oklch(0.23 0 0)` | `bg-secondary` |  |
@@ -37,27 +39,31 @@ The three inks, and the foreground each ground pairs with; faint keeps 4.5:1. Ru
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--foreground` | `oklch(1 0 0)` | `text-foreground` |  |
-| `--card-foreground` | `oklch(1 0 0)` | `text-card-foreground` |  |
-| `--popover-foreground` | `oklch(1 0 0)` | `text-popover-foreground` |  |
-| `--secondary-foreground` | `oklch(0.9461 0 0)` | `text-secondary-foreground` |  |
+| `--foreground` | `oklch(0.985 0 0)` | `text-foreground` | #fafafa |
+| `--card-foreground` | `var(--foreground)` | `text-card-foreground` |  |
+| `--popover-foreground` | `var(--foreground)` | `text-popover-foreground` |  |
+| `--secondary-foreground` | `oklch(0.88 0.004 286)` | `text-secondary-foreground` | #d4d4d8 |
 | `--muted-foreground` | `oklch(0.7118 0.0129 286.0665)` | `text-muted-foreground` |  |
 | `--faint` | `oklch(0.62 0.0129 286.0665)` | `text-faint` |  |
 | `--accent-foreground` | `var(--foreground)` | `text-accent-foreground` |  |
 
 ### Edges
 
-A frame, a field, where a header meets a body, a destination's hover, a control's 3:1 edge (T3), a canvas's dots. Rules: [`surfaces.md`](surfaces.md).
+The three white lines, a frame, a field, where a header meets a body, a destination's hover, a control's 3:1 edge (T3), a control face's lit top, a canvas's dots. Rules: [`surfaces.md`](surfaces.md).
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--border` | `oklch(0.275 0 0)` | `border-border` |  |
-| `--input` | `oklch(0.275 0 0)` | `border-input` |  |
+| `--line-subtle` | `oklch(1 0 0 / 0.06)` | `border-line-subtle` |  |
+| `--line` | `oklch(1 0 0 / 0.09)` | `border-line` |  |
+| `--line-strong` | `oklch(1 0 0 / 0.16)` | `border-line-strong` |  |
+| `--border` | `var(--line)` | `border-border` |  |
+| `--input` | `var(--line)` | `border-input` |  |
 | `--control-edge` | `oklch(0.54 0 0)` | `border-control-edge` |  |
-| `--hairline` | `color-mix(in oklab, var(--border) 70%, transparent)` | `border-hairline` |  |
-| `--grid-dot` | `color-mix(in oklab, var(--border) 45%, transparent)` |  |  |
+| `--hairline` | `var(--line-subtle)` | `border-hairline` |  |
+| `--grid-dot` | `oklch(1 0 0 / 0.05)` |  |  |
 | `--border-strong` | `color-mix(in oklab, var(--foreground) 22%, transparent)` | `border-border-strong` |  |
 | `--wire` | `color-mix(in oklab, var(--foreground) 22%, var(--background))` | `border-wire` |  |
+| `--edge` | `oklch(1 0 0 / 0.06)` | `border-edge` |  |
 
 ### Brand
 
@@ -66,7 +72,7 @@ A command's face, where you are, a location mark, the focus ring. Rules: [`colou
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
 | `--brand` | `oklch(0.9185 0.0444 238.9)` | `bg-brand` | #CAE9FF — the mark's own blue |
-| `--brand-foreground` | `oklch(0 0 0)` | `text-brand-foreground` | #000000 |
+| `--brand-foreground` | `oklch(0.2 0.03 240)` | `text-brand-foreground` | #0b1620 |
 | `--signal` | `oklch(0.78 0.13 238.9)` | `bg-signal` |  |
 | `--brand-hover` | `color-mix(in oklab, var(--brand) 78%, var(--signal) 22%)` | `bg-brand-hover` |  |
 | `--brand-active` | `color-mix(in oklab, var(--brand) 94%, #000 6%)` | `bg-brand-active` |  |
@@ -78,8 +84,8 @@ White as a fill, not the command face. Rules: [`colour.md`](colour.md).
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--primary` | `oklch(1 0 0)` | `bg-primary` |  |
-| `--primary-foreground` | `oklch(0 0 0)` | `text-primary-foreground` |  |
+| `--primary` | `oklch(0.985 0 0)` | `bg-primary` |  |
+| `--primary-foreground` | `oklch(0.17 0.02 240)` | `text-primary-foreground` |  |
 
 ### Status
 
@@ -98,7 +104,7 @@ The danger button at rest and pressed, and its label. Rules: [`colour.md`](colou
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--destructive-foreground` | `oklch(1 0 0)` | `text-destructive-foreground` |  |
+| `--destructive-foreground` | `oklch(0.985 0 0)` | `text-destructive-foreground` |  |
 | `--destructive-face` | `color-mix(in oklab, var(--destructive) 85%, #000)` | `bg-destructive-face` |  |
 | `--destructive-active` | `color-mix(in oklab, var(--destructive) 70%, #000)` | `bg-destructive-active` |  |
 
@@ -269,11 +275,11 @@ The rail. Rules: [`surfaces.md`](surfaces.md).
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--sidebar` | `var(--background)` | `bg-sidebar` |  |
-| `--sidebar-foreground` | `oklch(0.9461 0 0)` | `text-sidebar-foreground` |  |
+| `--sidebar` | `var(--ground)` | `bg-sidebar` |  |
+| `--sidebar-foreground` | `var(--secondary-foreground)` | `text-sidebar-foreground` |  |
 | `--sidebar-accent` | `var(--accent)` | `bg-sidebar-accent` |  |
-| `--sidebar-accent-foreground` | `oklch(1 0 0)` | `text-sidebar-accent-foreground` |  |
-| `--sidebar-border` | `oklch(0.245 0 0)` | `border-sidebar-border` |  |
+| `--sidebar-accent-foreground` | `var(--foreground)` | `text-sidebar-accent-foreground` |  |
+| `--sidebar-border` | `var(--line-subtle)` | `border-sidebar-border` |  |
 
 ## Scales
 
@@ -283,10 +289,12 @@ The product's own steps, each with its line height; Tailwind's `xs`, `sm`, `base
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--text-micro` | `0.625rem` / `0.875rem`; touch `0.6875rem` / `0.9375rem` | `text-micro` | 10px — eyebrows, tags, the smallest legible mark |
-| `--text-hint` | `0.6875rem` / `1rem`; touch `0.75rem` / `1rem` | `text-hint` | 11px — a row's secondary line |
-| `--text-body` | `0.8125rem` / `1.25rem` | `text-body` | 13px — body and row text; the product's default |
-| `--text-title` | `0.9375rem` / `1.375rem` | `text-title` | 15px — the title of a surface, and a section head |
+| `--text-micro` | `0.6875rem` / `0.875rem`; touch `0.6875rem` / `0.9375rem` | `text-micro` | 11px — eyebrows, tags, the smallest legible mark |
+| `--text-hint` | `0.75rem` / `1rem` | `text-hint` | 12px — a row's secondary line |
+| `--text-xs` | `0.8125rem` / `1rem` | `text-xs` | 13px — a table cell, a status word, a tooltip |
+| `--text-body` | `0.875rem` / `1.25rem` | `text-body` | 14px — body and row text; the product's default |
+| `--text-sm` | `0.9375rem` / `1.25rem` | `text-sm` | 15px — an option row's title |
+| `--text-title` | `1rem` / `1.375rem` | `text-title` | 16px — the title of a surface, and a section head |
 
 ### Fonts
 
@@ -304,7 +312,7 @@ Letter spacing, every step relative to the normal one. Rules: [`type.md`](type.m
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
-| `--tracking-normal` | `-0.02em` | `tracking-normal` |  |
+| `--tracking-normal` | `-0.005em` | `tracking-normal` |  |
 | `--tracking-tighter` | `calc(var(--tracking-normal) - 0.05em)` | `tracking-tighter` |  |
 | `--tracking-tight` | `calc(var(--tracking-normal) - 0.025em)` | `tracking-tight` |  |
 | `--tracking-wide` | `calc(var(--tracking-normal) + 0.025em)` | `tracking-wide` |  |
@@ -328,7 +336,7 @@ One radius per role, outer to inner: a swatch, a mark, a control, a well, a bloc
 
 ### Shadow
 
-Only for what floats: a popover, a dropdown, a dialog. No control carries one. Rules: [`surfaces.md`](surfaces.md).
+Only for what floats: a popover, a dropdown, a dialog. The three `edge` steps are insets, a control face's lit top pixel, and cast nothing. Rules: [`surfaces.md`](surfaces.md).
 
 | Token | Value | Utility | Note |
 | --- | --- | --- | --- |
@@ -337,6 +345,9 @@ Only for what floats: a popover, a dropdown, a dialog. No control carries one. R
 | `--shadow-md` | `0 6px 16px -6px oklch(0 0 0 / 0.6)` | `shadow-md` |  |
 | `--shadow-lg` | `0 12px 28px -10px oklch(0 0 0 / 0.68)` | `shadow-lg` |  |
 | `--shadow-xl` | `0 20px 44px -16px oklch(0 0 0 / 0.72)` | `shadow-xl` |  |
+| `--shadow-edge` | `inset 0 1px 0 0 var(--edge)` | `shadow-edge` |  |
+| `--shadow-edge-brand` | `inset 0 1px 0 0 oklch(1 0 0 / 0.4)` | `shadow-edge-brand` |  |
+| `--shadow-edge-danger` | `inset 0 1px 0 0 oklch(1 0 0 / 0.16)` | `shadow-edge-danger` |  |
 
 ### Motion
 

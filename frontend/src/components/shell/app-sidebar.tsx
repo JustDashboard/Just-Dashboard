@@ -314,7 +314,9 @@ export function AppSidebar() {
   }
 
   return (
-    <Sidebar collapsible="icon" className="border-r border-sidebar-border">
+    // No edge of its own from `md` up: the page's sheet has one, and the rail
+    // steps back onto the window's ground beside it.
+    <Sidebar collapsible="icon" className="group-data-[side=left]:border-r-0">
       {/* Collapsed, the header's padding has to be the nav's, not its own.
           The rail is 3rem and a rail button is 2rem: at p-3 the header's
           content box is only 1.5rem, so the search button — which keeps its
@@ -468,7 +470,8 @@ export function AppSidebar() {
  * pages and every container, site and database on the box, and the one thing
  * that still sees them all at once now that the rail shows one section at a
  * time — so it is drawn as the search field it opens rather than as one more
- * grey row: a framed well with the mark's blue glass and the shortcut in caps,
+ * grey row: a raised face with the mark's blue glass and the shortcut in caps
+ * set into it (the lit top edge of `--edge`, as Just Hub draws its search),
  * which is what the eye looks for when it wants to type. Collapsed, it keeps
  * its place in the icon rail as the glass alone.
  */
@@ -483,7 +486,7 @@ function SearchButton({ onOpen }: { onOpen: () => void }) {
     // shortcut is said. The button's `::after` covers the whole well, so a
     // press anywhere on it, the caps included, is a press on Search, and the
     // well draws the ring for the button inside it.
-    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-sidebar-border bg-card pr-1.5 text-body text-muted-foreground focus-ring-within transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:border-rule-brand hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:h-9">
+    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-transparent border-t-edge bg-control pr-1.5 text-body text-muted-foreground focus-ring-within transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-control-hover hover:text-sidebar-accent-foreground md:h-9">
       <button
         type="button"
         onClick={onOpen}

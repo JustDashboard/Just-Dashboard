@@ -38,5 +38,6 @@ export function useLauncherKeys() {
   return useApple() ? "⌘+K" : "Ctrl+K"
 }
 
+/** One key; the same cap as `components/keycaps.tsx` draws (see there). */
 export const KEYCAP =
-  "inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-hairline bg-control px-1 font-mono text-micro leading-none text-muted-foreground"
+  "inline-flex h-5 min-w-5 items-center justify-center rounded-sm border border-line bg-ground/50 px-1 font-sans text-micro font-medium leading-none text-muted-foreground"

@@ -2,6 +2,14 @@
 
 ## Reference
 
+**The frame.** The window is `--ground`: the rail, the phone's strip and, from `md` up, an 8px
+margin round the page. The page is a sheet on it, `--canvas` (`--background`), with its own edge
+(`--line`) and `rounded-xl` corners, so the work is always the lighter, framed thing and the
+navigation steps back (Just Hub's frame, 0.9.1). On a phone the sheet is the screen.
+
+**Lines.** `--line-subtle`, `--line` and `--line-strong` are white at 6, 9 and 16%, so one edge reads
+the same on every ground. `--border` and `--input` are `--line`; `--hairline` is `--line-subtle`.
+
 **Grounds.** A surface steps up the ladder `--background` → `--card` → `--control`. A header strip
 is `--surface-header`, a well `--surface-sunken`. A hairline (`--hairline`) is where a header meets
 a body or two things meet.
@@ -34,7 +42,7 @@ these carries a comment saying why.
 
 | Rule | Held by |
 | --- | --- |
-| Nothing lifts: no gradient, no glow, no drop shadow on a block or a control. | convention |
+| Nothing lifts: no gradient, no glow, no drop shadow on a block or a control. A control's face carries one lit pixel along its top (`--edge`), and nothing else. | convention |
 | A bare `rounded` is `rounded-sm` spelled twice; use the named step. | lint `radius-bare` |
 | Only the steps above. | lint `radius-scale`; coming: `radius-arbitrary` (WP-39) |
 | Press feedback is colour (`active:bg-control-active`), never movement or a shadow. | convention |
@@ -47,6 +55,15 @@ Cards, buttons, tabs, tiles and the sign-in panel used to carry `raised`: a grad
 hairline on the top edge, a dark lip below, a drop shadow, and an inversion on `:active`. It is
 removed. Forty-nine surfaces all claiming to stand in front of the page is a page with no foreground,
 and the treatment spent five CSS properties saying what a one-pixel border already says.
+
+**A control's face sits a hair above the page** (0.9.1). A button, a toggle and a chosen tab carry
+one pixel of white along their top edge (`--edge`, white at 6%) and no border round them, as light
+catches the top of a key: `border-t-edge` on a face with a border box (the side and foot borders are
+transparent, so the control is the size it was), `shadow-edge` on one without, and the brighter
+`shadow-edge-brand` and `shadow-edge-danger` on the coloured faces. It is an inset, not a shadow: it
+casts nothing and moves nothing, and a press is still colour. Just Hub's search field is where it
+came from. Keycaps go the other way, set a step into whatever holds them (`bg-ground/50`, a `--line`
+edge).
 
 What separates a surface now:
 

@@ -5,19 +5,25 @@
 The face is Source Sans 3. Every step has its own line height, so a line's box never comes from
 an ancestor.
 
-| Role | Utility | Size / line (px) | On a touch screen | Weight | Ink | For |
-| --- | --- | --- | --- | --- | --- | --- |
-| micro | `text-micro` | 10 / 14 | 11 / 15 | 500 (600 in `.eyebrow`) | muted, faint for axes | eyebrow, caps tag, axis tick, chip count |
-| hint | `text-hint` | 11 / 16 | 12 / 16 | 400 (500 for a table head) | muted | a row's second line, a field hint, a facts line, a table head, a caption |
-| xs | `text-xs` | 12 / 16 | same | 400 | foreground or muted | a table cell, a status word, a tooltip |
-| body | `text-body` | 13 / 20 | same | 400 reading, 500 a name | foreground | a row title, a field, a select, a menu item, a button label |
-| sm | `text-sm` | 14 / 20 | same | 500 | foreground | an option row's title, and nothing else |
-| title | `text-title` | 15 / 22 | same | 600 | foreground | a surface's title and a page section's head (with its hairline) |
-| identity | `text-base` | 16 / 24 | same | 600 | foreground | the identity header's name |
-| display | `text-2xl` | 24 / 32 | same | 600 | foreground | a flow page's question, a stat figure, a one-time code |
+| Role | Utility | Size / line (px) | Weight | Ink | For |
+| --- | --- | --- | --- | --- | --- |
+| micro | `text-micro` | 11 / 14 (15 on touch) | 500 (600 in `.eyebrow`) | muted, faint for axes | eyebrow, caps tag, axis tick, chip count |
+| hint | `text-hint` | 12 / 16 | 400 (500 for a table head) | muted | a row's second line, a field hint, a facts line, a table head, a caption |
+| xs | `text-xs` | 13 / 16 | 400 | foreground or muted | a table cell, a status word, a tooltip |
+| body | `text-body` | 14 / 20 | 400 reading, 500 a name | foreground | a row title, a field, a select, a menu item, a button label |
+| sm | `text-sm` | 15 / 20 | 500 | foreground | an option row's title, and nothing else |
+| title | `text-title` | 16 / 22 | 600 | foreground | a surface's title and a page section's head (with its hairline) |
+| identity | `text-lg/6` | 18 / 24 | 600 | foreground | the identity header's name |
+| display | `text-2xl` | 24 / 32 | 600 | foreground | a flow page's question, a stat figure, a one-time code |
 
-"On a touch screen" is `pointer: coarse` (T1, adopted 15 Nov 2026): `text-hint` reads 12px and
-`text-micro` 11px there, through the tokens, so no call site writes it. Desktop is unchanged.
+Every step is one pixel up from 0.9.0 (Spoke, adopted 23 Nov 2026), which puts micro, hint, body and
+title exactly on Just Hub's scale, and each keeps the line it sat on, so a row is the height it was.
+`text-xs` and `text-sm` are Tailwind's names, retuned in `globals.css` to move with the rest. A phone
+sets the same sizes as a desk: the touch step T1 gave 12 and 11px to a phone, and the desk reads
+those now too.
+
+**Tracking.** The body is set at −0.005em (`--tracking-normal`), nearly the face's own spacing. It
+was −0.02em, which pressed a line of Source Sans 3 into a block. Heads (`h1`–`h3`) keep −0.015em.
 
 **Weights.** Nothing is bold.
 
@@ -32,8 +38,8 @@ trigger that composes it resets to 400). Semibold on `text-hint`, `text-micro` (
 `.eyebrow`), `text-xs` or `text-body` emphasis is off the rule: a head is a head's size, and
 emphasis in a sentence is the name's 500.
 
-**Caps labels.** `.eyebrow` (10, 600, 0.14em, muted) opens a section, a panel header or a tile.
-`.caps` (10, 500, 0.06em, uppercase, faint) is a `Tag`'s face and every copy of it.
+**Caps labels.** `.eyebrow` (11, 600, 0.08em, muted) opens a section, a panel header or a tile.
+`.caps` (11, 500, 0.06em, uppercase, faint) is a `Tag`'s face and every copy of it.
 
 **Figures.** `.numeric` wherever figures are compared (tabular figures), and by default in table
 cells. `tracking-code` spaces a one-time code.
@@ -62,13 +68,13 @@ the upright alone. The files are whole, not subset to Latin: the licence reserve
 a subset is a modified font that could not keep it. `--font-mono` stays fixed-width for terminals, source code, and technical identifiers.
 
 **Glyphs are laid out at their real widths.** Chromium on Linux hints a web font and rounds every
-glyph's advance to a whole pixel, and against the body's −0.02em tracking that broke the 11–13px
+glyph's advance to a whole pixel, and against the body's then −0.02em tracking that broke the 11–13px
 lines into uneven pieces — "No tes", "Emp ty", a hint reading "Howitis listed" — at any device
 scale. `body` sets `text-rendering: geometricPrecision`, which lays glyphs out at their true
 advances there; macOS and Windows already did.
 
-The ladder is `text-micro` (10) → `text-hint` (11) → `text-xs` (12) → `text-body` (13) →
-`text-sm` (14) → `text-title` (15). An arbitrary `text-[Npx]` is a departure from it, and the linter
+The ladder is `text-micro` (11) → `text-hint` (12) → `text-xs` (13) → `text-body` (14) →
+`text-sm` (15) → `text-title` (16). It was one pixel smaller at every step until 0.9.1. An arbitrary `text-[Npx]` is a departure from it, and the linter
 says so.
 
 **`text-title` is what a surface calls itself**: a `PanelHeader`, a `Section`, a `Modal`, a
