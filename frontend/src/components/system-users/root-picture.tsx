@@ -91,7 +91,11 @@ export function RootPicture({
         </span>
       ),
       title: (
-        <span className={cn("font-mono", ONE_LINE)} title={user.username}>
+        // A block, so the line is the mono face's own. Inline, it stood on
+        // the sans line's baseline with its own ascent, and at 14px that
+        // made the name's line 21.25px where the waiting node's is 19.25:
+        // four accounts landed 8px taller than the picture had waited.
+        <span className={cn("block font-mono", ONE_LINE)} title={user.username}>
           {user.username}
         </span>
       ),

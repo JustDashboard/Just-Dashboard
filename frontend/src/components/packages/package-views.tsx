@@ -255,7 +255,10 @@ export function PackagePicture({
       // with one or two things a side is a level line and one with more a
       // column (`flowForm`): the room is held for both, and the line stands
       // on its middle. The top is room for the headings hung over the sides.
-      className="lg:flex lg:min-h-[19.75rem] lg:flex-col lg:justify-center lg:pt-12"
+      // 323px is four nodes of three lines (49.75 each: 14 + 19.25 + 16.5)
+      // on their three 20px gaps, under that top and in the picture's own
+      // 8px: it was 316 while a node was 47, which four of them now pass.
+      className="lg:flex lg:min-h-[20.1875rem] lg:flex-col lg:justify-center lg:pt-12"
       phone="marks"
       loading={!detail}
       start={{

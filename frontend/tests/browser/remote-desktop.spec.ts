@@ -899,11 +899,15 @@ test("a stream takes the whole content area in the computer's own shape, its pad
       .evaluate((canvas) => {
         const rect = canvas.getBoundingClientRect()
         const padding = (rect.width - rect.height * 1.6) / 2
+        // The sheet's inset leaves the frame a width that is not a whole
+        // number of pixels, so an edge can sit a fraction to either side:
+        // `+ 0` reads a rounded -0 as the 0 it is.
+        const whole = (value: number) => Math.round(value) + 0
         return {
           shape: Math.round((rect.width / rect.height) * 100) / 100,
-          height: Math.round(rect.height - innerHeight),
-          left: Math.round(rect.left + padding),
-          right: Math.round(rect.right - padding - innerWidth),
+          height: whole(rect.height - innerHeight),
+          left: whole(rect.left + padding),
+          right: whole(rect.right - padding - innerWidth),
         }
       })
   await expect.poll(picture).toEqual({ shape: 1.78, height: 0, left: 0, right: 0 })

@@ -14,10 +14,15 @@ type Purpose = (typeof PURPOSES)[number]
  * carries no mark; the one purpose still being tested is the exception, so
  * it is flagged where it is chosen rather than on a shelf of its own. The
  * sentence gives way before the tag does.
+ *
+ * The line is held at the sentence's 16px. The tag's own line is 16.5px at
+ * its 11px size, and set on a shared baseline the two made a line of 17.5:
+ * the experimental card stood a pixel and a half over the others in
+ * Workspace's grid, whose cards are one height.
  */
 export function ExperimentalMark({ className }: { className?: string }) {
   return (
-    <span className={cn("flex min-w-0 items-baseline gap-2", className)}>
+    <span className={cn("flex h-4 min-w-0 items-baseline gap-2", className)}>
       <Tag tone="warning" className="shrink-0">
         Experimental
       </Tag>

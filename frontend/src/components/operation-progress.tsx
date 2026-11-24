@@ -45,8 +45,11 @@ export function OperationProgress({
     // long confirm label — it takes the footer's first line and they the
     // second. At 390px, Cancel and a pending Delete sat within a few pixels of
     // a 128px minimum, so a renderer whose glyphs ran wider wrapped the footer
-    // and moved the dialog; 112px leaves them room to spare.
-    <div data-slot="operation-progress" className="mr-auto min-w-28 flex-1">
+    // and moved the dialog. The type has since grown a pixel and its letters
+    // sit wider, and Cancel beside a pending "Move to Trash" left 106px where
+    // 112 was asked: 80px leaves them room to spare again, and the words
+    // truncate as they always have.
+    <div data-slot="operation-progress" className="mr-auto min-w-20 flex-1">
       <p role="status" className="text-body leading-tight">
         <TextShimmer className="block truncate">{label}</TextShimmer>
       </p>
