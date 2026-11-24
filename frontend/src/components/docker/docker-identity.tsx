@@ -19,7 +19,10 @@ export function DockerTitle({ version }: { version?: string }) {
     <span className="inline-flex min-w-0 items-baseline gap-2">
       Docker{" "}
       {version && (
-        <span className="truncate font-mono text-body font-normal text-muted-foreground">
+        // On an 18px line rather than the body's 20: set on the name's
+        // baseline, the mono face's 20px line reached a pixel past the name's
+        // 24, and the bands under the header stepped down as the version landed.
+        <span className="truncate font-mono text-body leading-4.5 font-normal text-muted-foreground">
           {version}
         </span>
       )}

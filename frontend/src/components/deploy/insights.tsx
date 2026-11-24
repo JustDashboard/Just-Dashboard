@@ -76,9 +76,13 @@ function chartDay(date: string) {
   return weekdayAt(new Date(`${date}T00:00:00`))
 }
 
-/** The charts' grid, and a chart's place while its days are read: its head, its bars and its axis. */
+/**
+ * The charts' grid, and a chart's place while its days are read: its head
+ * (a 20px title over 12px and a rule), its 112px of bars and its 14px axis,
+ * 8px apart. 175px, so the deployments under the charts stand where they land.
+ */
 const CHARTS = "grid min-w-0 gap-x-10"
-const CHART_WAITING = "h-[10.875rem] w-full rounded-lg"
+const CHART_WAITING = "h-[10.9375rem] w-full rounded-lg"
 
 type Day = DeploymentInsights["daily"][number]
 type DayLine = { text: string; fill?: string }

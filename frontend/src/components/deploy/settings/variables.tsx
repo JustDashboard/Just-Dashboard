@@ -895,12 +895,15 @@ function VariablesBody({
     ) : (
       <div className="min-w-0 space-y-4">
         {/* The chips take what they need and the search the rest, so all eight
-            still leave it a usable width on one line. A phone keeps it on top. */}
+            still leave it a usable width on one line. A phone keeps it on top.
+            All eight are 617px of the 768 a desk's column has, so the search
+            asks for 128 at least and prompts with one word, which fits in it:
+            at 160 it dropped to a line of its own under the chips. */}
         <div className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-2">
           <SearchInput
             aria-label="Search variables"
-            placeholder="Search variables…"
-            containerClassName="sm:order-last sm:w-auto sm:min-w-40 sm:flex-1"
+            placeholder="Search…"
+            containerClassName="sm:order-last sm:w-auto sm:min-w-32 sm:flex-1"
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />

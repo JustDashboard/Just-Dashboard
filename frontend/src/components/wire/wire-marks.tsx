@@ -193,7 +193,14 @@ function Hub({
           from under them (the foot), so none runs through a word. */}
       <div data-slot="wire-hub-words" className="mt-2 max-w-full min-w-0">
         {hub.eyebrow && <p className="eyebrow">{hub.eyebrow}</p>}
-        {hub.title && <div className="text-body leading-snug font-medium">{hub.title}</div>}
+        {/* A name in mono at its own size's height, as `WireNode` sets it:
+            at the line's it stood two pixels taller than the grey bar it
+            waited as, and everything under the picture stepped down. */}
+        {hub.title && (
+          <div className="text-body leading-snug font-medium [&_.font-mono]:leading-none">
+            {hub.title}
+          </div>
+        )}
         {hub.hint && <div className="text-hint leading-snug text-muted-foreground">{hub.hint}</div>}
       </div>
       <div ref={footRef} aria-hidden className="mt-1 h-0 w-0" />

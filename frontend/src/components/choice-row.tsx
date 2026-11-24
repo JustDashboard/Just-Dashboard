@@ -98,6 +98,14 @@ export function useChoicePress({
  */
 export const CHOICE_ROW_BOX = "flex min-h-14 min-w-0 rounded-xl px-3 py-2.5"
 
+/**
+ * A row's name. One in mono (a store's, a variable's) is set at its own
+ * size's height, as a literal in the description is: at the line's height the
+ * other face's taller ascent grew the line a pixel, and the row past the 58px
+ * its ghost keeps.
+ */
+const CHOICE_ROW_TITLE = "text-body font-medium [&_.font-mono]:leading-none"
+
 /** The resting edge and ground of a card that does not answer the pointer. */
 const CHOICE_ROW_EDGE = "relative isolate rounded-xl border bg-choice-surface"
 
@@ -199,7 +207,7 @@ export function ChoiceRow({
         )}
       >
         {disabled ? (
-          <span className="block max-w-full min-w-0 truncate text-body font-medium">{title}</span>
+          <span className={cn(CHOICE_ROW_TITLE, "block max-w-full min-w-0 truncate")}>{title}</span>
         ) : href ? (
           <Link
             data-workspace-item={workspaceItem?.id}
@@ -207,7 +215,10 @@ export function ChoiceRow({
             href={href}
             aria-label={verb}
             onClick={(event) => event.stopPropagation()}
-            className="block max-w-full min-w-0 truncate rounded-sm text-left text-body font-medium focus-ring"
+            className={cn(
+              CHOICE_ROW_TITLE,
+              "block max-w-full min-w-0 truncate rounded-sm text-left focus-ring",
+            )}
           >
             {title}
           </Link>
@@ -223,7 +234,10 @@ export function ChoiceRow({
               event.stopPropagation()
               press.go()
             }}
-            className="block max-w-full min-w-0 truncate rounded-sm text-left text-body font-medium focus-ring"
+            className={cn(
+              CHOICE_ROW_TITLE,
+              "block max-w-full min-w-0 truncate rounded-sm text-left focus-ring",
+            )}
           >
             {title}
           </button>
