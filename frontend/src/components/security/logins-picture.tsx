@@ -33,13 +33,14 @@ const ROWS = 4
 /**
  * The picture's box. On a phone its rows of marks are one height by
  * themselves, given the hub's two lines of words. Wide, as a column a side,
- * it is held four rows tall whatever it draws, so the lists under it stay
- * where they are from one read to the next. As rows it is as tall as they
+ * it is held four rows tall whatever it draws (four of 49.75px, three gaps
+ * of 20 and 32 of padding are 291px), so the lists under it stay where they
+ * are from one read to the next. As rows it is as tall as they
  * are, one or two a side, with nothing held open: what it waits as is what
  * it last drew (`drawn`).
  */
 const HELD =
-  "flex flex-col justify-center max-lg:min-h-[20.75rem] lg:has-[[data-form=column]]:min-h-[17.75rem]"
+  "flex flex-col justify-center max-lg:min-h-[20.75rem] lg:has-[[data-form=column]]:min-h-[18.25rem]"
 
 /** A person's face at the size of the marks beside it, on the tile every mark stands on. */
 const FACE = { lg: "size-14", md: "size-11", sm: "size-9" } as const

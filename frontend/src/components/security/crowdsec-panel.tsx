@@ -306,7 +306,9 @@ function EnforcementEvidence({
             key={bouncer.name}
             title={bouncer.name}
             subtitle={
-              <span className="flex min-w-0 items-center gap-x-2">
+              // The second line's own 16px whatever stands on it: a tag alone
+              // is half a pixel taller, and the box took its height.
+              <span className="flex h-4 min-w-0 items-center gap-x-2">
                 <Tag>{bouncer.kind}</Tag>
                 {bouncer.unit && (
                   <span className="truncate font-mono">
