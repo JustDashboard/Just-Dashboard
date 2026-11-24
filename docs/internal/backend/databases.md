@@ -167,7 +167,9 @@ is connected by naming the instance found, not by typing its address again.
   dashboard's own store, a container's volume, a deployment's or a compose stack's directory, the
   system's (`/var/lib`, `/var/cache`, an NSS `nssdb`), a backup, a tool's, or an application's. A
   backup is a copy kept aside — a file with the store's own name anywhere but the store (a copy taken
-  before a repair, one a test run kept), anything under a directory with `backup`, `backups` or `bak`
+  before a repair, one a test run kept), the copies an update takes of the store under the data
+  directory's `pre-update/` (the data directory is mounted into the dashboard's own container, so
+  they were a container's files until 0.9.1), anything under a directory with `backup`, `backups` or `bak`
   as one of its words (`/var/backups`, `db-backups`), or a file named as a copy (`.bak`, `.backup`,
   `.old`, `.orig`). A tool's is a program's own state — anything under a hidden directory, a
   browser's or a browser driver's profile (a directory naming Playwright, Puppeteer, Chrome,

@@ -1276,6 +1276,8 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 		StorePath: "/var/lib/just-dashboard/vpsd.db",
 		DataDir:   "/var/lib/just-dashboard",
 		Mounts: []MountPlace{
+			// The dashboard's own container mounts its data directory.
+			{Source: "/var/lib/just-dashboard", Containers: []string{"just-dashboard-backend-1"}},
 			{Source: "/var/lib/docker/volumes/n8n_data/_data", Volume: "n8n_data", Containers: []string{"n8n-app"}},
 			{Source: "/var/lib/docker/volumes/old-data/_data", Volume: "old-data"},
 			{Source: "/var/lib/docker/volumes/pg-data/_data", Volume: "pg-data", Containers: []string{"pg"}},
@@ -1304,6 +1306,8 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 			{Path: "/srv/app/build_temp/seed.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/srv/templates/app.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/var/backups/just-dashboard/vpsd-before-repair/vpsd.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/var/lib/just-dashboard/pre-update/vpsd-0.8.6-20261118T012633Z.db", Engine: "sqlite", Size: 4096, Modified: when},
+			{Path: "/host/var/lib/just-dashboard/pre-update/vpsd-0.8.6-20261118T012633Z.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/home/ubuntu/pr136-evidence/backend-e2e/data/vpsd.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/srv/app/db-backups/app.db", Engine: "sqlite", Size: 4096, Modified: when},
 			{Path: "/srv/app/data/app.db.bak", Engine: "sqlite", Size: 4096, Modified: when},
@@ -1338,6 +1342,10 @@ func TestFilesAreListedWithTheirHolder(t *testing.T) {
 		"file:/home/ubuntu/pr136-evidence/backend-e2e/data/vpsd.db":   HolderBackup,
 		"file:/srv/app/db-backups/app.db":                             HolderBackup,
 		"file:/srv/app/data/app.db.bak":                               HolderBackup,
+		// The copies an update takes of the store, inside the data directory
+		// the dashboard's own container mounts, seen there and through /host.
+		"file:/var/lib/just-dashboard/pre-update/vpsd-0.8.6-20261118T012633Z.db":      HolderBackup,
+		"file:/host/var/lib/just-dashboard/pre-update/vpsd-0.8.6-20261118T012633Z.db": HolderBackup,
 		// A scratch directory and what a build or a test run fills.
 		"file:/home/ubuntu/jdt-scratch/jd-live-fixture.db": HolderTool,
 		"file:/home/ubuntu/web/node_modules/pkg/test.db":   HolderTool,

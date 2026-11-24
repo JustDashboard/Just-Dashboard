@@ -196,6 +196,17 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 		// copies were the files the control center offered to open first.
 		return HolderBackup, nil, ""
 	}
+	if places.DataDir != "" {
+		// The copies an update takes of the store before it starts
+		// (selfupdate.PreUpdateDir), named vpsd-<version>-<time>.db. The data
+		// directory is mounted into the dashboard's own container, so without
+		// this they were a container's files, offered twice (once through
+		// /host) among the files ready to open.
+		copies := path.Join(places.DataDir, "pre-update")
+		if within(copies, file) || within(copies, view) {
+			return HolderBackup, nil, ""
+		}
+	}
 	var best *MountPlace
 	for i := range places.Mounts {
 		m := &places.Mounts[i]
