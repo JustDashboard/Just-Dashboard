@@ -3146,12 +3146,14 @@ test.describe("Files at a desk", () => {
     const bar = page.getByRole("navigation", { name: "Files", exact: true })
     await expect(bar).toBeVisible()
     // The frame has no margin to float in: it runs from the app's rail to
-    // the window's edges, and the bar is its foot.
+    // the sheet's edges, and the bar is its foot. From `md` up the sheet is
+    // inset from the window, so its own edges are what the bar is held to.
     const foot = await boxOf(bar)
     const frame = await boxOf(page.locator("[data-slot=page]"))
+    const sheet = await boxOf(page.locator("[data-workspace-shell-scroll]"))
     expect(Math.round(foot.x)).toBe(Math.round(frame.x))
-    expect(Math.round(foot.x + foot.width)).toBe(800)
-    expect(Math.round(foot.y + foot.height)).toBe(900)
+    expect(Math.round(foot.x + foot.width)).toBe(Math.round(sheet.x + sheet.width))
+    expect(Math.round(foot.y + foot.height)).toBe(Math.round(sheet.y + sheet.height))
     expect(Math.round((await boxOf(strip)).y)).toBe(Math.round(frame.y))
     await page
       .getByRole("navigation", { name: "Files", exact: true })
