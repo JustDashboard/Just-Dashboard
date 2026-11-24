@@ -110,11 +110,23 @@ test.describe("right-sizing", () => {
     await expect(card.getByText("Too tight", { exact: true })).toBeVisible()
     await expect(card.getByText("640 MiB", { exact: true })).toBeVisible()
     await expect(card.getByText("0.35 cores", { exact: true })).toBeVisible()
+    // Each limit is a reading line: what to do from what it is, what it used
+    // under that, and the gauge at its end named by the readings in full.
+    const limits = card.locator("[data-slot=reading-line]")
+    await expect(limits).toHaveCount(2)
+    await expect(limits.nth(0)).toContainText("Raise to 640 MiB from 512 MiB")
+    await expect(limits.nth(1)).toContainText("Lower to 0.35 cores from 4 cores")
+    await expect(card.getByText("491 MiB most of the time, 500 MiB at peak")).toBeVisible()
+    await expect(card.getByText("0.21 cores most of the time, 0.6 cores at peak")).toBeVisible()
     await expect(
-      card.getByText("491 MiB most of the time · 500 MiB at its peak · limit 512 MiB"),
+      card.getByRole("img", {
+        name: "Memory: 491 MiB most of the time · 500 MiB at its peak · limit 512 MiB; suggested 640 MiB",
+      }),
     ).toBeVisible()
     await expect(
-      card.getByText("0.21 cores most of the time · 0.6 cores at its peak · limit 4 cores"),
+      card.getByRole("img", {
+        name: "CPU: 0.21 cores most of the time · 0.6 cores at its peak · limit 4 cores; suggested 0.35 cores",
+      }),
     ).toBeVisible()
     await expect(card.getByText(/96% of the limit/)).toBeVisible()
     await expect(card.getByText(/From 11,520 samples over 2 days/)).toBeVisible()
@@ -138,6 +150,7 @@ test.describe("right-sizing", () => {
     expect(runtime.command).toEqual(["bun", "start"])
     expect(runtime.internalPort).toBe(3000)
     await expect(card.getByText("Sized right", { exact: true })).toBeVisible()
+    await expect(limits.nth(0)).toContainText("640 MiB fits")
     await expect(card.getByText(/The saved limits apply with the next release/)).toBeVisible()
     await expect(card.getByRole("button", { name: "Apply suggested limits" })).toHaveCount(0)
   })

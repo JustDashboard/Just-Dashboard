@@ -4,10 +4,12 @@ import {
   applyToRuntime,
   cores,
   cpuReadings,
+  cpuUse,
   fleetSummary,
   historyLine,
   isOff,
   memoryReadings,
+  memoryUse,
   mib,
   span,
   verdictTone,
@@ -89,6 +91,12 @@ describe("right-sizing words", () => {
     )
     expect(cpuReadings({ ...value.cpu, limit: 0, throttledShare: 0.12 })).toBe(
       "0.21 cores most of the time · 0.4 cores at its peak · no limit yet · throttled 12%",
+    )
+    // A reading line's detail: what it used, the limit being in the words above.
+    expect(memoryUse(value.memory)).toBe("491 MiB most of the time, 500 MiB at peak")
+    expect(cpuUse(value.cpu)).toBe("0.21 cores most of the time, 0.4 cores at peak")
+    expect(cpuUse({ ...value.cpu, throttledShare: 0.12 })).toBe(
+      "0.21 cores most of the time, 0.4 cores at peak, throttled 12%",
     )
     expect(applyLines(value)).toEqual(["memory 512 MiB → 640 MiB", "CPU 4 cores → 0.35 cores"])
     expect(applyLines(sizing({ apply: { cpus: 0.35 } }))).toEqual(["CPU 4 cores → 0.35 cores"])
