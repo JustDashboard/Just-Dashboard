@@ -169,6 +169,22 @@ export function cpuReadings(cpu: CpuSizing) {
   return parts.join(" · ")
 }
 
+/**
+ * What one limit used, in the few words a reading line's detail holds; the
+ * limit itself is in the words above it, and the whole of it in the gauge's
+ * name.
+ */
+export function memoryUse(memory: MemorySizing) {
+  return `${mib(memory.p95Mb)} most of the time, ${mib(memory.peakMb)} at peak`
+}
+
+export function cpuUse(cpu: CpuSizing) {
+  const use = `${cores(cpu.p95)} most of the time, ${cores(cpu.peak)} at peak`
+  return cpu.throttledShare !== null && cpu.throttledShare > 0
+    ? `${use}, throttled ${Math.round(cpu.throttledShare * 100)}%`
+    : use
+}
+
 /** What the page tells the reader to do with one limit, before the figure. */
 export function suggestionVerb(verdict: SizingVerdict) {
   switch (verdict) {

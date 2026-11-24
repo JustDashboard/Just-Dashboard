@@ -29,8 +29,9 @@ task's exit and every lock with what production will wait for (`run-rehearsal.ts
 Overview opens on its window (`release-watch.tsx`), in the Overview's block shape: the proxy's mark
 with the reading as one sentence (how much of the new release fails and how long 19 in 20 of its
 requests take), what it was judged as and the window's countdown under it, then the previous release
-and the new one as two strips of one length with their figures beside them, with *Keep release #N*
-and *Roll back instantly*; a window that rolled back stays an hour with the reading that decided it,
+and the new one as two reading lines — the release's number as the mark, the share failed, how many
+it answered and how fast, and one strip of the same length at each line's end, none while a release
+has answered nothing — with *Keep release #N* and *Roll back instantly*; a window that rolled back stays an hour with the reading that decided it,
 and one that closed clean is not drawn. Deployments marks the rolled-back release and the warm one,
 and the one Live row is the run whose outcome is live now; Runtime settings edits the terms under
 *After a release goes live* (`settings/rollback-watch.tsx`, its words in `rollback-watch-model.ts`,
@@ -62,7 +63,8 @@ checkbox and the run page's link to the copy it asked for (`data-copies.tsx`, it
 unit-tested `data-rollback-model.ts`; [data-aware rollback](../../deployments/data-aware-rollback.md)).
 Under Production the Overview's **Right-size** card reads the environment's suggested memory and CPU
 limits from its retained samples — the verdict and *Apply suggested limits* in its head, each
-suggestion beside its p95, peak and limit — and the fleet lists the environments whose limits are
+limit as a reading line that says what to do with it ("Raise to 640 MiB from 512 MiB"), what it used
+under that and its gauge at the line's end — and the fleet lists the environments whose limits are
 off under the projects, each with *Apply*; both save through the configuration PUT
 ([right-sizing](../../deployments/right-sizing.md); `right-size.tsx`, words in `sizing-model.ts`,
 unit-tested). The Overview's production panel carries *Diagnose* for a role with `service.control`:

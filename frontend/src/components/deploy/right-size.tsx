@@ -9,9 +9,10 @@ import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentEnvironmentConfiguration } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { Cpu, Layers, Box } from "@/components/icons"
+import { Cpu, Layers, Box, type Icon } from "@/components/icons"
 import { HUE } from "@/components/live-figure"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
+import { ReadingLine, ReadingLines, ReadingMark } from "@/components/reading-line"
 import { Row, RowList } from "@/components/row-list"
 import { Status, StatusDot } from "@/components/status-dot"
 import { InfoTip } from "@/components/form"
@@ -24,12 +25,16 @@ import {
   applyLines,
   applyToRuntime,
   cores,
+  cpuLimit,
   cpuReadings,
+  cpuUse,
   fleetSummary,
   gaugeScale,
   historyLine,
   isOff,
+  memoryLimit,
   memoryReadings,
+  memoryUse,
   mib,
   sizingLead,
   suggestionVerb,
@@ -86,10 +91,11 @@ function useApplySizing(onApplied: () => void) {
 
 /**
  * The project overview's Right-size card: the verdict and the one verb in the
- * head, then a sentence on what the project runs and why, and each limit as what
- * to do with it over a gauge of what was used against where the limit would go.
- * A Compose stack has nothing in its plan to size and a read that fails has
- * nothing to say, so neither draws a card.
+ * head, then a sentence on what the project runs and why, and each limit as a
+ * reading line — the shape the CPU and memory readings at the top of the page
+ * take — that says what to do with it and ends on a gauge of what was used
+ * against where the limit would go. A Compose stack has nothing in its plan to
+ * size and a read that fails has nothing to say, so neither draws a card.
  */
 export function RightSizeCard({
   projectId,
@@ -142,7 +148,7 @@ export function RightSizeCard({
           </>
         }
       />
-      <PanelBody>
+      <PanelBody className="space-y-4 pt-4">
         <SizingBody sizing={sizing} product={product} />
       </PanelBody>
     </Panel>
@@ -164,7 +170,7 @@ function SizingBody({ sizing, product }: { sizing: EnvironmentSizing; product?: 
     ...(cpu.verdict === "right" ? [] : cpu.reasons.slice(0, 1)),
   ]
   return (
-    <div className="min-w-0 space-y-5 pt-1">
+    <>
       <WireNode
         mark={
           <span className="relative flex">
@@ -192,14 +198,16 @@ function SizingBody({ sizing, product }: { sizing: EnvironmentSizing; product?: 
           </>
         }
       />
-      <div className="grid min-w-0 gap-x-10 gap-y-5 lg:grid-cols-2">
+      <ReadingLines>
         <LimitLine
           name="Memory"
-          glyph={<Layers aria-hidden />}
+          glyph={Layers}
           hue={HUE.mem}
           rule={<InfoTip label="How the memory suggestion is worked out">{MEMORY_RULE}</InfoTip>}
           verdict={memory.verdict}
           suggestion={mib(memory.suggestedMb)}
+          current={memory.limitMb > 0 ? memoryLimit(memory.limitMb) : undefined}
+          use={memoryUse(memory)}
           used={memory.p95Mb}
           peak={memory.peakMb}
           suggested={memory.suggestedMb}
@@ -208,27 +216,38 @@ function SizingBody({ sizing, product }: { sizing: EnvironmentSizing; product?: 
         />
         <LimitLine
           name="CPU"
-          glyph={<Cpu aria-hidden />}
+          glyph={Cpu}
           hue={HUE.cpu}
           rule={<InfoTip label="How the CPU suggestion is worked out">{CPU_RULE}</InfoTip>}
           verdict={cpu.verdict}
           suggestion={cores(cpu.suggested)}
+          current={cpu.limit > 0 ? cpuLimit(cpu.limit) : undefined}
+          use={cpuUse(cpu)}
           used={cpu.p95}
           peak={cpu.peak}
           suggested={cpu.suggested}
           limit={cpu.limit}
           readings={cpuReadings(cpu)}
         />
-      </div>
-    </div>
+      </ReadingLines>
+    </>
   )
 }
 
 /**
- * One limit: what to do with it, in words, over a gauge. The solid run is what
- * it used most of the time, the paler run its peak, and the brand's tick where
- * the suggestion would put the limit; a limit already set is the tick in the
- * foreground, so "far too big" and "about to hit it" are both visible at once.
+ * One limit as a reading line: its measure's glyph on its hue (the warning or
+ * danger tile when the limit is off), what to do with it in words — "Raise to
+ * 640 MiB from 512 MiB", or "320 MiB fits" — what it used under that, and at
+ * the line's end its gauge. The solid run is what it used most of the time,
+ * the paler run its peak, and the brand's tick where the suggestion would put
+ * the limit; a limit already set is the tick in the foreground, so "far too
+ * big" and "about to hit it" are both visible at once.
+ *
+ * It was a block of its own: a tile, an eyebrow, the words, a gauge the width
+ * of half the page and the readings under it, beside the reading lines it
+ * repeated the shape of without being one. The gauge sits where those lines
+ * keep their last hour, and the readings in full are its name and the
+ * detail's title.
  */
 function LimitLine({
   name,
@@ -237,6 +256,8 @@ function LimitLine({
   rule,
   verdict,
   suggestion,
+  current,
+  use,
   used,
   peak,
   suggested,
@@ -244,11 +265,15 @@ function LimitLine({
   readings,
 }: {
   name: string
-  glyph: React.ReactNode
+  glyph: Icon
   hue: string
   rule: React.ReactNode
   verdict: SizingVerdict
   suggestion: string
+  /** The limit set now, in words, or nothing while there is none. */
+  current?: string
+  /** What it used, in the detail's few words. */
+  use: string
   used: number
   peak: number
   suggested: number
@@ -259,29 +284,25 @@ function LimitLine({
   const at = (value: number) => `${(value / scale) * 100}%`
   const verb = suggestionVerb(verdict)
   return (
-    <div className="flex min-w-0 items-start gap-3.5" data-slot="limit-line">
-      <WireMark size="md" hue={hue}>
-        {glyph}
-      </WireMark>
-      <div className="min-w-0 flex-1 space-y-1.5">
-        <div>
-          <p className="eyebrow flex items-center gap-1.5">
-            {name} {rule}
-          </p>
-          <p className="text-body leading-snug font-medium">
-            {verb && <>{verb} </>}
-            <span className="numeric">{suggestion}</span>
-            {!verb && <span className="font-normal text-muted-foreground"> fits</span>}
-          </p>
-        </div>
-        <div
+    <ReadingLine
+      className="animate-rise"
+      mark={<ReadingMark hue={hue} glyph={glyph} tone={limitTone(verdict)} />}
+      name={
+        <>
+          {name} {rule}
+        </>
+      }
+      hint={<span title={readings}>{use}</span>}
+      trend={
+        <span
           role="img"
           aria-label={`${name}: ${readings}; suggested ${suggestion}`}
-          className="relative flex h-4 animate-rise items-center"
+          data-slot="limit-gauge"
+          className="relative flex h-4 items-center"
         >
-          <span className="absolute inset-x-0 h-2 rounded-sm bg-meter-track" />
+          <span className="absolute inset-x-0 h-2 rounded-full bg-meter-track" />
           <span
-            className="absolute left-0 h-2 rounded-l-sm"
+            className="absolute left-0 h-2 rounded-full"
             style={{
               width: at(peak),
               minWidth: 3,
@@ -289,7 +310,7 @@ function LimitLine({
             }}
           />
           <span
-            className="absolute left-0 h-2 rounded-l-sm"
+            className="absolute left-0 h-2 rounded-full"
             style={{ width: at(used), minWidth: 3, background: hue }}
           />
           {limit > 0 && (
@@ -304,11 +325,31 @@ function LimitLine({
             className="absolute h-full w-0.5 rounded-full bg-brand"
             style={{ left: at(suggested) }}
           />
-        </div>
-        <p className="numeric text-hint text-muted-foreground">{readings}</p>
-      </div>
-    </div>
+        </span>
+      }
+    >
+      {verb ? (
+        <>
+          {verb} <span className="numeric">{suggestion}</span>
+          {current && verdict !== "unlimited" && (
+            <span className="font-normal text-muted-foreground"> from {current}</span>
+          )}
+        </>
+      ) : (
+        <>
+          <span className="numeric">{current ?? suggestion}</span>
+          <span className="font-normal text-muted-foreground"> fits</span>
+        </>
+      )}
+    </ReadingLine>
   )
+}
+
+/** A limit that is off draws its tile in the verdict's tone, as a reading past its line does. */
+function limitTone(verdict: SizingVerdict) {
+  if (verdict === "too_tight") return "danger"
+  if (verdict === "oversized") return "warning"
+  return "default"
 }
 
 /**
