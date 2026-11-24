@@ -35,7 +35,7 @@ import {
   type AclDraft,
   type AclShow,
 } from "@/components/database/ops/access-model"
-import { AccountMark, AccountName } from "@/components/database/ops/access-parts"
+import { ACCOUNT_TITLE, AccountMark, AccountName } from "@/components/database/ops/access-parts"
 import { AclFields, redisDropRequest } from "@/components/database/ops/access-redis-parts"
 import type { RedisACL, RedisACLChange, RedisACLUser } from "@/components/database/ops/access-types"
 import { accessHref } from "@/components/database/ops/account-address"
@@ -161,7 +161,7 @@ export function RedisAccount({ name }: { name: string }) {
       : []
 
   const mark = <AccountMark name={name} />
-  const title = <AccountName name={name} className="text-title" />
+  const title = <AccountName name={name} className={ACCOUNT_TITLE} />
   const identity = user ? (
     <IdentityHeader
       label={`About ${user.name}`}

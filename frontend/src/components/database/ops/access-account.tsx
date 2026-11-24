@@ -42,7 +42,7 @@ import {
   type AttributeField,
 } from "@/components/database/ops/access-model"
 import { ChangePassword } from "@/components/database/ops/access-password"
-import { AccountMark, AccountName } from "@/components/database/ops/access-parts"
+import { ACCOUNT_TITLE, AccountMark, AccountName } from "@/components/database/ops/access-parts"
 import { AccountSessions } from "@/components/database/ops/access-sessions"
 import type {
   DbPrivileges,
@@ -246,7 +246,7 @@ export function SqlAccount({ name, host }: { name: string; host?: string }) {
       : []
 
   const mark = <AccountMark name={name} />
-  const title = <AccountName name={name} host={host} className="text-title" />
+  const title = <AccountName name={name} host={host} className={ACCOUNT_TITLE} />
   const summary = data ? grantSummary(data, data.grants) : ""
   const identity = data ? (
     <IdentityHeader
