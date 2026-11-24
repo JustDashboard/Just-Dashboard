@@ -13,13 +13,18 @@ import { usePoll } from "@/hooks/use-poll"
 import type { DeploymentEngineRun, RollbackWatch, RollbackWatchResponse } from "@/lib/types"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
 import { ProductGlyph } from "@/components/product-logo"
+import { SplitBar } from "@/components/rank-list"
+import { NoReading, ReadingLine, ReadingLines } from "@/components/reading-line"
 import { StatusDot } from "@/components/status-dot"
+import type { Tone } from "@/components/tone"
 import { Button } from "@/components/ui/button"
 import { useConfirm } from "@/components/confirm-dialog"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import {
+  answeredWords,
+  failedWords,
   readingLine,
-  shareOf,
+  readingTone,
   trustedBaseline,
   watchLead,
   watchProxy,
@@ -34,10 +39,10 @@ import {
  * kept warm (`deploy/rollback_watch.go`), in the shape every block on the
  * Overview takes (§16): the proxy's mark, since its request record is the
  * evidence, with the reading as one sentence — how much of the new release
- * fails and how long 19 in 20 of its requests take — then one picture, the
- * two releases as two strips of one length. Under the sentence: what the
- * reading was judged as, how long the window has left and what the warm
- * release is doing. With skew protection the warm release still answers the
+ * fails and how long 19 in 20 of its requests take — then the two releases
+ * as the reading lines the top of the page draws, each ending on its strip.
+ * Under the sentence: what the reading was judged as, how long the window
+ * has left and what the warm release is doing. With skew protection the warm release still answers the
  * visitors it answered first; the reading is the new release's own requests,
  * and the window's line says how many the warm one answered.
  *
@@ -203,56 +208,93 @@ export function useReleaseWatch(projectId: number, environmentId: number, enable
 }
 
 /**
- * The block's one picture: the release before and the release now, each one
- * strip of the same length split into what it answered and what it failed, with
- * the figures the strip stands for in a column that lines up down the pair.
- * A sliver of failures keeps a few pixels, so half a percent is still seen.
+ * The block's one picture: the release before and the release now as two of
+ * the reading lines the top of the page draws — the release's number as its
+ * mark, as the wiring draws the live release, what share of its requests
+ * failed, how many it answered and how fast under it, and at the line's end
+ * one strip of what it answered against what it failed. The two strips are
+ * one length, so the pair still compares; a sliver of failures keeps a few
+ * pixels, so half a percent is still seen.
+ *
+ * It was two strips across the block with their figures in a column of their
+ * own at its far edge. A release that had answered nothing drew two empty
+ * tracks the width of the page, which read as a picture that had not loaded;
+ * now it says "No requests" in the line's place and draws no strip.
  */
 function BeforeAndAfter({ watch }: { watch: RollbackWatch }) {
   const rows = [
     {
       key: "before",
-      name: `Release #${watch.warmReleaseNumber}, before`,
+      number: watch.warmReleaseNumber,
+      name: "Before the cutover",
       // What the server compares against, or what little there was.
       reading: trustedBaseline(watch) ?? watch.baseline,
+      tone: "default" as Tone,
+      empty: "No requests",
     },
-    { key: "now", name: `Release #${watch.releaseNumber}, since`, reading: watch.observed },
+    {
+      key: "since",
+      number: watch.releaseNumber,
+      name: "Since the cutover",
+      reading: watch.observed,
+      tone: readingTone(watch),
+      empty: "No requests yet",
+    },
   ]
   return (
-    <ul className="min-w-0 space-y-2" data-testid="watch-picture">
-      {rows.map(({ key, name, reading }) => {
-        const failed = shareOf(reading) ?? 0
-        const words = readingLine(reading)
+    <ReadingLines data-testid="watch-picture">
+      {rows.map(({ key, number, name, reading, tone, empty }) => {
+        const failed = failedWords(reading)
         return (
-          <li
+          <ReadingLine
             key={key}
-            data-slot="watch-row"
-            className="grid min-w-0 grid-cols-main-end items-center gap-x-4 gap-y-1 sm:h-5 sm:grid-cols-[9.5rem_minmax(0,1fr)_15rem]"
+            className="animate-rise"
+            mark={<ReleaseMark number={number} tone={tone} />}
+            name={name}
+            hint={answeredWords(reading)}
+            trend={
+              reading &&
+              reading.requests > 0 && (
+                <SplitBar
+                  label={`Release #${number}, ${key}: ${readingLine(reading)}`}
+                  // A failure in a few hundred is a fraction of a pixel at
+                  // the strip's width; this keeps it to be seen.
+                  minShare={0.03}
+                  parts={[
+                    {
+                      key: "answered",
+                      count: reading.requests - reading.failures,
+                      color: "color-mix(in oklab, var(--success) 80%, transparent)",
+                    },
+                    { key: "failed", count: reading.failures, color: "var(--destructive)" },
+                  ]}
+                />
+              )
+            }
           >
-            <span className="truncate text-hint text-muted-foreground">{name}</span>
-            <span className="numeric truncate text-right text-hint text-foreground sm:order-3">
-              {words}
-            </span>
-            <span
-              role="img"
-              aria-label={`${name}: ${words}`}
-              className="flex h-2.5 min-w-0 animate-rise gap-0.5 overflow-hidden rounded-sm bg-meter-track max-sm:col-span-2 sm:order-2"
-            >
-              {reading && reading.requests > 0 && (
-                <>
-                  <span className="block h-full min-w-0 flex-1 bg-success/80 [transition:flex-grow_700ms_ease-out]" />
-                  {failed > 0 && (
-                    <span
-                      className="block h-full bg-destructive [transition:width_700ms_ease-out]"
-                      style={{ width: `${failed}%`, minWidth: 4 }}
-                    />
-                  )}
-                </>
-              )}
-            </span>
-          </li>
+            {failed ?? <NoReading>{empty}</NoReading>}
+          </ReadingLine>
         )
       })}
-    </ul>
+    </ReadingLines>
+  )
+}
+
+/**
+ * A release's number on the tile the wiring gives the live release, or on
+ * the warning and danger tiles once its reading is past a line.
+ */
+function ReleaseMark({ number, tone }: { number: number; tone: Tone }) {
+  const label = <span className="numeric text-xs font-semibold">#{number}</span>
+  if (tone === "warning" || tone === "danger")
+    return (
+      <WireMark size="md" tone={tone}>
+        {label}
+      </WireMark>
+    )
+  return (
+    <WireMark size="md" tone="logo">
+      {label}
+    </WireMark>
   )
 }

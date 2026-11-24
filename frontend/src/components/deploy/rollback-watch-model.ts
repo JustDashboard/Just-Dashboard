@@ -187,7 +187,7 @@ export function watchLead(watch: RollbackWatch): { title: string; hint?: string;
   if (!observed || observed.requests === 0)
     return {
       title: `Release #${watch.releaseNumber} has answered no requests yet`,
-      hint: join(`${watch.policy.minRequests} requests decide.`, manual),
+      hint: join(`It is judged once it has answered ${watch.policy.minRequests}.`, manual),
       tone: "unknown",
     }
 
@@ -199,18 +199,20 @@ export function watchLead(watch: RollbackWatch): { title: string; hint?: string;
     observed.p95 === undefined
       ? ""
       : `; ${LATENCY_SHARE.p95} finish inside ${latency(observed.p95)}`
-  const worst = [shareTone(watch), latencyTone(watch)]
+  const worst = readingTone(watch)
   return {
     title: `Release #${watch.releaseNumber} ${failing}${speed}`,
     hint: join(judgement(watch), manual),
-    tone: worst.includes("danger")
-      ? "danger"
-      : worst.includes("warning")
-        ? "warning"
-        : verdict?.judged
-          ? "running"
-          : "unknown",
+    tone: worst !== "default" ? worst : verdict?.judged ? "running" : "unknown",
   }
+}
+
+/** The new release's reading at its worst: the 5xx share's tone or the p95's. */
+export function readingTone(watch: RollbackWatch): "danger" | "warning" | "default" {
+  const worst = [shareTone(watch), latencyTone(watch)]
+  if (worst.includes("danger")) return "danger"
+  if (worst.includes("warning")) return "warning"
+  return "default"
 }
 
 /** What the reading was judged as, in a sentence, or nothing before a verdict. */
@@ -234,9 +236,26 @@ function judgement(watch: RollbackWatch) {
 const join = (...parts: (string | undefined)[]) => parts.filter(Boolean).join(" ") || undefined
 
 /**
- * One release's row of the picture: how much of it failed and how long 19 in
- * 20 took, in the sentence's own words, or what there is to say with nothing
- * to read.
+ * One release's line of the picture: how much of it failed, in the sentence's
+ * own words, or nothing with nothing to read (the line says so in its place).
+ */
+export function failedWords(reading: RollbackReading | undefined) {
+  if (!reading || reading.requests === 0) return undefined
+  return reading.failures === 0 ? "None failed" : `${percent(shareOf(reading), 1)} failed`
+}
+
+/** Under it, how many it answered and how long 19 in 20 took. */
+export function answeredWords(reading: RollbackReading | undefined) {
+  if (!reading || reading.requests === 0) return undefined
+  const count = `${reading.requests.toLocaleString()} ${reading.requests === 1 ? "request" : "requests"}`
+  return reading.p95 === undefined
+    ? count
+    : `${count} · ${latencyWords("p95", latency(reading.p95))}`
+}
+
+/**
+ * The whole of a release's reading in one phrase, for its strip's name: how
+ * much of it failed and how long 19 in 20 took, or "no requests".
  */
 export function readingLine(reading: RollbackReading | undefined) {
   if (!reading || reading.requests === 0) return "no requests"

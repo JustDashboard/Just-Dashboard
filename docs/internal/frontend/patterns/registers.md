@@ -219,8 +219,8 @@ a new block on this page takes it too:
   block's state as the `StatusDot` in its corner, as Runtime's node has it), then the reading as a sentence
   and its detail. What the runtime is on Right-size, Trivy on Vulnerabilities, Docker on Availability and
   the source's forge on Delivery: each mark is where the block's evidence comes from.
-- **Then its one coloured picture:** each limit's gauge, the severities' bar, the ribbon of days, the
-  releases per day. The hues are the existing ones (§3, §10), and the reading it replaces is said in the
+- **Then its one coloured picture:** each limit's gauge at the end of its reading line, the
+  severities' bar, the ribbon of days, the releases per day. The hues are the existing ones (§3, §10), and the reading it replaces is said in the
   words beside it, so nothing is colour alone.
 - **The live readings are lines,** `ReadingLine` in `components/reading-line.tsx`, drawn for this page by
   `deploy/live-readings.tsx`: a measurement's glyph on its own tint (`WireMark hue`, the `HUE` map's
@@ -235,11 +235,14 @@ a new block on this page takes it too:
   is asleep, and stayed two rows of four tiles until 0.8.6. The watch opens on the proxy that wrote the
   record (Caddy, or nginx where the readings carry no durations) with *Release #12 fails 0.4% of its
   requests; 19 in 20 finish inside 180ms*, the judgement and the countdown under it, and its picture is
-  the release before and the release now as two strips of one length, what each answered and what it
-  failed, the figures in a column beside them. The sleeping block opens on Docker's mark with *Asleep
+  the release before and the release now as two `ReadingLine`s, each the release's number as its mark,
+  the share failed, how many it answered and how fast, and at its end one strip of the same length,
+  what it answered and what it failed. A release that has answered nothing says *No requests* in the
+  line's place and draws no strip: two empty tracks across the block read as a picture that had not
+  loaded (0.9.1). The sleeping block opens on Docker's mark with *Asleep
   by design for 42 min*, and its picture is the last seven days as one strip with each stretch asleep on
-  it. Their verbs stay in the head: *Keep release #N* and *Roll back instantly*, *Wake now*. The rows
-  and strips keep one height and one place whether there is a reading or not
+  it. Their verbs stay in the head: *Keep release #N* and *Roll back instantly*, *Wake now*. The watch's
+  lines and the sleeping block's strip keep one height and one place whether there is a reading or not
   (`deploy-rollback-watch.spec.ts` and `deploy-sleep.spec.ts` measure both at 1280 and 390).
 
 The Deployments tab's history and every other page but the host Overview keep `StatTile`: this is

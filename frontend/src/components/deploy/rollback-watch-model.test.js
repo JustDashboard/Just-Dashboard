@@ -5,6 +5,9 @@ import {
   latencyTone,
   policyLine,
   readingLine,
+  readingTone,
+  failedWords,
+  answeredWords,
   shareTone,
   skewLine,
   warmLine,
@@ -198,7 +201,7 @@ describe("the Overview's block", () => {
     )
     expect(watchLead(watch({ observed: undefined, verdict: undefined }))).toEqual({
       title: "Release #42 has answered no requests yet",
-      hint: "20 requests decide.",
+      hint: "It is judged once it has answered 20.",
       tone: "unknown",
     })
     const noRoute = watchLead(
@@ -269,6 +272,30 @@ describe("the Overview's block", () => {
       "11.1% failed",
     )
     expect(readingLine(undefined)).toBe("no requests")
+  })
+  test("each release's line says the share failed, then how many and how fast", () => {
+    expect(failedWords(judged.baseline)).toBe("0.5% failed")
+    expect(answeredWords(judged.baseline)).toBe("412 requests · 19 in 20 inside 118ms")
+    expect(failedWords(watch().observed)).toBe("None failed")
+    // An nginx record holds no durations: the count alone.
+    expect(answeredWords({ requests: 1, failures: 0, errorRate: 0, from: "", until: "" })).toBe(
+      "1 request",
+    )
+    // Nothing read: the line says so in its own place.
+    expect(failedWords(undefined)).toBeUndefined()
+    expect(answeredWords({ requests: 0, failures: 0, errorRate: 0, from: "", until: "" })).toBe(
+      undefined,
+    )
+  })
+  test("the new release's mark takes the worse of its two readings", () => {
+    expect(readingTone(watch())).toBe("default")
+    expect(
+      readingTone(
+        watch({
+          observed: { requests: 120, failures: 46, errorRate: 0.383, p95: 90, from: "", until: "" },
+        }),
+      ),
+    ).toBe("danger")
   })
   test("the window's line counts down while it watches", () => {
     expect(windowLine(watch(), 300)).toBe("5:00 left to decide · release #41 paused")
