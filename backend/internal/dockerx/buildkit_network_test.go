@@ -6,6 +6,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 )
 
 // A build that reaches a database runs on a builder of its own: one per
@@ -90,5 +91,60 @@ func TestBuildxCommandNamesTheNetworkedBuilder(t *testing.T) {
 	argv, _, err = BuildxCommand(ImmutableBuildOptions{Dockerfile: "Dockerfile", Tag: "app:1"}, "/tmp/m.json")
 	if err != nil || slices.Contains(argv, "--builder") {
 		t.Fatalf("argv = %q, %v", argv, err)
+	}
+}
+
+// A builder an earlier build left waiting is matched to the next build's
+// networks before that build starts on it: joined to what it may reach now,
+// and taken off what it may not, such as a database unlinked meanwhile.
+func TestWaitingNetworkedBuilderIsMatchedToTheBuildsNetworks(t *testing.T) {
+	t.Parallel()
+	add, remove := networkedBuilderNetworkChanges(
+		[]string{"jd-e22-db-abc123", "jd-preview-22"}, []string{"jd-e22-db-abc123", "jd-e22-db-def456"})
+	if !slices.Equal(add, []string{"jd-e22-db-def456"}) || !slices.Equal(remove, []string{"jd-preview-22"}) {
+		t.Fatalf("add = %v, remove = %v", add, remove)
+	}
+	if add, remove := networkedBuilderNetworkChanges([]string{"a"}, []string{"a"}); len(add)+len(remove) != 0 {
+		t.Fatalf("an unchanged builder changes: add = %v, remove = %v", add, remove)
+	}
+}
+
+// Only a builder this process left waiting is claimed, once, and claiming
+// it stops the timer that would remove it.
+func TestWaitingNetworkedBuilderIsClaimedOnce(t *testing.T) {
+	t.Parallel()
+	name := "jd-build-e900000001-db-claimonce"
+	removed := make(chan struct{}, 1)
+	waiting := &waitingBuilder{networks: []string{"jd-e900000001-db-claimonce"}}
+	waitingBuilders.Lock()
+	waiting.timer = time.AfterFunc(time.Hour, func() { removed <- struct{}{} })
+	waitingBuilders.byName[name] = waiting
+	waitingBuilders.Unlock()
+	if got := takeWaitingBuilder(name); got != waiting {
+		t.Fatalf("claimed %v, want the waiting builder", got)
+	}
+	if got := takeWaitingBuilder(name); got != nil {
+		t.Fatalf("claimed twice: %v", got)
+	}
+	if waiting.timer.Stop() {
+		t.Fatal("claiming the builder left its removal running")
+	}
+}
+
+// A closed builder with no wait configured, or no Docker client, is removed
+// at once, as every builder was before builders waited.
+func TestNetworkedBuilderCloseWithoutAClientRemovesAtOnce(t *testing.T) {
+	t.Parallel()
+	released := false
+	builder := &NetworkedBuilder{Name: "jd-build-e900000002-db-noclient", release: func() { released = true }}
+	builder.Close(t.Context())
+	if !released {
+		t.Fatal("the builder's lock was not released")
+	}
+	waitingBuilders.Lock()
+	_, waiting := waitingBuilders.byName[builder.Name]
+	waitingBuilders.Unlock()
+	if waiting {
+		t.Fatal("a builder with no client was left waiting")
 	}
 }
