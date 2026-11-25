@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test"
+import { risen } from "./risen"
 import {
   archivedProject,
   deployment,
@@ -519,6 +520,10 @@ test("a card says its last hour in words, with no chart, at one height in every 
 
   // Every card is one height, and nothing in it is stretched or spills: the
   // footer starts the body's padding under the traffic line on each of them.
+  // Read once everything has landed: the traffic line rises into place when
+  // its figure arrives and each card slides in, so a box read during either
+  // put the gap a hair off 14 (14.000015, then 13.99971 on CI).
+  await risen(page)
   const boxes = await cards.evaluateAll((all) =>
     all.map((li) => {
       const line = li.querySelector("[data-slot=project-traffic]")!
