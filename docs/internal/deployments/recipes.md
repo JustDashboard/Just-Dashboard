@@ -1384,11 +1384,26 @@ TypeScript's incremental state in `.next/cache/.tsbuildinfo`, beside the mounted
 inside one. On a Next.js 16 application that was 30 to 50 s of a 60 to 106 s build. So the type check
 runs in a stage of its own, `typecheck`, beside the `build` stage, both from the `source` stage: BuildKit
 runs stages that do not depend on each other at once. It runs `next typegen`, which writes the route
-types and settles `tsconfig.json` as `next build` would, then `/opt/just-dashboard/typecheck.cjs`: what
-`next build`'s own check (`runTypeCheck`) does, on TypeScript's public API — the files `tsconfig.json`
-names less `.next/dev/types`, nothing emitted, errors less a configuration with no inputs and anything in
-a `__tests__` or `__mocks__` folder or a `.test.`/`.spec.` file, which `next build` leaves out too — run
-incrementally with its state in the environment's `next-typecheck` cache mount. The stage has the build's
+types and settles `tsconfig.json` as `next build` would, then `/opt/just-dashboard/typecheck.cjs`, which
+asks the application's TypeScript which of its two faces it has, as Next.js does
+(`getTypeScriptPackageInfo`): the compiler API is `lib/typescript.js`, and the command is the package's
+`tsc` bin. **With an API** (TypeScript 5 and 6) it does what `runTypeCheck` does on it — the files
+`tsconfig.json` names less `.next/dev/types`, nothing emitted, errors less a configuration with no inputs
+and anything in a `__tests__` or `__mocks__` folder or a `.test.`/`.spec.` file, which that check leaves
+out too. **With none** (TypeScript 7, the native compiler, whose package exports a version and nothing
+else) it does what `runTypeCheckCli` does, which is the only check `next build` has for such a package:
+the command `next build` finds (the `tsc` bin, or the `tscN` an aliased package renames it to, and
+`lib/tsc.js` in place of an extensionless bin of an ES module package), run under the stage's Node.js as
+`tsc --showConfig` to learn whether the project is incremental and then as `tsc --project tsconfig.json
+--noEmit --declarationMap false --emitDeclarationOnly false`, with `--tsBuildInfoFile` when it is. That
+check leaves nothing out, tests and `.next/dev/types` included, and neither does `next build` on the
+command; `--pretty false` is the one argument added, so its errors read `file(line,col): error TSnnnn`
+whatever the compiler makes of a build's output. The script never calls an API the package does not
+have: before it asked, every TypeScript 7 deployment failed with `ts.getParsedCommandLineOfConfigFile is
+not a function`. Next.js 16.4 chooses between the two by `experimental.useTypeScriptCli`, which defaults
+to the command; the stage chooses by what the package has, so a TypeScript 5 or 6 application at that
+default is checked on the API, without its test files, where `next build` would check them. Either check
+runs incrementally with its state in the environment's `next-typecheck` cache mount. The stage has the build's
 own values, guards and defaults, since `next typegen` loads `next.config` as `next build` does, but not
 the adapter. The build stage writes a one-line build adapter to `/opt/just-dashboard/next-adapter.mjs`,
 and the build command's RUN names it in `NEXT_ADAPTER_PATH`, which Next.js 16.4 reads as `adapterPath`;

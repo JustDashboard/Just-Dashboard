@@ -2,6 +2,11 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -174,5 +179,155 @@ func TestTypeCheckBesideNeedsFourCoresAndSixGiB(t *testing.T) {
 		if got := typeCheckBesideFits(test.cpus, test.memory); got != test.want {
 			t.Errorf("typeCheckBesideFits(%d, %d) = %v, want %v", test.cpus, test.memory, got, test.want)
 		}
+	}
+}
+
+// The stage writes the check with printf '%s\n' '…' in one instruction, so a
+// line break or a single quote in it would cut the script short.
+func TestNextTypeCheckSourceIsOnePrintfArgument(t *testing.T) {
+	t.Parallel()
+	for name, source := range map[string]string{"the check": nextTypeCheckSource, "the adapter": nextAdapterSource} {
+		if strings.ContainsAny(source, "'\n\r") {
+			t.Errorf("%s has a single quote or a line break:\n%s", name, source)
+		}
+	}
+}
+
+const (
+	// typeCheckCommandManifest is the shape of typescript@7: an ES module
+	// package whose main says its version, with a command and no API.
+	typeCheckCommandManifest = `{"name":"typescript","version":"7.0.2","type":"module","bin":{"tsc":"./bin/tsc"},"exports":{"./package.json":"./package.json",".":"./lib/version.cjs"}}`
+	// typeCheckAPIManifest is the shape of typescript@5 and 6.
+	typeCheckAPIManifest = `{"name":"typescript","version":"5.9.3","main":"./lib/typescript.js","bin":{"tsc":"./bin/tsc"}}`
+	// typeCheckCommand stands in for tsc: it records its arguments, answers
+	// --showConfig from JD_FAKE_CONFIG and otherwise prints JD_FAKE_ERROR, when
+	// there is one, and fails as tsc does on an error.
+	typeCheckCommand = `const fs = require("fs"); const args = process.argv.slice(2); fs.appendFileSync("calls.jsonl", JSON.stringify(args) + "\n"); ` +
+		`if (args.includes("--showConfig")) { process.stdout.write(process.env.JD_FAKE_CONFIG || "{}") } else if (process.env.JD_FAKE_ERROR) { console.log(process.env.JD_FAKE_ERROR); process.exit(2) }`
+	// typeCheckAPI stands in for lib/typescript.js with the calls the check
+	// makes: it records the program's options and reports JD_FAKE_ERROR, when
+	// there is one, in the file JD_FAKE_ERROR_FILE.
+	typeCheckAPI = `const fs = require("fs"); const failing = process.env.JD_FAKE_ERROR ? [{ category: 1, code: 2322, messageText: process.env.JD_FAKE_ERROR, file: { fileName: process.env.JD_FAKE_ERROR_FILE } }] : []; ` +
+		`module.exports = { sys: {}, DiagnosticCategory: { Error: 1 }, flattenDiagnosticMessageText: (text) => String(text), ` +
+		`getParsedCommandLineOfConfigFile: () => ({ fileNames: ["/app/app/page.tsx"], options: { strict: true }, errors: [] }), ` +
+		`createIncrementalProgram: (program) => { fs.appendFileSync("calls.jsonl", JSON.stringify(["api", program.options.tsBuildInfoFile, program.options.noEmit]) + "\n"); return { emit: () => ({ diagnostics: [] }) } }, ` +
+		`getPreEmitDiagnostics: () => failing, formatDiagnostics: (found) => found.map((d) => d.file.fileName + "(1,7): error TS" + d.code + ": " + d.messageText + "\n").join("") }`
+)
+
+// runTypeCheckScript runs the check as the stage does, under Node.js, in an
+// application whose node_modules/typescript holds the given files, and
+// returns what it printed, whether it passed and the calls it made.
+func runTypeCheckScript(t *testing.T, node string, typescript map[string]string, env ...string) (string, bool, [][]any) {
+	t.Helper()
+	root := t.TempDir()
+	writeBuildFixture(t, root, "tsconfig.json", `{"compilerOptions":{"strict":true}}`)
+	for name, content := range typescript {
+		writeBuildFixture(t, root, filepath.Join("node_modules", "typescript", name), content)
+	}
+	script := filepath.Join(t.TempDir(), "typecheck.cjs")
+	if err := os.WriteFile(script, []byte(nextTypeCheckSource+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	command := exec.Command(node, script)
+	command.Dir = root
+	command.Env = append(os.Environ(), env...)
+	output, err := command.CombinedOutput()
+	var calls [][]any
+	recorded, _ := os.ReadFile(filepath.Join(root, "calls.jsonl"))
+	for _, line := range strings.Split(strings.TrimSpace(string(recorded)), "\n") {
+		if line == "" {
+			continue
+		}
+		var call []any
+		if err := json.Unmarshal([]byte(line), &call); err != nil {
+			t.Fatalf("a recorded call %q: %v", line, err)
+		}
+		calls = append(calls, call)
+	}
+	return string(output), err == nil, calls
+}
+
+// The check asks the application's TypeScript which face it has, as next
+// build does. typescript@7 has a command and no API: the stage used to call
+// the API regardless and failed every such deploy with "is not a function".
+func TestNextTypeCheckScriptUsesWhatTypeScriptHas(t *testing.T) {
+	t.Parallel()
+	node, err := exec.LookPath("node")
+	if err != nil {
+		t.Skip("the type check script runs under Node.js")
+	}
+	command := map[string]string{
+		"package.json": typeCheckCommandManifest, "lib/version.cjs": `module.exports = { version: "7.0.2", versionMajorMinor: "7.0" }`,
+		// An ES module package: its extensionless bin is not what runs.
+		"bin/tsc": `throw new Error("the extensionless bin ran")`, "lib/tsc.js": `import { createRequire } from "node:module"; createRequire(import.meta.url)("./fake.cjs")`,
+		"lib/fake.cjs": typeCheckCommand,
+	}
+	api := map[string]string{
+		"package.json": typeCheckAPIManifest, "lib/typescript.js": typeCheckAPI,
+		"bin/tsc": `require("fs").appendFileSync("calls.jsonl", JSON.stringify(["the command ran"]) + "\n")`,
+	}
+	// What next build's own run of the command passes
+	// (runTypeCheckCli.js), and --pretty false.
+	check := []any{"--noEmit", "--declarationMap", "false", "--emitDeclarationOnly", "false", "--pretty", "false"}
+	incremental := append(slices.Clone(check), "--tsBuildInfoFile", nextTypeCheckState+"/cli.tsbuildinfo")
+	for _, test := range []struct {
+		name       string
+		typescript map[string]string
+		env        []string
+		passes     bool
+		prints     []string
+		calls      [][]any
+	}{
+		{name: "the command, types fine", typescript: command, env: []string{`JD_FAKE_CONFIG={"compilerOptions":{"incremental":true}}`}, passes: true,
+			calls: [][]any{{"--showConfig", "--pretty", "false"}, incremental}},
+		{name: "the command, a project that is not incremental keeps no state", typescript: command, env: []string{`JD_FAKE_CONFIG={"compilerOptions":{"strict":true}}`}, passes: true,
+			calls: [][]any{{"--showConfig", "--pretty", "false"}, check}},
+		{name: "the command, a type error", typescript: command, env: []string{`JD_FAKE_CONFIG={"compilerOptions":{"composite":true}}`,
+			"JD_FAKE_ERROR=app/page.tsx(1,7): error TS2322: Type 'string' is not assignable to type 'number'."},
+			prints: []string{"app/page.tsx(1,7): error TS2322: Type 'string' is not assignable to type 'number'.", "Failed to type check."},
+			calls:  [][]any{{"--showConfig", "--pretty", "false"}, incremental}},
+		{name: "the command, a configuration it cannot read", typescript: command, env: []string{"JD_FAKE_CONFIG=error TS5083: Cannot read file."},
+			prints: []string{"Could not parse the output of tsc --showConfig"}, calls: [][]any{{"--showConfig", "--pretty", "false"}}},
+		{name: "a command an aliased package renamed", typescript: map[string]string{
+			"package.json": `{"name":"@typescript/typescript7","version":"7.0.2","bin":{"tsc7":"./lib/renamed.js"}}`, "lib/renamed.js": typeCheckCommand},
+			env: []string{`JD_FAKE_CONFIG={"compilerOptions":{}}`}, passes: true, calls: [][]any{{"--showConfig", "--pretty", "false"}, check}},
+		{name: "neither an API nor a command", typescript: map[string]string{"package.json": `{"name":"typescript","version":"7.9.0"}`},
+			prints: []string{"TypeScript 7.9.0 has neither the compiler API nor a tsc command"}},
+		{name: "the API, types fine", typescript: api, passes: true, calls: [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
+		{name: "the API, a type error", typescript: api, env: []string{"JD_FAKE_ERROR=Type 'string' is not assignable to type 'number'.", "JD_FAKE_ERROR_FILE=/app/app/page.tsx"},
+			prints: []string{"/app/app/page.tsx(1,7): error TS2322: Type 'string' is not assignable to type 'number'."},
+			calls:  [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
+		{name: "the API, a type error in a test file", typescript: api, env: []string{"JD_FAKE_ERROR=Type 'string' is not assignable to type 'number'.", "JD_FAKE_ERROR_FILE=/app/app/page.test.tsx"},
+			passes: true, calls: [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			output, passed, calls := runTypeCheckScript(t, node, test.typescript, test.env...)
+			if passed != test.passes {
+				t.Fatalf("passed = %v, want %v:\n%s", passed, test.passes, output)
+			}
+			for _, want := range test.prints {
+				if !strings.Contains(output, want) {
+					t.Errorf("the output does not say %q:\n%s", want, output)
+				}
+			}
+			if len(calls) != len(test.calls) {
+				t.Fatalf("calls = %v, want %v:\n%s", calls, test.calls, output)
+			}
+			for index, want := range test.calls {
+				got := calls[index]
+				// The command is given the project by its whole path, which
+				// is the test's own folder.
+				if at := slices.Index(got, "--project"); at >= 0 && at+1 < len(got) {
+					if project, _ := got[at+1].(string); filepath.Base(project) != "tsconfig.json" || !filepath.IsAbs(project) {
+						t.Errorf("call %d names the project %q", index, project)
+					}
+					got = slices.Delete(slices.Clone(got), at, at+2)
+				}
+				if !slices.Equal(got, want) {
+					t.Errorf("call %d = %v, want %v", index, got, want)
+				}
+			}
+		})
 	}
 }

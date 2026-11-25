@@ -17,9 +17,11 @@ import (
 // So the type check runs as a stage of its own beside the build: BuildKit
 // runs two stages that do not depend on each other at once. The stage
 // generates the route types and settles tsconfig.json as next build would
-// (`next typegen`), then runs next build's own check on TypeScript's API
-// (nextTypeCheckSource) incrementally, its state in a cache mount of the
-// environment's; the build
+// (`next typegen`), then runs a check of next build's (nextTypeCheckSource)
+// incrementally, its state in a cache mount of the environment's: on
+// TypeScript's API where the application's TypeScript has one, and through
+// its tsc command where it has none (TypeScript 7), which is the only check
+// next build has for that package. The build
 // runs next build with the type check left out, through a build adapter
 // (NEXT_ADAPTER_PATH, which Next.js 16.4 reads as adapterPath) whose
 // modifyConfig sets typescript.ignoreBuildErrors. The runtime stage copies
@@ -53,16 +55,34 @@ const (
 // a generated Dockerfile is one line (withBuildValueGuards).
 const nextAdapterSource = `export default { name: "just-dashboard", modifyConfig: (config) => ({ ...config, typescript: { ...config.typescript, ignoreBuildErrors: true } }) }`
 
-// nextTypeCheckSource is the check: what next build's own type check
-// (next/dist/lib/typescript/runTypeCheck.js) does, on TypeScript's public
-// API, after next typegen has written next build's settings into
-// tsconfig.json. The files tsconfig.json names, less .next/dev/types; its
-// options with nothing emitted, incrementally, the state in
-// nextTypeCheckState; its errors, less a configuration with no inputs
-// (TS18003) and anything in a __tests__ or __mocks__ folder or a .test. or
-// .spec. file, which next build leaves out too. Errors print as
-// `file(line,col): error TSnnnn: …`. One line, like the adapter.
-const nextTypeCheckSource = `const path = require("path"); const ts = require(require.resolve("typescript", { paths: [process.cwd()] })); ` +
+// nextTypeCheckSource is the check next build would make, on whichever of
+// TypeScript's two faces next build would use, after next typegen has
+// written next build's settings into tsconfig.json. One line, like the
+// adapter, and no single quote, since the stage writes it with printf.
+//
+// Next.js 16.4 reads the package as getTypeScriptPackageInfo does
+// (next/dist/lib/typescript/runTypeScriptCli.js): the compiler API is
+// lib/typescript.js, and the command is the package's tsc bin. TypeScript 7,
+// the native compiler, ships the command and no API: requiring it gives a
+// version and nothing else. So the script asks which the package has, and
+// never calls an API that is not there.
+const nextTypeCheckSource = nextTypeCheckPackage +
+	`if (api && typeof api.getParsedCommandLineOfConfigFile === "function" && typeof api.createIncrementalProgram === "function") { ` + nextTypeCheckAPI + ` } else { ` + nextTypeCheckCLI + ` }`
+
+// nextTypeCheckPackage finds the application's TypeScript: its manifest, and
+// its API where the package has one.
+const nextTypeCheckPackage = `const path = require("path"); const fs = require("fs"); ` +
+	`const manifestPath = require.resolve("typescript/package.json", { paths: [process.cwd()] }); const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8")); ` +
+	`const home = path.dirname(manifestPath); const apiPath = path.join(home, "lib", "typescript.js"); const api = fs.existsSync(apiPath) ? require(apiPath) : null; `
+
+// nextTypeCheckAPI is the check on TypeScript's API, for a package that has
+// one (TypeScript 5 and 6): what next/dist/lib/typescript/runTypeCheck.js
+// does. The files tsconfig.json names, less .next/dev/types; its options
+// with nothing emitted, incrementally, the state in nextTypeCheckState; its
+// errors, less a configuration with no inputs (TS18003) and anything in a
+// __tests__ or __mocks__ folder or a .test. or .spec. file, which that check
+// leaves out too. Errors print as `file(line,col): error TSnnnn: …`.
+const nextTypeCheckAPI = `const ts = api; ` +
 	`const config = ts.getParsedCommandLineOfConfigFile(path.resolve("tsconfig.json"), {}, { ...ts.sys, onUnRecoverableConfigFileDiagnostic: (d) => { throw new Error(ts.flattenDiagnosticMessageText(d.messageText, "\n")) } }); ` +
 	`const devTypes = path.resolve(".next/dev/types"); const rootNames = config.fileNames.filter((name) => !name.startsWith(devTypes)); ` +
 	`const program = ts.createIncrementalProgram({ rootNames, options: { ...config.options, composite: false, incremental: true, declarationMap: false, emitDeclarationOnly: false, noEmit: true, tsBuildInfoFile: "` + nextTypeCheckState + `/tsbuildinfo" } }); ` +
@@ -70,6 +90,35 @@ const nextTypeCheckSource = `const path = require("path"); const ts = require(re
 	`const found = config.errors.filter((d) => d.code !== 18003).concat(rootNames.length > 0 ? ts.getPreEmitDiagnostics(program).concat(emitted.diagnostics) : []); ` +
 	`const errors = found.filter((d) => d.category === ts.DiagnosticCategory.Error && !(d.file && ignored.test(d.file.fileName))); ` +
 	`if (errors.length > 0) { process.stderr.write(ts.formatDiagnostics(errors, { getCanonicalFileName: (name) => name, getCurrentDirectory: () => process.cwd(), getNewLine: () => "\n" })); process.exit(1) }`
+
+// nextTypeCheckCLI is the check on TypeScript's command, for a package with
+// no API (TypeScript 7): what next/dist/lib/typescript/runTypeCheckCli.js
+// does, which is next build's own check of such a package. The command is
+// the one next build finds: the package's tsc bin (or the tscN an aliased
+// package renames it to), and lib/tsc.js in place of an extensionless bin of
+// an ES module package, which older Node.js releases cannot start. It runs
+// under this Node.js, twice. `tsc --showConfig` says whether the project is
+// incremental; then the whole project with nothing emitted, its state in
+// nextTypeCheckState when it is incremental. Nothing is left out here: the
+// command checks every file tsconfig.json names, tests and .next/dev/types
+// among them, and so does next build. --pretty false is the one argument
+// next build does not pass, so errors print as `file(line,col): error
+// TSnnnn: …` whatever the compiler makes of the build's output.
+const nextTypeCheckCLI = `const { spawnSync } = require("child_process"); ` +
+	`const stop = (message) => { process.stderr.write(message + "\n"); process.exit(1) }; ` +
+	`const stopped = (run) => run.error ? String(run.error.message || run.error) : run.signal ? "the TypeScript compiler was stopped by " + run.signal : ""; ` +
+	`const bins = typeof manifest.bin === "string" ? { tsc: manifest.bin } : manifest.bin || {}; const bin = bins.tsc || (Object.entries(bins).find(([name]) => /^tsc\d+$/.test(name)) || [])[1]; ` +
+	`let tsc = bin ? path.resolve(home, bin) : ""; const entry = path.join(home, "lib", "tsc.js"); ` +
+	`if (tsc && fs.existsSync(tsc) && manifest.type === "module" && path.extname(tsc) === "" && fs.existsSync(entry)) { tsc = entry } ` +
+	`if (!tsc || !fs.existsSync(tsc)) { stop("TypeScript " + manifest.version + " has neither the compiler API nor a tsc command to check types with.") } ` +
+	`const project = path.resolve("tsconfig.json"); ` +
+	`const shown = spawnSync(process.execPath, [tsc, "--showConfig", "--project", project, "--pretty", "false"], { encoding: "utf8", maxBuffer: Infinity }); ` +
+	`if (shown.status !== 0) { stop([shown.stdout, shown.stderr, stopped(shown)].filter(Boolean).join("\n").trim() || "tsc --showConfig failed.") } ` +
+	`let options; try { options = JSON.parse(shown.stdout).compilerOptions || {} } catch (cause) { stop("Could not parse the output of tsc --showConfig: " + cause.message) } ` +
+	`const args = ["--project", project, "--noEmit", "--declarationMap", "false", "--emitDeclarationOnly", "false", "--pretty", "false"]; ` +
+	`if (options.incremental || options.composite) { args.push("--tsBuildInfoFile", "` + nextTypeCheckState + `/cli.tsbuildinfo") } ` +
+	`const checked = spawnSync(process.execPath, [tsc, ...args], { stdio: "inherit" }); ` +
+	`if (checked.status !== 0) { stop(stopped(checked) || "Failed to type check.") }`
 
 // nextTypeCheckScript is where the type check stage writes it.
 const nextTypeCheckScript = "/opt/just-dashboard/typecheck.cjs"
