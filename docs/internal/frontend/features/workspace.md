@@ -539,7 +539,9 @@ kept 30 days") or, for what the Trash cannot take, why it is deleted permanently
 and "Delete permanently" in the menu skip the Trash. Every delete, move, rename, copy and duplicate is
 recorded as data (`undo.ts`: the steps that undo it, in order) on this visit's stack
 (`use-file-undo.ts`); its notice carries Undo, and Ctrl/Cmd+Z undoes the newest, then the one before,
-while text fields, dialogs and menus keep their own. An operation that cannot be undone (a permanent
+while text fields, dialogs and menus keep their own. Undos run one after another in the order asked
+for: a press while the last one is still with the server waits its turn rather than being dropped,
+and an operation asked for twice runs once. An operation that cannot be undone (a permanent
 delete, a copy by an account that may not delete) says so on its notice instead. Name search passes
 the folder on screen as `here` and says the index's age beside the count when the index answered.
 

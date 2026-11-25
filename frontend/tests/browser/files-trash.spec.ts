@@ -289,15 +289,31 @@ test("Ctrl+Z undoes the last file operation, then the one before", async ({ page
     .locator("[data-files-workspace] table")
     .first()
     .click({ position: { x: 5, y: 5 } })
+  // The first undo's request is held until the second press is in, so the
+  // second press lands while the first is still talking to the server, as it
+  // does on a slow connection or runner: it was dropped then.
+  let release = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/files/delete**", async (route) => {
+    await held
+    await route.fallback()
+  })
+  const deleting = page.waitForRequest((request) => request.url().includes("/api/v1/files/delete"))
   await page.keyboard.press("Control+z")
+  await deleting
+  await page.keyboard.press("Control+z")
+  release()
   await expect.poll(() => calls.filter((c) => c.path === "/files/delete").length).toBe(1)
   expect(calls.find((c) => c.path === "/files/delete")!.query.get("path")).toMatch(/report/)
-  await page.keyboard.press("Control+z")
   await expect.poll(() => calls.filter((c) => c.path === "/files/move").length).toBe(2)
   expect(calls.filter((c) => c.path === "/files/move")[1].body).toEqual({
     from: `${home}/ideas.md`,
     to: `${home}/notes.md`,
   })
+  // One after the other, in the order asked for: the rename is undone only
+  // once the duplicate is gone.
+  const order = calls.map((c) => c.path).filter((p) => p === "/files/delete" || p === "/files/move")
+  expect(order).toEqual(["/files/move", "/files/delete", "/files/move"])
 })
 
 test("Shift+Delete deletes for good, and says it cannot be undone", async ({ page }) => {
