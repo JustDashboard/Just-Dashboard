@@ -197,11 +197,12 @@ export default function FileEditorPage() {
 
   return (
     <Page fill="workspace" className="gap-2">
-      {/* A frame is needed because both the tree and editor own their scrolling.
-          Below `lg` it runs to the screen's edges and shows one of the two,
-          picked on the bar at its foot: beside each other on a phone the tree
-          was a drawer over the code, opened from a glyph in the strip. */}
-      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border">
+      {/* One surface held to the sheet, because both the tree and the editor
+          own their scrolling; the sheet is its frame. Below `lg` it shows one
+          of the two, picked on the bar at its foot: beside each other on a
+          phone the tree was a drawer over the code, opened from a glyph in the
+          strip. */}
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card">
         <WorkbenchHeader
           back={{
             label: "Back to Files",

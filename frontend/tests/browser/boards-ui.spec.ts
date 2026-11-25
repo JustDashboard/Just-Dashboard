@@ -308,10 +308,10 @@ test("a board opens without saving, keeps its images, and saves inserted live se
   expect(externalFonts).toEqual([])
 })
 
-// The editor is the workbench frame the terminal, Files and Git share: one
-// frame held to the window under a head bar that reads back, name, save state,
-// then one command and a menu. It had a bar of its own with four equal
-// controls and a bin.
+// The editor is the workbench the terminal, Files and Git share: one surface
+// held to the window under a head bar that reads back, name, save state, then
+// one command and a menu. It had a bar of its own with four equal controls and
+// a bin.
 for (const width of [1280, 390]) {
   test(`a drawing is one frame under a head bar with one command, at ${width}px`, async ({
     page,
@@ -323,15 +323,13 @@ for (const width of [1280, 390]) {
     const frame = page.locator("[data-slot=drawing-workspace]")
     const area = await page.locator("[data-workspace-shell-scroll]").boundingBox()
     const box = await frame.boundingBox()
-    if (width === 1280) {
-      // In the page's gutter, rounded, and held to the window.
-      expect(box!.x).toBeGreaterThan(area!.x)
-      expect(box!.y + box!.height).toBeLessThan(area!.y + area!.height)
-      expect(await frame.evaluate((node) => getComputedStyle(node).borderRadius)).not.toBe("0px")
-    } else {
-      // On a phone the frame is the screen.
-      expect([box!.x, box!.width]).toEqual([area!.x, area!.width])
-    }
+    // At every width the surface runs to the sheet's edges with no frame of
+    // its own: from `md` up the sheet is its frame, and on a phone the screen
+    // is. In the page's gutter with a rounded border, it was a frame 12px
+    // inside the sheet's own (0.9.1).
+    expect([box!.x, box!.width]).toEqual([area!.x, area!.width])
+    expect(box!.y + box!.height).toBeCloseTo(area!.y + area!.height, 0)
+    expect(await frame.evaluate((node) => getComputedStyle(node).borderTopWidth)).toBe("0px")
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(
       width,
     )

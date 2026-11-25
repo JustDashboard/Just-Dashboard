@@ -664,7 +664,8 @@ it, using `files.MoveEnds` to learn where the entry actually landed, and a delet
 folder of the same name starts with the global colour, or blue if none was chosen. Both are best-effort
 after the filesystem operation has succeeded.
 
-Frontend `components/files/`: the page is **one framed workbench** with no page header above it — a
+Frontend `components/files/`: the page is **one workbench surface**, run to the sheet's edges with
+no frame of its own and no page header above it — a
 strip across the top carrying where you are (a compact folder button for the global colour, the
 path and its star) and every page command (Find, content search, refresh, the view, arrange, the GitHub
 account, New, Upload, and the toggles for the two side columns), grouped into outlined boxes

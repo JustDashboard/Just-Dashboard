@@ -75,9 +75,10 @@ export function unreadKinds(kinds: MapKindReading[], drawn: ReadonlySet<string>)
  * stack and PM2 app, this dashboard itself — drawn as its own diagram of what
  * it is made of and wired to (`lib/server-systems.ts`, `canvas.tsx`).
  *
- * A reading page held to the window as a workbench (design system §16), one
- * frame around the rail of systems, a canvas and its inspector, the way a
- * database's Diagram is. Below the width those fit, one of the three at a
+ * A reading page held to the window as a workbench (design system §16): the
+ * rail of systems, a canvas and its inspector side by side on the sheet, with
+ * a hairline between each and no frame of their own (the sheet is the frame),
+ * the way a database's Diagram is. Below the width those fit, one of the three at a
  * time, edge to edge, with a bar at the foot to pick which: the canvas alone
  * left a phone no list of systems, no inspector and no way to the command
  * the desk's inspector has, where the databases map had all three.
@@ -107,11 +108,11 @@ export function ServerMapPage() {
       <div
         ref={root}
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          screen.immersive && "fixed inset-0 z-immersive p-3",
+          "flex min-h-0 min-w-0 flex-1 flex-col bg-background",
+          screen.immersive && "fixed inset-0 z-immersive",
         )}
       >
-        <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
+        <Pane flush className="min-h-0 flex-1">
           {ready ? (
             <ReactFlowProvider>
               <MapCanvas

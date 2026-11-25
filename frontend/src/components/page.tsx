@@ -30,13 +30,20 @@ import { TabHeading } from "@/components/shell/tab-title"
  * exactly the space it was handed, and the scrolling happens inside the pane
  * that owns the content.
  *
- * `fill="workspace"` is the workbench's frame (Files, Git, the terminal, the
- * map, the boards): the same definite height, the whole width, no gap between
- * its parts, and an inset only from `lg`, where the shell has room around it.
- * Those pages each spelled that with their own overrides — twelve spellings,
- * so their insets drifted by 4 to 8px and a loading branch framed differently
- * from its loaded one. `bleed` drops the inset too, for a remote screen that
- * runs edge to edge.
+ * `fill="workspace"` is the workbench's page (Files, Git, the terminal, the
+ * maps, the boards): the same definite height, the whole width, no gap between
+ * its parts, and no inset at any width. Those pages each spelled that with
+ * their own overrides — twelve spellings, so their insets drifted by 4 to 8px
+ * and a loading branch framed differently from its loaded one.
+ *
+ * The sheet is a workbench's frame. From `md` up the shell lays every page on
+ * a sheet with its own edge and corners (`app/(dashboard)/layout.tsx`), so a
+ * workbench draws none: its working surface runs to the sheet's edges and its
+ * panes are divided by hairlines. Until 0.9.1 the workbenches drew a rounded
+ * border of their own from `lg`, 12px in from the window; on the sheet that
+ * was a second edge 12px inside the first, a frame in a frame. Nothing inside
+ * the sheet draws a frame along its edge (`design-system.spec.ts`, *nothing
+ * on … draws a frame inside the sheet*).
  *
  * `rise` is the page arriving (the `rise` animation), said once here rather
  * than as `className="animate-rise"` on each page.
@@ -51,7 +58,6 @@ import { TabHeading } from "@/components/shell/tab-title"
 export function Page({
   className,
   fill,
-  bleed,
   rise,
   register = "reading",
   ...props
@@ -63,8 +69,6 @@ export function Page({
    * workbench's frame (above).
    */
   fill?: boolean | "xl" | "workspace"
-  /** With `fill="workspace"`: no inset at any width. */
-  bleed?: boolean
   /** The page rises into place as it arrives. */
   rise?: boolean
   /**
@@ -90,7 +94,7 @@ export function Page({
       className={cn(
         "group/page mx-auto flex w-full min-w-0 flex-col",
         fill === "workspace"
-          ? cn("h-full min-h-0 max-w-none overflow-hidden", !bleed && "lg:p-3")
+          ? "h-full min-h-0 max-w-none overflow-hidden"
           : "max-w-[1440px] gap-6 px-(--page-inset) py-6 [--page-inset:1.25rem] md:gap-8 md:px-(--page-inset) md:py-8 md:[--page-inset:2rem]",
         fill === true && "h-full min-h-0 overflow-hidden",
         fill === "xl" && "xl:h-full xl:min-h-0 xl:overflow-hidden",
@@ -101,6 +105,14 @@ export function Page({
     />
   )
 }
+
+/**
+ * What a workbench page shows while its first read is out, as the class list
+ * of a `LoadingPanel plain`: the working surface's ground at its final size,
+ * the rows a little in from the sheet's edge, and no frame. A framed panel
+ * laid at the top of a page with no inset is a frame against the sheet's own.
+ */
+export const WORKBENCH_WAITING = "flex-1 bg-card px-3"
 
 /**
  * The way back to the list a page sits under: "← Containers". One drawing for

@@ -2,7 +2,6 @@
 
 import { ErDiagram } from "@/components/database/diagram/er-diagram"
 import { SectionFrame } from "@/components/database/kit"
-import { WORKBENCH_PAGE } from "@/components/database/workbench/chrome"
 
 /**
  * The schema as a diagram, for a SQL engine: the canvas in the page's frame.
@@ -11,7 +10,7 @@ import { WORKBENCH_PAGE } from "@/components/database/workbench/chrome"
  */
 export function Diagram() {
   return (
-    <SectionFrame section="diagram" className={WORKBENCH_PAGE}>
+    <SectionFrame section="diagram">
       <ErDiagram />
     </SectionFrame>
   )

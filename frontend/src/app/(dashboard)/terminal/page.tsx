@@ -48,7 +48,7 @@ import { useBelow } from "@/lib/breakpoints"
 import { cn } from "@/lib/utils"
 import { useViewState } from "@/lib/view-state"
 import { IconAction } from "@/components/icon-action"
-import { Page } from "@/components/page"
+import { Page, WORKBENCH_WAITING } from "@/components/page"
 import { Pane, PaneHeader } from "@/components/panel"
 import { XtermPane, type XtermActions } from "@/components/xterm-pane"
 import { SplitDivider } from "@/components/terminal/split-divider"
@@ -727,7 +727,7 @@ export default function TerminalPage() {
     return (
       <Page fill="workspace">
         <h1 className="sr-only">Terminal</h1>
-        <LoadingPanel rows={4} />
+        <LoadingPanel rows={4} plain className={WORKBENCH_WAITING} />
       </Page>
     )
   // Only when there is nothing to show. A listing that fails while the
@@ -964,38 +964,37 @@ export default function TerminalPage() {
       {/* A workbench draws no page header, so its name is said, not drawn. */}
       <h1 className="sr-only">Terminal</h1>
       {data.persistenceError && (
-        <div className="max-lg:px-2 max-lg:pt-2">
+        <div className="px-2 pt-2">
           <Notice icon={ShieldOff} tone="danger" live="alert" title="New terminals are unavailable">
             {data.persistenceError}. Existing sessions keep running on the server.
           </Notice>
         </div>
       )}
       {data.login.error && (
-        <div className="max-lg:px-2 max-lg:pt-2">
+        <div className="px-2 pt-2">
           <Notice icon={ShieldOff} tone="danger" title="No account to log in as">
             {data.login.error} Set <code className="font-mono">JD_TERMINAL_USER</code> to an account
             that exists.
           </Notice>
         </div>
       )}
-      {/* One frame around the whole workbench. The rail, the emulator and the
+      {/* One working surface, and the sheet is its frame: it runs to the
+          sheet's edges and draws no border of its own, which 12px inside the
+          sheet's edge was a frame in a frame. The rail, the emulator and the
           tools column are separated by a hairline each rather than by a gutter
           and three borders: three framed panes with gaps between them read as
-          three boxes floating on the page, and the screen is one working
-          surface. The three columns' top strips are all 40px, so their
-          hairlines run across the frame as one rule. The panel toggles live
-          only in the emulator's strip; a second copy inside each panel said
-          the same thing twice. Below `lg` the frame is the screen, edge to
-          edge as the Git workspace's is, and holds one of the three at a
-          time over the bar that picks it. */}
+          three boxes floating on the page. The three columns' top strips are
+          all 40px, so their hairlines run across the surface as one rule. The
+          panel toggles live only in the emulator's strip; a second copy inside
+          each panel said the same thing twice. Below `lg` it holds one of the
+          three at a time over the bar that picks it. */}
       <div
         ref={workspaceRef}
         data-slot="terminal-workspace"
         style={{ "--jd-rail": `${railPx}px`, "--jd-tools": `${toolsPx}px` } as React.CSSProperties}
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border",
-          immersive &&
-            "fixed inset-0 z-immersive rounded-none border-0 bg-background lg:rounded-none",
+          "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card",
+          immersive && "fixed inset-0 z-immersive bg-background",
         )}
       >
         <div className="flex min-h-0 min-w-0 flex-1">

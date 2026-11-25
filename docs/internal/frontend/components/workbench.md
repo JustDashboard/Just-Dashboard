@@ -1,6 +1,6 @@
 # Workbench
 
-One frame held to the window: the panes it is made of, one pane at a time on a phone, the handles
+One surface held to the window, the sheet its frame: the panes it is made of, one pane at a time on a phone, the handles
 between them, the page's keys and place, the terminal, the editor and the canvases.
 
 **Members:** `Pane`, `PaneHeader`, `PaneFooter` (`panel.tsx`); `PaneBar`, `PaneBack`, `paneShown`
@@ -9,7 +9,10 @@ between them, the page's keys and place, the terminal, the editor and the canvas
 (`code-editor.tsx`); `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` (`canvas-move.ts`);
 `useIsPhone`, `useMediaQuery` (`hooks/use-mobile.ts`); `WorkbenchHeader` (`workbench-header.tsx`);
 `CanvasZoom` (`canvas-zoom.tsx`) and `useFullscreen` (`hooks/use-fullscreen.ts`). The page frame
-is `Page fill="workspace"` (`components/page.tsx`).
+is `Page fill="workspace"` (`components/page.tsx`), with no inset at any width: the working surface
+runs to the sheet's edges and draws no border of its own, since the sheet is its frame
+([`../foundations/surfaces.md`](../foundations/surfaces.md)). `WORKBENCH_WAITING` is its loading
+state's class list.
 
 **Register.** A workbench is a page the reader works in for minutes (the terminal, Files, Git, a
 database's Data and Query, the boards, the map), not one they read. Its recipe is

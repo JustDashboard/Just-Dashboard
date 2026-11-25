@@ -32,6 +32,7 @@ below) and let the operator decide; it is never a defect.
 | **Three inks** | `text-foreground`, `text-muted-foreground` and `text-faint`. Faint has a 4.5:1 floor. Text is never faded with opacity. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*, *no page fades its words with opacity*); coming: lint `ink-opacity` (WP-39) |
 | **Colours are tokens** | Every colour is named once, on `:root` in `app/globals.css`. | lint `hardcoded-palette`, `tone-tint`; coming: lint `colour-var` (WP-39) |
 | **Nothing lifts** | A surface separates by a step of ground and a border. Shadows only on popovers, menus, dialogs and the floating bars. A block is plain unless it can say why it needs an edge. A control's face carries one lit pixel along its top (`--edge`), no drop shadow. | convention |
+| **The sheet is the frame** (24 Nov 2026) | From `md` up every page is a sheet with its own edge. Nothing inside it draws a frame along that edge: a workbench runs to the sheet's edges with hairlines between its panes, and a pane on a reading page keeps the page's gutter. A frame 12px inside the sheet is a frame in a frame. | spec `design-system.spec.ts` (*nothing on … draws a frame inside the sheet*); [`foundations/surfaces.md`](foundations/surfaces.md) |
 | **One blue, three jobs** | The brand blue is a command's face, where you are, and a location mark. Status has its own three hues. | convention |
 | **No descriptions under titles** | `PageContext`, `Section`, `PanelHeader` and `ChartPanel` have no `description`. | type |
 | **A verb is one word. Few words.** | D14. When the operator says "too much whitespace", cut content; do not rearrange it. | convention |
@@ -49,8 +50,8 @@ below) and let the operator decide; it is never a defect.
 ## The deploy standard, D1 to D14
 
 Copied from the 13 Nov 2026 UI map (`tools/rubric.md`), which rated every page against it. A
-workbench (the terminal, Files, a database's Data, Query, Schema and Diagram) is one frame held to
-the window: judge it on D3, D5, D11, D12, D13 and D14, and on whether its chrome matches the Git
+workbench (the terminal, Files, a database's Data, Query, Schema and Diagram) is one surface held
+to the window, the sheet its frame: judge it on D3, D5, D11, D12, D13 and D14, and on whether its chrome matches the Git
 workspace, the server map and the assistant. Say which traits do not apply rather than failing them.
 
 | Id | Trait | At the standard | Not | Held by |

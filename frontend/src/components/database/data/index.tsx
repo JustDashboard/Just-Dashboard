@@ -16,12 +16,7 @@ import { EMPTY_CHANGE_STATE, useChangeSet, type ChangeSetState } from "@/compone
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import { SchemaHeadSkeleton } from "@/components/database/kit/schema-head"
-import {
-  WORKBENCH_PAGE,
-  WorkbenchFrame,
-  WorkbenchSide,
-  sideVerbs,
-} from "@/components/database/workbench/chrome"
+import { WorkbenchFrame, WorkbenchSide, sideVerbs } from "@/components/database/workbench/chrome"
 import { clamp } from "@/components/database/workbench/side-model"
 import {
   SETTLED,
@@ -377,7 +372,7 @@ export function SqlData() {
     ROW_GROUPS.every(({ group }) => (catalog.data?.objects[group]?.length ?? 0) === 0)
 
   return (
-    <SectionFrame section="data" className={WORKBENCH_PAGE}>
+    <SectionFrame section="data">
       {/* One frame around the whole workbench (§7.2): the head that says which
           database and carries the open table's verbs, then the rail, the
           table and the row as columns of one working surface, with a hairline

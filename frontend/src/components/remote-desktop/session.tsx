@@ -526,7 +526,7 @@ export function RemoteSession({
 
   if (!data) {
     return (
-      <Page fill="workspace" bleed className="p-6">
+      <Page fill="workspace" className="p-6">
         {error ? <ErrorState error={error} onRetry={refresh} retryable /> : <LoadingPanel />}
       </Page>
     )
@@ -604,7 +604,7 @@ export function RemoteSession({
   ) : null
 
   return (
-    <Page fill="workspace" bleed>
+    <Page fill="workspace">
       <h1 className="sr-only">
         {computer ? `Remote Desktop: ${computer.name}` : "Remote Desktop"}
       </h1>

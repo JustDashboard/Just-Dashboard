@@ -1555,8 +1555,9 @@ export default function FilesPage() {
       <h1 className="sr-only">Files</h1>
       <AudioQueueHost entries={entries} />
       <FolderColourProvider colours={colours} defaultColour={defaultColour}>
-        {/* One frame around the whole workbench: a strip across the top, then
-            the sidebar, the listing and the inspector separated by a hairline
+        {/* One working surface, and the sheet is its frame (no border of its
+            own: `Page fill="workspace"`): a strip across the top, then the
+            sidebar, the listing and the inspector separated by a hairline
             each rather than by a gutter and three borders — three framed
             panels with gaps between them read as three boxes floating on the
             page, and the screen is one working surface.
@@ -1576,7 +1577,7 @@ export default function FilesPage() {
               "--panel-ground": "var(--card)",
             } as React.CSSProperties
           }
-          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
+          className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card"
         >
           {/* Every control in the strip has a face, and the faces come in
               groups: the way back and forward, where you are, finding, how

@@ -2,7 +2,7 @@
 
 import dynamic from "next/dynamic"
 import { useParams } from "next/navigation"
-import { Page } from "@/components/page"
+import { Page, WORKBENCH_WAITING } from "@/components/page"
 import { LoadingPanel } from "@/components/loading"
 
 // The workspace draws its own page: the editor is a workbench held to the
@@ -12,7 +12,7 @@ const BoardWorkspace = dynamic(() => import("@/components/boards/board-workspace
   ssr: false,
   loading: () => (
     <Page fill="workspace">
-      <LoadingPanel />
+      <LoadingPanel plain className={WORKBENCH_WAITING} />
     </Page>
   ),
 })

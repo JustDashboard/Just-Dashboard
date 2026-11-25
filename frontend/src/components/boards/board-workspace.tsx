@@ -43,7 +43,7 @@ import {
 } from "@/components/icons"
 import { useConfirm } from "@/components/confirm-dialog"
 import { IconAction } from "@/components/icon-action"
-import { Page } from "@/components/page"
+import { Page, WORKBENCH_WAITING } from "@/components/page"
 import { PaneHeader } from "@/components/panel"
 import { ProductLogo } from "@/components/product-logo"
 import { WorkbenchHeader } from "@/components/workbench-header"
@@ -242,7 +242,7 @@ export default function BoardWorkspace({ id }: { id: number }) {
     return (
       <Page fill="workspace">
         <h1 className="sr-only">Drawing</h1>
-        <LoadingPanel />
+        <LoadingPanel plain className={WORKBENCH_WAITING} />
       </Page>
     )
   return <LoadedBoard key={board.id} board={board} />
@@ -699,7 +699,7 @@ function LoadedBoard({ board }: { board: Board }) {
     <Page fill="workspace">
       <div
         data-slot="drawing-workspace"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card"
       >
         {/* Two rows on a phone, on purpose: back, the name and the verbs, then
             the save state under the name. Wrapped wherever the next control

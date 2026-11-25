@@ -198,16 +198,16 @@ export function DatabaseMap() {
   const failed = !map.data && !topology.data && map.error && topology.error
 
   return (
-    <Page fill className="max-w-none gap-2 p-0 lg:px-3 lg:py-3">
+    <Page fill="workspace" className="gap-2">
       <PageContext title="Map" />
       <div
         ref={root}
         className={cn(
-          "flex min-h-0 min-w-0 flex-1 flex-col bg-background [&:fullscreen]:p-3",
-          screen.immersive && "fixed inset-0 z-immersive p-3",
+          "flex min-h-0 min-w-0 flex-1 flex-col bg-background",
+          screen.immersive && "fixed inset-0 z-immersive",
         )}
       >
-        <Pane className="min-h-0 flex-1 max-lg:rounded-none max-lg:border-0">
+        <Pane flush className="min-h-0 flex-1">
           {failed ? (
             <ErrorState
               className="p-4"

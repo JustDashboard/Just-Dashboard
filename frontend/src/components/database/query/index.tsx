@@ -19,7 +19,6 @@ import { Input } from "@/components/ui/input"
 import { EngineMark, SectionFrame } from "@/components/database/kit"
 import { useDatabase } from "@/components/database/shell/database-context"
 import {
-  WORKBENCH_PAGE,
   WorkbenchFrame,
   WorkbenchSide,
   sideVerbs,
@@ -692,7 +691,7 @@ export function SqlQuery() {
   ]
 
   return (
-    <SectionFrame section="query" className={WORKBENCH_PAGE}>
+    <SectionFrame section="query">
       {/* One frame around the whole workbench: the head that says which
           database, then the rail and the editor as columns of one working
           surface, with a hairline between them. */}

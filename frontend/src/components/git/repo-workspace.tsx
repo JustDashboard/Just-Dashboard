@@ -542,9 +542,12 @@ export function RepoWorkspace({
       ]}
     >
       <CommitAuthors.Provider value={authors.data}>
-        <Page fill="workspace" className="gap-3">
+        <Page fill="workspace">
+          {/* In from the sheet's edges, on its ground above the surface: a
+              framed notice laid against the sheet's edge is a frame in a
+              frame. */}
           {operation && (
-            <Notice tone="warning" title={`A ${operation} is in progress`}>
+            <Notice tone="warning" title={`A ${operation} is in progress`} className="m-3 shrink-0">
               {operation === "bisect"
                 ? "Finish the bisect in the terminal with git bisect reset."
                 : "Resolve each conflicted file in Changes, then continue when the result is ready."}
@@ -607,13 +610,13 @@ export function RepoWorkspace({
             </Notice>
           )}
 
-          {/* One frame around the whole workbench: a strip across the top, then
-          the three columns separated by hairlines. */}
+          {/* One working surface on the sheet, which is its frame: a strip
+          across the top, then the three columns separated by hairlines. */}
           <div
             style={
               { "--jd-tree": `${treePx}px`, "--jd-work": `${workPx}px` } as React.CSSProperties
             }
-            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card lg:rounded-xl lg:border"
+            className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card"
           >
             {/* The strip, left to right in the order it is read: which
             repository, then where HEAD is, then the three verbs pressed every

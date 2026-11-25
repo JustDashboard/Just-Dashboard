@@ -99,12 +99,12 @@ export function ToolsPanel() {
   return (
     <>
       <PageContext title="Tools" />
-      {/* One frame around the whole workbench: the strip, then the rail and
-          the pane with a hairline between them. Below `md` it runs to the
-          window's edges, one pane at a time with a bar at the foot. */}
+      {/* One working surface on the sheet, which is its frame: the strip,
+          then the rail and the pane with a hairline between them. Below `md`
+          it shows one pane at a time with a bar at the foot. */}
       <div
         data-slot="security-tools"
-        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card md:rounded-xl md:border"
+        className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-card"
       >
         <PaneHeader className="h-auto min-h-12 gap-3 px-3 py-1.5">
           <WireHost size="sm" />
