@@ -66,7 +66,11 @@ from pathlib import Path
 # The race gate, as the jobs it runs in: a name, how many processes split each
 # package's tests, and the packages. ./internal/api runs its tests one at a
 # time, so it is split to fill the runner; ./internal/deploy runs its own in
-# parallel already.
+# parallel already. ./internal/store has a job of its own: its tests are
+# parallel, but each migrates a store twice, twenty to forty seconds under the
+# detector, and sharing a runner's four cores with ./internal/deploy put the
+# package past `go test`'s ten minutes on three pull requests in November 2026
+# (the sum of its tests was 687 s on a quick runner, 1025 s on a slow one).
 RACE = [
     ("api", 4, ["backend/internal/api"]),
     (
@@ -76,10 +80,10 @@ RACE = [
             "backend/internal/deploy",
             "backend/internal/proxysvc",
             "backend/internal/backups",
-            "backend/internal/store",
             "backend/internal/dockerx",
         ],
     ),
+    ("store", 1, ["backend/internal/store"]),
 ]
 
 # Asserted without the race detector, which multiplies a SQLite read ten- to

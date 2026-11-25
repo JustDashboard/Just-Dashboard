@@ -230,8 +230,9 @@ never into `docs/audits/`.
   checked when it changed or imports one that did, so a change to one handler does not run the
   deployment suite and a change to the store runs everything above it. `backend` builds, vets, and tests
   those packages plainly; the six of the race gate (`internal/{api,deploy,proxysvc,backups,store,dockerx}`)
-  run under the race detector instead, in at most two jobs — `scripts/go-test-race.sh` splits
-  `./internal/api` across four processes to fill the runner's cores — and only their latency budgets
+  run under the race detector instead, in at most three jobs — `scripts/go-test-race.sh` splits
+  `./internal/api` across four processes to fill the runner's cores, and `./internal/store`, whose
+  migration tests are its slowest under the detector, has a runner of its own — and only their latency budgets
   run plainly, because the detector multiplies a SQLite read ten- to twenty-five-fold and so measures
   itself rather than the read. A package whose tests read the frontend's half of a contract
   (`internal/version`, `internal/deploy`) runs when that file changes. `frontend` lints the changed

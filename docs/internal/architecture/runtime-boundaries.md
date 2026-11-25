@@ -546,7 +546,10 @@ that fixture through `Open` calls `t.Parallel()` first, and `parallel_test.go` f
 not: each migrates twice, under the race detector one `Open` is about six seconds, and twenty of them
 in a row put the package at `go test`'s ten minutes, which is what failed the race gate three times
 in November 2026 with no race reported. They own the directories they open and the package keeps no
-state between stores, so nothing is shared.
+state between stores, so nothing is shared. Parallel, they still came to ten minutes again by late
+November, sharing a runner with `./internal/deploy`, so the race gate gives the package a job of its
+own (`RACE` in `scripts/ci-plan.py`), and `scripts/go-test-race.sh` gives each `go test` fifteen
+minutes instead of the default ten, inside the job's twenty.
 
 ### The store's connections
 
