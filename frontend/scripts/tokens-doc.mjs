@@ -137,6 +137,14 @@ const FAMILIES = [
   },
   {
     part: "Colour",
+    name: "Contributions",
+    match: /^--contribution-[0-4]$/,
+    use: "bg",
+    page: "colour.md",
+    for: "A day on a contribution calendar, from none to GitHub's busiest quartile.",
+  },
+  {
+    part: "Colour",
     name: "Languages",
     match: /^--language-[a-z]+$/,
     use: "text",
