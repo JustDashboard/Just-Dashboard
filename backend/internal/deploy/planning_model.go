@@ -607,6 +607,10 @@ type BuildPlanConfig struct {
 	// cache is the build's cache-mount scope, set by PrepareWithin from the
 	// release tag and the cache policy; it is never stored with the plan.
 	cache recipeCache
+	// typeCheckBeside says this server can run a Next.js type check beside
+	// the build (build_node_typecheck.go), set by PrepareWithin; it is never
+	// stored with the plan.
+	typeCheckBeside bool
 }
 
 // BuildSecretConfig names a variable and the reviewed recipe stages in which

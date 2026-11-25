@@ -165,11 +165,22 @@ func TestLiveBuildReachesItsDatabaseAndAppliesTheSchemaFirst(t *testing.T) {
 			t.Fatalf("the image does not hold what the build read: %v %s", err, output)
 		}
 	}
-	// The builder holds no endpoint on the network once it is closed.
+	// Closed, the builder waits on the network for the environment's next
+	// build; removing the environment's builder takes it off.
 	closeBuilder(context.Background())
+	assertLiveNetworkEndpoints(t, ctx, network, "2", "after close")
+	if err := client.RemoveNetworkedBuilderState(ctx, dockerx.NetworkedBuilderName(network)); err != nil {
+		t.Fatal(err)
+	}
+	assertLiveNetworkEndpoints(t, ctx, network, "1", "after the builder's removal")
+}
+
+// assertLiveNetworkEndpoints checks how many containers a network holds.
+func assertLiveNetworkEndpoints(t *testing.T, ctx context.Context, network, want, when string) {
+	t.Helper()
 	inspect, err := liveDockerOutput(ctx, "network", "inspect", network, "--format", "{{len .Containers}}")
-	if err != nil || strings.TrimSpace(string(inspect)) != "1" {
-		t.Fatalf("network endpoints after close = %s (%v)", inspect, err)
+	if err != nil || strings.TrimSpace(string(inspect)) != want {
+		t.Fatalf("network endpoints %s = %s (%v), want %s", when, inspect, err, want)
 	}
 }
 
@@ -298,11 +309,13 @@ func TestLiveBuildStepBuildsAnApplicationThatReadsItsNewDatabase(t *testing.T) {
 			t.Fatalf("the image does not hold what the build read: %v %s", err, output)
 		}
 	}
-	// The builder is gone from the network once the step is over.
-	inspect, err := liveDockerOutput(ctx, "network", "inspect", network, "--format", "{{len .Containers}}")
-	if err != nil || strings.TrimSpace(string(inspect)) != "1" {
-		t.Fatalf("network endpoints after the step = %s (%v)", inspect, err)
+	// The builder waits on the network once the step is over, until the
+	// environment's builder is removed.
+	assertLiveNetworkEndpoints(t, ctx, network, "2", "after the step")
+	if err := client.RemoveNetworkedBuilderState(ctx, dockerx.NetworkedBuilderName(network)); err != nil {
+		t.Fatal(err)
 	}
+	assertLiveNetworkEndpoints(t, ctx, network, "1", "after the builder's removal")
 }
 
 // liveBuildDatabaseServer starts PostgreSQL on a network of its own under a

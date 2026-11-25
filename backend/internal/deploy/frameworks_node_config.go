@@ -53,6 +53,7 @@ var nodeConfigKinds = []struct {
 var nodeProbedPaths = []string{
 	"index.html", ".meteor/release", "database/migrations", "medusa-config.ts", "medusa-config.js",
 	"adonisrc.ts", "ace.js", "keystone.ts", "keystone.js", "redwood.toml", "remix.config.js", "api/db/migrations",
+	"tsconfig.json",
 }
 
 // nodeConventionalEntries are the files a server library's starter keeps its

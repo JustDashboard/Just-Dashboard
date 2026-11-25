@@ -459,8 +459,10 @@ A change that weakens any of these has to say so explicitly.
     joined only to the networks `NetworksForRuntime` gives that environment's release, under the same
     isolation refusals; its steps
     share the builder container's network namespace, never the server's, and `--network=host` is used by
-    no build. The BuildKit image is pinned by digest, two environments never share a builder, and the
-    builder is removed after each build, so it holds no endpoint between builds. A migration or seed run
+    no build. The BuildKit image is pinned by digest and two environments never share a builder. Between
+    builds the builder waits at most 15 minutes running no build and listening on no port of the network;
+    the next build matches its networks to what that build's release may reach before starting on it, and
+    removing the environment's networks removes it first. A migration or seed run
     before the build is the plan's own command (the start command's migration, an image release task's,
     detection's seed), with the values that step would get anyway as BuildKit secrets; a seed runs only on
     databases holding no row, and a plan's backup gate is checked first. See

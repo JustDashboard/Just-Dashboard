@@ -91,11 +91,16 @@ network and joined to any other. Its steps share the builder container's network
 Docker's embedded resolver `127.0.0.11`, which BuildKit otherwise drops from a step's `resolv.conf`; so
 a step resolves `db-N.jd.internal` as the application does and reaches the internet through the same
 resolver. The step log limits are lifted to match Docker's builder. The builder is created for the
-step and removed after it (`buildx rm --keep-state`), so it holds no endpoint on the network between
-builds; its state volume (`buildx_buildkit_<builder>0_state`) keeps the cache. Builds of
-one environment take turns on it; two environments never share one, so one environment's build cannot
-reach another's database. Starting it takes 3 to 6 seconds and removing it under two, and an
-environment's first build on it fills its own cache. It pulls base images itself, as BuildKit does, so
+environment's first such build and, once a build is done, waits `dockerx.NetworkedBuilderIdle` (15
+minutes) for the next one, which starts on it at once — 0.3 s against 5 to 30 to create it — and is then
+removed (`buildx rm --keep-state`); its state volume (`buildx_buildkit_<builder>0_state`) keeps the cache
+either way. While it waits it runs no build and listens on no port of the network (the docker CLI reaches
+it through the container). The next build that starts on it first checks it still runs and matches its
+networks to that build's — joining what it may reach now and leaving what it may not, so a database
+unlinked meanwhile is out of reach — and a builder that fails that check, or one a stopped dashboard left
+running, is removed and created again. Builds of one environment take turns on it; two environments never
+share one, so one environment's build cannot reach another's database. An environment's first build on it
+fills its own cache. It pulls base images itself, as BuildKit does, so
 the daemon's registry mirrors (`daemon.json`) do not apply to it; registry sign-ins do, through the
 docker CLI's own configuration. A build whose values name no such host stays on Docker's builder.
 
@@ -125,8 +130,8 @@ happens, and build_artifact's evidence lists them (`databaseSteps`). A step that
 `build_schema_step_failed` or `build_seed_step_failed` with the command's last line; a refusal to join
 the network ends it before anything builds, as `build_database_network`.
 
-Removing an environment's networks (`removeRuntimeNetworks`) removes its builder, one a stopped
-dashboard left on the network included, and its cache first.
+Removing an environment's networks (`removeRuntimeNetworks`) removes its builder, a waiting one or one a
+stopped dashboard left on the network included, and its cache first.
 
 ## Runtime ownership and replacement
 
@@ -233,12 +238,15 @@ No hosted-provider account or live provider credentials are required by the loca
   the new signatures from each driver and Next.js, and remedies that follow Cache Components;
   `build_database_executor_test.go` runs build_artifact through a first deploy (network, schema, seed,
   build), a database with rows never seeded, a build off the network, and each failure.
-  `buildkit_network_test.go` covers the builder's arguments and configuration.
+  `buildkit_network_test.go` covers the builder's arguments and configuration, the networks a waiting
+  builder joins and leaves, and that one is claimed once; `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run
+  TestLiveNetworkedBuilderWaitsForTheNextBuild` closes a builder on two networks, starts the next build on
+  it with one, checks it left the other, and removes it.
 - `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLiveBuildReachesItsDatabase|TestLiveBuildStepBuildsAnApplication'`
   builds, with the real recipe and BuildKit, a package whose build reads a PostgreSQL that only its own
   network reaches under a `db-N.jd.internal` alias: the build reaches it, gets the migration and then
-  the seed applied from its own layers, and bakes the row into the image, leaving no endpoint on the
-  network. `JD_BUILD_DATABASE_LIVE_REPO` names a real checkout to build the same way.
+  the seed applied from its own layers, and bakes the row into the image; the closed builder waits on the
+  network until the environment's builder is removed, which leaves no endpoint. `JD_BUILD_DATABASE_LIVE_REPO` names a real checkout to build the same way.
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveDatabaseContentsSaysWhenADatabaseIsNew` counts
   rows in a provisioned PostgreSQL and MySQL.
 

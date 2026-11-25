@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -68,15 +69,60 @@ type NetworkedBuilderSpec struct {
 }
 
 // NetworkedBuilder is a builder running on an environment's networks. Close
-// removes its container — so it holds no endpoint on the network between
-// builds, and removing the network never meets a stranger — and keeps its
-// state volume, so the next build reuses the cache.
+// hands it back once the build is done: it stays running for
+// NetworkedBuilderIdle, so the environment's next build — a fix pushed a
+// minute later — starts on it at once instead of creating it again (5 to 30
+// seconds, more on a busy server), and is removed after that. Its state
+// volume, the cache, outlives the container either way.
+//
+// While it waits it is a BuildKit daemon with no build running, which
+// listens on no port of the network: the docker CLI reaches it through the
+// container itself. Removing the environment's network removes it first
+// (RemoveNetworkedBuilderState), as before; the next build that starts on it
+// matches its networks to what that build may reach, so a database unlinked
+// meanwhile is not reachable from it. One a stopped dashboard left running is
+// not trusted: the next build removes and creates it again.
 type NetworkedBuilder struct {
 	Name     string
 	Networks []string
-	client   *Client
-	release  func()
-	once     sync.Once
+	// Reused says the build starts on the builder an earlier build left
+	// waiting, rather than one created for it.
+	Reused  bool
+	client  *Client
+	release func()
+	once    sync.Once
+}
+
+// NetworkedBuilderIdle is how long a networked builder waits for its
+// environment's next build before it is removed. Zero removes it as soon as
+// its build is done.
+var NetworkedBuilderIdle = 15 * time.Minute
+
+// waitingBuilder is a builder this process left running after a build, with
+// what that build had it join and the timer that removes it.
+type waitingBuilder struct {
+	networks []string
+	timer    *time.Timer
+}
+
+// waitingBuilders are the builders this process left running, by name. Only
+// these are started on again; any other running under the name is removed.
+var waitingBuilders = struct {
+	sync.Mutex
+	byName map[string]*waitingBuilder
+}{byName: map[string]*waitingBuilder{}}
+
+// takeWaitingBuilder claims the builder waiting under name, if any, and
+// stops its removal. The caller holds the builder's lock.
+func takeWaitingBuilder(name string) *waitingBuilder {
+	waitingBuilders.Lock()
+	defer waitingBuilders.Unlock()
+	waiting := waitingBuilders.byName[name]
+	if waiting != nil {
+		delete(waitingBuilders.byName, name)
+		waiting.timer.Stop()
+	}
+	return waiting
 }
 
 // networkedBuilderLocks serialises the builds of one environment's builder:
@@ -85,13 +131,30 @@ type NetworkedBuilder struct {
 var networkedBuilderLocks sync.Map
 
 func networkedBuilderLock(ctx context.Context, name string) (func(), error) {
-	value, _ := networkedBuilderLocks.LoadOrStore(name, make(chan struct{}, 1))
-	slot := value.(chan struct{})
+	slot := networkedBuilderSlot(name)
 	select {
 	case slot <- struct{}{}:
 		return func() { <-slot }, nil
 	case <-ctx.Done():
 		return nil, ctx.Err()
+	}
+}
+
+func networkedBuilderSlot(name string) chan struct{} {
+	value, _ := networkedBuilderLocks.LoadOrStore(name, make(chan struct{}, 1))
+	return value.(chan struct{})
+}
+
+// networkedBuilderTryLock takes the builder's lock only if nobody holds it:
+// the removal of a waiting builder gives way to a build, whose own Close
+// leaves the builder waiting again.
+func networkedBuilderTryLock(name string) (func(), bool) {
+	slot := networkedBuilderSlot(name)
+	select {
+	case slot <- struct{}{}:
+		return func() { <-slot }, true
+	default:
+		return nil, false
 	}
 }
 
@@ -126,8 +189,9 @@ func NetworkedBuilderCreateArgs(spec NetworkedBuilderSpec, configPath string) ([
 }
 
 // StartNetworkedBuilder starts the builder an environment's database-reading
-// builds run on, on the given networks. A builder a stopped dashboard left
-// behind is removed first, its cache kept.
+// builds run on, on the given networks: the one an earlier build left
+// waiting, its networks matched to these, or a new one. A builder a stopped
+// dashboard left behind is removed first, its cache kept.
 func (c *Client) StartNetworkedBuilder(ctx context.Context, spec NetworkedBuilderSpec) (*NetworkedBuilder, error) {
 	if c == nil {
 		return nil, ErrUnavailable
@@ -146,11 +210,17 @@ func (c *Client) StartNetworkedBuilder(ctx context.Context, spec NetworkedBuilde
 	}
 	builder := &NetworkedBuilder{Name: spec.Name, Networks: append([]string(nil), spec.Networks...), client: c, release: release}
 	fail := func(err error) (*NetworkedBuilder, error) {
-		builder.Close(context.WithoutCancel(ctx))
+		builder.discard(context.WithoutCancel(ctx))
 		return nil, err
 	}
 	if err := writeNetworkedBuilderConfig(spec.ConfigDir, configPath); err != nil {
 		return fail(err)
+	}
+	if waiting := takeWaitingBuilder(spec.Name); waiting != nil {
+		if c.matchWaitingBuilder(ctx, spec) == nil {
+			builder.Reused = true
+			return builder, nil
+		}
 	}
 	c.removeNetworkedBuilder(ctx, spec.Name)
 	createCtx, cancel := context.WithTimeout(ctx, networkedBuilderStartTimeout)
@@ -176,8 +246,75 @@ var ErrNetworkedBuilder = errors.New("the builder on the environment's network c
 // time and the daemon's start.
 const networkedBuilderStartTimeout = 5 * time.Minute
 
-// Close removes the builder's container and keeps its cache.
+// matchWaitingBuilder checks that a waiting builder still runs, and joins
+// it to the build's networks and takes it off any other, so it reaches
+// exactly what this build may. An error leaves it to be created again.
+func (c *Client) matchWaitingBuilder(ctx context.Context, spec NetworkedBuilderSpec) error {
+	container := networkedBuilderContainer(spec.Name)
+	detail, err := c.Inspect(ctx, container)
+	if err != nil {
+		return err
+	}
+	if detail.State != "running" {
+		return fmt.Errorf("the waiting builder is %s", detail.State)
+	}
+	add, remove := networkedBuilderNetworkChanges(detail.Networks, spec.Networks)
+	for _, network := range remove {
+		if err := c.DisconnectNetwork(ctx, network, container, true); err != nil && !errdefs.IsNotFound(err) {
+			return err
+		}
+	}
+	for _, network := range add {
+		if err := c.ConnectNetwork(ctx, network, container, nil); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// networkedBuilderNetworkChanges are the networks a waiting builder joins
+// and leaves to be on exactly want.
+func networkedBuilderNetworkChanges(have, want []string) (add, remove []string) {
+	for _, network := range want {
+		if !slices.Contains(have, network) {
+			add = append(add, network)
+		}
+	}
+	for _, network := range have {
+		if !slices.Contains(want, network) {
+			remove = append(remove, network)
+		}
+	}
+	return add, remove
+}
+
+// Close hands the builder back after its build: it waits for the
+// environment's next build for NetworkedBuilderIdle, then is removed with
+// its cache kept.
 func (b *NetworkedBuilder) Close(ctx context.Context) {
+	if b == nil {
+		return
+	}
+	idle := NetworkedBuilderIdle
+	if idle <= 0 || b.client == nil {
+		b.discard(ctx)
+		return
+	}
+	b.once.Do(func() {
+		client, name := b.client, b.Name
+		waiting := &waitingBuilder{networks: append([]string(nil), b.Networks...)}
+		waitingBuilders.Lock()
+		waiting.timer = time.AfterFunc(idle, func() { client.removeWaitingBuilder(name, waiting) })
+		waitingBuilders.byName[name] = waiting
+		waitingBuilders.Unlock()
+		if b.release != nil {
+			b.release()
+		}
+	})
+}
+
+// discard removes the builder's container now and keeps its cache.
+func (b *NetworkedBuilder) discard(ctx context.Context) {
 	if b == nil {
 		return
 	}
@@ -189,6 +326,33 @@ func (b *NetworkedBuilder) Close(ctx context.Context) {
 			b.release()
 		}
 	})
+}
+
+// removeWaitingBuilder removes a builder whose wait is over, unless a build
+// has claimed it since. One whose lock is held — the Close that left it
+// waiting has not let go yet, or the environment's networks are being
+// removed — is looked at again a minute later.
+func (c *Client) removeWaitingBuilder(name string, waiting *waitingBuilder) {
+	release, ok := networkedBuilderTryLock(name)
+	if !ok {
+		waitingBuilders.Lock()
+		if waitingBuilders.byName[name] == waiting {
+			waiting.timer.Reset(min(NetworkedBuilderIdle, time.Minute))
+		}
+		waitingBuilders.Unlock()
+		return
+	}
+	defer release()
+	waitingBuilders.Lock()
+	current := waitingBuilders.byName[name]
+	if current == waiting {
+		delete(waitingBuilders.byName, name)
+	}
+	waitingBuilders.Unlock()
+	if current != waiting {
+		return
+	}
+	c.removeNetworkedBuilder(context.Background(), name)
 }
 
 // removeNetworkedBuilder removes the builder and its container, keeping the
@@ -221,6 +385,7 @@ func (c *Client) RemoveNetworkedBuilderState(ctx context.Context, name string) e
 		return err
 	}
 	defer release()
+	takeWaitingBuilder(name)
 	// Only what the daemon says is there is removed: the buildx CLI talks to
 	// the server's own daemon, and an environment that never built on this
 	// builder has nothing for it to do.
