@@ -20,6 +20,8 @@ var bareStarts = map[string]string{
 	"internal/api/handlers_backups.go startBackupRun":    "one goroutine per backup an operator asked for, not a loop",
 	"internal/jobs/jobs.go start":                        "one goroutine per job an operator asked for, not a loop",
 	"internal/deploy/rehearsal.go start":                 "one goroutine per rehearsal an operator asked for, not a loop",
+	"internal/deploy/certificate_prewarm.go start":       "one goroutine per build that names a new address, not a loop; recovered by Recover",
+	"internal/files/fetch.go Start":                      "one goroutine per link a person asked to fetch, not a loop; recovered by Recover",
 }
 
 // A background loop is started from a function called Start in every package
