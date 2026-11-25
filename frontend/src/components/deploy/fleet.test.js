@@ -82,7 +82,7 @@ describe("sortFleet", () => {
 })
 
 describe("fleetHaystack", () => {
-  test("finds a project by its product, its framework, its images and its last commit", () => {
+  test("finds a project by its product, its framework and its images", () => {
     const haystack = fleetHaystack(
       project({
         framework: "nextjs",
@@ -93,7 +93,9 @@ describe("fleetHaystack", () => {
     expect(haystack).toContain("next.js")
     expect(haystack).toContain("nextjs")
     expect(haystack).toContain("postgres")
-    expect(haystack).toContain("fix checkout")
+    // The card no longer draws the last commit, so a search for its subject
+    // would find a card that does not say why.
+    expect(haystack).not.toContain("fix checkout")
   })
 
   test("a template is found by its product", () => {

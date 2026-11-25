@@ -2771,17 +2771,20 @@ it runs in the host's mount namespace.
 card carries its own traffic and the counts are the chips), then the projects under a search field
 and native state chips, ordered failed, unhealthy, deploying, ready with pending changes, ready,
 stopped and not deployed. Automatic fleet attention rules and their list were removed in 0.7.5.
-A card carries the project drawn as itself
-(`ProjectMark`), its address, its source as its forge, repository and branch, its last commit, its
-hour of traffic from `GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started
-the last one, and the verbs the project context row offers (`useProjectVerbs`). Every card draws
-every part at one fixed height, so a row of cards is one height with nothing stretched: the second
-source line is the commit, or for anything not built from a repository the images it runs (an
-image project's first line then names its registry); the traffic band says "No web traffic" over a
-flat rule for a project with no address on the web; and the footer never wraps, its words
-truncating instead. The list view carries the same readings from 1024 in columns two lines tall — the
-state over the address or pending changes and the run strip over the last run, with the traffic
-joining from 1280 — so a row stays one row's height. The fleet is read every five seconds, every two
+The fleet is cards only: the grid/list switch went in 0.9.1 at the operator's request. A card
+carries the project drawn as itself (`ProjectMark`), its state (Ready is its dot alone; any other
+state says its word) and its address, its source on one line (the forge, repository and branch; the
+image it pulls; or the Compose stack and its services' products), its hour of traffic from
+`GET /deploy/traffic`, its last fourteen runs (`recentRuns`) and who started the last one, and the
+verbs the project context row offers (`useProjectVerbs`) behind its `⋯`, with no arrow: the card
+and its name open the project. It draws neither the last commit nor the open pull requests: both are
+the project's Overview's to say, and the Pull requests chip, fed by `GET /deploy/pull-requests`,
+still narrows the fleet to the projects that have one. The name and the traffic figure are the
+card's two weights, in the title's size; the rest is the muted hint. Every card draws every part at
+one fixed height (`PROJECT_CARD_HEIGHT`, which the fleet's and the Overview's placeholders share),
+so a row of cards is one height with nothing stretched: the traffic band says "No web traffic" over
+a flat rule for a project with no address on the web, and the footer never wraps, its words
+truncating instead. The fleet is read every five seconds, every two
 while any run is in flight (`RUN_IN_FLIGHT_POLL_MS`, as a project's detail and run list are), and the
 traffic every thirty; the archive is read once, for the count beside its link, and again when a card
 archives its project, because each archived row costs the server a history read.

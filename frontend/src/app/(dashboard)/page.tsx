@@ -40,7 +40,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { TopProcesses } from "@/components/metrics/top-processes"
 import { lastFleet, readFleet } from "@/components/database/fleet/read"
 import { IdentityHeader, platformName } from "@/components/identity-header"
-import { ProjectCard } from "@/components/deploy/fleet-card"
+import { PROJECT_CARD_HEIGHT, ProjectCard } from "@/components/deploy/fleet-card"
 import { sortFleet } from "@/components/deploy/fleet"
 import { DashboardHealthNotice } from "@/components/overview/health-notice"
 import { UsagePingQuestion } from "@/components/overview/usage-ping-question"
@@ -579,7 +579,7 @@ function DeploymentsSection({
         <ul aria-hidden className={PROJECT_GRID}>
           {[0, 1, 2].map((index) => (
             <li key={index}>
-              <Skeleton className="h-50.5 rounded-xl" />
+              <Skeleton className={cn(PROJECT_CARD_HEIGHT, "rounded-xl")} />
             </li>
           ))}
         </ul>
