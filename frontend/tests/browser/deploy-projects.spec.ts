@@ -466,6 +466,78 @@ test("a card draws no pull requests, commit or arrow, keeps its height, and the 
   await expect(projects.getByText("storefront", { exact: true })).toBeVisible()
 })
 
+test("a card says its last hour in words, with no chart, at one height in every state", async ({
+  page,
+}) => {
+  await mockProject(page)
+  const card = (id: number, name: string, endpoint?: string) => ({
+    ...deployment,
+    id,
+    name,
+    endpoint,
+    activeRun: undefined,
+  })
+  await page.route("**/api/v1/deploy/?view=fleet", (route) =>
+    json(route, {
+      deployments: [
+        card(1, "storefront", "storefront.example.test"),
+        card(2, "payments-api", "payments.example.test"),
+        card(3, "status-page", "status.example.test"),
+        { ...card(4, "queue-worker"), profile: "worker", liveReleaseId: undefined },
+      ],
+      activeWork: [],
+      slots: { heavyUsed: 0, heavyCapacity: 2, lightUsed: 0, lightCapacity: 4 },
+    }),
+  )
+  const hour = Array.from({ length: 60 }, (_, i) => (i === 20 ? 3 : 0))
+  await page.route("**/api/v1/deploy/traffic", (route) =>
+    json(route, {
+      "1": { status: "available", perMinute: 0.05, errorRate: 0, pages: 2, points: hour },
+      "2": { status: "available", perMinute: 3.2, errorRate: 0.07, pages: 40, points: hour },
+    }),
+  )
+  await page.setViewportSize({ width: 1280, height: 1000 })
+  await page.goto("/deploy")
+  const projects = page.getByRole("list", { name: "Deployment projects" })
+  const cards = projects.locator(":scope > li")
+  await expect(cards).toHaveCount(4)
+  // The fleet orders its cards by state, so each is found by its name.
+  const traffic = (name: string) =>
+    cards
+      .filter({ has: page.getByRole("link", { name, exact: true }) })
+      .locator("[data-slot=project-traffic]")
+  // The figure and the views are kept; the hour's chart is not (25 Nov 2026).
+  await expect(traffic("storefront")).toHaveText("0.05 requests a minute · 2 views")
+  await expect(traffic("payments-api")).toHaveText(
+    "3.20 requests a minute · 7.0% failing · 40 views",
+  )
+  await expect(traffic("payments-api").getByText("7.0% failing")).toHaveClass(/text-destructive/)
+  await expect(traffic("status-page")).toHaveText("— requests a minute")
+  await expect(traffic("queue-worker")).toHaveText("No web traffic")
+  await expect(projects.getByRole("img", { name: "Requests per minute, last hour" })).toHaveCount(0)
+  await expect(projects.locator("[data-slot=project-traffic] svg")).toHaveCount(0)
+
+  // Every card is one height, and nothing in it is stretched or spills: the
+  // footer starts the body's padding under the traffic line on each of them.
+  const boxes = await cards.evaluateAll((all) =>
+    all.map((li) => {
+      const line = li.querySelector("[data-slot=project-traffic]")!
+      const footer = line.parentElement!.nextElementSibling!
+      return {
+        height: li.getBoundingClientRect().height,
+        gap: footer.getBoundingClientRect().top - line.getBoundingClientRect().bottom,
+        spill: li.getBoundingClientRect().bottom - footer.getBoundingClientRect().bottom,
+      }
+    }),
+  )
+  for (const box of boxes) {
+    expect(box.height).toBe(boxes[0].height)
+    expect(box.gap).toBe(14)
+    expect(box.spill).toBeGreaterThanOrEqual(0)
+    expect(box.spill).toBeLessThanOrEqual(1)
+  }
+})
+
 test("archived list can be permanently deleted with confirmation and errors remain reviewable", async ({
   page,
 }, testInfo) => {
