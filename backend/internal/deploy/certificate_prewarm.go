@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // Getting the certificate while the build runs.
@@ -147,6 +148,9 @@ func (p *certificatePrewarms) start(
 	attempt := &certificatePrewarm{names: slices.Clone(names), startedAt: now.UTC(), cancel: cancel, done: make(chan struct{})}
 	p.runs[runID] = attempt
 	go func() {
+		// A panic in certbot's handling ends this prewarm, not the dashboard;
+		// the certificate step then issues as if none had been started.
+		defer safego.Recover(nil, "certificate prewarm")
 		defer cancel()
 		lines := []prewarmLine{}
 		result, err := issuer.EnsureDeploymentCertificate(workCtx, attempt.names, func(stream, text string) {

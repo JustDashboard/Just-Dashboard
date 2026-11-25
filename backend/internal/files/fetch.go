@@ -19,6 +19,8 @@ import (
 	"sync/atomic"
 	"syscall"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // A link fetched onto the server: the dashboard downloads it into a folder
@@ -232,6 +234,9 @@ func (f *Fetches) Start(owner string, req FetchRequest) (Fetch, error) {
 	f.mu.Unlock()
 
 	go func() {
+		// A panic in a download ends that download, not the dashboard; the
+		// deferred lines below still release its waiters.
+		defer safego.Recover(nil, "file fetch")
 		defer f.wg.Done()
 		defer close(job.done)
 		defer cancel()

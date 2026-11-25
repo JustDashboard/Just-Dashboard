@@ -159,7 +159,8 @@ there after Compose restarted the container, it went down again.
   many: a deployment worker (its lease lapses and the schedule's sweep reclaims the run, as for any
   worker that died), the kernel socket observer, the fan-out inside a loop's pass (one repository's
   check, one egress round, one container's log reader), a link's inner loops, the container feed the
-  first subscribing page starts, and the keepalive and control reader every WebSocket handler starts.
+  first subscribing page starts, the keepalive and control reader every WebSocket handler starts, a
+  build's certificate prewarm and a link the Files page fetches onto the server.
   The two cron schedulers (backups, base backups) wrap each job the same way, since `robfig/cron`
   recovers nothing.
 - `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
