@@ -57,6 +57,7 @@ import {
   DEFAULT_SEED_ROWS,
   MAX_SEED_ROWS,
   MAX_SEED_TABLES,
+  afterSetAside,
   chooseGenerator,
   choiceGroups,
   newSeed,
@@ -184,12 +185,12 @@ export function SeedPanel({
   // A plan read past (the reader changed something meanwhile) is let go,
   // and the server stops counting for it.
   const planning = usePoll(
-    async (signal) => ({
-      plan: readSeedPlan(
+    async (signal) => {
+      const plan = readSeedPlan(
         await post<unknown>(`/databases/${id}/seed/plan`, JSON.parse(asked.key), { signal }),
-      ),
-      asked: requestedChoices(asked.key),
-    }),
+      )
+      return { plan, asked: requestedChoices(asked.key), after: afterSetAside(asked.key, plan) }
+    },
     0,
     [id, asked.key, asked.nonce],
     { enabled: asked.key !== "" },
@@ -198,10 +199,20 @@ export function SeedPanel({
   useEffect(() => {
     if (answered) setChoices((held) => pruneChoices(held, answered.asked, answered.plan))
   }, [answered, setChoices])
+  // A plan that set a choice aside is followed within half a second by one
+  // asked without it, which has nothing to say of it: what it said stays
+  // under that plan, until the reader changes something.
+  const [said, setSaid] = useState<{ key: string; warnings: string[] }>()
+  if (answered?.after && said?.key !== answered.after) {
+    setSaid({ key: answered.after, warnings: answered.plan.warnings })
+  }
   // The plan on screen stays while the next one is read.
   const [kept, setKept] = useState<SeedPlan>()
   if (answered && answered.plan !== kept) setKept(answered.plan)
   const plan = answered?.plan ?? (planning.error ? undefined : kept)
+  const warnings = plan
+    ? [...new Set([...(said?.key === wanted ? said.warnings : []), ...plan.warnings])]
+    : NO_NAMES
   const reading = planning.loading || (armed && wanted !== "" && wanted !== asked.key)
   // What a write sends is what the preview on screen shows, and nothing newer.
   const current = Boolean(plan) && !reading && asked.key === wanted
@@ -343,6 +354,7 @@ export function SeedPanel({
             )}
             <SeedOutput
               plan={plan}
+              warnings={warnings}
               error={planning.error}
               onRetry={preview}
               reading={reading}
@@ -417,6 +429,7 @@ export function SeedPanel({
 /** The plan: a tab for each table in the order they are written, and the chosen one's rows. */
 function SeedOutput({
   plan,
+  warnings,
   error,
   onRetry,
   reading,
@@ -430,6 +443,8 @@ function SeedOutput({
   onChoose,
 }: {
   plan: SeedPlan | undefined
+  /** What the plan says, with what the one before it said of a choice it set aside. */
+  warnings: readonly string[]
   error: Error | undefined
   onRetry: () => void
   reading: boolean
@@ -487,7 +502,7 @@ function SeedOutput({
           {problem} The rows shown are the ones from before this change.
         </Notice>
       )}
-      {plan.warnings.length > 0 && <FormNote tone="warning">{plan.warnings.join(" ")}</FormNote>}
+      {warnings.length > 0 && <FormNote tone="warning">{warnings.join(" ")}</FormNote>}
       {/* A tab for each table, in the order they are written; the rows are its panel. */}
       <ViewTabs
         label="Tables seeded"

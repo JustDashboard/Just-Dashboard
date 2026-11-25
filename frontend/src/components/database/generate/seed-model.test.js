@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test"
 import {
+  afterSetAside,
   chooseGenerator,
   choiceGroups,
   newSeed,
@@ -182,6 +183,25 @@ describe("the request", () => {
     // Changed since that request was sent: not the plan's to judge.
     const since = { [users]: { email: "word", gone: "email" } }
     expect(pruneChoices(since, asked, read)).toBe(since)
+  })
+
+  test("a plan that set a choice aside leads to the request without it, the one the page asks next", () => {
+    const read = readSeedPlan(plan)
+    const request = (users) =>
+      seedRequest({
+        seed: 7,
+        targets,
+        rows: 25,
+        perTable: {},
+        choices: { [seedKey("public", "users")]: users },
+      })
+    const body = JSON.stringify(request({ email: "word", gone: "fullName" }))
+    expect(afterSetAside(body, read)).toBe(JSON.stringify(request({ email: "word" })))
+    // A table left with no choice is asked without columns at all.
+    const alone = JSON.stringify(request({ gone: "fullName" }))
+    expect(afterSetAside(alone, read)).toBe(JSON.stringify(request({})))
+    // Every choice kept: nothing follows.
+    expect(afterSetAside(JSON.stringify(request({ email: "word" })), read)).toBeUndefined()
   })
 
   test("every table, or the ones ticked", () => {

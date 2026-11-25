@@ -435,10 +435,23 @@ test("a choice for a column the table has since lost is said once and not sent a
   // a warning and not a refusal, and the one after carries it no more.
   dropped.add("customers.email")
   await page.getByLabel("Rows per table").fill("12")
-  await expect(page.getByText("customers has no column email now")).toBeVisible()
+  const note = page.getByText("customers has no column email now")
+  await expect(note).toBeVisible()
+  // The plan asked without the choice follows half a second later, and the
+  // note stays said under it instead of going with the plan that said it.
+  await expect
+    .poll(() => {
+      const customers = sent.plans.at(-1)?.tables[0]
+      return { rows: customers?.rows, columns: customers?.columns }
+    })
+    .toEqual({ rows: 12, columns: undefined })
+  // Insert is held while a plan is read: enabled again, that plan is on screen.
+  await expect(page.getByRole("button", { name: /^Insert \d+ rows?$/ })).toBeEnabled()
+  await expect(note).toBeVisible()
   await page.getByLabel("Rows per table").fill("13")
   await expect.poll(() => sent.plans.at(-1)?.tables.map((t) => t.rows)).toEqual([13, 13, 13])
   expect(sent.plans.at(-1)?.tables[0].columns).toBeUndefined()
+  await expect(note).toBeHidden()
 })
 
 test("writing shows the statements, sends the plan on screen, and says what went in", async ({

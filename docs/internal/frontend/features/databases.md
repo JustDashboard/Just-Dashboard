@@ -48,7 +48,8 @@ Generate's *Seed data* card (`generate/seed.tsx`, gated on `seed`) says first wh
 test rows inserted beside the ones already there, amber on a connection labelled production — then
 plans them for every table or the ones ticked — a tab per table in the order they are inserted with
 its rows now and after, its first rows under two-line column heads naming each column with its type
-and the generator filling it (changed there), and the statement a row is inserted with — and inserts
+and the generator filling it (changed there; a choice for a column the table has since lost is set
+aside, said once and left on screen until the next change), and the statement a row is inserted with — and inserts
 them behind `SqlReview` for a role that may change data on an unprotected connection; the preview is
 every role's, and what was written, refused or left out is said table by table with a link to each
 table's Data. Add a database (`/databases/new`) draws what is about to be made beside its catalogue
