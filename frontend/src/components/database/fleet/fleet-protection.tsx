@@ -12,10 +12,8 @@ import {
 } from "@/components/database/fleet/protection"
 import { ALERT_KINDS } from "@/components/database/ops/alerts-model"
 import type { DbAlerts } from "@/components/database/ops/alerts-types"
-import { Archive, Bell } from "@/components/icons"
-import { HUE } from "@/components/live-figure"
 import { Modal, ModalDescription } from "@/components/modal"
-import { NoReading, ReadingLine, ReadingLines, ReadingMark } from "@/components/reading-line"
+import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { usePoll } from "@/hooks/use-poll"
 import { get, post } from "@/lib/api"
@@ -23,6 +21,8 @@ import { describeCron } from "@/lib/cron"
 import { bytes, duration, plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { BackupJob, DbAlertKind, DbFleetEntry, NotificationChannel } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import Link from "next/link"
 import { useState } from "react"
 
 /** What a rule the Turn on press adds tells you of, in the words of its default line. */
@@ -76,11 +76,19 @@ function sayList(parts: readonly string[]) {
  * wears the command's blue: `ConfirmDialog` is red on purpose, for acts that
  * are awkward to undo, and neither of these is one.
  *
- * Once both are answered the lines say so quietly and open the job and the
- * alerts. Both are one height in every state (`ReadingLine`), so nothing
- * under them moves as the three reads they make land. Only an administrator
- * is offered the presses; anyone else reads the same lines as ways to the
- * pages that have the rest.
+ * The two are one framed block of two single lines (24 Nov 2026, at the
+ * operator's request that the presses be "incorporated better and more
+ * clear"): a dot in the line's tone, the subject, what is true in words,
+ * the names it is about, and the press straight after the words, saying
+ * what it does — *Schedule backups*, *Turn on alerts* — where it had stood
+ * alone at the far end of a reading line as *Schedule* and *Turn on*, under
+ * a tinted archive and bell. Once both are answered the lines say so
+ * quietly and open the job and the alerts.
+ *
+ * Every line is one height in every state, so nothing under them moves as
+ * the three reads they make land. Only an administrator is offered the
+ * presses; anyone else reads the same lines as ways to the pages that have
+ * the rest.
  */
 export function FleetProtection({
   entries,
@@ -192,34 +200,29 @@ export function FleetProtection({
   }
 
   return (
-    // Its own slot on a wrapper: the run keeps `reading-lines`, which the
-    // shared checks look for.
-    <div data-slot="fleet-protection" className="min-w-0">
-      <ReadingLines>
-        <BackupsLine
-          cover={backups}
-          error={jobs.error}
-          action={
-            admin && backups && backups.uncovered.length > 0 ? (
-              <Button size="sm" variant="outline" onClick={() => schedule(backups)}>
-                Schedule
-              </Button>
-            ) : undefined
-          }
-        />
-        <AlertsLine
-          cover={watch}
-          rules={alerts.data?.rules ?? []}
-          error={alerts.error}
-          action={
-            admin && watch && watch.unwatched.length > 0 && watch.missing.length > 0 ? (
-              <Button size="sm" variant="outline" onClick={() => turnOn(watch)}>
-                Turn on
-              </Button>
-            ) : undefined
-          }
-        />
-      </ReadingLines>
+    <div
+      data-slot="fleet-protection"
+      className="min-w-0 divide-y divide-hairline overflow-hidden rounded-xl border"
+    >
+      <BackupsLine
+        cover={backups}
+        error={jobs.error}
+        action={
+          admin && backups && backups.uncovered.length > 0 ? (
+            <Press onClick={() => schedule(backups)} verb="Schedule" rest="backups" />
+          ) : undefined
+        }
+      />
+      <AlertsLine
+        cover={watch}
+        rules={alerts.data?.rules ?? []}
+        error={alerts.error}
+        action={
+          admin && watch && watch.unwatched.length > 0 && watch.missing.length > 0 ? (
+            <Press onClick={() => turnOn(watch)} verb="Turn on" rest="alerts" />
+          ) : undefined
+        }
+      />
       <Ask question={asking} onClose={() => setAsking(null)} />
     </div>
   )
@@ -280,6 +283,95 @@ function Ask({ question, onClose }: { question: Question | null; onClose: () => 
   )
 }
 
+/** How a line stands: what its dot says. */
+type LineTone = "good" | "warning" | "unknown"
+
+const DOT: Record<LineTone, DotTone> = { good: "running", warning: "warning", unknown: "unknown" }
+
+/**
+ * One line of the block: a dot in the line's tone, the subject, what is
+ * true in words, what it is about in the muted ink, and the press that
+ * answers it straight after the words. One height in every state, and one
+ * line on every width: on a phone the subject and the names give way to the
+ * reading and the press, which are what the line is for.
+ *
+ * With `href` and no press the line is a way to the page that has the rest,
+ * and `label` is where it goes.
+ */
+function CheckLine({
+  name,
+  tone,
+  children,
+  detail,
+  action,
+  href,
+  label,
+}: {
+  name: string
+  tone: LineTone
+  children: React.ReactNode
+  detail?: React.ReactNode
+  action?: React.ReactNode
+  href?: string
+  label?: string
+}) {
+  const body = (
+    <>
+      <StatusDot tone={DOT[tone]} />
+      <span className="w-16 shrink-0 text-body font-medium max-sm:hidden">{name}</span>
+      <span data-slot="check-words" className="flex min-w-0 shrink items-baseline gap-2.5">
+        <span
+          className={cn(
+            "min-w-0 shrink truncate text-body",
+            tone === "warning" && "text-warning",
+            tone === "unknown" && "text-muted-foreground",
+          )}
+        >
+          {children}
+        </span>
+        {detail && (
+          <span className="min-w-0 shrink-[2] truncate text-hint text-muted-foreground max-sm:hidden">
+            {detail}
+          </span>
+        )}
+      </span>
+      {action && <span className="flex shrink-0 items-center">{action}</span>}
+    </>
+  )
+  const shape = "flex h-12 min-w-0 items-center gap-3 px-4"
+  if (href && !action)
+    return (
+      <Link
+        href={href}
+        aria-label={label}
+        data-slot="protection-line"
+        data-name={name}
+        data-tone={tone}
+        className={cn(shape, "focus-ring -outline-offset-2 transition-colors hover:bg-row-hover")}
+      >
+        {body}
+      </Link>
+    )
+  return (
+    <div data-slot="protection-line" data-name={name} data-tone={tone} className={shape}>
+      {body}
+    </div>
+  )
+}
+
+/**
+ * The press that answers a line, in words that say what it does. The noun
+ * gives way on a phone, where the line's words already name it.
+ */
+function Press({ onClick, verb, rest }: { onClick: () => void; verb: string; rest: string }) {
+  return (
+    <Button size="xs" variant="outline" className="text-foreground" onClick={onClick}>
+      {verb}
+      <span className="max-sm:hidden">{rest}</span>
+    </Button>
+  )
+}
+
 function BackupsLine({
   cover,
   error,
@@ -289,48 +381,44 @@ function BackupsLine({
   error?: Error
   action?: React.ReactNode
 }) {
-  const line = (
-    props: Omit<React.ComponentProps<typeof ReadingLine>, "mark" | "name">,
-    tone: "default" | "warning" = "default",
-  ) => (
-    <ReadingLine
-      mark={<ReadingMark hue={HUE.disk} glyph={Archive} tone={tone} />}
-      name="Backups"
-      {...props}
-    />
-  )
   if (!cover) {
-    return line({
-      href: "/backups",
-      label: "Backup jobs",
-      hint: error?.message,
-      children: (
-        <NoReading>
-          {error ? "The backup jobs could not be read" : "Reading the backup jobs…"}
-        </NoReading>
-      ),
-    })
+    return (
+      <CheckLine
+        name="Backups"
+        tone="unknown"
+        href="/backups"
+        label="Backup jobs"
+        detail={error?.message}
+      >
+        {error ? "The backup jobs could not be read" : "Reading the backup jobs…"}
+      </CheckLine>
+    )
   }
   const total = cover.dumpable.length
   if (total === 0) {
-    return line({ children: "No database here can be dumped from the dashboard" })
+    return (
+      <CheckLine name="Backups" tone="unknown">
+        No database here can be dumped from the dashboard
+      </CheckLine>
+    )
   }
   const left = cover.uncovered.length
   if (left > 0) {
-    return line(
-      {
-        href: action ? undefined : "/backups",
-        label: action ? undefined : "Backup jobs",
-        action,
-        hint: namesLine(cover.uncovered.map((entry) => entry.name)),
-        children:
-          left < total
-            ? `${left} of ${total} not backed up on a schedule`
-            : total === 1
-              ? "Not backed up on a schedule"
-              : `None of the ${total} is backed up on a schedule`,
-      },
-      "warning",
+    return (
+      <CheckLine
+        name="Backups"
+        tone="warning"
+        href={action ? undefined : "/backups"}
+        label={action ? undefined : "Backup jobs"}
+        action={action}
+        detail={namesLine(cover.uncovered.map((entry) => entry.name))}
+      >
+        {left < total
+          ? `${left} of ${total} not backed up on a schedule`
+          : total === 1
+            ? "Not backed up on a schedule"
+            : `None of the ${total} is backed up on a schedule`}
+      </CheckLine>
     )
   }
 
@@ -346,14 +434,16 @@ function BackupsLine({
   const only = cover.jobs.length === 1 ? cover.jobs[0] : undefined
   if (cover.failed) {
     const run = cover.failed.lastRun
-    return line(
-      {
-        href: `/backups/${cover.failed.id}`,
-        label: `Backup job ${cover.failed.name}`,
-        hint: `The last run of ${cover.failed.name} failed ${relativeTime(run?.endedAt ?? run?.startedAt)}`,
-        children: reading,
-      },
-      "warning",
+    return (
+      <CheckLine
+        name="Backups"
+        tone="warning"
+        href={`/backups/${cover.failed.id}`}
+        label={`Backup job ${cover.failed.name}`}
+        detail={`The last run of ${cover.failed.name} failed ${relativeTime(run?.endedAt ?? run?.startedAt)}`}
+      >
+        {reading}
+      </CheckLine>
     )
   }
   const next = until(cover.jobs[0]?.nextRun)
@@ -361,7 +451,7 @@ function BackupsLine({
     .map((job) => job.lastRun)
     .filter((run) => run?.status === "success")
     .sort((a, b) => Date.parse(b?.startedAt ?? "") - Date.parse(a?.startedAt ?? ""))[0]
-  const hint = cover.running
+  const detail = cover.running
     ? `${cover.running.name} is running now`
     : [
         newest
@@ -371,12 +461,17 @@ function BackupsLine({
       ]
         .filter(Boolean)
         .join(" · ")
-  return line({
-    href: only ? `/backups/${only.id}` : "/backups",
-    label: only ? `Backup job ${only.name}` : "Backup jobs",
-    hint,
-    children: reading,
-  })
+  return (
+    <CheckLine
+      name="Backups"
+      tone="good"
+      href={only ? `/backups/${only.id}` : "/backups"}
+      label={only ? `Backup job ${only.name}` : "Backup jobs"}
+      detail={detail}
+    >
+      {reading}
+    </CheckLine>
+  )
 }
 
 function AlertsLine({
@@ -390,102 +485,107 @@ function AlertsLine({
   error?: Error
   action?: React.ReactNode
 }) {
-  const line = (
-    props: Omit<React.ComponentProps<typeof ReadingLine>, "mark" | "name">,
-    tone: "default" | "warning" = "default",
-  ) => (
-    <ReadingLine
-      mark={<ReadingMark hue={HUE.load} glyph={Bell} tone={tone} />}
-      name="Alerts"
-      {...props}
-    />
-  )
   if (!cover) {
-    return line({
-      hint: error?.message,
-      children: (
-        <NoReading>
-          {error ? "The alert rules could not be read" : "Reading the alert rules…"}
-        </NoReading>
-      ),
-    })
+    return (
+      <CheckLine name="Alerts" tone="unknown" detail={error?.message}>
+        {error ? "The alert rules could not be read" : "Reading the alert rules…"}
+      </CheckLine>
+    )
   }
   const total = cover.watchable.length
   const first = cover.watchable[0]
   const page = first ? sectionHref(first.id, "alerts") : undefined
-  if (total === 0) return line({ children: "No database to watch" })
+  if (total === 0) {
+    return (
+      <CheckLine name="Alerts" tone="unknown">
+        No database to watch
+      </CheckLine>
+    )
+  }
 
   const firing = cover.firing[0]
   if (firing) {
     const rule = rules.find((one) => one.id === firing.ruleId)
     const what = rule ? ALERT_KINDS[rule.kind].label.toLowerCase() : "firing"
-    return line(
-      {
-        href:
+    return (
+      <CheckLine
+        name="Alerts"
+        tone="warning"
+        href={
           firing.connectionId !== undefined
             ? sectionHref(firing.connectionId, "alerts")
             : firing.jobId !== undefined
               ? `/backups/${firing.jobId}`
-              : page,
-        label: `Alerts of ${firing.label}`,
-        hint:
+              : page
+        }
+        label={`Alerts of ${firing.label}`}
+        detail={
           cover.firing.length > 1
-            ? `${firing.label}: ${firing.detail} · ${cover.firing.length - 1} more firing`
-            : firing.detail,
-        children: `${firing.label}: ${what}`,
-      },
-      "warning",
+            ? `${firing.detail} · ${cover.firing.length - 1} more firing`
+            : firing.detail
+        }
+      >
+        {`${firing.label}: ${what}`}
+      </CheckLine>
     )
   }
 
   const left = cover.unwatched.length
   if (left > 0) {
     const paused = cover.missing.length === 0
-    return line(
-      {
-        href: action ? undefined : page,
-        label: action ? undefined : "Alerts",
-        action,
-        hint: paused
-          ? "Its alert rules are paused"
-          : left < total
-            ? namesLine(cover.unwatched.map((entry) => entry.name))
-            : total === 1
-              ? "No alert rule watches it"
-              : "No alert rule watches them",
-        children:
-          left < total
-            ? `${left} of ${total} without an alert`
-            : total === 1
-              ? "Nothing tells you when it goes down"
-              : "Nothing tells you when one goes down",
-      },
-      "warning",
+    return (
+      <CheckLine
+        name="Alerts"
+        tone="warning"
+        href={action ? undefined : page}
+        label={action ? undefined : "Alerts"}
+        action={action}
+        detail={
+          paused
+            ? "Its alert rules are paused"
+            : left < total
+              ? namesLine(cover.unwatched.map((entry) => entry.name))
+              : undefined
+        }
+      >
+        {left < total
+          ? `${left} of ${total} without an alert`
+          : total === 1
+            ? "Nothing tells you when it goes down"
+            : "Nothing tells you when one goes down"}
+      </CheckLine>
     )
   }
 
   if (cover.reached && cover.reached.length === 0) {
-    return line(
-      {
-        href: "/deploy/notifications",
-        label: "Notification channels",
-        hint: "No notification channel is switched on",
-        children: "Alerts have nowhere to go",
-      },
-      "warning",
+    return (
+      <CheckLine
+        name="Alerts"
+        tone="warning"
+        href="/deploy/notifications"
+        label="Notification channels"
+        detail="No notification channel is switched on"
+      >
+        Alerts have nowhere to go
+      </CheckLine>
     )
   }
 
   const on = rules.filter((rule) => rule.enabled).length
-  return line({
-    href: page,
-    label: "Alerts",
-    hint: [
-      plural(on, "rule"),
-      cover.reached && `told to ${namesLine(cover.reached.map((channel) => channel.name))}`,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-    children: total === 1 ? "Watched" : `All ${total} watched`,
-  })
+  return (
+    <CheckLine
+      name="Alerts"
+      tone="good"
+      href={page}
+      label="Alerts"
+      detail={[
+        plural(on, "rule"),
+        cover.reached && `told to ${namesLine(cover.reached.map((channel) => channel.name))}`,
+      ]
+        .filter(Boolean)
+        .join(" · ")}
+    >
+      {total === 1 ? "Watched" : `All ${total} watched`}
+    </CheckLine>
+  )
 }

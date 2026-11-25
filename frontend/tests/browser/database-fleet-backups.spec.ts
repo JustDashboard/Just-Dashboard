@@ -44,7 +44,7 @@ const NOTHING: FleetMock = {
 }
 
 test.describe("the last backup the control center reads", () => {
-  test("a backup job's run is a backup on the card and on the identity line", async ({ page }) => {
+  test("a backup job's run is a backup on the card", async ({ page }) => {
     await mockFleet(page, JOBS)
     await page.goto("/databases")
 
@@ -57,8 +57,8 @@ test.describe("the last backup the control center reads", () => {
     await expect(card(page, "blog")).toContainText(backedUp(1))
     await expect(card(page, "app").getByText("never backed up")).toHaveClass(/text-warning/)
 
-    await expect(identity(page)).toContainText("4 of 5 backed up in the last day")
-    await expect(identity(page)).toContainText("1 never backed up")
+    // The identity line leaves the backups to the cards and to the Backups line under it.
+    await expect(identity(page)).not.toContainText("backed up")
   })
 
   test("a database neither dumped nor in a backup job is still never backed up", async ({
@@ -69,8 +69,7 @@ test.describe("the last backup the control center reads", () => {
     for (const name of ["shop", "blog", "cache", "app", "notes"]) {
       await expect(card(page, name).getByText("never backed up")).toBeVisible()
     }
-    await expect(identity(page)).toContainText("0 of 5 backed up in the last day")
-    await expect(identity(page)).toContainText("5 never backed up")
+    await expect(identity(page)).not.toContainText("backed up")
   })
 
   test("when the dump directories cannot be read, the fleet still says when each was backed up", async ({
@@ -116,7 +115,7 @@ test.describe("the last backup the control center reads", () => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mockFleet(page, JOBS)
     await page.goto("/databases")
-    await expect(identity(page)).toContainText("4 of 5 backed up in the last day")
+    await expect(card(page, "shop")).toContainText(backedUp(5))
 
     // The shelves from their top, so every card is in the picture rather than
     // the lines above them with the first row under it.

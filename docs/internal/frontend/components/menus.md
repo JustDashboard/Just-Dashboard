@@ -48,11 +48,13 @@ tab, copied, and middle-clicked.
   booleans `reveal` and `dim` are the old spelling, deprecated.
 - **`VerbBar({ verbs, menuLabel })`** — a detail surface's controls: the inline verbs as named
   `xs` outline buttons (`short` where given), the rest behind the menu.
-- **`VerbMenu({ verbs, align, label, trigger })`** — the overflow menu: the ellipsis, or a named
-  `trigger` for a menu that stands alone in a header. A choice closes the menu.
-- **`VerbItems({ verbs, kind })`** — the items alone, for a menu whose root is the caller's:
+- **`VerbMenu({ verbs, align, label, trigger, glyphs })`** — the overflow menu: the ellipsis, or a
+  named `trigger` for a menu that stands alone in a header. A choice closes the menu. `glyphs={false}`
+  draws each verb as its word alone (a `mark` and a tick still drawn), the operator's *Menus are
+  words* ([standard](../standard.md)); the Databases control center's menus are drawn so.
+- **`VerbItems({ verbs, kind, glyphs })`** — the items alone, for a menu whose root is the caller's:
   `kind="dropdown"` or `kind="context"` (one right-click root for a whole listing, say).
-  `VerbItemList({ verbs, parts })` is the same with parts of the caller's.
+  `VerbItemList({ verbs, parts, glyphs })` is the same with parts of the caller's.
 
 ## Danger
 

@@ -12,7 +12,7 @@ import { MissingThing } from "@/components/missing-thing"
 import { EmptyNote, ErrorState } from "@/components/state"
 import { Status } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { Button } from "@/components/ui/button"
+import { Button, buttonVariants } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { VerbMenu } from "@/components/verbs"
@@ -24,6 +24,7 @@ import {
   instanceName,
   instanceState,
   instanceWhere,
+  whereBesides,
   scanNotes,
   scanSilences,
   scanningFiles,
@@ -384,6 +385,7 @@ function Reported({ waiting, found }: { waiting: WaitingServer[]; found: Found }
               disabled={!host}
               onSelect={() => host && found.askHost(host)}
               verb={`Connect ${server.name}`}
+              arrow={false}
               leading={<EngineMark engine={engine} size="sm" />}
               title={
                 <>
@@ -408,13 +410,7 @@ function Reported({ waiting, found }: { waiting: WaitingServer[]; found: Found }
                   )}
                 </span>
               }
-              trailing={
-                host && (
-                  <span className="text-xs font-medium whitespace-nowrap max-sm:hidden">
-                    Connect
-                  </span>
-                )
-              }
+              trailing={host && <VerbFace word="Connect" />}
             />
           )
         })}
@@ -440,6 +436,7 @@ function FoundRow({
   const name = instanceName(instance)
   const words = foundActionWords(action, name)
   const where = instanceWhere(instance)
+  const besides = whereBesides(instance)
   const busy = found.busyWord(instance)
   const failure = found.failures[instance.key]
   // What stands between it and a connection, as one sentence: what it
@@ -470,6 +467,7 @@ function FoundRow({
       // the form.
       onSelect={() => (wantsPassword ? found.ask(instance) : found.act(instance))}
       verb={words.verb}
+      arrow={false}
       leading={<EngineMark engine={engine} size="sm" />}
       title={
         <span title={instance.name}>
@@ -488,22 +486,26 @@ function FoundRow({
           {!file && !failure && !busy && (
             <span className="flex shrink-0 items-baseline gap-1.5 sm:hidden">
               <Status state={instance.state} label={instanceState(instance)} />
-              <span aria-hidden>·</span>
+              {(besides || why) && <span aria-hidden>·</span>}
             </span>
           )}
           {instance.kind === "file" ? (
             <FolderOf path={where.text} className={why ? "max-w-[45%] shrink-0" : undefined} />
           ) : (
-            <span
-              title={where.text}
-              className={cn("min-w-0 truncate font-mono", why && "max-w-[45%] shrink-0")}
-            >
-              {where.text}
-            </span>
+            // What the title already says is not said again: a container
+            // named as the server it runs was its title twice.
+            besides && (
+              <span
+                title={where.text}
+                className={cn("min-w-0 truncate font-mono", why && "max-w-[45%] shrink-0")}
+              >
+                {besides}
+              </span>
+            )
           )}
           {why && (
             <>
-              <span aria-hidden>·</span>
+              {(instance.kind === "file" || besides) && <span aria-hidden>·</span>}
               <span title={why} className="min-w-0 flex-1 truncate">
                 {why}
               </span>
@@ -534,15 +536,7 @@ function FoundRow({
               className="max-sm:hidden"
             />
           )}
-          {words.word && !busy && (
-            // One width for every verb, so the readings beside them line up
-            // down the list instead of stepping with the word's length. On a
-            // phone the arrow is the verb: the row is the control, and the
-            // word took the room the name needed.
-            <span className="w-24 text-right text-xs font-medium whitespace-nowrap max-sm:hidden">
-              {words.word}
-            </span>
-          )}
+          {words.word && !busy && <VerbFace word={words.word} />}
         </span>
       }
       // Ignore is a word in the row's menu: as an eye on its own it was named
@@ -551,6 +545,7 @@ function FoundRow({
         !instance.self && (
           <VerbMenu
             label={`Actions for ${name}`}
+            glyphs={false}
             verbs={[
               instance.ignored
                 ? {
@@ -572,6 +567,36 @@ function FoundRow({
         )
       }
     />
+  )
+}
+
+/**
+ * The row's one verb, drawn as a button's face: where it stood as a word and
+ * an arrow, the word read as a label and the arrow as "go somewhere" for a
+ * press that connects, opens or starts (the operator asked for no arrow,
+ * 24 Nov 2026). The row is the control — its title is the button a keyboard
+ * reaches, named with the same verb — so the face is a picture of it, hidden
+ * from a screen reader, and a press on it is a press on the row. Every face
+ * stands in one width, so the readings beside them line up down the list.
+ */
+function VerbFace({ word }: { word: string }) {
+  // On a phone the verb alone ("Start", "Open"): the noun after it took the
+  // room the name and its address needed.
+  const [verb, ...rest] = word.split(" ")
+  return (
+    <span className="flex shrink-0 justify-end sm:w-28">
+      <span
+        aria-hidden
+        data-slot="found-verb"
+        className={cn(
+          buttonVariants({ size: "xs", variant: "outline" }),
+          "text-foreground group-hover/choice:bg-accent",
+        )}
+      >
+        {verb}
+        {rest.length > 0 && <span className="max-sm:hidden">{rest.join(" ")}</span>}
+      </span>
+    </span>
   )
 }
 

@@ -26,53 +26,6 @@ const identity = (page: Page) => page.locator("[data-slot=host-identity]")
 /** The menu at the end of the identity line, which holds every command but the first. */
 const more = (page: Page) => page.getByRole("button", { name: "More about the databases" })
 
-/** A recorded hour of a SQL server whose open sessions move, as the history route answers it. */
-function sqlHour(base: number) {
-  const now = Date.now()
-  return {
-    samples: Array.from({ length: 12 }, (_, index) => ({
-      at: now - (12 - index) * 300_000,
-      gap: false,
-      stats: {
-        at: new Date(now - (12 - index) * 300_000).toISOString(),
-        supported: true,
-        databaseBytes: 23_400_000,
-        connections: {
-          total: base + (index % 4),
-          active: 1,
-          idle: 1,
-          idleInTransaction: 0,
-          waiting: 0,
-          max: 100,
-        },
-        counters: {},
-        gauges: {},
-      },
-    })),
-    everySeconds: 30,
-    retentionHours: 168,
-  }
-}
-
-/** The same for a key-value store, which counts clients. */
-function redisHour(base: number) {
-  const now = Date.now()
-  return {
-    samples: Array.from({ length: 12 }, (_, index) => ({
-      at: now - (12 - index) * 300_000,
-      gap: false,
-      stats: {
-        server: {
-          sampledAtMs: now - (12 - index) * 300_000,
-          counters: { connected_clients: base + (index % 3) },
-        },
-      },
-    })),
-    everySeconds: 30,
-    retentionHours: 168,
-  }
-}
-
 /** A server with many databases, long names and awkward figures among them. */
 function manyDatabases(count: number) {
   const engines = [
@@ -151,18 +104,39 @@ test.describe("the control center", () => {
     // MariaDB behind the mysql driver is drawn and named as itself.
     await expect(card(page, "blog")).toContainText("MariaDB 11.8.9")
     await expect(card(page, "blog").locator("img").first()).toHaveAttribute("src", /mariadb/)
-    // Each reads in its engine's own words: what it holds and who is connected, as words
-    // on one line, where three figures stood under three labels.
+    // Each reads in its engine's own words: what it holds and who is connected, as figures
+    // with their nouns on one line, where three figures stood under three labels.
     await expect(card(page, "cache")).toContainText(/28,600\s*keys/)
-    await expect(card(page, "cache")).toContainText(/3\s*clients open/)
+    await expect(card(page, "cache")).toContainText(/3\s*clients/)
     await expect(card(page, "app")).toContainText(/4\s*collections/)
-    await expect(card(page, "shop")).toContainText(/4\s*sessions open/)
-    await expect(card(page, "shop")).toContainText("23.4 MB stored")
+    await expect(card(page, "shop").locator("[data-slot=fleet-holds]")).toHaveText(
+      /23\.4\s*MB\s*13\s*tables\s*4\s*sessions/,
+    )
     await expect(page.locator("[data-card=database] .eyebrow")).toHaveCount(0)
     // The dump age is said. The live clock can add seconds while the preceding readings settle.
     await expect(card(page, "shop")).toContainText(/backed up 3h(?: \d+[ms])* ago/)
     await expect(card(page, "cache")).toContainText("never backed up")
-    await expect(card(page, "shop")).toContainText("shop-db")
+    // Where it runs, where that says more than its name; a container named as the
+    // connection is not its name again.
+    await expect(card(page, "shop").locator("[data-slot=fleet-place]")).toHaveText("shop-db")
+    await expect(card(page, "cache").locator("[data-slot=fleet-place]")).toHaveCount(0)
+    await expect(card(page, "app").locator("[data-slot=fleet-place]")).toHaveText(
+      "db.example.com:27017",
+    )
+    // The expected state is its dot, named but not written on every card, and the menu
+    // is words.
+    await expect(card(page, "shop").locator("[data-slot=database-status]")).toHaveAttribute(
+      "title",
+      "connected",
+    )
+    // The word is there for a screen reader only: the state draws as its dot.
+    const status = await card(page, "shop").locator("[data-slot=database-status]").boundingBox()
+    expect(status?.width ?? 99).toBeLessThan(10)
+    await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
+    await expect(page.getByRole("menuitem").first()).toBeVisible()
+    await expect(page.getByRole("menu").locator("svg")).toHaveCount(0)
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("menu")).toHaveCount(0)
 
     // The two work pages of each engine, under its own names.
     await expect(card(page, "shop").getByRole("link", { name: "Data of shop" })).toHaveAttribute(
@@ -177,7 +151,7 @@ test.describe("the control center", () => {
     ).toHaveAttribute("href", "/databases/5/query")
 
     // The whole card is the way in; a control on it is its own press.
-    await card(page, "shop").getByText("23.4 MB stored").click()
+    await card(page, "shop").locator("[data-slot=fleet-holds]").click()
     await expect(page).toHaveURL(/\/databases\/1$/)
   })
 
@@ -258,40 +232,34 @@ test.describe("the control center", () => {
     await page.getByRole("radio", { name: "Where it runs" }).click()
   })
 
-  test("each card draws its last hour in the database's own hue, and the identity line keeps the totals", async ({
+  test("a card draws no line of its last hour, and the identity line says the totals once", async ({
     page,
   }) => {
     const server = await mockFleet(page, {
       dumps: { 4: null, 5: 200 },
       fleet: { 2: { ok: false, state: "stopped" } },
     })
-    server.answer("GET /databases/1/stats/history", () => ({ body: sqlHour(3) }))
-    server.answer("GET /databases/4/stats/history", () => ({ body: redisHour(2) }))
     await page.goto("/databases")
+    await expect(card(page, "shop")).toBeVisible()
 
-    // The band that split these across the databases is gone; the line says them once.
+    // "Databases" on a database's glyph, not the server's name on its engines' logos; the
+    // verdict carries the count.
+    await expect(identity(page)).toContainText("Databases")
+    await expect(identity(page)).toContainText("1 of 5 stopped")
+    await expect(identity(page).locator("img")).toHaveCount(0)
+    // The band that split these across the databases is gone; the line says them once, and
+    // leaves backups to the Backups line under it.
     await expect(page.locator("[data-slot=fleet-band]")).toHaveCount(0)
     await expect(identity(page)).toContainText("33.6 MB stored")
-    await expect(identity(page)).toContainText(/3 of 5 backed up in the last day/)
-    await expect(identity(page)).toContainText("1 never backed up")
+    await expect(identity(page)).toContainText(/sessions open/)
+    await expect(identity(page)).not.toContainText("backed up")
 
-    const stroke = async (name: string) =>
-      card(page, name)
-        .locator("[data-slot=fleet-trend] path[stroke]")
-        .evaluate((line) => getComputedStyle(line).stroke)
-    await expect(
-      card(page, "shop").getByRole("img", { name: "Sessions open on shop over the last hour" }),
-    ).toBeVisible()
-    await expect(
-      card(page, "cache").getByRole("img", { name: "Clients open on cache over the last hour" }),
-    ).toBeVisible()
-    // A stopped server draws no hour, and one with none recorded keeps the line's place.
-    await expect(card(page, "blog").locator("[data-slot=fleet-trend] svg")).toHaveCount(0)
-    await expect(card(page, "app").locator("[data-slot=fleet-trend] svg")).toHaveCount(0)
+    // The sessions' last hour was a stepped line with no scale: gone, and not asked for.
+    await expect(page.locator("[data-slot=fleet-trend]")).toHaveCount(0)
+    await expect(page.locator("[data-card=database] svg[role=img]")).toHaveCount(0)
+    expect(server.asked.filter((call) => call.includes("/stats/history"))).toEqual([])
     await expect(page.locator("[data-slot=fleet-size]")).toHaveCount(0)
     await expect(page.locator("[data-slot=fleet-hue]")).toHaveCount(0)
-    // Two databases, two hues.
-    expect(await stroke("shop")).not.toBe(await stroke("cache"))
   })
 
   test("what the attention list fixed is fixed from the database's own card", async ({ page }) => {
@@ -306,7 +274,7 @@ test.describe("the control center", () => {
     await page.goto("/databases")
 
     // The server that does not answer is the verdict, and the first card on its shelf.
-    await expect(identity(page)).toContainText("1 database not answering")
+    await expect(identity(page)).toContainText("1 of 5 not answering")
     await expect(
       page.getByRole("list", { name: "Containers" }).locator("[data-card=database]").first(),
     ).toContainText("cache")
@@ -402,7 +370,7 @@ test.describe("the control center", () => {
     await expect(page.locator("[data-card=database]")).toHaveCount(40)
     // The backups line names three of those no job dumps and counts the rest.
     await expect(
-      page.locator("[data-slot=fleet-protection] [data-slot=reading-line]").first(),
+      page.locator("[data-slot=fleet-protection] [data-slot=protection-line]").first(),
     ).toContainText(/and \d+ more/)
 
     // Nothing spills out of a card or the page, whatever the names and figures are.
@@ -431,7 +399,7 @@ test.describe("the control center", () => {
 
     // What it holds is read whole at this width, in the engine's own noun.
     const holds = card(page, "app").locator("[data-slot=fleet-holds]")
-    await expect(holds).toHaveText(/764\.0 KB stored\s*4 collections/)
+    await expect(holds).toHaveText(/764\.0\s*KB\s*4\s*collections\s*6\s*sessions/)
     expect(
       await holds.evaluate((el) =>
         [el, ...el.children].every((part) => part.scrollWidth <= part.clientWidth),
@@ -630,7 +598,9 @@ test.describe("the control center", () => {
     await expect(card(page, "blog").getByRole("button", { name: "Start blog" })).toHaveCount(0)
     await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     // The size nobody reported to this role is not said, rather than said as nothing.
-    await expect(card(page, "notes")).not.toContainText("stored")
+    await expect(card(page, "notes").locator("[data-slot=fleet-holds]")).not.toContainText(
+      /\d\s*(?:B|KB|MB|GB)\b/,
+    )
     await expect(card(page, "notes")).toContainText(/4\s*tables/)
     await card(page, "shop").getByRole("button", { name: "Actions for shop" }).click()
     await expect(page.getByRole("menuitem")).toHaveText(["Settings"])
@@ -695,7 +665,7 @@ test.describe("the control center", () => {
     await expect(page.getByRole("heading", { name: "What they feed" })).toHaveCount(0)
     await expect(page.getByText("Nothing seen reading")).toHaveCount(0)
     await expect(page.locator("[data-slot=wiring]")).toHaveCount(0)
-    const readers = page.getByRole("link", { name: "read by 4" })
+    const readers = page.getByRole("link", { name: "used by 4 clients" })
     await expect(readers).toHaveAttribute("href", "/databases/map")
     await readers.click()
     await expect(page.locator(".react-flow__node").first()).toBeVisible()

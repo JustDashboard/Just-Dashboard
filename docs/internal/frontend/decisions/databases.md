@@ -25,14 +25,16 @@ service the line says to add the mitigation to its compose file, and nothing is 
 server the inventory reports the same way (`kernelProblems`) says it as its row's reason, and its
 one press is *Apply mitigation* (`foundAction`'s `kernel-mitigation`), asked first, after which
 Connect is what the row offers. The database's home says the mitigation is on, and why, as a
-*Kernel* row under *Runs as*. The page opens on `HostIdentity`: the server's engines as
-a stack of their own logos, the commonest and then the largest first, the host's name, how many
-databases, what they store, the sessions open, how many things read them (a link to the map),
-how many were dumped in the last day and, in amber, how many never were; at its right end the
-verdict — how many do not answer, else how many are stopped, else *All N answering* — beside
-Scan and Add a database, which left the page's own row. Under it
+*Kernel* row under *Runs as*. The page opens on its identity line: a database's glyph,
+*Databases*, and the verdict beside it — how many do not answer, else how many are stopped (*1 of 9
+not answering*, *2 of 9 stopped*), else *All 9 answering* — then what they store, the sessions open
+and what uses them (*used by 3 apps*, or *clients* once a machine reads them; a link to the map),
+with *Add a database* and a `⋯` menu of words at its end. Until 24 Nov 2026 it was the server's
+name on a stack of the engines' logos, with how many were dumped in the last day and how many never
+were among its facts; the operator found it did not make sense (the logos read as the server being
+a PostgreSQL, and the backups were said again by the line under it). Under it
 `components/database/fleet/fleet-protection.tsx`, over the unit-tested `fleet/protection.ts`, says
-in two `ReadingLine`s what protects the databases. **Backups** reads whether every database the
+in one framed block of two single lines what protects the databases. **Backups** reads whether every database the
 dashboard can dump is in a backup job that runs by itself (switched on, on a schedule, this
 server's own: a paused job, one run by hand and one imported from a destination protect nothing),
 and says when — "All 6 backed up every day at 03:00", the last run's age and size and the next —
@@ -40,12 +42,16 @@ or how many are not, naming them. **Alerts** reads whether a switched-on rule wa
 database, and whether a notification channel would hear it: "All 6 watched" with the rules and the
 channels told, "Alerts have nowhere to go" (a way to Notification channels) when none is on, and
 what is firing before anything else, as the database and the kind ("blog: disk filling up"), a way
-to its Alerts page. When a line is not the answer a server wants, it ends on its one press, for an
-administrator: *Schedule* puts the databases no job dumps into the database-only scheduled job
+to its Alerts page. Each line is a dot in its tone, the subject, the reading in words and the names
+it is about, with no glyph. When a line is not the answer a server wants, the press that answers
+it follows the words straight away, for an administrator, saying what it does (24 Nov 2026: they
+were *Schedule* and *Turn on* at the far end of a `ReadingLine` under a tinted archive and bell,
+and the operator asked for them "incorporated better and more clear"): *Schedule backups* puts the
+databases no job dumps into the database-only scheduled job
 that already dumps the most of them, one `POST /backups/{id}/database-dumps` each, or makes one —
 *Databases*, every night at 03:00 into `/var/backups/just-dashboard`, keeping the last 7, the
 backup form's own defaults — and starts its run at once, so "never backed up" ends now rather
-than tonight; a job that also archives files is never added to. *Turn on* creates rules over every
+than tonight; a job that also archives files is never added to. *Turn on alerts* creates rules over every
 database (`connectionId: null`) for down, disk, connections and a failed or missed backup, with
 each kind's defaults and every switched-on channel, skipping a kind that already has such a rule,
 paused or not, and its question says when no channel is on yet. Both ask first, naming what they
@@ -60,15 +66,14 @@ Backups' on a `StandingBar` (removed after 0.8.5). Backups and
 the Sites page's Certificates had also drawn a track under every row with a dot on it until 0.7.5, which
 went at the operator's request: the track had no scale, so the dot said less than the age beside
 it, a database never backed up was drawn at a place it did not have, and the track's hairline
-under each row's own rule read as a double line. Each database keeps one hue (`fleetHues`, a
-lane hue without slate dealt in the order the connections were saved, so five databases are
-five hues and a new one moves nobody's), the line of its last hour on its card; the card's edge carries none (removed in 0.7.5 with every card's stripe, at
-the operator's request). Until 0.8.6 the cards could be laid across as a table and the page
+under each row's own rule read as a double line. Each database kept one hue (`fleetHues`) for the
+line of its last hour on its card until that line went on 24 Nov 2026; the card's edge carries
+none (removed in 0.7.5 with every card's stripe, at the operator's request). Until 0.8.6 the cards could be laid across as a table and the page
 carried a picture of what the databases feed — two lanes of marks drawn the way Configuration
 draws the path a request takes, with a line of the databases nothing was seen reading under it —
 and the map was the same picture with a list of readers beside it. In 0.8.6, at the operator's
 request, the table and the control center's picture went (the cards are the one way the fleet is
-drawn, and what feeds what is reached from the identity line's "read by" figure), and the map
+drawn, and what feeds what is reached from the identity line's "used by" figure), and the map
 became the server map's canvas with one diagram for each database
 ([server map](../../server-map.md#the-databases-map)). *Found on this server* lists its servers in the order they can be
 connected — one press, a password, a start, nothing this page can do — and a file row's second
@@ -79,34 +84,49 @@ under its own name elsewhere), a data directory no server runs on and what was i
 one *Set aside* fold, whose closed line counts each group and whose open body shows one group at
 a time, picked by a chip; ignore marks whose instance is gone are one counted line with *Forget
 them* rather than rows of bare keys. Every found row is the same two lines — where it is, then
-after a dot why it waits — with its verb in one fixed width, so the readings line up; only a
-connect that just failed adds a line, in full. The fleet's cards are one height whatever they
-carry: the Stored track is drawn empty where no size is known, the failure block holds the
-figures' height, and the facts are one line that cuts rather than wraps, so cards on shelves
-standing side by side (separate grids) still line up.
+after a dot why it waits — with its verb drawn as a small button's face in one fixed width, so
+the readings line up, and no arrow (24 Nov 2026, at the operator's request; the row is still the
+control, its title the button a keyboard reaches). Where it is leaves out what the title already
+says: a container named as its server was its name again before the address (`whereBesides`).
+The dashboard's own pre-update copies of its store (`pre-update/` in its data directory) are
+copies kept aside, not a container's files: they were offered twice, once through `/host`. Its
+row menu, like the card's and the identity line's, is words without glyphs. Only a connect that
+just failed adds a line, in full. The fleet's cards are one height whatever they
+carry: the failure block holds the figures' height, and the figures and the facts are each one
+line that cuts a whole item rather than wraps, so cards on shelves standing side by side (separate
+grids) still line up.
 
 ## The section's pages (§15)
 
 The Databases section omits the top metric-card sections on every page. The control center starts
-with the server's databases as an identity line laid out as a project's header (0.8.7): the engines
-as the mark, the server's name with the verdict after it, the figures as facts with no dot between
-them, *Add a database* as the one command and a `⋯` menu holding the rest (Metrics export, MCP
-server, Scan this server again, which were three grey controls beside the command). The line is
+with the databases as an identity line laid out as a project's header (0.8.7; its tile and title
+changed on 24 Nov 2026): a database's glyph, *Databases* with the verdict after it, the figures as
+facts with no dot between them, *Add a database* as the one command and a `⋯` menu of words
+holding the rest (Metrics export, MCP server, Scan this server again, which were three grey
+controls beside the command). The line is
 drawn while the fleet is being read, when the read failed and with no database connected, so it is
 in place from the first paint; an empty server keeps it and leaves the command to its empty state.
-Then two lines that say what protects the databases — backed up on a schedule, watched by an
-alert — each ending on the press that answers it (the band of storage, sessions and backups stood
-there until 0.9.1), then the saved databases as cards with search, engine chips and how they are
+Then one framed block of two lines that say what protects the databases — backed up on a
+schedule, watched by an alert — each with the press that answers it straight after its words (the
+band of storage, sessions and backups stood there until 0.9.1), then the saved databases as cards with search, engine chips and how they are
 shelved. The attention findings it opened on were removed in 0.7.1; each fix they carried is a
 verb on the database's card. The former metric-card `?show=` filters no longer narrow the inventory.
-Individual database cards retain the facts needed to compare connections, and read them as one line
-rather than three figures under three labels (`fleet/fleet-card.tsx`, 0.8.7): who is connected in
-words ("4 sessions open") with the last hour of it as a line in the database's hue, its newest dumps
-as the strip a database's own Backups draws with "backed up 3h ago" under it, and what it holds as
-words under the reading ("23.4 MB stored · 13 tables"). The hour is the recorder's history for that
-database (`fleet/trend.ts`, unit-tested), asked once and then every five minutes; the strip is the
-backup summary's `recent`. Every part keeps its place with nothing to draw, so a card with no
-recorded hour, one never dumped and one that failed stand as tall. A collector that could not read
+Individual database cards retain the facts needed to compare connections in four lines
+(`fleet/fleet-card.tsx`, 24 Nov 2026, at the operator's request: the card was "too boring", the
+reading in its middle "makes no sense" and it was too much small text). The head is the engine's
+mark, the name, and under it the product and its version, its state as a dot (the word only when
+it is not *connected*), where it runs only when that says more than the name, and the
+operator's environment and protection. Then what it holds as figures a step up from the body with
+their nouns small beside them — **23.4** MB **13** tables **4** sessions — and what uses it as
+those things' marks (*used by*). The foot says what needs a hand (*open to the internet*, *never
+backed up*, a dump over a week old, in amber), else when it was last backed up, beside the engine's
+two work pages, Start, Settings or Apply mitigation. There is no arrow, and the `⋯` menu is words
+without glyphs. Until then the reading was "4 sessions open" with the last hour of it as a line in
+the database's hue (the recorder's history, asked by every card every five minutes), the newest
+dumps as a strip, "23.4 MB stored · 13 tables" under it, how far it reaches even when that was
+*this server only*, and the container's name again in mono when it was the card's own; the hour
+had no scale and read as noise. A card with no size known says nothing of it, and one that failed
+stands as tall as the rest. A collector that could not read
 (*Found on this server*) is drawn as the product draws any missing thing: Docker's own unavailable
 state with the step that fixes it (`DockerMissing`), the daemon's sentence folded away, and no
 claim that everything found is connected. A database home starts with its

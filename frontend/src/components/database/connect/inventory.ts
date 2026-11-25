@@ -176,6 +176,18 @@ export function instanceWhere(instance: DbInstance): { kind: string; text: strin
 }
 
 /**
+ * Where a found instance is, less what its row's title already says: a
+ * container named as the server in it was the title again before its
+ * address, or the whole line where it has none.
+ */
+export function whereBesides(instance: DbInstance): string {
+  const where = instanceWhere(instance).text
+  const name = instanceName(instance)
+  if (where === name) return ""
+  return where.startsWith(`${name} · `) ? where.slice(name.length + 3) : where
+}
+
+/**
  * A file that is some program's private state — an editor's, a browser
  * profile's, a package's under `/var/lib`, the dashboard's own store — rather
  * than a database anybody would open from here.
