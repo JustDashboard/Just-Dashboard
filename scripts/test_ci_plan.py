@@ -143,7 +143,7 @@ class PlanTest(unittest.TestCase):
         packages, plain, race = self.go("backend/internal/store/store.go")
         self.assertEqual(packages, ["./internal/api", "./internal/deploy", "./internal/store"])
         self.assertEqual(plain, [])
-        self.assertEqual(race, ["api", "deploy"])
+        self.assertEqual(race, ["api", "deploy", "store"])
 
     def test_a_package_nothing_imports_is_checked_alone_and_plainly(self):
         self.assertEqual(self.go("backend/internal/term/term.go"), (["./internal/term"], ["./internal/term"], []))
