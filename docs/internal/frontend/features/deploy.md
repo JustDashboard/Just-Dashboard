@@ -179,8 +179,9 @@ BuildKit instruction that failed read from its first error, else the step's last
 cut to two frames — never BuildKit's closing recap of the Dockerfile, which is what a failed build's
 last lines are. *Show in build logs* opens the console at that line. The build logs are the transcript
 alone, its stages a select at every width (the rail of stages beside it went in 0.9.1); a `RUN`'s
-`--mount` flags are drawn faint and BuildKit's per-instruction clock gives way to the console's
-elapsed column (`build-console.tsx`, `transcript-line.tsx`). Details lists only the steps that ran:
+`--mount` flags are drawn faint, BuildKit's per-instruction clock gives way to the console's
+elapsed column, and a thrown error's kind (`TypeError:`) is an error line the Errors filter finds
+(`build-console.tsx`, `transcript-line.tsx`, `lib/transcript.ts`). Details lists only the steps that ran:
 the ones the plan skipped are a list under them, each beside its reason, the ones the run did not
 reach — or has not reached yet — one line of names, a stage with no step that ran is not drawn, and
 before any step starts Details is not drawn at all. A step's record shows a failed step's excerpt, a
