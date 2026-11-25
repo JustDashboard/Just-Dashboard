@@ -5,20 +5,22 @@ import {
   mockProject,
   run,
   saveSettings,
+  toolingScanReading,
   vulnerableScanReading,
 } from "./deploy-fixture"
 
 /**
  * The base-image vulnerability watch (`deploy/image_scan.go`): the
- * overview's Vulnerabilities panel, its Rebuild — the runs route's own
- * force_build of the live release's commit — and Scan now, the mark a
- * release's row carries in the deployments list, and the scanning terms in
- * Build settings.
+ * overview's Vulnerabilities panel, which says only what can be done; its
+ * Rebuild — the runs route's own force_build of the live release's commit;
+ * the report a link away, with every finding under whose it is, and Scan now;
+ * the mark a release's row carries in the deployments list; and the scanning
+ * terms in Build settings.
  */
 
 test.use({ timezoneId: "UTC" })
 
-test("the overview says what the scan found and rebuilds the live commit on a newer base", async ({
+test("the overview says what to do and rebuilds the live commit on a newer base", async ({
   page,
 }) => {
   const dashboard = await mockProject(page, { vulnerabilities: vulnerableScanReading() })
@@ -31,21 +33,20 @@ test("the overview says what the scan found and rebuilds the live commit on a ne
   await page.goto("/deploy/7")
   const panel = page.locator("#vulnerabilities")
   await expect(panel.getByRole("heading", { name: "Vulnerabilities" })).toBeVisible()
-  await expect(panel.getByText("2 fixable by a newer base")).toBeVisible()
-  // One figure per severity, each with how many have a fix.
-  // One sentence, one bar of the severities, and an upgrade per package.
-  await expect(panel.getByText("16 known vulnerabilities in release 2")).toBeVisible()
-  await expect(panel.getByRole("img", { name: /^By severity: 1 critical, 2 high/ })).toBeVisible()
-  await expect(panel.locator('[data-slot="stat-tile"]')).toHaveCount(0)
-  await expect(panel.locator('[data-slot="vulnerable-package"]')).toHaveCount(2)
-  await expect(panel.getByText("A rebuild is likely to fix some of these")).toBeVisible()
-  await expect(panel.getByText("node:22-alpine", { exact: true }).first()).toBeVisible()
-  await expect(panel.getByRole("link", { name: "CVE-2022-37434" })).toHaveAttribute(
+  await expect(panel.getByText("2 to fix", { exact: true })).toBeVisible()
+  await expect(panel.getByText("2 high or worse to fix in release 2")).toBeVisible()
+  // One row per thing to do, and none of the advisories: those are the report's.
+  const actions = panel.locator('[data-slot="scan-action"]')
+  await expect(actions).toHaveCount(1)
+  await expect(actions.getByText("Rebuild on the newer node:22-alpine")).toBeVisible()
+  await expect(actions.getByText("Fixes zlib, openssl")).toBeVisible()
+  await expect(panel.locator('[data-slot="vulnerable-package"]')).toHaveCount(0)
+  await expect(panel.getByRole("img", { name: /^By severity/ })).toHaveCount(0)
+  await expect(panel.getByText(/known vulnerabilities/)).toHaveCount(0)
+  await expect(panel.getByRole("link", { name: "Report" })).toHaveAttribute(
     "href",
-    "https://avd.aquasec.com/nvd/cve-2022-37434",
+    "/deploy/7/vulnerabilities",
   )
-  await expect(panel.getByText("1.2.13-r0 → 1.2.13-r1")).toBeVisible()
-  await expect(panel.getByText(/against a vulnerability database 6 hours old/)).toBeVisible()
 
   await panel.getByRole("button", { name: "Rebuild" }).click()
   await expect(page).toHaveURL(/\/deploy\/7\/runs\/88$/)
@@ -53,16 +54,72 @@ test("the overview says what the scan found and rebuilds the live commit on a ne
   expect(dashboard.actions()).not.toContain("scan")
 })
 
-test("a clean scan offers no rebuild, and Scan now asks for one", async ({ page }) => {
-  const dashboard = await mockProject(page)
+test("a release whose findings are all in tools and the newest base is quiet", async ({ page }) => {
+  await mockProject(page, { vulnerabilities: toolingScanReading() })
   await page.goto("/deploy/7")
   const panel = page.locator("#vulnerabilities")
-  await expect(panel.getByText("No high or worse vulnerabilities")).toBeVisible()
-  await expect(panel.getByText("Nothing high or worse was found.")).toBeVisible()
+  await expect(panel.getByText("Nothing high or worse to fix in release 1")).toBeVisible()
+  await expect(
+    panel.getByText(
+      "183 known: 149 in development tools shipped with it and 34 in the node:22-alpine base image.",
+      { exact: false },
+    ),
+  ).toBeVisible()
+  await expect(panel.locator('[data-slot="scan-action"]')).toHaveCount(0)
   await expect(panel.getByRole("button", { name: "Rebuild" })).toHaveCount(0)
-  await panel.getByRole("button", { name: "Scan now" }).click()
-  await expect(panel.getByRole("button", { name: "Scanning…" })).toBeDisabled()
+  // No verdict in the head when there is nothing to do.
+  await expect(panel.getByText("Nothing high or worse to fix", { exact: true })).toHaveCount(0)
+
+  await panel.getByRole("link", { name: "Report" }).click()
+  await expect(page).toHaveURL(/\/deploy\/7\/vulnerabilities$/)
+  const report = page.locator("#vulnerability-report")
+  await expect(report.getByText("183 known vulnerabilities in release 1")).toBeVisible()
+  const development = report.getByRole("region", { name: "Development tools shipped with it" })
+  await expect(development.getByText(/here through drizzle-kit/)).toBeVisible()
+  // esbuild's two copies are two rows, and neither offers a fix that is
+  // only esbuild's makers' to ship.
+  await expect(development.locator('[data-slot="vulnerable-package"]')).toHaveCount(2)
+  await expect(development.getByText(/→/)).toHaveCount(0)
+  await expect(development.getByText(/comes with drizzle-kit/).first()).toBeVisible()
+  const base = report.getByRole("region", { name: "The base image" })
+  await expect(base.getByRole("heading", { name: "The node:22-alpine base image" })).toBeVisible()
+  await expect(base.getByText(/is on the newest node:22-alpine/)).toBeVisible()
+  await expect(base.getByText("brace-expansion", { exact: true })).toBeVisible()
+  await expect(report.getByRole("region", { name: "Your app's packages" })).toHaveCount(0)
+  await expect(report.getByRole("button", { name: "Rebuild" })).toHaveCount(0)
+})
+
+test("the report lists the base's fixes a rebuild takes, and Scan now asks for one", async ({
+  page,
+}) => {
+  const dashboard = await mockProject(page, { vulnerabilities: vulnerableScanReading() })
+  await page.goto("/deploy/7/vulnerabilities")
+  const report = page.locator("#vulnerability-report")
+  await expect(report.getByText("16 known vulnerabilities in release 2")).toBeVisible()
+  await expect(report.getByText(/against a vulnerability database 6 hours old/)).toBeVisible()
+  const base = report.getByRole("region", { name: "The base image" })
+  await expect(base.getByText(/now names a newer image than release 2 was built on/)).toBeVisible()
+  await expect(base.getByText("1.2.13-r0 → 1.2.13-r1")).toBeVisible()
+  await expect(base.getByRole("link", { name: "CVE-2022-37434" })).toHaveAttribute(
+    "href",
+    "https://avd.aquasec.com/nvd/cve-2022-37434",
+  )
+  // busybox's high has no fix: listed, with nothing to upgrade to.
+  await expect(base.getByText("busybox", { exact: true })).toBeVisible()
+  await expect(report.getByRole("button", { name: "Rebuild" })).toBeVisible()
+  await report.getByRole("button", { name: "Scan now" }).click()
+  await expect(report.getByRole("button", { name: "Scanning…" })).toBeDisabled()
   expect(dashboard.actions()).toContain("scan")
+})
+
+test("a clean scan offers no rebuild", async ({ page }) => {
+  await mockProject(page)
+  await page.goto("/deploy/7")
+  const panel = page.locator("#vulnerabilities")
+  await expect(panel.getByText("Nothing high or worse to fix in release 2")).toBeVisible()
+  await expect(panel.getByText(/4 in the node:22-alpine base image/)).toBeVisible()
+  await expect(panel.getByRole("button", { name: "Rebuild" })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Scan now" })).toHaveCount(0)
 })
 
 test("scanning off says so and points at its terms", async ({ page }) => {
@@ -79,10 +136,10 @@ test("scanning off says so and points at its terms", async ({ page }) => {
     "href",
     "/deploy/7/settings/build#vulnerabilities",
   )
-  await expect(panel.getByRole("button", { name: "Scan now" })).toHaveCount(0)
+  await expect(panel.getByRole("button", { name: "Rebuild" })).toHaveCount(0)
 })
 
-test("a release's row carries what its scan found", async ({ page }) => {
+test("a release's row carries what can be fixed on it, and only that", async ({ page }) => {
   await mockProject(page, { vulnerabilities: vulnerableScanReading() })
   // The run that made release 20, finished, beside one still in flight.
   await page.route("**/api/v1/deploy/7/runs**", (route) => {
@@ -96,10 +153,10 @@ test("a release's row carries what its scan found", async ({ page }) => {
   await page.goto("/deploy/7/deployments")
   const mark = page.getByLabel(/^Vulnerabilities: /)
   await expect(mark).toHaveCount(1)
-  await expect(mark).toHaveText("2 fixable")
+  await expect(mark).toHaveText("2 to fix")
   await expect(mark).toHaveAttribute(
     "title",
-    /1 critical and 2 high at high or worse, 2 with a published fix; a newer base image is out/,
+    "2 high or worse that an upgrade, or a rebuild on the newer base image, fixes.",
   )
 })
 

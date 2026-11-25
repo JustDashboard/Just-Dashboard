@@ -692,8 +692,8 @@ never into `docs/audits/`.
   recorded serial, renews it (by request and by the schedule) without a restart, switches TLS off,
   and removes its container and volumes.
 - Changes to the vulnerability watch — `internal/imagescan` (the scanner's container, the database
-  download, the report reader) or `deploy/image_scan*.go` — also run, as root (build the `internal/api`
-  test binary and run it under `sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH`),
+  download, the report reader, the archive's Node packages) or `deploy/image_scan*.go` — also run, as
+  root (build the `internal/api` test binary and run it under `sudo -n env JD_DEPLOY_LIVE=1 PATH=$PATH`),
   `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveImageScanStoresFindingsAndRaisesTheAlert -count=1 -v`.
   It runs the pinned Trivy image against the real database, fetched from its registry (about 140 MB)
   into a volume of its own: a release on `alpine:3.12` pinned on a moved `alpine:3.22` stores zlib's

@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/imagescan"
@@ -139,6 +140,9 @@ func TestLiveImageScanStoresFindingsAndRaisesTheAlert(t *testing.T) {
 	if _, err := h.a.CreateRule(ctx, hostAlertWrite{Kind: hostAlertImageVulnerable}); err != nil {
 		t.Fatal(err)
 	}
+	// The database download alone can outlast the test server's idle
+	// minute, which signed the admin out while the scans ran.
+	h.admin.cookie = signInAs(t, h.s, "tester-after-scans", auth.RoleAdmin)
 	h.evaluate(t)
 	if len(h.sent) != 1 || h.sent[0].Host.Label != "live-old-alpine · production" ||
 		h.sent[0].Host.Subject != imageAlertSubject(oldProject, oldEnvironment) ||

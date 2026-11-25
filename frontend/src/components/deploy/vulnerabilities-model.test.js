@@ -1,10 +1,15 @@
 import { describe, expect, test } from "bun:test"
 import {
   cleanTitle,
+  dependencyWords,
   findingProduct,
   groupFindings,
   nearestFix,
+  originOf,
+  overviewLead,
+  scanActions,
   scanLead,
+  upgradeTitle,
   ageWords,
   atLeast,
   badgeOf,
@@ -36,6 +41,10 @@ function scan(overrides = {}) {
           fixed: "2",
           severity: "CRITICAL",
           target: "alpine 3.12.12",
+          class: "os-pkgs",
+          fromBase: true,
+          origin: "base",
+          action: "rebuild",
         },
         {
           id: "CVE-2",
@@ -44,6 +53,10 @@ function scan(overrides = {}) {
           fixed: "2",
           severity: "HIGH",
           target: "alpine 3.12.12",
+          class: "os-pkgs",
+          fromBase: true,
+          origin: "base",
+          action: "rebuild",
         },
       ],
       unfixed: [
@@ -93,9 +106,21 @@ describe("vulnerabilities", () => {
     expect(floorWords("CRITICAL")).toBe("critical")
   })
 
-  test("the alert's condition needs a fixable finding at the floor and a newer base", () => {
+  test("the alert's condition needs a fixable finding the base carries and a newer base", () => {
     expect(vulnerable(scan())).toBe(true)
     expect(vulnerable(scan({ newerBase: false }))).toBe(false)
+    // esbuild's Go is not the base's to fix, however new the base.
+    const tooling = {
+      id: "CVE-2024-24790",
+      package: "stdlib",
+      installed: "v1.20.7",
+      fixed: "1.21.11",
+      severity: "CRITICAL",
+      target: "app/node_modules/@esbuild/linux-x64/bin/esbuild",
+      class: "lang-pkgs",
+      dependency: "development",
+    }
+    expect(vulnerable(scan({ summary: { ...scan().summary, fixable: [tooling] } }))).toBe(false)
     expect(vulnerable(scan({ state: "scanning" }))).toBe(false)
     expect(
       vulnerable(
@@ -110,27 +135,24 @@ describe("vulnerabilities", () => {
     expect(inFlight(scan())).toBe(false)
   })
 
-  test("the header says the verdict a reader asks first", () => {
-    expect(scanVerdict(reading())).toEqual({ tone: "danger", line: "2 fixable by a newer base" })
-    expect(scanVerdict(reading({ scan: scan({ newerBase: false }) }))).toEqual({
-      tone: "danger",
-      line: "2 have a fix",
-    })
-    const unfixedOnly = scan({
+  test("the header says what there is to do, and is quiet when there is nothing", () => {
+    expect(scanVerdict(reading())).toEqual({ tone: "danger", line: "2 to fix" })
+    // With no newer base, the base's fixes are not the reader's to take.
+    const waiting = scan({
       newerBase: false,
-      summary: { counts: { ...zero, high: 1 }, fixableCounts: zero, fixable: [], unfixed: [] },
+      summary: {
+        ...scan().summary,
+        fixable: scan().summary.fixable.map((finding) => ({ ...finding, action: undefined })),
+      },
     })
-    expect(scanVerdict(reading({ scan: unfixedOnly }))).toEqual({
-      tone: "warning",
-      line: "1 with no fix yet",
+    expect(scanVerdict(reading({ scan: waiting }))).toEqual({
+      tone: "running",
+      line: "Nothing high or worse to fix",
     })
     const clean = scan({
       summary: { counts: { ...zero, low: 2 }, fixableCounts: zero, fixable: [], unfixed: [] },
     })
-    expect(scanVerdict(reading({ scan: clean }))).toEqual({
-      tone: "running",
-      line: "No high or worse vulnerabilities",
-    })
+    expect(scanVerdict(reading({ scan: clean })).tone).toBe("running")
     expect(scanVerdict(reading({ policy: { enabled: false, severityFloor: "HIGH" } })).line).toBe(
       "Scanning is off for this environment",
     )
@@ -145,28 +167,28 @@ describe("vulnerabilities", () => {
     expect(scanVerdict(reading({ scan: scan({ state: "scanning" }) })).tone).toBe("danger")
   })
 
-  test("a release's row is marked only when its scan found something at the floor", () => {
+  test("a release's row is marked only when something on it can be fixed", () => {
     const badge = {
       releaseId: 9,
       state: "scanned",
       floor: "HIGH",
       counts: { ...zero, critical: 1, high: 2 },
       atFloor: 3,
-      fixable: 2,
+      fixable: 3,
+      actionable: 2,
       newerBase: true,
     }
     expect(badgeOf(badge)).toEqual({
-      label: "2 fixable",
+      label: "2 to fix",
       tone: "danger",
-      title:
-        "1 critical and 2 high at high or worse, 2 with a published fix; a newer base image is out, so a rebuild may fix them.",
+      title: "2 high or worse that an upgrade, or a rebuild on the newer base image, fixes.",
     })
-    expect(badgeOf({ ...badge, fixable: 0, newerBase: false })).toEqual({
-      label: "3 unfixed",
-      tone: "warning",
-      title: "1 critical and 2 high at high or worse, none with a published fix yet.",
-    })
-    expect(badgeOf({ ...badge, atFloor: 0 })).toBeUndefined()
+    expect(badgeOf({ ...badge, newerBase: false }).title).toBe(
+      "2 high or worse that an upgrade or a rebuild fixes.",
+    )
+    // 67 "fixable" in esbuild's Go and the newest base: nothing on the row.
+    expect(badgeOf({ ...badge, actionable: 0 })).toBeUndefined()
+    expect(badgeOf({ ...badge, actionable: undefined })).toBeUndefined()
     expect(badgeOf(undefined)).toBeUndefined()
   })
 
@@ -243,28 +265,165 @@ describe("the findings as upgrades", () => {
     expect(findingProduct({ class: "lang-pkgs", target: "app/go.mod" })).toBe("go")
     expect(findingProduct({ class: "lang-pkgs", target: "app/requirements.txt" })).toBe("python")
     expect(findingProduct({ class: "lang-pkgs", target: "app/unknown" })).toBeUndefined()
+    expect(
+      findingProduct({
+        class: "lang-pkgs",
+        target: "app/node_modules/@esbuild/linux-x64/bin/esbuild",
+        package: "stdlib",
+      }),
+    ).toBe("go")
   })
 
-  test("the sentence says how many and how many can be fixed", () => {
-    const scan = (counts, fixableCounts) => ({
-      releaseNumber: 19,
-      summary: { counts, fixableCounts, fixable: [], unfixed: [] },
-    })
+  test("the report's sentence says how many and whose they are", () => {
     const zero = { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 }
+    const scan = (counts, origins) => ({
+      releaseNumber: 19,
+      floor: "HIGH",
+      targets: [{ kind: "base", reference: "node:22-alpine", state: "scanned", counts: zero }],
+      summary: { counts, fixableCounts: counts, fixable: [], unfixed: [] },
+      origins,
+    })
     const some = { ...zero, high: 6, medium: 14, low: 1 }
-    expect(scanLead(scan(some, some))).toEqual({
+    expect(
+      scanLead(
+        scan(some, { app: zero, development: { ...zero, high: 20 }, base: { ...zero, low: 1 } }),
+      ),
+    ).toEqual({
       title: "21 known vulnerabilities in release 19",
-      fix: "All 21 have a fix",
+      where: "20 in development tools shipped with it and 1 in the node:22-alpine base image",
     })
-    expect(scanLead(scan(some, { ...zero, high: 6 })).fix).toBe("6 of 21 have a fix")
-    expect(scanLead(scan(some, { ...zero, high: 1 })).fix).toBe("1 of 21 has a fix")
-    expect(scanLead(scan({ ...zero, low: 1 }, zero))).toEqual({
+    expect(scanLead(scan({ ...zero, low: 1 }, undefined))).toEqual({
       title: "1 known vulnerability in release 19",
-      fix: "None has a fix yet",
+      where: undefined,
     })
-    expect(scanLead(scan(zero, zero))).toEqual({
-      title: "No known vulnerabilities in release 19",
-      fix: undefined,
+    expect(scanLead(scan(zero, undefined)).title).toBe("No known vulnerabilities in release 19")
+  })
+})
+
+/** The release the operator saw: 183 findings, none theirs to fix. */
+describe("what the overview says", () => {
+  const counts = (overrides) => ({
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+    ...overrides,
+  })
+  const esbuild = {
+    id: "CVE-2024-24790",
+    package: "stdlib",
+    installed: "v1.20.7",
+    fixed: "1.21.11, 1.22.4",
+    severity: "CRITICAL",
+    target: "app/node_modules/@esbuild/linux-x64/bin/esbuild",
+    path: "app/node_modules/@esbuild/linux-x64/bin/esbuild",
+    class: "lang-pkgs",
+    dependency: "development",
+    via: "drizzle-kit",
+    origin: "development",
+  }
+  const npmGlob = {
+    id: "CVE-2025-1",
+    package: "brace-expansion",
+    installed: "2.0.2",
+    fixed: "2.0.3",
+    severity: "HIGH",
+    target: "Node.js",
+    path: "usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json",
+    class: "lang-pkgs",
+    dependency: "indirect",
+    via: "npm",
+    fromBase: true,
+    origin: "base",
+  }
+  const quiet = {
+    releaseNumber: 1,
+    state: "scanned",
+    floor: "HIGH",
+    newerBase: false,
+    rebuildable: true,
+    targets: [{ kind: "base", reference: "node:22-alpine", state: "scanned", counts: counts() }],
+    baseUpdates: [{ reference: "node:22-alpine", state: "current" }],
+    summary: {
+      counts: counts({ critical: 3, high: 64, medium: 104, low: 12 }),
+      fixableCounts: counts({ critical: 3, high: 64, medium: 104, low: 12 }),
+      fixable: [esbuild, npmGlob],
+      unfixed: [],
+    },
+    origins: {
+      app: counts({ medium: 1 }),
+      development: counts({ critical: 3, high: 54, medium: 84, low: 7 }),
+      base: counts({ high: 10, medium: 19, low: 5 }),
+    },
+    actionable: counts(),
+  }
+
+  test("nothing to fix says where the findings are, not that there are 183 of them", () => {
+    expect(overviewLead(quiet)).toEqual({
+      title: "Nothing high or worse to fix in release 1",
+      where:
+        "183 known: 1 in your app's packages, 148 in development tools shipped with it and 34 in the node:22-alpine base image.",
     })
+    expect(scanActions(quiet)).toEqual([])
+    expect(originOf(esbuild)).toBe("development")
+    expect(originOf({ ...esbuild, origin: undefined, dependency: undefined })).toBe("app")
+    expect(originOf({ ...npmGlob, origin: undefined })).toBe("base")
+  })
+
+  test("an own package with no fix yet is said, not counted as something to do", () => {
+    const unfixed = { ...npmGlob, fromBase: false, origin: "app", fixed: undefined, path: "app/x" }
+    expect(
+      overviewLead({ ...quiet, summary: { ...quiet.summary, unfixed: [unfixed] } }).where,
+    ).toContain("1 high or worse in your app's packages has no fix yet.")
+  })
+
+  test("what can be done is a rebuild first, then one upgrade per package", () => {
+    const next = {
+      id: "CVE-2026-9",
+      package: "next",
+      installed: "16.4.6",
+      fixed: "16.4.7",
+      severity: "HIGH",
+      target: "Node.js",
+      path: "app/node_modules/next/package.json",
+      class: "lang-pkgs",
+      dependency: "direct",
+      via: "next",
+      origin: "app",
+      action: "upgrade",
+    }
+    const zlib = {
+      id: "CVE-2022-37434",
+      package: "zlib",
+      installed: "1.2.13-r0",
+      fixed: "1.2.13-r1",
+      severity: "CRITICAL",
+      target: "alpine 3.19.1",
+      class: "os-pkgs",
+      fromBase: true,
+      origin: "base",
+      action: "rebuild",
+    }
+    const scan = {
+      ...quiet,
+      newerBase: true,
+      summary: { ...quiet.summary, fixable: [zlib, esbuild, next, npmGlob] },
+    }
+    const actions = scanActions(scan)
+    expect(actions.map((action) => action.kind)).toEqual(["rebuild", "upgrade"])
+    expect(actions[0]).toMatchObject({ packages: ["zlib"], newerBase: true, worst: "CRITICAL" })
+    expect(upgradeTitle(actions[1].group)).toBe("Upgrade next to 16.4.7")
+    expect(dependencyWords(actions[1].group)).toBe("in package.json")
+    expect(overviewLead(scan).title).toBe("2 high or worse to fix in release 1")
+  })
+
+  test("Go's standard library is the Go a binary was built with", () => {
+    const [group] = groupFindings([{ ...esbuild, origin: "app", dependency: undefined }])
+    expect(upgradeTitle(group)).toBe("Build with Go 1.21.11")
+    expect(dependencyWords({ package: "postcss", dependency: "indirect", via: "next" })).toBe(
+      "comes with next",
+    )
+    expect(dependencyWords({ package: "x", dependency: undefined })).toBe("")
   })
 })

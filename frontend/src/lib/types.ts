@@ -6381,7 +6381,23 @@ export type VulnerabilityFinding = {
   class?: string
   /** A base the release was built on carries it too, so a newer base may fix it. */
   fromBase?: boolean
+  /** Where the package is in the image: its package.json, or the binary it is compiled into. */
+  path?: string
+  /**
+   * For a package under node_modules: whether the application runs it (named in
+   * `dependencies`, or needed by one that is) or only a development tool brought it.
+   */
+  dependency?: "direct" | "indirect" | "development"
+  /** The dependency the application names that brought it in. */
+  via?: string
+  /** Whose it is: the application's, a development tool's shipped with it, or a base's. */
+  origin?: VulnerabilityOrigin
+  /** What the reader can do: upgrade the package, or rebuild to pick up a fix. */
+  action?: "upgrade" | "rebuild"
 }
+
+/** Whose a finding is (`imagescan.FindingOrigin`). */
+export type VulnerabilityOrigin = "app" | "development" | "base"
 
 /** One image a scan read: the release's own, or a base it was pinned on. */
 export type ImageScanTarget = {
@@ -6434,6 +6450,10 @@ export type ImageScan = {
   newerBase: boolean
   /** A build re-pins the bases (a recipe, static, Dockerfile or Compose build). */
   rebuildable: boolean
+  /** Every finding counted by whose it is. */
+  origins?: Record<VulnerabilityOrigin, VulnerabilityCounts>
+  /** The fixable findings the reader can act on: an upgrade or a rebuild. */
+  actionable?: VulnerabilityCounts
   requestedAt?: string
   startedAt?: string
   finishedAt?: string
@@ -6449,6 +6469,8 @@ export type ImageScanBadge = {
   atFloor: number
   /** Of those, the ones with a published fix. */
   fixable: number
+  /** Of those, the ones an upgrade or a rebuild fixes: all the row marks. */
+  actionable?: number
   newerBase: boolean
   scannedAt?: string
 }

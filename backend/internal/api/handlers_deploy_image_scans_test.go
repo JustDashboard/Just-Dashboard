@@ -101,8 +101,9 @@ func TestImageVulnerableIsAHostAlertKindWithNothingToSet(t *testing.T) {
 	}
 }
 
-// The reading is the alert's condition: fixable at the floor and a newer
-// base fires; either half missing is a recovery; a scan not read yet, in
+// The reading is the alert's condition: fixable at the floor in a base and
+// a newer base fires; either half missing is a recovery, and so is a fix only
+// the application or a development tool can take; a scan not read yet, in
 // flight or failed keeps the subject where it was.
 func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 	scan := func(state string, findings []imagescan.Finding, newer bool) *deploy.ImageScan {
@@ -114,6 +115,13 @@ func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 	}
 	medium := imagescan.Finding{ID: "CVE-9", Package: "x", Installed: "1", Fixed: "2", Severity: imagescan.SeverityMedium}
 	unfixed := imagescan.Finding{ID: "CVE-8", Package: "y", Installed: "1", Severity: imagescan.SeverityCritical}
+	// esbuild's Go, through a devDependency, and the application's own
+	// package: neither is in the base, so a newer base fixes neither.
+	tooling := imagescan.Finding{ID: "CVE-2024-24790", Package: "stdlib", Installed: "v1.20.7", Fixed: "1.21.11",
+		Severity: imagescan.SeverityCritical, Class: "lang-pkgs", Path: "app/node_modules/@esbuild/linux-x64/bin/esbuild",
+		Dependency: imagescan.DependencyDevelopment, Via: "drizzle-kit"}
+	own := imagescan.Finding{ID: "CVE-7", Package: "next", Installed: "16.4.6", Fixed: "16.4.7",
+		Severity: imagescan.SeverityHigh, Class: "lang-pkgs", Path: "app/node_modules/next/package.json", Dependency: imagescan.DependencyDirect}
 	live := func(environment int64, s *deploy.ImageScan) deploy.LiveImageScan {
 		return deploy.LiveImageScan{ProjectID: 7, ProjectName: "shop", EnvironmentID: environment, EnvironmentName: "production", Scan: s}
 	}
@@ -124,6 +132,7 @@ func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 		live(4, nil),
 		live(5, scan(deploy.ImageScanScanning, []imagescan.Finding{zlibFinding}, true)),
 		live(6, scan(deploy.ImageScanFailed, nil, true)),
+		live(7, scan(deploy.ImageScanScanned, []imagescan.Finding{tooling, own}, true)),
 	})
 	if !reading.Judged || len(reading.Firing) != 1 || reading.Firing[0].Subject != "env:7:1" || reading.Firing[0].Label != "shop · production" {
 		t.Fatalf("firing = %+v", reading.Firing)
@@ -139,6 +148,9 @@ func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 	}
 	if !strings.Contains(reading.Now["env:7:3"], "no high or worse finding with a fix") {
 		t.Fatalf("only an unfixed critical and a medium = %q", reading.Now["env:7:3"])
+	}
+	if !strings.Contains(reading.Now["env:7:7"], "no high or worse finding with a fix that a newer base would bring") {
+		t.Fatalf("a development tool's and the application's fixes = %q", reading.Now["env:7:7"])
 	}
 	for _, subject := range []string{"env:7:4", "env:7:5", "env:7:6"} {
 		if !reading.Unknown[subject] {

@@ -254,18 +254,132 @@ func TestAScanIsReadAtItsEnvironmentsFloorAndAFailedOneKeepsTheLastFindings(t *t
 func TestAFixableFindingWithoutANewerBaseIsNotTheAlert(t *testing.T) {
 	t.Parallel()
 	scan := ImageScan{State: ImageScanScanned, Floor: imagescan.SeverityHigh, Summary: imagescan.Summarize([]imagescan.Finding{
-		{ID: "CVE-1", Package: "openssl", Installed: "1", Fixed: "2", Severity: imagescan.SeverityHigh},
+		{ID: "CVE-1", Package: "openssl", Installed: "1", Fixed: "2", Severity: imagescan.SeverityHigh, FromBase: true},
 	}, imagescan.SeverityHigh)}
 	if scan.Vulnerable() {
 		t.Fatal("no newer base: a rebuild would pin the same digest, so there is nothing to tell")
 	}
 	scan.NewerBase = true
 	if !scan.Vulnerable() {
-		t.Fatal("a fixable high and a newer base is the alert")
+		t.Fatal("a fixable high in the base and a newer base is the alert")
 	}
 	scan.State = ImageScanScanning
 	if scan.Vulnerable() {
 		t.Fatal("a scan in flight is not a verdict")
+	}
+	// The same finding in what the application or a tool brought is not
+	// the base's to fix, however new the base.
+	scan.State = ImageScanScanned
+	scan.Summary = imagescan.Summarize([]imagescan.Finding{
+		{ID: "CVE-1", Package: "stdlib", Installed: "v1.20.7", Fixed: "1.21.11", Severity: imagescan.SeverityCritical,
+			Class: "lang-pkgs", Dependency: imagescan.DependencyDevelopment},
+		{ID: "CVE-2", Package: "next", Installed: "16.4.6", Fixed: "16.4.7", Severity: imagescan.SeverityHigh,
+			Class: "lang-pkgs", Dependency: imagescan.DependencyDirect},
+	}, imagescan.SeverityHigh)
+	if scan.Vulnerable() {
+		t.Fatal("a newer base was the alert for findings it cannot fix")
+	}
+}
+
+// Each finding says whose it is and what the reader can do: the
+// application's package an upgrade, a base's a rebuild while its tag names a
+// newer image, a package the build installed a rebuild, a development tool's
+// nothing. Only what can be done is counted on the release's row.
+func TestAScanSaysWhoseEachFindingIsAndWhatCanBeDone(t *testing.T) {
+	t.Parallel()
+	f := newReleaseStoreFixture(t)
+	ctx := context.Background()
+	release := seedScanRelease(t, f, 5, true)
+	findings := []imagescan.Finding{
+		{ID: "CVE-1", Package: "openssl", Installed: "3.0.1", Fixed: "3.0.2", Severity: imagescan.SeverityHigh,
+			Class: "os-pkgs", Target: "alpine 3.22.1", FromBase: true},
+		{ID: "CVE-2024-24790", Package: "stdlib", Installed: "v1.20.7", Fixed: "1.21.11", Severity: imagescan.SeverityCritical,
+			Class: "lang-pkgs", Path: "app/node_modules/@esbuild/linux-x64/bin/esbuild",
+			Dependency: imagescan.DependencyDevelopment, Via: "drizzle-kit"},
+		{ID: "CVE-3", Package: "next", Installed: "16.4.6", Fixed: "16.4.7", Severity: imagescan.SeverityHigh,
+			Class: "lang-pkgs", Path: "app/node_modules/next/package.json", Dependency: imagescan.DependencyDirect, Via: "next"},
+		{ID: "CVE-4", Package: "curl", Installed: "8.1.0-r0", Fixed: "8.1.2-r0", Severity: imagescan.SeverityHigh,
+			Class: "os-pkgs", Target: "alpine 3.22.1"},
+		{ID: "CVE-5", Package: "postcss", Installed: "8.4.30", Severity: imagescan.SeverityHigh,
+			Class: "lang-pkgs", Path: "app/node_modules/postcss/package.json", Dependency: imagescan.DependencyIndirect, Via: "next"},
+	}
+	finish := func(state string) {
+		t.Helper()
+		if err := f.runs.FinishImageScan(ctx, release, ImageScanResult{
+			State: ImageScanScanned, Findings: findings,
+			BaseUpdates: []ReleaseBaseUpdate{{Reference: "node:22-alpine", Pinned: scanNodeBase, Current: scanNodeBaseNow, State: state}},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	finish("outdated")
+	scan, err := f.runs.ImageScan(ctx, release)
+	if err != nil || scan == nil {
+		t.Fatalf("scan = %+v, %v", scan, err)
+	}
+	actions := map[string]string{}
+	origins := map[string]string{}
+	for _, finding := range append(append([]imagescan.Finding{}, scan.Summary.Fixable...), scan.Summary.Unfixed...) {
+		actions[finding.Package], origins[finding.Package] = finding.Action, finding.Origin
+	}
+	wantActions := map[string]string{"openssl": "rebuild", "stdlib": "", "next": "upgrade", "curl": "rebuild", "postcss": ""}
+	wantOrigins := map[string]string{"openssl": "base", "stdlib": "development", "next": "app", "curl": "app", "postcss": "app"}
+	for name := range wantActions {
+		if actions[name] != wantActions[name] || origins[name] != wantOrigins[name] {
+			t.Errorf("%s = %q from %q, want %q from %q", name, actions[name], origins[name], wantActions[name], wantOrigins[name])
+		}
+	}
+	if scan.Origins["app"] != (imagescan.Counts{High: 3}) || scan.Origins["development"] != (imagescan.Counts{Critical: 1}) ||
+		scan.Origins["base"] != (imagescan.Counts{High: 1}) {
+		t.Fatalf("origins = %+v", scan.Origins)
+	}
+	if scan.Actionable != (imagescan.Counts{High: 3}) {
+		t.Fatalf("actionable = %+v", scan.Actionable)
+	}
+	badges, _ := f.runs.ImageScanBadges(ctx, f.envID)
+	if len(badges) != 1 || badges[0].AtFloor != 5 || badges[0].Fixable != 4 || badges[0].Actionable != 3 {
+		t.Fatalf("badges = %+v", badges)
+	}
+
+	// With the base current, its finding waits on whoever publishes it.
+	finish("current")
+	scan, _ = f.runs.ImageScan(ctx, release)
+	for _, finding := range scan.Summary.Fixable {
+		if finding.Package == "openssl" && finding.Action != "" {
+			t.Fatalf("a current base's finding = %q", finding.Action)
+		}
+	}
+	if scan.Actionable != (imagescan.Counts{High: 2}) || scan.Vulnerable() {
+		t.Fatalf("with a current base: actionable %+v, vulnerable %v", scan.Actionable, scan.Vulnerable())
+	}
+}
+
+// A scan read before paths were kept is due again at once, bases and all,
+// and until then a binary under node_modules reads as a development tool's.
+func TestAScanReadBeforePathsWereKeptIsDueAgain(t *testing.T) {
+	t.Parallel()
+	f := newReleaseStoreFixture(t)
+	ctx := context.Background()
+	release := seedScanRelease(t, f, 6, true)
+	esbuild := imagescan.Finding{ID: "CVE-2024-24790", Package: "stdlib", Installed: "v1.20.7", Fixed: "1.21.11",
+		Severity: imagescan.SeverityCritical, Class: "lang-pkgs", Target: "app/node_modules/@esbuild/linux-x64/bin/esbuild"}
+	if err := f.runs.FinishImageScan(ctx, release, ImageScanResult{State: ImageScanScanned, Findings: []imagescan.Finding{esbuild}}); err != nil {
+		t.Fatal(err)
+	}
+	if id, _, _ := f.runs.ClaimImageScan(ctx); id != 0 {
+		t.Fatalf("a scan read a minute ago was claimed again: %d", id)
+	}
+	// As 0.9.0 left it: no reading, and counts without origins.
+	if _, err := f.base.DB.Exec(`UPDATE deploy_image_scans SET reading = 0, counts_json = '{"all":{"critical":1},"fixable":{"critical":1}}' WHERE release_id = ?`, release); err != nil {
+		t.Fatal(err)
+	}
+	scan, _ := f.runs.ImageScan(ctx, release)
+	if len(scan.Summary.Fixable) != 1 || scan.Summary.Fixable[0].Origin != imagescan.OriginDevelopment || scan.Actionable.Total() != 0 ||
+		scan.Origins["development"] != (imagescan.Counts{Critical: 1}) {
+		t.Fatalf("an old scan's binary = %+v, origins %+v", scan.Summary.Fixable, scan.Origins)
+	}
+	if id, trigger, _ := f.runs.ClaimImageScan(ctx); id != release || trigger != ImageScanTriggerSchedule {
+		t.Fatalf("an old reading was not due again: %d %q", id, trigger)
 	}
 }
 
@@ -392,6 +506,19 @@ func TestTheWatchScansTheReleaseAndItsBasesAndCarriesTheBasesForwardDaily(t *tes
 		if finding.FromBase != (finding.Package == "openssl") {
 			t.Fatalf("after the daily scan %s from base = %v", finding.Package, finding.FromBase)
 		}
+	}
+
+	// A scan read before paths were kept has bases with nothing to match
+	// paths against: its next daily scan reads them again.
+	if _, err := f.base.DB.Exec(`UPDATE deploy_image_scans SET reading = 0 WHERE release_id = ?`, release); err != nil {
+		t.Fatal(err)
+	}
+	scanner.asked = nil
+	if err := watch.ScanRelease(ctx, release, ImageScanTriggerSchedule); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(scanner.asked, want) {
+		t.Fatalf("after an old reading the daily scan asked %v", scanner.asked)
 	}
 
 	// An image that is gone fails the scan and keeps the last findings.

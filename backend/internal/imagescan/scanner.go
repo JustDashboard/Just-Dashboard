@@ -311,6 +311,15 @@ func (s *Scanner) Scan(ctx context.Context, ref string, pull bool) (*Scanned, er
 	if err != nil {
 		return nil, err
 	}
+	// Whether the application runs a vulnerable Node package is read from
+	// the same archive. An archive that cannot be read for it keeps the
+	// findings as Trivy gave them: unclassified is counted as the
+	// application's, never hidden.
+	if NeedsNodeGraph(report.Findings) {
+		if graph, err := ReadNodeGraph(ctx, filepath.Join(work, "in", "image.tar")); err == nil {
+			report.Findings = graph.Classify(report.Findings)
+		}
+	}
 	return &Scanned{Report: report, Database: database}, nil
 }
 

@@ -14,7 +14,9 @@ const imageScanSchema = `
 -- worst first and at most a thousand; targets_json each image read (the
 -- release's, and the bases it was pinned on, with theirs); bases_json what the
 -- registry said each base's tag names now. db_updated_at is when the
--- database the scan read was built. The row goes with its release.
+-- database the scan read was built. reading (in addedColumns) is how the
+-- findings were read, so a scan read before a change is due again. The row
+-- goes with its release.
 CREATE TABLE IF NOT EXISTS deploy_image_scans (
   release_id     INTEGER PRIMARY KEY REFERENCES deploy_releases(id) ON DELETE CASCADE,
   environment_id INTEGER NOT NULL,

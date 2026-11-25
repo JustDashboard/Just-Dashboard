@@ -80,6 +80,47 @@ type Finding struct {
 	// version is in one of the base images the release was built from, so a
 	// newer base may be what fixes it.
 	FromBase bool `json:"fromBase,omitempty"`
+	// Path is where the package is in the image: the package.json or
+	// metadata file Trivy read it from, or the binary it is compiled into.
+	// Empty for an OS package, which the distribution's database names.
+	Path string `json:"path,omitempty"`
+	// Dependency says whether the application runs a package installed
+	// under node_modules (DependencyDirect, DependencyIndirect) or only a
+	// development tool brought it (DependencyDevelopment); empty for
+	// anything else. Via is the dependency the application names that
+	// brought it in.
+	Dependency string `json:"dependency,omitempty"`
+	Via        string `json:"via,omitempty"`
+	// Origin and Action are worked out when a scan is read, from the marks
+	// above and the release's bases (deploy/image_scan.go): whose the
+	// package is, and what the reader can do about it.
+	Origin string `json:"origin,omitempty"`
+	Action string `json:"action,omitempty"`
+}
+
+// Where a finding comes from, as a reader can act on it.
+const (
+	// OriginApp is the application's own: a package it runs, or one its
+	// build installed.
+	OriginApp = "app"
+	// OriginDevelopment is a development tool shipped in the image, which
+	// nothing the application runs needs.
+	OriginDevelopment = "development"
+	// OriginBase is carried by a base image the release was built on.
+	OriginBase = "base"
+)
+
+// FindingOrigin is whose a finding is: a base's first, since only a newer
+// base fixes what it carries, then a development tool's, then the
+// application's.
+func FindingOrigin(f Finding) string {
+	switch {
+	case f.FromBase:
+		return OriginBase
+	case f.Dependency == DependencyDevelopment:
+		return OriginDevelopment
+	}
+	return OriginApp
 }
 
 // Fixable reports whether a fixed version has been published.
@@ -89,6 +130,10 @@ func (f Finding) Fixable() bool { return strings.TrimSpace(f.Fixed) != "" }
 // package and the installed version. The target is left out, because an
 // image and its base name their OS packages under different targets.
 func (f Finding) key() string { return f.ID + "\x00" + f.Package + "\x00" + f.Installed }
+
+// placedKey is key at a place in the image: two copies of a package at two
+// paths are two things to fix (npm's own glob and the application's).
+func (f Finding) placedKey() string { return f.key() + "\x00" + f.Path }
 
 // Report is one image's scan, read from Trivy's JSON.
 type Report struct {
@@ -122,9 +167,11 @@ type trivyReport struct {
 	Results []struct {
 		Target          string `json:"Target"`
 		Class           string `json:"Class"`
+		Type            string `json:"Type"`
 		Vulnerabilities []struct {
 			VulnerabilityID  string `json:"VulnerabilityID"`
 			PkgName          string `json:"PkgName"`
+			PkgPath          string `json:"PkgPath"`
 			InstalledVersion string `json:"InstalledVersion"`
 			FixedVersion     string `json:"FixedVersion"`
 			Severity         string `json:"Severity"`
@@ -162,16 +209,17 @@ func ParseReport(raw []byte) (*Report, error) {
 				Installed: strings.TrimSpace(v.InstalledVersion), Fixed: strings.TrimSpace(v.FixedVersion),
 				Severity: normalSeverity(v.Severity), Title: clip(strings.TrimSpace(v.Title), 200),
 				URL: safeURL(v.PrimaryURL), Target: targetName(result.Target), Class: result.Class,
+				Path: packagePath(result.Class, result.Type, result.Target, v.PkgPath),
 			}
 			if finding.ID == "" || finding.Package == "" {
 				continue
 			}
 			// The same package can be reported twice when two lock files
 			// name it; it is one thing to fix.
-			if seen[finding.key()] {
+			if seen[finding.placedKey()] {
 				continue
 			}
-			seen[finding.key()] = true
+			seen[finding.placedKey()] = true
 			report.Findings = append(report.Findings, finding)
 		}
 	}
@@ -191,6 +239,25 @@ func targetName(target string) string {
 		target = "image"
 	}
 	return clip(target, 200)
+}
+
+// packagePath is where a language package sits in the image: Trivy's
+// PkgPath, or for a compiled binary (whose packages are its build's
+// modules) the binary itself.
+func packagePath(class, kind, target, pkgPath string) string {
+	if class != "lang-pkgs" {
+		return ""
+	}
+	if pkgPath = strings.TrimSpace(pkgPath); pkgPath != "" {
+		return clip(cleanEntry(pkgPath), 400)
+	}
+	switch kind {
+	case "gobinary", "rustbinary":
+		if target = strings.TrimSpace(target); target != "" && !strings.HasPrefix(target, ArchivePath) {
+			return clip(cleanEntry(target), 400)
+		}
+	}
+	return ""
 }
 
 func normalSeverity(severity string) string {
@@ -241,16 +308,23 @@ func sortFindings(findings []Finding) {
 // carries too: the same vulnerability in the same package at the same
 // version. What the base carries a newer base may fix; what it does not came
 // with the application.
+//
+// A language package is matched at its path too: npm's own glob in the base
+// and the application's glob at the same version are two packages. A base
+// read before paths were kept matches on the package alone.
 func MarkFromBase(findings []Finding, bases ...[]Finding) []Finding {
-	inBase := map[string]bool{}
+	placed, loose := map[string]bool{}, map[string]bool{}
 	for _, base := range bases {
 		for _, finding := range base {
-			inBase[finding.key()] = true
+			placed[finding.placedKey()] = true
+			if finding.Path == "" {
+				loose[finding.key()] = true
+			}
 		}
 	}
 	out := make([]Finding, len(findings))
 	for i, finding := range findings {
-		finding.FromBase = inBase[finding.key()]
+		finding.FromBase = placed[finding.placedKey()] || loose[finding.key()]
 		out[i] = finding
 	}
 	return out
@@ -268,7 +342,8 @@ type Counts struct {
 // Total is every finding counted.
 func (c Counts) Total() int { return c.Critical + c.High + c.Medium + c.Low + c.Unknown }
 
-func (c *Counts) add(severity string) {
+// Add counts one finding of a severity.
+func (c *Counts) Add(severity string) {
 	switch normalSeverity(severity) {
 	case SeverityCritical:
 		c.Critical++
@@ -326,9 +401,9 @@ func Summarize(findings []Finding, floor string) Summary {
 	sorted := append([]Finding(nil), findings...)
 	sortFindings(sorted)
 	for _, finding := range sorted {
-		summary.Counts.add(finding.Severity)
+		summary.Counts.Add(finding.Severity)
 		if finding.Fixable() {
-			summary.FixableCounts.add(finding.Severity)
+			summary.FixableCounts.Add(finding.Severity)
 		}
 		if !AtLeast(finding.Severity, floor) {
 			continue

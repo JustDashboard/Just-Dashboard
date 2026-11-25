@@ -2478,16 +2478,21 @@ type Facet struct {
 
 // Finding is imagescan.Finding in the dashboard's source.
 type Finding struct {
-	Class     string `json:"class,omitempty"`
-	Fixed     string `json:"fixed,omitempty"`
-	FromBase  bool   `json:"fromBase,omitempty"`
-	ID        string `json:"id,omitempty"`
-	Installed string `json:"installed,omitempty"`
-	Package   string `json:"package,omitempty"`
-	Severity  string `json:"severity,omitempty"`
-	Target    string `json:"target,omitempty"`
-	Title     string `json:"title,omitempty"`
-	URL       string `json:"url,omitempty"`
+	Action     string `json:"action,omitempty"`
+	Class      string `json:"class,omitempty"`
+	Dependency string `json:"dependency,omitempty"`
+	Fixed      string `json:"fixed,omitempty"`
+	FromBase   bool   `json:"fromBase,omitempty"`
+	ID         string `json:"id,omitempty"`
+	Installed  string `json:"installed,omitempty"`
+	Origin     string `json:"origin,omitempty"`
+	Package    string `json:"package,omitempty"`
+	Path       string `json:"path,omitempty"`
+	Severity   string `json:"severity,omitempty"`
+	Target     string `json:"target,omitempty"`
+	Title      string `json:"title,omitempty"`
+	URL        string `json:"url,omitempty"`
+	Via        string `json:"via,omitempty"`
 }
 
 // Fixture is blueprint.Fixture in the dashboard's source.
@@ -2776,6 +2781,7 @@ type ImageBuildIssue struct {
 
 // ImageScan is deploy.ImageScan in the dashboard's source.
 type ImageScan struct {
+	Actionable        Counts              `json:"actionable,omitzero"`
 	BaseUpdates       []ReleaseBaseUpdate `json:"baseUpdates"`
 	DatabaseAgeHours  float64             `json:"databaseAgeHours,omitempty"`
 	DatabaseUpdatedAt *time.Time          `json:"databaseUpdatedAt,omitempty"`
@@ -2783,6 +2789,7 @@ type ImageScan struct {
 	FinishedAt        *time.Time          `json:"finishedAt,omitempty"`
 	Floor             string              `json:"floor,omitempty"`
 	NewerBase         bool                `json:"newerBase,omitempty"`
+	Origins           map[string]Counts   `json:"origins"`
 	Reason            string              `json:"reason,omitempty"`
 	Rebuildable       bool                `json:"rebuildable,omitempty"`
 	ReleaseID         int64               `json:"releaseId,omitempty"`
@@ -2798,14 +2805,15 @@ type ImageScan struct {
 
 // ImageScanBadge is deploy.ImageScanBadge in the dashboard's source.
 type ImageScanBadge struct {
-	AtFloor   int64      `json:"atFloor,omitempty"`
-	Counts    Counts     `json:"counts,omitzero"`
-	Fixable   int64      `json:"fixable,omitempty"`
-	Floor     string     `json:"floor,omitempty"`
-	NewerBase bool       `json:"newerBase,omitempty"`
-	ReleaseID int64      `json:"releaseId,omitempty"`
-	ScannedAt *time.Time `json:"scannedAt,omitempty"`
-	State     string     `json:"state,omitempty"`
+	Actionable int64      `json:"actionable,omitempty"`
+	AtFloor    int64      `json:"atFloor,omitempty"`
+	Counts     Counts     `json:"counts,omitzero"`
+	Fixable    int64      `json:"fixable,omitempty"`
+	Floor      string     `json:"floor,omitempty"`
+	NewerBase  bool       `json:"newerBase,omitempty"`
+	ReleaseID  int64      `json:"releaseId,omitempty"`
+	ScannedAt  *time.Time `json:"scannedAt,omitempty"`
+	State      string     `json:"state,omitempty"`
 }
 
 // ImageScanDatabase is api.imageScanDatabase in the dashboard's source.

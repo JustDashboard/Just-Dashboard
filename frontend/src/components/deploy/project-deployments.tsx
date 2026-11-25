@@ -911,9 +911,9 @@ function PromotionTag({ promotion }: { promotion: DeploymentPromotion }) {
 }
 
 /**
- * A release's scan on its row: a shield and what can be done about what it
- * found — "2 fixable" — with the counts in its title. A state that will
- * change with the next day's scan, so a `Status`, never a tag.
+ * A release's scan on its row: a shield and how many findings an upgrade or a
+ * rebuild fixes — "2 to fix" — drawn only when there are some. A state that
+ * will change with the next day's scan, so a `Status`, never a tag.
  */
 function ScanMark({ badge }: { badge?: ReturnType<typeof badgeOf> }) {
   if (!badge) return null

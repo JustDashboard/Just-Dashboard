@@ -2506,16 +2506,21 @@ export interface Facet {
 
 /** imagescan.Finding in the dashboard's source. */
 export interface Finding {
+  action?: string
   class?: string
+  dependency?: string
   fixed?: string
   fromBase?: boolean
   id?: string
   installed?: string
+  origin?: string
   package?: string
+  path?: string
   severity?: string
   target?: string
   title?: string
   url?: string
+  via?: string
 }
 
 /** blueprint.Fixture in the dashboard's source. */
@@ -2808,6 +2813,7 @@ export interface ImageBuildIssue {
 
 /** deploy.ImageScan in the dashboard's source. */
 export interface ImageScan {
+  actionable?: Counts
   baseUpdates?: ReleaseBaseUpdate[] | null
   databaseAgeHours?: number
   databaseUpdatedAt?: string | null
@@ -2815,6 +2821,7 @@ export interface ImageScan {
   finishedAt?: string | null
   floor?: string
   newerBase?: boolean
+  origins?: Record<string, Counts> | null
   reason?: string
   rebuildable?: boolean
   releaseId?: number
@@ -2830,6 +2837,7 @@ export interface ImageScan {
 
 /** deploy.ImageScanBadge in the dashboard's source. */
 export interface ImageScanBadge {
+  actionable?: number
   atFloor?: number
   counts?: Counts
   fixable?: number

@@ -48,6 +48,20 @@ const (
 	imageScanRetry = time.Hour
 	// maxStoredFindings bounds what one row keeps, worst first.
 	maxStoredFindings = 1000
+	// imageScanReading is how a scan's findings are read: 1 keeps each
+	// package's path and whether the application runs it. A live release
+	// whose scan was read before is due again, bases and all.
+	imageScanReading = 1
+)
+
+// What a reader can do about a fixable finding (ImageScan.actionOf).
+const (
+	// ImageScanActionUpgrade is a package of the application's that a newer
+	// version fixes: the application's to upgrade.
+	ImageScanActionUpgrade = "upgrade"
+	// ImageScanActionRebuild is one a build picks up: a base whose tag names
+	// a newer image, or a distribution package the build installs.
+	ImageScanActionRebuild = "rebuild"
 )
 
 // ImageScanPolicy is one environment's terms. Scanning is on unless an
@@ -187,20 +201,66 @@ type ImageScan struct {
 	// NewerBase says a base the release was pinned on has a newer digest
 	// under its tag; Rebuildable that a rebuild re-pins it (a recipe or
 	// static build, or a Dockerfile whose bases a build pulls again).
-	NewerBase   bool       `json:"newerBase"`
-	Rebuildable bool       `json:"rebuildable"`
-	RequestedAt *time.Time `json:"requestedAt,omitempty"`
-	StartedAt   *time.Time `json:"startedAt,omitempty"`
-	FinishedAt  *time.Time `json:"finishedAt,omitempty"`
+	NewerBase   bool `json:"newerBase"`
+	Rebuildable bool `json:"rebuildable"`
+	// Origins counts every finding by whose it is (imagescan.OriginApp,
+	// OriginDevelopment, OriginBase), and Actionable the fixable ones the
+	// reader can do something about: an upgrade of the application's own
+	// package, or a rebuild that picks up a fix. The rest is a development
+	// tool's, or a base's that has no newer image yet.
+	Origins     map[string]imagescan.Counts `json:"origins"`
+	Actionable  imagescan.Counts            `json:"actionable"`
+	RequestedAt *time.Time                  `json:"requestedAt,omitempty"`
+	StartedAt   *time.Time                  `json:"startedAt,omitempty"`
+	FinishedAt  *time.Time                  `json:"finishedAt,omitempty"`
 
 	findings []imagescan.Finding
 	method   BuildMethod
+	reading  int
 }
 
 // Vulnerable reports the alert's condition: a fixable finding at or above
-// the floor, and a newer digest of a base the release was pinned on.
+// the floor that a base carries, and a newer digest of a base the release
+// was pinned on. A development tool's finding is never the alert, and nor is
+// the application's own: a newer base fixes neither.
 func (scan ImageScan) Vulnerable() bool {
-	return scan.State == ImageScanScanned && scan.NewerBase && scan.Summary.FixableAtLeast(scan.Floor)
+	return scan.State == ImageScanScanned && scan.NewerBase && len(scan.BaseFixable()) > 0
+}
+
+// BaseFixable is the fixable findings at or above the floor that a base
+// carries: what a newer base may fix.
+func (scan ImageScan) BaseFixable() []imagescan.Finding {
+	out := []imagescan.Finding{}
+	for _, finding := range scan.Summary.Fixable {
+		if imagescan.FindingOrigin(finding) == imagescan.OriginBase && imagescan.AtLeast(finding.Severity, scan.Floor) {
+			out = append(out, finding)
+		}
+	}
+	return out
+}
+
+// actionOf is what the reader can do about one finding, if anything.
+func (scan ImageScan) actionOf(finding imagescan.Finding) string {
+	if !finding.Fixable() {
+		return ""
+	}
+	switch finding.Origin {
+	case imagescan.OriginApp:
+		if finding.Class == "os-pkgs" {
+			// A package the build installed from the distribution: a build
+			// without the cache installs the fixed one.
+			if scan.Rebuildable {
+				return ImageScanActionRebuild
+			}
+			return ""
+		}
+		return ImageScanActionUpgrade
+	case imagescan.OriginBase:
+		if scan.NewerBase {
+			return ImageScanActionRebuild
+		}
+	}
+	return ""
 }
 
 // QueueImageScan asks for a release to be scanned. A scan already in flight
@@ -252,10 +312,10 @@ func (s *OrchestrationStore) ClaimImageScan(ctx context.Context) (int64, string,
 			  LEFT JOIN deploy_image_scan_policies p ON p.environment_id = e.id
 			  LEFT JOIN deploy_image_scans q ON q.release_id = e.live_release_id
 			 WHERE e.live_release_id <> 0 AND e.archived_at = 0 AND e.kind <> 'preview' AND COALESCE(p.enabled, 1) = 1
-			   AND (q.release_id IS NULL OR (q.state = 'scanned' AND q.finished_at <= ?)
+			   AND (q.release_id IS NULL OR (q.state = 'scanned' AND (q.finished_at <= ? OR q.reading < ?))
 			        OR (q.state = 'failed' AND q.finished_at <= ?))
 			 ORDER BY COALESCE(q.finished_at, 0), e.id LIMIT 1`,
-			now.Add(-imageScanInterval).Unix(), now.Add(-imageScanRetry).Unix()).Scan(&releaseID)
+			now.Add(-imageScanInterval).Unix(), imageScanReading, now.Add(-imageScanRetry).Unix()).Scan(&releaseID)
 	}
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, "", nil
@@ -472,19 +532,37 @@ func (s *OrchestrationStore) FinishImageScan(ctx context.Context, releaseID int6
 		findings = findings[:maxStoredFindings]
 	}
 	counts := imagescan.Summarize(result.Findings, imagescan.SeverityLow)
+	recorded := map[string]imagescan.Counts{"all": counts.Counts, "fixable": counts.FixableCounts}
+	for origin, byOrigin := range originCounts(result.Findings) {
+		recorded[origin] = byOrigin
+	}
 	var databaseUpdated int64
 	if !result.Database.UpdatedAt.IsZero() {
 		databaseUpdated = result.Database.UpdatedAt.Unix()
 	}
 	_, err := s.db.ExecContext(ctx, `
 		UPDATE deploy_image_scans SET state = 'scanned', reason = ?, scanner = ?, db_updated_at = ?,
-		  counts_json = ?, findings_json = ?, targets_json = ?, bases_json = ?, truncated = ?, finished_at = ?
+		  counts_json = ?, findings_json = ?, targets_json = ?, bases_json = ?, truncated = ?, finished_at = ?, reading = ?
 		 WHERE release_id = ?`,
 		clipText(result.Reason, 1000), result.Scanner, databaseUpdated,
-		string(mustJSON(map[string]imagescan.Counts{"all": counts.Counts, "fixable": counts.FixableCounts})),
+		string(mustJSON(recorded)),
 		string(mustJSON(findings)), string(mustJSON(storedTargets(result.Targets))), string(mustJSON(result.BaseUpdates)),
-		boolInt(truncated), now, releaseID)
+		boolInt(truncated), now, imageScanReading, releaseID)
 	return err
+}
+
+// originCounts counts findings by whose they are, every origin present.
+func originCounts(findings []imagescan.Finding) map[string]imagescan.Counts {
+	out := map[string]imagescan.Counts{
+		imagescan.OriginApp: {}, imagescan.OriginDevelopment: {}, imagescan.OriginBase: {},
+	}
+	for _, finding := range findings {
+		origin := imagescan.FindingOrigin(finding)
+		counts := out[origin]
+		counts.Add(finding.Severity)
+		out[origin] = counts
+	}
+	return out
 }
 
 // storedTarget is ImageScanTarget with its findings, as the row keeps it, so
@@ -521,7 +599,7 @@ func (t ImageScanTarget) Findings() []imagescan.Finding { return t.findings }
 
 const imageScanColumns = `q.release_id, r.release_number, q.environment_id, q.state, q.reason, q.trigger, q.scanner,
 	q.db_updated_at, q.counts_json, q.findings_json, q.targets_json, q.bases_json, q.truncated,
-	q.requested_at, q.started_at, q.finished_at, r.provenance_json`
+	q.requested_at, q.started_at, q.finished_at, q.reading, r.provenance_json`
 
 func scanImageScan(row interface{ Scan(...any) error }) (*ImageScan, error) {
 	var scan ImageScan
@@ -530,7 +608,7 @@ func scanImageScan(row interface{ Scan(...any) error }) (*ImageScan, error) {
 	var truncated int
 	if err := row.Scan(&scan.ReleaseID, &scan.ReleaseNumber, &scan.EnvironmentID, &scan.State, &scan.Reason,
 		&scan.Trigger, &scan.Scanner, &databaseUpdated, &counts, &findings, &targets, &bases, &truncated,
-		&requested, &started, &finished, &provenance); err != nil {
+		&requested, &started, &finished, &scan.reading, &provenance); err != nil {
 		return nil, err
 	}
 	scan.DatabaseUpdatedAt = unixTimePtr(databaseUpdated)
@@ -551,6 +629,12 @@ func scanImageScan(row interface{ Scan(...any) error }) (*ImageScan, error) {
 	_ = json.Unmarshal([]byte(counts), &recorded)
 	scan.Summary = imagescan.Summary{Counts: recorded["all"], FixableCounts: recorded["fixable"]}
 	scan.Summary.Truncated = truncated != 0
+	if _, ok := recorded[imagescan.OriginApp]; ok {
+		scan.Origins = map[string]imagescan.Counts{}
+		for _, origin := range []string{imagescan.OriginApp, imagescan.OriginDevelopment, imagescan.OriginBase} {
+			scan.Origins[origin] = recorded[origin]
+		}
+	}
 	var record struct {
 		Builder PreparedBuild `json:"builder"`
 	}
@@ -568,9 +652,32 @@ func scanImageScan(row interface{ Scan(...any) error }) (*ImageScan, error) {
 	return &scan, nil
 }
 
-// read summarizes the kept findings at the environment's floor.
+// read summarizes the kept findings at the environment's floor, each marked
+// with whose it is and what can be done about it.
 func (scan *ImageScan) read(floor string) {
 	scan.Floor = floor
+	if scan.reading < 1 {
+		// Read before paths were kept: a binary under node_modules is a
+		// development tool's (esbuild's Go), which is most of what such a
+		// scan found, until the scan due now reads it properly.
+		for i, finding := range scan.findings {
+			if finding.Class == "lang-pkgs" && finding.Dependency == "" && strings.Contains("/"+finding.Target+"/", "/node_modules/") {
+				scan.findings[i].Dependency = imagescan.DependencyDevelopment
+			}
+		}
+	}
+	scan.Actionable = imagescan.Counts{}
+	for i, finding := range scan.findings {
+		finding.Origin = imagescan.FindingOrigin(finding)
+		finding.Action = scan.actionOf(finding)
+		if finding.Action != "" {
+			scan.Actionable.Add(finding.Severity)
+		}
+		scan.findings[i] = finding
+	}
+	if scan.Origins == nil {
+		scan.Origins = originCounts(scan.findings)
+	}
 	summary := imagescan.Summarize(scan.findings, floor)
 	// The counts are of every finding the scan made, which the kept list
 	// may have been cut short of.
@@ -608,8 +715,11 @@ type ImageScanBadge struct {
 	Counts    imagescan.Counts `json:"counts"`
 	AtFloor   int              `json:"atFloor"`
 	Fixable   int              `json:"fixable"`
-	NewerBase bool             `json:"newerBase"`
-	ScannedAt *time.Time       `json:"scannedAt,omitempty"`
+	// Actionable is how many of the fixable ones the reader can act on (an
+	// upgrade or a rebuild), which is all the row marks.
+	Actionable int        `json:"actionable"`
+	NewerBase  bool       `json:"newerBase"`
+	ScannedAt  *time.Time `json:"scannedAt,omitempty"`
 }
 
 // ImageScanBadges are the badges of an environment's scanned releases.
@@ -635,7 +745,7 @@ func (s *OrchestrationStore) ImageScanBadges(ctx context.Context, environmentID 
 		out = append(out, ImageScanBadge{
 			ReleaseID: scan.ReleaseID, State: scan.State, Floor: scan.Floor, Counts: scan.Summary.Counts,
 			AtFloor: scan.Summary.Counts.AtLeast(scan.Floor), Fixable: scan.Summary.FixableCounts.AtLeast(scan.Floor),
-			NewerBase: scan.NewerBase, ScannedAt: scan.FinishedAt,
+			Actionable: scan.Actionable.AtLeast(scan.Floor), NewerBase: scan.NewerBase, ScannedAt: scan.FinishedAt,
 		})
 	}
 	return out, rows.Err()

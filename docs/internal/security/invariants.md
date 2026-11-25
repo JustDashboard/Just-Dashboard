@@ -408,7 +408,10 @@ A change that weakens any of these has to say so explicitly.
     the database is fetched over https from its registry, checked against the digest its manifest
     names, repacked so that only `db/trivy.db` and `db/metadata.json` reach the volume, and copied in
     through a container that is created and never started; a base image is pulled by the daemon, by
-    digest, as a build pulls it. The scanner image is pinned by tag and index digest. Scanning changes
+    digest, as a build pulls it. The scanner image is pinned by tag and index digest. To tell which Node
+    packages an application runs, the dashboard reads the same archive itself, as data
+    (`imagescan.ReadNodeGraph`): only `package.json` files and `node_modules` links, each bounded,
+    nothing extracted to disk and nothing in the image run. Scanning changes
     nothing a release runs: a rebuild is offered as the runs route's own `force_build`, gated and
     audited as any build is. See [image vulnerabilities](../deployments/image-vulnerabilities.md).
 

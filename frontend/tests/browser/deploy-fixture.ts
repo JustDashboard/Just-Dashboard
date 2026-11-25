@@ -2177,7 +2177,7 @@ export async function expectSaved(page: Page) {
  * The live release (20, #2) read for known vulnerabilities: zlib's
  * CVE-2022-37434 and openssl's with a fix, carried by the base, and the base's
  * tag naming a newer image than the one the release was pinned on — the
- * alert's condition — plus a high nobody has fixed yet.
+ * alert's condition, and a rebuild to do — plus a high nobody has fixed yet.
  */
 export function vulnerableScanReading(
   policy: ImageScanPolicy = { enabled: true, severityFloor: "HIGH" },
@@ -2199,6 +2199,8 @@ export function vulnerableScanReading(
     target: "alpine 3.19.1",
     class: "os-pkgs",
     fromBase: true,
+    origin: "base" as const,
+    action: fixed ? ("rebuild" as const) : undefined,
   })
   return {
     policy,
@@ -2260,6 +2262,12 @@ export function vulnerableScanReading(
       ],
       newerBase: true,
       rebuildable: true,
+      origins: {
+        app: { critical: 0, high: 0, medium: 2, low: 5, unknown: 0 },
+        development: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        base: { critical: 1, high: 2, medium: 2, low: 4, unknown: 0 },
+      },
+      actionable: { critical: 1, high: 1, medium: 0, low: 0, unknown: 0 },
       requestedAt: now,
       startedAt: now,
       finishedAt: now,
@@ -2273,7 +2281,108 @@ export function vulnerableScanReading(
         counts: { critical: 1, high: 2, medium: 4, low: 9, unknown: 0 },
         atFloor: 3,
         fixable: 2,
+        actionable: 2,
         newerBase: true,
+        scannedAt: now,
+      },
+    ],
+  }
+}
+
+/**
+ * The release an operator reported (183 findings and a red "67 have a fix"),
+ * as the scan now reads it: esbuild's Go through drizzle-kit, a development
+ * dependency; npm's own packages in the newest node:22-alpine; nothing in what
+ * the application runs. Nothing to do, so the overview is quiet.
+ */
+export function toolingScanReading(): ImageScanReading {
+  const reading = vulnerableScanReading()
+  const esbuild = (id: string, severity: "CRITICAL" | "HIGH", go: string, path: string) => ({
+    id,
+    package: "stdlib",
+    installed: go,
+    fixed: "1.21.11, 1.22.4",
+    severity,
+    title: `golang: net/http: a flaw in ${id}`,
+    url: `https://avd.aquasec.com/nvd/${id.toLowerCase()}`,
+    target: path,
+    path,
+    class: "lang-pkgs",
+    dependency: "development" as const,
+    via: "drizzle-kit",
+    origin: "development" as const,
+  })
+  const nested =
+    "app/node_modules/@esbuild-kit/core-utils/node_modules/esbuild/node_modules/@esbuild/linux-x64/bin/esbuild"
+  const hoisted = "app/node_modules/@esbuild/linux-x64/bin/esbuild"
+  const braces = {
+    id: "CVE-2025-5889",
+    package: "brace-expansion",
+    installed: "2.0.2",
+    fixed: "2.0.3",
+    severity: "HIGH" as const,
+    title: "brace-expansion: a regular expression denial of service",
+    target: "Node.js",
+    path: "usr/local/lib/node_modules/npm/node_modules/brace-expansion/package.json",
+    class: "lang-pkgs",
+    dependency: "indirect" as const,
+    via: "npm",
+    fromBase: true,
+    origin: "base" as const,
+  }
+  const counts = (overrides: Partial<Record<"critical" | "high" | "medium" | "low", number>>) => ({
+    critical: 0,
+    high: 0,
+    medium: 0,
+    low: 0,
+    unknown: 0,
+    ...overrides,
+  })
+  return {
+    ...reading,
+    releaseId: 21,
+    scan: {
+      ...reading.scan!,
+      releaseId: 21,
+      releaseNumber: 1,
+      newerBase: false,
+      summary: {
+        counts: counts({ critical: 3, high: 64, medium: 104, low: 12 }),
+        fixableCounts: counts({ critical: 3, high: 64, medium: 104, low: 12 }),
+        fixable: [
+          esbuild("CVE-2024-24790", "CRITICAL", "v1.20.7", nested),
+          esbuild("CVE-2023-39325", "HIGH", "v1.20.7", nested),
+          esbuild("CVE-2025-61726", "HIGH", "v1.23.12", hoisted),
+          braces,
+        ],
+        unfixed: [],
+      },
+      baseUpdates: [
+        {
+          reference: "node:22-alpine",
+          pinned: `sha256:${"d".repeat(64)}`,
+          current: `sha256:${"d".repeat(64)}`,
+          state: "current",
+          checkedAt: now,
+        },
+      ],
+      origins: {
+        app: counts({}),
+        development: counts({ critical: 3, high: 54, medium: 84, low: 8 }),
+        base: counts({ high: 10, medium: 20, low: 4 }),
+      },
+      actionable: counts({}),
+    },
+    releases: [
+      {
+        releaseId: 21,
+        state: "scanned",
+        floor: "HIGH",
+        counts: counts({ critical: 3, high: 64, medium: 104, low: 12 }),
+        atFloor: 67,
+        fixable: 67,
+        actionable: 0,
+        newerBase: false,
         scannedAt: now,
       },
     ],
@@ -2296,6 +2405,12 @@ export function cleanScanReading(
         fixable: [],
         unfixed: [],
       },
+      origins: {
+        app: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        development: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
+        base: { critical: 0, high: 0, medium: 1, low: 3, unknown: 0 },
+      },
+      actionable: { critical: 0, high: 0, medium: 0, low: 0, unknown: 0 },
       baseUpdates: [
         {
           reference: "node:22-alpine",
