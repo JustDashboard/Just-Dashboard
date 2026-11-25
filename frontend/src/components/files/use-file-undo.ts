@@ -37,36 +37,48 @@ function failure(step: UndoStep, error: unknown): string | undefined {
  * (or says it cannot be undone), and keeps it on this visit's stack;
  * `undoLast` takes the newest off the stack, so a second press reaches the
  * one before. Nothing is kept past the visit: undo is for the slip just made.
+ *
+ * Undos run one after another, in the order they were asked for. A press
+ * while the one before is still talking to the server used to be dropped —
+ * Ctrl+Z twice in quick succession undid one operation — so it waits its
+ * turn instead. An operation is taken off the stack when it is asked for,
+ * not when it finishes, which is what lets the second press reach the one
+ * before; and one asked for twice (the notice's Undo pressed twice) runs once.
  */
 export function useFileUndo(onChange: () => void) {
   const stack = useRef<FileOperation[]>([])
-  const busy = useRef(false)
+  const taken = useRef(new WeakSet<FileOperation>())
+  const queue = useRef<Promise<void>>(Promise.resolve())
   const changed = useRef(onChange)
   useEffect(() => {
     changed.current = onChange
   }, [onChange])
 
-  const undo = useCallback(async (op: FileOperation) => {
-    if (busy.current) return
+  const undo = useCallback((op: FileOperation) => {
+    if (taken.current.has(op)) return queue.current
+    taken.current.add(op)
     stack.current = stack.current.filter((held) => held !== op)
     if (op.steps.length === 0) {
       notify.info(`${sentenceCase(op.label)} cannot be undone`, { description: op.why })
-      return
+      return queue.current
     }
-    busy.current = true
-    try {
-      const result = await runUndo(op, RUNNER)
-      if (result.failed) {
-        notify.error(`Could not undo ${op.label}`, undefined, {
-          description: failure(result.failed.step, result.failed.error),
-        })
-      } else {
-        notify.success(`Undid ${op.label}`)
+    const run = queue.current.then(async () => {
+      try {
+        const result = await runUndo(op, RUNNER)
+        if (result.failed) {
+          notify.error(`Could not undo ${op.label}`, undefined, {
+            description: failure(result.failed.step, result.failed.error),
+          })
+        } else {
+          notify.success(`Undid ${op.label}`)
+        }
+      } finally {
+        changed.current()
       }
-    } finally {
-      busy.current = false
-      changed.current()
-    }
+    })
+    // The next undo waits for this one whether or not it failed.
+    queue.current = run.catch(() => undefined)
+    return run
   }, [])
 
   const undoLast = useCallback(() => {
