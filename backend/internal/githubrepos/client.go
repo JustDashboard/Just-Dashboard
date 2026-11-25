@@ -184,6 +184,13 @@ func (c *Client) Request(ctx context.Context, method, path string, body any) (*R
 	if !strings.HasPrefix(path, "/") {
 		return nil, fmt.Errorf("github path %q is not absolute", path)
 	}
+	return c.send(ctx, method, c.APIURL+path, path, body)
+}
+
+// send is the one exchange: address is where the call goes, path what an
+// error names it by (the two differ only for GraphQL, which is not under the
+// REST root on GitHub Enterprise).
+func (c *Client) send(ctx context.Context, method, address, path string, body any) (*Response, error) {
 	var reader io.Reader
 	if body != nil {
 		encoded, err := json.Marshal(body)
@@ -192,7 +199,7 @@ func (c *Client) Request(ctx context.Context, method, path string, body any) (*R
 		}
 		reader = bytes.NewReader(encoded)
 	}
-	req, err := http.NewRequestWithContext(ctx, method, c.APIURL+path, reader)
+	req, err := http.NewRequestWithContext(ctx, method, address, reader)
 	if err != nil {
 		return nil, err
 	}
@@ -243,6 +250,76 @@ func (c *Client) Do(ctx context.Context, method, path string, body, out any) (*R
 		}
 	}
 	return response, nil
+}
+
+// GraphQLURL is where GitHub's GraphQL API answers for a REST root:
+// https://api.github.com/graphql on github.com, and on GitHub Enterprise,
+// whose REST root is https://host/api/v3, https://host/api/graphql.
+func GraphQLURL(apiURL string) string {
+	root := strings.TrimRight(apiURL, "/")
+	if root == "" {
+		root = DefaultAPIURL
+	}
+	if strings.HasSuffix(root, "/api/v3") {
+		return strings.TrimSuffix(root, "/v3") + "/graphql"
+	}
+	return root + "/graphql"
+}
+
+// GraphQLError is a GraphQL answer that carried `errors`. GitHub sends those
+// with status 200, so it is not an APIError: the caller decides whether the
+// rest of its answer stands without this half.
+type GraphQLError struct {
+	Messages []string
+}
+
+func (e *GraphQLError) Error() string {
+	if len(e.Messages) == 0 {
+		return "GitHub's GraphQL API answered with errors"
+	}
+	return strings.Join(e.Messages, "; ")
+}
+
+// GraphQL sends one query, with the same token and headers as every REST
+// call, and decodes its `data` into out. A status outside 2xx is an
+// *APIError as for REST; an answer with `errors` is a *GraphQLError.
+func (c *Client) GraphQL(ctx context.Context, query string, out any) error {
+	const path = "/graphql"
+	response, err := c.send(ctx, http.MethodPost, GraphQLURL(c.APIURL), path, map[string]string{"query": query})
+	if err != nil {
+		return err
+	}
+	var envelope struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	garbled := &APIError{Status: response.Status, Kind: KindUnavailable, Message: "GitHub's answer was not readable JSON", Path: path}
+	if err := json.Unmarshal(response.Body, &envelope); err != nil {
+		garbled.err = err
+		return garbled
+	}
+	if len(envelope.Errors) > 0 {
+		refused := &GraphQLError{}
+		for _, item := range envelope.Errors {
+			if message := strings.TrimSpace(item.Message); message != "" {
+				refused.Messages = append(refused.Messages, message)
+			}
+		}
+		return refused
+	}
+	if out == nil {
+		return nil
+	}
+	if len(envelope.Data) == 0 || string(envelope.Data) == "null" {
+		return garbled
+	}
+	if err := json.Unmarshal(envelope.Data, out); err != nil {
+		garbled.err = err
+		return garbled
+	}
+	return nil
 }
 
 // Page reads one page of a listing into out and reports whether GitHub's

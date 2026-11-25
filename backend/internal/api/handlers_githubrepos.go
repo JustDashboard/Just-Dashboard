@@ -22,7 +22,8 @@ import (
 // account that made it and is invisible to every other one, administrators
 // included, so nothing here lets one person act on GitHub as another.
 //
-//	read           the App's state, the account's own connections, the
+//	read           the App's state, the account's own connections, each
+//	               one's profile, pull requests, issues and activity, the
 //	               repositories they reach and everything about one
 //	service.control connecting and disconnecting the account's own GitHub
 //	               accounts, and the recoverable changes on GitHub: creating a
