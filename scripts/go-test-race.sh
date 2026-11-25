@@ -19,15 +19,23 @@
 # SQLite read by ten to twenty-five, so a budget measured under it measures the
 # detector and the runner's load, not the read.
 
+#
+# Each `go test` gets fifteen minutes rather than its default ten. Under the
+# detector a quarter of ./internal/api took 320 to 410 seconds on a quick
+# runner and 510 to 600 on a slow one, and ./internal/store reached ten
+# minutes beside ./internal/deploy, so the default was what failed the gate,
+# with no race found. The job's own twenty minutes stays the bound.
+
 set -euo pipefail
 
 processes=$1
 shift
 
 skip='StaysWithinItsBudgetAtReferenceScale'
+timeout='15m'
 
 if [ "$processes" -eq 1 ]; then
-	exec go test -race -count=1 -json -skip "$skip" "$@"
+	exec go test -race -count=1 -timeout "$timeout" -json -skip "$skip" "$@"
 fi
 
 out=$(mktemp -d)
@@ -58,7 +66,7 @@ for pkg in "$@"; do
 			echo "${slice[*]}"
 		))\$"
 		file="$out/$(basename "$pkg").$k"
-		go test -race -count=1 -json -run "$pattern" -skip "$skip" "$pkg" >"$file" &
+		go test -race -count=1 -timeout "$timeout" -json -run "$pattern" -skip "$skip" "$pkg" >"$file" &
 		pids+=("$!")
 		files+=("$file")
 	done

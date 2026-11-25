@@ -547,7 +547,8 @@ in a row put the package at `go test`'s ten minutes, which is what failed the ra
 in November 2026 with no race reported. They own the directories they open and the package keeps no
 state between stores, so nothing is shared. Parallel, they still came to ten minutes again by late
 November, sharing a runner with `./internal/deploy`, so the race gate gives the package a job of its
-own (`RACE` in `scripts/ci-plan.py`).
+own (`RACE` in `scripts/ci-plan.py`), and `scripts/go-test-race.sh` gives each `go test` fifteen
+minutes instead of the default ten, inside the job's twenty.
 
 ### The store's connections
 
