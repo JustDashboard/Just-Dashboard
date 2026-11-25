@@ -14,7 +14,6 @@ import type {
 import type { useConfirm } from "@/components/confirm-dialog"
 import { CONTROL } from "@/components/choice-row"
 import { BranchChip } from "@/components/git/marks"
-import { Sparkline } from "@/components/sparkline"
 import { ProductGlyph, ProductGlyphs, imageProducts } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -53,16 +52,18 @@ import { FAILING_NOTICE, failingTone } from "@/components/deploy/fleet"
  * A card is a destination — it opens the project — so it carries the lit edge
  * §16 gives to things you take, and draws the project as what it is, in the
  * colours that are the data's own: the product it runs, where its source
- * lives, how much traffic it is taking and what share of it fails, the last
- * fourteen runs as a strip and, while one is in flight, the release path
- * sweeping and the stage it is at lit.
+ * lives, how many requests a minute it is taking and what share of them fails,
+ * the last fourteen runs as a strip and, while one is in flight, the release
+ * path sweeping and the stage it is at lit.
  *
  * Three weights, read in this order: the name, then the traffic figure, both
  * in the title's size; everything else is the muted hint. The card does not
- * draw the last commit (who wrote what, under its subject) or the open pull
- * requests: the commit line was a sentence nobody read on a card, and a count
- * of pull requests is the project's Overview's to say. The Pull requests chip
- * above the grid still narrows the fleet to the projects that have one.
+ * draw the last commit (who wrote what, under its subject), the open pull
+ * requests or a chart of the hour: the commit line was a sentence nobody read
+ * on a card, a count of pull requests is the project's Overview's to say, and
+ * the chart was a spike nobody read either (25 Nov 2026, the operator's word),
+ * so the hour is said in words. The Pull requests chip above the grid still
+ * narrows the fleet to the projects that have one.
  *
  * The verbs are the project page's own (`useProjectVerbs`), so the card and
  * the project header cannot disagree about what can be done to a project. The
@@ -72,11 +73,11 @@ import { FAILING_NOTICE, failingTone } from "@/components/deploy/fleet"
  */
 
 /**
- * A card's height, which every card keeps whatever it says. Its placeholder,
- * on the fleet and on the Overview, takes the same, so a card lands where its
- * ghost stood (§11).
+ * A card's height, which every card keeps whatever it says. The card is drawn
+ * at it, and its placeholder, on the fleet and on the Overview, takes the
+ * same, so a card lands where its ghost stood (§11).
  */
-export const PROJECT_CARD_HEIGHT = "h-45.5"
+export const PROJECT_CARD_HEIGHT = "h-42"
 
 type Confirm = ReturnType<typeof useConfirm>["confirm"]
 
@@ -334,37 +335,17 @@ function SourceLine({ deployment: d }: { deployment: DeploymentSummary }) {
 }
 
 /**
- * A rate a minute, as the card's one figure: the number in the name's size
- * and weight, its unit small beside it, so the eye goes from the name to the
- * figure and the rest of the card is read only when wanted.
- */
-function Rate({ figure, muted }: { figure: string; muted?: boolean }) {
-  return (
-    <span
-      className={cn(
-        "numeric text-title leading-5 font-semibold tracking-tight",
-        muted ? "text-muted-foreground" : "text-foreground",
-      )}
-    >
-      {figure}
-      <span className="ml-0.5 text-hint font-normal tracking-normal text-muted-foreground">
-        /min
-      </span>
-    </span>
-  )
-}
-
-/**
- * The last hour at the ingress: how many requests a minute and what share
- * failed, then the hour as a line that runs out to the card's edge and stands
- * on the footer's rule. The line keeps its series colour; the only red is the
- * failing share, attached to its figure (§3), and the line rises once when its
- * hour of history lands (§11).
+ * The last hour at the ingress, said in words (D4): how many requests a
+ * minute, with the figure in the name's size and weight so the eye goes from
+ * the name to it; the share that failed, from 1%, attached to the figure in
+ * the colour the fleet's Failing requests tile gives it (§3); then how many
+ * pages were viewed. The views give way first on a narrow card. There is no
+ * chart of the hour (25 Nov 2026): a line of sixty minutes on a card was a
+ * spike over a flat rule, and the figure is what was read.
  *
- * The band is drawn on every card at one height, so a row of cards keeps one
- * height and its footers one baseline. A project with no address on the web —
- * a worker, a game server — says so over a flat rule; one with an address and
- * no hour yet draws the rule beside an empty figure.
+ * The line is drawn on every card at one height, so a row of cards keeps one
+ * height. A project with no address on the web — a worker, a game server —
+ * says so; one with an address and no hour yet says the figure is not in.
  */
 function CardTraffic({
   deployment,
@@ -373,36 +354,49 @@ function CardTraffic({
   deployment: DeploymentSummary
   pulse?: TrafficPulse
 }) {
-  const figure = "flex min-w-18 shrink-0 flex-col justify-end gap-0.5 pb-2"
+  // A flex line lays out no space between its parts, so the spaces between
+  // them are there for the words alone: a screen reader and a copy read
+  // "0.05 requests a minute", not "0.05requests".
+  const line = "flex h-5 min-w-0 items-baseline gap-1 text-hint leading-5 text-muted-foreground"
+  const unit = <span className="shrink-0">requests a minute</span>
   if (pulse?.status !== "available")
     return (
-      <div data-slot="project-traffic" className="flex h-12 min-w-0 items-end gap-3">
-        <span className={cn(figure, "text-hint leading-4 text-muted-foreground")}>
-          {deploymentURL(deployment.endpoint) ? <Rate figure="—" muted /> : "No web traffic"}
-        </span>
-        <span aria-hidden className="-mr-3.5 mb-2.5 flex-1 border-t border-dashed" />
-      </div>
+      <p data-slot="project-traffic" className={line}>
+        {deploymentURL(deployment.endpoint) ? (
+          <>
+            <Figure muted>—</Figure> {unit}
+          </>
+        ) : (
+          "No web traffic"
+        )}
+      </p>
     )
   return (
-    <div data-slot="project-traffic" className="flex h-12 min-w-0 animate-rise items-end gap-3">
-      <span className={figure}>
-        <Rate figure={perMinute(pulse.perMinute)} />
-        {pulse.errorRate >= FAILING_NOTICE ? (
-          <FailingShare rate={pulse.errorRate} className="text-hint leading-4" />
-        ) : (
-          <span className="numeric text-hint leading-4 text-muted-foreground">
-            {plural(pulse.pages, "view")}
-          </span>
-        )}
-      </span>
-      <Sparkline
-        values={pulse.points}
-        width={240}
-        height={48}
-        className="-mr-3.5 h-12 min-w-0 flex-1"
-        label="Requests per minute, last hour"
-      />
-    </div>
+    <p data-slot="project-traffic" className={cn(line, "animate-rise")}>
+      <Figure>{perMinute(pulse.perMinute)}</Figure> {unit}{" "}
+      {pulse.errorRate >= FAILING_NOTICE && (
+        <>
+          <span aria-hidden>·</span>{" "}
+          <FailingShare rate={pulse.errorRate} className="shrink-0" />{" "}
+        </>
+      )}
+      <span aria-hidden>·</span>{" "}
+      <span className="numeric min-w-0 truncate">{plural(pulse.pages, "view")}</span>
+    </p>
+  )
+}
+
+/** The card's one figure, in the name's size and weight. */
+function Figure({ children, muted }: { children: React.ReactNode; muted?: boolean }) {
+  return (
+    <span
+      className={cn(
+        "numeric shrink-0 text-title leading-5 font-semibold tracking-tight",
+        muted ? "text-muted-foreground" : "text-foreground",
+      )}
+    >
+      {children}
+    </span>
   )
 }
 
@@ -443,7 +437,7 @@ export function ProjectCard({
   const recent = deployment.recentRuns ?? []
 
   return (
-    <li className="min-w-0" data-slot="project-card">
+    <li className={cn(PROJECT_CARD_HEIGHT, "min-w-0")} data-slot="project-card">
       {/* Each card lands a beat after the one before it, capped so a fleet
           of forty does not take three seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.045} className="h-full">
@@ -469,7 +463,7 @@ export function ProjectCard({
                 card draws every part, so a row of them is one height with
                 nothing stretched and no gap opened where one project has
                 less to say than its neighbour. */}
-            <div className="flex min-w-0 flex-col gap-3 px-3.5 pt-3.5">
+            <div className="flex min-w-0 flex-col gap-3 p-3.5">
               {/* The state sits under the name rather than beside it: four
                   cards to a row leave a name beside a state and two verbs
                   about a hundred pixels, and the name is what is read. The
