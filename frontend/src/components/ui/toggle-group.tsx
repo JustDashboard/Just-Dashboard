@@ -36,9 +36,11 @@ const SEGMENT_SIZE = {
 /**
  * A row of toggles. Joined (`variant="outline"`, no spacing) it is the
  * segmented control Just Hub draws (its `.stitch/DESIGN.md` 4, Segmented
- * control): a control-filled track with 3px of padding, and the chosen segment
- * on a raised face under the strong line that slides to the segment chosen
- * next. `Segments` is the one single-choice caller.
+ * control): a control-filled track under the subtle line with 3px of padding,
+ * and the chosen segment on the chosen fill (`bg-chosen`, white 7%) with the
+ * lit top edge, sliding to the segment chosen next. No outline round the
+ * chosen face: the strong line there was louder than the answer it marked.
+ * `Segments` is the one single-choice caller.
  *
  * The face is one element measured onto the chosen segment rather than a fill
  * on each, which is what lets it slide. Until it has been measured, and
@@ -126,7 +128,7 @@ function ToggleGroup({
       className={cn(
         "group/toggle-group flex w-fit items-center rounded-md",
         segmented
-          ? "relative isolate max-w-full items-stretch gap-0.5 border border-border bg-control p-0.75 aria-invalid:border-destructive"
+          ? "relative isolate max-w-full items-stretch gap-0.5 border border-hairline bg-control p-0.75 aria-invalid:border-destructive"
           : "gap-[--spacing(var(--gap))]",
         className,
       )}
@@ -139,7 +141,7 @@ function ToggleGroup({
           // First in the track and placed absolutely, so the segments, each
           // placed relatively after it, are drawn over it without a z-index.
           className={cn(
-            "pointer-events-none absolute top-0 left-0 rounded-sm border border-border-strong bg-popover shadow-edge",
+            "pointer-events-none absolute top-0 left-0 rounded-sm bg-chosen shadow-edge",
             sliding && "transition-[transform,width,height] duration-base ease-arrive",
           )}
           style={{
@@ -177,7 +179,7 @@ function ToggleGroupItem({
           "relative inline-flex min-w-0 shrink-0 items-center justify-center gap-1.5 rounded-sm border border-transparent px-3 text-body font-medium whitespace-nowrap text-muted-foreground focus-ring-inset transition-colors",
           "hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=on]:text-foreground",
           // Each chosen segment's own face, until the sliding one is measured.
-          "data-[state=on]:border-border-strong data-[state=on]:bg-popover data-[state=on]:shadow-edge group-data-[face]/toggle-group:data-[state=on]:border-transparent group-data-[face]/toggle-group:data-[state=on]:bg-transparent group-data-[face]/toggle-group:data-[state=on]:shadow-none",
+          "data-[state=on]:bg-chosen data-[state=on]:shadow-edge group-data-[face]/toggle-group:data-[state=on]:bg-transparent group-data-[face]/toggle-group:data-[state=on]:shadow-none",
           "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           SEGMENT_SIZE[itemSize],
           className,

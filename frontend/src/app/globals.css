@@ -321,6 +321,14 @@
      opens under the pointer, a select's option list, a command row. */
   --menu-hover: color-mix(in oklab, var(--muted) 75%, transparent);
 
+  /* The chosen face of a switcher: a segment, a filter chip. White at a low
+     alpha, so it is one soft step up from whatever it sits on (a control
+     track, a card, a sheet), and drawn without an outline. Until 25 Nov 2026
+     a chosen segment was a face darker than its track under the strong line,
+     and a chosen chip the accent ground under it: a bright line round the
+     answer was louder than the answer. Just Hub's `--chosen`, the same 7%. */
+  --chosen: oklch(1 0 0 / 0.07);
+
   /* The resting face of a control: outline and secondary buttons, select
      triggers, toggles. One answer to "how light is a button", moved with the
      palette rather than matched by eye.
@@ -652,6 +660,7 @@
      window strip's tabs had no hover state at all. */
   --color-row-hover: var(--row-hover);
   --color-menu-hover: var(--menu-hover);
+  --color-chosen: var(--chosen);
 
   /* Registered so `bg-plot-warning` and `border-rule-danger` are real
      utilities. Without this the tokens above would only be reachable as

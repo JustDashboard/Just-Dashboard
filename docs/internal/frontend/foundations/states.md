@@ -4,7 +4,7 @@
 
 | State | Mark | Utility |
 | --- | --- | --- |
-| Selected | a filled ground, a property of the data | `bg-accent` |
+| Selected | a filled ground, a property of the data | `bg-accent`; a switcher's choice (a segment, a filter chip) `bg-chosen` |
 | Hover | a ground on a row, a menu or a control; a border step on a framed destination | `bg-row-hover`, `bg-menu-hover`, `hover:bg-control-hover`, `border-border-strong` |
 | Focus | the one outline ring | `focus-ring`, `focus-ring-inset` (no room outside), `focus-ring-within` |
 
@@ -13,7 +13,7 @@
 | The three never look alike, and a control in all three at once stays readable. | spec `design-system.spec.ts` (*hover, selection and focus are three different marks on a row*) |
 | One focus ring. No hand-written `focus-visible:ring` or outline. | lint `focus-ring`; widened to `focus` and bare `outline-none` (WP-39) |
 | Selection never borrows the ring's colour. | convention |
-| A chosen tab is a control face drawn inside the tab, and a chosen segment a raised face in its track; never an underline ([`../components/tabs-chips-segments.md`](../components/tabs-chips-segments.md)). | unit `components/tabs.test.js` |
+| A chosen tab is a control face drawn inside the tab, and a chosen segment or filter chip the chosen fill (`bg-chosen`) with no outline; never an underline ([`../components/tabs-chips-segments.md`](../components/tabs-chips-segments.md)). | unit `components/tabs.test.js` |
 | On the rail the current row is the selection fill, with no bar on its edge, and hover is the menu's fill. | spec `shell-phone.spec.ts` (*the current page is said, and the pointer's fill is not the selection's*) |
 | A row's actions appear through `RowActions`, `IconAction reveal` or `rowReveal()`, are visible on touch and on keyboard focus, and are laid out, never overlaid. | lint `row-reveal`; spec `design-system.spec.ts` (*row actions … are visible without a pointer*) |
 

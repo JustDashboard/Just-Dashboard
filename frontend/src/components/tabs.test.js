@@ -4,11 +4,12 @@ import { renderToStaticMarkup } from "react-dom/server"
 
 import { tabClasses, ViewTabs } from "./tabs"
 import { Segments } from "./segments"
+import { FilterChip } from "./chips"
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group"
 
 // Just Hub's tabs (components/tabs-chips-segments.md, "The look, from Just
 // Hub"): the chosen tab is a face, never an underline, and a segmented control
-// is one track with a raised face in it.
+// is one track with the chosen fill in it, under no outline.
 
 const VIEWS = [
   { key: "traffic", label: "Traffic" },
@@ -54,7 +55,7 @@ describe("a quiet tab", () => {
 })
 
 describe("a segmented control", () => {
-  test("is one track, with each chosen segment its own face until the sliding one is measured", () => {
+  test("is one track, with each chosen segment its own fill until the sliding one is measured", () => {
     const html = renderToStaticMarkup(
       h(Segments, {
         label: "Severity",
@@ -66,9 +67,10 @@ describe("a segmented control", () => {
         ],
       }),
     )
-    expect(html).toContain("bg-control p-0.75")
-    expect(html).toContain("data-[state=on]:bg-popover")
-    expect(html).toContain("data-[state=on]:border-border-strong")
+    expect(html).toContain("border-hairline bg-control p-0.75")
+    expect(html).toContain("data-[state=on]:bg-chosen")
+    // No line round the answer: it was louder than the answer.
+    expect(html).not.toMatch(/data-\[state=on\]:(border-border-strong|bg-popover)/)
     // 32px: a 24px segment in the track's 1px line and 3px of padding.
     expect(html).toContain("h-6 pointer-coarse:h-8")
     expect(html).not.toContain("data-face")
@@ -102,5 +104,16 @@ describe("a segmented control", () => {
     )
     expect(html).not.toContain("p-0.75")
     expect(html).toContain('data-spacing="1"')
+  })
+})
+
+describe("a filter chip", () => {
+  test("chosen, it trades its line for the chosen fill", () => {
+    const chosen = renderToStaticMarkup(h(FilterChip, { selected: true }, "Errors"))
+    expect(chosen).toContain("border-transparent bg-chosen text-foreground")
+    expect(chosen).not.toMatch(/border-border-strong|bg-accent/)
+    const rest = renderToStaticMarkup(h(FilterChip, { selected: false }, "Errors"))
+    expect(rest).toContain("border-input")
+    expect(rest).not.toContain("bg-chosen")
   })
 })

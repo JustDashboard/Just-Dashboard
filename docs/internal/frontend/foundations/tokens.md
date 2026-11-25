@@ -145,6 +145,7 @@ Hover's three answers, press feedback, selection. Rules: [`states.md`](states.md
 | `--row-hover` | `color-mix(in oklab, var(--muted) 55%, transparent)` | `bg-row-hover` |  |
 | `--accent` | `oklch(0.22 0 0)` | `bg-accent` |  |
 | `--menu-hover` | `color-mix(in oklab, var(--muted) 75%, transparent)` | `bg-menu-hover` |  |
+| `--chosen` | `oklch(1 0 0 / 0.07)` | `bg-chosen` |  |
 | `--control-hover` | `color-mix(in oklab, var(--control) 86%, var(--foreground) 14%)` | `bg-control-hover` |  |
 | `--control-active` | `color-mix(in oklab, var(--control) 90%, #000 10%)` | `bg-control-active` |  |
 
