@@ -303,6 +303,28 @@ export function pruneChoices(
   return next
 }
 
+/**
+ * The request a plan leads to when it set a choice aside: the one it answered
+ * with that choice forgotten, which the page asks for next. Undefined when it
+ * kept every choice it was asked for. What the plan said of the choice stays
+ * said under the plan that answers this, which no longer carries it.
+ */
+export function afterSetAside(body: string, plan: SeedPlan): string | undefined {
+  const asked = requestedChoices(body)
+  const kept = pruneChoices(asked, asked, plan)
+  if (kept === asked) return undefined
+  const request = JSON.parse(body) as {
+    tables?: { schema?: string; name?: string; columns?: Record<string, string> }[]
+  }
+  for (const t of request.tables ?? []) {
+    if (!t.columns || typeof t.name !== "string") continue
+    const left = kept[seedKey(t.schema ?? "", t.name)]
+    if (left) t.columns = left
+    else delete t.columns
+  }
+  return JSON.stringify(request)
+}
+
 /** What a request asked each table's columns to be filled with. */
 export function requestedChoices(body: string): SeedChoices {
   const parsed = JSON.parse(body) as {

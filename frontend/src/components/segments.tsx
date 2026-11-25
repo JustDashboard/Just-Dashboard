@@ -24,7 +24,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
  * label (a `<label for>` cannot name a group); elsewhere `label` names it.
  *
  * It is drawn as Just Hub's segmented control (`ToggleGroup`): a
- * control-filled track, the choice on a raised face under the strong line that
+ * control-filled track, the choice on the chosen fill with no outline that
  * slides to the next one, and the segments that are not the choice in the
  * muted ink.
  */

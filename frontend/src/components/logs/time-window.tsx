@@ -101,10 +101,7 @@ export function TimeWindow({
           variant="outline"
           size="sm"
           aria-label={`Time window: ${label}`}
-          className={cn(
-            "max-w-64 min-w-0 shrink-0 gap-2 px-2.5 text-body font-normal",
-            className,
-          )}
+          className={cn("max-w-64 min-w-0 shrink-0 gap-2 px-2.5 text-body font-normal", className)}
         >
           {live ? (
             <StatusDot tone="running" live />
@@ -154,7 +151,7 @@ export function TimeWindow({
                   className={cn(
                     "numeric h-8 rounded-md border text-body focus-ring transition-colors",
                     on
-                      ? "border-border-strong bg-accent font-medium text-foreground"
+                      ? "border-transparent bg-chosen font-medium text-foreground"
                       : "border-input bg-control text-muted-foreground hover:bg-control-hover hover:text-foreground",
                   )}
                 >

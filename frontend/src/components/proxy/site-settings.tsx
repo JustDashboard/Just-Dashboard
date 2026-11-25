@@ -96,7 +96,7 @@ export function SettingsParts({
             className={cn(
               "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-hint font-medium whitespace-nowrap focus-ring transition-colors",
               here
-                ? "border-border-strong bg-accent text-foreground"
+                ? "border-transparent bg-chosen text-foreground"
                 : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
             )}
           >

@@ -33,7 +33,8 @@ blue strip under the chosen tab was a colour bar, the mark the product draws now
 | Control | At rest | Hover | Chosen | Focus |
 | --- | --- | --- | --- | --- |
 | A quiet tab (`ViewTabs`, `tabClasses`, `ui/tabs` `line`) | muted ink, no ground | `--accent` face, foreground ink | `--control` face, foreground ink | the ring, 2px clear of the face |
-| A segment (`Segments`, a joined outline `ToggleGroup`, `ui/tabs` `default`) | muted ink on the track | foreground ink | a raised face: `--popover` under `--border-strong`, with the lit edge (`shadow-edge`) | the ring, inset in the segment |
+| A segment (`Segments`, a joined outline `ToggleGroup`, `ui/tabs` `default`) | muted ink on the track | foreground ink | the chosen fill (`--chosen`, white 7%) with the lit edge (`shadow-edge`), no outline | the ring, inset in the segment |
+| A filter chip (`FilterChip`, and the chips drawn by hand on a site's Settings and the log window's presets) | muted ink inside an `--input` line | the row's wash | the chosen fill in place of the line, foreground ink | the ring, outside the chip |
 
 **The quiet tab's face is inside the tab.** A tab keeps its strip's height (40px, 36 in a pane, 44
 in a flow's source picker) as its press box, and draws its face 4px in from every side: a transparent
@@ -47,13 +48,21 @@ Under forced colours the transparent border would be painted, so it comes off th
 sheet (the command palette's scopes) the chosen tab takes `--control-hover`, one step up, as the
 Hub's palette does: on `--popover` the control face sat a shade off the hover face.
 
-**The segmented control is one track.** A control-filled track with a 1px line and 3px of padding;
-the segments sit in it and the chosen one is a raised face. With one answer the face is a single
+**The segmented control is one track.** A control-filled track under the subtle line
+(`--hairline`) with 3px of padding; the segments sit in it and the chosen one is the chosen fill. With
+one answer the face is a single
 element measured onto the chosen segment, and it slides to the next one (`duration-base`,
 `ease-arrive`; reduced motion makes it a jump). With several answers (`type="multiple"`), or until it
 is measured, each chosen segment draws its own face. The whole track is the old control's height:
 `sm` is 32/40 round a 24/32 segment, `default` 36/44 round 28/36, and `Segments`' `inline` keeps 24/32
 with a 2px track round an 18/26 segment.
+
+**The chosen face has no outline.** A chosen segment or chip is `--chosen`, white at 7%: one soft step
+up from whatever it sits on (the track, a card, a sheet), the same in each. Until 25 Nov 2026 a chosen
+segment was a `--popover` face, darker than its track, under `--border-strong`, and a chosen chip the
+accent ground under the same line. The bright line round the answer was louder than the answer, and
+the Hub took it off the day before. A segment keeps the lit top edge; a chip has none, since the chip
+at rest is a line and no face.
 
 ## ViewTabs
 
@@ -135,7 +144,8 @@ is on the control face, and its close button sits beside the face.
 A chip narrows a list to a subset. It is a toggle button (`aria-pressed`), so several can be on.
 
 **Anatomy.** 28px, squared (`rounded-md`), the hint size (12px), an edge at rest
-(`--input`) and, chosen, the accent ground under `--border-strong`. It presses as 44px under a finger
+(`--input`) and, chosen, the chosen fill (`bg-chosen`) in place of the edge, the face a chosen segment
+has. It presses as 44px under a finger
 (`hit-area`) without growing the row. Pill shapes are reserved for nothing.
 
 `ChipCount` is the count after a chip's or a tab's label: tabular, the micro size, in `--faint`
@@ -188,7 +198,7 @@ A closed choice of two to five short words as one segmented control, the only si
 | `fill` | Shares the whole width between the segments. |
 
 Inside a `Field` it is also described by the field's hint and error. Labels are `text-xs`; the
-segments not chosen step back to the muted ink, and the choice is the raised face that slides (*The
+segments not chosen step back to the muted ink, and the choice is the chosen fill that slides (*The
 look, from Just Hub*). A caller that pinned a segment's height for a dense header (the ER diagram's
 detail, the Data editor's boolean and JSON switches) pins the segment inside the track, so the whole
 control keeps the height it had.
@@ -234,8 +244,9 @@ name.
 ## What enforces it
 
 - `components/tabs.test.js`: the chosen quiet tab is a control face with no underline, the face sits
-  inside a tab that keeps its height and an inset ring, and a segmented control is one track with a
-  raised face (24px at `inline`, separate controls with `spacing`).
+  inside a tab that keeps its height and an inset ring, a segmented control is one track with the
+  chosen fill and no outline (24px at `inline`, separate controls with `spacing`), and a chosen chip
+  trades its line for the same fill.
 - `hooks/use-view-tab.test.js`: the address parameter, the remembered view, the fallback to the first.
 - `components/phone-panes.test.js`: no page draws a foot bar by hand; the bar is a nav of buttons
   with the shown stop current and its words at the hint size.

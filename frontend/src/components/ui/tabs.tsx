@@ -27,8 +27,9 @@ function Tabs({
  * `.stitch/DESIGN.md` 4, Tabs and chips):
  *
  *   `default` — the segmented control inside a form: a control-filled track
- *               with 3px of padding, the chosen tab on a raised face under the
- *               strong line. The same mark `Segments` slides.
+ *               under the subtle line with 3px of padding, the chosen tab on
+ *               the chosen fill with no outline. The same mark `Segments`
+ *               slides.
  *   `line`    — quiet tabs: the muted ink, the chosen one in the foreground on
  *               a control face, as `ViewTabs` draws them. Never an underline.
  *
@@ -45,7 +46,7 @@ const tabsListVariants = cva(
         // 36px, a form's control height: a 1px edge and 3px of padding round
         // a 28px segment.
         default:
-          "gap-0.5 rounded-md border border-border bg-control p-0.75 group-data-[orientation=horizontal]/tabs:h-9",
+          "gap-0.5 rounded-md border border-hairline bg-control p-0.75 group-data-[orientation=horizontal]/tabs:h-9",
         line: "gap-1 rounded-none border-b border-hairline bg-transparent py-1 group-data-[orientation=horizontal]/tabs:h-10",
       },
     },
@@ -79,9 +80,9 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
       // scroller clips a ring drawn outside it.
       className={cn(
         "relative inline-flex shrink-0 items-center justify-center gap-1.5 border border-transparent px-3 text-body font-medium whitespace-nowrap text-muted-foreground focus-ring-inset transition-colors group-data-[orientation=vertical]/tabs:w-full group-data-[orientation=vertical]/tabs:justify-start hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=active]:text-foreground [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
-        // The segment: a raised face under the strong line, with the lit top
-        // edge every raised control has (`shadow-edge`).
-        "group-data-[variant=default]/tabs-list:h-full group-data-[variant=default]/tabs-list:flex-1 group-data-[variant=default]/tabs-list:rounded-sm group-data-[variant=default]/tabs-list:data-[state=active]:border-border-strong group-data-[variant=default]/tabs-list:data-[state=active]:bg-popover group-data-[variant=default]/tabs-list:data-[state=active]:shadow-edge",
+        // The segment: the chosen fill with the lit top edge every raised
+        // control has (`shadow-edge`), and no outline.
+        "group-data-[variant=default]/tabs-list:h-full group-data-[variant=default]/tabs-list:flex-1 group-data-[variant=default]/tabs-list:rounded-sm group-data-[variant=default]/tabs-list:data-[state=active]:bg-chosen group-data-[variant=default]/tabs-list:data-[state=active]:shadow-edge",
         // The quiet tab: the chosen one is a filled face, never an underline.
         "group-data-[variant=line]/tabs-list:h-8 group-data-[variant=line]/tabs-list:rounded-md group-data-[variant=line]/tabs-list:hover:bg-accent group-data-[variant=line]/tabs-list:data-[state=active]:bg-control",
         className,

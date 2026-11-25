@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { home, mockViewing, openFolder, png, text } from "./files-viewing-fixture"
+import { risen } from "./risen"
 
 /**
  * Text that reads as what it is, and media done properly, on the Files page.
@@ -350,6 +351,8 @@ test("a folder of pictures is a gallery: words, a strip, a slideshow", async ({ 
 test("audio plays as a queue that carries on across folders, on one line", async ({ page }) => {
   await mockViewing(page, media)
   await openFolder(page, `${home}/music`)
+  // Read where the listing rests, not where its rise is taking it.
+  await risen(page)
   const footer = page.locator("[data-slot='pane-footer']").first()
   const footerBefore = await footer.boundingBox()
   const firstRow = row(page, `${home}/music/01 intro.wav`)

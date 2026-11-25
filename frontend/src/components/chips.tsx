@@ -6,18 +6,20 @@ import { cn } from "@/lib/utils"
  * Squared rather than fully rounded, because a pill is the shape this product
  * reserves for nothing at all — see `components/tag.tsx`.
  *
- * Selected is `bg-accent` with a hairline, which is the same mark the terminal
- * rail puts on the active session and `ToggleGroup` puts on the pressed item.
- * It used to be a primary tint, so a row of filters and a row of toggles two
- * panels apart disagreed about what "chosen" looks like — and the primary tint
- * is the one thing on the page reserved for a *command*.
+ * Chosen, it trades its line for the chosen fill (`bg-chosen`) and the
+ * foreground ink: the face a chosen segment has, so a row of filters and a
+ * segmented control beside it agree on what "chosen" looks like. It used to
+ * be a primary tint, the one thing on the page reserved for a *command*, and
+ * then the accent ground under the strong line, which was louder than the
+ * filter it marked (Just Hub dropped that line on 24 Nov 2026, and so did
+ * this on the 25th).
  *
  * At rest it has an edge, the outline every other control in the row has. A
  * chip that was bare text until it was chosen sat in the log pane's filter row
  * beside bordered fields and buttons, and read as a caption: "Errors 238" was
- * a word with a number, not a thing to press. Chosen, the edge steps up to
- * `--border-strong` under the accent ground, so a row of them reads chosen
- * against unchosen at a glance and not by comparing two greys.
+ * a word with a number, not a thing to press. So a row of them reads chosen
+ * against unchosen at a glance: a line round the ones you could pick, a soft
+ * face on the one you did.
  *
  * It is drawn 28px tall at every pointer, so a row of filters keeps its
  * proportions, and presses as 44px under a finger (`hit-area`).
@@ -37,7 +39,7 @@ export function FilterChip({
         "focus-ring",
         selected
           ? // A count inside the chosen chip takes the label's ink.
-            "border-border-strong bg-accent text-foreground [--count-ink:currentColor]"
+            "border-transparent bg-chosen text-foreground [--count-ink:currentColor]"
           : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
         className,
       )}

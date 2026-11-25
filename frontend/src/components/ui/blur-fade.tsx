@@ -25,9 +25,15 @@ export function BlurFade({
   offset?: number
 }) {
   const reduced = useReducedMotion()
-  if (reduced) return <div className={className}>{children}</div>
+  if (reduced)
+    return (
+      <div data-slot="blur-fade" className={className}>
+        {children}
+      </div>
+    )
   return (
     <motion.div
+      data-slot="blur-fade"
       initial={{ y: offset, opacity: 0, filter: "blur(4px)" }}
       animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
       transition={{ delay, duration, ease: [0.16, 1, 0.3, 1] }}

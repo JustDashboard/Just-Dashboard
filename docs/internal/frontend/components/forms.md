@@ -420,8 +420,8 @@ icon control, and a `HoverCard` only a decorative preview: neither opens for a f
 to the page's gutter, so the chip cut off at the edge is the cue that there are more; wrapped, a
 strip of five broke into ragged lines with the last chip alone and pushed the list it filters a
 screen down. From `sm` it wraps as chips always have. **A chip has an edge at rest** — `--input`, the
-outline every field and outline button beside it has — and chosen, the accent ground under
-`--border-strong`. Bare text until chosen, a chip in the log pane's filter row beside bordered fields
+outline every field and outline button beside it has — and chosen, the chosen fill (`bg-chosen`) in
+place of the line. Bare text until chosen, a chip in the log pane's filter row beside bordered fields
 read as a caption: "Errors 238" was a word with a number, not a thing to press. A chip that is a legend — the request log's
 status families — may colour its count for the chosen state, so "5xx 13" says which thirteen.
 

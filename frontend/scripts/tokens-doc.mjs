@@ -98,7 +98,7 @@ const FAMILIES = [
   {
     part: "Colour",
     name: "Interaction",
-    match: /^--(row-hover|menu-hover|control-hover|control-active|accent)$/,
+    match: /^--(row-hover|menu-hover|control-hover|control-active|accent|chosen)$/,
     use: "bg",
     page: "states.md",
     for: "Hover's three answers, press feedback, selection.",
