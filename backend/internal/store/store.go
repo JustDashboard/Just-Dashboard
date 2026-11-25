@@ -2033,6 +2033,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// saved before were neither.
 	{"assistant_chats", "database_id", "INTEGER NOT NULL DEFAULT 0"},
 	{"assistant_chats", "about_enc", "TEXT NOT NULL DEFAULT ''"},
+	// How an image scan's findings were read (deploy.imageScanReading): 1
+	// keeps each package's path and whether the application runs it. A scan
+	// read before is 0, and its live release is due again.
+	{"deploy_image_scans", "reading", "INTEGER NOT NULL DEFAULT 0"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on

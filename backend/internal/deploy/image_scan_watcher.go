@@ -152,7 +152,9 @@ func (w *ImageScanWatcher) ScanRelease(ctx context.Context, releaseID int64, tri
 		reasons = append(reasons, "This release has no image on this server to scan.")
 	}
 	var baseFindings [][]imagescan.Finding
-	readBases := trigger != ImageScanTriggerSchedule || previous == nil
+	// A scan read before the current reading has bases whose findings
+	// have no paths to be matched by, so they are read again too.
+	readBases := trigger != ImageScanTriggerSchedule || previous == nil || previous.reading < imageScanReading
 	for _, base := range bases {
 		var target ImageScanTarget
 		if !readBases {

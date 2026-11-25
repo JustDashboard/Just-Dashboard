@@ -177,3 +177,66 @@ func TestAFindingTheBaseCarriesIsMarkedAsFromTheBase(t *testing.T) {
 		t.Fatal("the image's own findings were changed in place")
 	}
 }
+
+// A language package keeps where it is in the image: the package.json Trivy
+// read it from, or the binary its module was compiled into. Two copies at
+// two paths are two findings, and only the copy the base carries is the
+// base's.
+func TestALanguagePackageKeepsItsPathAndIsTheBasesOnlyAtTheBasesPath(t *testing.T) {
+	raw := []byte(`{"SchemaVersion": 2, "Trivy": {"Version": "0.76.1"}, "Results": [
+	  {"Target": "Node.js", "Class": "lang-pkgs", "Type": "node-pkg", "Vulnerabilities": [
+	    {"VulnerabilityID": "CVE-1", "PkgName": "glob", "InstalledVersion": "10.5.0", "FixedVersion": "10.5.1", "Severity": "HIGH",
+	     "PkgPath": "usr/local/lib/node_modules/npm/node_modules/glob/package.json"},
+	    {"VulnerabilityID": "CVE-1", "PkgName": "glob", "InstalledVersion": "10.5.0", "FixedVersion": "10.5.1", "Severity": "HIGH",
+	     "PkgPath": "app/node_modules/glob/package.json"}]},
+	  {"Target": "app/node_modules/@esbuild/linux-x64/bin/esbuild", "Class": "lang-pkgs", "Type": "gobinary", "Vulnerabilities": [
+	    {"VulnerabilityID": "CVE-2", "PkgName": "stdlib", "InstalledVersion": "v1.20.7", "FixedVersion": "1.21.11", "Severity": "CRITICAL"}]},
+	  {"Target": "/scan/image.tar (alpine 3.22.1)", "Class": "os-pkgs", "Type": "alpine", "Vulnerabilities": [
+	    {"VulnerabilityID": "CVE-3", "PkgName": "zlib", "InstalledVersion": "1.3.1-r0", "FixedVersion": "1.3.1-r1", "Severity": "MEDIUM"}]}]}`)
+	report, err := ParseReport(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	paths := map[string]bool{}
+	for _, finding := range report.Findings {
+		paths[finding.Package+" "+finding.Path] = true
+	}
+	for _, want := range []string{
+		"glob usr/local/lib/node_modules/npm/node_modules/glob/package.json",
+		"glob app/node_modules/glob/package.json",
+		"stdlib app/node_modules/@esbuild/linux-x64/bin/esbuild",
+		"zlib ",
+	} {
+		if !paths[want] {
+			t.Errorf("no finding %q in %v", want, paths)
+		}
+	}
+	base := []Finding{
+		{ID: "CVE-1", Package: "glob", Installed: "10.5.0", Path: "usr/local/lib/node_modules/npm/node_modules/glob/package.json"},
+		{ID: "CVE-3", Package: "zlib", Installed: "1.3.1-r0"},
+	}
+	for _, finding := range MarkFromBase(report.Findings, base) {
+		want := finding.Package == "zlib" || strings.HasPrefix(finding.Path, "usr/local/lib/")
+		if finding.FromBase != want {
+			t.Errorf("%s at %q from base = %v", finding.Package, finding.Path, finding.FromBase)
+		}
+	}
+	// A base read before paths were kept still matches by package.
+	for _, finding := range MarkFromBase(report.Findings, []Finding{{ID: "CVE-1", Package: "glob", Installed: "10.5.0"}}) {
+		if finding.Package == "glob" && !finding.FromBase {
+			t.Errorf("glob at %q is not matched by a pathless base", finding.Path)
+		}
+	}
+	origins := map[string]string{}
+	for _, finding := range []Finding{
+		{Package: "openssl", FromBase: true, Dependency: DependencyDevelopment},
+		{Package: "esbuild", Dependency: DependencyDevelopment},
+		{Package: "next", Dependency: DependencyDirect},
+		{Package: "curl"},
+	} {
+		origins[finding.Package] = FindingOrigin(finding)
+	}
+	if origins["openssl"] != OriginBase || origins["esbuild"] != OriginDevelopment || origins["next"] != OriginApp || origins["curl"] != OriginApp {
+		t.Fatalf("origins = %v", origins)
+	}
+}

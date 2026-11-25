@@ -9880,6 +9880,13 @@
       },
       "deploy.ImageScan": {
         "properties": {
+          "actionable": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/imagescan.Counts"
+              }
+            ]
+          },
           "baseUpdates": {
             "items": {
               "$ref": "#/components/schemas/deploy.ReleaseBaseUpdate"
@@ -9915,6 +9922,15 @@
           },
           "newerBase": {
             "type": "boolean"
+          },
+          "origins": {
+            "additionalProperties": {
+              "$ref": "#/components/schemas/imagescan.Counts"
+            },
+            "type": [
+              "object",
+              "null"
+            ]
           },
           "reason": {
             "type": "string"
@@ -9975,6 +9991,10 @@
       },
       "deploy.ImageScanBadge": {
         "properties": {
+          "actionable": {
+            "format": "int64",
+            "type": "integer"
+          },
           "atFloor": {
             "format": "int64",
             "type": "integer"
@@ -15764,7 +15784,13 @@
       },
       "imagescan.Finding": {
         "properties": {
+          "action": {
+            "type": "string"
+          },
           "class": {
+            "type": "string"
+          },
+          "dependency": {
             "type": "string"
           },
           "fixed": {
@@ -15779,7 +15805,13 @@
           "installed": {
             "type": "string"
           },
+          "origin": {
+            "type": "string"
+          },
           "package": {
+            "type": "string"
+          },
+          "path": {
             "type": "string"
           },
           "severity": {
@@ -15792,6 +15824,9 @@
             "type": "string"
           },
           "url": {
+            "type": "string"
+          },
+          "via": {
             "type": "string"
           }
         },
