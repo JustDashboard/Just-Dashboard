@@ -17,7 +17,7 @@ import {
  * backend; each test overrides the fleet/archived list it actually exercises.
  */
 
-test("fleet grid and list preserve filters and fit multiple projects", async ({
+test("the fleet is cards only, a search narrows them, and they fit a phone", async ({
   page,
 }, testInfo) => {
   await mockProject(page)
@@ -46,10 +46,10 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
   await page.goto("/deploy")
   const projects = page.getByRole("list", { name: "Deployment projects" })
   await expect(projects.locator(":scope > li")).toHaveCount(6)
-  await expect(page.getByRole("button", { name: "Grid view" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
+  // Cards only (25 Nov 2026): no switch to a list beside the search.
+  await expect(page.getByRole("group", { name: "Deployment layout" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "List view" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Grid view" })).toHaveCount(0)
   // No row of figures over the cards: each card carries its own traffic, the
   // per-state counts are the chips', and a state nothing is in draws no chip.
   // Health nobody has observed is not a reason for attention.
@@ -68,12 +68,7 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
   await page.getByRole("textbox", { name: "Search deployments" }).fill("payments")
   await expect(projects.locator(":scope > li")).toHaveCount(1)
 
-  await page.getByRole("button", { name: "List view" }).click()
-  await expect(page.getByRole("button", { name: "List view" })).toHaveAttribute(
-    "aria-pressed",
-    "true",
-  )
-  await expect(projects.locator(":scope > li")).toHaveCount(1)
+  await expect(page.getByText("1 of 6", { exact: true })).toBeVisible()
   await expect(projects.getByText("payments-api", { exact: true })).toBeVisible()
   await expect(projects.getByText("storefront", { exact: true })).toHaveCount(0)
 
@@ -86,9 +81,9 @@ test("fleet grid and list preserve filters and fit multiple projects", async ({
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   )
-  await testInfo.attach("fleet-list-390", {
+  await testInfo.attach("fleet-cards-390", {
     body: await page.screenshot({
-      path: testInfo.outputPath("fleet-list-390.png"),
+      path: testInfo.outputPath("fleet-cards-390.png"),
       fullPage: true,
     }),
     contentType: "image/png",
@@ -415,14 +410,25 @@ test("a Compose deployment with more than one service reports how many", async (
   await expect(page.getByText("docker-compose.yml", { exact: true })).toHaveCount(0)
 })
 
-test("a card says how many pull requests are open, and the chip narrows the fleet to them", async ({
+test("a card draws no pull requests, commit or arrow, keeps its height, and the chip still narrows", async ({
   page,
 }) => {
   await mockProject(page)
   await page.route("**/api/v1/deploy/?view=fleet", (route) =>
     json(route, {
       deployments: [
-        { ...deployment, id: 1, name: "storefront", activeRun: undefined },
+        {
+          ...deployment,
+          id: 1,
+          name: "storefront",
+          activeRun: undefined,
+          lastRun: {
+            ...run,
+            metadata: {
+              commit: { sha: "ccf670e1", subject: "Bind production server", author: "Ion" },
+            },
+          },
+        },
         { ...deployment, id: 2, name: "worker", activeRun: undefined },
       ],
       activeWork: [],
@@ -435,26 +441,29 @@ test("a card says how many pull requests are open, and the chip narrows the flee
   await page.setViewportSize({ width: 1280, height: 1000 })
   await page.goto("/deploy")
   const projects = page.getByRole("list", { name: "Deployment projects" })
-  await expect(projects.locator(":scope > li")).toHaveCount(2)
-  // A count in plain words on the source line, only where there is one.
-  const storefront = projects.locator(":scope > li").filter({ hasText: "storefront" })
-  await expect(storefront.getByText("3 pull requests · 1 preview", { exact: true })).toBeVisible()
-  await expect(
-    projects
-      .locator(":scope > li")
-      .filter({ hasText: "worker" })
-      .getByText(/pull request/),
-  ).toHaveCount(0)
+  const cards = projects.locator(":scope > li")
+  await expect(cards).toHaveCount(2)
+  // The count of pull requests and the last commit are the project's
+  // Overview's to say, not a card's: a card with them is the height and the
+  // shape of one without.
+  await expect(projects.getByText(/pull request|preview/)).toHaveCount(0)
+  await expect(projects.getByText("Bind production server")).toHaveCount(0)
+  await expect(projects.getByText("ccf670e")).toHaveCount(0)
+  // No arrow beside the name (25 Nov 2026): the card and its name open the
+  // project, and the only thing on the name's line is the ⋯ menu.
+  await expect(cards.locator("a + span > svg")).toHaveCount(0)
+  await expect(cards.first().getByRole("button", { name: "Actions for storefront" })).toBeVisible()
+  const [first, second] = await Promise.all(
+    [cards.nth(0), cards.nth(1)].map((c) => c.boundingBox()),
+  )
+  expect(first!.height).toBe(second!.height)
+  expect(first!.y).toBe(second!.y)
 
   const chip = page.getByRole("button", { name: /^Pull requests/ })
   await expect(chip).toContainText("1")
   await chip.click()
   await expect(projects.locator(":scope > li")).toHaveCount(1)
   await expect(projects.getByText("storefront", { exact: true })).toBeVisible()
-
-  // The list row's second line carries the same words.
-  await page.getByRole("button", { name: "List view" }).click()
-  await expect(projects.getByText("3 pull requests · 1 preview", { exact: true })).toBeVisible()
 })
 
 test("archived list can be permanently deleted with confirmation and errors remain reviewable", async ({

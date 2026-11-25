@@ -2,7 +2,6 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ArrowRight } from "@/components/icons"
 import { percent, plural, relativeTime, timestamp } from "@/lib/format"
 import { perMinute } from "@/lib/requests"
 import { cn } from "@/lib/utils"
@@ -10,15 +9,13 @@ import type {
   DeploymentActiveWork,
   DeploymentEngineRun,
   DeploymentSummary,
-  FleetPullRequests,
   TrafficPulse,
 } from "@/lib/types"
 import type { useConfirm } from "@/components/confirm-dialog"
-import { CONTROL, ChoiceRow } from "@/components/choice-row"
-import { SourcePull } from "@/components/git/glyphs"
-import { BranchChip, CommitLine, ShortSha } from "@/components/git/marks"
+import { CONTROL } from "@/components/choice-row"
+import { BranchChip } from "@/components/git/marks"
 import { Sparkline } from "@/components/sparkline"
-import { ProductGlyph, ProductGlyphs, hostProduct, imageProducts } from "@/components/product-logo"
+import { ProductGlyph, ProductGlyphs, imageProducts } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { VerbActions } from "@/components/verbs"
@@ -38,8 +35,8 @@ import {
   formatDuration,
   hostOf,
   operationLabel,
+  projectState,
   reachableAt,
-  runCommit,
   runDurationSeconds,
   runTriggerLine,
   shortRevision,
@@ -50,35 +47,43 @@ import { useNow } from "@/hooks/use-now"
 import { FAILING_NOTICE, failingTone } from "@/components/deploy/fleet"
 
 /**
- * One project in the fleet, in the two shapes the page draws: a card in the
- * grid and a row in the list.
+ * One project in the fleet, as a card in the grid. The fleet has no list
+ * layout: the operator asked for cards only (25 Nov 2026).
  *
- * Both are destinations — every one opens the project — so both carry the lit
- * edge §16 gives to things you take, where the grid used to be framed panels
- * whose only answer to the pointer was a border step and the list was rows you
- * read. And both draw the project as what it is, in the colours that are the
- * data's own: the product it runs, where its source lives and who last
- * committed to it, how much traffic it is taking and what share of it fails,
- * the last fourteen runs as a strip, and, while one is in flight, the release
- * path sweeping and the stage it is at lit.
+ * A card is a destination — it opens the project — so it carries the lit edge
+ * §16 gives to things you take, and draws the project as what it is, in the
+ * colours that are the data's own: the product it runs, where its source
+ * lives, how much traffic it is taking and what share of it fails, the last
+ * fourteen runs as a strip and, while one is in flight, the release path
+ * sweeping and the stage it is at lit.
+ *
+ * Three weights, read in this order: the name, then the traffic figure, both
+ * in the title's size; everything else is the muted hint. The card does not
+ * draw the last commit (who wrote what, under its subject) or the open pull
+ * requests: the commit line was a sentence nobody read on a card, and a count
+ * of pull requests is the project's Overview's to say. The Pull requests chip
+ * above the grid still narrows the fleet to the projects that have one.
  *
  * The verbs are the project page's own (`useProjectVerbs`), so the card and
- * the project header cannot disagree about what can be done to a project.
- * Visit is drawn inline on a row, which does not show the host; a card's host
- * line already is the link to the site, so on a card Visit heads the menu's
- * Project group.
+ * the project header cannot disagree about what can be done to a project. The
+ * card's host line is already the link to the site, so Visit heads the menu's
+ * Project group rather than drawing a glyph of its own. There is no arrow:
+ * the whole card and its name open the project.
  */
 
-type Confirm = ReturnType<typeof useConfirm>["confirm"]
+/**
+ * A card's height, which every card keeps whatever it says. Its placeholder,
+ * on the fleet and on the Overview, takes the same, so a card lands where its
+ * ghost stood (§11).
+ */
+export const PROJECT_CARD_HEIGHT = "h-45.5"
 
-/** A project's open pull requests and the previews built from them, from the fleet-wide read. */
-type ProjectPulls = FleetPullRequests["projects"][string]
+type Confirm = ReturnType<typeof useConfirm>["confirm"]
 
 type ProjectProps = {
   deployment: DeploymentSummary
   /** The last hour at the ingress, from the fleet-wide pulse. */
   pulse?: TrafficPulse
-  pulls?: ProjectPulls
   /** The fleet's own line for the run in flight: its stage and place in the queue. */
   work?: DeploymentActiveWork
   confirm: Confirm
@@ -109,20 +114,27 @@ function useFleetVerbs(deployment: DeploymentSummary, confirm: Confirm, refresh:
   return { verbs: all.filter((verb) => !verb.disabled), progressive, gate }
 }
 
-function FleetStatus({
+/**
+ * The project's state under its name. Ready is the expected answer, so it is
+ * the dot alone, named for a screen reader and the pointer: "Ready" on every
+ * card was a word nobody read, and it took the room the host needs. Any other
+ * state, and a verb on its way, says its word.
+ */
+function CardState({
   deployment,
   progressive,
-  className,
 }: {
   deployment: DeploymentSummary
   progressive?: string
-  className?: string
 }) {
-  return progressive ? (
-    <Status tone="warning" label={progressive} className={className} />
-  ) : (
-    <ProjectStatus summary={deployment} className={className} />
-  )
+  if (progressive) return <Status tone="warning" label={progressive} className="shrink-0" />
+  if (projectState(deployment) === "ready")
+    return (
+      <span data-slot="project-state" title="Ready" className="flex shrink-0">
+        <StatusDot tone="running" label="Ready" />
+      </span>
+    )
+  return <ProjectStatus summary={deployment} className="shrink-0" />
 }
 
 /**
@@ -175,14 +187,14 @@ export function runClock(
 }
 
 /**
- * Where the project answers, when it answers anywhere: its host, its port, or
- * that it is private. Mono only for the literal the host gave — "Private" is a
- * word. A project that has never been deployed says so in its state, so it
- * has no second line saying it again.
+ * Where the project answers, when it answers anywhere: its host as the link
+ * to the site, its port, or that it is private. Mono only for the literal the
+ * host gave — "Private" is a word. A project that has never been deployed
+ * says so in its state, so it has no second line saying it again.
  */
-function Address({ deployment, link }: { deployment: DeploymentSummary; link?: boolean }) {
+function Address({ deployment }: { deployment: DeploymentSummary }) {
   const url = deploymentURL(deployment.endpoint)
-  if (url && link)
+  if (url)
     return (
       <a
         href={url}
@@ -193,11 +205,11 @@ function Address({ deployment, link }: { deployment: DeploymentSummary; link?: b
         {hostOf(url)}
       </a>
     )
-  if (!url && !deployment.liveReleaseId) return null
+  if (!deployment.liveReleaseId) return null
   const literal = deployment.endpoint || deployment.hostPort || deployment.internalPort
   return (
     <span className={cn("min-w-0 truncate", literal && "font-mono")}>
-      {url ? hostOf(url) : reachableAt(deployment)}
+      {reachableAt(deployment)}
     </span>
   )
 }
@@ -239,108 +251,63 @@ function LastActivity({ deployment }: { deployment: DeploymentSummary }) {
   )
 }
 
-/**
- * What is open against the repository: its pull requests, and how many of
- * them are running as previews. A count in plain text on the pull request's
- * own glyph, the way the services count sits beside it — not a `Tag`, which
- * is for a property, and not a `Status`, which is for a state.
- */
-function PullLine({ pulls }: { pulls?: ProjectPulls }) {
-  if (!pulls || (pulls.open === 0 && pulls.previews === 0)) return null
-  const words = [
-    pulls.open > 0 && plural(pulls.open, "pull request"),
-    pulls.previews > 0 && plural(pulls.previews, "preview"),
-  ].filter(Boolean)
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1">
-      <SourcePull aria-hidden className="size-3 shrink-0" />
-      <span className="truncate">{words.join(" · ")}</span>
-    </span>
-  )
+/** The image an image project pulls, as it was configured. */
+function imageReference(d: DeploymentSummary) {
+  return d.sourceRepository || d.sourceRef || shortRevision(d.sourceRevision)
 }
 
 /**
- * The registry an image reference is pulled from: the host its first segment
- * names, or Docker Hub for a bare `owner/name`.
+ * Where the project comes from, on one line: the forge, the repository and
+ * the branch; the image it pulls; or the Compose stack and how many services
+ * it runs. What several services run is drawn as their products. The line is
+ * a fixed height on every card, so a row of them keeps one height whatever
+ * each was deployed from.
  */
-function imageRegistry(reference: string) {
-  const [first, ...rest] = reference.split("/")
-  return rest.length > 0 && (/[.:]/.test(first) || first === "localhost") ? first : "Docker Hub"
-}
-
-/**
- * Where a project comes from — the part of the source line it opens with. A
- * row has no room for a repository's name beside its branch and commit, so it
- * leaves it to the forge's mark; nor for the products a stack runs, which the
- * row's own mark already draws. A card names an image's registry here, since
- * its second line is the image itself.
- */
-function SourceOrigin({
-  deployment: d,
-  pulls,
-  compact,
-}: {
-  deployment: DeploymentSummary
-  pulls?: ProjectPulls
-  compact?: boolean
-}) {
+function SourceLine({ deployment: d }: { deployment: DeploymentSummary }) {
   const services = (d.serviceCount ?? 0) > 1 ? plural(d.serviceCount ?? 0, "service") : undefined
   const runs = imageProducts(d.images ?? []).filter((id) => id !== "docker")
+  let line: React.ReactNode
   switch (d.sourceKind) {
     case "git":
     case "local": {
       const host = sourceProduct(d)
-      return (
+      line = (
         <>
           {host && <ProductGlyph id={host} />}
-          {!compact && d.sourceRepository && (
-            <span className="min-w-0 truncate font-mono text-foreground">{d.sourceRepository}</span>
+          {d.sourceRepository && (
+            <span className="min-w-0 truncate font-mono">{d.sourceRepository}</span>
           )}
           <BranchChip branch={d.sourceRef || "main"} className="max-w-[10rem] shrink-0" />
-          {/* The commit line carries the revision when the engine recorded
-              what it was; without a subject the short sha is all there is,
-              and a card's second line draws it. */}
-          {compact && !runCommit(d.lastRun)?.subject && (
-            <ShortSha sha={shortRevision(d.sourceRevision)} />
-          )}
           {services && <span className="shrink-0">{services}</span>}
-          {services && !compact && <ProductGlyphs ids={runs} />}
-          <PullLine pulls={pulls} />
+          {services && <ProductGlyphs ids={runs} max={3} />}
         </>
       )
+      break
     }
     case "image": {
-      const reference = imageReference(d)
-      if (!compact) {
-        const registry = imageRegistry(reference ?? "")
-        return (
-          <>
-            <ProductGlyph id={hostProduct(registry) ?? "docker"} />
-            <span className="min-w-0 truncate">{registry}</span>
-          </>
-        )
-      }
       const product = sourceProduct(d)
-      return (
+      line = (
         <>
-          {product && <ProductGlyph id={product} />}
-          <span className="min-w-0 truncate font-mono text-foreground">
-            {reference || "Docker image"}
-          </span>
+          <ProductGlyph id={product ?? "docker"} />
+          <span className="min-w-0 truncate font-mono">{imageReference(d) || "Docker image"}</span>
         </>
       )
+      break
     }
     case "compose":
       // The file's name is not worth a glance once several services run
-      // from it; how many, and what they are, is — and a card's second line
-      // draws what they are.
-      return (
-        <span className="min-w-0 truncate">
-          Compose stack{services ? ` · ${services}` : d.sourceRef ? ` · ${d.sourceRef}` : ""}
-        </span>
+      // from it; how many, and what they are, is.
+      line = (
+        <>
+          <span className="min-w-0 truncate">
+            Compose stack{services ? ` · ${services}` : d.sourceRef ? ` · ${d.sourceRef}` : ""}
+          </span>
+          <ProductGlyphs ids={runs} max={3} />
+        </>
       )
+      break
     case "blueprint":
-      return (
+      line = (
         <>
           <span className="shrink-0">Template</span>
           {/* The tag is a flex box, which text-overflow does not reach, so
@@ -352,93 +319,38 @@ function SourceOrigin({
           )}
         </>
       )
+      break
     default:
-      return <span className="min-w-0 truncate">{WORKLOAD_LABELS[d.profile]}</span>
+      line = <span className="min-w-0 truncate">{WORKLOAD_LABELS[d.profile]}</span>
   }
-}
-
-/** The image an image project pulls, as it was configured. */
-function imageReference(d: DeploymentSummary) {
-  return d.sourceRepository || d.sourceRef || shortRevision(d.sourceRevision)
-}
-
-/**
- * What is live, on a card's second source line: the commit a repository last
- * built, with its author in their own hue, or else the images the project
- * runs, each drawn as its product. Every card draws the line, so a row of
- * them keeps one height and one baseline whatever each was deployed from.
- */
-function LiveLine({ deployment: d }: { deployment: DeploymentSummary }) {
-  const git = d.sourceKind === "git" || d.sourceKind === "local"
-  const commit = git ? runCommit(d.lastRun) : undefined
-  if (commit?.subject)
-    return (
-      <CommitLine
-        className="h-4.5 min-w-0"
-        sha={commit.sha}
-        subject={commit.subject}
-        author={commit.author}
-        at={commit.authoredAt}
-      />
-    )
-  // A repository's images are the ones this server built from it, named for
-  // the project rather than for anything a reader would recognise.
-  const configured = d.sourceKind === "image" ? imageReference(d) : undefined
-  const images = git ? [] : d.images?.length ? d.images : configured ? [configured] : []
-  if (images.length === 0)
-    return (
-      <p className="flex h-4.5 min-w-0 items-center gap-1.5">
-        <ShortSha sha={shortRevision(d.sourceRevision)} />
-        <span className="truncate">
-          {d.liveReleaseId ? "No commit recorded" : "Not deployed yet"}
-        </span>
-      </p>
-    )
   return (
-    <p className="flex h-4.5 min-w-0 items-center gap-1.5">
-      <ProductGlyphs ids={imageProducts(images)} max={3} />
-      <span className="min-w-0 truncate font-mono text-muted-foreground">{images.join(", ")}</span>
+    <p
+      data-slot="project-source"
+      className="flex h-4.5 min-w-0 items-center gap-1.5 overflow-hidden text-hint text-muted-foreground"
+    >
+      {line}
     </p>
   )
 }
 
 /**
- * Where the project comes from and what last went into it: the forge and the
- * repository, the branch, and the commit with its author in their own hue —
- * the Git page's drawing of the same things. A card spends two fixed lines on
- * it, where it comes from and what is live; a row's second line takes the
- * origin and the commit's subject.
+ * A rate a minute, as the card's one figure: the number in the name's size
+ * and weight, its unit small beside it, so the eye goes from the name to the
+ * figure and the rest of the card is read only when wanted.
  */
-export function SourceSummary({
-  deployment,
-  pulls,
-  compact,
-}: {
-  deployment: DeploymentSummary
-  pulls?: ProjectPulls
-  compact?: boolean
-}) {
-  if (compact) {
-    const commit =
-      deployment.sourceKind === "git" || deployment.sourceKind === "local"
-        ? runCommit(deployment.lastRun)
-        : undefined
-    return (
-      <span className="flex max-w-full min-w-0 items-center gap-1.5">
-        <SourceOrigin deployment={deployment} pulls={pulls} compact />
-        {commit?.subject && (
-          <span className="min-w-0 truncate text-muted-foreground">{commit.subject}</span>
-        )}
-      </span>
-    )
-  }
+function Rate({ figure, muted }: { figure: string; muted?: boolean }) {
   return (
-    <div className="min-w-0 space-y-1.5 text-hint text-muted-foreground">
-      <p className="flex h-4.5 min-w-0 items-center gap-1.5 overflow-hidden">
-        <SourceOrigin deployment={deployment} pulls={pulls} />
-      </p>
-      <LiveLine deployment={deployment} />
-    </div>
+    <span
+      className={cn(
+        "numeric text-title leading-5 font-semibold tracking-tight",
+        muted ? "text-muted-foreground" : "text-foreground",
+      )}
+    >
+      {figure}
+      <span className="ml-0.5 text-hint font-normal tracking-normal text-muted-foreground">
+        /min
+      </span>
+    </span>
   )
 }
 
@@ -461,33 +373,24 @@ function CardTraffic({
   deployment: DeploymentSummary
   pulse?: TrafficPulse
 }) {
-  const figure = "flex min-w-18 shrink-0 flex-col justify-end gap-0.5 pb-2 leading-tight"
+  const figure = "flex min-w-18 shrink-0 flex-col justify-end gap-0.5 pb-2"
   if (pulse?.status !== "available")
     return (
-      <div className="flex h-11 min-w-0 items-end gap-3">
-        <span className={cn(figure, "text-hint text-muted-foreground")}>
-          {deploymentURL(deployment.endpoint) ? (
-            <span className="numeric text-body">
-              —<span className="text-hint">/min</span>
-            </span>
-          ) : (
-            "No web traffic"
-          )}
+      <div data-slot="project-traffic" className="flex h-12 min-w-0 items-end gap-3">
+        <span className={cn(figure, "text-hint leading-4 text-muted-foreground")}>
+          {deploymentURL(deployment.endpoint) ? <Rate figure="—" muted /> : "No web traffic"}
         </span>
         <span aria-hidden className="-mr-3.5 mb-2.5 flex-1 border-t border-dashed" />
       </div>
     )
   return (
-    <div className="flex h-11 min-w-0 animate-rise items-end gap-3">
+    <div data-slot="project-traffic" className="flex h-12 min-w-0 animate-rise items-end gap-3">
       <span className={figure}>
-        <span className="numeric text-body font-medium">
-          {perMinute(pulse.perMinute)}
-          <span className="text-hint font-normal text-muted-foreground">/min</span>
-        </span>
+        <Rate figure={perMinute(pulse.perMinute)} />
         {pulse.errorRate >= FAILING_NOTICE ? (
-          <FailingShare rate={pulse.errorRate} className="text-hint" />
+          <FailingShare rate={pulse.errorRate} className="text-hint leading-4" />
         ) : (
-          <span className="numeric text-hint text-muted-foreground">
+          <span className="numeric text-hint leading-4 text-muted-foreground">
             {plural(pulse.pages, "view")}
           </span>
         )}
@@ -495,75 +398,11 @@ function CardTraffic({
       <Sparkline
         values={pulse.points}
         width={240}
-        height={44}
-        className="-mr-3.5 h-11 min-w-0 flex-1"
+        height={48}
+        className="-mr-3.5 h-12 min-w-0 flex-1"
         label="Requests per minute, last hour"
       />
     </div>
-  )
-}
-
-/**
- * The same hour in a row's measure: a short line, the rate, and the failing
- * share when there is one — named, because no header sits over the column.
- */
-function RowTraffic({ pulse }: { pulse: TrafficPulse }) {
-  return (
-    <span className="inline-flex min-w-0 animate-rise items-center gap-2 text-hint">
-      <Sparkline
-        values={pulse.points}
-        width={48}
-        height={16}
-        label="Requests per minute, last hour"
-      />
-      <span className="numeric text-foreground">{perMinute(pulse.perMinute)}/min</span>
-      {pulse.errorRate >= FAILING_NOTICE && <FailingShare rate={pulse.errorRate} />}
-    </span>
-  )
-}
-
-/**
- * The hour in a wide row's column: the line the height of both of the row's
- * lines, the rate beside it and, under the rate, the failing share or the
- * views — the card's band at a row's size. A project with nothing to show
- * draws the flat rule the card does, so the column never stands empty.
- */
-function TrafficCell({
-  deployment,
-  pulse,
-}: {
-  deployment: DeploymentSummary
-  pulse?: TrafficPulse
-}) {
-  if (pulse?.status !== "available")
-    return (
-      <span className="flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
-        <span aria-hidden className="w-12 shrink-0 border-t border-dashed" />
-        <span className="truncate">
-          {deploymentURL(deployment.endpoint) ? "—/min" : "No web traffic"}
-        </span>
-      </span>
-    )
-  return (
-    <span className="flex min-w-0 animate-rise items-center gap-2 text-hint">
-      <Sparkline
-        values={pulse.points}
-        width={48}
-        height={28}
-        className="h-7 shrink-0"
-        label="Requests per minute, last hour"
-      />
-      <span className="flex min-w-0 flex-col leading-4">
-        <span className="numeric truncate text-foreground">{perMinute(pulse.perMinute)}/min</span>
-        {pulse.errorRate >= FAILING_NOTICE ? (
-          <FailingShare rate={pulse.errorRate} className="truncate" />
-        ) : (
-          <span className="numeric truncate text-muted-foreground">
-            {plural(pulse.pages, "view")}
-          </span>
-        )}
-      </span>
-    </span>
   )
 }
 
@@ -580,7 +419,6 @@ function TrafficCell({
 export function ProjectCard({
   deployment,
   pulse,
-  pulls,
   work,
   confirm,
   refresh,
@@ -590,7 +428,7 @@ export function ProjectCard({
   const { verbs, progressive, gate } = useFleetVerbs(deployment, confirm, refresh)
   // The address under the name is already the way to the site, so a card
   // keeps Visit in its menu, first of the ways into the project, rather than
-  // drawing a second glyph for it beside the arrow.
+  // drawing a glyph for it beside the menu.
   const visit = verbs.find((verb) => verb.key === "visit")
   const menu = verbs.filter((verb) => verb !== visit)
   if (visit)
@@ -605,7 +443,7 @@ export function ProjectCard({
   const recent = deployment.recentRuns ?? []
 
   return (
-    <li className="min-w-0">
+    <li className="min-w-0" data-slot="project-card">
       {/* Each card lands a beat after the one before it, capped so a fleet
           of forty does not take three seconds. */}
       <BlurFade delay={Math.min(index, 11) * 0.045} className="h-full">
@@ -641,27 +479,21 @@ export function ProjectCard({
                 <ProjectMark deployment={deployment} size="md" className="row-span-2" />
                 <Link
                   href={base}
-                  className="block max-w-full min-w-0 self-end truncate rounded-sm text-title leading-tight font-medium focus-ring"
+                  className="block max-w-full min-w-0 self-end truncate rounded-sm text-title leading-tight font-semibold tracking-tight focus-ring"
                 >
                   {deployment.name}
                 </Link>
-                <span className="-my-2 -mr-1.5 flex items-center gap-1 self-end">
-                  <ArrowRight
-                    aria-hidden
-                    className="size-3.5 shrink-0 text-muted-foreground transition-colors group-hover/choice:text-foreground"
-                  />
+                {/* No arrow at the head (25 Nov 2026, the operator's word, as on
+                    the Databases cards): the whole card and its name open it. */}
+                <span className="-my-2 -mr-1.5 flex items-center self-end">
                   <VerbActions dim verbs={menu} menuLabel={`Actions for ${deployment.name}`} />
                 </span>
                 <div className="col-span-2 col-start-2 flex min-w-0 items-center gap-2 self-start text-hint text-muted-foreground">
-                  <FleetStatus
-                    deployment={deployment}
-                    progressive={progressive}
-                    className="shrink-0"
-                  />
-                  <Address deployment={deployment} link />
+                  <CardState deployment={deployment} progressive={progressive} />
+                  <Address deployment={deployment} />
                 </div>
               </div>
-              <SourceSummary deployment={deployment} pulls={pulls} />
+              <SourceLine deployment={deployment} />
               <CardTraffic deployment={deployment} pulse={pulse} />
             </div>
             {/* One line that never wraps: the strip and the clock keep their
@@ -685,147 +517,5 @@ export function ProjectCard({
       </BlurFade>
       {gate}
     </li>
-  )
-}
-
-/** A wide row's column: two lines in the height of the name and its source line. */
-const CELL =
-  "flex h-9 min-w-0 shrink-0 flex-col justify-center gap-1 text-hint text-muted-foreground"
-const LINE = "flex h-4 min-w-0 items-center"
-
-/**
- * A row in the list, in the shape the page picks for its width.
- *
- * One line wherever its readings fit beside the name, so the verbs stand on
- * the row's middle: below `xl` the readings were a band under the source line,
- * which made every row three lines tall with the verbs level with the name
- * over an empty corner. `lined` (from `lg`): its state over its address and
- * its last fourteen runs — the release path, in flight — over when it last
- * ran, in fixed columns two lines tall, so the row keeps the height of its
- * name and source line with both lines spent, a column of rows scans like the
- * table it replaces and the states end on one edge. `wide` (from `xl`): its
- * traffic joins them. The traffic is the one reading a narrower line leaves
- * out: it is the widest, and the grid's card, the project's Overview and,
- * past 5% failing, the Attention list above all carry it.
- *
- * Below `lg` the sidebar leaves the name no room for them, and they go beneath
- * it at the row's full width; `roomy` (from `sm`) keeps the state beside the
- * name, and a phone puts it first on the line beneath, where the verbs beside
- * the name would otherwise leave the source line a third of the row and the
- * commit's subject nothing.
- */
-export function ProjectRow({
-  deployment,
-  pulse,
-  pulls,
-  work,
-  confirm,
-  refresh,
-  wide,
-  lined,
-  roomy,
-}: ProjectProps & { wide: boolean; lined: boolean; roomy: boolean }) {
-  const { verbs, progressive, gate } = useFleetVerbs(deployment, confirm, refresh)
-  const now = useNow(1000, Boolean(deployment.activeRun))
-  const recent = deployment.recentRuns ?? []
-  const traffic = pulse?.status === "available" ? pulse : undefined
-  const run = deployment.activeRun
-  const when = (
-    <span className="numeric">
-      {run
-        ? runClock(run, work, now)
-        : relativeTime(
-            deployment.lastRun?.endedAt ?? deployment.lastRun?.requestedAt ?? deployment.updatedAt,
-          )}
-    </span>
-  )
-  const history = run ? (
-    <MiniReleasePath
-      currentStep={work?.currentStep ?? run.currentStep?.key}
-      currentStatus={work?.currentStatus ?? run.currentStep?.state}
-    />
-  ) : (
-    recent.length > 0 && <RunStrip runs={recent.slice(0, 14)} />
-  )
-  // In flight, the state is the stage the release is at, lit: "Deploying"
-  // beside a sweeping release path says the same thing twice. A narrow row
-  // keeps the short word as its state and puts the stage with the path.
-  const stage = run && (
-    <TextShimmer className="truncate text-xs font-medium">{stageOf(run, work)}</TextShimmer>
-  )
-  const status = <FleetStatus deployment={deployment} progressive={progressive} />
-  const pending = deployment.pendingChanges && !run && (
-    <Status tone="warning" label="Changes pending" />
-  )
-  const row = (
-    <ChoiceRow
-      href={`/deploy/${deployment.id}`}
-      verb={`Open ${deployment.name}`}
-      leading={<ProjectMark deployment={deployment} size="sm" />}
-      title={deployment.name}
-      description={<SourceSummary deployment={deployment} pulls={pulls} compact />}
-      trailing={
-        lined ? (
-          <>
-            <span className={cn(CELL, "w-28 xl:w-36")}>
-              <span className={LINE}>
-                {stage ? (
-                  <span className="inline-flex min-w-0 items-center gap-1.5">
-                    <StatusDot tone="warning" />
-                    {stage}
-                  </span>
-                ) : (
-                  status
-                )}
-              </span>
-              <span className={LINE}>{pending || <Address deployment={deployment} />}</span>
-            </span>
-            {wide && (
-              <span className={cn(CELL, "w-40")}>
-                <TrafficCell deployment={deployment} pulse={pulse} />
-              </span>
-            )}
-            <span className={cn(CELL, "w-28")}>
-              <span className={LINE}>{history || "No runs yet"}</span>
-              <span className={LINE}>{run ? when : <LastActivity deployment={deployment} />}</span>
-            </span>
-          </>
-        ) : (
-          roomy && status
-        )
-      }
-      actions={
-        // A fixed measure where the readings are columns, so a row without a
-        // site to visit keeps them in line with the rows that have one.
-        <VerbActions
-          dim
-          verbs={verbs}
-          menuLabel={`Actions for ${deployment.name}`}
-          className={cn(lined && "w-16.5 justify-end")}
-        />
-      }
-    >
-      {!lined && (
-        <div className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-1.5 text-hint text-muted-foreground sm:pl-11">
-          {!roomy && status}
-          <Address deployment={deployment} />
-          {pending}
-          {traffic && <RowTraffic pulse={traffic} />}
-          {history}
-          {stage}
-          {when}
-        </div>
-      )}
-    </ChoiceRow>
-  )
-  // Beside the row rather than inside it: a press in the dialog would reach
-  // the row's own handler through React's tree and open the project.
-  return gate ? (
-    <>
-      {row}
-      {gate}
-    </>
-  ) : (
-    row
   )
 }

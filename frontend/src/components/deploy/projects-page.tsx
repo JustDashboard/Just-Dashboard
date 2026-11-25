@@ -12,10 +12,8 @@ import {
   Database,
   GitHubMark,
   GridMasonry,
-  GridSquare,
   Key,
   Layers,
-  ListUnordered,
   MagnifyingGlass,
   Plus,
   StopCircle,
@@ -26,7 +24,7 @@ import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
-import { useSessionState, useViewState } from "@/lib/view-state"
+import { useSessionState } from "@/lib/view-state"
 import type {
   ArchivedDeployment,
   DeploymentActiveWork,
@@ -37,7 +35,7 @@ import type {
 } from "@/lib/types"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
-import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { IconAction } from "@/components/icon-action"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput, SearchInputSkeleton } from "@/components/search-input"
@@ -53,7 +51,7 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { ArchivedProjects } from "@/components/deploy/archived-projects"
 import { FleetRightSize } from "@/components/deploy/right-size"
-import { ProjectCard, ProjectRow, runClock, stageOf } from "@/components/deploy/fleet-card"
+import { PROJECT_CARD_HEIGHT, ProjectCard, runClock, stageOf } from "@/components/deploy/fleet-card"
 import { ProjectMark } from "@/components/project-mark"
 import { MiniReleasePath } from "@/components/deploy/run-pipeline"
 import { RunActorMark } from "@/components/deploy/run-marks"
@@ -98,24 +96,20 @@ const GRID = "grid gap-3 lg:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4"
 
 /**
  * The fleet before its first answer, in the shape it arrives in: the
- * toolbar's search, then three cards, or three rows in the list layout. The
- * route's Suspense fallback draws the same thing under the same header.
+ * toolbar's search, then three cards. The route's Suspense fallback draws the
+ * same thing under the same header.
  */
-export function FleetSkeleton({ layout = "grid" }: { layout?: "grid" | "list" }) {
+export function FleetSkeleton() {
   return (
     <>
       <SearchInputSkeleton />
-      {layout === "grid" ? (
-        <ul aria-hidden className={GRID}>
-          {[0, 1, 2].map((index) => (
-            <li key={index}>
-              <Skeleton className="h-50.5 rounded-xl" />
-            </li>
-          ))}
-        </ul>
-      ) : (
-        <ChoiceListSkeleton rows={3} lines={2} />
-      )}
+      <ul aria-hidden className={GRID}>
+        {[0, 1, 2].map((index) => (
+          <li key={index}>
+            <Skeleton className={cn(PROJECT_CARD_HEIGHT, "rounded-xl")} />
+          </li>
+        ))}
+      </ul>
     </>
   )
 }
@@ -131,12 +125,12 @@ function Fleet() {
   const router = useRouter()
   const { confirm, dialog } = useConfirm()
   const admin = can("system.admin")
-  // The header's shape, and the list rows', chosen once rather than drawn
-  // twice and hidden: the tests and a screen reader find each link by its
-  // name, and a hidden twin is a second answer to every query (§12). A run in
-  // flight keeps its stage and clock beside its name from `sm`; its release
-  // path, and a project's readings, join the line only from `lg`, where the
-  // sidebar leaves the name room to be read.
+  // The header's shape, and the in-progress rows', chosen once rather than
+  // drawn twice and hidden: the tests and a screen reader find each link by
+  // its name, and a hidden twin is a second answer to every query (§12). A
+  // run in flight keeps its stage and clock beside its name from `sm`; its
+  // release path joins the line only from `lg`, where the sidebar leaves the
+  // name room to be read.
   const roomy = useBreakpoint("sm")
   const lined = useBreakpoint("lg")
   const wide = useBreakpoint("xl")
@@ -164,10 +158,10 @@ function Fleet() {
     (signal) => get<ArchivedDeployment[]>("/deploy/", { view: "archived" }, signal),
     0,
   )
-  // Every GitHub project's open pull requests, on the Git page's minute: the
-  // server answers from its cache, and the read is a line on a card, so a
-  // failure leaves the cards without the line rather than the page with an
-  // error in it.
+  // Every GitHub project's open pull requests, on the Git page's minute, for
+  // the Pull requests chip alone: a card does not draw them. The server
+  // answers from its cache, and a failure leaves the chip hidden rather than
+  // the page with an error in it.
   const pullRequests = usePoll(
     (signal) => get<FleetPullRequests>("/deploy/pull-requests", undefined, signal),
     60000,
@@ -182,7 +176,6 @@ function Fleet() {
   // filtered fleet does not reset itself on the way back from a project.
   const [query, setQuery] = useSessionState("deploy.fleet.query", "")
   const [filter, setFilter] = useSessionState<FleetFilter>("deploy.fleet.filter.075", "all")
-  const [layout, setLayout] = useViewState<"grid" | "list">("deploy.fleet.layout", "grid")
 
   const deployments = useMemo(() => fleet.data?.deployments ?? [], [fleet.data])
   const pulses = pulse.data
@@ -261,44 +254,19 @@ function Fleet() {
     },
   ]
 
-  const layoutControls = (
+  // One verb and a ⋯, after how many of the fleet a search or a chip left.
+  // Notifications and Credentials are the sidebar's, which shows them beside
+  // this page from md; on a phone, where the sidebar is a drawer away, the
+  // menu carries them too. Archived is only here. On a phone the verb is one
+  // word, so the search keeps the room it needs on its line. The fleet is
+  // cards only (25 Nov 2026), so no layout switch stands beside them.
+  const actions = (
     <div className="ml-auto flex shrink-0 items-center gap-2">
       {narrowed && (
         <span className="numeric text-hint text-muted-foreground">
           {filtered.length} of {deployments.length}
         </span>
       )}
-      <div className="flex items-center gap-0.5" role="group" aria-label="Deployment layout">
-        <IconAction
-          variant="ghost"
-          size="icon-sm"
-          label="Grid view"
-          aria-pressed={layout === "grid"}
-          className={cn(layout === "grid" && "bg-accent text-accent-foreground")}
-          onClick={() => setLayout("grid")}
-        >
-          <GridSquare className="size-4" />
-        </IconAction>
-        <IconAction
-          variant="ghost"
-          size="icon-sm"
-          label="List view"
-          aria-pressed={layout === "list"}
-          className={cn(layout === "list" && "bg-accent text-accent-foreground")}
-          onClick={() => setLayout("list")}
-        >
-          <ListUnordered className="size-4" />
-        </IconAction>
-      </div>
-    </div>
-  )
-
-  // One verb and a ⋯. Notifications and Credentials are the sidebar's, which
-  // shows them beside this page from md; on a phone, where the sidebar is a
-  // drawer away, the menu carries them too. Archived is only here. On a phone
-  // the verb is one word, so the search keeps the room it needs on its line.
-  const actions = (
-    <div className="flex shrink-0 items-center gap-2">
       {admin && (
         <Button size="sm" asChild>
           <Link href="/deploy/new" aria-label={roomy ? undefined : "New project"}>
@@ -318,7 +286,7 @@ function Fleet() {
     <Page>
       <PageContext title="Deployments" />
 
-      {fleet.loading && !fleet.data && <FleetSkeleton layout={layout} />}
+      {fleet.loading && !fleet.data && <FleetSkeleton />}
       {fleet.error && !fleet.data && <ErrorState error={fleet.error} onRetry={fleet.refresh} />}
 
       {/* The fleet rises once, when the first snapshot
@@ -344,8 +312,8 @@ function Fleet() {
 
           {deployments.length > 0 && (
             <div className="flex min-w-0 flex-col gap-4">
-              {/* From xl it is one line: search, chips, layout, the verb.
-                  Below xl the search, the layout and the verb share the first
+              {/* From xl it is one line: search, chips, the count, the verb.
+                  Below xl the search, the count and the verb share the first
                   line and the chips take the whole of the second, scrolling
                   on a phone to the screen's edge, where a chip cut in half
                   says there is more. */}
@@ -373,7 +341,6 @@ function Fleet() {
                       )
                     }
                   />
-                  {!wide && layoutControls}
                   {!wide && actions}
                 </div>
                 {/* A state nothing is in gets no chip — a filter that can only
@@ -400,7 +367,6 @@ function Fleet() {
                     ) : null,
                   )}
                 </ChipStrip>
-                {wide && layoutControls}
                 {wide && actions}
               </Toolbar>
 
@@ -422,7 +388,7 @@ function Fleet() {
                     </Button>
                   }
                 />
-              ) : layout === "grid" ? (
+              ) : (
                 <ul aria-label="Deployment projects" className={GRID}>
                   {filtered.map((deployment, index) => (
                     <ProjectCard
@@ -430,30 +396,12 @@ function Fleet() {
                       index={index}
                       deployment={deployment}
                       pulse={pulses?.[String(deployment.id)]}
-                      pulls={pulls[String(deployment.id)]}
                       work={workFor(deployment)}
                       confirm={confirm}
                       refresh={refresh}
                     />
                   ))}
                 </ul>
-              ) : (
-                <ChoiceList aria-label="Deployment projects" className="animate-rise">
-                  {filtered.map((deployment) => (
-                    <ProjectRow
-                      key={deployment.id}
-                      wide={wide}
-                      lined={lined}
-                      roomy={roomy}
-                      deployment={deployment}
-                      pulse={pulses?.[String(deployment.id)]}
-                      pulls={pulls[String(deployment.id)]}
-                      work={workFor(deployment)}
-                      confirm={confirm}
-                      refresh={refresh}
-                    />
-                  ))}
-                </ChoiceList>
               )}
             </div>
           )}

@@ -8,7 +8,6 @@ import {
   frameworkLabel,
   projectProduct,
   projectState,
-  runCommit,
   type ProjectState,
 } from "@/components/deploy/vocabulary"
 
@@ -116,9 +115,9 @@ export function sortFleet(deployments: DeploymentSummary[]) {
 }
 
 /**
- * Everything a project is findable by. A card draws its product, its images
- * and its last commit, so "postgres", "next" or "fix checkout" each find the
- * project they are drawn on.
+ * Everything a project is findable by: what its card draws, its product and
+ * the products of its images, so "postgres" or "next" find the project they
+ * are drawn on. The last commit is not on the card, so it is not searched.
  */
 export function fleetHaystack(deployment: DeploymentSummary) {
   const images = deployment.images ?? []
@@ -132,7 +131,6 @@ export function fleetHaystack(deployment: DeploymentSummary) {
     projectProduct(deployment),
     ...imageProducts(images),
     ...images,
-    runCommit(deployment.lastRun)?.subject,
   ]
     .filter(Boolean)
     .join(" ")
