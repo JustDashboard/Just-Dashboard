@@ -5,14 +5,13 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Box, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { plural, relativeTime, shortDigest, timestamp } from "@/lib/format"
+import { relativeTime, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import type {
   DeploymentEngineRun,
   ImageScan,
   ImageScanReading,
-  VulnerabilityCounts,
   VulnerabilityFinding,
 } from "@/lib/types"
 import { useAuth } from "@/hooks/use-auth"
@@ -22,29 +21,25 @@ import { EmptyNote, ErrorState, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { ProductGlyph, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { Status, StatusDot } from "@/components/status-dot"
-import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import {
-  SEVERITIES,
-  SEVERITY_COLOR,
-  ageWords,
   cleanTitle,
-  countAtLeast,
   countsLine,
+  dependencyWords,
   findingProduct,
-  floorWords,
-  groupFindings,
   inFlight,
-  scanLead,
+  overviewLead,
+  scanActions,
   scanVerdict,
   severityTone,
-  vulnerable,
+  upgradeTitle,
   type FindingGroup,
+  type ScanAction,
 } from "@/components/deploy/vulnerabilities-model"
 
-/** How many packages the panel lists before "Show all". */
-const LISTED = 5
+/** How many rows a list draws before "Show all". */
+export const LISTED = 5
 
 const WORST_TEXT = {
   danger: "text-destructive",
@@ -52,24 +47,12 @@ const WORST_TEXT = {
 } as const
 
 /**
- * The live release's image, read for known vulnerabilities (`deploy/
- * image_scan.go`): what the scanner found at each severity, the findings a
- * published fix exists for at or above the environment's floor, and whether
- * a base the release was pinned on has a newer image under its tag — which,
- * with a fixable finding, is the alert's condition and the one thing the
- * reader can act on here: rebuild the same commit, which re-pins the base.
- *
- * The rebuild is the runs route's own force_build, so it is queued, checked
- * and audited as any build is; the panel only says which run to ask for. The
- * terms — scanning on or off, and the floor — are Build settings.
+ * The live release's scan as a page reads it (`deploy/image_scan.go`), with
+ * its two verbs: Scan now, and the rebuild the runs route already takes
+ * (force_build at the live release's commit), so it is queued, checked and
+ * audited as any build is.
  */
-export function Vulnerabilities({
-  projectId,
-  environmentId,
-}: {
-  projectId: number
-  environmentId: number
-}) {
+export function useScanReading(projectId: number, environmentId: number) {
   const { can } = useAuth()
   const router = useRouter()
   const base = `/deploy/${projectId}/environments/${environmentId}`
@@ -85,7 +68,6 @@ export function Vulnerabilities({
     { enabled: environmentId > 0 },
   )
   const [asking, setAsking] = useState<"scan" | "rebuild">()
-  const [all, setAll] = useState(false)
   const reading = poll.data
   const scan = reading?.scan ?? null
 
@@ -112,23 +94,87 @@ export function Vulnerabilities({
       setAsking(undefined)
     }
   }
+  const canScan = Boolean(
+    can("service.control") && reading?.available && reading.policy.enabled && reading.releaseId,
+  )
+  // A rebuild is offered when it fixes something: a base whose tag names a
+  // newer image, or a package the build installs from its distribution. Not
+  // while scanning is off: the scan it would act on is no longer kept up.
+  const offerRebuild = Boolean(
+    reading?.rebuild &&
+    reading.policy.enabled &&
+    scan?.state === "scanned" &&
+    can("service.control") &&
+    scanActions(scan).some((action) => action.kind === "rebuild"),
+  )
+  return { poll, reading, scan, asking, scanNow, rebuild, canScan, offerRebuild }
+}
 
+export type ScanReadingState = ReturnType<typeof useScanReading>
+
+/** Scan now, as a header's verb. */
+export function ScanNowButton({ state }: { state: ScanReadingState }) {
+  if (!state.canScan) return null
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={Boolean(state.asking) || inFlight(state.scan)}
+      pending={state.asking === "scan"}
+      onClick={() => void state.scanNow()}
+    >
+      {inFlight(state.scan) ? "Scanning…" : "Scan now"}
+    </Button>
+  )
+}
+
+/** Rebuild, as a header's verb, when a rebuild fixes something. */
+export function RebuildButton({ state }: { state: ScanReadingState }) {
+  if (!state.offerRebuild) return null
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      disabled={Boolean(state.asking)}
+      pending={state.asking === "rebuild"}
+      onClick={() => void state.rebuild()}
+    >
+      {state.asking === "rebuild" ? "Rebuilding…" : "Rebuild"}
+    </Button>
+  )
+}
+
+/**
+ * The project overview's Vulnerabilities panel: what the reader can do about
+ * the live release's scan, and only that. A scan counts everything Trivy
+ * finds, most of it in development tools shipped with the application or a
+ * base that is already the newest, so a total and a bar of severities read as
+ * an alarm with nothing behind it. Here it is one sentence, then a row for
+ * each upgrade or rebuild that fixes something at the floor. Everything else
+ * is in the report a link away (`vulnerability-report.tsx`), under whose it
+ * is. The terms — scanning on or off, and the floor — are Build settings.
+ */
+export function Vulnerabilities({
+  projectId,
+  environmentId,
+}: {
+  projectId: number
+  environmentId: number
+}) {
+  const state = useScanReading(projectId, environmentId)
+  const { poll, reading, scan } = state
   const verdict = reading ? scanVerdict(reading) : undefined
-  const canScan =
-    can("service.control") && reading?.available && reading.policy.enabled && reading.releaseId
-  // A rebuild is the command when it would re-pin a moved base; for a build
-  // whose bases the dashboard does not pin (a Dockerfile, Compose) a fixable
-  // finding is reason enough to offer one, since the build pulls them again.
-  const rebuildMode = rebuildOffer(reading, scan)
-  const offerRebuild = Boolean(rebuildMode && can("service.control"))
+  const report = `/deploy/${projectId}/vulnerabilities`
 
   return (
     <Panel plain id="vulnerabilities" className="scroll-mt-6">
       <PanelHeader
         title="Vulnerabilities"
+        link={scan?.finishedAt ? { href: report, label: "Report" } : undefined}
         actions={
           <>
-            {verdict && (
+            {/* Quiet when there is nothing to do: the sentence says so. */}
+            {verdict && verdict.tone !== "running" && (
               <Status
                 tone={verdict.tone}
                 icon={verdict.tone === "danger" ? ShieldOff : undefined}
@@ -136,33 +182,7 @@ export function Vulnerabilities({
                 className="max-sm:hidden"
               />
             )}
-            {canScan && (
-              <Button
-                size="sm"
-                variant="outline"
-                disabled={Boolean(asking) || inFlight(scan)}
-                pending={asking === "scan"}
-                onClick={() => void scanNow()}
-              >
-                {inFlight(scan) ? "Scanning…" : "Scan now"}
-              </Button>
-            )}
-            {offerRebuild && (
-              <Button
-                size="sm"
-                variant="outline"
-                title={
-                  rebuildMode === "command"
-                    ? undefined
-                    : "This build's bases are not pinned here; a rebuild pulls them again"
-                }
-                disabled={Boolean(asking)}
-                pending={asking === "rebuild"}
-                onClick={() => void rebuild()}
-              >
-                {asking === "rebuild" ? "Rebuilding…" : "Rebuild"}
-              </Button>
-            )}
+            <RebuildButton state={state} />
           </>
         }
       />
@@ -170,42 +190,34 @@ export function Vulnerabilities({
         {poll.error && !reading && <ErrorState error={poll.error} onRetry={poll.refresh} />}
         {poll.loading && !reading && <LoadingRows rows={1} />}
         {reading && (
-          <VulnerabilityBody
+          <ScanUnread
             reading={reading}
             scan={scan}
-            all={all}
-            onShowAll={() => setAll(true)}
             settingsHref={`/deploy/${projectId}/settings/build#vulnerabilities`}
-          />
+          >
+            {(scan) => <OverviewBody reading={reading} scan={scan} report={report} />}
+          </ScanUnread>
         )}
       </PanelBody>
     </Panel>
   )
 }
 
-/** Whether the panel offers a rebuild, and as the command or as a verb. */
-function rebuildOffer(
-  reading: ImageScanReading | undefined,
-  scan: ImageScan | null,
-): "command" | "verb" | undefined {
-  if (!reading?.rebuild || !scan || scan.state !== "scanned") return undefined
-  if (vulnerable(scan)) return "command"
-  const unpinned = scan.baseUpdates.length === 0 && scan.rebuildable
-  return unpinned && scan.summary.fixable.length > 0 ? "verb" : undefined
-}
-
-function VulnerabilityBody({
+/**
+ * What a page says before there is a scan to read — scanning off, no
+ * scanner, no release yet, the first scan still running — and the scan
+ * itself once there is one.
+ */
+export function ScanUnread({
   reading,
   scan,
-  all,
-  onShowAll,
   settingsHref,
+  children,
 }: {
   reading: ImageScanReading
   scan: ImageScan | null
-  all: boolean
-  onShowAll: () => void
   settingsHref: string
+  children: (scan: ImageScan) => React.ReactNode
 }) {
   if (!reading.policy.enabled)
     return (
@@ -232,187 +244,170 @@ function VulnerabilityBody({
     )
   if (scan.state === "failed" && scan.targets.length === 0)
     return <EmptyNote className="px-0 py-4 text-left">{scan.reason}</EmptyNote>
+  return <>{children(scan)}</>
+}
 
-  const { summary } = scan
-  const fixable = summary.fixable
-  const groups = groupFindings(fixable)
-  const listed = all ? groups : groups.slice(0, LISTED)
-  const outdated = scan.baseUpdates.filter((update) => update.state === "outdated")
+/** The notices a scan raises wherever it is read: a scan that did not finish, a distribution past its end. */
+export function ScanNotices({ scan }: { scan: ImageScan }) {
   const endOfLife = scan.targets.find((target) => target.kind === "release" && target.endOfLife)
-  const failedTargets = scan.targets.filter((target) => target.state === "failed")
-  const fixableAtFloor = countAtLeast(summary.fixableCounts, scan.floor)
-  const bases = scan.targets.filter((target) => target.kind === "base")
-  const lead = scanLead(scan)
-  const verdict = scanVerdict(reading)
-
   return (
-    <div className="space-y-4 pt-1">
-      <WireNode
-        mark={
-          <span className="relative flex">
-            <WireMark tone="logo" size="md">
-              <ProductGlyph id="trivy" />
-            </WireMark>
-            <StatusDot tone={verdict.tone} corner="md" />
-          </span>
-        }
-        title={lead.title}
-        hint={
-          <>
-            {lead.fix && `${lead.fix}. `}
-            Read by {scan.scanner ? `Trivy ${scan.scanner}` : reading.scanner}{" "}
-            <span title={timestamp(scan.finishedAt)}>{relativeTime(scan.finishedAt)}</span>
-            {scan.databaseAgeHours !== undefined &&
-              `, against a vulnerability database ${ageWords(scan.databaseAgeHours)}`}
-            . <SettingsLink href={settingsHref}>Scanning terms</SettingsLink>
-          </>
-        }
-      />
-
-      <SeverityBar counts={summary.counts} />
-
-      {bases.length > 0 && (
-        <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-hint text-muted-foreground">
-          <span>Built on</span>
-          {bases.map((base) => (
-            <span key={base.reference} className="inline-flex min-w-0 items-center gap-1.5">
-              <BaseGlyph reference={base.reference} />
-              <span className="truncate font-mono">{base.reference}</span>
-            </span>
-          ))}
-        </p>
-      )}
-
+    <>
       {scan.state === "failed" && (
         <Notice tone="warning" title="The latest scan did not finish">
-          {scan.reason} The counts above are from the scan before it.
-        </Notice>
-      )}
-      {vulnerable(scan) && outdated.length > 0 && (
-        <Notice tone="danger" icon={ShieldOff} title="A rebuild is likely to fix some of these">
-          {outdated.map((update) => (
-            <span key={update.reference} className="block">
-              <span className="font-mono">{update.reference}</span> now names a newer image (
-              <span className="font-mono">{shortDigest(update.current)}</span>) than the one release{" "}
-              {scan.releaseNumber} was pinned on (
-              <span className="font-mono">{shortDigest(update.pinned)}</span>).
-            </span>
-          ))}
-          {reading.rebuild
-            ? "Rebuilding builds the same commit without the cache, which pins the base again."
-            : reading.rebuildReason}
+          {scan.reason} What is shown is from the scan before it.
         </Notice>
       )}
       {endOfLife && (
         <Notice tone="warning" title={`${endOfLife.os} no longer gets security fixes`}>
-          The distribution this image runs on has reached its end of life, so what the scanner
-          reports is a floor: nothing found since will ever be fixed in it. A newer base is the only
-          way forward.
+          The distribution this image runs on has reached its end of life, so nothing found in it
+          from now on will be fixed. A newer base image is the only way forward.
         </Notice>
       )}
-
-      {fixable.length > 0 ? (
-        <section aria-label="Fixable vulnerabilities" className="min-w-0 space-y-1">
-          <div className="flex min-w-0 items-baseline justify-between gap-3 border-b border-hairline pb-2">
-            <h3 className="text-body leading-tight font-semibold tracking-tight">
-              With a fix, {floorWords(scan.floor)}
-            </h3>
-            <span className="numeric shrink-0 text-hint text-muted-foreground">
-              {plural(fixableAtFloor, "finding")} · {groups.length}{" "}
-              {groups.length === 1 ? "upgrade" : "upgrades"}
-            </span>
-          </div>
-          <ul className="divide-y divide-hairline">
-            {listed.map((group) => (
-              <PackageRow
-                key={`${group.package}:${group.installed}:${group.target}`}
-                group={group}
-              />
-            ))}
-          </ul>
-          {!all && groups.length > LISTED && (
-            <Button size="sm" variant="ghost" className="-ml-2" onClick={onShowAll}>
-              Show all {groups.length}
-            </Button>
-          )}
-        </section>
-      ) : (
-        <EmptyNote className="px-0 py-2 text-left">
-          {summary.unfixed.length > 0
-            ? `${plural(summary.unfixed.length, "finding")} ${floorWords(scan.floor)}, none with a published fix yet.`
-            : `Nothing ${floorWords(scan.floor)} was found.`}
-        </EmptyNote>
-      )}
-
-      {failedTargets.length > 0 && (
-        <p className="text-hint text-muted-foreground">
-          Not read:{" "}
-          {failedTargets.map((target, index) => (
-            <span key={target.reference + index}>
-              {index > 0 && "; "}
-              <span className="font-mono">{target.reference}</span> — {target.reason}
-            </span>
-          ))}
-        </p>
-      )}
-    </div>
+    </>
   )
 }
 
-/**
- * How the scan's findings split, as one bar and its key in the words. Four
- * figures in a row said the same thing and gave a zero the room of a six; here
- * the proportions are the reading, and a severity with nothing in it is absent.
- */
-function SeverityBar({ counts }: { counts: VulnerabilityCounts }) {
-  const parts = SEVERITIES.map((severity) => ({
-    severity,
-    count: counts[severity.toLowerCase() as "critical" | "high" | "medium" | "low"],
-  })).filter((part) => part.count > 0)
-  const total = parts.reduce((sum, part) => sum + part.count, 0)
+/** Trivy's mark, with the verdict's dot in its corner. */
+export function TrivyMark({ reading }: { reading: ImageScanReading }) {
   return (
-    <div className="min-w-0 space-y-2">
-      <div
-        role="img"
-        aria-label={total > 0 ? `By severity: ${countsLine(counts)}` : "Nothing found"}
-        data-testid="severity-bar"
-        className={cn(
-          "flex h-2.5 animate-rise gap-0.5 overflow-hidden rounded-sm",
-          total === 0 ? "bg-success/70" : "bg-meter-track",
-        )}
-      >
-        {parts.map((part) => (
-          <span
-            key={part.severity}
-            className="block h-full [transition:width_700ms_ease-out]"
-            style={{
-              width: `${(part.count / total) * 100}%`,
-              minWidth: 4,
-              background: SEVERITY_COLOR[part.severity],
-            }}
-          />
-        ))}
-      </div>
-      {parts.length > 0 && (
-        <p className="numeric flex flex-wrap gap-x-4 gap-y-1 text-hint text-muted-foreground">
-          {parts.map((part) => (
-            <span key={part.severity} className="inline-flex items-center gap-1.5">
-              <span
-                aria-hidden
-                className="size-2 rounded-xs"
-                style={{ background: SEVERITY_COLOR[part.severity] }}
-              />
-              <span className="font-medium text-foreground">{part.count}</span>
-              {part.severity.toLowerCase()}
-            </span>
+    <span className="relative flex">
+      <WireMark tone="logo" size="md">
+        <ProductGlyph id="trivy" />
+      </WireMark>
+      <StatusDot tone={scanVerdict(reading).tone} corner="md" />
+    </span>
+  )
+}
+
+function OverviewBody({
+  reading,
+  scan,
+  report,
+}: {
+  reading: ImageScanReading
+  scan: ImageScan
+  report: string
+}) {
+  const lead = overviewLead(scan)
+  const actions = scanActions(scan)
+  const listed = actions.slice(0, LISTED)
+  return (
+    <div className="space-y-4 pt-1">
+      <WireNode
+        mark={<TrivyMark reading={reading} />}
+        title={lead.title}
+        hint={
+          <>
+            {lead.where && `${lead.where} `}
+            Read by {scan.scanner ? `Trivy ${scan.scanner}` : reading.scanner}{" "}
+            <span title={timestamp(scan.finishedAt)}>{relativeTime(scan.finishedAt)}</span>.
+          </>
+        }
+      />
+      <ScanNotices scan={scan} />
+      {listed.length > 0 && (
+        <ul aria-label="What to do" className="divide-y divide-hairline">
+          {listed.map((action) => (
+            <ActionRow
+              key={
+                action.kind === "rebuild"
+                  ? "rebuild"
+                  : `${action.group.package}:${action.group.installed}:${action.group.path ?? action.group.target}`
+              }
+              action={action}
+              scan={scan}
+              rebuildReason={reading.rebuild ? undefined : reading.rebuildReason}
+            />
           ))}
-        </p>
+        </ul>
+      )}
+      {actions.length > listed.length && (
+        <SettingsLink href={report}>
+          {actions.length - listed.length} more in the report
+        </SettingsLink>
       )}
     </div>
   )
 }
 
-function BaseGlyph({ reference }: { reference: string }) {
+/** One thing to do: the command, what it fixes, and where the package came from. */
+function ActionRow({
+  action,
+  scan,
+  rebuildReason,
+}: {
+  action: ScanAction
+  scan: ImageScan
+  /** Why this release cannot be rebuilt here (an upstream image), when it cannot. */
+  rebuildReason?: string
+}) {
+  if (action.kind === "rebuild") {
+    const outdated = scan.baseUpdates
+      .filter((update) => update.state === "outdated")
+      .map((update) => update.reference)
+    const tone = severityTone(action.worst)
+    return (
+      <li className="flex min-w-0 items-center gap-3 py-3" data-slot="scan-action">
+        <WireMark tone="logo" size="sm">
+          {outdated[0] ? <BaseGlyph reference={outdated[0]} /> : <Box aria-hidden />}
+        </WireMark>
+        <div className="min-w-0 flex-1">
+          <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+            <span className="text-body font-medium">
+              {action.newerBase && outdated.length > 0
+                ? `Rebuild on the newer ${outdated.join(" and ")}`
+                : "Rebuild to install the fixed packages"}
+            </span>
+            <WorstCounts tone={tone}>{countsLine(action.counts)}</WorstCounts>
+          </div>
+          <p className="text-hint text-muted-foreground">
+            Fixes {packageList(action.packages)}
+            {rebuildReason && `. ${rebuildReason}`}
+          </p>
+        </div>
+      </li>
+    )
+  }
+  const { group } = action
+  const from = dependencyWords(group)
+  return (
+    <li className="flex min-w-0 items-center gap-3 py-3" data-slot="scan-action">
+      <PackageMark group={group} />
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <span className="text-body font-medium">{upgradeTitle(group)}</span>
+          <WorstCounts tone={severityTone(group.worst)}>{countsLine(group.counts)}</WorstCounts>
+        </div>
+        <p className="truncate text-hint text-muted-foreground" title={group.path ?? group.target}>
+          <span className="font-mono">{group.installed}</span> now
+          {from && ` · ${from}`}
+        </p>
+      </div>
+    </li>
+  )
+}
+
+function packageList(packages: string[]) {
+  if (packages.length <= 3) return packages.join(", ")
+  return `${packages.slice(0, 3).join(", ")} and ${packages.length - 3} more`
+}
+
+function WorstCounts({ tone, children }: { tone: string; children: React.ReactNode }) {
+  return (
+    <span
+      className={cn(
+        "numeric text-hint font-medium",
+        tone === "danger" || tone === "warning"
+          ? WORST_TEXT[tone as keyof typeof WORST_TEXT]
+          : "text-muted-foreground",
+      )}
+    >
+      {children}
+    </span>
+  )
+}
+
+export function BaseGlyph({ reference }: { reference: string }) {
   const product = imageProduct(reference)
   return hasProductLogo(product) ? (
     <ProductGlyph id={product} />
@@ -421,36 +416,40 @@ function BaseGlyph({ reference }: { reference: string }) {
   )
 }
 
-/** One upgrade: the package on its ecosystem's mark, and the advisories it answers. */
-function PackageRow({ group }: { group: FindingGroup }) {
+function PackageMark({ group }: { group: FindingGroup }) {
   const product = findingProduct(group)
+  return (
+    <WireMark tone="logo" size="sm">
+      {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Box aria-hidden />}
+    </WireMark>
+  )
+}
+
+/**
+ * One package in the report: on its ecosystem's mark, the version installed
+ * (and the one that fixes it, where the fix is the reader's to take), where it
+ * came from, and each advisory under it.
+ */
+export function PackageRow({ group, showFix }: { group: FindingGroup; showFix: boolean }) {
   const tone = severityTone(group.worst)
+  const from = dependencyWords(group)
   return (
     <li className="min-w-0 py-3" data-slot="vulnerable-package">
       <div className="flex min-w-0 items-center gap-3">
-        <WireMark tone="logo" size="sm">
-          {hasProductLogo(product) ? <ProductGlyph id={product} /> : <Box aria-hidden />}
-        </WireMark>
+        <PackageMark group={group} />
         <div className="min-w-0 flex-1">
           <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
             <span className="truncate text-body font-medium">{group.package}</span>
-            <span
-              className={cn(
-                "numeric text-hint font-medium",
-                tone === "danger" || tone === "warning"
-                  ? WORST_TEXT[tone]
-                  : "text-muted-foreground",
-              )}
-            >
-              {countsLine(group.counts)}
-            </span>
-            {group.fromBase && <Tag title="The base image carries it too">base image</Tag>}
+            <WorstCounts tone={tone}>{countsLine(group.counts)}</WorstCounts>
           </div>
-          <p className="truncate text-hint text-muted-foreground" title={group.target}>
+          <p
+            className="truncate text-hint text-muted-foreground"
+            title={group.path ?? group.target}
+          >
             <span className="font-mono">
-              {group.installed} → {group.fix}
-            </span>{" "}
-            · {group.target}
+              {showFix && group.fix ? `${group.installed} → ${group.fix}` : group.installed}
+            </span>
+            {from && ` · ${from}`} · {group.path ?? group.target}
           </p>
         </div>
       </div>
@@ -491,7 +490,7 @@ function FindingLine({ finding }: { finding: VulnerabilityFinding }) {
   )
 }
 
-function SettingsLink({ href, children }: { href: string; children: React.ReactNode }) {
+export function SettingsLink({ href, children }: { href: string; children: React.ReactNode }) {
   return (
     <Link
       href={href}

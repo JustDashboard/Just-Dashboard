@@ -248,7 +248,8 @@ proxy's page in the alerts kit (`components/alerts/kit.tsx`, `kinds.ts`, `alert-
   firing.
 - **A deployment's image is vulnerable** (`image_vulnerable`, nothing to set, one pass) when its
   environment scans and its live release's latest scan found a vulnerability with a published fix at
-  or above the environment's severity floor **and** a base the release was pinned on (or, for an
+  or above the environment's severity floor in what a base carries (never a development tool's or the
+  application's own, which a newer base does not fix) **and** a base the release was pinned on (or, for an
   upstream image, its own tag) now names a newer image in the registry — together, what says a
   rebuild is likely to fix something (`imageAlertReading` over `deploy.LiveImageScans`). The subject is
   `env:<project>:<environment>`, labelled "shop · production", and the message links to the

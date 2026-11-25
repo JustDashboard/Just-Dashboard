@@ -73,11 +73,13 @@ a link to the project's Assistant page (`/deploy/[id]/assistant?ask=diagnose`,
 `project-assistant.tsx` over `components/assistant/agent/`), which asks the assistant the diagnostic
 question about the environment ([the deployment assistant](../../deployments/operator.md)). The
 Overview's *Vulnerabilities* panel reads the live release's latest image scan
-(`vulnerabilities.tsx`, its words in `vulnerabilities-model.ts`, unit-tested): a figure per severity
-with how many have a fix, the moved base that makes a rebuild worth it, an end-of-life distribution,
-the fixable findings at the floor, and *Rebuild* — the runs route's own `force_build` of the live
-commit — and *Scan now*; Deployments marks a release whose scan found something at the floor, and
-Build settings carries the scanning terms (`settings/vulnerability-scan.tsx`) ([image
+(`vulnerabilities.tsx`, its words in `vulnerabilities-model.ts`, unit-tested) and says only what can
+be done: one row per rebuild or upgrade that fixes something at the floor, with *Rebuild* — the runs
+route's own `force_build` of the live commit — or, with nothing to do, one sentence on where the
+findings are (development tools shipped with the app, the base image), no total and no bar. *Report*
+leads to `/deploy/[id]/vulnerabilities` (`vulnerability-report.tsx`), every finding at the floor under
+whose it is, with *Scan now*; Deployments marks a release only with what can be fixed on it ("2 to
+fix"), and Build settings carries the scanning terms (`settings/vulnerability-scan.tsx`) ([image
 vulnerabilities](../../deployments/image-vulnerabilities.md)). Templates added on this dashboard sit
 beside the reviewed catalogue ([implementation](../../deployments/implementation.md)): the picker on
 `/deploy/new` opens on *Your templates* above the shelves, with a *Yours* chip, each a card like a

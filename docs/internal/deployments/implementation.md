@@ -1963,12 +1963,16 @@ only renderer/executor/validation authority for their feature.
   Trivy in a container with no network, no capabilities and nobody's account
   (`imagescan.ScanSpec`), after the build and daily while it is live (`deploy.ImageScanWatcher`, a run
   observer that never holds a run up). The vulnerability database is fetched by the dashboard itself,
-  checked against its digest and copied into the `jd-image-scan-db` volume. One row per release keeps
-  the counts by severity, the fixable findings, the database's age and whether each pinned base's tag
-  now names a newer digest — `ReleaseUpdate`'s registry read, compared with the digest the release
-  pinned. A fixable finding at the environment's floor with a newer base is the `image_vulnerable`
-  host alert and the overview's Rebuild, which is the runs route's own `force_build` of the live
-  commit. See [image vulnerabilities](image-vulnerabilities.md).
+  checked against its digest and copied into the `jd-image-scan-db` volume. Each finding is read for
+  whose it is — the application's, a development tool's shipped with it (a Node package only
+  devDependencies reach, read from the archive's `package.json` files), or a base's — and what the
+  reader can do: upgrade it, rebuild, or nothing. One row per release keeps the counts by severity and
+  by origin, the findings, the database's age and whether each pinned base's tag now names a newer
+  digest — `ReleaseUpdate`'s registry read, compared with the digest the release pinned. A fixable
+  finding at the environment's floor in a base with a newer base is the `image_vulnerable` host alert;
+  the overview says only what can be done, with Rebuild (the runs route's own `force_build` of the live
+  commit) when a rebuild fixes something, and the rest is in the project's vulnerability report. See
+  [image vulnerabilities](image-vulnerabilities.md).
 - An AI client reaches the deployments over the MCP endpoint when its key was given them
   (`api_tokens.deploy_access`: none, `read`, `deploy`; every deployment, or only those chosen in
   `api_token_deployments`, as a deploy key is narrowed). Six hand-written tools list deployments,
