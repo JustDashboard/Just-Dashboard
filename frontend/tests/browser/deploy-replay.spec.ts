@@ -201,7 +201,10 @@ test("a drifting candidate's replay names the requests it answered differently",
   // The report's own fields are not listed a second time as raw facts.
   await expect(record.getByText("Drift percent", { exact: true })).toHaveCount(0)
   // Nothing was cut over.
-  await expect(list.getByRole("button", { name: /^Switch traffic/ })).toContainText("Waiting")
+  await expect(list.getByRole("button", { name: /^Switch traffic/ })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Steps not reached" })).toContainText(
+    "Switch traffic",
+  )
 })
 
 test("a passing replay reads as the record matched", async ({ page }) => {
@@ -233,17 +236,16 @@ test("a replay that did not run says why", async ({ page }) => {
     drifts: [],
   } as unknown as ReplayReport
   await openRun(page, { state: "succeeded", endedAt: now }, withReplay("skipped", skipped))
+  // A replay that did not run has its reason and nothing else to read, so it
+  // is not a row of the steps but a line under them, beside the reason.
   const list = page.getByRole("list", { name: "Deployment steps" })
-  const step = list.getByRole("button", { name: /Traffic replay/ })
-  await expect(step).toContainText("no request has been recorded for this deployment yet")
-  await step.click()
-  const record = page.getByRole("region", { name: "Traffic replay" })
+  await expect(list.getByRole("button", { name: /Traffic replay/ })).toHaveCount(0)
+  const set = page.getByRole("region", { name: "Skipped steps" })
+  await expect(set.getByText("Traffic replay", { exact: true })).toBeVisible()
   await expect(
-    record.getByText(
-      "Not replayed: no request has been recorded for this deployment yet. The release went on to the cutover on its health checks alone.",
-    ),
+    set.getByText("no request has been recorded for this deployment yet", { exact: true }),
   ).toBeVisible()
-  await expect(record.getByRole("region", { name: "Replay report" })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Replay report" })).toHaveCount(0)
 })
 
 test("the replay terms are saved with the runtime plan", async ({ page }) => {

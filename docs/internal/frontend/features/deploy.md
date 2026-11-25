@@ -49,12 +49,13 @@ trial while its step runs — the window's countdown, the candidate and the live
 carries the traffic replay's terms under *Traffic replay*, beside the release strategy and saved
 with the runtime plan (`settings/replay.tsx`): the switch, the requests replayed, the status drift
 allowed, the slowdown factor, the time limit and the path prefixes, each refused under its own field
-before the save when the server would refuse it; the run page reads a `replay_traffic` step in the
+before the save when the server would refuse it; the run page reads a `replay_traffic` step that ran in the
 Verify stage as one sentence on the step's mark with a line of facts (`run-verdict.tsx`) — how many
 replayed requests matched, then those drifted against the share
 allowed, how long 19 in 20 of the candidate's answers took against the recorded ones, the time taken
 and how many were recorded — over each request the candidate answered differently by method, path, recorded status and its
-answer (`run-replay.tsx`, its words in `replay-model.ts`, unit-tested). Deployments also carries
+answer (`run-replay.tsx`, its words in `replay-model.ts`, unit-tested); one the plan skipped is a
+line under the steps beside its reason. Deployments also carries
 each release's data point as a tag, *Restore data as of this release…* under the release's verbs,
 and the *Data copies* panel — a copy's address revealed on request, *Compare with live*, *Keep 1
 more hour*, *Restore in place…* (a link to the database's Backups page or the backup run's restore,
@@ -171,7 +172,21 @@ while permanent run URLs retain their global identifiers. A run that failed or r
 why it failed* under its failure (`components/deploy/run-diagnosis.tsx`): the assistant's provider is
 asked only on the press, its answer — cause, quoted lines that open the build logs at themselves, steps,
 and the exact masked text that was sent — is kept with the run, and an administrator sets the assistant
-up from there (`deploy-run-diagnosis.spec.ts`). `/deploy/notifications`
+up from there (`deploy-run-diagnosis.spec.ts`). The failure itself is words, with no tile of the step
+beside them (`run-outcome.tsx`), over the lines of the step's output that say why
+(`failure-excerpt.ts`, unit-tested): the line the server's diagnosis proved, else the output of the
+BuildKit instruction that failed read from its first error, else the step's last error, a stack trace
+cut to two frames — never BuildKit's closing recap of the Dockerfile, which is what a failed build's
+last lines are. *Show in build logs* opens the console at that line. The build logs are the transcript
+alone, its stages a select at every width (the rail of stages beside it went in 0.9.1); a `RUN`'s
+`--mount` flags are drawn faint, BuildKit's per-instruction clock gives way to the console's
+elapsed column, and a thrown error's kind (`TypeError:`) is an error line the Errors filter finds
+(`build-console.tsx`, `transcript-line.tsx`, `lib/transcript.ts`). Details lists only the steps that ran:
+the ones the plan skipped are a list under them, each beside its reason, the ones the run did not
+reach — or has not reached yet — one line of names, a stage with no step that ran is not drawn, and
+before any step starts Details is not drawn at all. A step's record shows a failed step's excerpt, a
+running step's newest lines and a short step's whole output, and leaves a long passing output to the
+console (`run-steps.tsx`). `/deploy/notifications`
 (`components/deploy/notifications-page.tsx`) manages Discord, Slack, Microsoft Teams, Mattermost,
 Telegram, ntfy, Gotify, Pushover, e-mail and signed webhook channels with event selection, pause/resume, test delivery and delivery history.
 Its picture is a `WireFlow` (`marks` on a phone): projects, this server, and a node per channel with

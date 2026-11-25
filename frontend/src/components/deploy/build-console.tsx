@@ -93,9 +93,16 @@ function lineAnchor(id: string) {
  * dozens of lines. The clock is the column's title, and what is copied. A
  * phone has no room for it beside the line, and draws none.
  *
- * From `2xl` the stages are a rail beside the transcript rather than a
- * select above it — chosen once by width (§12), so the picker is in the
- * document once.
+ * The stages are a select in the toolbar at every width. From `2xl` they
+ * were a rail beside the transcript, a second list of the steps Details
+ * already lists, taking 240px from the lines; the operator asked for the
+ * transcript alone. Each step's sticky rule already says which step wrote a
+ * line, and narrowing to one is the select, or a step's "Build output" in
+ * Details.
+ *
+ * BuildKit stamps a line with its instruction's own clock (`#13 11.60`);
+ * where the console draws its own elapsed column that is a second clock
+ * beside the first, so the line drops it there.
  */
 export const BuildConsole = memo(function BuildConsole({
   transcript,
@@ -159,7 +166,6 @@ export const BuildConsole = memo(function BuildConsole({
   // reader's only when it went up from there — lines landing between the
   // scroll and its event must not read as the reader leaving the end.
   const followedTo = useRef(0)
-  const rail = useBreakpoint("2xl")
   // On a phone the elapsed column is a sixth of a 326px line, and its chip the
   // one the toolbar's second row has no room for.
   const wide = useBreakpoint("sm")
@@ -261,7 +267,7 @@ export const BuildConsole = memo(function BuildConsole({
   const failed = runFailed(outcome)
   const waiting = active && rows.length === 0
 
-  const stagePicker = rail ? undefined : (
+  const stagePicker = (
     <Select
       value={selectedStep ? String(selectedStep) : "all"}
       onValueChange={(value) => onSelectStep(value === "all" ? undefined : Number(value))}
@@ -281,12 +287,21 @@ export const BuildConsole = memo(function BuildConsole({
       </SelectTrigger>
       <SelectContent>
         <SelectItem value="all">All stages</SelectItem>
-        {steps.map((step) => (
-          <SelectItem key={step.id} value={String(step.id)}>
-            <StepMark state={step.state} />
-            {stepName(step.key, operation)}
-          </SelectItem>
-        ))}
+        {/* A step the plan skipped or the run has not reached wrote nothing
+            and has nothing to narrow to, as Details leaves it out of its rows. */}
+        {steps
+          .filter(
+            (step) =>
+              (step.state !== "skipped" && step.state !== "pending") ||
+              perStep.has(step.id) ||
+              step.id === selectedStep,
+          )
+          .map((step) => (
+            <SelectItem key={step.id} value={String(step.id)}>
+              <StepMark state={step.state} />
+              {stepName(step.key, operation)}
+            </SelectItem>
+          ))}
       </SelectContent>
     </Select>
   )
@@ -379,17 +394,6 @@ export const BuildConsole = memo(function BuildConsole({
       )}
 
       <div className="flex min-h-0 flex-1">
-        {rail && (
-          <StageRail
-            steps={steps}
-            perStep={perStep}
-            total={rows.length}
-            operation={operation}
-            stoppedAt={stoppedAt}
-            selected={selectedStep}
-            onSelect={onSelectStep}
-          />
-        )}
         <div
           ref={body}
           onScroll={(event) => {
@@ -607,6 +611,7 @@ const ConsoleLine = memo(function ConsoleLine({
       needle={needle}
       tokens
       arrived={arrived}
+      stepClock={stampCh === 0}
       stamp={
         stampCh > 0 ? (
           <time
@@ -633,7 +638,7 @@ const ConsoleLine = memo(function ConsoleLine({
 
 /**
  * A step's running time on its own clock, so the second that ticks is drawn
- * by the rule and the rail rather than by the console around the lines.
+ * by the step's rule rather than by the console around the lines.
  */
 function useStepSeconds(step: DeploymentStep, stoppedAt?: string) {
   const stopped = stoppedAt ? Date.parse(stoppedAt) : NaN
@@ -644,8 +649,8 @@ function useStepSeconds(step: DeploymentStep, stoppedAt?: string) {
 }
 
 /**
- * A run at work that has written nothing yet: the step it is at, drawn as the
- * steps rail draws it, with its name lit the way the fleet's card lights the
+ * A run at work that has written nothing yet: the step it is at, drawn as
+ * Details' steps draw it, with its name lit the way the fleet's card lights the
  * stage of a release in flight. It was a grey sentence in the middle of a
  * tall empty pane, which read as a console with nothing behind it. It is not a
  * live region: the run's header already announces the stage, and before a step
@@ -729,132 +734,5 @@ function StepRule({
         {plural(lines, "line")}
       </span>
     </div>
-  )
-}
-
-/**
- * The stages beside the transcript at widths where both fit: every step the
- * run took, its mark, how long it took and how much it wrote, the picked one
- * filled as every selection is (§3).
- *
- * The rail is mounted beside Details, so a stage picked there is not a mount
- * and `autoFocus` would not fire: the picked stage takes the keyboard whenever
- * the pick changes, as the select it replaces does.
- */
-function StageRail({
-  steps,
-  perStep,
-  total,
-  operation,
-  stoppedAt,
-  selected,
-  onSelect,
-}: {
-  steps: DeploymentStep[]
-  perStep: Map<number, number>
-  total: number
-  operation?: string
-  stoppedAt?: string
-  selected?: number
-  onSelect: (id: number | undefined) => void
-}) {
-  const buttons = useRef(new Map<number, HTMLButtonElement>())
-  useEffect(() => {
-    if (selected) buttons.current.get(selected)?.focus()
-  }, [selected])
-  const row = (pressed: boolean) =>
-    cn(
-      "flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-1.5 text-left text-xs focus-ring-inset transition-colors",
-      pressed ? "bg-accent text-foreground" : "text-muted-foreground hover:bg-row-hover",
-    )
-  return (
-    <div
-      role="group"
-      aria-label="Build log stage"
-      className="w-60 shrink-0 space-y-0.5 overflow-y-auto border-r border-hairline p-2"
-    >
-      <button
-        type="button"
-        aria-pressed={!selected}
-        onClick={() => onSelect(undefined)}
-        className={row(!selected)}
-      >
-        <span className="size-3.5 shrink-0" />
-        <span className="min-w-0 flex-1 truncate font-medium">All stages</span>
-        <span className="numeric shrink-0 text-hint text-muted-foreground">{total}</span>
-      </button>
-      {steps.map((step) => (
-        <StageButton
-          key={step.id}
-          step={step}
-          lines={perStep.get(step.id) ?? 0}
-          operation={operation}
-          stoppedAt={stoppedAt}
-          pressed={selected === step.id}
-          className={row(selected === step.id)}
-          onSelect={() => onSelect(step.id)}
-          buttonRef={(element) => {
-            if (element) buttons.current.set(step.id, element)
-            else buttons.current.delete(step.id)
-          }}
-        />
-      ))}
-    </div>
-  )
-}
-
-/** One stage on the rail, with its own clock while it runs. */
-function StageButton({
-  step,
-  lines,
-  operation,
-  stoppedAt,
-  pressed,
-  className,
-  onSelect,
-  buttonRef,
-}: {
-  step: DeploymentStep
-  lines: number
-  operation?: string
-  stoppedAt?: string
-  pressed: boolean
-  className: string
-  onSelect: () => void
-  buttonRef: (element: HTMLButtonElement | null) => void
-}) {
-  const seconds = useStepSeconds(step, stoppedAt)
-  return (
-    <button
-      ref={buttonRef}
-      type="button"
-      aria-pressed={pressed}
-      onClick={onSelect}
-      className={className}
-    >
-      <StepMark state={step.state} />
-      <span
-        className={cn(
-          "min-w-0 flex-1 truncate",
-          pressed || lines > 0 ? "text-foreground" : "",
-          (step.state === "failed" || step.state === "blocked") && "text-destructive",
-        )}
-      >
-        {stepName(step.key, operation)}
-      </span>
-      {seconds !== undefined && (
-        <span className="numeric shrink-0 text-hint text-muted-foreground">
-          {duration(seconds)}
-        </span>
-      )}
-      <span
-        className={cn(
-          "numeric w-6 shrink-0 text-right text-hint",
-          lines ? "text-muted-foreground" : "text-faint",
-        )}
-      >
-        {lines}
-      </span>
-    </button>
   )
 }

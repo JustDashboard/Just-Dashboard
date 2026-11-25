@@ -57,6 +57,10 @@ describe("a transcript's lines", () => {
     expect(classify("FAILED: docker compose build: exit status 1").kind).toBe("error")
     expect(classify("#31 ERROR: process did not complete successfully").kind).toBe("error")
     expect(classify("#29 12.1 error TS2322: Type 'string' is not assignable").kind).toBe("error")
+    expect(
+      classify("#17 2.167 TypeError: ts.getParsedCommandLineOfConfigFile is not a function").kind,
+    ).toBe("error")
+    expect(classify("#9 1.2 ModuleNotFoundError: No module named 'flask'").kind).toBe("error")
     expect(classify("#29 30.2 Found 0 errors.").kind).toBe("output")
     expect(classify("#29 3.4 warning: deprecated option").kind).toBe("warning")
   })

@@ -66,7 +66,7 @@ import {
 import { useNow } from "@/hooks/use-now"
 import { BuildConsole } from "@/components/deploy/build-console"
 import { ReleasePipeline } from "@/components/deploy/run-pipeline"
-import { RunDetails, initialStep } from "@/components/deploy/run-steps"
+import { RunDetails, initialStep, ranStep } from "@/components/deploy/run-steps"
 import { RunHeader } from "@/components/deploy/run-header"
 import { RunFailure, RunReady } from "@/components/deploy/run-outcome"
 import { RunCanary } from "@/components/deploy/run-canary"
@@ -386,6 +386,10 @@ export function RunPage() {
 
   const current =
     attempts.find((step) => step.state === "running" || step.state === "failed") ?? attempts.at(-1)
+  // Details is the steps that ran and what each recorded: before the first
+  // starts it would be a frame around nothing, and the build logs already
+  // say what the run is waiting for.
+  const anyRan = attempts.some(ranStep)
 
   const cancel = async () => {
     if (working) return
@@ -485,11 +489,13 @@ export function RunPage() {
     else scrollIntoViewRespectingMotion(document.getElementById("build-logs"))
   }
 
-  const showFailure = () => {
+  // At the cause's line where the diagnosis named one, else at the line the
+  // failure's excerpt is about.
+  const showFailure = (seq?: number) => {
     if (!failedStep) return
     showOutput(failedStep.id)
-    if (cause?.lineSeq)
-      setFocusLine((focus) => ({ seq: cause.lineSeq!, nonce: (focus?.nonce ?? 0) + 1 }))
+    const line = cause?.lineSeq ?? seq
+    if (line) setFocusLine((focus) => ({ seq: line, nonce: (focus?.nonce ?? 0) + 1 }))
   }
 
   // A line the diagnosis quoted, in the build logs: on its own step's
@@ -644,7 +650,6 @@ export function RunPage() {
           cause={cause}
           kept={kept}
           rows={rows}
-          deployment={deployment}
           now={clock}
           changedSince={changedSince}
           fix={fix}
@@ -806,7 +811,7 @@ export function RunPage() {
             // frame of the desk's, since the pane is the frame.
             <div className="min-h-0 flex-1 space-y-6 overflow-y-auto px-(--page-inset) py-4">
               {stop === "steps" && outcome}
-              {attempts.length > 0 && (
+              {anyRan && (
                 <RunDetails
                   projectId={projectId}
                   deployment={deployment}
@@ -822,6 +827,7 @@ export function RunPage() {
                   }}
                   onShowOutput={showOutput}
                   pane={stop === "step" ? "step" : "steps"}
+                  active={active}
                 />
               )}
             </div>
@@ -866,7 +872,7 @@ export function RunPage() {
               />
             </div>
           </Section>
-          {attempts.length > 0 && (
+          {anyRan && (
             <RunDetails
               projectId={projectId}
               deployment={deployment}
@@ -878,6 +884,7 @@ export function RunPage() {
               selected={inspectedStepId ?? initialStep(attempts)?.id}
               onSelect={setInspectedStepId}
               onShowOutput={showOutput}
+              active={active}
             />
           )}
         </>

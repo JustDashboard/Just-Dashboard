@@ -133,7 +133,10 @@ test("a step the engine wrote no times for takes them from its events", async ({
   })
   await page.clock.install({ time: new Date("2026-09-03T12:00:00Z") })
   await page.goto("/deploy/7/runs/84")
-  await expect(page.getByRole("list", { name: "Deployment steps" })).toBeVisible()
+  await expect(page.getByRole("heading", { name: "Deployment #1" })).toBeVisible()
+  // Before any step has started, Details is not drawn: a frame of steps that
+  // have nothing to show yet.
+  await expect(page.getByRole("heading", { name: "Details" })).toHaveCount(0)
 
   // An engine from before the times were sent: the event's own instant is
   // when the step started.

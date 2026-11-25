@@ -164,6 +164,8 @@ export function TranscriptRow({
   marked,
   gutter,
   inBlock,
+  stepClock = true,
+  stepNumber = true,
 }: {
   line: TranscriptLine
   wrap: boolean
@@ -198,6 +200,18 @@ export function TranscriptRow({
    * the line names its own role.
    */
   inBlock?: boolean
+  /**
+   * Draw BuildKit's per-instruction clock (`#13 11.60`). A console with an
+   * elapsed column of its own turns it off: two clocks on one line, counting
+   * from different zeros, read as one number too many.
+   */
+  stepClock?: boolean
+  /**
+   * Draw the BuildKit step number a line printed under (`#17`). An excerpt
+   * of one instruction's output turns it off with the clock: every line has
+   * the same one, and on a phone the two took a third of the line.
+   */
+  stepNumber?: boolean
 }) {
   if (line.kind === "blank") return <li aria-hidden className="h-3" />
   const lane = laneFor(line.service)
@@ -241,7 +255,7 @@ export function TranscriptRow({
           <span className="font-medium" style={lane ? { color: lane } : undefined}>
             [{line.target}]
           </span>{" "}
-          <span className="font-medium text-foreground">{text(rest)}</span>
+          <Instruction text={rest} needle={needle} />
         </span>
       )
       break
@@ -287,8 +301,8 @@ export function TranscriptRow({
       if (line.time && rest.startsWith(`${line.time} `)) rest = rest.slice(line.time.length + 1)
       content = (
         <span className={flow}>
-          {stepped && <StepNo step={line.step} />}
-          {line.time && line.kind !== "progress" && (
+          {stepped && stepNumber && <StepNo step={line.step} />}
+          {stepClock && line.time && line.kind !== "progress" && (
             <span className="numeric mr-2 text-faint select-none">{line.time}</span>
           )}
           {tokens && line.kind === "output" ? (
@@ -341,6 +355,26 @@ export function TranscriptRow({
         {trailing}
       </span>
     </li>
+  )
+}
+
+/** The flags BuildKit runs an instruction with, before the command itself. */
+const RUN_FLAG = /(--(?:mount|network|security)=\S+\s*)/
+
+/**
+ * An instruction's text with its `RUN` flags drawn faint: the recipes mount a
+ * cache and a secret per variable, so a build's `RUN` was eight lines of
+ * `--mount=type=secret,…` wrapped around the one command it ran. The text is
+ * the same, for search and copying; only the weight moves to the command.
+ */
+function Instruction({ text, needle }: { text: string; needle: string }) {
+  // A capturing split puts the flags at the odd places.
+  return text.split(RUN_FLAG).map((part, index) =>
+    part === "" ? null : (
+      <span key={index} className={index % 2 === 1 ? "text-faint" : "font-medium text-foreground"}>
+        <Hit text={part} needle={needle} />
+      </span>
+    ),
   )
 }
 

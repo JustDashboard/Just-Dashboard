@@ -254,8 +254,10 @@ test("Details shows the picked step's record, and only a step with output leads 
   await mockProject(page)
   const withEvidence = steps.map((step) =>
     step.key === "backup_gate"
-      ? { ...step, evidence: { reason: "no backup gate configured", routeRemoved: true } }
-      : step,
+      ? { ...step, evidence: { reason: "no backup gate configured" } }
+      : step.key === "release_task"
+        ? { ...step, evidence: { task: "migrate", exitCode: 0 } }
+        : step,
   )
   await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
     socket.send(
@@ -269,9 +271,9 @@ test("Details shows the picked step's record, and only a step with output leads 
             seq: 30,
             type: "step.log",
             runId: 84,
-            stepId: 111,
+            stepId: 110,
             ts: now,
-            data: { stream: "stdout", text: "smoke: GET / 200\n", truncated: false },
+            data: { stream: "stdout", text: "readiness: GET /health 200\n", truncated: false },
           },
         ],
         ts: Date.now(),
@@ -286,9 +288,16 @@ test("Details shows the picked step's record, and only a step with output leads 
   await expect(page.getByRole("heading", { name: "Details" })).toBeVisible()
   const list = page.getByRole("list", { name: "Deployment steps" })
   await expect(list).toBeVisible()
-  await expect(page.getByText("15 steps · 8 passed · 1 skipped", { exact: true })).toBeVisible()
+  // The steps that ran are counted; the rest say why they are not rows.
+  await expect(
+    page.getByText("9 steps ran · 1 skipped · 5 still to run", { exact: true }),
+  ).toBeVisible()
   // The rail is the release path read down: each stage the run includes.
   await expect(list.getByRole("list", { name: "Verify", exact: true })).toBeVisible()
+  // Only steps that ran are rows: a stage whose steps have not started yet
+  // is not drawn.
+  await expect(list.getByRole("list", { name: "Route", exact: true })).toHaveCount(0)
+  await expect(list.getByRole("button")).toHaveCount(9)
 
   // It opens on the step at work.
   const inspector = page.getByRole("region", { name: "Readiness checks" })
@@ -297,36 +306,49 @@ test("Details shows the picked step's record, and only a step with output leads 
     "aria-pressed",
     "true",
   )
+  // The newest lines it wrote stand in its record.
+  await expect(
+    page
+      .getByRole("list", { name: "Readiness checks output" })
+      .getByText("readiness: GET /health 200"),
+  ).toBeVisible()
 
-  // The skipped gate's reason is its second line; picked, its evidence is facts.
-  const gate = list.getByRole("button", { name: /Backup check/ })
-  await expect(gate).toContainText("no backup gate configured")
-  await gate.click()
-  await expect(gate).toHaveAttribute("aria-pressed", "true")
-  const record = page.getByRole("region", { name: "Backup check" })
-  await expect(record.getByText("Route removed", { exact: true })).toBeVisible()
-  await expect(record.getByText("Yes", { exact: true })).toBeVisible()
-  // Nothing was written to the build log for it, so nothing offers the console.
-  await expect(page.getByRole("button", { name: "Build output", exact: true })).toHaveCount(0)
+  // The skipped gate is a line under the steps beside its reason, which is
+  // all it recorded, not a button onto an empty record.
+  await expect(list.getByRole("button", { name: /Backup check/ })).toHaveCount(0)
+  const skipped = page.getByRole("region", { name: "Skipped steps" })
+  await expect(skipped.getByText("Backup check", { exact: true })).toBeVisible()
+  await expect(skipped.getByText("no backup gate configured", { exact: true })).toBeVisible()
+  // What the run has not reached is one line of names.
+  await expect(page.getByRole("region", { name: "Steps still to run" })).toHaveText(
+    /Smoke checks · Switch traffic/,
+  )
 
   // A step that passed with no end recorded reads as done, not as a
   // duration measured to the present.
   await expect(list.getByRole("button", { name: /Resolve source/ })).toContainText("Done")
 
-  const smoke = list.getByRole("button", { name: /Smoke checks/ })
-  await smoke.focus()
+  // Picked, a step's evidence is facts; it wrote nothing to the build log,
+  // so nothing offers the console.
+  const task = list.getByRole("button", { name: /Release task/ })
+  await task.click()
+  await expect(task).toHaveAttribute("aria-pressed", "true")
+  const record = page.getByRole("region", { name: "Release task" })
+  await expect(record.getByText("migrate", { exact: true })).toBeVisible()
+  await expect(page.getByRole("button", { name: "Build output", exact: true })).toHaveCount(0)
+
+  const readiness = list.getByRole("button", { name: /Readiness checks/ })
+  await readiness.focus()
   await page.keyboard.press("Enter")
-  // The last lines it wrote stand in its record.
-  await expect(
-    page.getByRole("list", { name: "Smoke checks output" }).getByText("smoke: GET / 200"),
-  ).toBeVisible()
   await page.getByRole("button", { name: "Build output", exact: true }).click()
 
   const stage = page.getByRole("combobox", { name: "Build log stage" })
-  await expect(stage).toHaveText("Smoke checks")
+  await expect(stage).toHaveText("Readiness checks")
   await expect(stage).toBeFocused()
   await expect(
-    page.getByRole("group", { name: "Deployment transcript" }).getByText("smoke: GET / 200"),
+    page
+      .getByRole("group", { name: "Deployment transcript" })
+      .getByText("readiness: GET /health 200"),
   ).toBeVisible()
 })
 
@@ -524,15 +546,16 @@ test("a failure leads to the step that failed", async ({ page }) => {
   })
   await page.goto("/deploy/7/runs/84")
 
-  // What broke, where in the run, and the last lines the step wrote.
+  // What broke, where in the run, and the lines of the step's output that
+  // say why — in words, with no tile of the step beside them.
   const failure = page.getByRole("region", { name: "Why this deployment failed" })
   await expect(failure.getByText("Failed at", { exact: false })).toContainText("Build")
   await expect(failure.getByText("step 5 of 15", { exact: false })).toBeVisible()
-  await expect(
-    failure
-      .getByRole("list", { name: "Last lines from Build" })
-      .getByText('error: script "build" exited with code 1'),
-  ).toBeVisible()
+  await expect(failure.locator("img")).toHaveCount(0)
+  const output = failure.getByRole("list", { name: "Output from Build" })
+  await expect(output.getByText('error: script "build" exited with code 1')).toBeVisible()
+  // The error line is the one held out.
+  await expect(output.locator('[aria-current="true"]')).toContainText("exited with code 1")
 
   // Details opens on it.
   await expect(page.getByRole("region", { name: "Build", exact: true })).toBeVisible()

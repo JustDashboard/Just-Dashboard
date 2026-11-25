@@ -9,7 +9,6 @@ import type {
   DeploymentFailureCause,
   DeploymentRelease,
   DeploymentStep,
-  DeploymentSummary,
 } from "@/lib/types"
 import { StatusDot } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
@@ -23,18 +22,24 @@ import {
 } from "@/components/deploy/vocabulary"
 import { causeHeadline, causeTitle } from "@/components/deploy/failure-cause"
 import type { ConsoleRow } from "@/components/deploy/build-console"
-import { StepTile } from "@/components/deploy/run-evidence"
+import { failureExcerpt } from "@/components/deploy/failure-excerpt"
 
-/** How many of the failing step's last lines stand under the failure. */
-const TAIL = 4
+/** How many lines of the failing step's output stand under the failure. */
+const EXCERPT = 6
 
 /**
  * How a run that failed or rolled back ended, said once and in the order it
- * is read: what broke, drawn as the step it broke in on that step's tile;
- * where in the run, how far it got and when; the engine's reason in its own
- * words; the last lines the step wrote, so "nothing is clear" is answered on
- * the page rather than three presses away; and what to do — the fix where the
+ * is read: what broke; where in the run, how far it got and when; the
+ * engine's reason in its own words; the lines of the step's output that say
+ * why (`failureExcerpt`), so "nothing is clear" is answered on the page
+ * rather than three presses away; and what to do — the fix where the
  * evidence names one, the line in the build logs, the step's whole record.
+ *
+ * The step it broke in was drawn as its tile beside the headline, a 40px
+ * Docker logo the step's name in the line under it already said; the
+ * operator asked for the words alone. And the lines were the step's last
+ * four, which for a Docker build are BuildKit's recap of the Dockerfile, not
+ * the program's error.
  *
  * It was a banner of a title, a sentence and one button, and the sentence was
  * the engine's message at the size of a hint. A failure is the one thing on
@@ -49,7 +54,6 @@ export function RunFailure({
   cause,
   kept,
   rows,
-  deployment,
   now,
   changedSince,
   fix,
@@ -66,15 +70,17 @@ export function RunFailure({
   /** The release that stayed live when the run rolled back. */
   kept?: DeploymentRelease
   rows: ConsoleRow[]
-  deployment?: DeploymentSummary
   now: number
   /** What changed in the settings since the run, when they did. */
   changedSince?: string
   fix?: { href: string; label: string }
   /** The fix is the way forward rather than a place to check. */
   fixIsCommand: boolean
-  /** The build console on the failing step — at the cause's line where it names one. */
-  onShowOutput: () => void
+  /**
+   * The build console on the failing step, at the line the excerpt is about
+   * where it found one (the cause's own line where the diagnosis named it).
+   */
+  onShowOutput: (seq?: number) => void
   onShowStep: () => void
 }) {
   const rolledBack = run.state === "rolled_back"
@@ -83,7 +89,8 @@ export function RunFailure({
     : cause
       ? causeHeadline(cause)
       : causeTitle(run.terminalCode || "deployment_failed")
-  const tail = step ? rows.filter((row) => row.stepId === step.id).slice(-TAIL) : []
+  const excerpt = step ? failureExcerpt(rows, step.id, cause?.lineSeq, EXCERPT) : undefined
+  const tail = excerpt?.rows ?? []
   const seconds = step ? stepSeconds(step, now) : undefined
   const reached = step ? steps.findIndex((candidate) => candidate.id === step.id) + 1 : 0
   return (
@@ -95,56 +102,49 @@ export function RunFailure({
       )}
     >
       <div className="flex min-w-0 flex-col gap-4 p-4 sm:flex-row sm:items-start">
-        <div className="flex min-w-0 flex-1 gap-3.5">
-          {step ? (
-            <StepTile step={step} state={step.state} deployment={deployment} size="md" />
-          ) : (
-            <span className="flex size-10 shrink-0 items-center justify-center">
-              <StatusDot tone={rolledBack ? "warning" : "danger"} />
+        <div className="min-w-0 flex-1 space-y-1.5">
+          <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+            <span className="text-title leading-tight font-semibold tracking-tight">
+              {headline}
             </span>
-          )}
-          <div className="min-w-0 space-y-1.5">
-            <p className="flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
-              <span className="text-title leading-tight font-semibold tracking-tight">
-                {headline}
+            {run.terminalCode && <Tag mono>{run.terminalCode}</Tag>}
+          </p>
+          {step && (
+            <p className="numeric text-xs text-muted-foreground">
+              {rolledBack ? "Stopped at " : "Failed at "}
+              <span className="font-medium text-foreground">
+                {stepName(step.key, stepOperation(run))}
               </span>
-              {run.terminalCode && <Tag mono>{run.terminalCode}</Tag>}
+              {` · step ${reached} of ${steps.length}`}
+              {seconds !== undefined && ` · after ${formatDuration(seconds)}`}
+              {run.endedAt && ` · ${relativeTime(run.endedAt)}`}
             </p>
-            {step && (
-              <p className="numeric text-xs text-muted-foreground">
-                {rolledBack ? "Stopped at " : "Failed at "}
-                <span className="font-medium text-foreground">
-                  {stepName(step.key, stepOperation(run))}
-                </span>
-                {` · step ${reached} of ${steps.length}`}
-                {seconds !== undefined && ` · after ${formatDuration(seconds)}`}
-                {run.endedAt && ` · ${relativeTime(run.endedAt)}`}
-              </p>
-            )}
-            {cause?.subjects && cause.subjects.length > 0 && (
-              <p className="flex flex-wrap gap-1.5 pt-0.5" aria-label="Named by the failure">
-                {cause.subjects.map((subject) => (
-                  <Tag key={subject} mono>
-                    {subject}
-                  </Tag>
-                ))}
-              </p>
-            )}
-            {run.terminalReason && (
-              <p className="pt-0.5 text-body leading-relaxed text-foreground">
-                {run.terminalReason}
-              </p>
-            )}
-          </div>
+          )}
+          {cause?.subjects && cause.subjects.length > 0 && (
+            <p className="flex flex-wrap gap-1.5 pt-0.5" aria-label="Named by the failure">
+              {cause.subjects.map((subject) => (
+                <Tag key={subject} mono>
+                  {subject}
+                </Tag>
+              ))}
+            </p>
+          )}
+          {run.terminalReason && (
+            <p className="pt-0.5 text-body leading-relaxed text-foreground">{run.terminalReason}</p>
+          )}
         </div>
-        <div className="flex shrink-0 flex-wrap gap-2 max-sm:pl-13.5">
+        <div className="flex shrink-0 flex-wrap gap-2">
           {fix && (
             <Button size="sm" variant={fixIsCommand ? "default" : "outline"} asChild>
               <Link href={fix.href}>{fix.label}</Link>
             </Button>
           )}
           {step && (
-            <Button variant="outline" size="sm" onClick={onShowOutput}>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onShowOutput(tail.find((row) => row.id === excerpt?.marked)?.seq)}
+            >
               <Logs className="size-3.5" />
               {cause?.lineSeq ? "Show the line" : "Show in build logs"}
             </Button>
@@ -160,7 +160,7 @@ export function RunFailure({
         <div className="space-y-3 px-4 pb-4">
           {tail.length > 0 && (
             <ol
-              aria-label={`Last lines from ${step ? stepName(step.key, stepOperation(run)) : "the run"}`}
+              aria-label={`Output from ${step ? stepName(step.key, stepOperation(run)) : "the run"}`}
               className="overflow-hidden rounded-md border border-hairline bg-surface-sunken py-1.5 font-mono text-xs leading-6"
             >
               {tail.map((row) => (
@@ -170,7 +170,9 @@ export function RunFailure({
                   wrap
                   needle=""
                   tokens
-                  marked={cause?.lineSeq !== undefined && row.id.startsWith(`${cause.lineSeq}:`)}
+                  stepClock={false}
+                  stepNumber={false}
+                  marked={row.id === excerpt?.marked}
                 />
               ))}
             </ol>
