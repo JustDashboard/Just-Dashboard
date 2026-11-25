@@ -166,8 +166,16 @@ function Preview({ className, ...props }: PreviewProps) {
     return () => controller.abort()
   }, [path, modified])
 
+  // `relative`, so what is placed inside it is clipped by it: a screen-reader
+  // label (`sr-only`, placed absolutely) far down the facts was placed against
+  // the column instead, past the window, and made the whole workspace one
+  // 41px scroll long. A click that scrolled it there landed a row away when
+  // the inspector shortened and the workspace sprang back.
   return (
-    <div data-files-inspector className={cn("flex min-h-0 flex-col overflow-auto", className)}>
+    <div
+      data-files-inspector
+      className={cn("relative flex min-h-0 flex-col overflow-auto", className)}
+    >
       <Hero {...props} preview={preview} />
       {error && <ErrorState error={error} className="m-4" />}
       {!preview && !error && <LoadingRows rows={4} className="p-4" />}

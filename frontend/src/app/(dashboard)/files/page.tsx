@@ -1737,12 +1737,11 @@ export default function FilesPage() {
                 value={view}
                 onValueChange={(v) => v && setView(v)}
                 aria-label="View"
-                className="h-8"
               >
-                <ToggleGroupItem value="list" aria-label="Details" className="h-8 min-w-8 px-0">
+                <ToggleGroupItem value="list" aria-label="Details" className="min-w-8 px-0">
                   <ListUnordered className="size-3.5" />
                 </ToggleGroupItem>
-                <ToggleGroupItem value="grid" aria-label="Tiles" className="h-8 min-w-8 px-0">
+                <ToggleGroupItem value="grid" aria-label="Tiles" className="min-w-8 px-0">
                   <GridSquare className="size-3.5" />
                 </ToggleGroupItem>
               </ToggleGroup>
