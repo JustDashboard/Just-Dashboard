@@ -95,7 +95,7 @@ const railChip = (chip: SiteChip): SiteChip =>
  * It opens on the identity line the section's other destinations open on:
  * the engine's mark, the site's name and whether it is serving, what it is,
  * and at the far end whether it is well, the one command that edits it and
- * the rest behind `⋯`. Under it its views, as the underlined strip with the
+ * the rest behind `⋯`. Under it its views, as the view strip with the
  * view in the address (`?tab=`):
  *
  *   **Overview** — how a request reaches it, drawn as the visitors, the

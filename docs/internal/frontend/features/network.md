@@ -378,8 +378,8 @@ service state. The pages that moved keep their behaviour:
   history off it offers the page that turns it on.
   **An address is a page of its own** (`/network/connections/[address]`, `connections/address-page.tsx`),
   in place of the peer sheet, on the process page's shape: a way back, the identity line with the block
-  (or lifting it) as its one command and the lookups in the menu, "Live" and "A past hour" as an
-  underlined strip (`?tab=past`, `?hour=`), and from `xl` a rail of the live list with the list's own
+  (or lifting it) as its one command and the lookups in the menu, "Live" and "A past hour" as a
+  view strip (`?tab=past`, `?hour=`), and from `xl` a rail of the live list with the list's own
   search and chip (`connections/address-rail.tsx`; Alt+↑ and Alt+↓ walk it and carry the open view).
   `?peer=<address>` on the list lands on it. The live view (`connections/address-views.tsx`) is a
   picture of the address, this server's ports and the programs behind them — what the summary folded:

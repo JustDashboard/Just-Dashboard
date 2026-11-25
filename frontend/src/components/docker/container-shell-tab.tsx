@@ -123,10 +123,16 @@ export function ContainerShellTab({ detail }: { detail: ContainerDetail }) {
                 value={asRoot ? "root" : "default"}
                 onValueChange={(value) => value && setAsRoot(value === "root")}
               >
-                <ToggleGroupItem value="default" className="h-7 px-2 font-mono text-hint">
+                <ToggleGroupItem
+                  value="default"
+                  className="h-5 px-2 font-mono text-hint pointer-coarse:h-5"
+                >
                   {imageUser.split(":")[0]}
                 </ToggleGroupItem>
-                <ToggleGroupItem value="root" className="h-7 px-2 font-mono text-hint">
+                <ToggleGroupItem
+                  value="root"
+                  className="h-5 px-2 font-mono text-hint pointer-coarse:h-5"
+                >
                   root
                 </ToggleGroupItem>
               </ToggleGroup>

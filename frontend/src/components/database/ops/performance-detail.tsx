@@ -14,7 +14,7 @@ import { useDatabase } from "@/components/database/shell/database-context"
 /**
  * The shape of a page Performance opens for one thing — a statement, a table,
  * a session — which is the process page's (`procs/process-page`): a way back,
- * the identity line, the views as an underlined strip with the open one in
+ * the identity line, the views as a view strip with the open one in
  * the address, and from `xl` the list it was opened from as a column on the
  * left, so the next one is a press away and not a trip back to the list.
  *
@@ -117,7 +117,7 @@ export function useDetailTab<T extends string>(views: readonly DetailView<T>[]) 
   return [tab, setTab] as const
 }
 
-/** The underlined strip and the open view under it, which scrolls by itself where the page is held to the window. */
+/** The view strip and the open view under it, which scrolls by itself where the page is held to the window. */
 export function DetailTabs<T extends string>({
   label,
   views,

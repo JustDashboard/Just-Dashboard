@@ -473,7 +473,7 @@ function PackagesPage({ asked }: { asked: string | null }) {
 
         {(data?.available || reading) && (
           <div className="flex min-w-0 animate-rise flex-col gap-4">
-            {/* The same underlined strip every switcher in the product wears:
+            {/* The same view strip every switcher in the product wears:
               the brand underline says where you are, and the label stays
               ink. It is drawn while the inventory is still out, so the views
               land under a strip that is already there. */}

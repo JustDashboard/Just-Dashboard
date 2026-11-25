@@ -143,7 +143,7 @@ redesigned now starts from them:
 - **A picture of things wired through one hub is `WireFlow`**, and it waits at its loaded shape
   (§2, the two paragraphs on it).
 - **An item's detail is a page with a rail, not a sheet**: a route of its own on `DetailPage`, which
-  is a way back, the identity line with its one command, the views as an underlined strip named in
+  is a way back, the identity line with its one command, the views as a view strip named in
   `?tab=`, and from `xl` the list it came from as a `Rail` with that list's own filter, Alt+↑ and
   Alt+↓ walking it with the view kept. The address that opened the sheet redirects to the page. A
   sheet stays for a small add or edit form ([`detail-with-rail.md`](detail-with-rail.md)).

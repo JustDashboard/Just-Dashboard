@@ -67,7 +67,7 @@ const BACK = { href: "/proxy/certificates", label: "Certificates" }
  * list. It is a destination now, on the detail frame every item page shares
  * (`DetailPage`): the way back with the arrows, the identity line with the
  * certificate's verbs on it (`IdentityVerbs`), then its views as the
- * underlined strip, with `?tab=` in the address.
+ * view strip, with `?tab=` in the address.
  *
  * What the sheet did well — the list beside the thing being read — is the
  * column on the left from `xl` (`CertificateRail`): the list's own search,
@@ -226,12 +226,7 @@ function CertificateMain({
       <CertificateRun />
     </>,
     <Tabs value={shown} onValueChange={setTab} className="gap-0">
-      <ViewTabList
-        label={`Views of ${cert.name}`}
-        value={shown}
-        views={views}
-        sticky
-      />
+      <ViewTabList label={`Views of ${cert.name}`} value={shown} views={views} sticky />
 
       <TabsContent value="overview" className="space-y-8 pt-6">
         <CertificateOverview
@@ -345,11 +340,7 @@ function CertificateIdentity({
       }
       title={<span className="truncate">{cert.name}</span>}
       state={
-        replacing ? (
-          <Status state="activating" label="Replacing…" />
-        ) : (
-          <ExpiryStatus cert={cert} />
-        )
+        replacing ? <Status state="activating" label="Replacing…" /> : <ExpiryStatus cert={cert} />
       }
       {...lineVerbs(cert.name, verbs)}
       facts={

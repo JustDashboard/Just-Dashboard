@@ -90,7 +90,7 @@ const BACK = { href: "/processes", label: "Processes" }
  * threads, descriptors, limits, environment, the signals it handles) had
  * nowhere to go. So a process is a destination with a way back, the way a
  * container is (`docker/container-detail`), on the shared detail frame
- * (`DetailPage`), and its views are the underlined strip under its identity
+ * (`DetailPage`), and its views are the view strip under its identity
  * line.
  *
  * What the sheet did well — the table beside the thing being read — is the

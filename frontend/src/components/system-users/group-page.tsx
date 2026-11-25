@@ -63,7 +63,7 @@ const BACK = { href: "/system-users/groups", label: "Groups" }
  * group is opened to find out (what being in it hands over, and through which
  * rule) was one grey line there. So a group is a destination with a way back,
  * on the shape a service's page has (`procs/service-page.tsx`): its identity
- * line, its views as an underlined strip with the one on screen in the address,
+ * line, its views as a view strip with the one on screen in the address,
  * and from `xl` the list beside it with its search and its order, so the next
  * group is one press away and Alt+↑ and Alt+↓ walk it.
  *

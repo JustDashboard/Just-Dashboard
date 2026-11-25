@@ -100,7 +100,7 @@ const BACK = { href: "/processes/services", label: "Services" }
  * environment that file gives it, how much of the host it can reach, and the
  * verbs only a full read can offer — had nowhere to go. So a unit is a
  * destination with a way back, the way a process is (`process-page`), on the
- * shared detail frame (`DetailPage`), and its views are the underlined strip
+ * shared detail frame (`DetailPage`), and its views are the view strip
  * under its identity line.
  *
  * The table stays beside it from `xl` (`ServiceRail`): its filters, search

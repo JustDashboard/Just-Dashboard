@@ -130,7 +130,7 @@ export function QueryRail({
         value={view}
         onValueChange={onView}
         rootClassName="min-h-0 flex-1"
-        className="bg-surface-header [&_[role=tab]]:px-2.5"
+        className="bg-surface-header [&_[role=tab]]:px-1.5"
       >
         <TabsContent value={view} className="flex min-h-0 flex-col">
           {view === "saved" && (

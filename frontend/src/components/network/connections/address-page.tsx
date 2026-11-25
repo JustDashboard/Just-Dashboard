@@ -71,7 +71,7 @@ type Frame = Omit<React.ComponentProps<typeof DetailPage>, "identity" | "childre
  * is a destination with a way back, built the way a process is
  * (`procs/process-page.tsx`): its identity line with its verbs, its two views
  * — what it holds now, and what socket history kept of an hour — as the
- * underlined strip, in the address bar as `?tab=` and `?hour=`.
+ * view strip, in the address bar as `?tab=` and `?hour=`.
  *
  * From `xl` the live list stands beside it (`AddressRail`), with the list's own
  * search and chip, so checking the next caller is one press, Alt+↑ and Alt+↓

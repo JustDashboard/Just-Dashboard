@@ -82,7 +82,7 @@ const BACK = { href: "/processes/pm2", label: "PM2" }
  * product, a process's, linked straight into it. So an application is a
  * destination with a way back, the way a process and a service are
  * (`process-page`, `service-page`): the line it opens on, its views as the
- * underlined strip under that line with the view in the address, and the
+ * view strip under that line with the view in the address, and the
  * list beside it.
  *
  * The page is the application's, not one worker's. PM2 lists a cluster once

@@ -37,6 +37,13 @@ const top = (locator: Locator) =>
         document.querySelector("[data-slot=page]")!.getBoundingClientRect().top,
     ),
   )
+/** `top` before it is rounded, for a block that may rest on a half pixel. */
+const exactTop = (locator: Locator) =>
+  locator.evaluate(
+    (node) =>
+      node.getBoundingClientRect().top -
+      document.querySelector("[data-slot=page]")!.getBoundingClientRect().top,
+  )
 const height = async (locator: Locator) => Math.round((await locator.boundingBox())!.height)
 const fits = (page: Page) =>
   page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)
@@ -182,13 +189,18 @@ for (const width of [1280, 390]) {
       await expect(rows).toHaveCount(2)
       // On a phone a row is a card that wraps what it has to say.
       if (width >= 640) expect(await height(rows.nth(0))).toBe(await height(rows.nth(1)))
-      const second = await top(rows.nth(1))
+      // Read where the page rests, unrounded. The drift list above is a
+      // half-pixel tall at 390, so the row sits on a .5 and a rounded read
+      // went either way with the last of the rise and the scroll that
+      // `check()` makes: 2385 before and 2386 after, with nothing moved.
+      await risen(page)
+      const second = await exactTop(rows.nth(1))
       await page
         .getByRole("checkbox", {
           name: "Select repair for /etc/just-dashboard/network/links.batch",
         })
         .check()
-      expect(await top(rows.nth(1))).toBe(second)
+      expect(Math.abs((await exactTop(rows.nth(1))) - second)).toBeLessThan(0.5)
       // No framed notice or sentence stands over the plan: what it applies is
       // the head's tip, then the rows.
       const plan = page.getByRole("region", { name: "Owned repair plan" })

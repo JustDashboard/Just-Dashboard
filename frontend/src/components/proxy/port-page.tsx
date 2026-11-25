@@ -77,7 +77,7 @@ const BACK = { href: "/proxy/ports", label: "Ports" }
  * (`DetailPage`): the way back with the arrows, the identity line — the
  * owner as its product, the port and who holds it, where it answers as the
  * state, the socket's verbs at its end (`IdentityVerbs`) — and its views as
- * the underlined strip under it: Reach (the path to it drawn, then why),
+ * the view strip under it: Reach (the path to it drawn, then why),
  * Owner, Clients, History.
  *
  * What the sheet did well, the list beside the thing being read, is the rail

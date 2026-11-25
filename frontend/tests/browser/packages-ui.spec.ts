@@ -252,7 +252,7 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * the design system says (design-system.md §15) — the host's identity line
  * with its distribution as the mark and the manager and index age as facts,
  * a software-size band and an update queue, four views under
- * one underlined strip, and no framed block but a table anywhere on the page;
+ * one strip of quiet tabs, and no framed block but a table anywhere on the page;
  * that every package is drawn as the software it is (§14) and an upgrade shows
  * the part of the version it changes; that the one decision worth making in a
  * hurry (security updates waiting) carries its own button above the fold; that
@@ -320,7 +320,7 @@ test("the page opens on software and updates without summary cards", async ({ pa
   // Each view is a toolbar, a hairline and a framed table (§2) — and nothing
   // else on the page carries an edge.
   expect(await framedNonTables(page), "a framed block that is not a table").toEqual([])
-  // The pill-shaped tab list is gone; the strip is the product's underlined one.
+  // The segmented tab list is not used here; the strip is the product's quiet one.
   expect(await page.locator("[data-slot='tabs-list']").count()).toBe(0)
 })
 

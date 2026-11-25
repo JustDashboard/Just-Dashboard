@@ -89,7 +89,7 @@ const TAB_LABEL: Record<VolumeTab, string> = {
  * It opens on the volume's identity line — the product whose data it holds,
  * its name, where it stands, its size and where it is kept, and its verbs with
  * one command — over a picture of who mounts it and where it is backed up
- * (`volume-picture`), then its views as the underlined strip, in the address
+ * (`volume-picture`), then its views as the view strip, in the address
  * as `?tab=`: its files, the containers that mount it, the jobs that back it
  * up, and what Docker was told.
  *

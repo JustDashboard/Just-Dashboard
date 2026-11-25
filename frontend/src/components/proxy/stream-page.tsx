@@ -98,7 +98,7 @@ function dotTone(stream: StreamEntry): DotTone {
  * way back, the way a site, a process and a unit are: the identity line —
  * the port as the service its number is, its name, what kind of forward it
  * is, where it goes and who may reach it, its state at the end — and its
- * verbs above it; then its views as the underlined strip, with the view in
+ * verbs above it; then its views as the view strip, with the view in
  * the address (`?tab=`). The Overview draws the forward (port, nginx, the
  * servers behind it) and what it carried as reading lines; Clients ranks who
  * connected, with the rule that turns one away a press from it; Connected

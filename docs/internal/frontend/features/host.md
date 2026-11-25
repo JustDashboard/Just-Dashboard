@@ -477,7 +477,7 @@ at the end) with its logs as the one command where its owner keeps any (a zombie
 them) and every signal in its `⋯`, Terminate, Kill and "with its children" last in the destructive
 ink, each asking first: no destructive verb takes the command, and a process with no logs draws
 only the menu; then the
-views as the underlined strip, `?tab=` in the address — **Overview** (`process-overview.tsx`:
+views as the view strip, `?tab=` in the address — **Overview** (`process-overview.tsx`:
 notices for an exit or a reused PID, a zombie, a kernel thread, a paused process, a binary or
 library an upgrade replaced, descriptors near their limit, deleted files held open and a waiting
 signal; four live readings over the recent windows; *Where it runs*, a wired picture of what
@@ -518,7 +518,7 @@ a rail beside it (`pm2-app-rail.tsx`: the list's own search, state chip and orde
 row, held while the pointer is in it), Alt+↑/↓ and two arrows to walk it with the view carried
 along; the identity line (the application as its interpreter, its name and state, its script, fork
 or cluster of n, restarts and unstable restarts, uptime ticking) with one command — Start where a
-worker is down, otherwise Reload — and the rest in a menu; then the views as the underlined strip,
+worker is down, otherwise Reload — and the rest in a menu; then the views as the view strip,
 `?tab=` in the address — **Overview** (`pm2-app-overview.tsx`: notices where PM2 gave up, where
 some workers are down and where a reboot would not bring it back; *Where it runs*, the process
 page's wired picture with the account's daemon and its boot hook on the left and each worker as a
@@ -559,7 +559,7 @@ copy, its description, who it runs as, whether it starts on boot, uptime ticking
 link to that process's page and its tasks, and at the end its state and its exposure score in its
 tone, opening Limits and security) under Start/Restart/Stop and a menu of reload, clear failed,
 freeze or thaw, enable/disable, mask or unmask, reload unit files when this one changed on disk, its
-main process, its unit file and copy; then the views as the underlined strip, `?tab=` in the address
+main process, its unit file and copy; then the views as the view strip, `?tab=` in the address
 — **Overview** (`service-overview.tsx`: a failure, a restart loop, a mask, a unit file changed on
 disk with Reload unit files, a frozen cgroup, a skipped condition and memory at its ceiling as
 Notices; four live readings over the unit's recent windows, or its last run's counters; *Where it
@@ -677,7 +677,7 @@ door on every page of it (`read-state.tsx`) rather than controls that fail.
 One account, on the shape a service's page has: a way back, its identity line (sign-in state beside
 the name; a terminal as that account as the command, `/terminal?as=<name>`, which `/terminal` passes
 on as `asUser`, or its files where it has no shell; Files, Disable or Enable, End sessions and a
-delete that reads what would go first in the menu), and three views as an underlined strip with the
+delete that reads what would go first in the menu), and three views as a view strip with the
 one on screen in the address (`?tab=`). **Overview**: its password and every SSH key as rows of one
 list (set or generate a password, require a change, lock, unlock only when there is a password
 behind the lock, remove; add a key by paste, GitHub import or generation, with label, restrictions,

@@ -537,7 +537,7 @@ export function LogWorkspace(props: WorkspaceProps) {
               key={id}
               type="button"
               aria-pressed={mode === id}
-              className={cn(tabClasses(mode === id, "h-10"), "max-sm:px-2")}
+              className={tabClasses(mode === id, "h-10")}
               onClick={() => switchMode(id)}
             >
               {MODE_LABEL[id]}
@@ -548,7 +548,7 @@ export function LogWorkspace(props: WorkspaceProps) {
               key={v.id}
               type="button"
               aria-pressed={mode === v.id}
-              className={cn(tabClasses(mode === v.id, "h-10"), "max-sm:px-2")}
+              className={tabClasses(mode === v.id, "h-10")}
               onClick={() => switchMode(v.id)}
             >
               {v.label}

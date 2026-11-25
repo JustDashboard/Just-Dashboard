@@ -443,7 +443,7 @@ function BooleanControl({ column, value, onStage }: Omit<ControlProps, "id">) {
           { value: "true", label: "true", mono: true },
           { value: "false", label: "false", mono: true },
         ]}
-        className="[&_[data-slot=toggle-group-item]]:h-7"
+        className="[&_[data-slot=toggle-group-item]]:h-5"
         onChange={(next) => onStage(next === "true")}
       />
       {current === "" && (
@@ -511,7 +511,7 @@ function JsonControl({ id, column, value, onStage }: ControlProps) {
               { value: "tree", label: "Tree" },
               { value: "text", label: "Text" },
             ]}
-            className="[&_[data-slot=toggle-group-item]]:h-6"
+            className="p-0.5 [&_[data-slot=toggle-group-item]]:h-4.5"
             onChange={setMode}
           />
         )}

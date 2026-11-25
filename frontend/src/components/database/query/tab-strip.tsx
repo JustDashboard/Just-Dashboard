@@ -22,7 +22,7 @@ import { isChanged, type QueryTab } from "@/components/database/query/tabs"
 export const tabElementId = (base: string, tab: string) => `${base}-tab-${tab}`
 
 /**
- * The editor's tabs: one statement each, the one in front underlined.
+ * The editor's tabs: one statement each, the one in front on a control face.
  *
  * A tab is closed with its own button (or Delete) and named by pressing its
  * name twice (or F2). A tab that is the draft of a saved query says when its
@@ -68,7 +68,7 @@ export function TabStrip({
   const [overflows, setOverflows] = useState(false)
 
   // The tab in front is kept in view: one opened past the edge of the strip
-  // is otherwise a tab nobody can see, with nothing underlined.
+  // is otherwise in front where nobody can see it.
   useEffect(() => {
     const node = scroller.current
     // The tab, then its close button beside it: both ends of it in view.
@@ -153,11 +153,7 @@ export function TabStrip({
                 tabIndex={selected ? 0 : -1}
                 title={`${tab.title} — press twice to rename`}
                 style={{ order: index * 2 }}
-                className={cn(
-                  tabClasses(selected, "h-10"),
-                  "max-w-48 shrink-0 pr-1.5",
-                  selected && "bg-card",
-                )}
+                className={cn(tabClasses(selected, "h-10"), "max-w-48 shrink-0")}
                 onClick={() => onShow(tab.id)}
                 onDoubleClick={() => setRenaming(tab.id)}
                 onAuxClick={(event) => {
@@ -184,10 +180,7 @@ export function TabStrip({
               key={tab.id}
               data-front={selected || undefined}
               style={{ order: index * 2 + 1 }}
-              className={cn(
-                "flex shrink-0 items-center border-r border-hairline",
-                selected && "bg-card",
-              )}
+              className="flex shrink-0 items-center border-r border-hairline"
             >
               {renaming === tab.id ? (
                 <input

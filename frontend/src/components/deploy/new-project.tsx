@@ -420,7 +420,7 @@ export function NewProject({
                   data-source={option.key}
                   aria-pressed={tab === option.key}
                   onClick={() => setTab(option.key)}
-                  className={tabClasses(tab === option.key, "h-11 max-sm:px-2")}
+                  className={tabClasses(tab === option.key, "h-11")}
                 >
                   <option.icon
                     aria-hidden
