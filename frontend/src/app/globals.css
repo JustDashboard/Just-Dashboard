@@ -218,6 +218,17 @@
   --pull-closed: var(--tag-red);
   --pull-draft: oklch(0.66 0.018 250.9);
 
+  /* A contribution calendar's five steps, as GitHub draws a profile's year:
+     an empty day is a faint well, then four greens rising to the pull's own
+     open green. The steps are the green mixed into the sheet rather than
+     four new hues, so the busiest day is the same green as an open request
+     beside it. */
+  --contribution-0: oklch(1 0 0 / 0.06);
+  --contribution-1: color-mix(in oklab, var(--tag-green) 26%, var(--card));
+  --contribution-2: color-mix(in oklab, var(--tag-green) 48%, var(--card));
+  --contribution-3: color-mix(in oklab, var(--tag-green) 74%, var(--card));
+  --contribution-4: var(--tag-green);
+
   /* Shadows are for things that genuinely float above the page — a popover, a
      dropdown, a dialog. They are no longer spent on cards and buttons, which
      now separate by ground step and border alone. Four steps for four roles:
@@ -638,6 +649,11 @@
   --color-pull-merged: var(--pull-merged);
   --color-pull-closed: var(--pull-closed);
   --color-pull-draft: var(--pull-draft);
+  --color-contribution-0: var(--contribution-0);
+  --color-contribution-1: var(--contribution-1);
+  --color-contribution-2: var(--contribution-2);
+  --color-contribution-3: var(--contribution-3);
+  --color-contribution-4: var(--contribution-4);
 
   --color-control: var(--control);
   --color-control-hover: var(--control-hover);
