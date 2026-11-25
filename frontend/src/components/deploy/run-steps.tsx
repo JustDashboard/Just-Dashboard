@@ -48,6 +48,8 @@ import type { ConsoleRow } from "@/components/deploy/build-console"
 import { CodeBlock, JsonCode } from "@/components/code"
 import { EvidenceView, StepTile, stepSummary } from "@/components/deploy/run-evidence"
 import { buildTimingOf, buildTimingSentence } from "@/components/deploy/build-timing"
+import { failureCause } from "@/components/deploy/failure-cause"
+import { failureExcerpt } from "@/components/deploy/failure-excerpt"
 import { useBreakpoint } from "@/lib/breakpoints"
 import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
@@ -88,19 +90,41 @@ const LINE: Partial<Record<DeploymentStep["state"], string>> = {
 }
 
 /**
+ * A step with something of its own to read: it ran, or it is running. A step
+ * the plan skipped has a reason and nothing else, and one the run has not
+ * reached has nothing at all.
+ */
+export function ranStep(step: DeploymentStep) {
+  return step.state !== "skipped" && step.state !== "pending"
+}
+
+/**
  * The step the inspector opens on: the one that failed, else the one at work,
  * else the build — what a finished run is opened to read — else the last that
- * ran.
+ * ran. None, before any step has started.
  */
 export function initialStep(steps: DeploymentStep[]) {
   return (
     steps.find((step) => step.state === "failed" || step.state === "blocked") ??
     steps.find((step) => step.state === "running") ??
     steps.find((step) => step.key === "build_artifact" && step.state === "passed") ??
-    [...steps].reverse().find((step) => step.state !== "pending") ??
-    steps[0]
+    [...steps].reverse().find(ranStep)
   )
 }
+
+/**
+ * Why the plan skipped a step, in the engine's words: its recorded reason,
+ * else what a check step's outcome says, else its message.
+ */
+export function skipReason(step: DeploymentStep): string | undefined {
+  const evidence = step.evidence ?? {}
+  if (typeof evidence.reason === "string" && evidence.reason !== "") return evidence.reason
+  if (evidence.outcome === "disabled") return "turned off for this plan"
+  return step.errorMessage || undefined
+}
+
+/** Every step a release stage names, for telling a step no stage names. */
+const STAGED = new Set<string>(RELEASE_GROUPS.flatMap((group) => [...group.keys]))
 
 /**
  * What the inspector leaves out of a step's record because it is drawn
@@ -194,11 +218,23 @@ function drawnElsewhere(step: DeploymentStep): string[] {
  * where in the run it happened, on one scale for every row, so the step that
  * held the run up is the long bar.
  *
+ * **Only steps that ran are rows.** Every run is planned with all nineteen
+ * steps, so a run that failed at Build drew fourteen rows of "Waiting" under
+ * it, and one that succeeded seven rows of "Skipped" — a Stop most of the
+ * nineteen — each a button onto a record with nothing in it. The steps the
+ * plan skipped are one list under the stages, each with its reason (the
+ * whole of what such a step records), and the ones the run never reached, or
+ * has not reached yet, one line of names. A stage whose steps all fell in
+ * those two is not drawn: the release path above already shows it was not
+ * part of what ran.
+ *
  * **The inspector** is the step's whole record: its state and times, the
- * error it stopped on, preflight's findings for Check plan, the last lines it
- * wrote to the build log with the way to the rest, and its evidence drawn as
- * what each thing is (`EvidenceView`), with the record as it was kept one
- * fold away.
+ * error it stopped on, preflight's findings for Check plan, its output — for
+ * a failed step the lines that say why (`failureExcerpt`), for one at work
+ * its newest lines, for a short one all of it — with the way to the rest,
+ * and its evidence drawn as what each thing is (`EvidenceView`), with the
+ * record as it was kept one fold away. Its head is the step's name and state
+ * alone: the rail's row beside it already draws the step's tile.
  *
  * Below `lg` the inspector follows the rail, and picking a step brings it
  * into view.
@@ -215,6 +251,7 @@ export function RunDetails({
   onSelect,
   onShowOutput,
   pane,
+  active,
 }: {
   /**
    * One half alone, as a phone's pane draws it: the steps, or the record of
@@ -238,11 +275,16 @@ export function RunDetails({
   onSelect: (id: number) => void
   /** Opens the build console on one step's output. */
   onShowOutput: (id: number) => void
+  /** The run is still going: a step it has not reached is still to come, not left out. */
+  active: boolean
 }) {
   const wide = useBreakpoint("lg")
-  const rail = useRef<HTMLOListElement>(null)
+  const rail = useRef<HTMLDivElement>(null)
   const inspector = useRef<HTMLDivElement>(null)
-  const current = steps.find((step) => step.id === selected) ?? initialStep(steps)
+  const ran = steps.filter(ranStep)
+  const skipped = steps.filter((step) => step.state === "skipped")
+  const waiting = steps.filter((step) => step.state === "pending")
+  const current = ran.find((step) => step.id === selected) ?? initialStep(ran)
   const currentId = current?.id
 
   // The picked step stays in the rail's view — the failed one a run opens on
@@ -257,31 +299,24 @@ export function RunDetails({
     if (at.top < box.top || at.bottom > box.bottom)
       list.scrollTop += at.top - box.top - (box.height - at.height) / 2
   }, [currentId])
-  const passed = steps.filter((step) => step.state === "passed").length
-  const skipped = steps.filter((step) => step.state === "skipped").length
   const failed = steps.filter((step) => step.state === "failed" || step.state === "blocked").length
 
-  const spans = new Map(steps.map((step) => [step.id, stepSpan(step, now)]))
+  const spans = new Map(ran.map((step) => [step.id, stepSpan(step, now)]))
   const known = [...spans.values()].filter((span) => span !== undefined)
   const from = known.length ? Math.min(...known.map((span) => span.start)) : 0
   const to = known.length ? Math.max(...known.map((span) => span.end)) : 0
   const length = Math.max(to - from, 1)
 
-  // The release path's stages, each holding the steps the run planned for
-  // it; a step no stage names — the compatibility pipeline's one — closes
-  // the rail under a stage of its own.
-  const grouped = new Set<number>()
+  // The release path's stages, each holding the steps of it that ran, and
+  // in the state the whole stage is in; a step no stage names — the
+  // compatibility pipeline's one — closes the rail under a stage of its own.
   const stages: { label: string; state: ReleaseNodeState; steps: DeploymentStep[] }[] =
-    RELEASE_GROUPS.map((group) => {
-      const members = steps.filter((step) => (group.keys as readonly string[]).includes(step.key))
-      for (const step of members) grouped.add(step.id)
-      return {
-        label: stageName(group.label, operation),
-        state: groupedState(steps, group.keys),
-        steps: members,
-      }
-    }).filter((stage) => stage.steps.length > 0)
-  const rest = steps.filter((step) => !grouped.has(step.id))
+    RELEASE_GROUPS.map((group) => ({
+      label: stageName(group.label, operation),
+      state: groupedState(steps, group.keys),
+      steps: ran.filter((step) => (group.keys as readonly string[]).includes(step.key)),
+    })).filter((stage) => stage.steps.length > 0)
+  const rest = ran.filter((step) => !STAGED.has(step.key))
   if (rest.length > 0) stages.push({ label: "Other", state: "pending", steps: rest })
 
   const pick = (id: number) => {
@@ -291,47 +326,51 @@ export function RunDetails({
   }
 
   const railList = (
-    <ol
+    <div
       ref={rail}
-      aria-label="Deployment steps"
-      className={cn(
-        "min-h-0 space-y-1 overflow-y-auto",
-        pane ? "-mx-2" : "p-2 max-lg:border-b lg:border-r",
-      )}
+      className={cn("min-h-0 overflow-y-auto", pane ? "-mx-2" : "p-2 max-lg:border-b lg:border-r")}
     >
-      {stages.map((stage) => (
-        <li key={stage.label} className="min-w-0">
-          <StageHead label={stage.label} state={stage.state} steps={stage.steps} now={now} />
-          <ol aria-label={stage.label} className="min-w-0">
-            {stage.steps.map((step, index) => {
-              const span = spans.get(step.id)
-              return (
-                <StepRow
-                  key={step.id}
-                  step={step}
-                  deployment={deployment}
-                  operation={operation}
-                  now={now}
-                  lines={lineCounts.get(step.id) ?? 0}
-                  selected={step.id === current?.id}
-                  above={index > 0 ? stage.steps[index - 1].state : undefined}
-                  last={index === stage.steps.length - 1}
-                  left={span ? ((span.start - from) / length) * 100 : undefined}
-                  width={span ? ((span.end - span.start) / length) * 100 : undefined}
-                  onSelect={() => pick(step.id)}
-                />
-              )
-            })}
-          </ol>
-        </li>
-      ))}
-    </ol>
+      {stages.length > 0 ? (
+        <ol aria-label="Deployment steps" className="min-w-0 space-y-1">
+          {stages.map((stage) => (
+            <li key={stage.label} className="min-w-0">
+              <StageHead label={stage.label} state={stage.state} steps={stage.steps} now={now} />
+              <ol aria-label={stage.label} className="min-w-0">
+                {stage.steps.map((step, index) => {
+                  const span = spans.get(step.id)
+                  return (
+                    <StepRow
+                      key={step.id}
+                      step={step}
+                      deployment={deployment}
+                      operation={operation}
+                      now={now}
+                      lines={lineCounts.get(step.id) ?? 0}
+                      selected={step.id === current?.id}
+                      above={index > 0 ? stage.steps[index - 1].state : undefined}
+                      last={index === stage.steps.length - 1}
+                      left={span ? ((span.start - from) / length) * 100 : undefined}
+                      width={span ? ((span.end - span.start) / length) * 100 : undefined}
+                      onSelect={() => pick(step.id)}
+                    />
+                  )
+                })}
+              </ol>
+            </li>
+          ))}
+        </ol>
+      ) : (
+        <p className="px-2 pt-3 pb-1 text-hint text-muted-foreground">
+          {active ? "No step has started yet." : "No step ran."}
+        </p>
+      )}
+      <SetAside skipped={skipped} waiting={waiting} active={active} operation={operation} />
+    </div>
   )
   const record = current && (
     <Inspector
       key={current.id}
       projectId={projectId}
-      deployment={deployment}
       step={current}
       operation={operation}
       now={now}
@@ -354,14 +393,15 @@ export function RunDetails({
       title="Details"
       actions={
         <p className="numeric text-xs text-muted-foreground">
-          {plural(steps.length, "step")} · <span className="text-success">{passed} passed</span>
-          {skipped > 0 && ` · ${skipped} skipped`}
+          {plural(ran.length, "step")} ran
           {failed > 0 && (
             <>
               {" · "}
               <span className="text-destructive">{failed} failed</span>
             </>
           )}
+          {skipped.length > 0 && ` · ${skipped.length} skipped`}
+          {waiting.length > 0 && ` · ${waiting.length} ${active ? "still to run" : "not reached"}`}
         </p>
       }
     >
@@ -371,7 +411,13 @@ export function RunDetails({
       >
         {railList}
         <div ref={inspector} className="min-h-0 min-w-0 scroll-mt-16 overflow-y-auto">
-          {record}
+          {record ?? (
+            <p className="p-4 text-body text-muted-foreground sm:p-5">
+              {active
+                ? "Each step's record appears here once it starts."
+                : "The run ended before any step started."}
+            </p>
+          )}
         </div>
       </div>
     </Section>
@@ -528,13 +574,40 @@ const STEP_TONE: Partial<
   blocked: "danger",
 }
 
-/** How many of a step's last lines the inspector shows before the console takes over. */
+/**
+ * How many lines of a step's output the inspector shows before the console
+ * takes over: a step that wrote no more is shown whole.
+ */
 const TAIL = 8
 
-/** One step's whole record: its state and times, its error, its output's end and its evidence. */
+/** How many lines of a failed step's output the inspector shows: the ones that say why. */
+const EXCERPT = 10
+
+/**
+ * The lines of a step's output worth reading in its record: for a failed
+ * step the ones that say why, for one at work its newest, for one that wrote
+ * a few lines all of them. A finished step's last lines out of hundreds —
+ * a build's `naming to …` — say nothing the step's own record does not, so
+ * such a step offers its output in the console instead.
+ */
+function outputOf(
+  step: DeploymentStep,
+  rows: ConsoleRow[],
+): { rows: ConsoleRow[]; marked?: string; whole: boolean } {
+  const own = rows.filter((row) => row.stepId === step.id && row.line.kind !== "blank")
+  const failed = step.state === "failed" || step.state === "blocked"
+  const excerpt = failed
+    ? failureExcerpt(rows, step.id, failureCause([step])?.cause?.lineSeq, EXCERPT)
+    : undefined
+  if (own.length <= TAIL) return { rows: own, marked: excerpt?.marked, whole: true }
+  if (excerpt) return { ...excerpt, whole: false }
+  if (step.state === "running") return { rows: own.slice(-TAIL), whole: false }
+  return { rows: [], whole: false }
+}
+
+/** One step's whole record: its state and times, its error, its output and its evidence. */
 function Inspector({
   projectId,
-  deployment,
   step,
   operation,
   now,
@@ -544,7 +617,6 @@ function Inspector({
   bare,
 }: {
   projectId?: number
-  deployment?: DeploymentSummary
   step: DeploymentStep
   operation?: string
   now: number
@@ -566,8 +638,12 @@ function Inspector({
   // What Railpack decided is drawn as one, and left out of the generic reading.
   const railpack = railpackOf(step)
   const reading = railpack ? withoutRailpack(evidence) : evidence
-  const tail = rows.filter((row) => row.stepId === step.id).slice(-TAIL)
+  const output = outputOf(step, rows)
+  const tail = output.rows
   const recorded = Object.keys(evidence).length > 0
+  // A failure's cause is the error above it and the run's failure, not a
+  // record to read a third time as facts.
+  const omit = step.errorCode ? [...drawnElsewhere(step), "cause"] : drawnElsewhere(step)
   const name = stepName(step.key, operation)
   const Heading = bare ? "h2" : "h3"
   return (
@@ -576,30 +652,27 @@ function Inspector({
       className={cn("min-w-0 animate-rise space-y-6", !bare && "p-4 sm:p-5")}
     >
       <header className="flex min-w-0 flex-wrap items-center gap-x-4 gap-y-3">
-        <div className="flex min-w-0 flex-1 items-center gap-3">
-          <StepTile step={step} state={step.state} deployment={deployment} size="md" />
-          <div className="min-w-0 space-y-1">
-            <Heading className="truncate text-title font-semibold tracking-tight">{name}</Heading>
-            <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
-              <Status
-                tone={STEP_TONE[step.state] ?? "stopped"}
-                label={stepStateLabel(step.state)}
-                live={step.state === "running"}
-              />
-              {seconds !== undefined && (
-                <span>
-                  took <span className="numeric text-foreground">{duration(seconds)}</span>
-                </span>
-              )}
-              {step.startedAt && (
-                <span className="numeric" title={timestamp(step.startedAt)}>
-                  {clock(step.startedAt)}
-                  {step.endedAt && ` → ${clock(step.endedAt)}`}
-                </span>
-              )}
-              {step.attempt > 1 && <span>attempt {step.attempt}</span>}
-            </p>
-          </div>
+        <div className="min-w-0 flex-1 space-y-1">
+          <Heading className="truncate text-title font-semibold tracking-tight">{name}</Heading>
+          <p className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+            <Status
+              tone={STEP_TONE[step.state] ?? "stopped"}
+              label={stepStateLabel(step.state)}
+              live={step.state === "running"}
+            />
+            {seconds !== undefined && (
+              <span>
+                took <span className="numeric text-foreground">{duration(seconds)}</span>
+              </span>
+            )}
+            {step.startedAt && (
+              <span className="numeric" title={timestamp(step.startedAt)}>
+                {clock(step.startedAt)}
+                {step.endedAt && ` → ${clock(step.endedAt)}`}
+              </span>
+            )}
+            {step.attempt > 1 && <span>attempt {step.attempt}</span>}
+          </p>
         </div>
         {lines > 0 && (
           <Button variant="outline" size="sm" className="shrink-0" onClick={onShowOutput}>
@@ -637,21 +710,34 @@ function Inspector({
             <Logs aria-hidden className="size-3.5" />
             <span className="font-medium text-foreground">Output</span>
             <span className="numeric">
-              {lines > tail.length
-                ? `last ${tail.length} of ${lines} lines`
-                : plural(lines, "line")}
+              {output.whole
+                ? plural(lines, "line")
+                : step.state === "running"
+                  ? `last ${tail.length} of ${lines} lines`
+                  : `from line ${tail[0].line.number} of ${lines}`}
             </span>
           </figcaption>
           <ol aria-label={`${name} output`} className="py-1.5 font-mono text-xs leading-6">
             {tail.map((row) => (
-              <TranscriptRow key={row.id} line={row.line} wrap needle="" tokens />
+              <TranscriptRow
+                key={row.id}
+                line={row.line}
+                wrap
+                needle=""
+                tokens
+                // A failure's excerpt is one instruction's output: its
+                // BuildKit number and clock are the same on every line.
+                stepClock={output.whole || step.state === "running"}
+                stepNumber={output.whole || step.state === "running"}
+                marked={row.id === output.marked}
+              />
             ))}
           </ol>
         </figure>
       )}
 
       {recorded ? (
-        <EvidenceView evidence={reading} omit={drawnElsewhere(step)} />
+        <EvidenceView evidence={reading} omit={omit} />
       ) : (
         <p className="text-body text-muted-foreground">
           {step.state === "pending"
@@ -672,6 +758,54 @@ function Inspector({
         </Disclosure>
       )}
     </section>
+  )
+}
+
+/**
+ * What the rail leaves out of its rows, under them: the steps the plan
+ * skipped, each beside its reason, and the steps the run never reached — or
+ * has not reached yet — as one line of names. Neither is a button: a skipped
+ * step's record is its reason, and an unreached one has none.
+ */
+function SetAside({
+  skipped,
+  waiting,
+  active,
+  operation,
+}: {
+  skipped: DeploymentStep[]
+  waiting: DeploymentStep[]
+  active: boolean
+  operation?: string
+}) {
+  if (skipped.length === 0 && waiting.length === 0) return null
+  return (
+    <div className="mt-2 space-y-3 border-t border-hairline px-2 pt-3 pb-2">
+      {skipped.length > 0 && (
+        <section aria-label="Skipped steps" className="space-y-1.5">
+          <p className="eyebrow">Skipped</p>
+          <dl className="grid grid-cols-[auto_minmax(0,1fr)] gap-x-3 gap-y-1 text-hint">
+            {skipped.map((step) => (
+              <div key={step.id} className="contents">
+                <dt className="text-muted-foreground">{stepName(step.key, operation)}</dt>
+                <dd className="text-faint">{skipReason(step) ?? "not part of this plan"}</dd>
+              </div>
+            ))}
+          </dl>
+        </section>
+      )}
+      {waiting.length > 0 && (
+        <section
+          aria-label={active ? "Steps still to run" : "Steps not reached"}
+          className="space-y-1.5"
+        >
+          <p className="eyebrow">{active ? "Still to run" : "Not reached"}</p>
+          <p className="text-hint text-faint">
+            {waiting.map((step) => stepName(step.key, operation)).join(" · ")}
+          </p>
+        </section>
+      )}
+    </div>
   )
 }
 

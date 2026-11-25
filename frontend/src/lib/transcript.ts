@@ -89,8 +89,10 @@ const NOTES = [
   /^restored \S+ from \S+/,
 ]
 
+// A thrown error is named for its kind — `TypeError:`, `ModuleNotFoundError:`
+// — which the word match above cannot see inside one word.
 const ERROR =
-  /(^FAILED:|^! |\b(error|errors|fatal|panic|failed to|failed|unhealthy|exit code: [1-9])\b)/i
+  /(^FAILED:|^! |\b(error|errors|fatal|panic|failed to|failed|unhealthy|exit code: [1-9])\b|\b[A-Z]\w*(?:Error|Exception):)/i
 // "0 errors" and "--no-errors" are not failures, and a bun or Go build prints
 // both on the way to succeeding.
 const NOT_ERROR = /\b(0|no) (errors?|warnings?)\b|--no-\w*error/i

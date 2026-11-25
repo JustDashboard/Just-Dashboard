@@ -194,8 +194,11 @@ test("a failing rehearsal says the release stopped before production", async ({ 
   await expect(report.getByRole("list", { name: "Release tasks against the copy" })).toContainText(
     "contains null values",
   )
-  // The release task itself never ran.
-  await expect(list.getByRole("button", { name: /^Release task/ })).toContainText("Waiting")
+  // The release task itself never ran: named under the steps, not a row of them.
+  await expect(list.getByRole("button", { name: /^Release task/ })).toHaveCount(0)
+  await expect(page.getByRole("region", { name: "Steps not reached" })).toContainText(
+    "Release task",
+  )
 })
 
 const databaseVariable = (connectionId: number, name: string): DeploymentVariable => ({
