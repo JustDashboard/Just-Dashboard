@@ -49,7 +49,7 @@ reason in its tooltip (`VerbSpec.reason`).
 
 | View | What it draws | States |
 | --- | --- | --- |
-| Overview | The picture first: the repository on GitHub wired through this server to its checkouts (`WireFlow`), or one sentence and **Clone**. Then About (description, homepage, fork parent, counts, template, topics) and *What you can do here*: the role, the installation's selection, the App's grant in words, and every ability with its reason. | Checkouts loading: the picture's loading shape. |
+| Overview | Two columns from `lg`, as GitHub opens a repository: the main one and a 17rem side column, which comes first on a phone. Main: the picture first, the repository on GitHub wired through this server to its checkouts (`WireFlow`), or one sentence and **Clone**; then the README pane, headed by the last commit on the default branch (author's face, subject linked to GitHub, verified mark, short sha, time; `GET …/commits?sha=<default>&page=1`) and the README's path, its Markdown drawn by `Markdown` after `absoluteReadme` made its relative pictures GitHub `raw` addresses (read through the forge media reader) and its relative links GitHub `blob` pages (`GET …/readme`); then *What you can do here*: the role, the installation's selection, the App's grant in words, and every ability with its reason. Side: About (description, homepage, topics, stars, forks, open issues, visibility and default branch, template, fork parent, each by its glyph) and Languages, GitHub's bar in Linguist's colours with each language's logo and share (`LanguageBar`, `LanguageList`, from `GET …/languages` through `languageShares`). | Checkouts loading: the picture's loading shape. The README pane keeps a 16rem floor while read; no README is one line; a failed read is one line with Try again. Languages GitHub measured none of draw nothing. |
 | Branches | Rows, the default first; `default` and `protected` marks; the protection and rulesets of a protected branch in a popover (`GET …/branches/protection`), the unreadable half saying why. **New branch** (name, from a branch). Delete per row (ordinary confirm). 100 a page, **Show more**. | `ListBody`: skeleton rows, `ErrorState`, one line when empty. |
 | Commits | A branch select (default first); each commit's first line, author (`ForgeFace` with a login), relative time, verified mark, short sha, open on GitHub. **Show older**. | as above |
 | Pull requests | Chips Open, Closed, Merged, All; `ChoiceRow` cards (state mark, number, title, author, head → base, draft, two labels, updated). A card opens the request in place (`&pull=<n>`, pushed so Back returns): body as `Markdown`, size and mergeability, checks, reviews, **Merge**, **Close** or **Reopen**, GitHub. | the request's own read: `LoadingRows`, `ErrorState` |
@@ -93,6 +93,9 @@ An archived repository's settings are read-only until it is unarchived; only Una
 - `frontend/src/components/github/repo/model.test.js` (`bun test`): the settings diff (only changed,
   only stated), name, topic and branch rules, the run word and its verbs, reasons, the grant in words,
   the failure kinds.
+- `frontend/src/components/github/repo/readme-model.test.js` (`bun test`): a README's relative
+  pictures and links made whole against its own folder and branch, absolute addresses, fragments and
+  paths that climb out of the repository left alone; bytes per language as shares.
 - `frontend/tests/browser/github-repo.spec.ts` with `github-repo-fixture.ts` (every route of the
   views through `mockGitHub`'s `handle`, writes recorded in `calls`): the four detail-with-rail checks;
   each view against its fixture; reasons on held controls (`acme-labs/design-system`, role read;
