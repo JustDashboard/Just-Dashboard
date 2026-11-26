@@ -558,3 +558,116 @@ export function sslDirectives(certPath: string, keyPath: string): string {
 export function runningCertbotJob(jobs: Job[] | undefined): Job | null {
   return jobs?.find((job) => certbotRunning(job)) ?? null
 }
+
+/** Who serves a certificate, as a row and a page draw it: the words and where they open. */
+export type CertificateUserRow = {
+  key: string
+  label: string
+  href: string
+  /** A deployment's route nothing deploys any more. */
+  leftover?: boolean
+}
+
+/**
+ * Everything that serves a certificate, sites first and then streams. A
+ * deployment's route reads as its project and environment where the server
+ * said which (`usedByLabels`); without that — an older backend — a site keeps
+ * the name it is listed under.
+ */
+export function certificateUsers(
+  cert: Pick<Certificate, "usedBy" | "usedByStreams" | "usedByLabels">,
+): CertificateUserRow[] {
+  const said = new Map((cert.usedByLabels ?? []).map((user) => [user.site, user]))
+  return [
+    ...cert.usedBy.map((site) => {
+      const user = said.get(site)
+      return {
+        key: `site:${site}`,
+        label: user?.label ?? site,
+        href: user?.href ?? `/proxy/sites/${encodeURIComponent(site)}`,
+        leftover: user?.leftover,
+      }
+    }),
+    ...(cert.usedByStreams ?? []).map((stream) => ({
+      key: `stream:${stream}`,
+      label: `stream ${stream}`,
+      href: `/proxy/streams/${encodeURIComponent(stream)}`,
+    })),
+  ]
+}
+
+/**
+ * A certificate nothing on this server serves. One that could not be read is
+ * not known to be unused: its file may be the one a site names.
+ */
+export function certUnused(cert: Pick<Certificate, "usedBy" | "usedByStreams" | "error">): boolean {
+  return !cert.error && cert.usedBy.length === 0 && (cert.usedByStreams?.length ?? 0) === 0
+}
+
+/**
+ * Whether this server can delete the certificate: certbot's lineages, the
+ * imports and what Caddy holds. A file a site names elsewhere is the site's.
+ */
+export function certDeletable(cert: Pick<Certificate, "source">): boolean {
+  return cert.source === "certbot" || cert.source === "imported" || cert.source === "caddy"
+}
+
+/** An unused certificate the bulk cleanup can remove. */
+export function unusedDeletable(cert: Certificate): boolean {
+  return certDeletable(cert) && certUnused(cert)
+}
+
+/**
+ * Whether the cleanup ticks a certificate before the operator has looked.
+ * Nothing is lost with an expired one, or with one Caddy holds, which it
+ * orders again when a route asks. A valid lineage or import that no site
+ * names may be kept for something this server cannot see, so it is listed
+ * and left for the operator to tick.
+ */
+export function cleanupTicked(cert: Pick<Certificate, "source" | "expired">): boolean {
+  return cert.expired || cert.source === "caddy"
+}
+
+/** The state a list can be narrowed to, beside its source. */
+export type CertStateFilter = "all" | "unused" | "expired"
+
+export function certInState(cert: Certificate, state: CertStateFilter): boolean {
+  if (state === "unused") return certUnused(cert)
+  if (state === "expired") return !cert.error && cert.expired
+  return true
+}
+
+/**
+ * The header's figures, read over every certificate rather than what a filter
+ * leaves. Only a certificate something serves can be refused or run out: an
+ * expired one nothing names breaks nothing, and counted as refused it turned
+ * the header red on a server whose every site was fine. It is counted as
+ * unused, which is what there is to do about it.
+ */
+export function countCertificates(all: Certificate[]) {
+  // A test certificate is refused like an expired one, and counted there
+  // rather than as expiring: its days say nothing about when it stops working.
+  const readable = all.filter((c) => !c.error)
+  const unused = readable.filter(certUnused)
+  const served = readable.filter((c) => !certUnused(c))
+  const expiring = served.filter((c) => c.expiring && !c.expired && !c.staging)
+  const expired = served.filter((c) => c.expired && !c.staging).length
+  const test = served.filter((c) => c.staging).length
+  const unreadable = all.length - readable.length
+  return {
+    all: all.length,
+    expiring: expiring.length,
+    soonest: Math.min(...expiring.map((c) => c.daysLeft)),
+    refused: expired + test + unreadable,
+    refusedWhy: [
+      expired > 0 && `${expired} expired`,
+      test > 0 && plural(test, "test certificate"),
+      unreadable > 0 && `${unreadable} unreadable`,
+    ]
+      .filter(Boolean)
+      .join(" · "),
+    unused: unused.length,
+    /** Unused ones browsers would refuse, so "all valid" is not said over them. */
+    unusedRefused: unused.filter((c) => c.expired || c.staging).length,
+  }
+}

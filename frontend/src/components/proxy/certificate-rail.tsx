@@ -55,6 +55,8 @@ export function CertificateRail({
     setQuery: (value: string) => void
     source: string
     setSource: (value: "all") => void
+    state: string
+    setState: (value: "all") => void
     sort: keyof typeof SORT_WORDS
   }
   hrefFor: (cert: Certificate) => string
@@ -85,8 +87,11 @@ export function CertificateRail({
       error={certs ? undefined : error}
       onRetry={onRetry}
       empty="No certificate matches."
-      filtered={filters.source !== "all"}
-      onClearFilters={() => filters.setSource("all")}
+      filtered={filters.source !== "all" || filters.state !== "all"}
+      onClearFilters={() => {
+        filters.setSource("all")
+        filters.setState("all")
+      }}
       className={className}
     />
   )

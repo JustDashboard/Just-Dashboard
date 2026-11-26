@@ -11,6 +11,7 @@ Every domain drawn through nginx or Caddy to the application it reaches, with it
 - Every domain drawn through nginx or Caddy to the application it reaches
 - Sites written as ordinary config, with a builder for auth and access rules
 - Certificates through certbot, including DNS wildcards, with runway at a glance
+- Caddy's own certificates listed with the project that serves each, and the ones nothing serves deleted in one step
 - A live TLS report, streams, ports and per-site traffic
 - Alerts on renewals and certificate drift
 
