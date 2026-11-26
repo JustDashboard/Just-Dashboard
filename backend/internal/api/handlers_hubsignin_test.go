@@ -54,7 +54,11 @@ type signInEnv struct {
 	admin *client
 	// adminID is the administrator's account; it opted in for "owner".
 	adminID int64
-	calls   int
+	// optInCode is the authenticator code that opt-in spent, kept so a test
+	// can offer the very same code again: a code worked out again later is a
+	// fresh one once the clock has crossed a 30-second step.
+	optInCode string
+	calls     int
 }
 
 // hubAccount makes an account and a password session for it, with an
@@ -127,7 +131,8 @@ func newSignInEnv(t *testing.T) *signInEnv {
 		t.Fatal(err)
 	}
 	e.sync()
-	e.allow(admin, "owner", hubPassword, nextCode(t, secret, 1), http.StatusNoContent)
+	e.optInCode = nextCode(t, secret, 1)
+	e.allow(admin, "owner", hubPassword, e.optInCode, http.StatusNoContent)
 	return e
 }
 
@@ -681,7 +686,7 @@ func TestOptingInChecksThePasswordAndCodeAndOneHubUserPerAccount(t *testing.T) {
 		t.Fatalf("wrong code = %s", w.Body)
 	}
 	// The code that made the grant in newSignInEnv is used up.
-	if w := e.allow(e.admin, "owner", hubPassword, nextCode(t, secret, 1), 401); codeOf(t, w) != "invalid_code" {
+	if w := e.allow(e.admin, "owner", hubPassword, e.optInCode, 401); codeOf(t, w) != "invalid_code" {
 		t.Fatalf("reused code = %s", w.Body)
 	}
 	if w := e.allow(e.admin, "nobody", hubPassword, nextCode(t, secret, 2), 400); codeOf(t, w) != "bad_request" {
