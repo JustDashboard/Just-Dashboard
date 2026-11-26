@@ -123,14 +123,13 @@ func parseHostsLine(l []byte) (string, []string, bool) {
 
 // HostRecords reads the file.
 func (s *Service) HostRecords(ctx context.Context) (*HostRecords, error) {
-	path := hostFilePath(s.paths.Hosts)
 	out := &HostRecords{Path: s.paths.Hosts, Managed: []HostRecord{}, Other: []HostLine{}}
-	data, err := os.ReadFile(path)
+	data, err := s.readHostsFile()
 	if err != nil {
 		if os.IsNotExist(err) {
 			return out, nil
 		}
-		return nil, fmt.Errorf("reading %s: %w", path, err)
+		return nil, fmt.Errorf("reading %s: %w", s.paths.Hosts, err)
 	}
 	lines := splitHostsLines(data)
 	span, err := findHostsBlock(s.paths.Hosts, lines)
@@ -162,32 +161,62 @@ func (s *Service) SetHostRecords(ctx context.Context, records []HostRecord) (*Ho
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	mirrored := hostFilePath(s.paths.Hosts)
-	path := throughLink(mirrored)
-	data, err := os.ReadFile(path)
-	if err != nil && !os.IsNotExist(err) {
-		return nil, fmt.Errorf("reading %s: %w", path, err)
-	}
-	mode := fs.FileMode(0o644)
-	if st, err := os.Stat(path); err == nil {
-		mode = st.Mode().Perm()
-	}
-	next, err := replaceHostsBlock(s.paths.Hosts, data, clean)
+	// The file is read, edited and written by one path in one view. Read
+	// here and written in the server's namespace, a link whose target
+	// differs between the two would have the server's file replaced with
+	// another file's lines.
+	err = s.onHostsFile(func(path string) error {
+		data, err := os.ReadFile(path)
+		if err != nil && !os.IsNotExist(err) {
+			return fmt.Errorf("reading %s: %w", path, err)
+		}
+		mode := fs.FileMode(0o644)
+		if st, err := os.Stat(path); err == nil {
+			mode = st.Mode().Perm()
+		}
+		next, err := replaceHostsBlock(s.paths.Hosts, data, clean)
+		if err != nil {
+			return err
+		}
+		if bytes.Equal(next, data) {
+			return nil
+		}
+		if err := writeFileAtomic(path, next, mode); err != nil {
+			return fmt.Errorf("writing %s: %w", path, err)
+		}
+		return nil
+	})
 	if err != nil {
 		return nil, err
 	}
-	if !bytes.Equal(next, data) {
-		// Docker mounts its own hosts file over the one the container is
-		// given, and the server's is busy under /host as well, so the write
-		// goes where the server's file is a plain one.
-		err := hostexec.OnServerPath(s.paths.Hosts, mirrored, func(at string) error {
-			return writeFileAtomic(throughLink(at), next, mode)
-		})
-		if err != nil {
-			return nil, fmt.Errorf("writing %s: %w", path, err)
-		}
-	}
 	return s.HostRecords(ctx)
+}
+
+// onHostsFile runs fn on the server's hosts file, by the path fn is given and
+// in the view it belongs to. Docker mounts its own hosts file over the one the
+// container is given, and the server's is busy under /host as well, so in the
+// shipped container fn runs in the server's mount namespace, where the file is
+// a plain one and a link in it resolves to what the server's programs read.
+// A link is followed rather than replaced (throughLink).
+func (s *Service) onHostsFile(fn func(path string) error) error {
+	run := s.onServer
+	if run == nil {
+		run = hostexec.OnServerPath
+	}
+	return run(s.paths.Hosts, hostFilePath(s.paths.Hosts), func(at string) error {
+		return fn(throughLink(at))
+	})
+}
+
+// readHostsFile reads the server's hosts file in the view an edit would use.
+func (s *Service) readHostsFile() ([]byte, error) {
+	var data []byte
+	err := s.onHostsFile(func(path string) error {
+		var err error
+		data, err = os.ReadFile(path)
+		return err
+	})
+	return data, err
 }
 
 // throughLink is where a write to path belongs. A symbolic link is replaced
