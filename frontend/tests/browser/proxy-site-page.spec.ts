@@ -465,6 +465,48 @@ test("a site that keeps no log of its own says so in one line, with the way to t
   await expect(page.getByRole("switch", { name: "Access log" })).toBeVisible()
 })
 
+test("from xl a field reached by Tab stops short of the save bar over the page's own scroller", async ({
+  page,
+}) => {
+  // A Tab and a read for each stop of the form: on a busy machine that is a minute.
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 760 })
+  await mockProxy(page, { included: true })
+  await inStep(page)
+  await page.goto("/proxy/sites/app.example.com?tab=settings")
+  const first = page.getByLabel("Send it to")
+  await first.fill("http://127.0.0.1:4000")
+  await expect(bar(page)).toContainText("1 unsaved change")
+  // From xl the head holds still and the detail page's body is what scrolls,
+  // with the bar portalled over it: the shell's own inset never reaches it.
+  const body = page.locator("[data-detail-scroll]")
+  expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 100)).toBe(true)
+  const barTop = (await bar(page).boundingBox())!.y
+
+  await first.focus()
+  let reached = 0
+  for (let step = 0; step < 80; step++) {
+    await page.keyboard.press("Tab")
+    const at = await page.evaluate(() => {
+      const node = document.activeElement
+      // The bar comes after the form: the whole form has been walked.
+      if (node?.closest('[role="region"][aria-label="Save changes"]')) return "bar"
+      if (!node?.closest('[data-slot="site-settings"]')) return null
+      const box = node.getBoundingClientRect()
+      if (box.height === 0) return null
+      const name = node.getAttribute("aria-label") ?? node.id ?? ""
+      return { name: `${node.tagName} ${name} ${node.textContent?.slice(0, 30) ?? ""}`, box }
+    })
+    if (at === "bar") break
+    if (!at) continue
+    reached += 1
+    expect(at.box.bottom, `${at.name} is under the bar`).toBeLessThanOrEqual(barTop)
+  }
+  // Far enough down the form that the body had to scroll.
+  expect(reached).toBeGreaterThan(5)
+  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
+})
+
 test("a site's Settings and its save bar fit a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })

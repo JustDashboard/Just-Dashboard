@@ -1039,8 +1039,13 @@
   /* The shell's scroller is where a focused field is scrolled into view: it
      stops short of whatever bars the bottom stack holds (`--bottom-occupied`,
      published by components/dock.tsx), so a field near the foot of a long
-     form is not left under the save bar (MOB-09). */
-  [data-workspace-shell-scroll] {
+     form is not left under the save bar (MOB-09). From `xl` a detail page
+     holds its head still and scrolls its own body instead, with the bar
+     portalled over it, so that body (`data-detail-scroll`) stops short too:
+     with only the shell's inset, Tab left a site's Settings field under the
+     bar. */
+  [data-workspace-shell-scroll],
+  [data-detail-scroll] {
     scroll-padding-bottom: calc(var(--bottom-occupied, 0px) + 0.5rem);
   }
 

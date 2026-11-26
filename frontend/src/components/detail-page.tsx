@@ -242,7 +242,12 @@ export function DetailPage({
               )}
               {identity}
             </div>
-            <div className="flex min-w-0 flex-col gap-8 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+            {/* The scroller from `xl`, so it keeps a focused field clear of
+                the bottom stack's bars (globals.css). */}
+            <div
+              data-detail-scroll
+              className="flex min-w-0 flex-col gap-8 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1"
+            >
               {children}
             </div>
           </div>

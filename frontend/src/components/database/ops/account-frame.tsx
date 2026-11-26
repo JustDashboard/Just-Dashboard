@@ -247,6 +247,9 @@ export function AccountPane({
     <TabsContent
       value={view}
       forceMount={keep || undefined}
+      // The scroller from `xl`, inside the detail page's: a field reached by
+      // Tab stops short of the save bar here too (globals.css).
+      data-detail-scroll
       className={cn(
         "min-h-0 flex-1 pt-6 data-[state=inactive]:hidden xl:overflow-y-auto",
         // Room at the sides for what reaches past the column's edge — a
