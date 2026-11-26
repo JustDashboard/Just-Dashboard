@@ -401,6 +401,8 @@ and its count share one immediate transaction that does not end with the request
 even if the client disconnects. `VerifyReauthentication` reads and adds to the same count.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
+Once its factors are given, the 2FA routes refuse it too (`httpx.RefuseOwedPasswordChange`), so a
+session owing the change reaches only its status, sign-out and the change.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
 The account keys page replaces an owned key through the existing create route, followed by an
 optional, separately confirmed revoke after the tool has switched credentials. The old key remains

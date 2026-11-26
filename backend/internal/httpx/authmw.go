@@ -525,6 +525,25 @@ func RefuseHubSession(next http.Handler) http.Handler {
 	})
 }
 
+// RefuseOwedPasswordChange keeps a session that has given every factor it owes,
+// and still owes a password change, off the second factor's own routes. They
+// sit behind AuthenticatePartial so that a session can give its factor first;
+// once it has, the password change is the next step and the only one besides
+// status and sign-out (invariant 2). A session still owing a factor passes,
+// because enrolling or giving a code comes before the change: under
+// JD_REQUIRE_2FA an account made with a temporary password enrols, then
+// changes it. Answered before the handler, so the refusal spends nothing from
+// the account's guess budget.
+func RefuseOwedPasswordChange(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if p, ok := PrincipalFrom(r.Context()); ok && p.Elevated && p.User != nil && p.User.MustChangePW {
+			WriteError(w, r, passwordChangeRequired())
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
 // recordKeyRefusal writes a deploy key's refused request to the audit trail
 // the way AuditMutations writes a refused write, reads included: what was
 // asked for is the target, and the refusal is the detail.

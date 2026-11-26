@@ -507,7 +507,11 @@ What did **not** change, and must not:
   [passkeys](../architecture/runtime-boundaries.md#passkeys).
 - A temporary password does not grant feature access. After required factors, only authentication
   status/logout and the session-only password change are available until `must_change_pw` is
-  cleared. API tokens cannot bypass this restriction.
+  cleared. API tokens cannot bypass this restriction. The factors come first: under `JD_REQUIRE_2FA`
+  an account made with a temporary password enrols from its partial session and then changes the
+  password, and from then on the 2FA routes refuse its session with `403 password_change_required`
+  (`httpx.RefuseOwedPasswordChange`, before a guess is spent) as every feature route does
+  (`resolveWithPasswordChange`). `api/password_change_order_test.go` holds both orders.
 
 Two deliberate loosenings. The first: with the policy off, an account that has never enrolled signs in
 on a password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession`

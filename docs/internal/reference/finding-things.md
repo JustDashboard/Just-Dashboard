@@ -300,7 +300,7 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | --- | --- | --- |
 | Network allowlist | `AllowlistCIDRs` in `backend/internal/httpx/middleware.go` | First middleware of `/api/v1` in `api/routes.go`; `JD_ALLOWED_CIDRS` is read in `config/config.go` |
 | Authentication | `Authenticator` in `backend/internal/httpx/authmw.go`; sessions and keys in `backend/internal/auth/` | Each group in `api/routes.go` picks its `Authenticate…` method |
-| Two-factor | `AuthenticatePartial` in `httpx/authmw.go`; codes in `backend/internal/auth/totp.go` | The half-authenticated group in `api/routes.go` |
+| Two-factor | `AuthenticatePartial` in `httpx/authmw.go`, with `RefuseOwedPasswordChange` in front of the 2FA routes; codes in `backend/internal/auth/totp.go` | The half-authenticated group in `api/routes.go` |
 | Capability | `RequireCapability` in `httpx/authmw.go`; roles in `backend/internal/auth/roles.go` | Each `mount…Routes`. Checks that depend on the request's content are listed in [`request-lifecycle.md`](../architecture/request-lifecycle.md) |
 | Destructive actions | `s.destructive` in `api/routes.go`; `backend/internal/httpx/confirm.go` for the typed phrase | Around the route at its mount |
 | CSRF | `RequireCSRF` in `backend/internal/httpx/csrf.go` | The groups in `api/routes.go` a session cookie reaches; the stream bridge asks for a same-site Origin instead |

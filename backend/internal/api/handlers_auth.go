@@ -128,7 +128,7 @@ func (s *Server) handleSession(w http.ResponseWriter, r *http.Request) error {
 
 func (s *Server) handleTOTPSetup(w http.ResponseWriter, r *http.Request) error {
 	p := httpx.MustPrincipal(r)
-	if err := s.limitSecondFactor(r); err != nil {
+	if err := s.spendGuess(r); err != nil {
 		return err
 	}
 	if p.User.TOTPEnabled {
@@ -157,7 +157,7 @@ func (s *Server) handleTOTPEnable(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	p := httpx.MustPrincipal(r)
-	if err := s.limitSecondFactor(r); err != nil {
+	if err := s.spendGuess(r); err != nil {
 		return err
 	}
 	codes, err := s.Auth.ConfirmTOTPEnrollmentForSession(r.Context(), p.UserID(), p.SessionID, req.Code)
@@ -182,7 +182,7 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) error 
 		return err
 	}
 	p := httpx.MustPrincipal(r)
-	if err := s.limitSecondFactor(r); err != nil {
+	if err := s.spendGuess(r); err != nil {
 		return err
 	}
 	if err := s.Auth.VerifySecondFactor(r.Context(), p.SessionID, p.UserID(), req.Code); err != nil {
@@ -204,19 +204,11 @@ func (s *Server) handleTOTPVerify(w http.ResponseWriter, r *http.Request) error 
 	return nil
 }
 
-// Enrollment and verification share an account budget; changing routes or
-// source addresses must not multiply the number of guesses.
-func (s *Server) limitSecondFactor(r *http.Request) error {
-	p := httpx.MustPrincipal(r)
-	if p.Elevated && p.User.MustChangePW {
-		return httpx.Err(http.StatusForbidden, "password_change_required", "change your temporary password before continuing")
-	}
-	return s.spendGuess(r)
-}
-
-// spendGuess takes one guess from the account's budget. A password asked for
-// again from a session is guessed against the same budget as a code, whichever
-// route asks for it, so no form is a way around another.
+// spendGuess takes one guess from the account's budget. Setup, enrollment and
+// verification share it, and a password asked for again from a session is
+// guessed against it as a code is, whichever route or address asks, so no form
+// is a way around another. A session that owes a password change never gets
+// this far on the 2FA routes (httpx.RefuseOwedPasswordChange).
 func (s *Server) spendGuess(r *http.Request) error {
 	key := "totp|" + strconv.FormatInt(httpx.MustPrincipal(r).UserID(), 10)
 	if err := s.loginLim.Spend(key, "too many verification attempts"); err != nil {
