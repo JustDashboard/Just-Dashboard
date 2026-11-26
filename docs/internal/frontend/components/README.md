@@ -71,7 +71,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `ChoiceListSkeleton` | [Card row](card-row.md) | `components/choice-row.tsx` | Card rows that have not arrived, at the card's own box. | keep |
 | `useChoicePress`, `choicePress`, `ChoicePress` (type) | [Card row](card-row.md) | `components/choice-row.tsx` | A card's press: skips inner controls and a text selection, and opens a new tab on a modified click; `choicePress` is the rule as a pure step. | keep |
 | `CHOICE_ROW_BOX` | [Card row](card-row.md) | `components/choice-row.tsx` | A `ChoiceRow`'s box inside its edge, shared with its skeleton so both are 58px. | keep |
-| `ChoiceGrid`, `ChoiceCard`, `ChoiceCardTitle`, `ChoiceCardHint` | [Choice card](choice-card.md) | `components/choice-card.tsx` | A block you pick one of, in a grid of choices. | keep |
+| `ChoiceGrid`, `ChoiceCard`, `ChoiceCardTitle`, `ChoiceCardHint`, `choiceStep` | [Choice card](choice-card.md) | `components/choice-card.tsx` | A block you pick one of, in a grid of choices; `choiceStep` is where a bare key moves a single choice. | keep |
 | `ProductCard` | [Choice card](choice-card.md) | `components/choice-card.tsx` | One product as a picker of products draws it: its logo, name and a line. | keep |
 | `PurposeCard`, `ExperimentalMark` | [Choice card](choice-card.md) | `components/onboarding/purpose-card.tsx` | One purpose the server is for, as a card pressed to take or leave it, and what an experimental one says on it. | keep |
 | `OpenCard` | [Card row](card-row.md) | `components/open-card.tsx` | The press-anywhere card shell under a repository, a drawing or a fleet card. | keep |
