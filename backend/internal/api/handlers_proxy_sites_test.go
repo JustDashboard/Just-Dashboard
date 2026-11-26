@@ -20,6 +20,14 @@ import (
 // $JD_TEST_RELOAD_EXIT.
 func siteFormServer(t *testing.T) (*client, string) {
 	t.Helper()
+	c, dir, _ := siteFormServerWithStore(t)
+	return c, dir
+}
+
+// siteFormServerWithStore is siteFormServer with the server, for a test that
+// reads what a request left in the store.
+func siteFormServerWithStore(t *testing.T) (*client, string, *Server) {
+	t.Helper()
 	s := testServer(t)
 	dir := t.TempDir()
 	for _, sub := range []string{"sites-available", "sites-enabled", "bin"} {
@@ -45,7 +53,7 @@ func siteFormServer(t *testing.T) (*client, string) {
 	t.Setenv("JD_TEST_OUT", "nginx: configuration file test is successful")
 	s.Cfg.NginxDir = dir
 	s.initModules()
-	return &client{t: t, h: s.Routes(), cookie: signIn(t, s)}, dir
+	return &client{t: t, h: s.Routes(), cookie: signIn(t, s)}, dir, s
 }
 
 // siteShimPrelude sets $conf to the configuration a fake nginx is given — the
@@ -549,5 +557,33 @@ func TestSiteSpecSaysWhatASaveDropsAndWhichVersionItRead(t *testing.T) {
 	decodeSite(t, c.do(http.MethodGet, "/api/v1/proxy/sites/app", "", nil), &after)
 	if after.Lossless == nil || !*after.Lossless || after.Spec.Custom != "client_body_buffer_size 1m;" {
 		t.Fatalf("after the save: %+v", after)
+	}
+}
+
+// The download and the export hand over what the sites' files hold, and the
+// audit middleware lets every GET by, so each records its own entry. Both
+// once labelled an entry the middleware never wrote.
+func TestSiteDownloadAndExportAreAudited(t *testing.T) {
+	c, dir, s := siteFormServerWithStore(t)
+	site := "server {\n    listen 80;\n    server_name app.example.com;\n}\n"
+	if err := os.WriteFile(filepath.Join(dir, "sites-available", "app"), []byte(site), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if w := c.do(http.MethodGet, "/api/v1/proxy/sites/app/download", "", nil); w.Code != http.StatusOK || w.Body.String() != site {
+		t.Fatalf("download got %d: %q", w.Code, w.Body.String())
+	}
+	if w := c.do(http.MethodGet, "/api/v1/proxy/sites-export", "", nil); w.Code != http.StatusOK || w.Body.Len() == 0 {
+		t.Fatalf("export got %d with %d bytes", w.Code, w.Body.Len())
+	}
+	for _, want := range []struct{ action, target string }{{"proxy.site.download", "app"}, {"proxy.sites.export", ""}} {
+		var count int
+		var detail string
+		if err := s.Store.DB.QueryRow(`SELECT count(*), coalesce(max(detail), '') FROM audit_log WHERE action=? AND target=? AND success=1`,
+			want.action, want.target).Scan(&count, &detail); err != nil {
+			t.Fatal(err)
+		}
+		if count != 1 || !strings.Contains(detail, `"bytes"`) {
+			t.Errorf("%s: %d entries, detail %q", want.action, count, detail)
+		}
 	}
 }
