@@ -45,9 +45,11 @@ At the end of stage 3 the installer copies the `jd` command line out of the fres
 image (`docker run --rm --entrypoint cat just-dashboard-backend:latest /usr/local/bin/jd`) to
 `/usr/local/bin/jd` on the host, mode 0755. An image without it, or a failed copy, is a `[!]` line naming
 `sudo ./scripts/manage.sh install-cli` and never fails the install. After that the dashboard keeps the
-host's copy current: at every boot `internal/clihost` replaces `/host/usr/local/bin/jd` with the jd built
-beside the running binary when the file there is an older jd — recognised by a line of its usage text —
-and leaves a missing file, or any other program called `jd`, alone.
+host's copy current: at every boot `internal/clihost` replaces the server's `/usr/local/bin/jd` with the
+jd built beside the running binary when the file there is an older jd — recognised by a line of its usage
+text — and leaves a missing file, or any other program called `jd`, alone. It opens that path with
+`hostexec.HostPath`: through PID 1's root from the backend's container, and as itself on a server where
+the backend runs directly, which has no `/host` mount.
 
 The completion guide appears after backend health verification and shows the dashboard address,
 sign-in instructions and terminal command examples, including a shell-quoted checkout path, and a

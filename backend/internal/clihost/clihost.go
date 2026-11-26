@@ -27,11 +27,12 @@ const Marker = "jd — deploy to a Just Dashboard from the command line"
 // Path is where install.sh puts jd on the server.
 const Path = "/usr/local/bin/jd"
 
-// Refresh replaces hostRoot+Path with built when the file there is a jd that
-// differs from it. It reports whether it replaced anything. hostRoot is where
-// the server's own root is mounted in the backend's container ("/host");
-// built is the jd beside the dashboard's binary.
-func Refresh(hostRoot, built string) (bool, error) {
+// Refresh replaces target with built when the file there is a jd that
+// differs from it. It reports whether it replaced anything. The caller names
+// target, the server's Path, as it opens the server's filesystem, which is
+// not always /host: a backend running on the server itself has no such
+// mount. built is the jd beside the dashboard's binary.
+func Refresh(target, built string) (bool, error) {
 	want, err := os.ReadFile(built)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil // a build without jd, such as a developer's
@@ -42,7 +43,6 @@ func Refresh(hostRoot, built string) (bool, error) {
 	if !bytes.Contains(want, []byte(Marker)) {
 		return false, fmt.Errorf("%s does not look like jd", built)
 	}
-	target := filepath.Join(hostRoot, Path)
 	have, err := os.ReadFile(target)
 	if errors.Is(err, fs.ErrNotExist) {
 		return false, nil

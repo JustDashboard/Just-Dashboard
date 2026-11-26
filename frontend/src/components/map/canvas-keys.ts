@@ -2,8 +2,9 @@
  * The arrow keys on a canvas: the server map, the databases map, a
  * database's diagram and a drawing (T10, WCAG 2.1.1). Each of them is moved
  * by a trackpad, a mouse and a finger (`canvas-move.ts`); these keys do the
- * same two things without a drag. Keys are not a single pointer (2.5.7): on
- * the maps that is the inspector's Move buttons, which take `moved` too.
+ * same two things without a drag. Keys are not a single pointer (2.5.7):
+ * that is the Move buttons (`MoveBar`), which take `moved` too on the maps
+ * and a diagram, and a drawing's own arrows on a drawing.
  *
  * With nothing chosen an arrow slides the picture: the view goes the way the
  * arrow points, as a page scrolls, by a fixed distance on the screen whatever

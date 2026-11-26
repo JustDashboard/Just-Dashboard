@@ -24,6 +24,15 @@ import { cn } from "@/lib/utils"
  * It is drawn 28px tall at every pointer, so a row of filters keeps its
  * proportions, and presses as 44px under a finger (`hit-area`).
  */
+// Forced colours (Windows High Contrast) repaint every fill as the page and
+// every ink as the text's, so the chosen chip read as any other. There it
+// takes the system's own selection, Highlight under HighlightText, kept from
+// that repaint, as the chosen tab does (`components/tabs.tsx`). Its ring is
+// drawn outside it, on the page, so it is Highlight as every focused
+// control's is there. Normal colours keep the face with no outline.
+const CHOSEN_FORCED =
+  "forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none forced-colors:[--ring:Highlight]"
+
 export function FilterChip({
   selected,
   className,
@@ -39,7 +48,10 @@ export function FilterChip({
         "focus-ring",
         selected
           ? // A count inside the chosen chip takes the label's ink.
-            "border-transparent bg-chosen text-foreground [--count-ink:currentColor]"
+            cn(
+              "border-transparent bg-chosen text-foreground [--count-ink:currentColor]",
+              CHOSEN_FORCED,
+            )
           : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
         className,
       )}

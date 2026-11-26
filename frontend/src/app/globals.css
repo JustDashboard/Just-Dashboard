@@ -1159,12 +1159,24 @@
  *
  * The transparent resting outline is deliberate: it reserves the space, so a
  * control does not shift when it takes focus, and it survives forced-colors
- * mode where `outline-color` is overridden but `outline-style` is not. */
+ * mode where `outline-color` is overridden but `outline-style` is not.
+ *
+ * That same override paints the resting outline too: forced colours give the
+ * transparent line the text's colour, so every control drawn with the ring
+ * wore it while nothing had the keyboard, and the one that did could not be
+ * told apart. There the resting outline is absent rather than transparent
+ * (`outline-style: none`), and the ring is drawn only with focus. Normal
+ * colours keep the transparent line. */
 @utility focus-ring {
   outline: 2px solid transparent;
   outline-offset: 2px;
   &:focus-visible {
     outline-color: var(--ring);
+  }
+  @media (forced-colors: active) {
+    &:not(:focus-visible) {
+      outline-style: none;
+    }
   }
 }
 
@@ -1181,6 +1193,11 @@
   &:has(:focus-visible) {
     outline-color: var(--ring);
   }
+  @media (forced-colors: active) {
+    &:not(:has(:focus-visible)) {
+      outline-style: none;
+    }
+  }
 }
 
 /* The same ring for a control with no room outside itself to draw one — a tab
@@ -1190,6 +1207,11 @@
   outline-offset: -2px;
   &:focus-visible {
     outline-color: var(--ring);
+  }
+  @media (forced-colors: active) {
+    &:not(:focus-visible) {
+      outline-style: none;
+    }
   }
 }
 

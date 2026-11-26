@@ -40,6 +40,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -629,7 +630,7 @@ function ProcessTableRow({
         <div className="flex w-full min-w-0 items-center gap-3">
           <ProcessMark process={process} />
           <div className="min-w-0">
-            <RowLink title={process.name} onClick={() => onOpen(process)}>
+            <RowLink {...ROW_NAME} title={process.name} onClick={() => onOpen(process)}>
               {process.name}
             </RowLink>
             <p

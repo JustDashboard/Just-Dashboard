@@ -29,6 +29,8 @@ import {
   type DiagramDocument,
 } from "@/components/database/diagram/document"
 import { KeyLegend } from "@/components/database/diagram/chrome"
+import { MoveBar } from "@/components/move-bar"
+import type { Direction } from "@/components/map/canvas-keys"
 import type { DbGraphEdge, DbGraphTable, DbSchemaGraph } from "@/components/database/diagram/types"
 
 /**
@@ -58,6 +60,7 @@ export function Inspector({
   onQuery,
   hrefOutside,
   onClose,
+  onMove,
 }: {
   graph: DbSchemaGraph
   doc: DiagramDocument
@@ -78,6 +81,12 @@ export function Inspector({
   /** Where a table that is not in the picture can be read: its page in Schema. */
   hrefOutside: (schema: string, table: string) => string
   onClose: () => void
+  /**
+   * Move the focused table a step, for a pointer that cannot drag. Left out
+   * where nothing may move (the layout locked) or the canvas is not beside
+   * the inspector to watch it move (a phone).
+   */
+  onMove?: (direction: Direction) => void
 }) {
   const [filter, setFilter] = useState("")
   const byId = useMemo(() => new Map(graph.tables.map((t) => [t.id, t])), [graph.tables])
@@ -389,6 +398,14 @@ export function Inspector({
           </div>
         )}
       </div>
+      {/* In the foot, so it stays put while the inspector above it scrolls. */}
+      {focused && onMove && (
+        <MoveBar
+          name={qualified && focused.schema ? `${focused.schema}.${focused.name}` : focused.name}
+          onMove={onMove}
+          className="border-t border-hairline px-3 py-2"
+        />
+      )}
       <KeyLegend />
     </aside>
   )

@@ -14,6 +14,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -70,11 +71,19 @@ type Service struct {
 	onServer func(real, mirrored string, write func(path string) error) error
 }
 
+// serverMount is where the shipped container mounts the server's root. Tests
+// point it at a temporary directory.
+var serverMount = "/host"
+
 // New returns the service for the server this process manages.
 func New() *Service {
+	// The server's hosts file under the mount says this is the shipped
+	// container. A link there counts even when its target names nothing from
+	// here, as in netx: an absolute target is the server's to resolve, and
+	// taking the link for no mount would hand the rename Docker's copies.
 	root := ""
-	if st, err := os.Stat("/host/etc/hosts"); err == nil && st.Mode().IsRegular() {
-		root = "/host"
+	if _, err := os.Lstat(filepath.Join(serverMount, "etc", "hosts")); err == nil {
+		root = serverMount
 	}
 	return &Service{
 		run: func(ctx context.Context, name string, args ...string) ([]byte, error) {

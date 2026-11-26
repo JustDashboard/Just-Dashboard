@@ -286,19 +286,24 @@ export function LogDrainsPage() {
   }
 
   const editing = draft?.id ? list?.find((drain) => drain.id === draft.id) : undefined
+  // A first read that failed is settled, not still on its way: the list says
+  // so with a way to try again, and the picture is not left waiting on it.
+  const failed = Boolean(drains.error && !list)
 
   return (
     <Page>
       <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Log drains" />
       {/* On the page's own ground, as Notifications' picture is. */}
-      <div className="mx-auto w-full max-w-5xl lg:py-2">
-        <DrainsPicture
-          drains={list}
-          projects={projects}
-          loading={!list || fleet.waiting}
-          onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
-        />
-      </div>
+      {!failed && (
+        <div className="mx-auto w-full max-w-5xl lg:py-2">
+          <DrainsPicture
+            drains={list}
+            projects={projects}
+            loading={!list || fleet.waiting}
+            onAdd={admin ? (kind) => open(emptyDraft(kind)) : undefined}
+          />
+        </div>
+      )}
       <Panel plain>
         <PanelHeader
           title="Drains"
@@ -313,8 +318,9 @@ export function LogDrainsPage() {
           }
         />
         <PanelBody>
-          {drains.error && !list ? (
-            <ErrorState error={drains.error} onRetry={drains.refresh} />
+          {failed && drains.error ? (
+            // Named, so a plain network failure offers Try again too.
+            <ErrorState error={drains.error} what="the log drains" onRetry={drains.refresh} />
           ) : !list ? (
             <ChoiceListSkeleton rows={2} />
           ) : list.length === 0 ? (

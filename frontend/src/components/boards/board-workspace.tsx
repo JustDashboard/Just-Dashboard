@@ -9,6 +9,7 @@ import {
   CaptureUpdateAction,
   convertToExcalidrawElements,
   Excalidraw,
+  Footer,
   getCommonBounds,
   hashElementsVersion,
   isLinearElement,
@@ -59,7 +60,8 @@ import { ApiError, del, get, put } from "@/lib/api"
 import { dashboardResource, embeddable } from "@/lib/board/embeds"
 import { EXCALIDRAW_ASSETS } from "@/lib/vendored"
 import { isTypingTarget, OWNER_SELECTOR } from "@/lib/keys"
-import { arrowOf, panned } from "@/components/map/canvas-keys"
+import { arrowOf, MOVE_STEP, panned, type Direction } from "@/components/map/canvas-keys"
+import { MoveBar } from "@/components/move-bar"
 import { BOARD_FILE_TYPES, shownFileIds } from "@/lib/board/files"
 import type { Board, BoardSaved, BoardScene } from "@/lib/board/boards"
 import type { DbFleet, DeployProject } from "@/lib/types"
@@ -299,6 +301,47 @@ function slideScene(api: ExcalidrawImperativeAPI | null, event: React.KeyboardEv
   })
 }
 
+/** Excalidraw's own step for Shift and an arrow, with no grid. */
+const EXCALIDRAW_SHIFT_STEP = 5
+
+/**
+ * The selection a step the way `direction` points, by a single press of a
+ * Move button (WCAG 2.5.7): the keys' longer step (`MOVE_STEP.large`), as
+ * the map and a database's Diagram take it. Excalidraw moves a selection
+ * only by a drag or its arrows, and only its arrows carry what goes with it
+ * (the text in a shape, what is in a frame, the arrows bound to it), none of
+ * which it exports. So the press is made of its arrows: as many of them as
+ * the step takes, sent to its canvas, then let go as a key is, which is
+ * when it binds the arrows again.
+ */
+function nudgeSelection(
+  api: ExcalidrawImperativeAPI | null,
+  canvas: Element | null,
+  direction: Direction,
+) {
+  if (!api || !canvas) return
+  const state = api.getAppState()
+  const key =
+    direction.x < 0
+      ? "ArrowLeft"
+      : direction.x > 0
+        ? "ArrowRight"
+        : direction.y < 0
+          ? "ArrowUp"
+          : "ArrowDown"
+  // On a grid an arrow alone is a cell, and Shift a pixel; without one Shift
+  // is the longer of its two steps.
+  const grid = state.gridModeEnabled ? state.gridSize : 0
+  const shiftKey = !grid
+  const presses = Math.max(1, Math.round(MOVE_STEP.large / (grid || EXCALIDRAW_SHIFT_STEP)))
+  for (let press = 0; press < presses; press++) {
+    canvas.dispatchEvent(
+      new KeyboardEvent("keydown", { key, shiftKey, bubbles: true, cancelable: true }),
+    )
+  }
+  document.dispatchEvent(new KeyboardEvent("keyup", { key, shiftKey, bubbles: true }))
+}
+
 function LoadedBoard({ board }: { board: Board }) {
   const router = useRouter()
   const { can } = useAuth()
@@ -315,6 +358,9 @@ function LoadedBoard({ board }: { board: Board }) {
   const [catalogError, setCatalogError] = useState<Error | null>(null)
   const apiRef = useRef<ExcalidrawImperativeAPI | null>(null)
   const [api, setApi] = useState<ExcalidrawImperativeAPI | null>(null)
+  const canvasRef = useRef<HTMLDivElement>(null)
+  // Whether anything is selected, for the Move buttons under the canvas.
+  const [selecting, setSelecting] = useState(false)
   // Once the live room has been joined, saves merge with the stored scene
   // instead of refusing a revision another editor moved on: the editors are
   // drawing together, and each sees the other's changes as they are made.
@@ -505,6 +551,7 @@ function LoadedBoard({ board }: { board: Board }) {
       if (first) savedSignatureRef.current = next
       const previous = sceneRef.current?.signature ?? savedSignatureRef.current
       sceneRef.current = { elements, appState, files: held, signature: next }
+      setSelecting(Object.values(appState.selectedElementIds).some(Boolean))
       // The images stored apart are read once the scene they belong to is
       // there; another editor's are read as their elements arrive.
       if (first && apiRef.current) void files.read(apiRef.current, elements)
@@ -778,6 +825,7 @@ function LoadedBoard({ board }: { board: Board }) {
         />
         <div className="relative flex min-h-0 flex-1 overflow-hidden">
           <div
+            ref={canvasRef}
             className="min-h-0 min-w-0 flex-1"
             aria-label={`${name} drawing canvas`}
             onKeyDown={(event) => slideScene(apiRef.current, event)}
@@ -825,6 +873,26 @@ function LoadedBoard({ board }: { board: Board }) {
                     })
                   }
                 />
+                {/* What is selected moves by a press too, for a pointer that
+                    cannot drag. In Excalidraw's own foot, where its zoom and
+                    undo are, and only while something is selected; a phone's
+                    Excalidraw has no such foot, as the maps leave theirs out. */}
+                {canWrite && selecting && (
+                  <Footer>
+                    <MoveBar
+                      name="the selection"
+                      onMove={(direction) =>
+                        nudgeSelection(
+                          apiRef.current,
+                          canvasRef.current?.querySelector(".excalidraw-container") ?? null,
+                          direction,
+                        )
+                      }
+                      // Apart from the undo and redo beside it, as Excalidraw sets its own.
+                      className="ml-2.5 rounded-md border border-hairline bg-popover p-0.5 pl-2"
+                    />
+                  </Footer>
+                )}
               </Excalidraw>
             </LiveCardProvider>
           </div>

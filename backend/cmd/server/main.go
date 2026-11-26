@@ -328,7 +328,9 @@ func run(agentFlag, agentReset bool) error {
 	// Waited for at shutdown: the store is closed when run returns, and a
 	// purge still writing then is a write to a closed database.
 	janitorDone := safego.Go(ctx, log, "session janitor", func(ctx context.Context) { janitor(ctx, svc, log) })
-	refreshHostCLI(log)
+	if exe, err := os.Executable(); err == nil {
+		refreshHostCLI(log, filepath.Join(filepath.Dir(exe), "jd"), hostexec.HostPath)
+	}
 	proxysvc.InstallAppDomainHook = installHostCLI
 
 	if cfg.AgentMode {
@@ -481,16 +483,14 @@ func agentTLS(id *agent.Identity) (*tls.Config, error) {
 	}, nil
 }
 
-// refreshHostCLI brings the server's /usr/local/bin/jd up to the jd built
+// refreshHostCLI brings the server's /usr/local/bin/jd up to built, the jd
 // beside this binary, when the one there is an older jd (internal/clihost).
-// The server's root is mounted at /host in the backend's container; anywhere
-// else there is nothing there and nothing happens.
-func refreshHostCLI(log *slog.Logger) {
-	exe, err := os.Executable()
-	if err != nil {
-		return
-	}
-	replaced, err := clihost.Refresh("/host", filepath.Join(filepath.Dir(exe), "jd"))
+// hostPath (hostexec.HostPath) names the server's path as this process
+// opens it: through PID 1's root from the backend's container, the path
+// itself on a server where the backend runs directly, which has no /host
+// mount to write through.
+func refreshHostCLI(log *slog.Logger, built string, hostPath func(string) string) {
+	replaced, err := clihost.Refresh(hostPath(clihost.Path), built)
 	switch {
 	case err != nil:
 		log.Warn("could not update the server's jd", "path", clihost.Path, "err", err)

@@ -31,6 +31,7 @@ import { VerbActions, VerbMenu } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -734,7 +735,7 @@ function PM2Row(props: RowProps) {
           <ApplicationMark process={process} />
           <div className="min-w-0">
             <div className="flex min-w-0 items-center gap-2">
-              <RowLink title={process.name} onClick={() => onOpen(process)}>
+              <RowLink {...ROW_NAME} title={process.name} onClick={() => onOpen(process)}>
                 {process.name}
               </RowLink>
               <span className="numeric shrink-0 font-mono text-hint text-muted-foreground">

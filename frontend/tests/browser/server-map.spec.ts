@@ -600,7 +600,7 @@ test("a single pointer moves a box and a system from the inspector, one press at
   // frame, with everything in it.
   const was = await at(page, `frame:${s}`)
   await frame(page, s).locator(".map-frame-grip").click()
-  const group = inspector(page).locator("[data-slot=map-move]")
+  const group = inspector(page).locator("[data-slot=move-bar]")
   await expect(group).toHaveCount(1)
   await expect(inspector(page).getByRole("heading", { name: "prom-data" })).toHaveCount(0)
   await group.getByRole("button", { name: / left$/ }).click()
@@ -612,6 +612,34 @@ test("a single pointer moves a box and a system from the inspector, one press at
   await expect
     .poll(() => Object.keys((mock.saved.layout as { frames?: object } | null)?.frames ?? {}))
     .toEqual([s])
+})
+
+test("a Move button answers Enter as a button, and the map stays where it is", async ({ page }) => {
+  // The buttons stand inside the canvas's keys, where Enter on a chosen box
+  // opens its page: pressed on a Move button, it moved the box and went.
+  await open(page, "/map?system=system:stack:monitoring")
+  await still(page)
+  const s = "system:stack:monitoring"
+  const id = `${s}/volume:prom-data`
+  const anchor = `${s}/container:c-prom`
+  const offset = async () => {
+    const [a, b] = [await at(page, id), await at(page, anchor)]
+    const z = (await view(page)).zoom
+    return { x: Math.round((a.x - b.x) / z), y: Math.round((a.y - b.y) / z) }
+  }
+  await node(page, id).click()
+  const right = inspector(page)
+    .getByRole("group", { name: "Move prom-data" })
+    .getByRole("button", { name: "Move prom-data right" })
+  const before = await offset()
+  await right.focus()
+  await page.keyboard.press("Enter")
+  await expect.poll(offset).toEqual({ x: before.x + 40, y: before.y })
+  // A page that had gone would have no button to press again.
+  await page.keyboard.press("Enter")
+  await expect.poll(offset).toEqual({ x: before.x + 80, y: before.y })
+  await expect(right).toBeFocused()
+  await expect(page).toHaveURL(/\/map\?/)
 })
 
 test("a click on open ground inside a system leaves the arrows sliding the canvas", async ({

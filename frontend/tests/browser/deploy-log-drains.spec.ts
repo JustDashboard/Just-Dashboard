@@ -92,6 +92,31 @@ test("an empty page offers the three formats, and a drain is added with its seal
   expect(storage).not.toContain("fixture-header-secret")
 })
 
+test("a first read that fails settles the page on the failure, with Try again", async ({
+  page,
+}) => {
+  // The list said it had failed while the picture over it kept loading, and a
+  // plain network failure offered no way to ask again, as on Secret stores.
+  await mockProject(page)
+  let refuse = true
+  await page.route("**/api/v1/deploy/log-drains**", (route) =>
+    refuse ? route.abort("connectionrefused") : json(route, [healthy]),
+  )
+  await page.goto("/deploy/drains")
+  const failure = page.locator("[data-slot=error-state]")
+  await expect(failure).toContainText("Could not read the log drains")
+  await expect(page.locator("[data-slot=wire-flow]")).toHaveCount(0)
+
+  refuse = false
+  await failure.getByRole("button", { name: "Try again", exact: true }).click()
+  const list = page.getByRole("list", { name: "Log drains" })
+  await expect(list.locator("[data-slot=choice-row]", { hasText: "Local Loki" })).toBeVisible()
+  await expect(failure).toHaveCount(0)
+  const picture = page.locator("[data-slot=wire-flow]")
+  await expect(picture).toBeVisible()
+  await expect(picture).not.toHaveAttribute("data-loading")
+})
+
 test("a failing drain says what the destination answered, and its verbs reach the server", async ({
   page,
 }) => {

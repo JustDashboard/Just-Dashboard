@@ -444,6 +444,95 @@ test("the arrows slide a drawing with nothing selected, and Excalidraw's own mov
   await expect.poll(where).toEqual({ x: slid.x + 6, y: slid.y })
 })
 
+test("a single pointer moves a selection from under the drawing, one press at a time", async ({
+  page,
+}) => {
+  // WCAG 2.5.7: Excalidraw moves a selection by a drag or its arrows, and
+  // neither is a single press. The buttons are there only while something is.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const board = await mockBoards(page, {
+    elements: [
+      {
+        ...libraryItem.elements[0],
+        id: "box",
+        x: 100,
+        y: 100,
+        width: 160,
+        height: 80,
+        backgroundColor: "#a5d8ff",
+      },
+    ],
+    appState: {},
+    files: {},
+  })
+  await openBoard(page)
+  const moves = page.getByRole("group", { name: "Move the selection" })
+  await expect(moves).toHaveCount(0)
+
+  // A press on the shape selects it; the buttons then carry it, the arrows'
+  // longer step a press, and it is saved where they left it.
+  const ground = (await page.locator("canvas.interactive").boundingBox())!
+  await page.mouse.click(ground.x + 180, ground.y + 140)
+  await expect(moves).toBeVisible()
+  await moves.getByRole("button", { name: "Move the selection right" }).click()
+  await moves.getByRole("button", { name: "Move the selection down" }).click()
+  const saved = () => {
+    const box = board.puts
+      .at(-1)
+      ?.scene.elements.find((element) => (element as { id?: string }).id === "box") as
+      { x: number; y: number } | undefined
+    return box ? { x: Math.round(box.x), y: Math.round(box.y) } : null
+  }
+  await expect.poll(saved, { timeout: 15_000 }).toEqual({ x: 140, y: 140 })
+
+  // Let go, and they are gone.
+  await page.mouse.click(ground.x + 600, ground.y + 500)
+  await expect(moves).toHaveCount(0)
+})
+
+test("a Move button under the drawing answers Enter and Space as a button, not as the canvas's keys", async ({
+  page,
+}) => {
+  // The buttons stand inside Excalidraw, which hears every key that comes up
+  // through it: Enter opened the selected box's text, and Space was a held
+  // slide, and neither press moved the box.
+  await page.setViewportSize({ width: 1280, height: 800 })
+  const board = await mockBoards(page, {
+    elements: [
+      {
+        ...libraryItem.elements[0],
+        id: "box",
+        x: 100,
+        y: 100,
+        width: 160,
+        height: 80,
+        backgroundColor: "#a5d8ff",
+      },
+    ],
+    appState: {},
+    files: {},
+  })
+  await openBoard(page)
+  const ground = (await page.locator("canvas.interactive").boundingBox())!
+  await page.mouse.click(ground.x + 180, ground.y + 140)
+  const right = page
+    .getByRole("group", { name: "Move the selection" })
+    .getByRole("button", { name: "Move the selection right" })
+  await right.focus()
+  await page.keyboard.press("Enter")
+  await page.keyboard.press("Space")
+  const saved = () => {
+    const box = board.puts
+      .at(-1)
+      ?.scene.elements.find((element) => (element as { id?: string }).id === "box") as
+      { x: number; y: number } | undefined
+    return box ? { x: Math.round(box.x), y: Math.round(box.y) } : null
+  }
+  await expect.poll(saved, { timeout: 15_000 }).toEqual({ x: 180, y: 100 })
+  await expect(page.locator("textarea.excalidraw-wysiwyg")).toHaveCount(0)
+  await expect(right).toBeFocused()
+})
+
 test("a drawing another tab changed can only be read again, and that is the bar's one command", async ({
   page,
 }) => {

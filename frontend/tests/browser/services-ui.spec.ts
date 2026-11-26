@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { mockServices, SYSTEMD_LIST, UNITS } from "./services-fixture"
 import { risen } from "./risen"
+import { expectRowIsOneStop } from "./row-name-stop"
 
 /**
  * The Services page against a host whose services carry their live readings:
@@ -107,7 +108,7 @@ test("the chips count and narrow, the verdict narrows to the failed, and Escape 
     .getByRole("button", { name: /Static/ })
     .click()
   expect(await rowNames(page)).toEqual(["certbot.service"])
-  await page.locator("[data-slot='table-row']").first().focus()
+  await page.locator("[data-slot='table-row'] [data-workspace-primary]").first().focus()
   await page.keyboard.press("Escape")
   expect(await rowNames(page)).toEqual(["postgresql.service", "certbot.service"])
   await page.keyboard.press("Escape")
@@ -116,6 +117,19 @@ test("the chips count and narrow, the verdict narrows to the failed, and Escape 
   // A link from elsewhere that asks for the failed opens on them.
   await page.goto("/processes/services?state=failed")
   await expect.poll(() => rowNames(page)).toEqual(["postgresql.service", "certbot.service"])
+})
+
+test("a service's row is one Tab stop, its name, and Tab goes straight on to its next control", async ({
+  page,
+}) => {
+  // RowLink dropped the ROW_NAME the table never gave it either, so the row
+  // stayed a stop of its own beside the name: two presses of Tab a unit.
+  await mockServices(page)
+  await page.setViewportSize({ width: 1440, height: 1000 })
+  await page.goto("/processes/services")
+  const row = page.locator("tr[data-workspace-item='nginx.service']")
+  await expect(row).toBeVisible()
+  await expectRowIsOneStop(page, row)
 })
 
 test("each row says how long it has been in its state and what it is using", async ({ page }) => {

@@ -142,6 +142,9 @@ function ToggleGroup({
           // placed relatively after it, are drawn over it without a z-index.
           className={cn(
             "pointer-events-none absolute top-0 left-0 rounded-sm bg-chosen shadow-edge",
+            // Forced colours repaint the chosen fill as the page: the system's
+            // selection there, kept from the repaint (see SEGMENT_FORCED).
+            "forced-colors:bg-[Highlight] forced-colors:forced-color-adjust-none",
             sliding && "transition-[transform,width,height] duration-base ease-arrive",
           )}
           style={{
@@ -157,6 +160,17 @@ function ToggleGroup({
     </ToggleGroupPrimitive.Root>
   )
 }
+
+// Forced colours (Windows High Contrast) repaint every fill as the page and
+// every ink as the text's, so the chosen segment read as any other. There it
+// takes the system's own selection, Highlight under HighlightText, kept from
+// that repaint, as the chosen tab does (`components/tabs.tsx`): its own face
+// until the sliding one is measured, then the face's, which is Highlight too.
+// Its ring is inset, inside that face, so there it is HighlightText: a
+// Highlight ring on a Highlight face would not be seen. Whole class names,
+// for Tailwind.
+const SEGMENT_FORCED =
+  "data-[state=on]:forced-colors:bg-[Highlight] data-[state=on]:forced-colors:text-[HighlightText] data-[state=on]:forced-colors:forced-color-adjust-none data-[state=on]:forced-colors:[--ring:HighlightText]"
 
 function ToggleGroupItem({
   className,
@@ -180,6 +194,7 @@ function ToggleGroupItem({
           "hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=on]:text-foreground",
           // Each chosen segment's own face, until the sliding one is measured.
           "data-[state=on]:bg-chosen data-[state=on]:shadow-edge group-data-[face]/toggle-group:data-[state=on]:bg-transparent group-data-[face]/toggle-group:data-[state=on]:shadow-none",
+          SEGMENT_FORCED,
           "[&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
           SEGMENT_SIZE[itemSize],
           className,

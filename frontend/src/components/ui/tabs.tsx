@@ -86,6 +86,16 @@ function TabsList({
   )
 }
 
+// Forced colours (Windows High Contrast) repaint every fill as the page and
+// every ink as the text's, so the chosen tab read as any other. There it takes
+// the system's own selection, Highlight under HighlightText, kept from that
+// repaint, as the page's tabs do (`components/tabs.tsx`). The fill is said per
+// variant, to outweigh each variant's own chosen fill. The ring is inset,
+// inside that face, so there it is HighlightText: a Highlight ring on a
+// Highlight face would not be seen. Whole class names, for Tailwind.
+const ACTIVE_FORCED =
+  "group-data-[variant=default]/tabs-list:data-[state=active]:forced-colors:bg-[Highlight] group-data-[variant=line]/tabs-list:data-[state=active]:forced-colors:bg-[Highlight] data-[state=active]:forced-colors:text-[HighlightText] data-[state=active]:forced-colors:forced-color-adjust-none data-[state=active]:forced-colors:[--ring:HighlightText]"
+
 function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Trigger>) {
   return (
     <TabsPrimitive.Trigger
@@ -100,6 +110,7 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
         "group-data-[variant=default]/tabs-list:h-full group-data-[variant=default]/tabs-list:flex-1 group-data-[variant=default]/tabs-list:rounded-sm group-data-[variant=default]/tabs-list:data-[state=active]:bg-chosen group-data-[variant=default]/tabs-list:data-[state=active]:shadow-edge",
         // The quiet tab: the chosen one is a filled face, never an underline.
         "group-data-[variant=line]/tabs-list:h-8 group-data-[variant=line]/tabs-list:rounded-md group-data-[variant=line]/tabs-list:hover:bg-accent group-data-[variant=line]/tabs-list:data-[state=active]:bg-control",
+        ACTIVE_FORCED,
         className,
       )}
       {...props}
