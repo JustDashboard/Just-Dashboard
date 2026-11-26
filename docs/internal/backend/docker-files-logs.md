@@ -948,9 +948,10 @@ folder part dropped and unsafe names refused (`SafeName`); a taken name becomes 
 than replacing anything. The bytes stage beside the destination like an upload's and publish through
 `publishStaged`; a known length is checked against the room first, an unknown one every 16 MiB, and a
 download that stops early, sends nothing for a minute, is cancelled or would fill the disk leaves
-nothing behind. Four running fetches an account, eight in all. `fetch_test.go` covers success, a
-redirect chain, refused schemes, a name with a path in it, cancel, a connection dropped midway, disk
-room and no clobber, and the headers sent.
+nothing behind. A panic inside a download fails that fetch like any other error. Four running fetches
+an account, eight in all. `fetch_test.go` covers success, a redirect chain, refused schemes, a name with
+a path in it, cancel, a connection dropped midway, disk room and no clobber, a panic, and the headers
+sent.
 
 ## Logs
 
