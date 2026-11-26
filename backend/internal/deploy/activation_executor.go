@@ -679,6 +679,25 @@ func (e *NormalizedStepExecutor) activate(
 	}
 	var route *proxysvc.DeploymentRoute
 	var appliedRoute *proxysvc.DeploymentRouteResult
+	// The leftover routes this release takes its domains over from go back
+	// on every way it can fail from the cutover on, not only a refused
+	// cutover: a public-route check, the route's verification, the tailnet
+	// or the commit failing left the domain answered by nothing. It runs
+	// after the failure's own recovery has taken this release's route out,
+	// and not where that did not happen, which would leave two routes
+	// claiming one name.
+	var takenOver []proxysvc.DeploymentRouteSnapshot
+	live := false
+	defer func() {
+		if live || len(takenOver) == 0 {
+			return
+		}
+		if evidence.Recovery != nil && !evidence.Recovery.RouteRestored {
+			_ = stepLog(execution, "stderr", "The leftover routes this release took its domains over from were not put back, because its own route could not be taken out first")
+			return
+		}
+		e.restoreLeftoverRoutes(ctx, execution, takenOver)
+	}()
 	if snapshot.Plan.Tailnet != nil && len(snapshot.Domains) > 0 {
 		// Only a preview's plan can arrive here like this: a trigger's
 		// domain pattern under a tailnet-only environment. Publishing it
@@ -722,7 +741,7 @@ func (e *NormalizedStepExecutor) activate(
 			}
 		}
 		route = &routeValue
-		takenOver := e.takeOverLeftoverRoutes(ctx, execution, release.Release.EnvironmentID, routeValue.Domains)
+		takenOver = e.takeOverLeftoverRoutes(ctx, execution, release.Release.EnvironmentID, routeValue.Domains)
 		applied, applyErr := e.proxy.ApplyDeploymentRoute(ctx, routeValue)
 		appliedRoute = &applied
 		routeEvidence := publicRouteActivationEvidence(applied)
@@ -730,7 +749,6 @@ func (e *NormalizedStepExecutor) activate(
 		if applyErr != nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 			recovery.RouteRestored = applied.Recovered
-			e.restoreLeftoverRoutes(ctx, execution, takenOver)
 			evidence.Recovery = &recovery
 			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked" + proxyRefusal(applyErr), Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
@@ -837,6 +855,7 @@ func (e *NormalizedStepExecutor) activate(
 		evidence.Recovery = &recovery
 		return StepResult{State: StepFailed, ErrorCode: "activation_commit_failed", ErrorMessage: "the release pointer could not be committed", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 	}
+	live = true
 	_ = stepLog(execution, "status", fmt.Sprintf("Activated immutable release #%d", release.Release.Number))
 	// Where each linked database stands at this moment is what "roll back
 	// to this release" can later bring its data back to.

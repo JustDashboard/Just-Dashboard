@@ -1667,7 +1667,10 @@ only renderer/executor/validation authority for their feature.
   only by **leftover** routes — `just-dashboard-env-<id>.conf` whose environment is gone or archived —
   passes as `domain_takeover`, and activation removes those routes (`SnapshotDeploymentRoute`, then
   `RemoveDeploymentRoute`) just before `ApplyDeploymentRoute` writes its own, keeping the certificate
-  since the new route serves the same name, and puts them back if the cutover fails. Anything else is
+  since the new route serves the same name, and puts them back if the release does not go live — a
+  refused cutover, a failed public-route check or route verification, the tailnet step or the commit —
+  once the failure's recovery has taken its own route out (not where that failed, which would leave two
+  routes claiming one name). Anything else is
   `domain_conflict`, naming the claimer: a live deployment's route links its Domains settings, any other
   site its own page (`/proxy/sites/<name>`). When the owners cannot be read nothing counts as a
   leftover, so a live route is never taken over. HTTPS activation resolves an already-issued certificate/key pair through

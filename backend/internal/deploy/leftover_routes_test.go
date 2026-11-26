@@ -2,6 +2,7 @@ package deploy
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -271,5 +272,121 @@ func TestReleaseKeepsALeftoverItCouldNotRemove(t *testing.T) {
 	}
 	if !log.said("could not be removed: caddy refused the reload") {
 		t.Fatalf("log = %v", log.lines)
+	}
+}
+
+// cutoverTakeoverProxy is a takeoverProxy whose cutover is applied, refused,
+// or applied and then not verified, and whose route restores are recorded in
+// order with the snapshot each was given.
+type cutoverTakeoverProxy struct {
+	takeoverProxy
+	refuseApply  bool
+	refuseVerify bool
+	// stuck is a route whose restore fails.
+	stuck string
+}
+
+func (p *cutoverTakeoverProxy) RestoreDeploymentRoute(ctx context.Context, snapshot proxysvc.DeploymentRouteSnapshot) error {
+	if snapshot.Name == p.stuck {
+		return errors.New("caddy refused the reload")
+	}
+	return p.takeoverProxy.RestoreDeploymentRoute(ctx, snapshot)
+}
+
+func (p *cutoverTakeoverProxy) ApplyDeploymentRoute(_ context.Context, route proxysvc.DeploymentRoute) (proxysvc.DeploymentRouteResult, error) {
+	result := proxysvc.DeploymentRouteResult{Snapshot: proxysvc.DeploymentRouteSnapshot{Name: route.Name}, Recovered: true}
+	if p.refuseApply {
+		return result, errors.New("caddy refused the route")
+	}
+	return result, nil
+}
+
+func (p *cutoverTakeoverProxy) VerifyDeploymentRoute(context.Context, proxysvc.DeploymentRoute) error {
+	if p.refuseVerify {
+		return errors.New("the route answers something else")
+	}
+	return nil
+}
+
+// A release that took a domain over from a leftover route and then did not
+// go live puts the leftover back, after its own route is restored: whether
+// the proxy refused the cutover or the cutover could not be verified. One
+// whose own route could not be taken out leaves the leftover out rather than
+// have two routes claim the name, and one that goes live keeps the domain.
+func TestReleaseThatDoesNotGoLivePutsTheLeftoverRouteBack(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name         string
+		refuseApply  bool
+		refuseVerify bool
+		stuck        bool
+		state        StepState
+		code         string
+		restored     bool
+	}{
+		{name: "the proxy refuses the cutover", refuseApply: true, state: StepFailed, code: "proxy_cutover_failed", restored: true},
+		{name: "the cutover is not verified", refuseVerify: true, state: StepFailed, code: "activation_verification_failed", restored: true},
+		{name: "its own route cannot be taken out", refuseVerify: true, stuck: true, state: StepFailed, code: "activation_verification_failed"},
+		{name: "the release goes live", state: StepPassed},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			fixture := newReleaseStoreFixture(t)
+			plan := RuntimePlanConfig{
+				InternalPort: 3000, BindAddress: "127.0.0.1", Strategy: StrategyBlueGreen,
+				Command: []string{}, Capabilities: []string{}, Devices: []string{}, Mounts: []RuntimeMount{},
+			}
+			fixture.addPlanWithRuntime(t, 1, strings.Repeat("a", 40), plan)
+			run, lease := fixture.claimedRun(t, 1)
+			release := createRuntimeCandidateWithDomains(t, fixture, *run, lease, plan, "takeover-candidate",
+				nil, []PlannedDomain{{Hostname: "jellyfin.example.test", Ownership: OwnershipManaged}})
+			if _, err := fixture.runs.RecordCandidateRuntime(context.Background(), *run, lease.Token, ReleaseRuntimeInput{
+				ReleaseID: release.Release.ID, Kind: "container", RuntimeID: "takeover-candidate",
+				Host: "127.0.0.1", Port: 32123, Metadata: json.RawMessage(`{"version":1}`),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			proxy := &cutoverTakeoverProxy{refuseApply: test.refuseApply, refuseVerify: test.refuseVerify}
+			proxy.vhosts = []proxysvc.VHost{{Name: "just-dashboard-env-450.conf", ServerNames: []string{"jellyfin.example.test"}}}
+			if test.stuck {
+				proxy.stuck = deploymentRouteName(fixture.envID)
+			}
+			executor := (&NormalizedStepExecutor{
+				store: fixture.runs, variables: fixture.variables, proxy: proxy,
+				runtime: &orderingRuntimeOwner{running: map[string]bool{"takeover-candidate": true}, allowConcurrent: true},
+			}).WithRouteOwners(&leftoverOwners{})
+			log := &takeoverLog{}
+			result := executor.activate(context.Background(), StepExecution{
+				Run: *run, ClaimToken: lease.Token, Output: log,
+			}, mustExecutionPlan(t, fixture, *run))
+			if result.State != test.state || result.ErrorCode != test.code {
+				t.Fatalf("activation = %s/%s, want %s/%s", result.State, result.ErrorCode, test.state, test.code)
+			}
+			if strings.Join(proxy.removed, ",") != "just-dashboard-env-450.conf" {
+				t.Fatalf("removed = %v", proxy.removed)
+			}
+			own := deploymentRouteName(fixture.envID)
+			switch {
+			case test.restored && test.refuseApply:
+				// The proxy restores its own route inside the refused apply.
+				if strings.Join(proxy.restored, ",") != "just-dashboard-env-450.conf" {
+					t.Fatalf("restored = %v", proxy.restored)
+				}
+			case test.restored:
+				if strings.Join(proxy.restored, ",") != own+",just-dashboard-env-450.conf" {
+					t.Fatalf("restored = %v, want this release's route and then the leftover", proxy.restored)
+				}
+			default:
+				if len(proxy.restored) != 0 {
+					t.Fatalf("put back %v", proxy.restored)
+				}
+			}
+			if test.stuck && !log.said("were not put back, because its own route could not be taken out first") {
+				t.Fatalf("log = %v", log.lines)
+			}
+			if test.restored && !log.said("Put the leftover route just-dashboard-env-450.conf back") {
+				t.Fatalf("log = %v", log.lines)
+			}
+		})
 	}
 }
