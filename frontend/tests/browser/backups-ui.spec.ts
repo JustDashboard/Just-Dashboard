@@ -690,6 +690,32 @@ for (const width of [1280, 1720]) {
   })
 }
 
+test("on a phone the keyboard goes with a run: onto it when it opens, back to it on Back", async ({
+  page,
+}) => {
+  // A run is a page of its own on a phone, so opening one hid the rail's
+  // button that had the keyboard, and Back hid itself: focus fell to the page.
+  await page.setViewportSize({ width: 390, height: 844 })
+  await page.goto("/backups/2")
+  const run = page.getByRole("button", { name: /^Run 101,/ })
+  await run.focus()
+  await page.keyboard.press("Enter")
+  await expect(page).toHaveURL(/run=101/)
+  const heading = page.getByRole("heading", { name: /^Run 101/ })
+  await expect(heading).toBeFocused()
+  await expect(run).toBeHidden()
+
+  // Back is one Shift+Tab away, and pressing it puts the keyboard on the run.
+  await page.keyboard.press("Shift+Tab")
+  const back = page.getByRole("button", { name: "Back to runs", exact: true })
+  await expect(back).toBeFocused()
+  await page.keyboard.press("Enter")
+  await expect(page).not.toHaveURL(/run=/)
+  await expect(run).toBeFocused()
+  await expect(run).toBeInViewport()
+  await expect(back).toBeHidden()
+})
+
 test("a phone draws the picture as marks and scrolls nowhere sideways", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/backups")
