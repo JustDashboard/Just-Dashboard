@@ -499,14 +499,17 @@ func refreshHostCLI(log *slog.Logger) {
 	}
 }
 
-// installHostCLI puts the jd built beside this binary at the server's
-// /usr/local/bin/jd when nothing is there (internal/clihost). Only the
-// just-dashboard.com address's certificate asks for it: certbot on the host
-// runs that jd to prove and renew the wildcard.
-func installHostCLI() (bool, error) {
+// installHostCLI puts the jd built beside this binary at target, the
+// server's /usr/local/bin/jd as certbot's side is opened from here, when
+// nothing is there (internal/clihost). Only the just-dashboard.com
+// address's certificate asks for it: certbot on the host runs that jd to
+// prove and renew the wildcard. proxysvc names target the way it runs
+// certbot, so a backend running on the server itself, with no /host mount,
+// installs where certbot looks.
+func installHostCLI(target string) (bool, error) {
 	exe, err := os.Executable()
 	if err != nil {
 		return false, err
 	}
-	return clihost.Install("/host", filepath.Join(filepath.Dir(exe), "jd"))
+	return clihost.Install(target, filepath.Join(filepath.Dir(exe), "jd"))
 }
