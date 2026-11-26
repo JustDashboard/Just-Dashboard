@@ -1468,10 +1468,6 @@ func (s *Server) handleDBRowDelete(w http.ResponseWriter, r *http.Request) error
 	if len(req.Key) == 0 {
 		return httpx.BadRequest("a primary key is required to identify the row to delete")
 	}
-	conn, _, err := s.dbConnRow(r.Context(), id)
-	if err != nil {
-		return err
-	}
 	// No typed phrase. Deleting a row is what a data browser is for — a dozen
 	// a day for anyone using this page as intended — and the bulk path made it
 	// worse by asking for the same table name eight times in a row. A phrase in
