@@ -118,8 +118,10 @@ request's context descends from (`http.Server.BaseContext`), which is the only t
 response held open on purpose (an assistant's answer, an export) or a hijacked socket, neither of which
 `http.Server.Shutdown` cancels by itself. Handlers have eight seconds in all to return. Then
 `api.Server.ShutdownContext(budget)` runs the module shutdown above with what is left: the deployment
-engine's 30-second grace and the three 10-second waits (socket history, captures, diagnostics) keep their
-own limits and are cut short by the budget. It ends by waiting for the goroutines `Start` launched itself
+engine's 30-second grace, then the removal of the networked builders a build left waiting
+(`RemoveWaitingNetworkedBuilders`, 10 seconds; [database networks](../deployments/database-networks.md#builds-that-read-their-database)),
+and the three 10-second waits (socket history, captures, diagnostics) keep their own limits and are cut
+short by the budget. It ends by waiting for the goroutines `Start` launched itself
 (`Server.background`: the store's health, block expiry, the Remote Desktop and database upgrade
 recoveries), and `main` waits for the session janitor, so nothing is still writing when the store closes.
 `Shutdown` runs once; the deferred call after a signal's is a no-op. Before this the HTTP drain alone

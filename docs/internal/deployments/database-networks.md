@@ -97,8 +97,13 @@ removed (`buildx rm --keep-state`); its state volume (`buildx_buildkit_<builder>
 either way. While it waits it runs no build and listens on no port of the network (the docker CLI reaches
 it through the container). The next build that starts on it first checks it still runs and matches its
 networks to that build's — joining what it may reach now and leaving what it may not, so a database
-unlinked meanwhile is out of reach — and a builder that fails that check, or one a stopped dashboard left
-running, is removed and created again. Builds of one environment take turns on it; two environments never
+unlinked meanwhile is out of reach — and a builder that fails that check, or one a dashboard that did not
+stop cleanly left running, is removed and created again. The timer that removes a waiting builder lives
+only in the dashboard's process, so a dashboard that stops removes the builders it left waiting first
+(`RemoveWaitingNetworkedBuilders`, after the deployment engine stops and before the Docker client closes,
+within ten seconds of the stop's budget), their state volumes kept, and removes at once any a build
+closes after that; otherwise a restart inside the wait left the builder on the environment's networks
+until the environment built again. Builds of one environment take turns on it; two environments never
 share one, so one environment's build cannot reach another's database. An environment's first build on it
 fills its own cache. It pulls base images itself, as BuildKit does, so
 the daemon's registry mirrors (`daemon.json`) do not apply to it; registry sign-ins do, through the
@@ -248,9 +253,12 @@ No hosted-provider account or live provider credentials are required by the loca
   build's counted one never run (and one reading the same database through its pooler run), a build off
   the network, and each failure.
   `buildkit_network_test.go` covers the builder's arguments and configuration, the networks a waiting
-  builder joins and leaves, and that one is claimed once; `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run
+  builder joins and leaves, that one is claimed once, and that a stopping dashboard removes the builders
+  its client left waiting and stops their timers; `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run
   TestLiveNetworkedBuilderWaitsForTheNextBuild` closes a builder on two networks, starts the next build on
-  it with one, checks it left the other, and removes it.
+  it with one, checks it left the other, and removes it, and `-run TestLiveStoppingRemovesTheWaitingNetworkedBuilder`
+  builds on one, closes it, stops, and checks the container and its network endpoint are gone, the state
+  volume is kept, and a builder closed after the stop is removed at once.
 - `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLiveBuildReachesItsDatabase|TestLiveBuildStepBuildsAnApplication'`
   builds, with the real recipe and BuildKit, a package whose build reads a PostgreSQL that only its own
   network reaches under a `db-N.jd.internal` alias: the build reaches it, gets the migration and then
