@@ -67,21 +67,23 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 
 ### File groups inside `api`
 
-284 source files and their tests, in one package. The prefix says the area.
+About 290 source files and their tests, in one package. The prefix says the area. The counts here
+and below were taken on 26 Nov 2026: they give a group's size, and a file or two more since is not
+a mistake.
 
 | Files | Count | Area |
 | --- | --- | --- |
 | `handlers_db*.go` | 40 | Databases |
-| `handlers_deploy*.go` | 36 | Deployments |
+| `handlers_deploy*.go` | 37 | Deployments |
 | `handlers_network*.go` | 27 | Network |
 | `handlers_proxy*.go` | 18 | Proxy; with `handlers_certificates*.go`, `handlers_tls*.go`, `handlers_ports*.go` |
 | `handlers_assistant*.go` | 9 | The assistant |
 | `handlers_git*.go` | 13 | Local Git (4), its GitHub half (5, `handlers_github*.go`) and the GitHub page (4, `handlers_githubrepos*.go`) |
 | `handlers_files*.go` | 8 | Files: browsing, the Trash, versions, what a folder is to the server, transfers, thumbnails, Find's index |
 | `handlers_mcp*.go` | 5 | The MCP endpoint and its keys |
-| other `handlers_*.go` | 58 | One to four files per remaining area |
+| other `handlers_*.go` | 59 | One to four files per remaining area |
 | `database_*.go` | 21 | Databases: inventory, metrics, alerts, point-in-time recovery, TLS, the pooler, upgrades |
-| `deployment_*.go`, `deploy_*.go` | 19 | Deployments: joins with other features, deploy keys, the OpenAPI description |
+| `deployment_*.go`, `deploy_*.go` | 20 | Deployments: joins with other features, deploy keys, the OpenAPI description |
 | `boards_*.go`, `map_*.go` | 9 | Excalidraw and the server map, which have no package of their own |
 | `routes.go`, `route_methods.go`, `server.go`, `modules.go`, `modules_proxy.go` | 5 | The router, the `Server`, and the module set |
 
@@ -91,22 +93,22 @@ Counts are source files; the tests sit beside them. A group named `detect` is `d
 `detect_*.go`; a name with a `*` is a plain wildcard. Files outside a group are named for the one
 thing they hold.
 
-**`deploy`** (249 source files), described in
+**`deploy`** (about 270 source files), described in
 [`implementation.md`](../deployments/implementation.md):
 
 | Group | Count | What it holds |
 | --- | --- | --- |
 | `detect`, `detector` | 51 | Reading a checkout: languages, frameworks, start command, databases, variables |
-| `build` | 28 | Build recipes per language, and reading a failed build's output |
+| `build` | 38 | Build recipes per language, and reading a failed build's output |
 | `preflight` | 20 | What is checked about a plan before a run starts |
-| `frameworks` | 16 | Per-ecosystem framework knowledge the detector and recipes read |
-| `run` | 8 | A run's history, logs, metrics, transcript and diagnosis |
+| `frameworks` | 17 | Per-ecosystem framework knowledge the detector and recipes read |
+| `run` | 10 | A run's history, logs, metrics, transcript and diagnosis |
 | `preview` | 8 | Pull request preview environments |
 | `runtime` | 7 | A release's container: flags, replicas, listeners, concurrency |
 | `orchestration` | 6 | The persistent engine: model, queue, steps, events, store |
-| `source`, `release`, `planning` | 15 | Fetching a source, immutable releases, drafts and plans |
+| `source`, `release`, `planning` | 16 | Fetching a source, immutable releases, drafts and plans |
 
-**`dbx`** (174 source files), described in
+**`dbx`** (about 175 source files), described in
 [`databases.md`](../backend/databases.md):
 
 | Group | Count | What it holds |
@@ -122,20 +124,20 @@ thing they hold.
 | `statement`, `statements` | 7 | Splitting and classifying SQL (`statement`), statement statistics (`statements`) |
 | `*_capabilities.go` | 18 | What each engine supports, one file per feature; they cut across the groups above |
 
-**`proxysvc`** (142 source files), described in
+**`proxysvc`** (about 150 source files), described in
 [`proxy.md`](../backend/proxy.md):
 
 | Group | Count | What it holds |
 | --- | --- | --- |
 | `sites`, `site` | 26 | nginx sites: parse, render and apply (`sites`); one site's logs, drift, trial (`site`) |
 | `deployment` | 10 | The routes, certificates and edge rules a deployment asks for |
-| `docker_caddy*` | 8 | The Docker Caddy ingress |
+| `docker_caddy*` | 9 | The Docker Caddy ingress |
 | `stream` | 8 | TCP and UDP streams |
 | `tls*` | 16 | The TLS report: scans (`tlsscan`), deep checks, monitoring |
 | `certbot`, `cert` | 9 | Issuing and renewing; reading certificate files |
 | `ports` | 5 | Listeners and who owns them |
 
-**`netx`** (131 source files), described in [`network.md`](../backend/network.md):
+**`netx`** (about 130 source files), described in [`network.md`](../backend/network.md):
 
 | Group | Count | What it holds |
 | --- | --- | --- |

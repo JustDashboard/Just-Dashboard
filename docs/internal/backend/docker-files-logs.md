@@ -916,7 +916,8 @@ own save arriving back is neither. `watch_test.go` and `handlers_files_transfer_
 remove, rename, growth, coalescing, the limits and fallback, a path outside the roots, release and a
 moved folder; `files-transfer.spec.ts` the page.
 
-**Uploads in pieces** (`files/resumable.go`, `components/files/pieces.tsx`, `upload-pieces.ts`). A
+**Uploads in pieces** (`files/resumable.go`, `components/files/upload-pieces.ts`, and the queue in
+`uploads.tsx` that drives it). A
 file over 32 MiB goes to `POST /files/pieces` (`file.write`, audited as `file.upload.begin`), which
 checks the destination as a one-request upload would and the disk's room for the whole file, and
 creates a staging file `.jd-part-<id>` (0600, root's) beside the destination, on its filesystem. Pieces

@@ -373,7 +373,7 @@ export function SqlData() {
 
   return (
     <SectionFrame section="data">
-      {/* One frame around the whole workbench (§7.2): the head that says which
+      {/* One frame around the whole workbench (§7): the head that says which
           database and carries the open table's verbs, then the rail, the
           table and the row as columns of one working surface, with a hairline
           between them rather than a gutter and three borders. */}
