@@ -17,6 +17,7 @@ import {
   countsLine,
   floorWords,
   inFlight,
+  reportReachable,
   scanVerdict,
   vulnerable,
 } from "./vulnerabilities-model"
@@ -142,6 +143,24 @@ describe("vulnerabilities", () => {
     expect(vulnerable(null)).toBe(false)
     expect(inFlight(scan({ state: "queued" }))).toBe(true)
     expect(inFlight(scan())).toBe(false)
+  })
+
+  test("the report is a link away as soon as the live release can be scanned", () => {
+    // Scan now is the report's: the first scan is asked for there.
+    expect(reportReachable(reading({ scan: null }))).toBe(true)
+    expect(
+      reportReachable(reading({ scan: scan({ state: "queued", finishedAt: undefined }) })),
+    ).toBe(true)
+    expect(reportReachable(reading({ scan: null, releaseId: undefined }))).toBe(false)
+    expect(reportReachable(reading({ scan: null, available: false }))).toBe(false)
+    expect(
+      reportReachable(reading({ scan: null, policy: { enabled: false, severityFloor: "HIGH" } })),
+    ).toBe(false)
+    // A scan already read keeps its report, whatever the terms say now.
+    expect(reportReachable(reading({ policy: { enabled: false, severityFloor: "HIGH" } }))).toBe(
+      true,
+    )
+    expect(reportReachable(undefined)).toBe(false)
   })
 
   test("the header says what there is to do, and is quiet when there is nothing", () => {

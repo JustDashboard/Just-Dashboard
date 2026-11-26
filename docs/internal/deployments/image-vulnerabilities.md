@@ -234,7 +234,9 @@ API's description, `docs/api/deploy-openapi.json`.
   34 in the node:22-alpine base image", and an own package at the floor with no fix yet is said, not
   counted. No total in the title, no bar of severities, no advisories: a total read as that many
   things wrong with the application when none of them were. An end-of-life distribution and a scan that
-  did not finish are called out. **Report** in the head leads to the rest.
+  did not finish are called out. **Report** in the head leads to the rest; it is there as soon as the
+  live release can be scanned, before its first scan too, since **Scan now** is the report's verb
+  (`reportReachable`).
 - The **report** (`/deploy/[id]/vulnerabilities`, `deploy/vulnerability-report.tsx`): how many were
   found and whose they are, when and against how old a database, each base with whether it is the newest,
   and one section per origin — *Your app's packages*, *Development tools shipped with it* (naming the

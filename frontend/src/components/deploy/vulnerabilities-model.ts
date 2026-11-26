@@ -252,6 +252,17 @@ export function vulnerable(scan: ImageScan | null | undefined) {
   )
 }
 
+/**
+ * Whether the overview links to the report: as soon as there is a live release
+ * that can be scanned, scanned yet or not, since Scan now is the report's verb
+ * and the first scan is asked for there. A scan already read keeps its link.
+ */
+export function reportReachable(reading: ImageScanReading | undefined) {
+  if (!reading) return false
+  if (reading.scan?.finishedAt) return true
+  return Boolean(reading.releaseId && reading.policy.enabled && reading.available)
+}
+
 /** Whether a scan is waiting or running, which the panel polls faster for. */
 export function inFlight(scan: ImageScan | null | undefined) {
   return scan?.state === "queued" || scan?.state === "scanning"
