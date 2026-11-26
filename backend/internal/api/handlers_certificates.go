@@ -1114,7 +1114,7 @@ func (s *Server) handleCaddyCertificateDelete(w http.ResponseWriter, r *http.Req
 		}
 		return certificateInUse(&proxysvc.CaddyCertificateInUseError{Name: inUse.Name, Routes: labelled})
 	case errors.Is(err, proxysvc.ErrCaddyCertificatePath):
-		return httpx.BadRequest("%s", err.Error())
+		return httpx.Refused(err)
 	case errors.Is(err, proxysvc.ErrCaddyCertificateNotFound), errors.Is(err, proxysvc.ErrNoCaddyIngress):
 		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
 	case errors.As(err, &problem):
