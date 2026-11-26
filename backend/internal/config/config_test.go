@@ -1,6 +1,7 @@
 package config
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -176,6 +177,104 @@ func writeDatabase(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.WriteFile(filepath.Join(dir, store.DatabaseFile), []byte("x"), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// loadBind loads with the two settings the bind rule reads, and blanks the
+// legacy name too, so an allowlist in the environment the tests run in
+// cannot answer for the one under test.
+func loadBind(t *testing.T, addr, allowlist string) (*Config, error) {
+	t.Helper()
+	t.Setenv("JD_MASTER_KEY", strings.Repeat("ab", 32))
+	t.Setenv("JD_ADDR", addr)
+	t.Setenv("JD_ALLOWED_CIDRS", allowlist)
+	t.Setenv("VPSD_ALLOWED_CIDRS", "")
+	return Load()
+}
+
+// SECURITY.md promises the backend refuses to start on an address that is
+// not loopback without an allowlist; this is the refusal, in its own words.
+// A name counts as routable, localhost included, since it is resolved when
+// the listener opens. Agent mode binds JD_ADDR as well and gets no pass.
+func TestARoutableAddressWithoutAnAllowlistRefusesToStart(t *testing.T) {
+	for _, addr := range []string{"0.0.0.0:8080", ":8080", "[::]:8080", "100.64.0.5:8080", "203.0.113.7:8080", "localhost:8080", "dashboard.example:8080"} {
+		_, err := loadBind(t, addr, "")
+		want := "JD_ALLOWED_CIDRS is required when JD_ADDR (" + addr + ") is not bound to loopback"
+		if err == nil || !strings.Contains(err.Error(), want) {
+			t.Errorf("%s with no allowlist: %v, want the refusal %q", addr, err, want)
+		}
+	}
+	t.Setenv("JD_AGENT_MODE", "true")
+	if _, err := loadBind(t, "0.0.0.0:8443", ""); err == nil || !strings.Contains(err.Error(), "JD_ALLOWED_CIDRS is required") {
+		t.Errorf("agent mode on every address with no allowlist: %v", err)
+	}
+	// A list with nothing in it is not an allowlist either.
+	if _, err := loadBind(t, "0.0.0.0:8080", " , "); err == nil || !strings.Contains(err.Error(), "JD_ALLOWED_CIDRS: no usable entries") {
+		t.Errorf("an allowlist of commas: %v", err)
+	}
+}
+
+func TestALoopbackAddressStartsWithLoopbackAsItsAllowlist(t *testing.T) {
+	for _, addr := range []string{"127.0.0.1:8080", "127.0.0.1:0", "[::1]:8080"} {
+		c, err := loadBind(t, addr, "")
+		if err != nil {
+			t.Fatalf("%s: %v", addr, err)
+		}
+		if got := fmt.Sprint(c.AllowedCIDRs); got != "[127.0.0.1/32 ::1/128]" {
+			t.Errorf("%s: allowlist %s, want loopback alone", addr, got)
+		}
+	}
+}
+
+// The case SECURITY.md documents: a routable JD_ADDR is the operator's to
+// choose, kept to the networks they name.
+func TestARoutableAddressStartsWithTheAllowlistItWasGiven(t *testing.T) {
+	for addr, allowlist := range map[string]string{
+		"100.64.0.5:8080": "100.64.0.0/10,127.0.0.1/32,::1/128",
+		"0.0.0.0:8080":    "10.8.0.0/24",
+		"[::]:8080":       "fd7a:115c:a1e0::/48,100.64.0.0/10",
+		"localhost:8080":  "127.0.0.1",
+	} {
+		c, err := loadBind(t, addr, allowlist)
+		if err != nil {
+			t.Errorf("%s with %s: %v", addr, allowlist, err)
+			continue
+		}
+		if len(c.AllowedCIDRs) != len(strings.Split(allowlist, ",")) {
+			t.Errorf("%s: allowlist %v, want %s", addr, c.AllowedCIDRs, allowlist)
+		}
+	}
+}
+
+// An allowlist that lets every address in is the open internet with a
+// setting beside it. On a routable address that is refused, however it is
+// spelt; on loopback the bind is the perimeter, as it is with no list.
+func TestAnAllowlistOfEveryAddressIsRefusedOnARoutableAddress(t *testing.T) {
+	everything := []string{
+		"0.0.0.0/0",
+		"::/0",
+		"10.8.0.0/24,0.0.0.0/0",
+		"0.0.0.0/1,128.0.0.0/1",
+		"0.0.0.0/2,64.0.0.0/2,128.0.0.0/1",
+		"::/1,8000::/1",
+		"::ffff:0:0/96",
+	}
+	for _, allowlist := range everything {
+		_, err := loadBind(t, "0.0.0.0:8080", allowlist)
+		if err == nil || !strings.Contains(err.Error(), "JD_ALLOWED_CIDRS admits every address") ||
+			!strings.Contains(err.Error(), "JD_ADDR (0.0.0.0:8080)") {
+			t.Errorf("%s on 0.0.0.0:8080: %v, want refused", allowlist, err)
+		}
+		if _, err := loadBind(t, "127.0.0.1:8080", allowlist); err != nil {
+			t.Errorf("%s on loopback: %v, want it to start", allowlist, err)
+		}
+	}
+	// 0.0.0.0 with no length is one address, the way parseCIDRs reads any
+	// bare address.
+	for _, allowlist := range []string{"0.0.0.0", "0.0.0.0/1", "0.0.0.0/1,128.0.0.0/2", "::/1", "::ffff:0:0/97", "0.0.0.0/1,::/1,8000::/2"} {
+		if _, err := loadBind(t, "0.0.0.0:8080", allowlist); err != nil {
+			t.Errorf("%s leaves addresses out and must start: %v", allowlist, err)
+		}
 	}
 }
 

@@ -215,6 +215,10 @@ never into `docs/audits/`.
   `python3 scripts/test_install_dependencies.py`, `python3 scripts/test_dotenv.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
+- A change to `docker-compose.yml` runs `python3 scripts/test_compose_binds.py` (`scripts/test-changed.sh`
+  picks it), which holds the stack's half of invariant 7: the backend's `JD_ADDR` pinned to loopback,
+  every published port on `127.0.0.1`, and nothing on the host's network but the backend and Caddy. A
+  new service there that needs the host's network is a decision to write into invariant 7 first.
 - **`bun run build` is the final frontend type-check gate.** `frontend/Dockerfile`
   sets `JD_IMAGE_BUILD=1`, which tells `next.config.ts` to skip the type-check pass and the
   prerender source maps. That is deliberate: install and update are both

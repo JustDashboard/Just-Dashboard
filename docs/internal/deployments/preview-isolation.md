@@ -329,7 +329,7 @@ a fork's gets none.
 
 A preview's container publishes on loopback exactly as production's does, and what reaches it is
 `tailscale serve` on the host: tailscaled listens on the node's tailnet address and forwards one port to
-`http://127.0.0.1:<upstream>`. The dashboard never binds a routable address itself, and the exception to
+`http://127.0.0.1:<upstream>`. The dashboard binds no routable address for a preview itself, and the exception to
 invariant 7 is written down in [invariants](../security/invariants.md). `deploy_preview_addresses` holds
 one row per preview environment (`kind`, `port`, `upstream_port`, `url`, `published`, `updated_at`,
 `UNIQUE(kind, port)`); `AllocatePreviewAddress` takes the lowest free port in **21000–21999** that

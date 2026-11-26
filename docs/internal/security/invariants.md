@@ -252,7 +252,27 @@ A change that weakens any of these has to say so explicitly.
    `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
    (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
    script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is.
-7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
+7. Nothing but Caddy binds a routable address in the shipped stack: `docker-compose.yml` pins the
+   backend's `JD_ADDR` to `127.0.0.1:${JD_BACKEND_PORT}`, publishes the frontend on `127.0.0.1` alone,
+   and puts nothing on the host's network but the backend and Caddy (`scripts/test_compose_binds.py`).
+   The program holds a looser rule, and holds it itself: `config.Load` refuses to start on a `JD_ADDR`
+   that is not a literal loopback address (a name, `localhost` included, counts as routable) unless
+   `JD_ALLOWED_CIDRS` is set, and refuses an allowlist that admits every IPv4 or every IPv6 address on
+   such a bind, however it is split. A routable `JD_ADDR` with an allowlist is the operator's
+   documented choice for the binary run by hand ([SECURITY.md](../../../SECURITY.md)): the allowlist
+   still runs before authentication, and the Security overview reports the socket as a broken
+   `ingress` boundary (below). **Agent mode** (`JD_AGENT_MODE`) is the named exception among the
+   dashboard's own listeners: its hub is on another machine and must reach it, so an agent is run by
+   hand on a routable `JD_ADDR` (the stack's loopback pin leaves it unreachable), under the same
+   allowlist rule. It serves that address over TLS that asks every caller for a certificate, and
+   without the enrolled hub's pinned certificate it answers `/healthz`, the signed webhooks,
+   `/agent/info` and `/agent/enrol` (a one-time token, on the login budget) and nothing else: every
+   feature route goes through `httpx.HubOnly`. `TestARoutableAddressWithoutAnAllowlistRefusesToStart`,
+   `TestAnAllowlistOfEveryAddressIsRefusedOnARoutableAddress`,
+   `TestAgentModeServesTLSThatAsksEveryCallerForACertificate` and
+   `TestHubOnlyAdmitsTheEnrolledHubsCertificateAlone` hold the program's half.
+
+   The exceptions below are not the dashboard's own listener. The first:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
    (`selfcfg.TailnetServe`, `tailscale serve`), forwarding each to a loopback port the dashboard
