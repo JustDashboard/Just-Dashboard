@@ -185,11 +185,18 @@ export function LabelTag({ label }: { label: GitHubLabel }) {
  * A list GitHub hands out a page at a time, read a page more with each
  * **Show more**: the pages read so far, whether there are more, and a reset
  * when what is listed changes (another state chip, another branch).
+ *
+ * A list the server keeps in memory for a while (`kept`, the account's pull
+ * requests and issues) is read past that memory (`refresh=1`) when the
+ * reader asks for it again, by `reload` or by the page's own Refresh
+ * bumping `round`, and so are the pages Show more adds to that reading.
+ * Anything else is read from wherever the server answers it.
  */
 export function usePages<T, P extends { hasMore: boolean }>(
   path: string | null,
   query: Record<string, string | number | undefined>,
   pick: (page: P) => T[],
+  { kept = false, round = 0 }: { kept?: boolean; round?: number } = {},
 ) {
   const key = path === null ? null : JSON.stringify([path, query])
   const [state, setState] = useState<{
@@ -201,8 +208,17 @@ export function usePages<T, P extends { hasMore: boolean }>(
     error?: Error
     /** The last page's whole answer, for what it says besides its items (a total). */
     last?: P
+    /** Read past the server's memory, so the pages after it are too. */
+    bypassed?: boolean
   }>({ key: null, items: [], page: 0, hasMore: false, loading: true })
-  const [ask, setAsk] = useState(0)
+  // Which list a reload was asked for, so a filter changed after it is read
+  // as usual rather than past the server's memory.
+  const [ask, setAsk] = useState<{ n: number; key: string | null }>({ n: 0, key: null })
+  const [seenRound, setSeenRound] = useState(round)
+  if (round !== seenRound) {
+    setSeenRound(round)
+    setAsk((held) => ({ n: held.n + 1, key }))
+  }
   const pickRef = useRef(pick)
   useEffect(() => {
     pickRef.current = pick
@@ -213,11 +229,15 @@ export function usePages<T, P extends { hasMore: boolean }>(
   })
 
   const read = useCallback(
-    async (page: number, fresh: boolean, signal?: AbortSignal) => {
+    async (page: number, fresh: boolean, bypass: boolean, signal?: AbortSignal) => {
       if (path === null) return
       setState((held) => ({ ...held, loading: true, error: undefined }))
       try {
-        const answer = await get<P>(path, { ...queryRef.current, page }, signal)
+        const answer = await get<P>(
+          path,
+          { ...queryRef.current, page, ...(bypass ? { refresh: 1 } : {}) },
+          signal,
+        )
         const items = pickRef.current(answer)
         setState((held) => ({
           key,
@@ -226,13 +246,18 @@ export function usePages<T, P extends { hasMore: boolean }>(
           hasMore: answer.hasMore,
           loading: false,
           last: answer,
+          bypassed: bypass,
         }))
       } catch (error) {
         if (signal?.aborted) return
+        // A first page that failed leaves nothing of the list before it: its
+        // total and its notices were another filter's.
         setState((held) => ({
           ...held,
           key,
           items: fresh ? [] : held.items,
+          last: fresh ? undefined : held.last,
+          bypassed: fresh ? false : held.bypassed,
           loading: false,
           error: error as Error,
         }))
@@ -241,12 +266,13 @@ export function usePages<T, P extends { hasMore: boolean }>(
     [path, key],
   )
 
+  const bypass = kept && ask.n > 0 && ask.key === key
   useEffect(() => {
     if (path === null) return
     const controller = new AbortController()
-    void read(1, true, controller.signal)
+    void read(1, true, bypass, controller.signal)
     return () => controller.abort()
-  }, [read, path, ask])
+  }, [read, path, ask, bypass])
 
   const current = state.key === key
   return {
@@ -255,8 +281,8 @@ export function usePages<T, P extends { hasMore: boolean }>(
     loading: state.loading || !current,
     error: current ? state.error : undefined,
     last: current ? state.last : undefined,
-    more: () => void read(state.page + 1, false),
-    reload: () => setAsk((n) => n + 1),
+    more: () => void read(state.page + 1, false, kept && Boolean(state.bypassed)),
+    reload: () => setAsk((held) => ({ n: held.n + 1, key })),
   }
 }
 

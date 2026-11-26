@@ -98,10 +98,21 @@ function holdsChecks(node: React.ReactNode): boolean {
   return found
 }
 
-/** One labelled control, its hint, and — when the value is wrong — why. */
+/**
+ * One labelled control, its hint, and — when the value is wrong — why.
+ *
+ * `group` is for a field of several controls — a foreign key's column pairs,
+ * a role's settings as name and value, a stream's rules — where a `for`
+ * can name only one and the field's id, handed to each, was one id on many
+ * elements with the label pointing at the first. The field is then a
+ * `role="group"` named by its label and described by its hint and error, and
+ * its controls take none of it: each names itself (`aria-label`), and each
+ * is still marked invalid with the error.
+ */
 export function Field({
   label,
   htmlFor,
+  group = false,
   hint,
   info,
   error,
@@ -115,6 +126,8 @@ export function Field({
    * an id and hands it to the control through `useFieldControl`.
    */
   htmlFor?: string
+  /** Several controls, each named by itself: the field is their named group. */
+  group?: boolean
   /** What goes here, in one line. Replaced by the error while there is one. */
   hint?: React.ReactNode
   /**
@@ -142,27 +155,40 @@ export function Field({
   // Checks drawn as the hint are read as the hint; drawn beside the control
   // they are read after it.
   const checksBeside = holdsChecks(children)
+  const describedBy = joinIds(
+    error ? ids.error : undefined,
+    shownHint ? ids.hint : undefined,
+    checksBeside ? ids.checks : undefined,
+  )
   const control: FieldControl = {
     // A field given `htmlFor` names a control that has that id already; a
-    // second control in it must not take the same one.
-    id: htmlFor ? undefined : ids.control,
+    // second control in it must not take the same one. A group hands its
+    // id to none of them.
+    id: htmlFor || group ? undefined : ids.control,
     labelId: ids.label,
-    describedBy: joinIds(
-      error ? ids.error : undefined,
-      shownHint ? ids.hint : undefined,
-      checksBeside ? ids.checks : undefined,
-    ),
+    // A group is described once, on itself: each of its controls described
+    // by the same hint read it again at every stop.
+    describedBy: group ? undefined : describedBy,
     invalid: Boolean(error),
     checksId: ids.checks,
   }
   return (
     <FieldContext.Provider value={control}>
-      <div className={cn("min-w-0 space-y-1.5", className)}>
+      <div
+        role={group ? "group" : undefined}
+        aria-labelledby={group ? ids.label : undefined}
+        aria-describedby={group ? describedBy : undefined}
+        className={cn("min-w-0 space-y-1.5", className)}
+      >
         <div className="flex min-w-0 items-center justify-between gap-3">
           {/* The tip sits beside the label rather than inside it: a button is
               a labelable element, and a label may not contain one. */}
           <div className="flex min-w-0 items-center gap-1.5">
-            <Label id={ids.label} htmlFor={ids.control} className="min-w-0 text-body font-medium">
+            <Label
+              id={ids.label}
+              htmlFor={group ? undefined : ids.control}
+              className="min-w-0 text-body font-medium"
+            >
               {label}
             </Label>
             {info && <Explain label="What this setting does">{info}</Explain>}

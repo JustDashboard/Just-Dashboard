@@ -107,11 +107,11 @@ func TestImageVulnerableIsAHostAlertKindWithNothingToSet(t *testing.T) {
 // flight or failed keeps the subject where it was.
 func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 	scan := func(state string, findings []imagescan.Finding, newer bool) *deploy.ImageScan {
-		return &deploy.ImageScan{
+		read := deploy.ImageScan{
 			ReleaseNumber: 4, State: state, Floor: imagescan.SeverityHigh, NewerBase: newer, Rebuildable: true,
-			Summary:     imagescan.Summarize(findings, imagescan.SeverityHigh),
 			BaseUpdates: []deploy.ReleaseBaseUpdate{{Reference: "node:22-alpine", State: map[bool]string{true: "outdated", false: "current"}[newer]}},
-		}
+		}.WithFindings(findings)
+		return &read
 	}
 	medium := imagescan.Finding{ID: "CVE-9", Package: "x", Installed: "1", Fixed: "2", Severity: imagescan.SeverityMedium}
 	unfixed := imagescan.Finding{ID: "CVE-8", Package: "y", Installed: "1", Severity: imagescan.SeverityCritical}
@@ -156,6 +156,30 @@ func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 		if !reading.Unknown[subject] {
 			t.Fatalf("%s is not kept where it was: %+v", subject, reading)
 		}
+	}
+
+	// A Node and Bun build: zlib is node's, and only oven/bun moved, so a
+	// rebuild would not fix it and nothing fires; once node moves, it does,
+	// and the message names node.
+	bunNow := "sha256:" + strings.Repeat("9", 64)
+	nodeZlib := zlibFinding
+	nodeZlib.BaseDigests = []string{scanTestBase}
+	twoBases := func(node string) *deploy.ImageScan {
+		read := deploy.ImageScan{
+			ReleaseNumber: 5, State: deploy.ImageScanScanned, Floor: imagescan.SeverityHigh, NewerBase: true, Rebuildable: true,
+			BaseUpdates: []deploy.ReleaseBaseUpdate{
+				{Reference: "oven/bun:1", Pinned: scanTestNewer, Current: bunNow, State: "outdated"},
+				{Reference: "node:22-alpine", Pinned: scanTestBase, Current: node, State: map[bool]string{true: "current", false: "outdated"}[node == scanTestBase]},
+			},
+		}.WithFindings([]imagescan.Finding{nodeZlib})
+		return &read
+	}
+	mixed := imageAlertReading([]deploy.LiveImageScan{live(8, twoBases(scanTestBase)), live(9, twoBases(scanTestNewer))})
+	if len(mixed.Firing) != 1 || mixed.Firing[0].Subject != "env:7:9" || !strings.Contains(mixed.Firing[0].Detail, "node:22-alpine now names a newer image") {
+		t.Fatalf("firing = %+v", mixed.Firing)
+	}
+	if !strings.Contains(mixed.Now["env:7:8"], "each base with a fixable finding names now") {
+		t.Fatalf("only bun moved = %q", mixed.Now["env:7:8"])
 	}
 }
 
@@ -218,8 +242,11 @@ func TestTheVulnerabilitiesRoutesReadSaveAndAskForAScan(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &reading) != nil {
 		t.Fatalf("read: %d %s", w.Code, w.Body.String())
 	}
-	if reading.Scan == nil || reading.ReleaseID != release || len(reading.Scan.Summary.Fixable) != 1 || !reading.Scan.Vulnerable() {
+	if reading.Scan == nil || reading.ReleaseID != release || len(reading.Scan.Summary.Fixable) != 1 || reading.Scan.Actionable.Critical != 1 {
 		t.Fatalf("scan = %+v", reading.Scan)
+	}
+	if stored, err := s.modules.deployRuns.ImageScan(t.Context(), release); err != nil || !stored.Vulnerable() {
+		t.Fatalf("stored scan = %+v, %v", stored, err)
 	}
 	if len(reading.Releases) != 1 || reading.Releases[0].Fixable != 1 {
 		t.Fatalf("badges = %+v", reading.Releases)

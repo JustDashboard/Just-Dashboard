@@ -514,7 +514,9 @@ foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and t
 the rows that changed laid over the listing so selection, scroll and dialogs stay put. The uploads panel
 (`uploads.tsx`) holds uploads (in pieces over 32 MiB, with pause, resume and cancel, carrying on after a
 dropped connection) and links being fetched by the server (New → *From a link*), each one line with
-how far it is in words (`transfer-words.ts`)
+how far it is in words (`transfer-words.ts`). A worker stops for good once its upload is paused, and
+Resume pressed while that worker still waits on a request leaves the upload queued until it has
+exited, so one upload never has two workers sending its pieces
 
 Each row says the most telling thing the server knows about the entry after its name, with its logo
 ("Postgres volume of shop-db", "Served at example.com by nginx"); a tile carries the logo in its
@@ -541,7 +543,14 @@ recorded as data (`undo.ts`: the steps that undo it, in order) on this visit's s
 (`use-file-undo.ts`); its notice carries Undo, and Ctrl/Cmd+Z undoes the newest, then the one before,
 while text fields, dialogs and menus keep their own. Undos run one after another in the order asked
 for: a press while the last one is still with the server waits its turn rather than being dropped,
-and an operation asked for twice runs once. An operation that cannot be undone (a permanent
+and an operation asked for twice runs once. A move or copy answers the identity of what it left
+(`identity`), and its undo sends it back as `expect`: an entry that took the name while the undo waited
+is refused (`409 entry_changed`, "Something else has taken its name since, and was left alone") rather
+than moved or put in the Trash. A save in the editor sheet writes a new file over the name, so the
+write answers the identity it replaced and the one it left, and an undo still to run that names the
+saved file follows it (`carryIdentity`); a rename, then a save, then Ctrl+Z still undoes the rename,
+while a step expecting something else at that name is left as it was. An operation that cannot be
+undone (a permanent
 delete, a copy by an account that may not delete) says so on its notice instead. Name search passes
 the folder on screen as `here` and says the index's age beside the count when the index answered.
 

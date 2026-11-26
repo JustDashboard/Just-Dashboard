@@ -47,6 +47,7 @@ import {
   shelfLabel,
   shelfOf,
 } from "@/components/docker/networks"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /** How often the list is read; each read is one network list and one container list. */
 const POLL = 10_000
@@ -245,7 +246,7 @@ export function Networks() {
 
   const showOn = (network: DockerNetwork) => {
     setOnNetwork(network.id === onNetwork ? "" : network.id)
-    containersPanel.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+    scrollIntoViewRespectingMotion(containersPanel.current)
   }
 
   const attached = new Set(networks.flatMap((n) => (n.endpoints ?? []).map((e) => e.container)))

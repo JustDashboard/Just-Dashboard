@@ -29,6 +29,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ChoiceListSkeleton } from "@/components/choice-row"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * The dashboard's own version, and everything it has ever been.
@@ -170,9 +171,7 @@ export default function DashboardVersionPage() {
                   // A search may have filtered the release out of the history.
                   setFilter("")
                   window.requestAnimationFrame(() =>
-                    document
-                      .getElementById(`release-${noted}`)
-                      ?.scrollIntoView({ block: "start", behavior: "smooth" }),
+                    scrollIntoViewRespectingMotion(document.getElementById(`release-${noted}`)),
                   )
                 }}
               >

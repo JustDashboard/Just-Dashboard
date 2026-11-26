@@ -170,12 +170,22 @@ func (s *Service) forgetConnection(id int64) {
 }
 
 // Forget drops what is cached about one repository after a change to it: its
-// access and the connection's repository list, which shows it.
+// access, the connection's repository list, which shows it, and the
+// account's pull requests, issues and activity, which may list what changed
+// (a request merged, an issue closed or opened). The inbox pages are dropped
+// whole: one that did not hold the repository's items yet may hold the one
+// just opened.
 func (s *Service) Forget(connection int64, owner, name string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.lists, connection)
 	delete(s.access, keyOf(connection, owner, name))
+	delete(s.events, connection)
+	for key := range s.inboxes {
+		if key.connection == connection {
+			delete(s.inboxes, key)
+		}
+	}
 }
 
 func (s *Service) forgetAll() {

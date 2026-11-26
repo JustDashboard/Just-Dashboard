@@ -97,8 +97,13 @@ removed (`buildx rm --keep-state`); its state volume (`buildx_buildkit_<builder>
 either way. While it waits it runs no build and listens on no port of the network (the docker CLI reaches
 it through the container). The next build that starts on it first checks it still runs and matches its
 networks to that build's — joining what it may reach now and leaving what it may not, so a database
-unlinked meanwhile is out of reach — and a builder that fails that check, or one a stopped dashboard left
-running, is removed and created again. Builds of one environment take turns on it; two environments never
+unlinked meanwhile is out of reach — and a builder that fails that check, or one a dashboard that did not
+stop cleanly left running, is removed and created again. The timer that removes a waiting builder lives
+only in the dashboard's process, so a dashboard that stops removes the builders it left waiting first
+(`RemoveWaitingNetworkedBuilders`, after the deployment engine stops and before the Docker client closes,
+within ten seconds of the stop's budget), their state volumes kept, and removes at once any a build
+closes after that; otherwise a restart inside the wait left the builder on the environment's networks
+until the environment built again. Builds of one environment take turns on it; two environments never
 share one, so one environment's build cannot reach another's database. An environment's first build on it
 fills its own cache. It pulls base images itself, as BuildKit does, so
 the daemon's registry mirrors (`daemon.json`) do not apply to it; registry sign-ins do, through the
@@ -125,7 +130,20 @@ way, once, only when every linked database the build reaches holds no row of the
 (`DatabaseHasRows`, `api/deployment_database_contents.go`: PostgreSQL and MySQL tables, leaving out the
 migration tools' records, Django's content types and permissions and PostGIS's reference systems; any
 other engine, more than 500 tables, or an error counts as holding rows). A seed usually resets the
-tables it fills, so a database with any row is never seeded. The step's log says each of these as it
+tables it fills, so a database with any row is never seeded. The seed runs with the runtime values, not
+the build's, so it runs only when every database those values name is one the build reads and whose
+rows were counted, compared by connection and by the database the URL's path names (`databaseTargets`,
+`uncountedSeedTargets`): a runtime value naming another linked database, a hosted one, a preview's
+branch, another database on the same server (`${{database.5.url.app_shadow}}`, which `DatabaseHasRows`
+does not count), or a connection string that is no URL (ADO.NET's) keeps the seed from running, as do
+runtime values that name no database at all. A cache is never a target, linked from this server
+(`redis://…@db-9.jd.internal`) or hosted, on the build's side and on the seed's. A hosted URL counts
+only when its scheme names an engine a seed's rows go to (`seedDatabaseSchemes`: PostgreSQL,
+MySQL/MariaDB, MongoDB, SQL Server, ClickHouse, Oracle and their usual spellings). A linked one counts
+unless its scheme names a cache (`cacheSchemes`: Redis, Valkey, KeyDB, Dragonfly, Memcached), because
+it keeps the scheme its connection was saved with, which can be a ClickHouse's `http://`. The step is then handed the very values that
+were judged.
+The step's log says each of these as it
 happens, and build_artifact's evidence lists them (`databaseSteps`). A step that fails ends the build as
 `build_schema_step_failed` or `build_seed_step_failed` with the command's last line; a refusal to join
 the network ends it before anything builds, as `build_database_network`.
@@ -237,11 +255,17 @@ No hosted-provider account or live provider credentials are required by the loca
   one migrating from the build's output is not run first), which hosts send a build to the network,
   the new signatures from each driver and Next.js, and remedies that follow Cache Components;
   `build_database_executor_test.go` runs build_artifact through a first deploy (network, schema, seed,
-  build), a database with rows never seeded, a build off the network, and each failure.
+  build), a database with rows never seeded, a seed whose runtime values name a database other than the
+  build's counted one never run (and one reading the same database through its pooler, or beside a linked
+  cache, run), a build off
+  the network, and each failure.
   `buildkit_network_test.go` covers the builder's arguments and configuration, the networks a waiting
-  builder joins and leaves, and that one is claimed once; `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run
+  builder joins and leaves, that one is claimed once, and that a stopping dashboard removes the builders
+  its client left waiting and stops their timers; `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run
   TestLiveNetworkedBuilderWaitsForTheNextBuild` closes a builder on two networks, starts the next build on
-  it with one, checks it left the other, and removes it.
+  it with one, checks it left the other, and removes it, and `-run TestLiveStoppingRemovesTheWaitingNetworkedBuilder`
+  builds on one, closes it, stops, and checks the container and its network endpoint are gone, the state
+  volume is kept, and a builder closed after the stop is removed at once.
 - `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run 'TestLiveBuildReachesItsDatabase|TestLiveBuildStepBuildsAnApplication'`
   builds, with the real recipe and BuildKit, a package whose build reads a PostgreSQL that only its own
   network reaches under a `db-N.jd.internal` alias: the build reaches it, gets the migration and then

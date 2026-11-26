@@ -52,7 +52,9 @@ certificate for both through the site. **Claiming publishes this server's IP add
   account for 30 days, and refuses reserved names.
 - The address follows the server's IP within 15 minutes. Release it from the same card once no deployment
   uses it. Unlinking the server, or the site's administrators suspending the address, takes its records down;
-  deployments using it say so and leave the name out of their next release.
+  deployments using it say so and leave the name out of their next release. So does a rollback to a release
+  from before you changed or released the handle: the old handle's names are never served or certified again
+  unless you claim it back.
 - The wildcard renews on certbot's own timer through `jd app-domain challenge`, which needs the server to stay
   linked. Your server's outbound and inbound IPv4 address must be the same (no NAT in between), and
   `JD_ALLOWED_CIDRS` must keep `127.0.0.1/32`. Downgrading the dashboard below 0.9.1 breaks the renewal.

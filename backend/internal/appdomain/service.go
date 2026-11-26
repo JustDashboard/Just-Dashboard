@@ -1,12 +1,14 @@
 package appdomain
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -107,6 +109,12 @@ type Service struct {
 	claimMu sync.Mutex
 	// kick asks the loop to ask the site now: a link was just approved.
 	kick chan struct{}
+	// issueFailed tells the loop an issuance failed, so the automatic one
+	// tries again autoIssueRetry after the failure, not at the first hourly
+	// check after that, which can be nearly an hour later.
+	issueFailed chan struct{}
+	// after is time.After; tests hold its waits.
+	after func(time.Duration) <-chan time.Time
 	// linkEvery is how often the loop looks for a link made or replaced by
 	// another process (the terminal's --admin link).
 	linkEvery time.Duration
@@ -149,6 +157,7 @@ func New(o Options) *Service {
 		address: o.PublicAddress, waitTXT: o.WaitTXT, now: o.Now,
 		addressEvery: 15 * time.Minute, refreshEvery: time.Hour, refreshAtMost: time.Minute, txtWait: 120 * time.Second,
 		linkEvery: 30 * time.Second, kick: make(chan struct{}, 1),
+		issueFailed: make(chan struct{}, 1), after: time.After,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -212,6 +221,20 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) run(ctx context.Context) {
+	// A failure from before the loop is on record, and is waited for from
+	// there: the signal it sent is not needed. One whose hour is over is
+	// the start-up check's to retry. One still within it, as after a
+	// restart for an update minutes after the failure, gets the rest of its
+	// wait here: the start-up check leaves it, and the next hourly check can
+	// be nearly an hour after the wait ends.
+	select {
+	case <-s.issueFailed:
+	default:
+	}
+	var retry <-chan time.Time
+	if wait, failed := s.retryWait(ctx); failed && wait > 0 {
+		retry = s.after(wait)
+	}
 	if st, err := readState(ctx, s.st.DB); err == nil && st.Handle != "" {
 		if err := s.ensureHook(ctx); err != nil {
 			s.log.Warn("app domain hook credential", "err", err)
@@ -230,6 +253,16 @@ func (s *Service) run(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.issueFailed:
+			retry = nil
+			if wait, failed := s.retryWait(ctx); failed {
+				retry = s.after(wait)
+			}
+		case <-retry:
+			retry = nil
+			if st, err := readState(ctx, s.st.DB); err == nil {
+				s.autoIssue(ctx, st)
+			}
 		case <-addresses.C:
 			s.followAddress(ctx)
 		case <-refreshes.C:
@@ -248,6 +281,20 @@ func (s *Service) run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// retryWait is how long until the failed wildcard's wait is over:
+// autoIssueRetry after the failure (CertificateTriedAt), 0 once it is.
+// The hourly check alone can come up to an hour after that, as when the
+// 10:00 check starts an issuance that fails at 10:02: the 11:00 check is two
+// minutes early, and the noon one would be the next. failed is false when
+// no failure of the held handle's wildcard is on record.
+func (s *Service) retryWait(ctx context.Context) (wait time.Duration, failed bool) {
+	st, err := readState(ctx, s.st.DB)
+	if err != nil || !st.held() || st.CertificateError == "" || st.CertificateTriedAt == 0 {
+		return 0, false
+	}
+	return max(time.Unix(st.CertificateTriedAt, 0).Add(autoIssueRetry).Sub(s.now()), 0), true
 }
 
 // serverID is the stored link's server id, or "" with no link.
@@ -280,7 +327,10 @@ func (s *Service) linked(ctx context.Context) bool {
 }
 
 // followAddress sends PUT /domain when the server's public address is no
-// longer the one the records point at.
+// longer the one the records point at. Its answer is dropped, as refresh's
+// is, when the Generation moved while the PUT was out: one that crosses an
+// unlink would make the detached handle active again, held by a server
+// whose records the site has deleted. The next follow-up sends it again.
 func (s *Service) followAddress(ctx context.Context) {
 	st, err := readState(ctx, s.st.DB)
 	if err != nil || !st.held() {
@@ -296,11 +346,12 @@ func (s *Service) followAddress(ctx context.Context) {
 		return
 	}
 	_, _ = update(ctx, s.st.DB, func(cur *State) (bool, error) {
-		if cur.Handle != st.Handle {
+		if cur.Generation != st.Generation || cur.Handle != st.Handle {
 			return false, nil
 		}
 		s.mirror(cur, domain)
 		cur.LastError = ""
+		cur.Generation++
 		return true, nil
 	})
 	s.record(ctx, "app.domain.address", st.Hostname, true, map[string]any{"from": st.Address, "to": domain.Address})
@@ -308,22 +359,39 @@ func (s *Service) followAddress(ctx context.Context) {
 
 // refresh asks the site what it holds for this server, and records what
 // changed there: a suspension, a release on the site, an unlink.
+//
+// The answer describes the moment the site was asked. A claim, a release or
+// a link change that commits while the GET is out is newer, so an answer
+// that crosses one is dropped (State.Generation): one with no domain would
+// detach a handle claimed a moment ago, one with the old domain would bring
+// back a handle just released, and an old link's offer would be claimed
+// through the new one. The next check asks again.
 func (s *Service) refresh(ctx context.Context) {
+	asked, err := readState(ctx, s.st.DB)
+	if err != nil {
+		return
+	}
 	if !s.linked(ctx) {
-		s.detachIfHeld(ctx, "The account link is not active, so the site no longer publishes this server's records.")
+		s.detachIfHeld(ctx, asked.Generation, "The account link is not active, so the site no longer publishes this server's records.")
 		return
 	}
 	info, err := s.link.GetDomain(ctx)
 	if errors.Is(err, accountlink.ErrNotLinked) {
-		s.detachIfHeld(ctx, "The server was removed from its just-dashboard.com account, so the site released its handle.")
+		s.detachIfHeld(ctx, asked.Generation, "The server was removed from its just-dashboard.com account, so the site released its handle.")
 		return
 	}
 	if err != nil {
 		s.noteError(ctx, err)
 		return
 	}
-	before, _ := readState(ctx, s.st.DB)
+	var before State
+	stale := false
 	after, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
+		if cur.Generation != asked.Generation {
+			stale = true
+			return false, nil
+		}
+		before = *cur
 		cur.LastCheckedAt, cur.LastError = s.now().Unix(), ""
 		cur.Available = ptr(info.Available)
 		cur.AvailableReason = ""
@@ -347,15 +415,21 @@ func (s *Service) refresh(ctx context.Context) {
 			cur.Status, cur.UpdatedAt = StatusDetached, s.now().Unix()
 			cur.Reason = "The site no longer lists this handle for this server: it was released on the site, or by an administrator there."
 		}
+		if cur.owner() != before.owner() {
+			// An answer to a GET that was out meanwhile (the loop's and a
+			// page's) describes the state this one replaced.
+			cur.Generation++
+		}
 		return true, nil
 	})
-	if err == nil && before.Status != after.Status && after.Handle != "" {
+	if err != nil || stale {
+		return
+	}
+	if before.Status != after.Status && after.Handle != "" {
 		s.record(ctx, "app.domain."+after.Status, after.Hostname, true, map[string]any{"reason": after.Reason})
 	}
-	if err == nil {
-		s.autoClaim(ctx, after)
-		s.autoIssue(ctx, after)
-	}
+	s.autoClaim(ctx, after)
+	s.autoIssue(ctx, after)
 }
 
 // autoRetry is how long a handle whose automatic claim failed is left
@@ -381,10 +455,17 @@ func (s *Service) autoClaim(ctx context.Context, st State) {
 	}
 	defer s.claimMu.Unlock()
 	offer := st.Offer
+	// st is the answer refresh just stored. A link change or a claim since
+	// then is newer: the offer was the old link's, or is taken.
+	current := false
 	if _, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
+		if cur.Generation != st.Generation || cur.Offer != offer {
+			return false, nil
+		}
+		current = true
 		cur.OfferTried, cur.OfferTriedAt, cur.OfferError = offer, s.now().Unix(), ""
 		return true, nil
-	}); err != nil {
+	}); err != nil || !current {
 		return
 	}
 	view, err := s.Claim(ctx, offer, "system")
@@ -437,8 +518,12 @@ func (s *Service) Refresh(ctx context.Context) {
 	s.refresh(ctx)
 }
 
-// mirror copies the site's record of the domain onto the state.
+// mirror copies the site's record of the domain onto the state. A handle it
+// replaces is kept in Previous, so its names stay detached.
 func (s *Service) mirror(cur *State, d accountlink.Domain) {
+	if cur.Handle != "" && cur.Handle != d.Handle {
+		cur.remember(s.baseOf(*cur))
+	}
 	cur.Handle, cur.Hostname, cur.Address = d.Handle, strings.ToLower(d.Hostname), d.Address
 	cur.Zone = strings.TrimPrefix(cur.Hostname, d.Handle+".")
 	cur.Status, cur.Reason = d.Status, ""
@@ -446,14 +531,31 @@ func (s *Service) mirror(cur *State, d accountlink.Domain) {
 		cur.Reason = *d.Reason
 	}
 	cur.UpdatedAt = d.UpdatedAt
+	cur.forget(cur.base())
 }
 
-func (s *Service) detachIfHeld(ctx context.Context, why string) {
+// baseOf is <handle>.<zone> for the state's handle, with the zone the site
+// named or the account site's own, or "" with no handle or zone.
+func (s *Service) baseOf(st State) string {
+	if st.Handle == "" {
+		return ""
+	}
+	if zone := s.zone(st); zone != "" {
+		return st.Handle + "." + zone
+	}
+	return ""
+}
+
+// detachIfHeld detaches a held handle, unless the state's Generation is no
+// longer generation: a claim or a new link since then is newer than what
+// found the link gone.
+func (s *Service) detachIfHeld(ctx context.Context, generation int64, why string) {
 	st, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
-		if cur.Handle == "" || cur.Status == StatusDetached {
+		if cur.Generation != generation || cur.Handle == "" || cur.Status == StatusDetached {
 			return false, nil
 		}
 		cur.Status, cur.Reason, cur.UpdatedAt = StatusDetached, why, s.now().Unix()
+		cur.Generation++
 		return true, nil
 	})
 	if err == nil && st.Status == StatusDetached && st.Reason == why {
@@ -532,6 +634,9 @@ func (s *Service) Claim(ctx context.Context, handle, by string) (View, error) {
 		cur.LastError, cur.CertificateError = "", ""
 		// The site clears an offer once the server's domain is active.
 		cur.Offer, cur.OfferError = "", ""
+		// Raised even for a repair of the same handle: a GET out meanwhile
+		// may have been answered before the site had it again.
+		cur.Generation++
 		return true, nil
 	})
 	if err != nil {
@@ -576,7 +681,13 @@ func (s *Service) Release(ctx context.Context) error {
 		}
 	}
 	if _, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
-		*cur = State{Revision: cur.Revision, AutoAssign: cur.AutoAssign, Zone: cur.Zone, Available: cur.Available, AvailableReason: cur.AvailableReason}
+		released := s.baseOf(*cur)
+		*cur = State{
+			Revision: cur.Revision, Generation: cur.Generation + 1,
+			AutoAssign: cur.AutoAssign, Zone: cur.Zone, Available: cur.Available, AvailableReason: cur.AvailableReason,
+			Previous: cur.Previous,
+		}
+		cur.remember(released)
 		return true, nil
 	}); err != nil {
 		return err
@@ -726,13 +837,20 @@ func (s *Service) Classify(ctx context.Context, hostname string) NameState {
 	// deployed from a dashboard like this one), its www, the operator's other
 	// subdomains, and names under handles that were never this server's.
 	// Treating them as app names failed their releases as "detached".
-	if st.Handle == "" || appNameHandle(hostname, s.zone(st)) != st.Handle {
-		return NotAppDomain
+	if st.Handle != "" && appNameHandle(hostname, s.zone(st)) == st.Handle {
+		if s.Enabled() && st.held() {
+			return Held
+		}
+		return Detached
 	}
-	if s.Enabled() && st.held() {
-		return Held
+	// A handle held before this one, or released, stays detached: a saved
+	// release can still name it after it left the configuration, and
+	// read as an ordinary name it would be ordered a certificate of its own
+	// and served on a name the site points elsewhere.
+	if st.heldBefore(hostname) {
+		return Detached
 	}
-	return Detached
+	return NotAppDomain
 }
 
 // appNameHandle is the handle an app name sits under, <handle>.<zone> or
@@ -762,13 +880,10 @@ func (s *Service) HandleBase(ctx context.Context) string {
 		return ""
 	}
 	st, err := readState(ctx, s.st.DB)
-	if err != nil || st.Handle == "" {
+	if err != nil {
 		return ""
 	}
-	if zone := s.zone(st); zone != "" {
-		return st.Handle + "." + zone
-	}
-	return ""
+	return s.baseOf(st)
 }
 
 // Zone is the app domain zone, or "" when none is known.
@@ -834,21 +949,28 @@ func (s *Service) UsedBy(ctx context.Context, st State) ([]Use, error) {
 	return s.uses(ctx, st.base(), nil)
 }
 
-// DetachedNames lists the deployment domains under the handle this server
-// held and no longer holds. Other names under the zone are not app names
-// (Classify) and are never listed.
+// DetachedNames lists the deployment domains under a handle this server
+// held and no longer holds: the stored one while it is not held, and those
+// in Previous. Other names under the zone are not app names (Classify) and
+// are never listed.
 func (s *Service) DetachedNames(ctx context.Context, st State) ([]Use, error) {
-	if st.Handle == "" || (s.Enabled() && st.held()) {
-		return []Use{}, nil
+	var bases []string
+	if base := s.baseOf(st); base != "" && !(s.Enabled() && st.held()) {
+		bases = append(bases, base)
 	}
-	zone := s.zone(st)
-	base := st.Handle + "." + zone
-	if zone == "" {
-		return []Use{}, nil
+	bases = append(bases, st.Previous...)
+	out := []Use{}
+	for _, base := range bases {
+		uses, err := s.uses(ctx, base, func(hostname string) bool { return underBase(hostname, base) })
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, uses...)
 	}
-	return s.uses(ctx, base, func(hostname string) bool {
-		return appNameHandle(hostname, zone) == st.Handle
+	slices.SortFunc(out, func(a, b Use) int {
+		return cmp.Or(strings.Compare(a.Project, b.Project), strings.Compare(a.Environment, b.Environment), strings.Compare(a.Hostname, b.Hostname))
 	})
+	return out, nil
 }
 
 // UsedByAny lists every deployment name under the zone, held or not: what

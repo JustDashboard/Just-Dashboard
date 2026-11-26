@@ -131,6 +131,60 @@ func (s *Server) moveFileVersions(ctx context.Context, src, dst string) {
 	}
 }
 
+// trashedVersionsPrefix keys the history of an entry Replace put in the
+// Trash, by the item's id. It is never a path a client can name (those are
+// absolute), so no listing or version route reaches it.
+const trashedVersionsPrefix = "trash:"
+
+func trashedVersionsKey(id string) string { return trashedVersionsPrefix + id }
+
+// holdReplacedVersions takes the history of the entry a move or a copy has
+// just replaced at path along with it into the Trash. Left at the path, it
+// would become the history of what took the name, and a move back would
+// carry it off with the wrong file.
+func (s *Server) holdReplacedVersions(ctx context.Context, path string, replaced *replacedEntry) {
+	if replaced == nil || replaced.Item == nil {
+		return
+	}
+	s.moveFileVersions(ctx, path, trashedVersionsKey(replaced.Item.ID))
+}
+
+// restoreTrashedVersions gives a restored entry back the history Replace
+// held for it, at the path it came back to.
+func (s *Server) restoreTrashedVersions(ctx context.Context, id, path string) {
+	s.moveFileVersions(ctx, trashedVersionsKey(id), path)
+}
+
+// forgetTrashedVersions drops the histories held for items that have left
+// the Trash for good: removed, emptied or expired. Only the ids named, never
+// whatever a listing misses: a Trash folder on a drive that is not mounted
+// right now still holds its items.
+func (s *Server) forgetTrashedVersions(ctx context.Context, ids ...string) {
+	if len(ids) == 0 {
+		return
+	}
+	keeper := s.fileVersions()
+	// Few items hold a history; an emptied Trash of thousands asks once.
+	keys, err := keeper.PathsWithPrefix(ctx, trashedVersionsPrefix)
+	if err != nil {
+		s.Log.Warn("the histories held for Trash items could not be read", "err", err)
+		return
+	}
+	held := map[string]bool{}
+	for _, key := range keys {
+		id, _, _ := strings.Cut(strings.TrimPrefix(key, trashedVersionsPrefix), "/")
+		held[id] = true
+	}
+	for _, id := range ids {
+		if !held[id] {
+			continue
+		}
+		if err := keeper.Forget(ctx, trashedVersionsKey(id)); err != nil {
+			s.Log.Warn("the history held for a Trash item that is gone could not be dropped", "id", id, "err", err)
+		}
+	}
+}
+
 // fileVersionEntry is one row of a file's history: an edit version or a
 // backup run's copy.
 type fileVersionEntry struct {

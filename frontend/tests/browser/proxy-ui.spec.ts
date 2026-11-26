@@ -70,7 +70,9 @@ test("the overview's sites are cards drawn as what they reach, the engine in the
   await expect(app.locator("img[src='/logos/nginx.svg']")).toHaveCount(1)
   await expect(app).toContainText("nginx site → node")
   // Nothing listens behind the shop's address, so no product is guessed.
-  const shop = cards.filter({ hasText: "just-dashboard-shop" })
+  // Titled by the domain its visitors type, not by the route's file.
+  const shop = cards.filter({ hasText: "shop.example.com" })
+  await expect(shop).not.toContainText("just-dashboard-shop")
   await expect(shop.locator("img[src='/logos/caddy.svg']")).toHaveCount(1)
   await expect(shop.locator("img")).toHaveCount(1)
   // A site whose certificate is certbot's says so with Let's Encrypt's mark.
@@ -346,7 +348,7 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
     .getByRole("list", { name: "Installed certificates" })
     .locator("[data-slot='choice-row']")
   const row = installed.filter({ hasText: "old.example.com" })
-  await expect(row.getByText("Used by nothing")).toBeVisible()
+  await expect(row.getByText("Unused", { exact: true })).toBeVisible()
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the expired one is first, saying so.
   await expect(installed.first()).toContainText("old.example.com")
@@ -1453,7 +1455,9 @@ test("/proxy/sites/just-dashboard-shop reads its route's requests, and what Cadd
   await page.goto("/proxy/sites/just-dashboard-shop?tab=logs")
 
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText("a deployment route")).toBeVisible()
+  await expect(identity.getByText("Caddy route", { exact: true })).toBeVisible()
+  // The file, beside the domain the page is titled with.
+  await expect(identity.getByText("just-dashboard-shop", { exact: true })).toBeVisible()
   await expect(identity.getByText("1 failed in the last hour")).toBeVisible()
   const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveAttribute(
@@ -1526,7 +1530,7 @@ test("the Caddyfile's page reads Caddy's journal whole, since its names are addr
   await page.goto("/proxy/sites/Caddyfile?tab=logs")
 
   await expect(
-    page.locator("[data-slot='host-identity']").getByText("a site in the Caddyfile"),
+    page.locator("[data-slot='host-identity']").getByText("Caddyfile", { exact: true }).first(),
   ).toBeVisible()
   const views = page.getByRole("navigation", { name: "Log view" })
   await expect(views.getByRole("button", { name: "Requests" })).toHaveCount(0)

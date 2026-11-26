@@ -3,6 +3,7 @@ package deploy
 import (
 	"context"
 	"errors"
+	"fmt"
 	"slices"
 	"strings"
 	"sync"
@@ -148,16 +149,26 @@ func (p *certificatePrewarms) start(
 	attempt := &certificatePrewarm{names: slices.Clone(names), startedAt: now.UTC(), cancel: cancel, done: make(chan struct{})}
 	p.runs[runID] = attempt
 	go func() {
-		// A panic in certbot's handling ends this prewarm, not the dashboard;
-		// the certificate step then issues as if none had been started.
-		defer safego.Recover(nil, "certificate prewarm")
 		defer cancel()
 		lines := []prewarmLine{}
-		result, err := issuer.EnsureDeploymentCertificate(workCtx, attempt.names, func(stream, text string) {
-			if len(lines) < prewarmLogLines {
-				lines = append(lines, prewarmLine{stream, text})
-			}
+		var result proxysvc.DeploymentCertificate
+		answered := false
+		err := safego.Try(nil, "certificate prewarm", func() error {
+			var err error
+			result, err = issuer.EnsureDeploymentCertificate(workCtx, attempt.names, func(stream, text string) {
+				if len(lines) < prewarmLogLines {
+					lines = append(lines, prewarmLine{stream, text})
+				}
+			})
+			answered = true
+			return err
 		})
+		if !answered {
+			// A panic in certbot's handling ends this prewarm, not the
+			// dashboard, and nobody answered it: it still publishes, as cut
+			// short, so the certificate step stops waiting and issues itself.
+			err = fmt.Errorf("%w: %w", errPrewarmFault, err)
+		}
 		p.mu.Lock()
 		defer p.mu.Unlock()
 		attempt.result, attempt.err, attempt.lines, attempt.finishedAt = result, err, lines, p.clock().UTC()
@@ -172,12 +183,17 @@ func (p *certificatePrewarms) start(
 	return true
 }
 
+// errPrewarmFault is a background attempt a panic in the dashboard ended.
+var errPrewarmFault = errors.New("the certificate attempt started during the build stopped on a fault")
+
 // prewarmInterrupted is a background attempt that did not get an answer from
-// anyone: cut short, or out of time waiting for certbot's turn. The step asks
-// again itself, and the names are not cooled off.
+// anyone: cut short, by a cancellation or a fault, or out of time waiting for
+// certbot's turn. The step asks again itself, and the names are not cooled
+// off.
 func prewarmInterrupted(err error) bool {
 	var busy *proxysvc.CertbotBusyError
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) || errors.As(err, &busy)
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) ||
+		errors.Is(err, errPrewarmFault) || errors.As(err, &busy)
 }
 
 // take hands the step the run's background attempt for exactly these names,

@@ -95,7 +95,15 @@ func TestComposeValidationRejectsEachUnsafeShape(t *testing.T) {
 			app(b).Ports[0].Primary = false
 			db(b).Ports[0].Exposure = "proxy"
 		}, "only an application is routed"},
-		{"a port published on every interface", func(b *Blueprint) { db(b).Ports[0].Exposure = "direct" }, "proxy or internal"},
+		{"a port published on every interface", func(b *Blueprint) { db(b).Ports[0].Exposure = "direct" }, "proxy, internal or loopback"},
+		{"a loopback port outside a stack", func(b *Blueprint) { db(b).Ports[0].Exposure = "loopback" }, "only a stack's private services"},
+		{"a loopback port with no route to publish it through", func(b *Blueprint) {
+			b.Stack = "media"
+			db(b).Ports[0].Exposure = "loopback"
+		}, "declares no egress"},
+		{"a data volume nothing writes, mounted read-only", func(b *Blueprint) {
+			db(b).Volumes[0].ReadOnly = true
+		}, "holds data and is mounted read-only"},
 		{"a UDP port", func(b *Blueprint) { db(b).Ports[0].Protocol = "udp" }, "TCP only"},
 		{"the Docker socket", func(b *Blueprint) {
 			app(b).Volumes = append(app(b).Volumes, Volume{Name: "docker", Target: "/var/run/docker.sock", Purpose: "Socket", ReadOnly: true})
@@ -260,8 +268,21 @@ func TestComposeTemplatesRenderTheStackTheyPromise(t *testing.T) {
 						t.Fatalf("public service is on %q", service.Networks)
 					}
 				} else {
-					if len(service.Ports) > 0 {
+					// A stack's private web interface is the one thing a
+					// private service may publish, and only on loopback.
+					loopback := 0
+					for _, port := range declared.Ports {
+						if port.Exposure == "loopback" {
+							loopback++
+						}
+					}
+					if len(service.Ports) != loopback {
 						t.Fatalf("private service %s publishes %q", declared.Name, service.Ports)
+					}
+					for _, binding := range service.Ports {
+						if !strings.HasPrefix(binding, "127.0.0.1:") {
+							t.Fatalf("private service %s publishes %q beyond loopback", declared.Name, binding)
+						}
 					}
 					if slices.Contains(networks, composeEdgeNetwork) || !slices.Contains(networks, composePrivateNetwork) {
 						t.Fatalf("private service %s is on %q", declared.Name, service.Networks)

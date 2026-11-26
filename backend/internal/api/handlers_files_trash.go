@@ -86,6 +86,10 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return mapFileError(err)
 	}
+	// An undo that puts a copy in the Trash names the copy it made.
+	if err := s.expectEntry(entry, r.URL.Query().Get("expect")); err != nil {
+		return err
+	}
 	if !permanent {
 		item, err := s.modules.fileTrash.Put(path, trashActor(r))
 		if err != nil {
@@ -168,14 +172,39 @@ func (s *Server) settleReplaced(replaced *replacedEntry, failed bool) {
 	}
 }
 
-// respondReplaced answers a move or a copy: 204 as before, or what was
+// movedResponse answers a move or a copy: the identity of what now sits at
+// the destination, which the page's undo sends back as `expect`, and what was
 // replaced and where it went when something was.
-func respondReplaced(w http.ResponseWriter, replaced *replacedEntry) {
-	if replaced == nil {
-		httpx.NoContent(w)
-		return
+type movedResponse struct {
+	Identity string         `json:"identity,omitempty"`
+	Replaced *replacedEntry `json:"replaced,omitempty"`
+}
+
+func (s *Server) respondMoved(w http.ResponseWriter, dst string, replaced *replacedEntry) {
+	identity, err := s.modules.hostFiles.Identity(dst)
+	if err != nil {
+		// Done all the same; the undo simply cannot check it.
+		s.Log.Warn("a moved or copied entry's identity could not be read", "path", dst, "err", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"replaced": replaced})
+	httpx.JSON(w, http.StatusOK, movedResponse{Identity: identity, Replaced: replaced})
+}
+
+// expectEntry refuses a mutation of an entry that is not the one the caller
+// last saw at that name: a queued undo of a copy or a move, run after
+// something else took the name, must leave that something alone.
+func (s *Server) expectEntry(path, expect string) error {
+	if expect == "" {
+		return nil
+	}
+	identity, err := s.modules.hostFiles.Identity(path)
+	if err != nil {
+		return mapFileError(err)
+	}
+	if identity != expect {
+		return httpx.Err(http.StatusConflict, "entry_changed",
+			"what has that name now is not the entry this was about, so it was left alone")
+	}
+	return nil
 }
 
 func (s *Server) handleFileTrashList(w http.ResponseWriter, r *http.Request) error {
@@ -221,6 +250,12 @@ func (s *Server) handleFileTrashRestore(w http.ResponseWriter, r *http.Request) 
 	if err != nil {
 		return mapTrashError(err)
 	}
+	// What the restore displaced takes its history into the Trash before
+	// the restored entry's own comes back to the name.
+	if restored.Replaced != nil {
+		s.holdReplacedVersions(r.Context(), restored.Path, &replacedEntry{Item: restored.Replaced})
+	}
+	s.restoreTrashedVersions(r.Context(), req.ID, restored.Path)
 	detail := map[string]any{"id": req.ID}
 	if req.Conflict != "" {
 		detail["conflict"] = req.Conflict
@@ -242,19 +277,46 @@ func (s *Server) handleFileTrashRemove(w http.ResponseWriter, r *http.Request) e
 	if err != nil {
 		return mapTrashError(err)
 	}
+	s.forgetTrashedVersions(r.Context(), id)
 	httpx.SetAudit(r, "file.trash.delete", item.OriginalPath, map[string]any{"id": id, "name": item.Name})
 	httpx.NoContent(w)
 	return nil
 }
 
 func (s *Server) handleFileTrashEmpty(w http.ResponseWriter, r *http.Request) error {
+	before, _ := s.modules.fileTrash.List()
 	removed, bytes, err := s.modules.fileTrash.Empty()
+	s.forgetTrashedVersions(r.Context(), trashItemsGone(before, s.modules.fileTrash)...)
 	httpx.SetAudit(r, "file.trash.empty", "", map[string]any{"items": removed, "bytes": bytes})
 	if err != nil {
 		return mapTrashError(err)
 	}
 	httpx.JSON(w, http.StatusOK, map[string]any{"removed": removed, "bytes": bytes})
 	return nil
+}
+
+// trashItemsGone is the ids listed in before that the Trash no longer
+// holds. Read from two listings rather than from what Empty counted, so an
+// item it could not remove keeps what is held for it.
+func trashItemsGone(before *files.TrashListing, trash *files.Trash) []string {
+	if before == nil || len(before.Items) == 0 {
+		return nil
+	}
+	after, err := trash.List()
+	if err != nil {
+		return nil
+	}
+	still := make(map[string]bool, len(after.Items))
+	for _, item := range after.Items {
+		still[item.ID] = true
+	}
+	var gone []string
+	for _, item := range before.Items {
+		if !still[item.ID] {
+			gone = append(gone, item.ID)
+		}
+	}
+	return gone
 }
 
 // expireFileTrash removes what has been in the Trash longer than
@@ -273,6 +335,11 @@ func (s *Server) expireFileTrash(ctx context.Context) {
 		if err != nil {
 			s.Log.Warn("some expired Trash items could not be removed", "err", err)
 		}
+		ids := make([]string, 0, len(gone))
+		for _, item := range gone {
+			ids = append(ids, item.ID)
+		}
+		s.forgetTrashedVersions(ctx, ids...)
 		for _, item := range gone {
 			detail, _ := json.Marshal(map[string]any{
 				"id": item.ID, "name": item.Name, "deletedAt": item.DeletedAt.UTC().Format(time.RFC3339),

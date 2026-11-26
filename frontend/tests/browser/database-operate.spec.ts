@@ -3149,9 +3149,9 @@ test("accounts that cannot be read say so in the server's words without metric c
     .filter({ hasText: "Permission denied for pg_authid" })
   await expect(failed).toContainText("Could not read the account")
   await expect(failed.getByRole("button", { name: "Try again" })).toBeVisible()
-  await expect(
-    page.getByRole("navigation", { name: "Accounts" }).getByRole("alert"),
-  ).toContainText("SELECT command denied for table user")
+  await expect(page.getByRole("navigation", { name: "Accounts" }).getByRole("alert")).toContainText(
+    "SELECT command denied for table user",
+  )
 })
 
 test("a key–value server's users are rules, and the dashboard's own user keeps what would cut it off", async ({
@@ -3291,9 +3291,20 @@ test("a document database's users hold roles on databases, granted and taken one
   await expect.poll(() => where(page)).toBe("/databases/5/access/api?host=app_main")
   await expect(identity(page)).toContainText("kept in app_main")
   await expect(identity(page)).toContainText("SCRAM-SHA-256")
-  // One view, so no strip.
+  // One view, so no strip, and so no tab panel: what the view holds is the
+  // region named Roles, and nothing on the page is labelled by an element that
+  // is not there.
   await expect(page.getByRole("tab")).toHaveCount(0)
+  await expect(page.getByRole("tabpanel")).toHaveCount(0)
   const roles = page.getByRole("region", { name: "Roles" })
+  await expect(roles.getByRole("button", { name: "Add role" })).toBeVisible()
+  expect(
+    await page.evaluate(() =>
+      [...document.querySelectorAll("[aria-labelledby]")]
+        .flatMap((node) => node.getAttribute("aria-labelledby")!.split(/\s+/))
+        .filter((id) => id && !document.getElementById(id)),
+    ),
+  ).toEqual([])
   await roles.getByRole("combobox", { name: "The role" }).click()
   await page.getByRole("option", { name: "dbAdmin" }).click()
   await roles.getByRole("button", { name: "Add role" }).click()

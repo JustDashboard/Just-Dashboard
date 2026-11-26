@@ -21,8 +21,9 @@ import { watchOccupant } from "@/lib/stack-occupant"
  *
  * What the bars occupy is published on the root as `--bottom-occupied`, and
  * the top of the whole stack, docks included, as `--bottom-stack`: the shell's
- * scroller keeps a focused field above the first (`scroll-padding-bottom`),
- * and toasts can rise above the second.
+ * scroller, and from `xl` a detail page's own (`data-detail-scroll`), keep a
+ * focused field above the first (`scroll-padding-bottom`), and toasts can rise
+ * above the second.
  */
 
 export type StackLayer = "bar" | "dock"
@@ -97,8 +98,9 @@ function publish() {
     const root = document.documentElement.style
     root.setProperty("--bottom-occupied", `${snapshot.occupied}px`)
     root.setProperty("--bottom-stack", `${snapshot.top}px`)
-    // The shell's scroller reads `--bottom-occupied` for its scroll padding
-    // (globals.css), so a focused field stops short of the bars.
+    // The shell's scroller and a detail page's read `--bottom-occupied` for
+    // their scroll padding (globals.css), so a focused field stops short of
+    // the bars.
   }
   for (const listener of listeners) listener()
 }

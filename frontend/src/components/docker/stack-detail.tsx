@@ -90,6 +90,7 @@ import { Tabs, TabsContent } from "@/components/ui/tabs"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { decodeSegment } from "@/lib/route-params"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * A stack, as the application it is rather than as five container rows.
@@ -668,7 +669,7 @@ function StackBody({
   const services = useRef<HTMLDivElement>(null)
   const showServices = () =>
     requestAnimationFrame(() =>
-      services.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+      scrollIntoViewRespectingMotion(services.current, { block: "nearest" }),
     )
 
   return (

@@ -1,21 +1,19 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { ArrowRight, CloudUpload, Download, Globe, Plus, Warning } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { bytes, compactCount, plural } from "@/lib/format"
-import { ApiError, del, get, post } from "@/lib/api"
+import { del, get, post } from "@/lib/api"
 import type {
   Certificate,
   NpmImportResult,
   ProxyPending,
   SiteBackup,
   SiteCacheUsage,
-  SiteDeleteResult,
   SitePlacementResult,
-  SiteRenameResult,
   SiteResult,
   SitesBulkResult,
   SiteTrafficReading,
@@ -37,8 +35,7 @@ import { ConfirmDialog, useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow, GroupRule } from "@/components/choice-row"
 import { IdentityHeader } from "@/components/identity-header"
 import { Fact } from "@/components/fact-line"
-import { Modal } from "@/components/modal"
-import { Panel, PanelBody, PanelHeader, PanelToolbar, Well } from "@/components/panel"
+import { Panel, PanelBody, PanelHeader, PanelToolbar } from "@/components/panel"
 import { ListToolbar } from "@/components/toolbar"
 import { Page, PageContext } from "@/components/page"
 import { SearchInput } from "@/components/search-input"
@@ -81,7 +78,6 @@ import {
   ServingStatus,
   SiteTLS,
   UpstreamHealth,
-  siteKind,
 } from "@/components/proxy/site-marks"
 import { siteDestination } from "@/components/proxy/site-rail"
 import { siteSettingsHref } from "@/components/proxy/site-tabs"
@@ -102,7 +98,13 @@ import {
   type SiteReadings,
   type SiteSort,
 } from "@/components/proxy/site-filters"
-import { activeOwner, matchesSearch } from "@/components/proxy/site-details"
+import {
+  activeOwner,
+  isLeftover,
+  matchesSearch,
+  siteKind,
+  siteTitle,
+} from "@/components/proxy/site-details"
 import { reloadFailure, reloadOutput } from "@/components/proxy/site-outcome"
 import { sitesReadError, sitesReadFailure } from "@/components/proxy/sites-read-failure"
 import {
@@ -131,13 +133,14 @@ import { engineUnit, useProxy, useProxyRead } from "@/components/proxy/proxy-con
 import {
   downloadFrom,
   opensFile,
-  retireRoute,
-  routeRetirement,
+  leftoverRetirement,
+  retireLeftovers,
   siteDeletable,
   sitePath,
   siteSwitchable,
   useSiteVerbs,
 } from "@/components/proxy/site-verbs"
+import { useSiteChanges } from "@/components/proxy/site-changes"
 import { isDisabled, sharedNames } from "@/components/proxy/site-order"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
@@ -159,6 +162,7 @@ type BulkAction = keyof typeof BULK
  */
 const CHIP_TONE: Partial<Record<SiteChip, string>> = {
   broken: "text-destructive",
+  leftover: "text-warning",
   down: "text-destructive",
   notlive: "text-warning",
   expiring: "text-warning",
@@ -167,9 +171,6 @@ const CHIP_TONE: Partial<Record<SiteChip, string>> = {
 
 /** A card's identity in the list: two entries may share a name across layouts. */
 const siteKey = (v: VHost) => `${v.kind}:${v.layout ?? ""}:${v.name}`
-
-/** nginx's own words about a change, kept for the operator who asks to see them. */
-type NginxOutput = { title: string; output: string }
 
 /**
  * One read of the list: the rows, and the error when the read failed; and the
@@ -186,13 +187,6 @@ type ListRead = { read: unknown; data: unknown; pending: unknown }
  * the busy word, and a later verb on the site that is refused keeps it.
  */
 type Busy = { verb: string; answered?: ListRead; unloaded?: Unloaded }
-
-/**
- * What a change that landed says when nginx did not reload: `notRunning` when
- * there was no nginx to reload, which starts with the change, and
- * `notReloaded`, before nginx's reason, when the reload itself failed.
- */
-type ReloadCopy = { notRunning: string; notReloaded: string }
 
 /**
  * A file open in the config editor: the site's own, or — for a site whose
@@ -246,10 +240,24 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const [importing, setImporting] = useState(false)
   const searchRef = useRef<HTMLInputElement>(null)
   const [pending, setPending] = useState<Record<string, Busy>>({})
-  const [output, setOutput] = useState<NginxOutput | null>(null)
   // In the URL so a deployment finding can link straight at the site serving
   // its hostname, and so the browser's back button restores the selection.
   const [requested, setRequested] = useQuerySelection("site")
+  // `?q=` is a search another page asks for: a deployment's domain, a
+  // certificate's name. It is taken into the list's own search, with the chip
+  // let go so the answer is not hidden under it, and then off the address,
+  // so typing over it is not undone by a reload.
+  const asked = useSearchParams().get("q")
+  const search = useEffectEvent((text: string) => {
+    setFilter(text)
+    setChip("all")
+    const url = new URL(window.location.href)
+    url.searchParams.delete("q")
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+  })
+  useEffect(() => {
+    if (asked !== null) search(asked)
+  }, [asked])
   const { data, error, loading, refresh } = useProxyRead("vhosts")
   // Readings other parts of the proxy own. Each draws nothing where its
   // endpoint does not answer — no certificates readable, no health check or
@@ -264,11 +272,15 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     [],
     { enabled: hasNginx },
   )
+  // The summary covers the ingress's routes as well as nginx's sites: a host
+  // that serves everything through the Docker Caddy ingress has an hour to
+  // read too, and had no column for it.
+  const traffics = hasNginx || Boolean(status?.ingressContainer)
   const trafficPoll = usePoll(
     (signal) => get<SitesTraffic>("/proxy/traffic", undefined, signal),
     60_000,
     [],
-    { enabled: hasNginx },
+    { enabled: traffics },
   )
   // Whether the configuration history answers, which is what its verb
   // leads to; it is an administrator's.
@@ -393,10 +405,16 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   // here, and what there is to do with it is take it out.
   const linkedRemoval = admin && linked?.broken === "dangling" && !linked.path ? linked : undefined
   const linkedSettings = linkedForm?.name
+  // A route with no file on the host (the Docker Caddy ingress's) has neither
+  // a form nor a file to show: the link opened the list and nothing else.
+  // Its page is what there is.
+  const linkedPage =
+    linked && !linkedForm && !opensFile(linked) && !linkedRemoval ? linked.name : undefined
   useEffect(() => {
     // Replaced, so Back from the site's Settings is not this address again.
     if (linkedSettings) router.replace(siteSettingsHref(linkedSettings))
-  }, [linkedSettings, router])
+    else if (linkedPage) router.replace(sitePath(linkedPage))
+  }, [linkedSettings, linkedPage, router])
 
   const closeForm = (open: boolean) => {
     setForm((f) => ({ ...f, open }))
@@ -497,7 +515,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
    */
   const noteReload = (
     name: string,
-    res: VHostLinkResult | SiteDeleteResult,
+    res: Parameters<typeof reloadOutcome>[0],
     keepsCard: boolean,
   ): ReloadOutcome | undefined => {
     // eslint-disable-next-line react-hooks/purity -- a verb's handler reads the clock when nginx answers, never during render; the compiler cannot see that through the hooks it is handed to
@@ -527,155 +545,31 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   }
   const failure = error ? sitesReadFailure(error) : undefined
 
-  // The whole of what nginx printed, one press away from the toast that
-  // carries its first line.
-  const showOutput = (name: string, text: string | undefined) =>
-    text
-      ? { label: "Show nginx output", onClick: () => setOutput({ title: name, output: text }) }
-      : undefined
-
-  /**
-   * Says when a change that landed did not reload, and returns whether it
-   * said anything. With no nginx running there is nothing still serving the
-   * configuration from before — "keeps serving" would claim a site is up
-   * that is not — and nginx starts with the change. Any other failed reload
-   * leaves whatever nginx had loaded, if it is running, which the page
-   * cannot see from here and so does not claim.
-   */
-  const reportReload = (
-    res: VHostLinkResult | SiteDeleteResult,
-    outcome: ReloadOutcome | undefined,
-    done: string,
-    copy: ReloadCopy,
-  ): boolean => {
-    const failure = reloadFailure(res)
-    if (!failure) return false
-    const action = showOutput(res.name, reloadOutput(res))
-    if (outcome === "notRunning") {
-      notify.warning(`${done}; nginx is not running`, {
-        description: copy.notRunning,
-        duration: 12_000,
-        action,
-      })
-    } else {
-      notify.warning(`${done}, not reloaded`, {
-        description: `${copy.notReloaded} ${failure}`,
-        duration: 12_000,
-        action,
-      })
-    }
-    return true
-  }
-  /**
-   * Says what a change to a link did. The change itself passed `nginx -t` —
-   * a refused one comes back as a 422 carrying nginx's reason, and nothing
-   * changed — but the reload after it can still fail, which the page has to
-   * say.
-   */
-  const reportLink = (
-    res: VHostLinkResult,
-    outcome: ReloadOutcome | undefined,
-    done: string,
-    copy: ReloadCopy,
-  ) => {
-    if (!reportReload(res, outcome, done, copy)) notify.success(done)
-  }
-  const reportRefusal = (title: string, name: string, err: unknown) =>
-    notify.error(title, err, {
-      action: err instanceof ApiError ? showOutput(name, err.raw) : undefined,
-    })
-
-  const toggle = (vhost: VHost, enabled: boolean) => {
-    const apply = async (): Promise<"reported"> => {
-      setBusy(vhost.name, enabled ? "Enabling" : "Disabling")
-      let outcome: ReloadOutcome | undefined
-      try {
-        const res = await post<VHostLinkResult>(
-          `/proxy/vhosts/${encodeURIComponent(vhost.name)}/enabled`,
-          { enabled, reload: true },
-        )
-        outcome = noteReload(vhost.name, res, true)
-        if (enabled) {
-          reportLink(res, outcome, `${vhost.name} enabled`, {
-            notRunning: "It serves once nginx starts.",
-            notReloaded: "It is not serving until nginx reloads.",
-          })
-        } else {
-          reportLink(res, outcome, `${vhost.name} disabled`, {
-            notRunning: "nginx starts without it.",
-            notReloaded: "If nginx is running, it still serves it until a reload succeeds.",
-          })
-        }
-      } catch (err) {
-        reportRefusal(`Could not ${enabled ? "enable" : "disable"} ${vhost.name}`, vhost.name, err)
-      } finally {
-        reread(vhost.name, outcome === "reloaded")
-      }
-      return "reported"
-    }
-    if (!enabled) {
-      confirm({
-        title: `Disable ${vhost.name}`,
-        confirmLabel: "Disable and reload",
-        description: (
-          <p>
-            <b>{vhost.name}</b> stops serving as soon as nginx reloads. The config file stays on
-            disk.
-            {vhost.linkedAs?.length ? (
-              <>
-                {" "}
-                Disabling removes{" "}
-                {vhost.linkedAs.map((alias, i) => (
-                  <span key={alias}>
-                    {i > 0 && " and "}
-                    <code className="font-mono break-all">sites-enabled/{alias}</code>
-                  </span>
-                ))}
-                , which {vhost.linkedAs.length === 1 ? "serves" : "serve"} it under another name.
-              </>
-            ) : null}{" "}
-            If taking it out breaks a configuration nginx was loading, the link goes back and
-            nothing changes.
-          </p>
-        ),
-        action: apply,
-      })
-      return
-    }
-    // The name in sites-enabled is how nginx reads some other file; the
-    // enable points it at this one, and that file loses its only way in.
-    if (vhost.broken === "stale" && vhost.linkTarget && !vhost.targetServedElsewhere) {
-      const displaced = hosts.find((h) => h.linkedAs?.includes(vhost.name))
-      confirm({
-        title: `Enable ${vhost.name}`,
-        confirmLabel: "Enable and reload",
-        description: (
-          <p>
-            <code className="font-mono break-all">sites-enabled/{vhost.name}</code> is how nginx
-            serves{" "}
-            {displaced ? (
-              <b>{displaced.name}</b>
-            ) : (
-              <code className="font-mono break-all">{vhost.linkTarget}</code>
-            )}{" "}
-            now. Enabling points it at this site&apos;s file, and{" "}
-            {displaced ? (
-              <>
-                <b>{displaced.name}</b> stops serving once nginx reloads, until it is enabled under
-                its own name.
-              </>
-            ) : (
-              "nginx stops reading that file once it reloads; nothing on this page links it back."
-            )}{" "}
-            If nginx refuses {vhost.name}, the link goes back and nothing changes.
-          </p>
-        ),
-        action: apply,
-      })
-      return
-    }
-    void apply()
-  }
+  const {
+    toggle,
+    remove,
+    retire,
+    rename,
+    reportLink,
+    reportRefusal,
+    showOutput,
+    setOutput,
+    outputDialog,
+  } = useSiteChanges({
+    confirm,
+    hosts,
+    begin: setBusy,
+    heard: noteReload,
+    settle: reread,
+    // Whatever pointed at the old name on this page — the URL's selection,
+    // the cursor, a ticked box — follows it, since that card is gone.
+    onRenamed: (vhost, res) => {
+      if (requested === vhost.name) setRequested(res.name)
+      const moved = siteKey({ ...vhost, name: res.name })
+      setCursor((c) => (c === siteKey(vhost) ? moved : c))
+      setSelected((list) => list.map((name) => (name === vhost.name ? res.name : name)))
+    },
+  })
 
   /** Takes out a link in sites-enabled that no site's switch owns, and says how it went. */
   const removeLink = async (vhost: VHost): Promise<"reported"> => {
@@ -760,81 +654,6 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
     apply().catch((err) => notify.error("Could not end maintenance", err))
   }
 
-  const remove = (vhost: VHost) =>
-    confirm({
-      title: `Delete ${vhost.name}`,
-      confirmLabel: "Delete and reload",
-      description: (
-        <p>
-          The file and its symlink are removed and nginx reloads. The previous content is kept
-          beside it as <code className="font-mono">{vhost.name}.bak</code>, which nginx does not
-          read and this list does not show.
-        </p>
-      ),
-      action: async () => {
-        setBusy(vhost.name, "Deleting")
-        let outcome: ReloadOutcome | undefined
-        try {
-          const res = await del<SiteDeleteResult>(`/proxy/sites/${encodeURIComponent(vhost.name)}`)
-          outcome = noteReload(vhost.name, res, false)
-          // The file is gone, and a running nginx still serves what it
-          // loaded: "completed" would send the operator away from a site
-          // that is up.
-          const reported = reportReload(res, outcome, `${vhost.name} deleted`, {
-            notRunning: "nginx starts without it.",
-            notReloaded: "If nginx is running, it still serves it until a reload succeeds.",
-          })
-          return reported ? "reported" : undefined
-        } finally {
-          reread(vhost.name, outcome === "reloaded")
-        }
-      },
-    })
-
-  const retire = (vhost: VHost) =>
-    confirm({
-      ...routeRetirement(vhost),
-      action: async () => {
-        setBusy(vhost.name, "Removing")
-        try {
-          return await retireRoute(vhost)
-        } finally {
-          reread(vhost.name, false)
-        }
-      },
-    })
-
-  /**
-   * Moves a site to a new name. A refusal is thrown back into the dialog,
-   * which keeps the typed name; on success whatever pointed at the old name
-   * on this page — the URL's selection, the cursor, a ticked box — follows
-   * it, since that card is gone.
-   */
-  const rename = async (vhost: VHost, to: string) => {
-    setBusy(vhost.name, "Renaming")
-    let outcome: ReloadOutcome | undefined
-    try {
-      const res = await post<SiteRenameResult>(
-        `/proxy/sites/${encodeURIComponent(vhost.name)}/rename`,
-        { to, reload: true },
-      )
-      outcome = noteReload(vhost.name, res, false)
-      if (requested === vhost.name) setRequested(res.name)
-      const moved = siteKey({ ...vhost, name: res.name })
-      setCursor((c) => (c === siteKey(vhost) ? moved : c))
-      setSelected((list) => list.map((name) => (name === vhost.name ? res.name : name)))
-      reportLink(res, outcome, `${vhost.name} renamed to ${res.name}`, {
-        notRunning: "nginx starts with it under the new name.",
-        notReloaded:
-          "If nginx is running, it keeps serving the site as it loaded it until a reload succeeds.",
-      })
-      for (const warning of res.warnings)
-        notify.warning(`${res.name}: moved unchanged`, { description: warning })
-    } finally {
-      reread(vhost.name, outcome === "reloaded")
-    }
-  }
-
   /** A site an import or a restore added: said like any verb's reload, then read. */
   const placed = (res: SitePlacementResult, done: string) => {
     let outcome: ReloadOutcome | undefined
@@ -883,7 +702,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
   const override = (vhost: VHost) => {
     const owner = activeOwner(vhost)
     confirm({
-      title: `Edit ${vhost.name} anyway`,
+      title: `Edit ${siteTitle(vhost)} anyway`,
       confirmLabel: "Edit anyway",
       description: (
         <p>
@@ -935,6 +754,23 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
       },
     })
   }
+
+  // The routes deleted deployments left, which Remove all takes out the way
+  // a deployment removes its own route, on either engine. Each row keeps its
+  // busy word while the whole run is in flight.
+  const leftovers = hosts.filter(isLeftover)
+  const removeLeftovers = () =>
+    confirm({
+      ...leftoverRetirement(leftovers),
+      action: async () => {
+        for (const v of leftovers) setBusy(v.name, "Removing")
+        try {
+          return await retireLeftovers(leftovers)
+        } finally {
+          for (const v of leftovers) reread(v.name, false)
+        }
+      },
+    })
 
   const handlers = {
     admin,
@@ -1321,6 +1157,10 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         </Notice>
       )}
 
+      {leftovers.length > 0 && (
+        <Leftovers count={leftovers.length} onRemove={admin ? removeLeftovers : undefined} />
+      )}
+
       {run?.running !== false && pendingPoll.data && (
         <PendingStrip
           pending={pendingPoll.data}
@@ -1339,7 +1179,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
           hosts={hosts}
           appOf={appOf}
           healthOf={(v) => siteUpstreams(v, upstreamPoll.data)}
-          traffics={hasNginx}
+          traffics={traffics}
           traffic={trafficPoll.data}
           trafficError={trafficPoll.error}
           certs={certPoll.data}
@@ -1574,15 +1414,7 @@ export function SitesPage({ hasNginx }: { hasNginx: boolean }) {
         onOpenChange={(open) => !open && setRenaming(null)}
         onRename={rename}
       />
-      <Modal
-        open={output !== null}
-        onOpenChange={(open) => !open && setOutput(null)}
-        title={`nginx output — ${output?.title ?? ""}`}
-        size="lg"
-        initialFocus="body"
-      >
-        <Well className="max-h-[60svh] break-all whitespace-pre-wrap">{output?.output}</Well>
-      </Modal>
+      {outputDialog}
       {dialog}
     </Page>
   )
@@ -1672,19 +1504,26 @@ function SiteRow({
   const verbs = useSiteVerbs({ vhost, busy, ambiguous, ...handlers })
   // A link to nothing has no domain or upstream to draw, only where it points.
   const linkOnly = vhost.broken === "dangling" && !vhost.path
+  const title = siteTitle(vhost)
   const names = vhost.serverNames.join(", ")
   const destination = siteDestination(vhost) || "served by configuration"
   const kind = app?.name ? `${app.name} · ${siteKind(vhost)}` : siteKind(vhost)
+  // The title is the first domain. What it leaves unsaid goes before the
+  // arrow: the file where that is another word, else the other domains.
+  const beside = vhost.name !== title ? vhost.name : names !== title ? names || "Default host" : ""
+  const leftover = isLeftover(vhost)
   const ports = listenPorts(vhost.listen)
   // The words the switch and nginx have about the site come before its
   // upstream's: a site that is off has no visitors for a dead upstream to fail.
   const plainlyServing =
     !busy && !unread && !vhost.broken && !stopped && !unloaded && !notLive && vhost.enabled
-  const down = plainlyServing && health.some(isDown)
+  // A leftover's upstream is often gone with its deployment; what there is
+  // to do about it is remove the route, which is the word it keeps.
+  const down = plainlyServing && !leftover && health.some(isDown)
   return (
     <ChoiceRow
       href={sitePath(vhost.name)}
-      verb={`Open ${vhost.name}`}
+      verb={`Open ${title}`}
       index={index}
       busy={Boolean(busy)}
       className={cn(
@@ -1713,7 +1552,7 @@ function SiteRow({
           />
         </>
       }
-      title={vhost.name}
+      title={title}
       description={
         <span className="flex min-w-0 items-center gap-1.5">
           <span className="shrink-0 max-sm:hidden">{kind}</span>
@@ -1727,13 +1566,9 @@ function SiteRow({
                 className="flex min-w-0 items-center gap-1.5 font-mono"
                 title={`${names || "Default host"} → ${destination}`}
               >
-                {/* The names are said once: where they are the site's own
-                    name, the title already says them. */}
-                {names !== vhost.name && (
+                {beside && (
                   <>
-                    <span className={cn("truncate", !names && "font-sans")}>
-                      {names || "Default host"}
-                    </span>
+                    <span className={cn("truncate", !names && "font-sans")}>{beside}</span>
                     <ArrowRight aria-hidden className="size-3 shrink-0" />
                   </>
                 )}
@@ -1788,18 +1623,49 @@ function SiteRow({
           <span className="flex size-5 items-center justify-center max-sm:hidden">
             {selectable && (
               <Checkbox
-                aria-label={`Select ${vhost.name}`}
+                aria-label={`Select ${title}`}
                 checked={selected}
                 onCheckedChange={(on) => onSelectedChange(on === true)}
               />
             )}
           </span>
           {verbs.length > 0 ? (
-            <VerbMenu verbs={verbs} label={`More actions for ${vhost.name}`} />
+            <VerbMenu verbs={verbs} label={`More actions for ${title}`} />
           ) : (
             <span aria-hidden className="size-8" />
           )}
         </>
+      }
+    />
+  )
+}
+
+/**
+ * The routes deleted deployments left, said once over the list with the one
+ * thing to do about all of them. Deleting a project keeps its route, so a
+ * host that had tried a dozen applications listed a dozen "serving" routes
+ * to nothing, each removable only from its own menu.
+ */
+function Leftovers({ count, onRemove }: { count: number; onRemove?: () => void }) {
+  return (
+    <Notice
+      data-slot="site-leftovers"
+      tone="warning"
+      icon={Warning}
+      className="items-center"
+      title={
+        <span className="flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-2">
+          <span className="min-w-0">
+            {count === 1
+              ? "1 route was left by a deleted deployment and still answers its domain"
+              : `${count} routes were left by deleted deployments and still answer their domains`}
+          </span>
+          {onRemove && (
+            <Button size="xs" variant="outline" onClick={onRemove}>
+              {count === 1 ? "Remove" : "Remove all"}
+            </Button>
+          )}
+        </span>
       }
     />
   )

@@ -53,6 +53,32 @@ test("the spine is drawn once the server says which steps the account has", asyn
   await expect(spine(page).getByRole("listitem")).toHaveText(["Sign in", "Code"])
 })
 
+test("a code pasted in its groups arrives as all six digits", async ({ page }) => {
+  await mockSignIn(page, {
+    ...signedOut,
+    needsTotp: true,
+    user: { username: "ion", totpEnabled: true, mustChangePassword: false },
+  })
+  const verified: unknown[] = []
+  await page.route("**/api/v1/auth/2fa/verify", async (route) => {
+    verified.push(route.request().postDataJSON())
+    await fulfill(route, { ...signedOut, needsTotp: true })
+  })
+  await signIn(page)
+  const code = page.getByLabel("Verification code", { exact: true })
+  await expect(code).toBeVisible()
+  // As a message or an authenticator copies it: the browser's own length
+  // limit, applied before the space went, kept "12345".
+  await code.fill("123 456")
+  await expect(code).toHaveValue("123456")
+  // Pasted over what is there, with its dash, and more than a code after it.
+  await code.selectText()
+  await page.keyboard.insertText("654-321 is your code, valid 10 minutes")
+  await expect(code).toHaveValue("654321")
+  await page.getByRole("button", { name: "Verify", exact: true }).click()
+  await expect.poll(() => verified).toEqual([{ code: "654321" }])
+})
+
 test("a forgotten password points at the server's reset script", async ({ page }) => {
   await mockSignIn(page, signedOut)
   await page.goto("/login")

@@ -156,22 +156,22 @@ func TestTheProfileStandsWithoutItsCalendar(t *testing.T) {
 	}
 }
 
-func TestInboxQueriesNameTheConnectionsOwnLogin(t *testing.T) {
+func TestInboxQueriesAskForTheTokensOwnAccount(t *testing.T) {
 	cases := []struct {
 		kind, filter, state string
 		page                int
 		want                string
 	}{
-		{InboxPulls, "created", "open", 1, "is:pr is:open archived:false author:mona"},
-		{InboxPulls, "assigned", "closed", 2, "is:pr is:closed archived:false assignee:mona"},
-		{InboxPulls, "mentioned", "open", 34, "is:pr is:open archived:false mentions:mona"},
-		{InboxPulls, "review", "open", 1, "is:pr is:open archived:false review-requested:mona"},
-		{InboxIssues, "created", "closed", 1, "is:issue is:closed archived:false author:mona"},
-		{InboxIssues, "assigned", "open", 3, "is:issue is:open archived:false assignee:mona"},
-		{InboxIssues, "mentioned", "open", 1, "is:issue is:open archived:false mentions:mona"},
+		{InboxPulls, "created", "open", 1, "is:pr is:open archived:false author:@me"},
+		{InboxPulls, "assigned", "closed", 2, "is:pr is:closed archived:false assignee:@me"},
+		{InboxPulls, "mentioned", "open", 34, "is:pr is:open archived:false mentions:@me"},
+		{InboxPulls, "review", "open", 1, "is:pr is:open archived:false review-requested:@me"},
+		{InboxIssues, "created", "closed", 1, "is:issue is:closed archived:false author:@me"},
+		{InboxIssues, "assigned", "open", 3, "is:issue is:open archived:false assignee:@me"},
+		{InboxIssues, "mentioned", "open", 1, "is:issue is:open archived:false mentions:@me"},
 	}
 	for _, c := range cases {
-		path, err := InboxQuery{Kind: c.kind, Filter: c.filter, State: c.state, Page: c.page}.searchPath("mona")
+		path, err := InboxQuery{Kind: c.kind, Filter: c.filter, State: c.state, Page: c.page}.searchPath()
 		if err != nil {
 			t.Fatalf("%+v: %v", c, err)
 		}
@@ -184,16 +184,9 @@ func TestInboxQueriesNameTheConnectionsOwnLogin(t *testing.T) {
 			t.Errorf("%+v: query = %v", c, q)
 		}
 	}
-	// A login that would read as more than one qualifier never reaches a
-	// query, and an enterprise-managed login (an underscore) does.
-	for _, login := range []string{"", "mona author:hubot", "mona\"", "mona/x", "-mona"} {
-		_, err := InboxQuery{Kind: InboxPulls, Filter: "created", State: "open", Page: 1}.searchPath(login)
-		if KindOf(err) != KindUnavailable {
-			t.Errorf("login %q: err = %v", login, err)
-		}
-	}
-	if _, err := (InboxQuery{Kind: InboxPulls, Filter: "created", State: "open", Page: 1}).searchPath("mona_acme"); err != nil {
-		t.Fatal(err)
+	// An unchecked query never becomes a path.
+	if _, err := (InboxQuery{Kind: InboxPulls, Filter: "created author:hubot", State: "open", Page: 1}).searchPath(); err == nil {
+		t.Fatal("an unchecked filter reached a query")
 	}
 }
 
@@ -229,16 +222,16 @@ func TestInboxQueriesAreCheckedBeforeGitHubIsAsked(t *testing.T) {
 		wantInvalid(t, err)
 	}
 	// The service checks again whatever it is handed.
-	_, err = InboxQuery{Kind: InboxIssues, Filter: "review", State: "open", Page: 1}.searchPath("mona")
+	_, err = InboxQuery{Kind: InboxIssues, Filter: "review", State: "open", Page: 1}.searchPath()
 	wantInvalid(t, err)
-	_, err = InboxQuery{Kind: InboxPulls, Filter: "created", State: "open", Page: 0}.searchPath("mona")
+	_, err = InboxQuery{Kind: InboxPulls, Filter: "created", State: "open", Page: 0}.searchPath()
 	wantInvalid(t, err)
 }
 
 func TestInboxItemsAreMappedFromGitHubsSearch(t *testing.T) {
 	fake := newFake(t)
 	query := InboxQuery{Kind: InboxPulls, Filter: "created", State: "closed", Page: 2}
-	path, _ := query.searchPath("mona")
+	path, _ := query.searchPath()
 	fake.on("GET "+path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Link", `<https://api.github.com/search/issues?page=3>; rel="next", <https://api.github.com/search/issues?page=5>; rel="last"`)
 		_, _ = w.Write([]byte(`{"total_count":131,"incomplete_results":true,"items":[
@@ -256,7 +249,7 @@ func TestInboxItemsAreMappedFromGitHubsSearch(t *testing.T) {
 			{"repository_url":"https://api.github.com/somewhere/else","number":10,"title":"No repository","state":"open"},
 			{"repository_url":"https://api.github.com/repos/octo-org/widgets/extra","number":11,"title":"Not a repository","state":"open"}]}`))
 	})
-	page, err := searchInbox(context.Background(), testAccess(t, fake).Client, "mona", query)
+	page, err := searchInbox(context.Background(), testAccess(t, fake).Client, query)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -286,12 +279,12 @@ func TestInboxItemsAreMappedFromGitHubsSearch(t *testing.T) {
 	// answer with nothing is an empty list, not null.
 	last := newFake(t)
 	query = InboxQuery{Kind: InboxIssues, Filter: "mentioned", State: "open", Page: maxInboxPage}
-	path, _ = query.searchPath("mona")
+	path, _ = query.searchPath()
 	last.on("GET "+path, func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Link", `<https://api.github.com/search/issues?page=35>; rel="next"`)
 		_, _ = w.Write([]byte(`{"total_count":5000,"incomplete_results":false,"items":[]}`))
 	})
-	page, err = searchInbox(context.Background(), testAccess(t, last).Client, "mona", query)
+	page, err = searchInbox(context.Background(), testAccess(t, last).Client, query)
 	if err != nil || page.HasMore || page.Total != 5000 || page.Incomplete {
 		t.Fatalf("last = %+v %v", page, err)
 	}

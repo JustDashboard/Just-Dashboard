@@ -498,17 +498,80 @@ export function hasPlaceholder(text: string): boolean {
 }
 
 /**
- * A statement's key in the list. The server's id is the engine's digest of
- * the text, and one digest can be listed twice — once per schema it ran in —
- * so the id alone is not one row: the second is told apart by its place.
+ * A statement's key in the list, which is its address. The server's id is the
+ * engine's digest of the text, and one digest can be listed twice — once per
+ * role that ran it on PostgreSQL, once per schema on MySQL — so the id alone
+ * is not one row. The engine says which of those a row is (`variant`), and
+ * the key is the id with that after it: a row keeps its key whatever the
+ * list's order, so its page never turns into the other row's when the two
+ * swap places between two reads.
+ *
+ * Only rows the engine gives no identity of their own (another role's
+ * statements this account may not read, with neither an id nor a text) are
+ * still told apart by their place.
  */
-export function statementKeys(statements: readonly Pick<DbStatement, "id">[]): string[] {
-  const seen = new Map<string, number>()
+export function statementKeys(
+  statements: readonly Pick<DbStatement, "id" | "variant">[],
+): string[] {
+  const used = new Set<string>()
   return statements.map((statement) => {
-    const n = seen.get(statement.id) ?? 0
-    seen.set(statement.id, n + 1)
-    return n === 0 ? statement.id : `${statement.id}~${n}`
+    const own = statement.variant ? `${statement.id}~${statement.variant}` : statement.id
+    let key = own
+    for (let n = 1; used.has(key); n++) key = `${own}~${n}`
+    used.add(key)
+    return key
   })
+}
+
+/** The engine's id in a statement's key: what is before its first `~`. No id has one. */
+export function statementIdOf(key: string): string {
+  const cut = key.indexOf("~")
+  return cut < 0 ? key : key.slice(0, cut)
+}
+
+/**
+ * The statement an address names among the rows of a list: the row of that
+ * key, or, for an address that is the engine's id alone (History's, and every
+ * one made before a row carried its variant), that id's statement. Where the
+ * id is listed more than once that is its rows together, on purpose: the one
+ * statement across every role or schema, which is what History records for
+ * it, rather than whichever of them came first.
+ */
+export function statementAt(
+  keyed: readonly { key: string; statement: DbStatement }[],
+  address: string | null,
+): { key?: string; statement: DbStatement } | undefined {
+  if (address === null) return undefined
+  const exact = keyed.find((row) => row.key === address)
+  if (exact) return exact
+  if (address.includes("~")) return undefined
+  const rows = keyed.filter((row) => row.statement.id === address)
+  if (rows.length === 0) return undefined
+  if (rows.length === 1) return rows[0]
+  return { statement: statementsTogether(rows.map((row) => row.statement)) }
+}
+
+/**
+ * Rows of one id as one statement: the counts and the time summed, the mean
+ * of the whole, the longest of any. The share of reads served from cache is
+ * not known for the whole without each row's reads, so it is left unknown
+ * rather than averaged into a figure no row has.
+ */
+export function statementsTogether(rows: readonly DbStatement[]): DbStatement {
+  const calls = rows.reduce((sum, row) => sum + row.calls, 0)
+  const totalMs = rows.reduce((sum, row) => sum + row.totalMs, 0)
+  const longest = rows.flatMap((row) => (row.maxMs === undefined ? [] : [row.maxMs]))
+  return {
+    id: rows[0].id,
+    query: rows[0].query,
+    calls,
+    totalMs,
+    meanMs: calls > 0 ? totalMs / calls : 0,
+    maxMs: longest.length > 0 ? Math.max(...longest) : undefined,
+    rows: rows.reduce((sum, row) => sum + row.rows, 0),
+    hitRatio: -1,
+    share: rows.reduce((sum, row) => sum + row.share, 0),
+  }
 }
 
 /** The statements an engine draws a plan for: the ones that read or change rows. */

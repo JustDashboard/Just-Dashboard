@@ -206,6 +206,59 @@ for (const width of [1280, 390]) {
   })
 }
 
+for (const width of [320, 390]) {
+  test(`on a ${width}px phone every fact the keyboard reaches on the identity line is on screen`, async ({
+    page,
+  }) => {
+    test.setTimeout(90_000)
+    await page.setViewportSize({ width, height: 800 })
+    await mockRemoteDesktop(page)
+    await page.goto("/remote-desktop")
+    const line = page.locator("[data-slot=host-identity]")
+    await expect(line).toContainText("4 computers")
+    await risen(page)
+    // Each control in the facts, and whether the line's clip shows it.
+    const controls = await line.evaluate((root) => {
+      const facts = [...root.querySelectorAll<HTMLElement>("[data-slot=fact]")]
+      const box = facts[0].closest("[data-slot=fact-line]")!.parentElement!.getBoundingClientRect()
+      return [...root.querySelectorAll<HTMLElement>("[data-slot=fact] :is(a, button)")].map(
+        (control, index) => {
+          control.dataset.probe = String(index)
+          const at = control.getBoundingClientRect()
+          return {
+            name: control.textContent!.trim(),
+            shown: at.height > 0 && at.top >= box.top - 1 && at.bottom <= box.bottom + 1,
+          }
+        },
+      )
+    })
+    expect(controls.length).toBeGreaterThan(0)
+
+    // Every Tab stop from the top of the page until the focus is past the line.
+    const reached = new Set<string>()
+    await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur())
+    for (let step = 0; step < 30; step++) {
+      await page.keyboard.press("Tab")
+      const at = await line.evaluate((root) => {
+        const focused = document.activeElement as HTMLElement | null
+        if (!focused || focused === document.body) return { past: false }
+        const past =
+          !root.contains(focused) &&
+          Boolean(root.compareDocumentPosition(focused) & Node.DOCUMENT_POSITION_FOLLOWING)
+        return { probe: focused.dataset.probe, past }
+      })
+      if (at.probe !== undefined) reached.add(controls[Number(at.probe)].name)
+      if (at.past) break
+    }
+    for (const control of controls)
+      expect(reached.has(control.name), `${control.name} is a Tab stop`).toBe(control.shown)
+    if (width === 320) {
+      // The narrow phone has no room for the link to the tailnet, so it is left off whole.
+      expect(controls.find((control) => control.name === "over Tailscale")?.shown).toBe(false)
+    }
+  })
+}
+
 test("Docker not answering is Docker's own screen with its step, never the client's sentence", async ({
   page,
 }) => {

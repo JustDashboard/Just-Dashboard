@@ -1,4 +1,5 @@
 import type { VHost } from "@/lib/types"
+import { siteKind, siteTitle } from "@/components/proxy/site-details"
 import { byUrgency } from "@/components/proxy/site-order"
 import { sitePath } from "@/components/proxy/site-verbs"
 
@@ -19,10 +20,12 @@ export function overviewRoutes(hosts: VHost[]): { shown: VHost[]; total: number 
   return { shown: [...hosts].sort(byUrgency).slice(0, ROUTE_LIMIT), total: hosts.length }
 }
 
-/** What serves a route, in the words the Sites cards use. */
+/**
+ * Who writes a route, in the Sites rows' own words: the two lists said
+ * different things about one route while each had its own.
+ */
 export function routeKind(vhost: VHost): string {
-  if (vhost.kind === "nginx") return "nginx site"
-  return vhost.path ? "Caddyfile" : "Docker Caddy ingress"
+  return siteKind(vhost)
 }
 
 /**
@@ -33,7 +36,7 @@ export function routeKind(vhost: VHost): string {
  * requests and its TLS report.
  */
 export function routeTarget(vhost: VHost): { href: string; verb: string } {
-  return { href: sitePath(vhost.name), verb: `Open ${vhost.name}` }
+  return { href: sitePath(vhost.name), verb: `Open ${siteTitle(vhost)}` }
 }
 
 /**

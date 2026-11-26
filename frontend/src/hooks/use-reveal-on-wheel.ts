@@ -2,6 +2,7 @@
 
 import { useEffect, type RefObject } from "react"
 import { revealDelta } from "@/lib/scroll-reveal"
+import { scrollBehavior } from "@/lib/motion"
 
 /** Roughly how long a smooth scroll runs: the reveal holds the wheel that long. */
 const SETTLE_MS = 450
@@ -37,9 +38,9 @@ export function useRevealOnWheel(ref: RefObject<HTMLElement | null>) {
       if (delta === 0) return
       event.preventDefault()
       if (event.timeStamp < settling) return
-      const smooth = !matchMedia("(prefers-reduced-motion: reduce)").matches
-      port.scrollBy({ top: delta, behavior: smooth ? "smooth" : "auto" })
-      settling = smooth ? event.timeStamp + SETTLE_MS : 0
+      const behavior = scrollBehavior()
+      port.scrollBy({ top: delta, behavior })
+      settling = behavior === "smooth" ? event.timeStamp + SETTLE_MS : 0
     }
     // React's own `onWheel` is passive, and a passive listener cannot keep the
     // wheel from scrolling the rows while the page is still on its way.

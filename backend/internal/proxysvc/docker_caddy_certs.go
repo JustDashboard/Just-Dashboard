@@ -128,13 +128,23 @@ func (c *dockerCaddy) certificates(ctx context.Context) ([]Certificate, error) {
 		}
 		cert := summarise(leaf, name, path)
 		cert.Source = "caddy"
-		// Caddy renews on its own schedule, a third of the term before
-		// expiry, so the renewal window says nothing the operator must act
-		// on. An expired one is still expired.
-		cert.Expiring = false
+		cert.Expiring = caddyRenewalOverdue(leaf.NotBefore, leaf.NotAfter, time.Now())
 		out = append(out, *cert)
 	}
 	return out, nil
+}
+
+// caddyRenewalOverdue reports a certificate Caddy should have renewed by now
+// and has not. Caddy renews on its own once a third of the term is left, so
+// entering that window asks nothing of the operator, and this used to be
+// false for every Caddy certificate: one whose renewal kept failing then
+// stayed green until the day it expired. It turns a day into the window (a
+// quarter of the window on a short term), which Caddy's own attempt and its
+// first retries fit inside, so a healthy certificate never shows as expiring.
+func caddyRenewalOverdue(notBefore, notAfter, now time.Time) bool {
+	window := renewalWindow(notBefore, notAfter)
+	grace := min(24*time.Hour, window/4)
+	return now.Before(notAfter) && notAfter.Sub(now) <= window-grace
 }
 
 // caddyInventory is what the Docker ingress serves, each certificate used by

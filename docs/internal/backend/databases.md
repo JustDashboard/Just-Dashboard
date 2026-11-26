@@ -1681,7 +1681,10 @@ are decided here, not by the page.
   day, SQL Server's `sys.dm_exec_query_stats` summed by query hash for plans compiled in this database
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
-  `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
+  `share` of everything tracked and, where the engine lists one id more than once, the `variant` that
+  tells its rows apart (the role that ran it on PostgreSQL, with `-nested` where `toplevel` is false
+  on 14+, and the schema on MySQL; the other engines group by their id), and `supported: false` comes
+  with what would enable it (`enable`) or
   with the grant the account lacks (`reason`). On PostgreSQL `enable` says how far the module is from
   loaded: `configured` when the list the next start loads names it and the running list does not —
   that list is the last line the configuration files hold for it, read from `pg_file_settings` by a
@@ -1964,7 +1967,7 @@ and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
 The control center's *Alerts* line (`components/database/fleet/fleet-protection.tsx`) reads every
 rule and the channels, and its *Turn on* creates the usual kinds as rules over every database
 (`connectionId: null`, no channels, each kind's defaults), skipping a kind that already has such a
-rule, paused or not.
+rule, paused or not, by the rules it reads again just before it makes any.
 
 - **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
   database of an engine can be watched for, and the create route refuses a rule for one database
@@ -2313,7 +2316,9 @@ the detail of each classifier is below, with the surface it guards.
   is not complete ends with an object whose only key is `__export`; a SQL file always ends with a
   comment. And a caller that names its export (`exportId`) can ask `GET /{id}/export/status` afterwards,
   which is the only way a browser saving a CSV learns it was cut at the limit: browsers show trailers
-  to nothing, and a CSV has nowhere to say it. The registry is memory, keyed by account, connection and
+  to nothing, and a CSV has nowhere to say it. The page asks it with the export's own abort signal
+  (`settledExport` in `lib/stream-export.ts`), and saves nothing once Cancel was pressed, however
+  late. The registry is memory, keyed by account, connection and
   name. A **failure** is never a response that ends: the first 64 KiB are held so that a statement
   refused before then is an ordinary error response, and past that the response is flushed and the
   connection aborted (`http.ErrAbortHandler`), which a browser reports as a failed download and every
@@ -2821,8 +2826,8 @@ was written by (a server since moved to a newer major cannot start the older clu
 An AI client — Claude Code, Cursor, VS Code, anything that speaks the Model Context Protocol over
 Streamable HTTP — reaches the databases, and the deployments if its key was given them, through one
 endpoint, `POST /api/v1/mcp` (`api/handlers_mcp.go`, `handlers_mcp_tools.go`, `handlers_mcp_deploy.go`,
-`handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 114 tools in all: the seven
-database tools, the six hand-written deployment tools, and 101 tools generated from the deployment API,
+`handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 117 tools in all: the seven
+database tools, the six hand-written deployment tools, and 104 tools generated from the deployment API,
 the last to a key whose owner turned them on for it. It sits outside the `/databases` tree, as the metrics export does,
 because what admits a request there is different.
 
@@ -2907,8 +2912,8 @@ because what admits a request there is different.
   `read_run_log`, `…/environments/{env}/releases` `list_releases`, `POST …/run` `deploy`,
   `POST …/environments/{env}/rollback` `rollback` — the hand-written one is kept, with its names and
   bounds), the three WebSocket streams, the four routes whose answer is not JSON (the favicon, the
-  preview frame, the CSV export, the YAML description) and the JSON description itself: 101 tools
-  generated, 114 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
+  preview frame, the CSV export, the YAML description) and the JSON description itself: 104 tools
+  generated, 117 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
   deploy key route is neither a tool nor left out with a reason, when a route no deploy key reaches is
   a tool, or when the count differs from `api.MCPGeneratedTools` and the 113 these pages, `docs/features/databases.md` and
   the deployment implementation notes quote.

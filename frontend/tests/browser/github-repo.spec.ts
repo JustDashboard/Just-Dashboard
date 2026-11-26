@@ -181,6 +181,49 @@ test.describe("the views", () => {
     await expect(page.locator("[data-slot=github-languages]")).toHaveCount(0)
   })
 
+  test("an empty README says it is empty, and a languages read that failed says so", async ({
+    page,
+  }) => {
+    await mockGitHubRepo(page)
+    // Registered after the mock, so they answer first.
+    await page.route("**/api/v1/github/connections/1/repos/mira-dev/notes/readme", (route) =>
+      route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          found: true,
+          path: "README.md",
+          htmlUrl: "https://github.com/mira-dev/notes/blob/main/README.md",
+        }),
+      }),
+    )
+    let failing = true
+    await page.route("**/api/v1/github/connections/1/repos/mira-dev/notes/languages", (route) =>
+      failing
+        ? route.fulfill({
+            status: 502,
+            contentType: "application/json",
+            body: JSON.stringify({
+              error: { code: "github_unavailable", message: "GitHub is down" },
+            }),
+          })
+        : route.fulfill({
+            status: 200,
+            contentType: "application/json",
+            body: JSON.stringify({ languages: [{ name: "Go", bytes: 100 }] }),
+          }),
+    )
+    await page.goto("/github/mira-dev/notes?account=1")
+    const readme = page.locator("[data-slot=github-readme]")
+    await expect(readme).toContainText("README.md is empty.")
+    await expect(readme).not.toContainText("too long")
+    const languages = page.locator("[data-slot=github-languages]")
+    await expect(languages).toContainText("GitHub did not hand over the languages.")
+    failing = false
+    await languages.getByRole("button", { name: "Try again" }).click()
+    await expect(languages.getByRole("img", { name: /^Go 100%/ })).toBeVisible()
+  })
+
   test("a repository with no checkout offers Clone", async ({ page }) => {
     await mockGitHubRepo(page)
     await page.goto("/github/mira-dev/notes?account=1")

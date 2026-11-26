@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useReducedMotion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { LogText } from "@/components/logs/log-text"
 import { LANES, hueFor } from "@/lib/hue"
 import { hitRanges, type LineKind, type TranscriptLine } from "@/lib/transcript"

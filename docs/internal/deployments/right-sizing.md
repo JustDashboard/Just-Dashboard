@@ -77,8 +77,10 @@ rests on; and each limit as a reading line, the shape of the live readings above
 on its hue (the danger tile when too tight, the warning tile when oversized), what to do with it ("Raise to
 640 MiB from 512 MiB", or "320 MiB fits"), what it used most of the time and at peak under that, and at the
 line's end a gauge: what it used most of the time, its peak paler, the limit in the foreground and the
-suggestion's tick in the brand. The readings in full are the gauge's name. Each limit's ⓘ states its
-rule. It draws nothing for a Compose stack or a failed read. The fleet's **Right-size** panel under the projects lists only the environments that are
+suggestion's tick in the brand. The readings in full are the gauge's name, and the tip of what it used:
+that detail is a dotted term a tap, a hover or the keyboard opens, since on a phone the gauge is not
+drawn and the line, which keeps one height, cuts the detail before the peak and the throttling. Each
+limit's ⓘ states its rule. It draws nothing for a Compose stack or a failed read. The fleet's **Right-size** panel under the projects lists only the environments that are
 off, furthest first, with what an apply would change and an *Apply* per row; what is right or still
 gathering history is a count in its head, and a fleet with nothing off draws nothing.
 

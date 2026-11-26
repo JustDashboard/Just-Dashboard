@@ -155,6 +155,36 @@ test.describe("right-sizing", () => {
     await expect(card.getByRole("button", { name: "Apply suggested limits" })).toHaveCount(0)
   })
 
+  test.describe("on a phone", () => {
+    test.use({ hasTouch: true, viewport: { width: 390, height: 844 } })
+
+    test("every reading is a tap away though the gauge is not drawn", async ({ page }) => {
+      await mockProject(page)
+      await page.route("**/api/v1/deploy/7/environments/12/sizing", (route) =>
+        json(route, sizing({ cpu: { ...sizing().cpu!, throttledShare: 0.31 } })),
+      )
+      await page.goto("/deploy/7")
+      const card = page.locator("section", { has: page.locator("#right-size-title") }).last()
+      const limits = card.locator("[data-slot=reading-line]")
+      await expect(limits).toHaveCount(2)
+      // The gauge is the wide layout's; the lines stay one height.
+      await expect(card.locator("[data-slot=limit-gauge]").first()).toBeHidden()
+      const memoryBox = await limits.nth(0).boundingBox()
+      const cpuBox = await limits.nth(1).boundingBox()
+      expect(memoryBox!.height).toBe(cpuBox!.height)
+      // The usage is cut before the throttling; a tap reads it all.
+      const usage = limits.nth(1).getByRole("button", {
+        name: "0.21 cores most of the time, 0.6 cores at peak, throttled 31%",
+      })
+      await usage.tap()
+      const tip = page.getByRole("dialog", { name: "CPU: what it used" })
+      await expect(tip).toContainText(
+        "0.21 cores most of the time · 0.6 cores at its peak · limit 4 cores · throttled 31%",
+      )
+      await expect(tip).toContainText("Suggested 0.35 cores")
+    })
+  })
+
   test("too little history says how much more it needs and offers nothing", async ({ page }) => {
     await mockProject(page)
     await page.route("**/api/v1/deploy/7/environments/12/sizing", (route) =>

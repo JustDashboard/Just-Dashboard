@@ -124,6 +124,14 @@ export type AlertCover = {
   unwatched: DbFleetEntry[]
   /** The kinds the Turn on press would add: those with no rule over every database yet. */
   missing: DbAlertKind[]
+  /**
+   * Some of the usual rules over every database are there and some are not:
+   * a Turn on that stopped half-way. Its first rule alone makes every
+   * database read as watched, so this, not `unwatched`, keeps the press.
+   */
+  partial: boolean
+  /** Whether the Turn on press has something to make (`turnOnOffered`). */
+  offered: boolean
   /** What is firing now, the first a database's own. */
   firing: DbAlertSubject[]
   /** The switched-on channels the rules reach; undefined while they are not known. */
@@ -162,10 +170,16 @@ export function alertCover(
     const toldAll = on.some((rule) => rule.channels.length === 0)
     reached = channels.filter((channel) => channel.enabled && (toldAll || named.has(channel.id)))
   }
+  const missing = WATCHED_KINDS.filter((kind) => !fleetKinds.has(kind))
+  const partial = missing.length > 0 && missing.length < WATCHED_KINDS.length
   return {
     watchable,
     unwatched,
-    missing: WATCHED_KINDS.filter((kind) => !fleetKinds.has(kind)),
+    missing,
+    partial,
+    // A fleet every database of which has rules of its own is not offered
+    // the usual ones over them all: it was set up by hand, on purpose.
+    offered: watchable.length > 0 && missing.length > 0 && (unwatched.length > 0 || partial),
     firing,
     reached,
   }

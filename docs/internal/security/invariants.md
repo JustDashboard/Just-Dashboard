@@ -153,7 +153,7 @@ A change that weakens any of these has to say so explicitly.
    and any key read, a deploy key included; it derives each operation's security from this table and
    from `RequireSession` in the route's chain, and a test walks both keys to check it
    ([`../backend/deploy-api.md`](../backend/deploy-api.md)). What stays a
-   session's whatever the key: every reveal (`…/variables/{name}/reveal`, shared variables, the legacy
+   session's whatever the key: every reveal (`…/variables/{name}/reveal`, a smart stack's accounts, shared variables, the legacy
    `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
    connections that hold credentials of their own (create, update, test and delete),
    the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,
@@ -573,6 +573,7 @@ either names a route the router does not refuse, or leaves one out:
 | Proxy basic-auth users | `POST /proxy/auth-files/`, `POST /proxy/import/npm`, `POST /proxy/import/npm/apply` |
 | Deployment secrets and saved credentials | `POST /deploy/`, `POST /deploy/{id}/environments/{env}/triggers`, `PUT /deploy/{id}/environments/{env}/triggers/{trigger}`, `POST /deploy/{id}/environments/{env}/triggers/{trigger}/rotate-secret`, `POST /deploy/{id}/rotate-secret`, `POST /deploy/credentials`, `PUT /deploy/credentials/{id}`, `POST /deploy/secret-stores`, `PUT /deploy/secret-stores/{store}`, `POST /deploy/notifications`, `PUT /deploy/notifications/{channel}`, `POST /deploy/log-drains`, `PUT /deploy/log-drains/{drain}` |
 | Deployment secret variables | `GET /deploy/{id}/env/reveal`, `GET /deploy/{id}/environments/{env}/variables/{name}/reveal`, `POST /deploy/{id}/environments/{env}/variables/{name}/generate`, `POST /deploy/{id}/environments/{env}/variables/{name}/rotate`, `GET /deploy/shared-variables/{name}/reveal`, `GET /deploy/{id}/shared-variables/{name}/reveal` |
+| A smart stack's accounts | `GET /deploy/{id}/stack/credentials/{name}/reveal` |
 | Git and GitHub | `POST /git/github/auth/device`, `POST /git/github/auth/device/{id}`, `POST /git/github/auth/token`, `POST /git/github/auth/configure`, `POST /deploy/github-app/manifest`, `POST /deploy/github-app/callback`, `POST /git/forge/account`, `POST /github/app/manifest`, `POST /github/callback`, `POST /github/connections/authorize`, `POST /github/connections/device`, `GET /github/connections/device/{flow}`, `DELETE /github/connections/{connection}/repos/{owner}/{repo}/` |
 | DNS credentials, tunnels and TLS keys | `POST /certificates/dns-credentials`, `POST /certificates/import`, `POST /certificates/export`, `POST /network/dns/services/`, `PUT /network/dns/services/{id}`, `PUT /proxy/tunnel/`, `POST /proxy/tunnel/create` |
 | Network peers and check machines | `POST /network/vpn/wireguard/{iface}/peers`, `PATCH /network/vpn/wireguard/{iface}/peers/{id}`, `GET /network/vpn/wireguard/{iface}/peers/{id}/config`, `POST /network/vpn/archive/{file}/restore`, `POST /network/external/enrollments` |

@@ -58,7 +58,7 @@ func TestPreflightNamesTheRecordADomainNeeds(t *testing.T) {
 		Detail: "None of the DNS credentials saved here reaches a zone that holds localhost.",
 	}, true)
 	missing := findingByCode(findings, "dns_record_missing")
-	if missing == nil || missing.Title != "DNS record is missing" || missing.DeepLink != "/proxy/certificates" ||
+	if missing == nil || missing.Title != "DNS record is missing" || missing.DeepLink != "/proxy/certificates?tab=dns" ||
 		missing.Measured != "A localhost → 203.0.113.7; AAAA localhost → 2001:db8::7" || !strings.Contains(missing.Means, "None of the DNS credentials") ||
 		findingByCode(findings, "dns_record_writable") != nil {
 		t.Fatalf("missing %#v", missing)

@@ -430,7 +430,13 @@ type Blueprint struct {
 	// stays shipped and stays resolvable, because a deployment already running
 	// one re-resolves its definition on every redeploy; deleting the file would
 	// turn somebody's working service into an unredeployable one.
-	Retired    string       `json:"retired,omitempty"`
+	Retired string `json:"retired,omitempty"`
+	// Stack names the smart stack (internal/stacks) this Compose template is
+	// a preset of. The dashboard configures such a deployment's services and
+	// links them to each other once its release is live, so it is offered on
+	// the Stacks tab with the stack's own questions rather than in the
+	// template catalogue, and an added template may not claim one.
+	Stack      string       `json:"stack,omitempty"`
 	Provenance Provenance   `json:"provenance"`
 	Image      Image        `json:"image"`
 	Inputs     []Input      `json:"inputs,omitempty"`

@@ -120,6 +120,17 @@ func (rt *certbotRuntime) on(ctx context.Context, name string, args ...string) *
 	return hostexec.Command(ctx, name, args...)
 }
 
+// path names path on the side this certbot runs on as this process opens
+// it, chosen as on chooses where to run: through the host's root when
+// certbot is the host's and its namespaces are reachable, as it is when
+// certbot is this process's own or the backend runs on the server itself.
+func (rt *certbotRuntime) path(path string) string {
+	if rt.onHost {
+		return hostexec.HostPath(path)
+	}
+	return path
+}
+
 const certbotProbePrefix = "just-dashboard-certbot-probe."
 
 // probeDirs points a certbot that only answers a question at directories of

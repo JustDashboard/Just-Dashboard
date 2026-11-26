@@ -1,0 +1,210 @@
+{
+  "id": "media-essential",
+  "version": "1.0.0",
+  "name": "Media server (Essential)",
+  "stack": "media",
+  "category": "http",
+  "profile": "compose",
+  "description": "Jellyfin and Seerr, set up and signed in to each other by the dashboard, for a library you fill yourself. Requests are collected but nothing fetches them.",
+  "iconId": "globe",
+  "docsUrl": "https://jellyfin.org/docs/",
+  "access": {
+    "kind": "setup",
+    "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and keeps the accounts it creates. Reveal them on the stack's page."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-2.0",
+    "upstreamUrl": "https://github.com/jellyfin/jellyfin",
+    "reviewedAt": "2026-11-26",
+    "minimumDashboard": "0.9.1"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Jellyfin's domain",
+      "required": false,
+      "description": "Optional; the address you and your apps open Jellyfin at. Seerr and the managers stay on this server until you publish them."
+    },
+    {
+      "name": "request-approval",
+      "kind": "choice",
+      "label": "Requests",
+      "variable": "MEDIA_REQUEST_APPROVAL",
+      "default": "admin",
+      "required": true,
+      "description": "Who decides what is fetched. People you let in to Seerr can always ask.",
+      "choices": [
+        {
+          "value": "admin",
+          "label": "You approve each request",
+          "description": "Nothing is fetched until an administrator approves it"
+        },
+        {
+          "value": "auto",
+          "label": "Approve automatically",
+          "description": "A request from anyone you let in is fetched at once"
+        }
+      ]
+    }
+  ],
+  "secrets": [],
+  "services": [
+    {
+      "name": "jellyfin",
+      "role": "app",
+      "purpose": "Plays the library on every screen, behind the domain",
+      "image": {
+        "reference": "jellyfin/jellyfin:12.4",
+        "tagPolicy": "minor",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8096,
+          "protocol": "tcp",
+          "purpose": "The web interface and the apps",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "jellyfin-config",
+          "target": "/config",
+          "purpose": "Library metadata, users and settings",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "jellyfin-cache",
+          "target": "/cache",
+          "purpose": "Transcodes and thumbnails",
+          "data": true,
+          "backup": false
+        },
+        {
+          "name": "media",
+          "target": "/data",
+          "purpose": "Downloads and the library, on one volume so a finished download is moved into the library rather than copied",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 3072,
+        "minMemoryMb": 1536
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:8096/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 90
+      }
+    },
+    {
+      "name": "seerr",
+      "role": "app",
+      "purpose": "Where people search for a title and ask for it; signs in with Jellyfin accounts",
+      "image": {
+        "reference": "ghcr.io/seerr-team/seerr:v3.5.2",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "info"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 5055,
+          "protocol": "tcp",
+          "purpose": "The request desk, on this server's loopback until you publish it",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "seerr-config",
+          "target": "/app/config",
+          "purpose": "settings.json, the database of users and requests, and the logs",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "-q",
+          "--spider",
+          "--tries=1",
+          "--timeout=3",
+          "http://localhost:5055/api/v1/status"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "jellyfin",
+          "condition": "healthy"
+        }
+      ],
+      "egress": true
+    }
+  ],
+  "checks": [
+    {
+      "name": "Jellyfin answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {},
+  "update": {
+    "detector": "registry",
+    "notes": "Back up first: Jellyfin and the managers migrate their databases on start and cannot go back without a restore. The stack configures itself again after every deploy.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:1d3807c8dbd91af0f075e235b4ff7567dff6a2f574b7161c748288f1dce013b4"
+    }
+  ]
+}

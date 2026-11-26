@@ -61,6 +61,9 @@ type NormalizedStepExecutor struct {
 	proxy         ActivationProxy
 	workspaceRoot string
 	notifications *AutomationStore
+	// routeOwners tells a leftover deployment route from a live one, so
+	// a release takes a domain over from the first (leftover_routes.go).
+	routeOwners RouteOwners
 
 	certificates CertificateIssuer
 	// appDomains places names against the app domain this server holds
@@ -161,6 +164,13 @@ type ActivationProxy interface {
 	ApplyDeploymentRoute(context.Context, proxysvc.DeploymentRoute) (proxysvc.DeploymentRouteResult, error)
 	RestoreDeploymentRoute(context.Context, proxysvc.DeploymentRouteSnapshot) error
 	VerifyDeploymentRoute(context.Context, proxysvc.DeploymentRoute) error
+}
+
+// WithRouteOwners lets a release take its domains over from the routes a
+// deleted or archived deployment left (leftover_routes.go).
+func (e *NormalizedStepExecutor) WithRouteOwners(routes RouteOwners) *NormalizedStepExecutor {
+	e.routeOwners = routes
+	return e
 }
 
 func NewNormalizedStepExecutor(

@@ -3,6 +3,7 @@ package imagescan
 import (
 	"errors"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -160,6 +161,15 @@ func TestSummariesAreBounded(t *testing.T) {
 	if len(summary.Fixable) != MaxListed || !summary.Truncated || summary.Counts.High != MaxListed+5 {
 		t.Fatalf("listed %d, truncated %v, counted %d", len(summary.Fixable), summary.Truncated, summary.Counts.High)
 	}
+
+	// What the reader can act on is kept when the list is cut, and still
+	// listed in its place, worst first.
+	actionable := Finding{ID: "CVE-1", Package: "zz", Installed: "1", Fixed: "2", Severity: SeverityHigh, Action: "rebuild"}
+	worst := Finding{ID: "CVE-2", Package: "zz", Installed: "1", Fixed: "2", Severity: SeverityCritical}
+	kept := Summarize(append(findings, actionable, worst), SeverityHigh)
+	if len(kept.Fixable) != MaxListed || kept.Fixable[0].ID != "CVE-2" || kept.Fixable[MaxListed-1].ID != "CVE-1" {
+		t.Fatalf("listed %d, first %s, last %s", len(kept.Fixable), kept.Fixable[0].ID, kept.Fixable[MaxListed-1].ID)
+	}
 }
 
 func TestAFindingTheBaseCarriesIsMarkedAsFromTheBase(t *testing.T) {
@@ -169,12 +179,21 @@ func TestAFindingTheBaseCarriesIsMarkedAsFromTheBase(t *testing.T) {
 		{ID: "CVE-1", Package: "openssl", Installed: "3.0.9", Target: "alpine 3.19.1"},
 	}
 	base := []Finding{{ID: "CVE-1", Package: "openssl", Installed: "3.0.1", Target: "alpine 3.19.0"}}
-	marked := MarkFromBase(image, base)
+	marked := MarkFromBase(image, BaseFindings{Findings: base})
 	if !marked[0].FromBase || marked[1].FromBase || marked[2].FromBase {
 		t.Fatalf("marks = %v %v %v", marked[0].FromBase, marked[1].FromBase, marked[2].FromBase)
 	}
 	if image[0].FromBase {
 		t.Fatal("the image's own findings were changed in place")
+	}
+
+	// Each mark keeps the digests of the bases that carry it, once each.
+	node, bun := "sha256:"+strings.Repeat("a", 64), "sha256:"+strings.Repeat("b", 64)
+	both := MarkFromBase(image, BaseFindings{Digest: node, Findings: append(base, base...)},
+		BaseFindings{Digest: bun, Findings: []Finding{image[1]}})
+	if !slices.Equal(both[0].BaseDigests, []string{node}) || !slices.Equal(both[1].BaseDigests, []string{bun}) ||
+		!both[1].FromBase || both[2].BaseDigests != nil {
+		t.Fatalf("digests = %v %v %v", both[0].BaseDigests, both[1].BaseDigests, both[2].BaseDigests)
 	}
 }
 
@@ -215,14 +234,14 @@ func TestALanguagePackageKeepsItsPathAndIsTheBasesOnlyAtTheBasesPath(t *testing.
 		{ID: "CVE-1", Package: "glob", Installed: "10.5.0", Path: "usr/local/lib/node_modules/npm/node_modules/glob/package.json"},
 		{ID: "CVE-3", Package: "zlib", Installed: "1.3.1-r0"},
 	}
-	for _, finding := range MarkFromBase(report.Findings, base) {
+	for _, finding := range MarkFromBase(report.Findings, BaseFindings{Findings: base}) {
 		want := finding.Package == "zlib" || strings.HasPrefix(finding.Path, "usr/local/lib/")
 		if finding.FromBase != want {
 			t.Errorf("%s at %q from base = %v", finding.Package, finding.Path, finding.FromBase)
 		}
 	}
 	// A base read before paths were kept still matches by package.
-	for _, finding := range MarkFromBase(report.Findings, []Finding{{ID: "CVE-1", Package: "glob", Installed: "10.5.0"}}) {
+	for _, finding := range MarkFromBase(report.Findings, BaseFindings{Findings: []Finding{{ID: "CVE-1", Package: "glob", Installed: "10.5.0"}}}) {
 		if finding.Package == "glob" && !finding.FromBase {
 			t.Errorf("glob at %q is not matched by a pathless base", finding.Path)
 		}

@@ -145,6 +145,7 @@ var hubSessionRefused = []string{
 	"GET /api/v1/deploy/{id}/environments/{env}/data-copies/{copy}/url",          // that login's password
 	"GET /api/v1/deploy/{id}/env/reveal",                                         // a project's secret values
 	"GET /api/v1/deploy/{id}/environments/{env}/variables/{name}/reveal",         // a variable's secret value
+	"GET /api/v1/deploy/{id}/stack/credentials/{name}/reveal",                    // an account a stack created
 	"POST /api/v1/deploy/{id}/environments/{env}/variables/{name}/generate",      // a new secret, shown
 	"POST /api/v1/deploy/{id}/environments/{env}/variables/{name}/rotate",        // a rotated secret, shown
 	"GET /api/v1/deploy/shared-variables/{name}/reveal",                          // a shared secret value

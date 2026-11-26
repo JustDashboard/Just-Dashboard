@@ -419,7 +419,8 @@ exact binary revisions, changes during staging, concurrent text/image writers an
 Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read
 (`internal/contentguard`, which Compose and crontab edits share). The Files
 and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
-returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
+returns the saved revision (and the saved file's `identity` and `previousIdentity`, for the Files undo,
+below). `WriteChecked` serializes the content comparison and atomic publish
 with Compose saves to the same resolved path, checks the bytes before staging and immediately
 before publish, and reports a stale, removed, nonregular or oversized backing file as
 `409 content_conflict`. Guarded disk reads use nonblocking open and an opened-file type check, so a
@@ -455,6 +456,11 @@ with the last row that names it; a sweep once per process removes copies a crash
 History is keyed by resolved path: `/files/move` carries it, and everything under a moved folder,
 with `MoveEnds` (as a folder's colour), byte-compared so `/srv/app` never takes `/srv/app2`'s; a
 delete leaves it where it was, so a file put back at its path (the Trash's restore) finds it again.
+What a Replace puts in the Trash is the exception: its history and head leave the name with it, held
+under `trash:<item id>` (`holdReplacedVersions`, never a path a client can name), so the file that
+takes the name does not inherit it and a move back does not carry it off. The Trash's restore gives it
+back at the path the item returns to (an occupant a `replace` restore displaces is held first), and
+removing, emptying or expiring the item drops it (`Keeper.Forget`, only for the ids that left).
 
 `GET /files/versions?path=` lists a path's versions with the backup runs that hold it, by time:
 `backups.Store.FileCopies` reads only the store (each job's successful runs whose complete manifest
@@ -609,8 +615,18 @@ renames back with no-replace; a taken place is a 409 `already_exists` unless `co
 checked against `^[0-9a-f]{32}$` before it reaches a path. Items older than `JD_FILES_TRASH_DAYS` (30;
 0 keeps everything) are removed hourly by `expireFileTrash`, each removal an audit entry
 (`file.trash.expire`, actor `system`); the same sweep removes the leftovers of a trash that never
-finished. A move or copy with `overwrite` first puts what it replaces in the Trash
-(`trashReplaced`) and answers 200 `{replaced: {item}}` instead of 204: a move renames the occupant
+finished. A move or copy answers 200 `{identity, replaced?}`: `identity` names what now has the
+destination's name (`Service.Identity`: device, inode and, where the filesystem records it, birth
+time, so a rename keeps it and a copy or a file renamed over the name does not), and the page's undo
+sends it back as `expect` on `POST /files/move` and `DELETE /files/delete`, which answer
+`409 entry_changed` and touch nothing when the entry at that name is no longer the one named.
+`PUT /files/write` writes a new file and renames it over the name, so a save changes that identity too:
+its answer (the entry and its `revision`, as before) adds `identity`, the saved file's, and
+`previousIdentity`, the file it replaced (absent for a new file), and the page carries an undo still
+waiting on the replaced file to the saved one (`carryIdentity` in `undo.ts`). Something else at the name
+keeps its own identity, so its undo is still refused. A move or
+copy with `overwrite` first puts what it replaces in the Trash (`trashReplaced`) and names it in
+`replaced: {item}`: a move renames the occupant
 away; a copy keeps a regular file by a hard link, so the copy's atomic replacement still reads the old
 file's owner, mode and ACL, and renames a folder away (so Replace replaces rather than merges); a
 symbolic link at a copy's destination is left to Copy, which refuses it. If the operation then fails,
@@ -943,9 +959,10 @@ folder part dropped and unsafe names refused (`SafeName`); a taken name becomes 
 than replacing anything. The bytes stage beside the destination like an upload's and publish through
 `publishStaged`; a known length is checked against the room first, an unknown one every 16 MiB, and a
 download that stops early, sends nothing for a minute, is cancelled or would fill the disk leaves
-nothing behind. Four running fetches an account, eight in all. `fetch_test.go` covers success, a
-redirect chain, refused schemes, a name with a path in it, cancel, a connection dropped midway, disk
-room and no clobber, and the headers sent.
+nothing behind. A panic inside a download fails that fetch like any other error. Four running fetches
+an account, eight in all. `fetch_test.go` covers success, a redirect chain, refused schemes, a name with
+a path in it, cancel, a connection dropped midway, disk room and no clobber, a panic, and the headers
+sent.
 
 ## Logs
 

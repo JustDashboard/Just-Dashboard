@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/go-chi/chi/v5"
 )
@@ -40,6 +41,58 @@ type proxyAlertsView struct {
 	// since the dashboard started.
 	LastPass        *time.Time `json:"lastPass,omitempty"`
 	IntervalSeconds int        `json:"intervalSeconds"`
+	// Absent are the kinds that judge nothing on this server: a rule of one
+	// is on and can never fire, which the page must not draw as all clear.
+	Absent []string `json:"absent"`
+}
+
+// proxyAlertHost is what decides whether a kind has anything to read here.
+type proxyAlertHost struct {
+	// Nginx: upstreams, served certificates and a site's 5xx share are read
+	// from nginx's configuration and logs, and from nowhere else.
+	Nginx bool
+	// EngineUnit: the engine rule follows a systemd unit; the Docker Caddy
+	// ingress is a container and has none.
+	EngineUnit bool
+	// Certbot: the renewal rule reads certbot's last run.
+	Certbot bool
+	// Certificates counts the files the expiry rules read (certbot's
+	// lineages, imports and what nginx names). The ingress renews its own
+	// inside its container, where no rule looks.
+	Certificates int
+}
+
+// proxyAlertKindsAbsent names the kinds no pass can judge on such a host,
+// in the order the kinds are listed. The watched-endpoint kinds dial out and
+// are judged everywhere.
+func proxyAlertKindsAbsent(host proxyAlertHost) []string {
+	absent := map[string]bool{
+		proxyAlertCertExpiring:  !host.Nginx && host.Certificates == 0,
+		proxyAlertCertExpired:   !host.Nginx && host.Certificates == 0,
+		proxyAlertRenewalFailed: !host.Certbot,
+		proxyAlertServedDrift:   !host.Nginx,
+		proxyAlertEngineDown:    !host.EngineUnit,
+		proxyAlertUpstreamDown:  !host.Nginx,
+		proxyAlertSiteErrors:    !host.Nginx,
+	}
+	out := []string{}
+	for _, kind := range proxyAlertKinds {
+		if absent[kind] {
+			out = append(out, kind)
+		}
+	}
+	return out
+}
+
+func (s *Server) proxyAlertHost(ctx context.Context) proxyAlertHost {
+	_, engineErr := s.modules.proxy.Engine()
+	certs, _ := s.modules.proxy.ListCertificates(ctx)
+	return proxyAlertHost{
+		Nginx:        hostexec.Available("nginx"),
+		EngineUnit:   engineErr == nil,
+		Certbot:      hostexec.Available("certbot"),
+		Certificates: len(certs),
+	}
 }
 
 func (s *Server) proxyAlertsView(ctx context.Context) (*proxyAlertsView, error) {
@@ -59,6 +112,7 @@ func (s *Server) proxyAlertsView(ctx context.Context) (*proxyAlertsView, error) 
 	return &proxyAlertsView{
 		Rules: rules, Subjects: subjects, History: history,
 		LastPass: alerts.LastPass(), IntervalSeconds: int(alerts.interval / time.Second),
+		Absent: proxyAlertKindsAbsent(s.proxyAlertHost(ctx)),
 	}, nil
 }
 

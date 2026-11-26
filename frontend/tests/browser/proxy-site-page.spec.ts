@@ -75,6 +75,58 @@ test("a site opens on its Overview, and each view has an address", async ({ page
   )
 })
 
+test("under forced colours the chosen tab and log view are the system's selection, apart from the ring", async ({
+  page,
+}) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites/app.example.com?tab=logs")
+  const paint = (locator: ReturnType<Page["locator"]>) =>
+    locator.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return {
+        fill: style.backgroundColor,
+        ink: style.color,
+        ring: style.outlineColor,
+        offset: style.outlineOffset,
+        gap: style.borderTopWidth,
+      }
+    })
+  const ground = await page
+    .locator("body")
+    .evaluate((node) => getComputedStyle(node).backgroundColor)
+  const views = page.getByRole("tablist", { name: "Views of app.example.com" })
+  const logView = page.getByRole("navigation", { name: "Log view" })
+  await expect(logView.getByRole("button", { pressed: true })).toBeVisible()
+  for (const [chosen, other] of [
+    [views.getByRole("tab", { name: "Logs" }), views.getByRole("tab", { name: "Overview" })],
+    [
+      logView.getByRole("button", { pressed: true }),
+      logView.getByRole("button", { pressed: false }).first(),
+    ],
+  ]) {
+    const on = await paint(chosen)
+    const off = await paint(other)
+    // Forced colours had painted both the same: the page's fill, the text's ink.
+    expect(on.fill).not.toBe(off.fill)
+    expect(on.fill).not.toBe(ground)
+    expect(on.ink).not.toBe(off.ink)
+    // The selection is a face, not a line: no ring until the keyboard comes.
+    expect(on.ring).toBe("rgba(0, 0, 0, 0)")
+  }
+
+  // Focus on the chosen tab is a ring in the gap round the face, 2px clear of it.
+  const logs = views.getByRole("tab", { name: "Logs" })
+  await logs.focus()
+  await page.keyboard.press("Tab")
+  await page.keyboard.press("Shift+Tab")
+  await expect(logs).toBeFocused()
+  const focused = await paint(logs)
+  expect(focused.ring).not.toBe("rgba(0, 0, 0, 0)")
+  expect(focused.offset).toBe("-2px")
+  expect(focused.gap).toBe("4px")
+})
+
 test("the line a site opens on carries its state, one command and the rest in a menu", async ({
   page,
 }) => {
@@ -87,11 +139,16 @@ test("the line a site opens on carries its state, one command and the rest in a 
   // One command with a face; everything else is a word in the menu.
   await expect(line.getByRole("button")).toHaveCount(2)
   await line.getByRole("button", { name: "More actions for app.example.com" }).click()
+  // What changes the site is here as it is in the list: the switch, a
+  // rename and a delete, behind the menu since none of them is the command.
   await expect(page.getByRole("menuitem")).toHaveText([
     "Raw config",
     "Open site",
     "TLS report",
+    "Disable",
+    "Rename",
     "Download",
+    "Delete",
   ])
   await page.keyboard.press("Escape")
 
@@ -164,7 +221,7 @@ test("the Sites list stands beside a site, and the next one opens on the view on
     .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))
   expect(new Set(heights).size).toBe(1)
 
-  await rail.getByRole("link", { name: "just-dashboard-shop" }).click()
+  await rail.getByRole("link", { name: "shop.example.com" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-shop\?tab=logs$/)
 
   // Alt+↑ walks the list, and the list's own search narrows it.
@@ -413,6 +470,48 @@ test("a site that keeps no log of its own says so in one line, with the way to t
   await expect(page.getByRole("switch", { name: "Access log" })).toBeVisible()
 })
 
+test("from xl a field reached by Tab stops short of the save bar over the page's own scroller", async ({
+  page,
+}) => {
+  // A Tab and a read for each stop of the form: on a busy machine that is a minute.
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 760 })
+  await mockProxy(page, { included: true })
+  await inStep(page)
+  await page.goto("/proxy/sites/app.example.com?tab=settings")
+  const first = page.getByLabel("Send it to")
+  await first.fill("http://127.0.0.1:4000")
+  await expect(bar(page)).toContainText("1 unsaved change")
+  // From xl the head holds still and the detail page's body is what scrolls,
+  // with the bar portalled over it: the shell's own inset never reaches it.
+  const body = page.locator("[data-detail-scroll]")
+  expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 100)).toBe(true)
+  const barTop = (await bar(page).boundingBox())!.y
+
+  await first.focus()
+  let reached = 0
+  for (let step = 0; step < 80; step++) {
+    await page.keyboard.press("Tab")
+    const at = await page.evaluate(() => {
+      const node = document.activeElement
+      // The bar comes after the form: the whole form has been walked.
+      if (node?.closest('[role="region"][aria-label="Save changes"]')) return "bar"
+      if (!node?.closest('[data-slot="site-settings"]')) return null
+      const box = node.getBoundingClientRect()
+      if (box.height === 0) return null
+      const name = node.getAttribute("aria-label") ?? node.id ?? ""
+      return { name: `${node.tagName} ${name} ${node.textContent?.slice(0, 30) ?? ""}`, box }
+    })
+    if (at === "bar") break
+    if (!at) continue
+    reached += 1
+    expect(at.box.bottom, `${at.name} is under the bar`).toBeLessThanOrEqual(barTop)
+  }
+  // Far enough down the form that the body had to scroll.
+  expect(reached).toBeGreaterThan(5)
+  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
+})
+
 test("a site's Settings and its save bar fit a phone", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 })
   await mockProxy(page, { included: true })
@@ -435,4 +534,113 @@ test("a site's Settings and its save bar fit a phone", async ({ page }) => {
       }),
     ).toBe(true)
   }
+})
+
+/** A route on the Docker Caddy ingress, which has no file on the host. */
+const ingressRoute = {
+  kind: "caddy",
+  path: "",
+  enabled: true,
+  formEditable: false,
+  listen: ["80", "443"],
+  tls: true,
+  modified: "",
+  size: 0,
+}
+/** Its project was deleted, so no environment names it. */
+const leftover = {
+  ...ingressRoute,
+  name: "just-dashboard-env-450.conf",
+  serverNames: ["jellyfin.example.com"],
+  upstreams: ["http://10.0.0.10:8096"],
+}
+const deployed = {
+  ...ingressRoute,
+  name: "just-dashboard-env-175.conf",
+  serverNames: ["shop.example.com"],
+  upstreams: ["http://10.0.0.3:3000"],
+  owner: { projectId: 3, environmentId: 175, project: "shop", environment: "production" },
+}
+
+test("a leftover route's page is titled by its domain, says what it is, and removes it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const sites: unknown[] = [app, leftover, deployed]
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
+  const calls: string[] = []
+  await page.route("**/api/v1/proxy/vhosts/*/deployment-route", (route) => {
+    calls.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`)
+    sites.splice(1, 1)
+    return json(route, { name: leftover.name, certificates: ["jellyfin.example.com"] })
+  })
+  await page.goto(`/proxy/sites/${leftover.name}`)
+
+  // The domain is the title; the file is a fact on the line.
+  await expect(page.getByRole("heading", { name: "jellyfin.example.com" })).toBeVisible()
+  const line = page.getByRole("region", { name: "About jellyfin.example.com" })
+  await expect(line.getByText("leftover", { exact: true })).toBeVisible()
+  await expect(line.getByText("serving", { exact: true })).toHaveCount(0)
+  await expect(line.getByText(leftover.name, { exact: true })).toBeVisible()
+  await expect(line).toContainText("Leftover · its deployment was deleted")
+  await expect(page.getByText("Docker Caddy ingress")).toHaveCount(0)
+
+  // No destructive verb is the line's command; the page's one line says what
+  // the route is beside the button that removes it.
+  const origin = page.locator("[data-slot='site-origin']")
+  await expect(origin).toContainText("Left by a deleted deployment")
+  await expect(line.getByRole("button", { name: /Remove/ })).toHaveCount(0)
+  await origin.getByRole("button", { name: "Remove", exact: true }).click()
+  const confirm = page.getByRole("dialog", { name: "Remove jellyfin.example.com" })
+  await expect(confirm).toContainText("jellyfin.example.com stops answering")
+  await confirm.getByRole("button", { name: "Remove route" }).click()
+  await expect
+    .poll(() => calls)
+    .toEqual([`DELETE /api/v1/proxy/vhosts/${leftover.name}/deployment-route`])
+  await expect(page.getByText("jellyfin.example.com removed")).toBeVisible()
+  // Gone, so the list is where to be.
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
+})
+
+test("a live deployment's route says where its domain is removed", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [app, leftover, deployed]))
+  await page.goto(`/proxy/sites/${deployed.name}`)
+
+  await expect(page.getByRole("heading", { name: "shop.example.com" })).toBeVisible()
+  const line = page.getByRole("region", { name: "About shop.example.com" })
+  await expect(line).toContainText("shop · production")
+  await expect(line.getByText("serving", { exact: true })).toBeVisible()
+  const origin = page.locator("[data-slot='site-origin']")
+  await expect(origin).toContainText("Written by shop on every deploy.")
+  await expect(
+    origin.getByRole("link", { name: "Remove the domain in shop · Domains" }),
+  ).toHaveAttribute("href", "/deploy/3/settings/domains")
+  // Nothing here removes it: not on the line, and not as a button in the body.
+  await expect(origin.getByRole("button")).toHaveCount(0)
+  await line.getByRole("button", { name: "More actions for shop.example.com" }).click()
+  await expect(page.getByRole("menuitem", { name: /Remove|Delete/ })).toHaveCount(0)
+})
+
+test("a site deleted from its own page leaves for the list", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const sites: unknown[] = [...vhosts]
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
+  let deleted: string | undefined
+  await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback()
+    deleted = new URL(route.request().url()).pathname
+    sites.splice(1, 1)
+    return json(route, {
+      name: "legacy.example.com",
+      reload: { validation: { valid: true, output: "" }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy/sites/legacy.example.com")
+  await page.getByRole("button", { name: "More actions for legacy.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  const confirm = page.getByRole("dialog", { name: "Delete legacy.example.com" })
+  await confirm.getByRole("button", { name: "Delete and reload" }).click()
+  await expect.poll(() => deleted).toBe("/api/v1/proxy/sites/legacy.example.com")
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
 })

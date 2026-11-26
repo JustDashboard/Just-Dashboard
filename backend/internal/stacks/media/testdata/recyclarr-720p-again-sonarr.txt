@@ -1,0 +1,7 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[INF] just-dashboard-series: Processing Sonarr server just-dashboard-series
+[INF] just-dashboard-series: All custom formats are already up to date!
+[INF] just-dashboard-series: All sizes for quality definition series are already up to date!
+[INF] just-dashboard-series: All quality profiles are up to date!
+[INF] just-dashboard-series: Completed at 11/26/2026 03:37:12

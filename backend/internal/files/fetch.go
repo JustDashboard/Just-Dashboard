@@ -234,13 +234,15 @@ func (f *Fetches) Start(owner string, req FetchRequest) (Fetch, error) {
 	f.mu.Unlock()
 
 	go func() {
-		// A panic in a download ends that download, not the dashboard; the
-		// deferred lines below still release its waiters.
+		// A panic in a download ends that download, not the dashboard. Try
+		// turns it into the fetch's error, so the fetch fails with its finish
+		// time before its waiters are released: left "running", it would count
+		// against the bounds and never be pruned.
 		defer safego.Recover(nil, "file fetch")
 		defer f.wg.Done()
 		defer close(job.done)
 		defer cancel()
-		err := f.run(ctx, job, u, req.Overwrite)
+		err := safego.Try(nil, "file fetch", func() error { return f.run(ctx, job, u, req.Overwrite) })
 		job.mu.Lock()
 		job.f.Finished = time.Now().UTC()
 		switch {

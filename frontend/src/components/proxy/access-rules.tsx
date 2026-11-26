@@ -64,6 +64,7 @@ export function AccessRules({
   return (
     <Field
       label="Who may connect"
+      group
       info="The first rule a client matches decides; nothing below it is read. A stream has no authentication of its own, so these rules are the only gate."
       error={error}
     >

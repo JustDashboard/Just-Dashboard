@@ -361,7 +361,7 @@ func (s *staticBuildNetworks) NetworksForBuild(context.Context, int64, map[strin
 // database's own container, leaving Drizzle's records out.
 type psqlDatabaseContents struct{ container string }
 
-func (p *psqlDatabaseContents) DatabaseHasRows(ctx context.Context, _ int64) (bool, error) {
+func (p *psqlDatabaseContents) DatabaseHasRows(ctx context.Context, _ int64, _ string) (bool, error) {
 	list, err := liveDockerOutput(ctx, "exec", p.container, "psql", "-U", "postgres", "-tAc",
 		`SELECT format('%I.%I', schemaname, tablename) FROM pg_tables WHERE schemaname NOT IN ('pg_catalog', 'information_schema', 'drizzle')`)
 	if err != nil {

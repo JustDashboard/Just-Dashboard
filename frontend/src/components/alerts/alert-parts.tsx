@@ -69,7 +69,17 @@ export function alertOutcome(event: AlertEventView) {
  * Nothing firing, said as the good news it is rather than a grey line — and,
  * with no rule on, as the plain fact that nothing is followed, which is not.
  */
-export function AllClear({ rules, cadence }: { rules: number; cadence: string }) {
+export function AllClear({
+  rules,
+  cadence,
+  idle = 0,
+}: {
+  /** The rules that judge something. */
+  rules: number
+  cadence: string
+  /** Rules that are on and read nothing on this server: not good news, and not "no rules". */
+  idle?: number
+}) {
   const good = rules > 0
   return (
     <div
@@ -99,12 +109,18 @@ export function AllClear({ rules, cadence }: { rules: number; cadence: string })
       </span>
       <div className="min-w-0">
         <p className="text-body leading-snug font-medium">
-          {good ? "Nothing is firing" : "No rules yet, so nothing is followed"}
+          {good
+            ? "Nothing is firing"
+            : idle > 0
+              ? "Nothing here is followed"
+              : "No rules yet, so nothing is followed"}
         </p>
         <p className="text-hint leading-snug text-pretty text-muted-foreground">
           {good
             ? `${plural(rules, "rule")} checked ${cadence}; you are told once when one starts and once when it stops.`
-            : "Add a rule below and it is checked from the next pass."}
+            : idle > 0
+              ? `${plural(idle, "rule")} ${idle === 1 ? "watches" : "watch"} what is not on this server.`
+              : "Add a rule below and it is checked from the next pass."}
         </p>
       </div>
     </div>
