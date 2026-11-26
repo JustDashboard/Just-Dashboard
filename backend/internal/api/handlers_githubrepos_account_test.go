@@ -213,8 +213,8 @@ func TestTheInboxSearchesAsTheConnectionAndKeepsEachPageAMinute(t *testing.T) {
 		t.Fatalf("a pull request has no state reason: %v", merged)
 	}
 
-	// Defaults are spelled out to GitHub; the login is the connection's.
-	want := []string{"is:pr is:open archived:false author:octo-dev page=1 per_page=30 updated/desc"}
+	// Defaults are spelled out to GitHub, and the account is the token's own.
+	want := []string{"is:pr is:open archived:false author:@me page=1 per_page=30 updated/desc"}
 	if searches := ghSearches(e.fake); strings.Join(searches, "|") != strings.Join(want, "|") {
 		t.Fatalf("searches = %q", searches)
 	}
@@ -234,11 +234,11 @@ func TestTheInboxSearchesAsTheConnectionAndKeepsEachPageAMinute(t *testing.T) {
 		}
 	}
 	want = append(want,
-		"is:pr is:open archived:false author:octo-dev page=2 per_page=30 updated/desc",
-		"is:pr is:open archived:false review-requested:octo-dev page=1 per_page=30 updated/desc",
-		"is:pr is:closed archived:false assignee:octo-dev page=1 per_page=30 updated/desc",
-		"is:issue is:open archived:false mentions:octo-dev page=1 per_page=30 updated/desc",
-		"is:pr is:open archived:false author:octo-dev page=1 per_page=30 updated/desc",
+		"is:pr is:open archived:false author:@me page=2 per_page=30 updated/desc",
+		"is:pr is:open archived:false review-requested:@me page=1 per_page=30 updated/desc",
+		"is:pr is:closed archived:false assignee:@me page=1 per_page=30 updated/desc",
+		"is:issue is:open archived:false mentions:@me page=1 per_page=30 updated/desc",
+		"is:pr is:open archived:false author:@me page=1 per_page=30 updated/desc",
 	)
 	if searches := ghSearches(e.fake); strings.Join(searches, "|") != strings.Join(want, "|") {
 		t.Fatalf("searches = %q", searches)
@@ -316,14 +316,62 @@ func TestTheAccountsEventsAreItsOwnAndKeptAMinute(t *testing.T) {
 	if strings.TrimSpace(w.Body.String()) != want {
 		t.Fatalf("events = %s\nwant     %s", w.Body, want)
 	}
+	// With no profile read lately, GitHub is asked whose token it is first:
+	// the login stored at connection time is not trusted for the path.
 	requests := e.fake.Requests()
-	if len(requests) != 1 || requests[0].Path != "/users/octo-dev/events" || requests[0].Query != "per_page=30" {
+	if len(requests) != 2 || requests[0].Path != "/user" || requests[1].Path != "/users/octo-dev/events" || requests[1].Query != "per_page=30" {
 		t.Fatalf("asked %+v", requests)
 	}
-	if w := e.admin.call(http.MethodGet, base+"/events", "", nil); w.Code != http.StatusOK || len(e.fake.Requests()) != 1 {
+	if w := e.admin.call(http.MethodGet, base+"/events", "", nil); w.Code != http.StatusOK || len(e.fake.Requests()) != 2 {
 		t.Fatalf("second read asked GitHub again")
 	}
-	if w := e.admin.call(http.MethodGet, base+"/events?refresh=1", "", nil); w.Code != http.StatusOK || len(e.fake.Requests()) != 2 {
+	if w := e.admin.call(http.MethodGet, base+"/events?refresh=1", "", nil); w.Code != http.StatusOK || len(e.fake.Requests()) != 4 {
 		t.Fatalf("refresh = %d after %d requests", w.Code, len(e.fake.Requests()))
+	}
+	// A profile read lately names the account, and no /user is asked again.
+	if w := e.admin.call(http.MethodGet, base+"/profile", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("profile = %d %s", w.Code, w.Body)
+	}
+	e.fake.Reset()
+	if w := e.admin.call(http.MethodGet, base+"/events?refresh=1", "", nil); w.Code != http.StatusOK || ghAsked(e.fake, "GET", "/user") != 0 || ghAsked(e.fake, "GET", "/users/octo-dev/events") != 1 {
+		t.Fatalf("events after a profile = %d, asked %v", w.Code, e.fake.Requests())
+	}
+}
+
+// An account renamed on GitHub after it was connected is followed: its
+// activity is read by the new login, never the old one somebody else may
+// hold now, and the connection is stored under the new login.
+func TestARenamedAccountIsFollowedToItsNewLogin(t *testing.T) {
+	e, base := newGHAccountEnv(t)
+	e.fake.Users[1001].Login = "octo-new"
+	e.fake.Reset()
+	if w := e.admin.call(http.MethodGet, base+"/events", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("events = %d %s", w.Code, w.Body)
+	}
+	if ghAsked(e.fake, "GET", "/users/octo-dev/events") != 0 || ghAsked(e.fake, "GET", "/users/octo-new/events") != 1 {
+		t.Fatalf("asked %v", e.fake.Requests())
+	}
+	stored := func() string {
+		t.Helper()
+		w := e.admin.call(http.MethodGet, "/api/v1/github/connections", "", nil)
+		var list []struct {
+			Login string `json:"login"`
+		}
+		if err := json.Unmarshal(w.Body.Bytes(), &list); w.Code != http.StatusOK || err != nil || len(list) != 1 {
+			t.Fatalf("connections = %d %s", w.Code, w.Body)
+		}
+		return list[0].Login
+	}
+	if login := stored(); login != "octo-new" {
+		t.Fatalf("stored login = %q", login)
+	}
+
+	// The profile follows a rename the same way.
+	e.fake.Users[1001].Login = "octo-newer"
+	if w := e.admin.call(http.MethodGet, base+"/profile?refresh=1", "", nil); w.Code != http.StatusOK {
+		t.Fatalf("profile = %d %s", w.Code, w.Body)
+	}
+	if login := stored(); login != "octo-newer" {
+		t.Fatalf("stored login after the profile = %q", login)
 	}
 }

@@ -77,6 +77,46 @@ func TestTheAccountReadsAreKeptOnlyForTheirTime(t *testing.T) {
 	}
 }
 
+// A change to a repository from the dashboard drops the account's inbox
+// pages and activity with the repository's own reads, so the request just
+// merged or the issue just opened is listed by the next read; another
+// connection's are kept.
+func TestAChangeDropsTheAccountsInboxAndActivity(t *testing.T) {
+	h := newHarness(t)
+	h.createApp()
+	c := h.connect(h.alice, 1001)
+	ctx := context.Background()
+	query, err := githubrepos.ParseInboxQuery(githubrepos.InboxIssues, "assigned", "", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	read := func() {
+		t.Helper()
+		if _, err := h.s.Inbox(ctx, h.alice, c.ID, query, false); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := h.s.Events(ctx, h.alice, c.ID, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	h.fake.Reset()
+	read()
+	read()
+	if searches, events := asked(h.fake, "GET", "/search/issues"), asked(h.fake, "GET", "/users/octo-dev/events"); searches != 1 || events != 1 {
+		t.Fatalf("before the change GitHub was asked %d searches, %d events", searches, events)
+	}
+	h.s.Forget(c.ID, "octo-dev", "app")
+	read()
+	if searches, events := asked(h.fake, "GET", "/search/issues"), asked(h.fake, "GET", "/users/octo-dev/events"); searches != 2 || events != 2 {
+		t.Fatalf("after the change GitHub was asked %d searches, %d events", searches, events)
+	}
+	h.s.Forget(c.ID+1, "octo-dev", "app")
+	read()
+	if searches := asked(h.fake, "GET", "/search/issues"); searches != 2 {
+		t.Fatalf("another connection's change dropped this one's pages: %d searches", searches)
+	}
+}
+
 // A profile that came back without its calendar is asked for again after a
 // minute rather than five, so one bad answer from GitHub does not hide the
 // calendar for long.

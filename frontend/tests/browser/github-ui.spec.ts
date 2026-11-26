@@ -554,6 +554,82 @@ test.describe("pull requests and issues", () => {
     await expect(view.getByRole("img", { name: "Closed as not planned" })).toHaveCount(1)
   })
 
+  test("the Overview's sections open the list on their own filter, kept in the address", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mockGitHubPage(page)
+    await page.goto("/github")
+    await expect(page.locator("[data-slot=github-inbox-pull-review]")).toContainText(
+      "Lazy-load the product gallery",
+    )
+    // "All pull requests" under Review requests is the review requests.
+    const all = page.getByRole("link", { name: "All pull requests" })
+    await expect(all).toHaveCount(2)
+    await expect(all.nth(1)).toHaveAttribute("href", "/github?account=1&tab=pulls&filter=review")
+    await all.nth(1).click()
+    await expect(page).toHaveURL(/tab=pulls&filter=review$/)
+    const view = page.locator("[data-slot=github-inbox-pull]")
+    await expect(view.getByRole("button", { name: /^Review requests \d+$/ })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await expect(view.getByRole("listitem").first()).toContainText("Lazy-load the product gallery")
+
+    // A state chosen here is in the address too, so a reload (or Back from
+    // a request) finds the list as it was left.
+    await view.getByRole("radio", { name: "Closed" }).click()
+    await expect(page).toHaveURL(/filter=review&state=closed$/)
+    await page.reload()
+    await expect(view.getByRole("radio", { name: "Closed" })).toBeChecked()
+    await expect(view.getByText("No closed pull requests waiting on your review.")).toBeVisible()
+
+    // Another view starts on its own defaults.
+    await page.getByRole("tab", { name: "Issues" }).click()
+    await expect(page).toHaveURL(/tab=issues$/)
+    await expect(
+      page.locator("[data-slot=github-inbox-issue]").getByRole("button", { name: /^Created \d+$/ }),
+    ).toHaveAttribute("aria-pressed", "true")
+  })
+
+  test("reading a list again asks GitHub, past the server's minute of memory", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const reads: string[] = []
+    await mockGitHubPage(page, {
+      handle: async (_route, path, url) => {
+        if (/\/(pulls|issues)$/.test(path)) reads.push(url.search)
+        return false
+      },
+    })
+    await page.goto("/github?tab=pulls")
+    const view = page.locator("[data-slot=github-inbox-pull]")
+    await expect(view.getByRole("listitem")).toHaveCount(3)
+    expect(reads.every((search) => !search.includes("refresh"))).toBe(true)
+    const before = reads.length
+    await view.getByRole("button", { name: "Read the pull requests again" }).click()
+    await expect
+      .poll(() => reads.slice(before))
+      .toContainEqual(expect.stringContaining("refresh=1"))
+    // A chip chosen after it is read as usual.
+    const after = reads.length
+    await view.getByRole("button", { name: "Mentioned" }).click()
+    await expect.poll(() => reads.length).toBeGreaterThan(after)
+    expect(reads.slice(after).some((search) => search.includes("refresh"))).toBe(false)
+  })
+
+  test("a closed row names who opened it, not who closed it", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mockGitHubPage(page)
+    await page.goto("/github?tab=pulls&state=closed")
+    const merged = page
+      .locator("[data-slot=github-inbox-pull]")
+      .getByRole("listitem")
+      .filter({ has: page.getByRole("img", { name: "merged" }) })
+    await expect(merged).toHaveCount(1)
+    await expect(merged).toContainText(/by \S+ was merged/)
+    await expect(merged).not.toContainText(/merged .* by/)
+  })
+
   for (const width of [1440, 390]) {
     test(`every row is one height at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })

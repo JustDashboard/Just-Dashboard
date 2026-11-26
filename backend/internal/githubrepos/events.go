@@ -11,7 +11,9 @@ import (
 )
 
 // What the connected account did lately, as GitHub's activity feed lists it
-// (/users/{login}/events, which shows a person their private events too).
+// (/users/{login}/events). GitHub adds private events to that feed only for
+// a token with the Events account permission, which the App's manifest does
+// not ask for, so it is public events only.
 // GitHub's events are a dozen payload shapes; they are folded here into one
 // flat Event so the page draws a line per event without knowing GitHub's.
 
@@ -249,7 +251,12 @@ func (s *Service) Events(ctx context.Context, userID, id int64, refresh bool) (E
 			return cached, nil
 		}
 	}
-	list, err := readEvents(ctx, s.client(c), c.Login, s.webURL())
+	client := s.client(c)
+	login, err := s.currentLogin(ctx, c, client)
+	if err != nil {
+		return EventList{}, err
+	}
+	list, err := readEvents(ctx, client, login, s.webURL())
 	if err != nil {
 		return EventList{}, err
 	}

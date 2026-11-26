@@ -114,18 +114,25 @@ the main one), one on a phone.
 **Pull requests** and **Issues** (`InboxView`): GitHub's own lists of the account's, across every
 repository it reaches (`GET …/pulls` and `…/issues`, GitHub's issue search). Chips for which part
 — Created, Review requests (pull requests only), Assigned, Mentioned — with GitHub's total on the
-chosen one; Open or Closed as segments; a refresh. Rows (`InboxRow`, `ChoiceRow` without an arrow,
-one height): the state as GitHub's glyph in its colour (a request open, draft, merged or closed; an
-issue open, closed as completed, or closed as not planned), the title, `owner/name #n · opened 2
-days ago by login`, and from a tablet two labels in their colours, the comment count and the
-author's face. A row in a repository the page lists opens on that repository's page with the
+chosen one; Open or Closed as segments; a refresh, which reads the list past the server's minute of
+memory (`?refresh=1`). The chip and the state are in the address (`?filter=`, `?state=`, read by
+`inboxFilterOf` and `inboxStateOf`, the defaults left out, written with `replaceState`), so the
+Overview's **All pull requests** under Review requests opens on Review requests, and Back from a
+request finds the list as it was left; switching views drops both, and the next view starts on its
+own defaults. Rows (`InboxRow`, `ChoiceRow` without an arrow, one height): the state as GitHub's
+glyph in its colour (a request open, draft, merged or closed; an issue open, closed as completed, or
+closed as not planned), the title, `owner/name #n ·` then GitHub's words (`inboxWhen`): `opened 2
+days ago by login` while open, `by login was merged 2 days ago` once not (the login is who opened
+it; search does not say who closed or merged it), and from a tablet two labels in their colours,
+the comment count and the author's face. A row in a repository the page lists opens on that repository's page with the
 request or issue open (`?tab=pulls&pull=n`, `?tab=issues&issue=n`, `inboxHref`); any other opens on
 GitHub. Thirty a page, **Show more**. An `incomplete` search is a warning over the list.
 
 Nothing here polls: GitHub's rate limit is the reader's own. The App and the connections are read
 on arrival; the list, the profile and the events on arrival and on Refresh (each past the server's
 cache then); the pull requests and issues when their view or preview is drawn (the server keeps
-each answer a minute); Local Git's list once, for the marks.
+each answer a minute), and again past that cache on Refresh (`usePages`' `kept` and `round`) or
+their own refresh button; Local Git's list once, for the marks.
 
 ### Setting up the App
 
