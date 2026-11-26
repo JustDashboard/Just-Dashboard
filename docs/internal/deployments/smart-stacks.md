@@ -113,7 +113,7 @@ value. Nothing in a response, a step record or a log carries a value otherwise.
 | Route | Who | What |
 |---|---|---|
 | `GET /deploy/stacks` | any signed-in account, any key | the catalogue: presets with their template, memory and disk estimate, limitations, services |
-| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state and loopback address, steps, actions, accounts; `404 stack_not_found` otherwise |
+| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, a private one's loopback address and, once live, the public one's URL (the deployment's endpoint), steps, actions, accounts; `404 stack_not_found` otherwise |
 | `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass; audited |
 | `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | one account's password; audited |
 

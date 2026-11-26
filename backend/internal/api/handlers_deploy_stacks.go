@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -300,6 +301,10 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		}
 	}
 	healthy := liveErr == nil
+	publicURL := ""
+	if liveErr == nil {
+		publicURL = s.stackPublicURL(ctx, record.EnvironmentID)
+	}
 	images := map[string]string{}
 	if definition, err := blueprint.Get(preset.Template); err == nil {
 		for _, service := range definition.Services {
@@ -312,6 +317,9 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		}
 		service := stackServiceState{Name: info.Name, Title: info.Title, Purpose: info.Purpose, Access: info.Access,
 			Image: images[info.Name], DocsURL: info.DocsURL, Status: serviceStatus(state.Status, byService[info.Name])}
+		if info.Access == stacks.AccessPublic {
+			service.URL = publicURL
+		}
 		if container, found := containers[info.Name]; found {
 			service.Container = &stackContainerState{Name: container.Name, State: container.State, Health: container.Health}
 			if container.Image != "" {
@@ -531,6 +539,33 @@ func (s *Server) stackLiveRelease(ctx context.Context, environmentID int64) (sta
 		live.TemplateID = id
 	}
 	return live, err
+}
+
+// stackPublicURL is the address the deployment's domain gives its public
+// service, read as the fleet reads a deployment's endpoint: the
+// environment's first domain, else a tailnet-only environment's address.
+// "" when it has neither.
+func (s *Server) stackPublicURL(ctx context.Context, environmentID int64) string {
+	var endpoint string
+	if err := s.Store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(NULLIF((
+		         SELECT d.resource_id FROM deploy_dependencies d
+		          WHERE d.environment_id = ? AND d.kind = 'domain'
+		          ORDER BY d.id LIMIT 1
+		       ), ''), (
+		         SELECT x.url FROM deploy_preview_addresses x
+		          WHERE x.environment_id = ? AND x.url != ''
+		       ), '')`, environmentID, environmentID).Scan(&endpoint); err != nil || endpoint == "" {
+		return ""
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "https://" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil || (parsed.Scheme != "https" && parsed.Scheme != "http") || parsed.Host == "" || parsed.User != nil {
+		return ""
+	}
+	return parsed.String()
 }
 
 // newStackService is the stack loop over this dashboard's store, Docker and

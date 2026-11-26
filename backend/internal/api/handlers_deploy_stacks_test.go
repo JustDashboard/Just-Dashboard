@@ -166,3 +166,58 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 	// A project that is not a stack has no stack page.
 	call(http.MethodGet, "/deploy/999999/stack", "", http.StatusNotFound)
 }
+
+// The stack's public service is reached at the deployment's own address, as
+// the Overview opens it; a private one never is, and nothing is offered
+// before the release is live.
+func TestStackStateGivesThePublicServiceTheDeploymentsAddress(t *testing.T) {
+	s := testServer(t)
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	project, err := s.Store.DB.Exec(`INSERT INTO deploy_projects (name, repo_path, hook_secret, hook_id, created_at) VALUES ('media', '', 'x', 'hook-media', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ := project.LastInsertId()
+	environment, err := s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id, name, slug, kind, created_at, updated_at) VALUES(?, 'production', 'production', 'production', 1, 1)`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environmentID, _ := environment.LastInsertId()
+	if _, err := s.Store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id, kind, ownership, resource_kind, resource_id, created_at) VALUES(?, 'domain', 'managed', 'proxy_site', 'media.example.test', 1)`, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	if err := s.modules.stackStore.Register(context.Background(), projectID, environmentID, media.ID, "essential", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	read := func() map[string]stackServiceState {
+		t.Helper()
+		response := c.do(http.MethodGet, fmt.Sprintf("/api/v1/deploy/%d/stack", projectID), "", nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("stack = %d %s", response.Code, response.Body.String())
+		}
+		var state stackState
+		if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+			t.Fatal(err)
+		}
+		services := map[string]stackServiceState{}
+		for _, service := range state.Services {
+			services[service.Name] = service
+		}
+		return services
+	}
+
+	if waiting := read(); waiting["jellyfin"].URL != "" {
+		t.Fatalf("a stack with no live release offers %q", waiting["jellyfin"].URL)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_environments SET live_release_id = 99 WHERE id = ?`, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	live := read()
+	if live["jellyfin"].URL != "https://media.example.test" {
+		t.Fatalf("jellyfin = %+v; want the deployment's address", live["jellyfin"])
+	}
+	if live["seerr"].URL != "" {
+		t.Fatalf("a private service is offered at %q", live["seerr"].URL)
+	}
+}
