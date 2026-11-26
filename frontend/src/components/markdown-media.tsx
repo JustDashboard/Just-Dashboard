@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useMemo, useState } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useState } from "react"
 import { External } from "@/components/icons"
 import { forgeMediaUrl } from "@/hooks/use-github"
 import { isForgeMedia } from "@/lib/markdown"
@@ -104,6 +104,10 @@ export function MediaGrid({ children, count }: { children: React.ReactNode; coun
  * fails, so a gallery of every address offered recordings as broken pictures.
  * The one shown is held by its address, so a picture that loads while the
  * lightbox is open joins the walk without moving it.
+ *
+ * The page loads a picture only as it comes near, and one in a closed fold not
+ * at all, so opening the lightbox asks for the rest of the body's pictures
+ * itself: each joins the walk once it loads as one, and a recording never does.
  */
 export function MediaLightbox({ media, children }: { media: Media[]; children: React.ReactNode }) {
   const [shown, setShown] = useState<string>()
@@ -113,6 +117,24 @@ export function MediaLightbox({ media, children }: { media: Media[]; children: R
     [],
   )
   const value = useMemo(() => ({ open: setShown, loaded }), [loaded])
+  const opened = shown !== undefined
+  useEffect(() => {
+    if (!opened) return
+    const probes = media
+      .filter((item) => isForgeMedia(item.src) && !VIDEO.test(item.src))
+      .map((item) => {
+        const probe = new Image()
+        probe.onload = () => loaded(item.src)
+        probe.src = forgeMediaUrl(item.src)
+        return probe
+      })
+    return () => {
+      for (const probe of probes) {
+        probe.onload = null
+        probe.removeAttribute("src")
+      }
+    }
+  }, [opened, media, loaded])
   const gallery = media.filter((item) => pictures.has(item.src) || item.src === shown)
   const at = gallery.findIndex((item) => item.src === shown)
   return (
