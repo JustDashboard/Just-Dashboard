@@ -980,9 +980,18 @@ only renderer/executor/validation authority for their feature.
   without the archive, the WAL-G tool volume holding its key, or the recovery settings; anything else
   is restored from the newest native dump a backup job made of that connection
   (`backups.Store.LatestDatabaseDump`, `Runner.ExtractDatabaseDump`, the same extraction
-  `RestoreDatabase` uses; never an imported run's, whose connection ids are another server's): `pg_restore --no-owner --no-privileges --exit-on-error`, `psql -f` or
-  `mysql`, with the application's role made first when it is not the superuser. MySQL and MariaDB
-  restore from dumps only; any other engine is reported as not supported. The tasks then run through
+  `RestoreDatabase` uses; never an imported run's, whose connection ids are another server's). A
+  `pg_dump` archive is read by the copy's own `pg_restore --no-owner --no-privileges --exit-on-error`
+  inside it, over its socket. A SQL dump (a plain `pg_dump`, a mysqldump, the dashboard's own SQL,
+  gzipped or not) is never handed to `psql` or `mysql`: it is replayed by `dbx` over a connection to
+  the copy's address on the rehearsal network, which the dashboard, on the host's network, reaches
+  directly, signed in as the server's superuser with the password its container was started with, TLS
+  when the copy offers it ([invariant 6](../security/invariants.md)). The transcript keeps the replay's
+  progress and the server's warnings, not its notices, and a failure names the statement and its line.
+  The application's role is made first when it is not the superuser, over the socket with its password
+  handed to `psql` as a session setting in `PGOPTIONS`, never on the command line; MySQL and MariaDB's
+  readiness ping takes root's password from `MYSQL_PWD`. MySQL and MariaDB restore from dumps only;
+  any other engine is reported as not supported. The tasks then run through
   the same release-task runtime as for real (`runImageReleaseTask` with `Rehearsal`), in the release
   image with the same variables and timeout, but on the rehearsal network alone — never the project's
   database networks, the preview network or the host's — with no mounts and a

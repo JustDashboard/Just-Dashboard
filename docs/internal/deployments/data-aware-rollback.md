@@ -45,13 +45,16 @@ otherwise.
 
 The copy is made by the rehearsal's own path: the production server's container configuration on a
 fresh volume, archiving off on the command line, none of production's ports, labels or writable
-mounts; from the recorded dump run (`pg_restore`, `psql` or the MySQL/MariaDB client), or recovered by
-WAL-G from the recorded archive **to the recorded moment** (a moment past the archive's end recovers to
+mounts; from the recorded dump run (a `pg_dump` archive by the copy's own `pg_restore`, a SQL dump
+replayed by `dbx` over a connection to the copy, never piped to `psql` or the MySQL/MariaDB client), or
+recovered by WAL-G from the recorded archive **to the recorded moment** (a moment past the archive's end recovers to
 its end, as the Databases page's recovery does). Unlike a rehearsal's copy it joins the deployment's
 own database network, under `db-<connection>-copy-<copy>.jd.internal` — never production's names —
 and the account the application signs in as is given a password made for the copy (letters and
 digits, `ALTER ROLE` / `ALTER USER` for every host but `localhost`), so the copy's address carries no
-password production accepts. The restore is bounded by the environment's rehearsal limits
+password production accepts. The password is on no command line: PostgreSQL's `ALTER ROLE` runs over
+the copy's socket and reads it from a session setting `psql` is handed in `PGOPTIONS`, and MySQL's
+`ALTER USER` goes over a connection to the copy as its root. The restore is bounded by the environment's rehearsal limits
 (`restoreTimeoutSeconds`, `maxBackupMb`). Eligibility reads only what was recorded: a point that
 retention has since taken away — the backup run deleted, or no base backup left from before the moment
 — is found when the copy is restored, and the copy ends `failed` with that reason. The address and sign-in are sealed in the row and handed out
