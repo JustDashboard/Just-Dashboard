@@ -108,6 +108,7 @@ const NOT_YET = [
       "src/components/proxy/private-cert-dialog.tsx",
       "src/components/proxy/site-form.tsx",
       // Cut out of site-form.tsx with its ToggleGroups (CQ-01); they leave the list together.
+      "src/components/proxy/site-form/limits.tsx",
       "src/components/proxy/site-form/upstream.tsx",
       "src/components/proxy/stream-servers.tsx",
       "src/components/proxy/stream-setup.tsx",
