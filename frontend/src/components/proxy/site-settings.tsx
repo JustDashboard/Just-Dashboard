@@ -22,7 +22,8 @@ import {
  * The chrome of a site's Settings: what the form's sheet was — a header, a
  * footer holding two Saves and a pane beside the fields — drawn as a
  * deployment's settings are. The fields and everything they do stay in
- * `site-form.tsx`; this file is only where they stand.
+ * `site-form.tsx` and its parts in `site-form/`; this file is only where
+ * they stand.
  *
  *   `SettingsParts` — the parts of the form (`?view=`), each a link, with a
  *   mark on the ones holding an unsaved change or a failed check.
