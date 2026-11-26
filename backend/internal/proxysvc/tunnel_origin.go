@@ -92,7 +92,7 @@ type CloudflareCredentials struct {
 func SavedCloudflareCredentials() (CloudflareCredentials, error) {
 	raw, err := os.ReadFile(credentialsPath("cloudflare"))
 	if errors.Is(err, os.ErrNotExist) {
-		return CloudflareCredentials{}, errors.New("no Cloudflare credentials are saved: save an API token for the Cloudflare DNS provider under Certificates, with Zone › DNS › Edit and Account › Cloudflare Tunnel › Edit")
+		return CloudflareCredentials{}, errors.New("no Cloudflare credentials are saved: save an API token for the Cloudflare DNS provider under Certificates, on its DNS challenge view, with Zone › DNS › Edit and Account › Cloudflare Tunnel › Edit")
 	}
 	if err != nil {
 		return CloudflareCredentials{}, err

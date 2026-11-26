@@ -7,8 +7,10 @@ import (
 	"maps"
 	"mime"
 	"net/http"
+	"net/url"
 	"slices"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -114,6 +116,10 @@ func (s *Server) mountCertificateRoutes(r chi.Router) {
 			// renewal: the ordinary confirmation, no phrase.
 			r.Method(http.MethodPost, "/delete", s.handle(s.handleCertDelete))
 			r.Method(http.MethodDelete, "/imported/{name}", s.handle(s.handleImportedDelete))
+			// A certificate the Docker ingress holds for a name no route
+			// serves: Caddy orders another if a route asks again, so the
+			// ordinary confirmation and no phrase.
+			r.Method(http.MethodDelete, "/caddy", s.handle(s.handleCaddyCertificateDelete))
 		})
 	})
 }
@@ -316,8 +322,69 @@ func (s *Server) handleCertList(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return httpx.Internal(err)
 	}
+	if err := s.labelCertificateUsers(r.Context(), certs); err != nil {
+		return httpx.Internal(err)
+	}
 	httpx.JSON(w, http.StatusOK, certs)
 	return nil
+}
+
+// labelCertificateUsers says who serves each certificate in the operator's
+// words. UsedBy holds what the proxy knows a site by, and for a deployment
+// that is its route's file name: "just-dashboard-env-12.conf" was the whole
+// answer to "what breaks when this expires". A deployment's route becomes
+// its project and environment and opens the project; a route whose
+// deployment is gone, or archived, is a leftover and opens on Sites, where
+// it can be removed.
+func (s *Server) labelCertificateUsers(ctx context.Context, certs []proxysvc.Certificate) error {
+	index := map[string]int{}
+	var hosts []proxysvc.VHost
+	for _, cert := range certs {
+		for _, site := range cert.UsedBy {
+			if _, seen := index[site]; !seen {
+				index[site] = len(hosts)
+				hosts = append(hosts, proxysvc.VHost{Name: site})
+			}
+		}
+	}
+	if len(hosts) == 0 {
+		return nil
+	}
+	if err := s.markDeploymentRoutes(ctx, hosts); err != nil {
+		return err
+	}
+	for i := range certs {
+		if len(certs[i].UsedBy) == 0 {
+			continue
+		}
+		labels := make([]proxysvc.CertificateUser, 0, len(certs[i].UsedBy))
+		for _, site := range certs[i].UsedBy {
+			labels = append(labels, certificateUser(hosts[index[site]]))
+		}
+		certs[i].UsedByLabels = labels
+	}
+	return nil
+}
+
+// certificateUser is one site as a certificate's reader is told of it.
+func certificateUser(host proxysvc.VHost) proxysvc.CertificateUser {
+	user := proxysvc.CertificateUser{Site: host.Name, Label: host.Name, Href: "/proxy/sites/" + url.PathEscape(host.Name)}
+	switch owner := host.Owner; {
+	case owner != nil && !owner.Archived:
+		user.Label = owner.Project + " · " + owner.Environment
+		user.Href = "/deploy/" + strconv.FormatInt(owner.ProjectID, 10)
+	case deploymentRouteRe.MatchString(host.Name):
+		user.Label, user.Leftover = "leftover route", true
+	default:
+		// A host the ingress's own Caddyfile serves is listed as
+		// docker-caddy:<container>:<host>; the host is its name.
+		if rest, found := strings.CutPrefix(host.Name, "docker-caddy:"); found {
+			if _, name, ok := strings.Cut(rest, ":"); ok && name != "" {
+				user.Label = name
+			}
+		}
+	}
+	return user
 }
 
 // handleCertbot answers with certbot's own view, parsed.
@@ -1005,6 +1072,63 @@ func (s *Server) handleImportedDelete(w http.ResponseWriter, r *http.Request) er
 	}
 	httpx.SetAudit(r, "certificates.imported.delete", name, map[string]any{"force": force})
 	httpx.NoContent(w)
+	return nil
+}
+
+// handleCaddyCertificateDelete removes a certificate the Docker ingress holds
+// and no route serves, by the path the inventory lists it at. The routes are
+// read again here: one that serves the name refuses the delete, and so does
+// a Caddy that cannot be asked.
+func (s *Server) handleCaddyCertificateDelete(w http.ResponseWriter, r *http.Request) error {
+	var req struct {
+		Path string `json:"path"`
+	}
+	if err := httpx.DecodeJSON(r, &req); err != nil {
+		return err
+	}
+	if req.Path == "" {
+		return httpx.BadRequest("path is required")
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	released, err := s.modules.deployRuns.ReleasedHostnames(ctx)
+	if err != nil {
+		return httpx.Internal(err)
+	}
+	out, err := s.modules.proxy.DeleteCaddyCertificate(ctx, req.Path, released)
+	var inUse *proxysvc.CaddyCertificateInUseError
+	var problem *proxysvc.IngressProblem
+	switch {
+	case errors.As(err, &inUse):
+		labelled := make([]string, 0, len(inUse.Routes))
+		for _, route := range inUse.Routes {
+			hosts := []proxysvc.VHost{{Name: route}}
+			if err := s.markDeploymentRoutes(ctx, hosts); err != nil {
+				return httpx.Internal(err)
+			}
+			user := certificateUser(hosts[0])
+			if user.Leftover {
+				user.Label = "the leftover route " + route
+			}
+			labelled = append(labelled, user.Label)
+		}
+		return certificateInUse(&proxysvc.CaddyCertificateInUseError{Name: inUse.Name, Routes: labelled})
+	case errors.Is(err, proxysvc.ErrCaddyCertificatePath):
+		return httpx.BadRequest("%s", err.Error())
+	case errors.Is(err, proxysvc.ErrCaddyCertificateNotFound), errors.Is(err, proxysvc.ErrNoCaddyIngress):
+		return httpx.Err(http.StatusNotFound, "not_found", err.Error())
+	case errors.As(err, &problem):
+		return ingressProblemError(problem)
+	case err != nil:
+		// Not knowing what Caddy serves is not "unused": nothing was removed.
+		return httpx.Err(http.StatusServiceUnavailable, "caddy_unreadable", err.Error())
+	}
+	detail := map[string]any{"path": out.Path, "copies": out.Copies, "keptCopies": out.KeptCopies}
+	if out.CopiesError != "" {
+		detail["copiesError"] = out.CopiesError
+	}
+	httpx.SetAudit(r, "certificates.caddy.delete", out.Name, detail)
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
 }
 
