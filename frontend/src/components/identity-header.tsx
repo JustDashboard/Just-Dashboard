@@ -511,27 +511,35 @@ function naturalWidth(element: HTMLElement) {
  * the password") opened at once on a press and, as the topmost layer, took
  * the Escape meant for the popover, which stayed open. So the tip listens on
  * the command's own box in the page, where nothing in a portal reaches, and
- * its trigger is a box with nothing in it laid over the command, an anchor
- * that takes no pointer and no focus.
+ * its trigger is a box with nothing in it, an anchor that takes no pointer
+ * and no focus.
+ *
+ * The tip names the one button the pointer is on or the keyboard landed on,
+ * and its anchor is laid over that button. A split command is two icons on a
+ * phone (Issue certificate, and the other ways beside it), and a tip that
+ * read every icon in the box said both names over either half, so the icon
+ * was not explained at all.
  */
 function CommandTip({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const [words, setWords] = useState<string | null>(null)
+  const [tip, setTip] = useState<IconTip | null>(null)
   useEffect(() => {
     const box = ref.current
     if (!box) return
-    const hide = () => setWords(null)
-    // A mouse resting on it, or a keyboard landing on it; a finger never
-    // opens a tooltip, since the tap that would is a press.
-    const enter = (event: PointerEvent) => {
-      if (event.pointerType !== "touch") setWords(iconWords(box))
+    const hide = () => setTip(null)
+    // A mouse resting on a button, or a keyboard landing on one; a finger
+    // never opens a tooltip, since the tap that would is a press. `over`
+    // rather than `enter`, so moving from one half to the other says the
+    // other's name.
+    const over = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") setTip(iconTip(box, event.target))
     }
     const focus = (event: FocusEvent) => {
       if (event.target instanceof Element && event.target.matches(":focus-visible"))
-        setWords(iconWords(box))
+        setTip(iconTip(box, event.target))
     }
     const listeners = [
-      ["pointerenter", enter],
+      ["pointerover", over],
       ["pointerleave", hide],
       ["pointerdown", hide],
       ["focusin", focus],
@@ -546,30 +554,57 @@ function CommandTip({ children }: { children: React.ReactNode }) {
   return (
     <span ref={ref} className="relative flex shrink-0 items-center gap-3 sm:contents">
       {children}
-      <TooltipProvider>
-        <Tooltip open={words !== null} onOpenChange={(open) => !open && setWords(null)}>
-          <TooltipTrigger asChild>
-            <span aria-hidden className="pointer-events-none absolute inset-0 sm:hidden" />
-          </TooltipTrigger>
-          {words !== null && <TooltipContent>{words}</TooltipContent>}
-        </Tooltip>
-      </TooltipProvider>
+      {tip && (
+        // Keyed on the button, so the tip opens again on the other half
+        // rather than sliding from where the first one stood.
+        <TooltipProvider key={tip.words}>
+          <Tooltip open onOpenChange={(open) => !open && setTip(null)}>
+            <TooltipTrigger asChild>
+              <span
+                aria-hidden
+                data-slot="command-tip-anchor"
+                className="pointer-events-none absolute sm:hidden"
+                style={tip.at}
+              />
+            </TooltipTrigger>
+            <TooltipContent>{tip.words}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
     </span>
   )
 }
 
+type IconTip = {
+  words: string
+  /** The button's box inside the command's, where the tip's anchor is laid. */
+  at: { left: number; top: number; width: number; height: number }
+}
+
 /**
- * What the command's icon-only buttons say, or nothing when none is drawn as
- * an icon alone: each one's accessible name, its `aria-label` where it has one
- * (a command drawn with its `short` word), else its words.
+ * What the button an event reached says, and where it is in the command's
+ * box, or nothing when that button is not drawn as an icon alone: its
+ * accessible name, its `aria-label` where it has one (a command drawn with its
+ * `short` word), else its words.
  */
-function iconWords(box: HTMLElement | null) {
-  if (!box || !window.matchMedia(breakpointQuery("sm", "below")).matches) return null
-  const words = Array.from(box.querySelectorAll<HTMLElement>("[data-size]"))
-    .filter((button) => button.getClientRects().length > 0 && button.querySelector("svg"))
-    .map((button) => buttonName(button))
-    .filter(Boolean)
-  return words.length > 0 ? words.join(" · ") : null
+function iconTip(box: HTMLElement, target: EventTarget | null): IconTip | null {
+  if (!window.matchMedia(breakpointQuery("sm", "below")).matches) return null
+  const button = target instanceof Element ? target.closest<HTMLElement>("[data-size]") : null
+  if (!button || !box.contains(button) || button.getClientRects().length === 0) return null
+  if (!button.querySelector("svg")) return null
+  const words = buttonName(button)
+  if (!words) return null
+  const outer = box.getBoundingClientRect()
+  const inner = button.getBoundingClientRect()
+  return {
+    words,
+    at: {
+      left: inner.left - outer.left,
+      top: inner.top - outer.top,
+      width: inner.width,
+      height: inner.height,
+    },
+  }
 }
 
 /** A button's name as a screen reader hears it, for the tip that says it aloud on a phone. */
