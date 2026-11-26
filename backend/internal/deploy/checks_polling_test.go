@@ -199,7 +199,7 @@ func TestReadinessStopsWhenTheRunIsCancelled(t *testing.T) {
 func TestReadinessKeepsTheCrashLoopGraceWhenItAsksQuickly(t *testing.T) {
 	t.Parallel()
 	clock := newPollingClock()
-	backend := &livenessBackendFake{state: dockerx.ContainerLiveness{Status: "restarting", Restarting: true, ExitCode: 1, RestartCount: 6}}
+	backend := &livenessBackendFake{state: dockerx.ContainerLiveness{Status: "restarting", Running: true, Restarting: true, ExitCode: 1, RestartCount: 6}}
 	runner := pollingRunner(clock, backend, -1, 0)
 	target := pollingTarget
 	target.ContainerID = "candidate"
