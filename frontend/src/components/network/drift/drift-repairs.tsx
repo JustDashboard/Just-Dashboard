@@ -140,7 +140,7 @@ function RepairRow({
   onChange: (checked: boolean) => void
 }) {
   const id = `repair-${item.id}`
-  const changes = item.after ? diffCounts(lineDiff(item.before ?? "", item.after)) : undefined
+  const changes = item.after ? diffCounts(repairDiff(item)) : undefined
   // A route or a rule is saved under a number; it is named by where it goes.
   const named = row && (row.kind === "route" || row.kind === "rule")
   const name = named ? row.label : item.resource
@@ -304,8 +304,16 @@ export function DriftReview({
   )
 }
 
+/**
+ * A repair's change to its file, exactly: it is the change reviewed before it
+ * is applied, so an absent file is no lines and a trailing space is a change.
+ */
+function repairDiff(item: OwnedRepair) {
+  return lineDiff(item.before ?? "", item.after ?? "", { exact: true })
+}
+
 function ReviewedRepair({ item }: { item: OwnedRepair }) {
-  const lines = item.after ? lineDiff(item.before ?? "", item.after) : []
+  const lines = item.after ? repairDiff(item) : []
   return (
     <section className="min-w-0 space-y-3">
       <header className="flex min-w-0 items-start justify-between gap-3">

@@ -42,6 +42,46 @@ describe("lineDiff", () => {
   })
 })
 
+describe("lineDiff, exact", () => {
+  const exact = (before, after) => lineDiff(before, after, { exact: true })
+
+  test("an absent file is no lines, so a new file is only what it adds", () => {
+    const diff = exact("", "one\ntwo\n")
+    expect(diffCounts(diff)).toEqual({ added: 2, removed: 0 })
+    expect(diff).toEqual([
+      { kind: "added", text: "one" },
+      { kind: "added", text: "two" },
+    ])
+  })
+
+  test("emptying a file removes every line and adds none", () => {
+    expect(diffCounts(exact("one\ntwo\n", ""))).toEqual({ added: 0, removed: 2 })
+  })
+
+  test("a replacement that only changes a trailing space is a change", () => {
+    const diff = exact("a\nkeep \n", "a\nkeep\n")
+    expect(diffCounts(diff)).toEqual({ added: 1, removed: 1 })
+    expect(diff.filter((l) => l.kind !== "same").map((l) => l.text)).toEqual(["keep ", "keep"])
+    expect(diffCounts(exact("a", "a "))).toEqual({ added: 1, removed: 1 })
+  })
+
+  test("a newline added at the end is a change, and the body carries git's note", () => {
+    const diff = exact("a\nb", "a\nb\n")
+    expect(diff).toEqual([
+      { kind: "same", text: "a" },
+      { kind: "removed", text: "b", noNewline: true },
+      { kind: "added", text: "b" },
+    ])
+    expect(unifiedBody(diff)).toBe(" a\n-b\n\\ No newline at end of file\n+b")
+  })
+
+  test("identical texts, final newline and all, are no lines at all", () => {
+    expect(exact("same\n", "same\n")).toEqual([])
+    expect(exact("same", "same")).toEqual([])
+    expect(exact("", "")).toEqual([])
+  })
+})
+
 describe("diffCounts", () => {
   test("counts the added and the removed lines, not the context or the gaps", () => {
     const diff = lineDiff("a\nb\nc\nd\n", "a\nc\nd\ne\nf\n")

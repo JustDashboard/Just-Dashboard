@@ -370,7 +370,7 @@ where they are used); a page in that area takes them instead of drawing a copy.
 | `ScaledPair` | [Readings](readings.md) | `components/metrics/hardware-panels.tsx` | Two sides of one quantity as one bar against the largest beside it, for a table cell: the shared `SplitBar` with `total`. | keep |
 | `RoleTag`, `ROLE_NAME` | [Workspace](../features/workspace.md) | `components/account/role.tsx` | An account's role as a tag, and the name each role is said by. | keep |
 | `LensReadingLine` | [Readings](readings.md) | `components/logs/lens-reading-line.tsx` | A log lens's reading as a `ReadingLine` whose press narrows the log to the lines it counts. | keep |
-| `lineDiff`, `diffCounts`, `unifiedBody` | [Values](values.md) | `lib/line-diff.ts` | Two texts as a line diff, its added and removed counts, and a unified body `DiffView` can draw. | keep |
+| `lineDiff`, `diffCounts`, `unifiedBody` | [Values](values.md) | `lib/line-diff.ts` | Two texts as a line diff, its added and removed counts, and a unified body `DiffView` can draw. `exact` (a drift repair's file change) treats an empty file as no lines and keeps trailing whitespace and a missing final newline as changes. | keep |
 | `useAddressTab`, `ViewTabs`, `StepArrows`, `View` (type) | [Rail](rail.md) | `components/system-users/detail-shell.tsx` | System users' first copy of the detail frame's parts; `useDetailTab`, `ViewTabList`, `StepArrows` from `detail-page.tsx` and `TabView` are them. | retired (0.9.0) |
 
 ## Families

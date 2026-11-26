@@ -1069,6 +1069,8 @@ export type DiffLine = {
   kind: "same" | "added" | "removed" | "gap"
   text: string
   section?: string
+  /** The file's last line, with no newline after it (an exact diff only). */
+  noNewline?: boolean
 }
 
 export type DeployPreview = {
