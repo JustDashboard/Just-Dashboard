@@ -559,6 +559,7 @@ func TestDatabaseTargetsNameEachDatabaseAValueReaches(t *testing.T) {
 		"REDIS_URL":    "redis://cache.example:6379",
 		"VALKEY_URL":   "valkeys://default:secret@db-9.jd.internal:6379/0",
 		"EVENTS_URL":   "clickhouse://default:secret@db-10.jd.internal:9000/events",
+		"METRICS_URL":  "http://default:secret@db-11.jd.internal:8123/metrics",
 		"SITE_URL":     "https://shop.example",
 		"PORT":         "3000",
 	})
@@ -566,7 +567,7 @@ func TestDatabaseTargetsNameEachDatabaseAValueReaches(t *testing.T) {
 	for _, target := range targets {
 		got = append(got, fmt.Sprintf("%s=%d/%s", target.variable, target.connectionID, target.database))
 	}
-	want := "ADO=0/,BRANCH_URL=0/app,DATABASE_URL=8/app,EVENTS_URL=10/events,HOSTED_URL=0/,JDBC_URL=8/app_cache,POOLED_URL=8/app"
+	want := "ADO=0/,BRANCH_URL=0/app,DATABASE_URL=8/app,EVENTS_URL=10/events,HOSTED_URL=0/,JDBC_URL=8/app_cache,METRICS_URL=11/metrics,POOLED_URL=8/app"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("targets = %v\nwant      %s", got, want)
 	}

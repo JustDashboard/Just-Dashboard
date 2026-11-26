@@ -137,9 +137,11 @@ rows were counted, compared by connection and by the database the URL's path nam
 branch, another database on the same server (`${{database.5.url.app_shadow}}`, which `DatabaseHasRows`
 does not count), or a connection string that is no URL (ADO.NET's) keeps the seed from running, as do
 runtime values that name no database at all. A cache is never a target, linked from this server
-(`redis://…@db-9.jd.internal`) or hosted: only a URL whose scheme names an engine a seed's rows go to
-(`seedDatabaseSchemes`: PostgreSQL, MySQL/MariaDB, MongoDB, SQL Server, ClickHouse, Oracle and their usual
-spellings) counts, on the build's side and on the seed's. The step is then handed the very values that
+(`redis://…@db-9.jd.internal`) or hosted, on the build's side and on the seed's. A hosted URL counts
+only when its scheme names an engine a seed's rows go to (`seedDatabaseSchemes`: PostgreSQL,
+MySQL/MariaDB, MongoDB, SQL Server, ClickHouse, Oracle and their usual spellings). A linked one counts
+unless its scheme names a cache (`cacheSchemes`: Redis, Valkey, KeyDB, Dragonfly, Memcached), because
+it keeps the scheme its connection was saved with, which can be a ClickHouse's `http://`. The step is then handed the very values that
 were judged.
 The step's log says each of these as it
 happens, and build_artifact's evidence lists them (`databaseSteps`). A step that fails ends the build as

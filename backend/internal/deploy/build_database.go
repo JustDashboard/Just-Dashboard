@@ -422,10 +422,10 @@ func (t databaseTarget) sameDatabase(other databaseTarget) bool {
 }
 
 // seedDatabaseSchemes are the URL schemes of the engines a seed's rows go
-// to, so a value naming one is a database the seed could write to: every
-// engine but a cache that a database of this server's can be linked as
-// (dbx's drivers), and the usual spellings of the same elsewhere. A cache is
-// not where they go, whether this server's or one elsewhere.
+// to, so a value naming one elsewhere is a database the seed could write to:
+// every engine but a cache that a database of this server's can be linked as
+// (dbx's drivers), and the usual spellings of the same. A cache is not where
+// they go. A value naming this server's is judged by cacheSchemes instead.
 var seedDatabaseSchemes = []string{
 	"postgres", "postgresql", "postgis", "mysql", "mysql2", "mariadb", "mongodb", "sqlserver", "mssql",
 	"cockroachdb", "libsql", "prisma", "clickhouse", "oracle",
@@ -436,6 +436,17 @@ var seedDatabaseSchemes = []string{
 func seedDatabaseScheme(scheme string) bool {
 	return slices.ContainsFunc(strings.Split(strings.ToLower(scheme), "+"), func(part string) bool {
 		return slices.Contains(seedDatabaseSchemes, part)
+	})
+}
+
+// cacheSchemes are the URL schemes of the caches a database of this server's
+// can be linked as: what a seed's rows never go to.
+var cacheSchemes = []string{"redis", "rediss", "valkey", "valkeys", "keydb", "dragonfly", "memcached", "memcache"}
+
+// cacheScheme reports whether a URL scheme ("redis+sentinel") names a cache.
+func cacheScheme(scheme string) bool {
+	return slices.ContainsFunc(strings.Split(strings.ToLower(scheme), "+"), func(part string) bool {
+		return slices.Contains(cacheSchemes, part)
 	})
 }
 
@@ -465,13 +476,20 @@ func databaseTargets(values map[string]string) []databaseTarget {
 			continue
 		}
 		host := strings.ToLower(parsed.Hostname())
-		if host == "" || !seedDatabaseScheme(parsed.Scheme) {
-			// A cache linked from this server is no more a seed's target
-			// than a hosted one.
+		if host == "" {
 			continue
 		}
 		if !strings.HasSuffix(host, ".jd.internal") {
-			targets = append(targets, databaseTarget{variable: name})
+			if seedDatabaseScheme(parsed.Scheme) {
+				targets = append(targets, databaseTarget{variable: name})
+			}
+			continue
+		}
+		if cacheScheme(parsed.Scheme) {
+			// A cache linked from this server is no more a seed's target
+			// than a hosted one. Anything else linked from it is: its URL
+			// keeps the scheme its connection was saved with, which can be
+			// a ClickHouse's http:// as well as an engine's own.
 			continue
 		}
 		target := databaseTarget{variable: name, database: strings.Trim(parsed.Path, "/")}
