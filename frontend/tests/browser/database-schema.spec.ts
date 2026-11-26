@@ -1270,6 +1270,18 @@ test("a foreign key is built against the other table's own columns", async ({ pa
   await page.getByRole("option", { name: "customers" }).click()
   // The usual key points at the other table's primary key: it is proposed.
   await expect(dialog.getByRole("combobox", { name: "Column 1 of customers" })).toContainText("id")
+  // The pairs are one group named Columns, and each select names itself. The
+  // field's id went to every select, and its label pointed at the first.
+  await dialog.getByRole("button", { name: /^Another pair/ }).click()
+  const pairs = dialog.getByRole("group", { name: "Columns" })
+  await expect(pairs.getByRole("combobox")).toHaveCount(4)
+  expect(await pairs.getByRole("combobox").evaluateAll((all) => all.map((one) => one.id))).toEqual([
+    "",
+    "",
+    "",
+    "",
+  ])
+  await dialog.getByRole("button", { name: "Remove pair 2" }).click()
   await dialog.getByRole("combobox", { name: "Column 1 of orders" }).click()
   await page.getByRole("option", { name: "customer_id" }).click()
   await dialog.getByRole("button", { name: "Add foreign key" }).click()

@@ -290,7 +290,7 @@ export function NewAccount() {
               </FieldRow>
 
               {!isService && (
-                <Field label="How do they sign in?">
+                <Field label="How do they sign in?" group>
                   <div className="grid gap-3">
                     <Segments
                       label="How they sign in"

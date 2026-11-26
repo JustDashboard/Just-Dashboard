@@ -92,8 +92,9 @@ Each is a best-practice change that touches a decision above. The operator answe
 
 There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
 (`components/loading.tsx`). `design-system/primitives` refuses a native `<input type="checkbox">`
-and a hand-spun `LoaderCircle` outside `components/ui`, `state.tsx`, `loading.tsx` and `icons.tsx`, and an import
-of `BarList` anywhere but the Query page's Chart view. `design-system/tokens` refuses
+and a hand-spun `LoaderCircle` outside `components/ui`, `state.tsx`, `loading.tsx` and `icons.tsx`, an import
+of `BarList` anywhere but the Query page's Chart view, and a `Field` of several controls that is not
+a `group` (`field-group`), whose controls would each take its one id. `design-system/tokens` refuses
 `type-scale` (a `text-[Npx]`), `tone-tint`, `radius-bare`, `radius-scale`, `focus-ring` (a
 hand-written focus ring), `row-reveal` (a hand-written hover reveal) and `hardcoded-palette`.
 `design-system/latency-words` refuses p50, p95 and p99 in text. `eslint.config.mjs` holds every

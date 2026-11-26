@@ -31,6 +31,11 @@ and a screen reader hears its hint and its error wherever it is.
   control through a context (`useFieldControl`); `Input`, `Textarea`, `SelectTrigger`,
   `InputGroupInput`, `Switch` and `Checkbox` read it, and `ToggleGroup` takes the label's id as its
   name (`useField()?.labelId`), since a group is not a control a `for` can point at.
+- **`Field group`**: a field of several controls, each named by its own words (a foreign key's
+  column pairs, a role's settings as a name and a value, a stream's rules). The field is a
+  `role="group"` named by its label (`aria-labelledby`) and described by its hint and error, and its
+  controls take neither its id nor its description; the error still marks each one invalid. Without
+  it every control took the field's one id and the label's `for` named the first.
 - **`SettingsColumn`**: `mx-auto max-w-3xl`, the pending strip first, then the sections in a
   `FormSections` (a hairline between each), and 80px at the foot for the save bar.
 - **`SettingSection`**: a `FormSection aside`: an h2, under it what the section currently is as data
@@ -171,8 +176,10 @@ A `Field` wires itself to its control: it makes the ids of its label, hint, erro
 hands them, with `aria-invalid` while there is an error, through a context that `Input`,
 `Textarea` and `SelectTrigger` read (`useFieldControl`), so tabbing back to a field reads its hint
 or its error and the red edge follows the error without the caller setting `aria-invalid`. Give
-`htmlFor` only when the control has an id of its own; one control per `Field`. The error line
-carries a warning glyph, so it is not told by colour alone.
+`htmlFor` only when the control has an id of its own; one control per `Field`, or `group` for a
+field of several, which the `design-system/primitives` lint (`field-group`) asks for when two
+controls could take the field's id at once. The error line carries a warning glyph, so it is not
+told by colour alone.
 The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
 `space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
 beside the field that caused it. They are built from these now, and the statement in one is the

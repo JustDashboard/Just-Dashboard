@@ -22,7 +22,11 @@ function reported(code, filename = "src/components/example.tsx") {
         files: ["**/*.ts", "**/*.tsx"],
         languageOptions: { parser: tsParser, parserOptions: { ecmaFeatures: { jsx: true } } },
         plugins: { "design-system": designSystem, "retired-apis": retiredApis },
-        rules: { "design-system/tokens": "error", "retired-apis/retired": "error" },
+        rules: {
+          "design-system/tokens": "error",
+          "design-system/primitives": "error",
+          "retired-apis/retired": "error",
+        },
       },
     ],
     { filename },
@@ -243,5 +247,39 @@ describe("retired APIs", () => {
   test("a model decodes what is not an address", () => {
     const model = `export const dsn = (s) => decodeURIComponent(s)`
     expect(reported(model, "src/lib/dsn.ts")).not.toContain("route-params")
+  })
+})
+
+describe("a field of several controls", () => {
+  test("field-group: two controls under one Field's id are refused; a group or htmlFor is not", () => {
+    const pair = `<Input aria-label="Setting 1 name" /><Input aria-label="Setting 1 value" />`
+    expect(reported(jsx(`<Field label="Settings">${pair}</Field>`))).toContain("field-group")
+    expect(reported(jsx(`<Field label="Settings" group>${pair}</Field>`))).not.toContain(
+      "field-group",
+    )
+    expect(
+      reported(jsx(`<Field label="Name" htmlFor="name"><Input id="name" /><Input /></Field>`)),
+    ).not.toContain("field-group")
+  })
+
+  test("field-group: a control drawn per item is many", () => {
+    const rows = jsx(`<Field label="Columns">
+      {pairs.map((pair) => <SelectTrigger key={pair} aria-label={pair} />)}
+    </Field>`)
+    expect(reported(rows)).toContain("field-group")
+  })
+
+  test("field-group: one control at a time, its own id, or a field inside is not", () => {
+    const either = jsx(`<Field label="Which">
+      <Segments label="Which" value={v} options={[]} onChange={set} />
+      {typed ? <Textarea aria-label="Names" /> : <SearchInput aria-label="Filter" />}
+    </Field>`)
+    expect(reported(either)).not.toContain("field-group")
+    const own = jsx(`<Field label="Name"><Input /><Input id="other" /></Field>`)
+    expect(reported(own)).not.toContain("field-group")
+    const named = jsx(`<Field label="Mode"><Input /><Switch aria-label="On" /></Field>`)
+    expect(reported(named)).not.toContain("field-group")
+    const nested = jsx(`<Field label="Pair" group><Field label="A"><Input /></Field></Field>`)
+    expect(reported(nested)).not.toContain("field-group")
   })
 })

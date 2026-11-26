@@ -668,6 +668,13 @@ test("a role is tried with the settings the policies read, and the rows it sees 
 
   // The setting the tenant policy reads is offered as a row already.
   await expect(tester(page).getByLabel("Setting 1 name")).toHaveValue("app.tenant_id")
+  // The settings are one group named by the field and described by its hint;
+  // a name and a value each name themselves, and neither takes the field's id.
+  const settings = tester(page).getByRole("group", { name: "Settings it carries" })
+  await expect(settings).toHaveAccessibleDescription(/What current_setting reads in a policy/)
+  expect(
+    await settings.getByRole("textbox").evaluateAll((all) => all.map((one) => one.id)),
+  ).toEqual(["", ""])
   await expect(tester(page).getByRole("button", { name: "Run" })).toBeDisabled()
   await tester(page).getByRole("combobox", { name: "Role" }).click()
   // The engine's own roles are not offered, and the ones nothing filters are marked.
