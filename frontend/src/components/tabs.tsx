@@ -39,12 +39,28 @@ import { LoneView } from "@/components/ui/tabs"
 // in a pane) as its press box, so no strip moved, and the inset ring lands in
 // that border, 2px clear of the face. That is the Hub's ring, and a scroller
 // cannot clip it. The face takes the control's corner, so the box's corner is
-// that plus the border. Forced colours paint a transparent border, so it comes
-// off there.
+// that plus the border. Forced colours would paint the transparent border in
+// the text's colour, so there it is the page's own colour (Canvas): the gap
+// stays a gap, and the ring still lands in it.
 const TAB_BASE = cn(
   "inline-flex shrink-0 items-center gap-1.5 px-2 text-body font-medium whitespace-nowrap focus-ring-inset transition-colors",
-  "rounded-[calc(var(--radius-md)+4px)] border-4 border-transparent bg-clip-padding forced-colors:border-0 forced-colors:px-3",
+  "rounded-[calc(var(--radius-md)+4px)] border-4 border-transparent bg-clip-padding forced-colors:border-[Canvas]",
 )
+
+// Forced colours (Windows High Contrast) repaint every fill as the page behind
+// it and every ink as the text's, so the chosen face vanished and the chosen
+// tab read as any other. There it takes the system's own selection, Highlight
+// under HighlightText, kept from that repaint (`forced-color-adjust`, which
+// would otherwise also lay a Canvas plate behind the HighlightText). Kept from
+// the repaint, the ring would be the product's blue, so it is Highlight as
+// every focused control's is there (`--ring`, which `focus-ring-inset` draws
+// in). It stays an outline in the Canvas gap, so selection is a face and focus
+// a line round it: two marks, as in normal colours. Only under forced colours: normal colours keep the face
+// with no outline. Whole class names, twice: Tailwind reads the source.
+const CHOSEN_FORCED =
+  "forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none forced-colors:[--ring:Highlight]"
+const ACTIVE_FORCED =
+  "data-[state=active]:forced-colors:bg-[Highlight] data-[state=active]:forced-colors:text-[HighlightText] data-[state=active]:forced-colors:forced-color-adjust-none data-[state=active]:forced-colors:[--ring:Highlight]"
 
 /**
  * The quiet-tab look, for a switcher between views of the page you are
@@ -59,7 +75,7 @@ export function tabClasses(selected: boolean | undefined, height: string) {
     height,
     selected
       ? // A count inside the chosen tab takes the label's ink, not the faint one.
-        "bg-control text-foreground [--count-ink:currentColor]"
+        cn("bg-control text-foreground [--count-ink:currentColor]", CHOSEN_FORCED)
       : "text-muted-foreground hover:bg-accent hover:text-foreground",
   )
 }
@@ -69,6 +85,7 @@ export function tabClasses(selected: boolean | undefined, height: string) {
 const TRIGGER = cn(
   TAB_BASE,
   "data-[state=active]:bg-control data-[state=active]:text-foreground data-[state=active]:[--count-ink:currentColor]",
+  ACTIVE_FORCED,
   "data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-foreground",
   "disabled:pointer-events-none disabled:text-faint",
 )

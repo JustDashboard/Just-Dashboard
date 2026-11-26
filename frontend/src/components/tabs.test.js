@@ -40,6 +40,36 @@ describe("a quiet tab", () => {
     expect(tab).toContain("focus-ring-inset")
   })
 
+  test("under forced colours the chosen one is the system's selection, and only there", () => {
+    const marker = [
+      "forced-colors:bg-[Highlight]",
+      "forced-colors:text-[HighlightText]",
+      "forced-colors:forced-color-adjust-none",
+      "forced-colors:[--ring:Highlight]",
+    ]
+    const chosen = tabClasses(true, "h-10").split(" ")
+    for (const one of marker) expect(chosen).toContain(one)
+    // The gap the ring lands in is the page's colour there, not a painted border.
+    expect(chosen).toContain("forced-colors:border-[Canvas]")
+    expect(chosen).not.toContain("forced-colors:border-0")
+    const rest = tabClasses(false, "h-10")
+    expect(rest).not.toContain("Highlight")
+    // Normal colours keep the face with no outline.
+    expect(
+      chosen.filter((one) => /(^|:)outline-/.test(one) && !one.startsWith("forced-colors:")),
+    ).toEqual([])
+
+    const html = renderToStaticMarkup(
+      h(ViewTabs, {
+        label: "Views of ens3",
+        views: VIEWS,
+        value: "traffic",
+        onValueChange: () => {},
+      }),
+    )
+    for (const one of marker) expect(html).toContain(`data-[state=active]:${one}`)
+  })
+
   test("ViewTabs draws the same face from Radix's own state", () => {
     const html = renderToStaticMarkup(
       h(ViewTabs, {

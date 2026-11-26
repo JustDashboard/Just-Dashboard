@@ -75,6 +75,58 @@ test("a site opens on its Overview, and each view has an address", async ({ page
   )
 })
 
+test("under forced colours the chosen tab and log view are the system's selection, apart from the ring", async ({
+  page,
+}) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites/app.example.com?tab=logs")
+  const paint = (locator: ReturnType<Page["locator"]>) =>
+    locator.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return {
+        fill: style.backgroundColor,
+        ink: style.color,
+        ring: style.outlineColor,
+        offset: style.outlineOffset,
+        gap: style.borderTopWidth,
+      }
+    })
+  const ground = await page
+    .locator("body")
+    .evaluate((node) => getComputedStyle(node).backgroundColor)
+  const views = page.getByRole("tablist", { name: "Views of app.example.com" })
+  const logView = page.getByRole("navigation", { name: "Log view" })
+  await expect(logView.getByRole("button", { pressed: true })).toBeVisible()
+  for (const [chosen, other] of [
+    [views.getByRole("tab", { name: "Logs" }), views.getByRole("tab", { name: "Overview" })],
+    [
+      logView.getByRole("button", { pressed: true }),
+      logView.getByRole("button", { pressed: false }).first(),
+    ],
+  ]) {
+    const on = await paint(chosen)
+    const off = await paint(other)
+    // Forced colours had painted both the same: the page's fill, the text's ink.
+    expect(on.fill).not.toBe(off.fill)
+    expect(on.fill).not.toBe(ground)
+    expect(on.ink).not.toBe(off.ink)
+    // The selection is a face, not a line: no ring until the keyboard comes.
+    expect(on.ring).toBe("rgba(0, 0, 0, 0)")
+  }
+
+  // Focus on the chosen tab is a ring in the gap round the face, 2px clear of it.
+  const logs = views.getByRole("tab", { name: "Logs" })
+  await logs.focus()
+  await page.keyboard.press("Tab")
+  await page.keyboard.press("Shift+Tab")
+  await expect(logs).toBeFocused()
+  const focused = await paint(logs)
+  expect(focused.ring).not.toBe("rgba(0, 0, 0, 0)")
+  expect(focused.offset).toBe("-2px")
+  expect(focused.gap).toBe("4px")
+})
+
 test("the line a site opens on carries its state, one command and the rest in a menu", async ({
   page,
 }) => {
