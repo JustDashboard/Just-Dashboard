@@ -93,3 +93,38 @@ test("under forced colours the chosen tab of the shared kit is the system's sele
   await expectChosenMark(page, chosen, list.locator("[data-state=inactive]").first())
   await expectRingSeen(page, chosen, chosen)
 })
+
+test("under forced colours the shared ring is drawn only on what has the keyboard", async ({
+  page,
+}) => {
+  // Forced colours painted the resting transparent outline in the text's
+  // colour: every control drawn with the ring wore it at once.
+  await mockServices(page)
+  await page.goto("/processes/services")
+  const strip = page.locator("[aria-label='State']")
+  await expect(strip.getByRole("button").first()).toBeVisible()
+  const ringed = () =>
+    page.evaluate(() =>
+      [...document.querySelectorAll<HTMLElement>("[class*='focus-ring']")]
+        .filter((el) => el.offsetParent && !el.contains(document.activeElement))
+        .map((el) => {
+          const style = getComputedStyle(el)
+          return {
+            what: `${el.tagName} ${el.getAttribute("aria-label") ?? el.textContent?.trim().slice(0, 30)}`,
+            shown: style.outlineStyle !== "none" && style.outlineColor !== "rgba(0, 0, 0, 0)",
+          }
+        }),
+    )
+  const resting = await ringed()
+  expect(resting.length).toBeGreaterThan(10)
+  expect(resting.filter((one) => one.shown)).toEqual([])
+
+  // Reached by the keyboard, a control shows it, and only that one.
+  const chip = strip.getByRole("button").first()
+  await chip.focus()
+  await page.keyboard.press("Tab")
+  await page.keyboard.press("Shift+Tab")
+  await expect(chip).toBeFocused()
+  expect(await chip.evaluate((el) => getComputedStyle(el).outlineStyle)).not.toBe("none")
+  expect((await ringed()).filter((one) => one.shown)).toEqual([])
+})

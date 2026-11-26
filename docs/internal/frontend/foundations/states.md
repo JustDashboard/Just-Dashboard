@@ -37,6 +37,14 @@ to none: `outline-hidden` and `outline-none` win over it. The sidebar's five cla
 keyboard's focus and showed nothing. `components/ui/focus-ring.test.js` fails on a class list that has
 both, and `design-system.spec.ts` walks the rail's own rows.
 
+At rest the ring is a transparent line, there before focus so nothing moves when it comes. Forced
+colours (Windows High Contrast) paint that line in the text's colour, so every control drawn with the
+ring wore it at once and the one with the keyboard could not be told apart. Under forced colours the
+three utilities leave the outline out until focus (`outline-style: none`); normal colours keep the
+transparent line. `app/focus-ring.test.js` reads the utilities, and `forced-colours.spec.ts` (*the
+shared ring is drawn only on what has the keyboard*) finds no ring at rest on a page and one on a
+focused control.
+
 A row's actions appear through `RowActions`, `IconAction reveal`, or `rowReveal()`. Never by hand: the
 four mechanisms that sentence hides — pointer, keyboard, open menu, touch — are how five action
 clusters ended up permanently unreachable on a phone.
