@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test"
-import { motionMs, reducedMotion, scrollIntoViewRespectingMotion } from "./motion"
+import { readdirSync, readFileSync } from "node:fs"
+import { join, relative } from "node:path"
+import { motionMs, reducedMotion, scrollBehavior, scrollIntoViewRespectingMotion } from "./motion"
 
 const real = { window: globalThis.window, document: globalThis.document }
 
@@ -113,5 +115,52 @@ describe("scrollIntoViewRespectingMotion", () => {
     browser()
     expect(() => scrollIntoViewRespectingMotion(null)).not.toThrow()
     expect(() => scrollIntoViewRespectingMotion(undefined, { focus: true })).not.toThrow()
+  })
+})
+
+describe("scrollBehavior", () => {
+  test("glides, and goes at once when either request is made", () => {
+    browser()
+    expect(scrollBehavior()).toBe("smooth")
+    browser({ reduce: true })
+    expect(scrollBehavior()).toBe("instant")
+    browser({ paused: true })
+    expect(scrollBehavior()).toBe("instant")
+  })
+})
+
+/** Every source file under `src`, tests and this module aside. */
+function sources(dir = join(import.meta.dir, "..")) {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name)
+    if (entry.isDirectory()) return sources(path)
+    if (!/\.(ts|tsx)$/.test(entry.name) || /\.test\./.test(entry.name)) return []
+    return [path]
+  })
+}
+
+describe("script that scrolls", () => {
+  const src = join(import.meta.dir, "..")
+  const own = new Set(["lib/motion.ts", "components/shell/motion-pause.ts"])
+
+  // A glide written by hand overrides the root rule by specification, so a
+  // reveal on a paused page still glided (A11Y-17): Certificates' Renewal
+  // runs and a project's failure reading did, among fourteen others.
+  test("asks for a glide only through this module", () => {
+    const written = sources()
+      .filter((path) => !own.has(relative(src, path)))
+      .filter((path) => /behavior:[^,}]*"smooth"/.test(readFileSync(path, "utf8")))
+      .map((path) => relative(src, path))
+    expect(written).toEqual([])
+  })
+
+  // The media query alone is the system's half of the answer: a page paused
+  // from the account menu still moved.
+  test("reads reduced motion through this module, which also hears the pause", () => {
+    const asked = sources()
+      .filter((path) => !own.has(relative(src, path)))
+      .filter((path) => /matchMedia\(\s*"\(prefers-reduced-motion/.test(readFileSync(path, "utf8")))
+      .map((path) => relative(src, path))
+    expect(asked).toEqual([])
   })
 })

@@ -29,6 +29,15 @@ export function motionMs(ms: number): number {
   return reducedMotion() ? 0 : ms
 }
 
+/**
+ * The behaviour for a scroll run from script that is not a reveal (a strip's
+ * chevrons, a page pulled along by the wheel): a glide, or at once when
+ * motion is reduced.
+ */
+export function scrollBehavior(): ScrollBehavior {
+  return reducedMotion() ? "instant" : "smooth"
+}
+
 type Reveal = {
   /** Where the target lands in its scroller. Default `start`. */
   block?: ScrollLogicalPosition
@@ -59,5 +68,5 @@ export function scrollIntoViewRespectingMotion(
     // element is instant and would cut the glide short.
     el.focus({ preventScroll: true })
   }
-  target.scrollIntoView({ block, inline, behavior: reducedMotion() ? "instant" : "smooth" })
+  target.scrollIntoView({ block, inline, behavior: scrollBehavior() })
 }

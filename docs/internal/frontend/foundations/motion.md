@@ -41,9 +41,11 @@ library's elements read that when each mounts, so a layout or exit glide of one 
 keeps what it read. Such a component keeps one element whichever the answer, so the switch
 changes how it moves and never remounts what it holds. Script that scrolls or
 animates asks `lib/motion.ts`: `reducedMotion()` is both answers,
-`scrollIntoViewRespectingMotion(el, { block, focus })` is the one way to scroll to a section, and
-`motionMs(ms)` is a canvas duration. An explicit `behavior: "smooth"` overrides the CSS rule, so
-it is never written by hand. `Sweep` owns the one reduced-motion face of an indeterminate bar: a
+`scrollIntoViewRespectingMotion(el, { block, focus })` is the one way to scroll to a section,
+`scrollBehavior()` is the behaviour for any other scroll run from script (a strip's chevrons, a
+page pulled along by the wheel), and `motionMs(ms)` is a canvas duration. An explicit
+`behavior: "smooth"` overrides the CSS rule, so it is never written by hand, and the media query
+alone is only the system's half of the answer, so script never asks it directly either. `Sweep` owns the one reduced-motion face of an indeterminate bar: a
 still track in the faint ink.
 
 | Rule | Held by |
@@ -53,7 +55,7 @@ still track in the faint ink.
 | No hand-written `ease-[cubic-bezier(…)]` or `duration-[…]`. | convention; coming: WP-39 |
 | `data-motion="paused"` pauses what reduced motion pauses, from before the first paint. | `globals.css` (the rule and the two variants); spec `shell-phone.spec.ts` (*Pause animations*); unit `components/shell/motion-pause.test.js` |
 | A component already on screen follows the switch without a reload. | `useReducedMotion` in `motion-pause.ts`; ESLint `no-restricted-imports`; spec `files-ui.spec.ts` (*Pause animations reaches a page already open*) |
-| `behavior: "smooth"` only in `lib/motion.ts`. | unit `motion.test.js`; coming: WP-39 |
+| `behavior: "smooth"` and the reduced-motion media query only in `lib/motion.ts` (and `motion-pause.ts`). | unit `motion.test.js` (*script that scrolls*, which reads every source file); spec `proxy-certificates.spec.ts` (*with animations paused, Show log …*) |
 
 ## 11. Motion says one of four things
 

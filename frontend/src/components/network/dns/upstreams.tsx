@@ -26,6 +26,7 @@ import {
 } from "@/components/network/dns/resolvers"
 import { VerificationChecks } from "@/components/network/dns/verification"
 import { dnsServersProblem } from "@/components/network/draft-input"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 type Draft = {
   servers: string
@@ -656,7 +657,7 @@ export function ResolverOutcomeNote({ outcome }: { outcome: ResolverOutcome }) {
   // the column, so it is brought into view when it arrives.
   const note = useRef<HTMLDivElement>(null)
   useEffect(() => {
-    note.current?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+    scrollIntoViewRespectingMotion(note.current, { block: "nearest" })
   }, [outcome])
   if (outcome.kind === "put-back") {
     return (
