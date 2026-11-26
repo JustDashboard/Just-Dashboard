@@ -58,7 +58,7 @@ The installer writes the settings that matter, and **Settings → Configuration*
 | `JD_USAGE_PING` | `true` | Whether an administrator may be asked to [count this server](linking-and-usage.md#the-usage-count) in the public install numbers. Nothing is sent until one says yes. `false` means nobody is asked and nothing is ever sent; `JD_ACCOUNT_LINK=false` does the same. |
 | `JD_UPDATE_DIR` | discovered | The directory you cloned into. Normally empty: the dashboard asks Docker where its own stack was deployed from. Set it only if the Version page says that failed. |
 | `JD_AGENT_MODE` | `false` | Run as an agent managed by a hub: no login, mutual TLS only. Not useful on its own yet. |
-| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. Never set it on a real host. |
+| `JD_DEV` | `false` | Development only. Drops `Secure` from the session cookie, which is then `jd_session` rather than `__Host-jd_session`, so the UI works over plain HTTP. `docker-compose.yml` does not pass it to the backend, so setting it in `.env` does nothing; it applies only when you run the binary yourself. Never set it on a real host. |
 | `JD_LOG_LEVEL` | `info` | `debug` for verbose logs. |
 
 **Where it looks**
