@@ -11,6 +11,7 @@ import {
   trashSentence,
 } from "./trash"
 import {
+  carryIdentity,
   copyOperation,
   deleteOperation,
   moveOperation,
@@ -134,6 +135,36 @@ describe("undo, as data", () => {
     expect(calls).toEqual(["move /b/y /a/y"])
     expect(result.done).toBe(0)
     expect(result.failed.step.kind).toBe("move")
+  })
+
+  test("a step names the entry its operation left, and the runner is given it", async () => {
+    const op = moveOperation("moving x", [{ from: "/a/x", to: "/b/x", identity: "9:12:1.5" }])
+    const copy = copyOperation("copying y", [{ to: "/b/y", identity: "9:13:2.5" }], true)
+    const calls = []
+    const runner = {
+      move: async (from, to, identity) => calls.push(`move ${from} ${to} ${identity}`),
+      restore: async (id) => calls.push(`restore ${id}`),
+      trash: async (path, identity) => calls.push(`trash ${path} ${identity}`),
+    }
+    await runUndo(op, runner)
+    await runUndo(copy, runner)
+    expect(calls).toEqual(["move /b/x /a/x 9:12:1.5", "trash /b/y 9:13:2.5"])
+  })
+
+  test("a save in the editor carries a waiting step to the file it left, and nothing else", () => {
+    const op = moveOperation("renaming x", [{ from: "/a/x", to: "/a/y", identity: "9:12:1.5" }])
+    const copy = copyOperation("duplicating z", [{ to: "/a/z copy", identity: "9:14:3.5" }], true)
+    // The editor saved /a/y, which was the renamed file: the undo follows it.
+    carryIdentity(op, "/a/y", "9:12:1.5", "9:20:7.5")
+    expect(op.steps).toEqual([{ kind: "move", from: "/a/y", to: "/a/x", identity: "9:20:7.5" }])
+    carryIdentity(copy, "/a/z copy", "9:14:3.5", "9:21:8.5")
+    expect(copy.steps).toEqual([{ kind: "trash", path: "/a/z copy", identity: "9:21:8.5" }])
+    // What the editor saved over had another identity (something else took
+    // the name), or it saved another path: the step keeps its own.
+    carryIdentity(op, "/a/y", "9:30:1.5", "9:31:2.5")
+    carryIdentity(op, "/a/x", "9:20:7.5", "9:32:2.5")
+    carryIdentity(op, "/a/y", "", "9:33:2.5")
+    expect(op.steps).toEqual([{ kind: "move", from: "/a/y", to: "/a/x", identity: "9:20:7.5" }])
   })
 
   test("the stack keeps the newest operations", () => {

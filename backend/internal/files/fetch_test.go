@@ -360,3 +360,31 @@ func TestFetchLimitsAndShownURL(t *testing.T) {
 		t.Fatalf("shown %q", got)
 	}
 }
+
+// panickingTransport stands for a fault inside the download itself.
+type panickingTransport struct{}
+
+func (panickingTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	panic("a fault in the download")
+}
+
+// A panic in one download fails that fetch with its finish time, so it stops
+// counting against the bounds and is pruned like any other, rather than
+// staying "running" for good.
+func TestAFetchThatPanicsFailsAndFreesItsPlace(t *testing.T) {
+	root := t.TempDir()
+	f := NewFetches(New([]string{root}))
+	defer f.Close()
+	f.client.Transport = panickingTransport{}
+	for i := range fetchesPerOwner + 1 {
+		started, err := f.Start("a", FetchRequest{Dir: root, URL: fmt.Sprintf("http://example.test/%d", i)})
+		if err != nil {
+			t.Fatalf("fetch %d refused: %v", i, err)
+		}
+		got := waitFetch(t, f, started.ID)
+		if got.Status != "failed" || got.Finished.IsZero() || !strings.Contains(got.Error, "fault in the dashboard") {
+			t.Fatalf("a fetch that panicked: %+v", got)
+		}
+	}
+	noLeftovers(t, root)
+}

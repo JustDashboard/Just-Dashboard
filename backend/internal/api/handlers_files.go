@@ -193,6 +193,11 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	// A save writes a new file and renames it over the name, which gives the
+	// file another identity: the answer names the one it replaced and the one
+	// it left, so the Files page can carry a pending undo from the first to
+	// the second (an absent file has none to replace).
+	previous, _ := s.modules.hostFiles.Identity(req.Path)
 	if err := s.writeFileKept(r, req.Path, req.Content, req.ExpectedRevision); err != nil {
 		return mapFileError(err)
 	}
@@ -201,10 +206,16 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
+	identity, err := s.modules.hostFiles.Identity(req.Path)
+	if err != nil {
+		s.Log.Warn("a saved file's identity could not be read", "path", req.Path, "err", err)
+	}
 	httpx.JSON(w, http.StatusOK, struct {
 		*files.Entry
-		Revision string `json:"revision"`
-	}{entry, contentguard.Revision(req.Content)})
+		Revision         string `json:"revision"`
+		Identity         string `json:"identity,omitempty"`
+		PreviousIdentity string `json:"previousIdentity,omitempty"`
+	}{entry, contentguard.Revision(req.Content), identity, previous})
 	return nil
 }
 
@@ -337,6 +348,10 @@ type moveRequest struct {
 	// an occupied destination is a 409, which is what lets the page ask
 	// "replace, keep both or skip" instead of finding out afterwards.
 	Overwrite bool `json:"overwrite,omitempty"`
+	// Expect, when given, is the identity From must still have (what a move
+	// or a copy answered, kept by the page's undo): an entry that has taken
+	// the name since is refused with 409 entry_changed rather than moved.
+	Expect string `json:"expect,omitempty"`
 }
 
 // An empty side of a move or copy resolves to the first configured root —
@@ -361,6 +376,9 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
+	if err := s.expectEntry(src, req.Expect); err != nil {
+		return err
+	}
 	replaced, err := s.trashReplaced(r, src, dst, req.Overwrite, false)
 	if err != nil {
 		return err
@@ -370,9 +388,10 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 		return mapFileError(err)
 	}
 	s.moveFileColours(r.Context(), src, dst)
+	s.holdReplacedVersions(r.Context(), dst, replaced)
 	s.moveFileVersions(r.Context(), src, dst)
 	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
-	respondReplaced(w, replaced)
+	s.respondMoved(w, dst, replaced)
 	return nil
 }
 
@@ -396,8 +415,9 @@ func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) error {
 		s.settleReplaced(replaced, true)
 		return mapFileError(err)
 	}
+	s.holdReplacedVersions(r.Context(), dst, replaced)
 	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
-	respondReplaced(w, replaced)
+	s.respondMoved(w, dst, replaced)
 	return nil
 }
 
