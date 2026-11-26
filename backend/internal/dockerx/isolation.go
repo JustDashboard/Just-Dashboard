@@ -4,8 +4,8 @@ import (
 	"context"
 	"errors"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/errdefs"
 )
 
 // StopOwnedForIsolation preserves the container and its data, but prevents a
@@ -19,7 +19,7 @@ func (c *Client) StopOwnedForIsolation(ctx context.Context, id string, labels ma
 		return err
 	}
 	detail, err := cli.ContainerInspect(ctx, id)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -37,23 +37,23 @@ func (c *Client) StopOwnedForIsolation(ctx context.Context, id string, labels ma
 		RestartPolicy: container.RestartPolicy{Name: container.RestartPolicyDisabled},
 	})
 	if detail.State != nil && detail.State.Paused {
-		if err := cli.ContainerUnpause(ctx, id); err != nil && !errdefs.IsNotModified(err) {
+		if err := cli.ContainerUnpause(ctx, id); err != nil && !cerrdefs.IsNotModified(err) {
 			return errors.Join(updateErr, err)
 		}
 	}
 	grace := 5
 	stopErr := cli.ContainerStop(ctx, id, container.StopOptions{Timeout: &grace})
-	if errdefs.IsNotFound(stopErr) {
+	if cerrdefs.IsNotFound(stopErr) {
 		return nil
 	}
-	if errdefs.IsNotModified(stopErr) {
+	if cerrdefs.IsNotModified(stopErr) {
 		stopErr = nil
 	}
 	if err := errors.Join(updateErr, stopErr); err != nil {
 		return err
 	}
 	detail, err = cli.ContainerInspect(ctx, id)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {

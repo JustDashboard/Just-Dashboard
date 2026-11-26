@@ -8,7 +8,7 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 )
@@ -259,7 +259,7 @@ func (b *DockerArtifactBackend) ImageUse(ctx context.Context, reference string) 
 	}
 	detail, err := b.docker.InspectImage(ctx, reference)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return ImageUse{}, ErrImageGone
 		}
 		return ImageUse{}, err

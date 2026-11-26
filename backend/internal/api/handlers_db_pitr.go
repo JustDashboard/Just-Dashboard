@@ -17,7 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -196,7 +196,7 @@ func (s *Server) readDBPITR(ctx context.Context, conn *dbConnection, dsn string)
 		// A copy kept beside the server is a database of its own, and is
 		// removed like one; once it is gone it is not listed here.
 		if restore.State == "ready" {
-			if _, err := s.modules.docker.Inspect(ctx, restore.Container); errdefs.IsNotFound(err) {
+			if _, err := s.modules.docker.Inspect(ctx, restore.Container); cerrdefs.IsNotFound(err) {
 				_ = s.deletePITRRestore(ctx, restore.ID)
 				continue
 			}

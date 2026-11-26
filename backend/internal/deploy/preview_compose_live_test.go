@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // livePreviewComposeIsolation previews a two-service Compose release whose
@@ -300,7 +300,7 @@ secrets:
 			t.Fatalf("cleanup left volume %s", volume.Name)
 		}
 	}
-	if _, err := client.InspectNetwork(ctx, previewNetworkName(environmentID)); !errdefs.IsNotFound(err) {
+	if _, err := client.InspectNetwork(ctx, previewNetworkName(environmentID)); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("the preview network survived cleanup: %v", err)
 	}
 	if out, err := liveDockerOutput(ctx, "network", "ls", "--quiet", "--filter", "label=com.docker.compose.project="+fmt.Sprintf("jd-e%d", environmentID)); err != nil || strings.TrimSpace(string(out)) != "" {
