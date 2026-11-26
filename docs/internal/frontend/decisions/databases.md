@@ -134,7 +134,9 @@ had no scale and read as noise. A card with no size known says nothing of it, an
 stands as tall as the rest. A collector that could not read
 (*Found on this server*) is drawn as the product draws any missing thing: Docker's own unavailable
 state with the step that fixes it (`DockerMissing`), the daemon's sentence folded away, and no
-claim that everything found is connected. A database home starts with its
+claim that everything found is connected. A Docker that answers its ping while its listing failed
+is that collector's own failure instead, with what it answered and *Try again*, until the inventory
+reports it read. A database home starts with its
 header, then a picture of how it is used with one line each for what it runs as, where it is reachable
 from and its dumps, its recorded activity as lines, its server log, its rankings and the server's
 other databases (below). Activity is recorded by the backend every 30 seconds
