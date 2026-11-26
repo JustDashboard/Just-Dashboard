@@ -6,17 +6,19 @@ import type { Certificate, Listener, StreamStatus, VHost } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
 import { useShortcuts } from "@/hooks/use-shortcuts"
-import { ProxyProvider, type ProxyStatus } from "@/components/proxy/proxy-context"
+import { ProxyProvider, useProxyStatusRead } from "@/components/proxy/proxy-context"
 import { reading } from "@/components/proxy/freshness"
 import { useConfigTest } from "@/components/proxy/test-result"
 
 /**
- * The proxy is nine pages — the overview, the sites, the certificates, what
+ * The proxy is ten pages — the overview, the sites, the certificates, what
  * a visitor actually gets over TLS, the non-HTTP streams, every listening
- * port, the traffic, the alerts, and nginx's configuration as files. The
- * rail lists them; this layout holds what they share.
+ * port, the tunnel, the traffic, the alerts, and nginx's configuration as
+ * files. The rail lists them, less Streams and Configuration on a server with
+ * no nginx (`needs` in `shell/nav.ts`); this layout holds what they share.
  *
- * It polls which proxy this host runs, because the site builder needs nginx
+ * It polls which proxy this host runs (one read shared with the rail and the
+ * palette, `useProxyStatusRead`), because the site builder needs nginx
  * and both it and the Overview read that. It does not gate the section:
  * certificates and ports are real questions with or without a proxy installed.
  *
@@ -28,10 +30,7 @@ import { useConfigTest } from "@/components/proxy/test-result"
 export default function ProxyLayout({ children }: { children: React.ReactNode }) {
   const { can } = useAuth()
   const admin = can("system.admin")
-  const status = usePoll(
-    (signal) => reading(get<ProxyStatus>("/proxy/status", undefined, signal)),
-    60_000,
-  )
+  const status = useProxyStatusRead(60_000)
   const vhosts = usePoll(
     (signal) => reading(get<VHost[]>("/proxy/vhosts", undefined, signal)),
     30_000,

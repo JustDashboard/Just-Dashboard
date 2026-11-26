@@ -12,6 +12,23 @@ export const availability = {
   certbot: true,
 }
 
+/**
+ * A server whose apps are deployments behind the Docker Caddy ingress and
+ * nothing else: no nginx, no certbot, and `caddy` true because the backend
+ * sets it whenever the ingress runs.
+ */
+export const ingressOnly = {
+  ...availability,
+  nginx: false,
+  nginxVersion: "",
+  caddy: true,
+  certbot: false,
+  ingressContainer: "just-dashboard-ingress",
+  ingressId: "0f3c9a51b2d4",
+  ingressStartedAt: "2026-11-20T08:00:00Z",
+  ingressState: "running",
+}
+
 /** `nginx -t` passing, as the config test and a reload's test answer it. */
 export const passingTest = {
   valid: true,

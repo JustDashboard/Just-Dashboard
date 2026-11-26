@@ -375,7 +375,9 @@ only renderer/executor/validation authority for their feature.
   the names, method, DNS provider and lineage, never a credential); a reuse or a refusal before
   ordering changes nothing and is not. Preflight asks the same question for an uncovered wildcard on
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
-  blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
+  blocked with the refusal and a deep link to `/proxy/certificates?tab=dns`, where a provider's
+  credentials are saved (the DNS-challenge `certificate_automatic` and `dns_record_missing` link there
+  too, and `domain_link_missing` to `/proxy/sites?q=<hostname>`); a covered one is
   `certificate_available`.
   **The work starts while the build runs** (`certificate_prewarm.go`). The domains are in the stored
   plan before `build_artifact`, so that step starts the same `EnsureDeploymentCertificate` in the
@@ -1663,7 +1665,21 @@ only renderer/executor/validation authority for their feature.
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
   availability. A deploy re-runs those host observations from its frozen configuration in `analyze_plan`
   — alongside the source checks above — before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
-  treated as reusable ownership. HTTPS activation resolves an already-issued certificate/key pair through
+  treated as reusable ownership. Preflight reads which sites already answer each managed domain
+  (`DomainObservation.claims`, `deploy/leftover_routes.go`) and asks the API layer which deployment
+  writes each route (`RouteOwners`, the same `markDeploymentRoutes` the Sites list uses). A domain held
+  only by **leftover** routes — `just-dashboard-env-<id>.conf` whose environment is gone or archived —
+  passes as `domain_takeover`, whose words name every name those routes answer (`DomainClaim.names`),
+  since each whole route goes and a name this deployment does not claim stops answering with it; and
+  activation removes those routes (`SnapshotDeploymentRoute`, then
+  `RemoveDeploymentRoute`) just before `ApplyDeploymentRoute` writes its own, keeping the certificate
+  since the new route serves the same name, and puts them back if the release does not go live — a
+  refused cutover, a failed public-route check or route verification, the tailnet step or the commit —
+  once the failure's recovery has taken its own route out (not where that failed, which would leave two
+  routes claiming one name). Anything else is
+  `domain_conflict`, naming the claimer: a live deployment's route links its Domains settings, any other
+  site its own page (`/proxy/sites/<name>`). When the owners cannot be read nothing counts as a
+  leftover, so a live route is never taken over. HTTPS activation resolves an already-issued certificate/key pair through
   Proxy and fails closed if it no longer exists; deployment activation never invents certificate paths or
   performs issuance itself.
 - A configured backup dependency executes as a step before candidate start. A linked database whose

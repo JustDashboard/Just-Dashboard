@@ -8,7 +8,7 @@ import { errorRateTone, share, trafficLabel } from "@/components/proxy/site-traf
 import { Tag } from "@/components/tag"
 import { certPathProduct, siteProduct } from "@/components/proxy/marks"
 import type { BackendKind } from "@/components/proxy/route-map"
-import { FEATURE_LABEL, activeOwner } from "@/components/proxy/site-details"
+import { FEATURE_LABEL, isLeftover } from "@/components/proxy/site-details"
 import { isDown } from "@/components/proxy/site-filters"
 import { useProjectFavicon } from "@/components/project-mark"
 
@@ -102,7 +102,8 @@ export function SiteTLS({ vhost }: { vhost: VHost }) {
  * a verb changed that nginx did not reload, so a running nginx still has it
  * as it was; and `notLive` is what nginx itself shows of that — the file
  * changed since the configuration it is running was loaded — in words such
- * as "saved, not live".
+ * as "saved, not live". A route its deployment left is `leftover` whatever
+ * else is true of it, since removing it is what there is to do.
  */
 export function ServingStatus({
   vhost,
@@ -139,6 +140,10 @@ export function ServingStatus({
     )
   }
   if (notLive) return <Status verdict="warning" label={notLive} />
+  // Before "serving": the route answers, which is the trouble with it. The
+  // deployment that wrote it is gone, and a green word beside it read as a
+  // site in use.
+  if (isLeftover(vhost)) return <Status verdict="warning" label="leftover" />
   if (vhost.enabled && vhost.maintenance) return <Status tone="warning" label="maintenance" />
   if (vhost.kind === "nginx" && !vhost.enabledPath && vhost.enabled) {
     // conf.d: every present .conf file is active and there is nothing to
@@ -153,24 +158,11 @@ export function ServingStatus({
 }
 
 /**
- * Who writes the site, where that is a deployment; otherwise where an nginx
- * site lives, where that is not the ordinary sites-available.
- */
-export function siteKind(vhost: VHost): string {
-  const owner = activeOwner(vhost)
-  if (owner) return `Managed by ${owner.project} · ${owner.environment}`
-  if (vhost.kind !== "nginx") return vhost.path ? "Caddyfile" : "Docker Caddy ingress"
-  if (vhost.layout === "conf.d") return "nginx site in conf.d"
-  if (vhost.layout === "sites-enabled") return "nginx site in sites-enabled"
-  return "nginx site"
-}
-
-/**
  * What the rest of the card cannot say about where the site comes from and
  * how nginx reaches it: a name in sites-enabled that does not serve its file,
  * the other names that do, a file the editor will not open because it lives
- * outside the nginx directory, a deployment that wrote the route and is
- * archived, and a file still as its package installed it.
+ * outside the nginx directory, and a file still as its package installed
+ * it. Who writes the route is the page's own line (`SiteOriginLine`).
  */
 export function SiteNotes({ vhost }: { vhost: VHost }) {
   const link = <span className="font-mono">sites-enabled/{vhost.name}</span>
@@ -228,28 +220,6 @@ export function SiteNotes({ vhost }: { vhost: VHost }) {
           </span>{" "}
           links to <span className="font-mono break-all">{vhost.resolvesTo}</span>, outside the
           nginx directory, so this page does not open it.
-        </>
-      ),
-    })
-  }
-  const owner = vhost.owner
-  if (activeOwner(vhost) && owner) {
-    lines.push({
-      key: "owner",
-      text: (
-        <>
-          The next deploy of <b className="font-medium text-foreground">{owner.project}</b> writes
-          this route again, and an edit made here is lost then.
-        </>
-      ),
-    })
-  } else if (owner?.archived) {
-    lines.push({
-      key: "owner",
-      text: (
-        <>
-          Written by <b className="font-medium text-foreground">{owner.project}</b> ·{" "}
-          {owner.environment}, which is archived: nothing deploys it any more.
         </>
       ),
     })

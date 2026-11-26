@@ -16,6 +16,11 @@ export type Certificate = {
   usedBy: string[]
   /** The streams serving TLS with this file. */
   usedByStreams?: string[]
+  /**
+   * Each of `usedBy` in words, with where it opens: a deployment's route as
+   * its project and environment. Absent from older backends.
+   */
+  usedByLabels?: CertificateUser[]
   /** SHA-256 of the DER and the serial, in openssl's uppercase colon form. */
   fingerprint?: string
   serial?: string
@@ -25,6 +30,25 @@ export type Certificate = {
   localCA?: boolean
   /** A Caddy certificate's release copies: what deployments of its domain were activated with. */
   evidence?: CertificateEvidence[]
+}
+
+/** One site or route that serves a certificate, as the page says it. */
+export type CertificateUser = {
+  /** The entry of `usedBy` this describes. */
+  site: string
+  label: string
+  href: string
+  /** A deployment's route that nothing deploys any more. */
+  leftover?: boolean
+}
+
+/** What deleting a certificate Caddy held took with it. */
+export type CaddyCertificateDelete = {
+  name: string
+  path: string
+  copies: string[]
+  keptCopies: string[]
+  copiesError?: string
 }
 
 /** One of Caddy's caddy-<hash> release copies, kept beside the imports. */

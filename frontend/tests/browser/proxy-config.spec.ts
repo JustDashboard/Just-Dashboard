@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { availability, json, mockProxy, user } from "./proxy-fixtures"
+import { availability, ingressOnly, json, mockProxy, user } from "./proxy-fixtures"
 import { mockConfigViews } from "./fixtures/proxy/config-views"
 import { risen } from "./risen"
 
@@ -270,4 +270,22 @@ test("a Caddy server is sent to Sites, where its Caddyfile opens", async ({ page
     "href",
     "/proxy/sites",
   )
+})
+
+test("behind the Caddy ingress the page names who writes its routes, not a Caddyfile", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/status", (route) => json(route, ingressOnly))
+  await page.goto("/proxy/config")
+  const missing = page.locator("[data-slot='missing-thing']")
+  await expect(missing).toContainText("Deployments write the Caddy ingress's routes")
+  await expect(missing.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/proxy/sites")
+  await expect(missing.getByRole("link", { name: "Deployments" })).toHaveAttribute(
+    "href",
+    "/deploy",
+  )
+  // The ingress has no Caddyfile on the server, though the status says caddy.
+  await expect(page.getByText("Its one Caddyfile opens from Sites")).toHaveCount(0)
+  await expect(page.getByRole("button", { name: /^Install nginx/ })).toHaveCount(0)
 })

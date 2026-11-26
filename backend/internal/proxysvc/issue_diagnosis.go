@@ -202,7 +202,7 @@ func classify(d *IssuanceDiagnosis, kind string, local func(net.IP) (bool, bool)
 	case kind == "unauthorized" || strings.Contains(lower, "invalid response") || strings.Contains(lower, "acme-challenge"):
 		set(d, StageChallenge, "Serving the challenge file", "The web server answering the name on port 80",
 			"The authority reached a web server that did not serve the challenge file: the name may land on another site, a redirect may leave the path, or the webroot may be another folder.",
-			DiagnosisLink{"Which site answers the name", "/proxy/sites"},
+			DiagnosisLink{"Which site answers the name", "/proxy/sites?q=" + url.QueryEscape(name)},
 			DiagnosisLink{"Ask the challenge path yourself", "/network/tools?tool=http&target=" + url.QueryEscape("http://"+name+"/.well-known/acme-challenge/test")})
 	case strings.Contains(lower, "account") && failureLineRe.MatchString(lower) || strings.Contains(lower, "externalaccountrequired") || strings.Contains(lower, "invalidcontact"):
 		set(d, StageAccount, "The ACME account", "The ACME account and its authority",

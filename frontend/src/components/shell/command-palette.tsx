@@ -23,7 +23,7 @@ import { usePoll } from "@/hooks/use-poll"
 import { sectionOf } from "@/lib/sidebar-sections"
 import { NAV, PERSONAL_NAV, navLocation, type NavEntry, type NavItem } from "@/components/shell/nav"
 import { PaletteModal } from "@/components/modal"
-import type { ProxyStatus } from "@/components/proxy/proxy-context"
+import { useProxyStatusRead } from "@/components/proxy/proxy-context"
 import { warningCount } from "@/components/proxy/config-test"
 import { reloadToast } from "@/components/proxy/load-proof"
 import { engineFor, sectionHref } from "@/components/database/engine"
@@ -289,12 +289,9 @@ function Palette({
     [],
     { enabled: inside !== null && can("read") },
   )
-  const proxyStatus = usePoll(
-    (signal) => get<ProxyStatus>("/proxy/status", undefined, signal),
-    0,
-    [],
-    { enabled: can("system.admin") },
-  )
+  // The rail's read of the same key (`needsNginx` in app-sidebar) is this one.
+  const proxyStatus = useProxyStatusRead(0, can("system.admin")).data?.value
+  const noNginx = proxyStatus?.nginx === false
   const [known] = useSessionState<Record<string, KnownDatabase>>(KNOWN_DATABASES_KEY, {})
   const databaseItems = reads.find((read) => read.source.kind === "database")?.items ?? []
   const current = databaseItems.find((item) => item.id === `database:${inside}`)
@@ -319,6 +316,10 @@ function Palette({
         (entry) =>
           entry.href === undefined || !entry.hubLink || Boolean(hub) || entry.href === here,
       )
+      .filter(
+        (entry) =>
+          entry.href === undefined || entry.needs !== "nginx" || !noNginx || entry.href === here,
+      )
       .map(({ href, title, icon }) => ({ href, title, icon }))
   const pages: PaletteItem[] = [
     ...NAV.flatMap((group) =>
@@ -334,7 +335,11 @@ function Palette({
           product: PAGE_PRODUCTS[page.href],
           // A hub-only page stays out of the empty list until there is a hub,
           // and is found by name: the way to connect one from this side.
-          explicit: isHidden(page.href) || (Boolean(page.hubLink) && !hub),
+          // So does a page that reads nginx on a server known to have none.
+          explicit:
+            isHidden(page.href) ||
+            (Boolean(page.hubLink) && !hub) ||
+            (page.needs === "nginx" && noNginx),
           neighbours: parent
             ? { label: parent.title, pages: shown(parent.children ?? [], page.href) }
             : { label: group.label, pages: shown(group.items, page.href) },
@@ -411,7 +416,7 @@ function Palette({
       keys: command.keys,
       run: () => requestAnimationFrame(() => requestAnimationFrame(command.run)),
     }))
-  if (proxyStatus.data?.nginx && can("system.admin")) {
+  if (proxyStatus?.nginx && can("system.admin")) {
     commands.push(
       {
         id: "command:reload-nginx",

@@ -25651,7 +25651,7 @@
     },
     "/deploy/{id}/permanent": {
       "delete": {
-        "description": "Destructive. The deployment's name is typed as its confirmation, sent in the X-Confirm header as the dashboard sends it.",
+        "description": "Destructive. The deployment's name is typed as its confirmation, sent in the X-Confirm header as the dashboard sends it. With ?routes=remove the proxy routes its environments wrote are removed too, after the records, and the answer is 200 with routesRemoved and routeErrors (each route that was not removed, with the reason).",
         "operationId": "deployPurge",
         "responses": {
           "204": {

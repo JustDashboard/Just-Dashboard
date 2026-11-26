@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test"
 import { existsSync } from "node:fs"
-import { findingNavigation } from "./finding-destinations"
+import { findingLinkLabel, findingNavigation } from "./finding-destinations"
 
 test("legacy owner links open the resource itself and keep its requested view", () => {
   expect(findingNavigation("/docker/containers?container=abc&tab=logs")).toEqual({
@@ -18,6 +18,31 @@ test("legacy owner links open the resource itself and keep its requested view", 
   expect(findingNavigation("/network/tools?tool=dns&target=example.test&record=CAA").href).toBe(
     "/network/tools?tool=dns&target=example.test&record=CAA",
   )
+})
+
+test("a proxy or domain link is named for the thing it lands on", () => {
+  const label = (href) => findingNavigation(href)?.label
+  expect(label("/proxy/sites")).toBe("Open sites")
+  expect(label("/proxy/sites?q=shop.example.test")).toBe("Open sites")
+  expect(label("/proxy/sites/shop")).toBe("Open site")
+  expect(label("/proxy/certificates")).toBe("Open certificates")
+  expect(label("/proxy/certificates?tab=dns")).toBe("Open certificates")
+  expect(label("/proxy/certificates/shop.example.test")).toBe("Open certificate")
+  expect(label("/proxy/ports/tcp%3A0.0.0.0%3A443")).toBe("Open port")
+  expect(label("/proxy/streams/postgres")).toBe("Open stream")
+  expect(label("/deploy/7/settings/domains")).toBe("Open domains")
+  // The other settings views keep the general words.
+  expect(label("/deploy/7/settings/variables")).toBe("Review project settings")
+  expect(findingNavigation("/proxy/sites?q=shop.example.test").href).toBe(
+    "/proxy/sites?q=shop.example.test",
+  )
+})
+
+test("a finding's link falls back to the old words only for an unnamed address", () => {
+  expect(findingLinkLabel("/proxy/sites/shop")).toBe("Open site")
+  expect(findingLinkLabel("/deploy/7/settings/domains")).toBe("Open domains")
+  expect(findingLinkLabel("/not-a-page")).toBe("Open owning page")
+  expect(findingLinkLabel("https://elsewhere.test")).toBe("Open owning page")
 })
 
 test("unknown or external owners get no pretend in-dashboard fix", () => {

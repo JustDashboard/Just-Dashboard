@@ -169,7 +169,7 @@ describe("diagnosisLinks", () => {
     ])
     expect(links({ stage: "handshake", reason: "plain-http", where: "here" })).toEqual([
       ["Listening ports", "/proxy/ports?q=:443"],
-      ["Sites", "/proxy/sites"],
+      ["Sites", "/proxy/sites?q=app.example.com"],
     ])
   })
   test("plain HTTP on port 80 is sent to 443, wherever it answered", () => {
