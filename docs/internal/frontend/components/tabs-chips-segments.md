@@ -77,7 +77,9 @@ that repaint with `forced-color-adjust: none`: the chip's face, a segment's own 
 slides under the segments, and a `TabsTrigger` in either look. A chip's ring is drawn outside it, on
 the page, so it is Highlight; a segment's and a kit tab's ring is inset, inside the Highlight face, so
 it is HighlightText. Normal colours are untouched. `components/chosen-forced.test.js` and
-`forced-colours.spec.ts` hold it.
+`forced-colours.spec.ts` hold it. The two strips drawn by hand as chips take the same classes: a
+site's Settings parts (`proxy/site-settings.tsx`, whose count takes HighlightText there too) and the
+log window's presets (`logs/time-window.tsx`), each with its own case in `forced-colours.spec.ts`.
 
 ## ViewTabs
 

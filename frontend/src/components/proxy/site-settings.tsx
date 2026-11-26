@@ -45,6 +45,17 @@ const MARK_TONE: Record<PartMark["tone"], string> = {
   muted: "",
 }
 
+// Forced colours (Windows High Contrast) repaint every fill as the page and
+// every ink as the text's, so the part you are on read as any other. There it
+// takes the system's selection, Highlight under HighlightText, kept from that
+// repaint, as a chosen `FilterChip` does (`components/chips.tsx`); its count
+// takes the same ink, since its tone is a colour forced colours have taken
+// from every other part too. The ring is outside it, on the page, so it is
+// Highlight. Normal colours keep the face with no outline. Whole class names,
+// for Tailwind.
+const CHOSEN_FORCED =
+  "forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none forced-colors:[--ring:Highlight] forced-colors:[&_[data-slot=chip-count]]:text-[HighlightText]"
+
 /**
  * The parts of a site's Settings. Links rather than buttons, so each part
  * has an address, opens in a new tab, and the browser's Back steps out of
@@ -96,7 +107,7 @@ export function SettingsParts({
             className={cn(
               "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-md border px-2.5 text-hint font-medium whitespace-nowrap focus-ring transition-colors",
               here
-                ? "border-transparent bg-chosen text-foreground"
+                ? cn("border-transparent bg-chosen text-foreground", CHOSEN_FORCED)
                 : "border-input text-muted-foreground hover:bg-row-hover hover:text-foreground",
             )}
           >

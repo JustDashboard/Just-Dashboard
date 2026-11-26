@@ -1,5 +1,6 @@
 import { expect, test, type Locator, type Page } from "@playwright/test"
 import { mockFleet } from "./database-fleet-fixture"
+import { PG, mockLensLogs } from "./logs-lens-fixture"
 import { mockProxy } from "./proxy-fixtures"
 import { mockServices } from "./services-fixture"
 
@@ -92,6 +93,39 @@ test("under forced colours the chosen tab of the shared kit is the system's sele
   await expect(chosen).toBeVisible({ timeout: 60_000 })
   await expectChosenMark(page, chosen, list.locator("[data-state=inactive]").first())
   await expectRingSeen(page, chosen, chosen)
+})
+
+test("under forced colours the site settings part you are on is the system's selection", async ({
+  page,
+}) => {
+  // Drawn by hand as a chip strip: the part you are on was a 7% white face
+  // forced colours repaint as the page, its ink and edge the same as the rest.
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites/app.example.com?tab=settings")
+  const parts = page.getByRole("navigation", { name: "Parts of the settings" })
+  const here = parts.locator("a[aria-current=page]")
+  await expect(here).toBeVisible({ timeout: 60_000 })
+  await page.mouse.move(0, 0)
+  await expectChosenMark(page, here, parts.locator("a:not([aria-current])").first())
+  await expectRingSeen(page, here, "page")
+})
+
+test("under forced colours the chosen log window preset is the system's selection", async ({
+  page,
+}) => {
+  await mockLensLogs(page)
+  await page.goto(`/logs?source=${encodeURIComponent(PG)}`)
+  const trigger = page.getByRole("button", { name: /^Time window:/ })
+  const presets = page.getByRole("group", { name: "Presets" })
+  await trigger.click()
+  await presets.getByRole("button").first().click()
+  await expect(presets).toHaveCount(0)
+  await trigger.click()
+  const chosen = presets.locator("button[aria-pressed=true]")
+  await expect(chosen).toBeVisible()
+  await page.mouse.move(0, 0)
+  await expectChosenMark(page, chosen, presets.locator("button[aria-pressed=false]").first())
+  await expectRingSeen(page, chosen, "page")
 })
 
 test("under forced colours the shared ring is drawn only on what has the keyboard", async ({

@@ -13,6 +13,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 
 export type WindowPreset = { id: string; label: string; short: string }
 
+// Forced colours (Windows High Contrast) repaint every fill as the page and
+// every ink as the text's, so the chosen preset read as any other. There it
+// takes the system's selection, Highlight under HighlightText, kept from that
+// repaint, as a chosen `FilterChip` does (`components/chips.tsx`). The ring is
+// outside it, on the popover, so it is Highlight. Normal colours keep the face
+// with no outline. Whole class names, for Tailwind.
+const CHOSEN_FORCED =
+  "forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none forced-colors:[--ring:Highlight]"
+
 /**
  * datetime-local wants the browser's own clock — to the second, since a
  * column zoomed out of a fifteen-minute chart is fifteen seconds wide and at
@@ -151,7 +160,10 @@ export function TimeWindow({
                   className={cn(
                     "numeric h-8 rounded-md border text-body focus-ring transition-colors",
                     on
-                      ? "border-transparent bg-chosen font-medium text-foreground"
+                      ? cn(
+                          "border-transparent bg-chosen font-medium text-foreground",
+                          CHOSEN_FORCED,
+                        )
                       : "border-input bg-control text-muted-foreground hover:bg-control-hover hover:text-foreground",
                   )}
                 >
