@@ -1,7 +1,8 @@
 "use client"
 
 import { forwardRef, useEffect, useId, useRef, useState } from "react"
-import { AnimatePresence, motion, useIsPresent, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion, useIsPresent } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { IconAction } from "@/components/icon-action"
 import { CornerDownLeft, Cross, FolderOpen, MagnifyingGlass } from "@/components/icons"
 import { get } from "@/lib/api"

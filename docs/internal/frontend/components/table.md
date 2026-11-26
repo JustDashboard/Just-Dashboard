@@ -104,7 +104,10 @@ A table has one phone answer, chosen by what its rows are (MOB-11):
   `Workspace` already puts the keyboard back on). A row holding one is no tab stop itself. A row
   that holds none stays a stop so it can be reached, and should get a name control, or at least an
   `aria-label`. Before 0.9.0 every activatable row was a stop beside its own name button: two
-  presses of Tab a row, the first reading every cell as one name (A11Y-10).
+  presses of Tab a row, the first reading every cell as one name (A11Y-10). `RowLink` passes
+  `ROW_NAME` and any other attribute on to its button; until 0.9.1 it dropped them, and the
+  Docker containers table stayed two stops a row (spec `docker-ui.spec.ts`, *a container's row
+  is one Tab stop*).
 - **Every header cell has a name**: a visible title, or `label` (axe `empty-table-header`).
 - **A sortable head says its order**: `aria-sort` on the `th`, and its words are a real button with
   the focus ring. There is one `SortHead`; it replaced five copies, one of which said nothing to a

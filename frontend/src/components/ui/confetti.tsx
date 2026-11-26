@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useImperativeHandle, useRef, type Ref } from "react"
 import confetti from "canvas-confetti"
 import type { CreateTypes, Options } from "canvas-confetti"
+import { reducedMotion } from "@/lib/motion"
 
 export type ConfettiRef = { fire: (options?: Options) => void }
 
@@ -31,7 +32,7 @@ export function Confetti({ ref, className }: { ref: Ref<ConfettiRef>; className?
   }, [])
 
   const fire = useCallback((options: Options = {}) => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return
+    if (reducedMotion()) return
     const style = getComputedStyle(document.documentElement)
     const colors = ["--brand", "--signal", "--chart-4", "--chart-3", "--success"].map((name) =>
       hex(style.getPropertyValue(name).trim()),

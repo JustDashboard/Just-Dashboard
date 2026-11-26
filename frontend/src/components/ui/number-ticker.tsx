@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, type ComponentPropsWithoutRef } from "react"
-import { useInView, useMotionValue, useReducedMotion, useSpring } from "motion/react"
+import { useInView, useMotionValue, useSpring } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 
 import { cn } from "@/lib/utils"
 
@@ -39,9 +40,16 @@ export function NumberTicker({
 
   useEffect(() => {
     if (!isInView) return
+    // Asked for less motion after the figure mounted, the next value is
+    // written rather than counted to.
+    if (reduced) {
+      motionValue.jump(value)
+      springValue.jump(value)
+      return
+    }
     const timer = setTimeout(() => motionValue.set(value), delay * 1000)
     return () => clearTimeout(timer)
-  }, [motionValue, isInView, delay, value])
+  }, [motionValue, springValue, isInView, delay, value, reduced])
 
   // Written only when the figure changes at the precision shown: every write
   // is a DOM mutation the browser answers with style and layout.

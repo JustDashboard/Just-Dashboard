@@ -234,7 +234,9 @@ it; an edit adds Test with an optional path and key, which shows the version fou
 environment variable's editor, with *Reference* on, offers the connected stores with path, key and an
 optional version (`StoreReferencePicker`, `components/deploy/secret-store-picker.tsx`), which makes the
 variable secret; a variable reading one draws the store's mark and name, linked here, and where in it the
-key is (`StoreReferenceLabel`). Checked by `deploy-secret-stores.spec.ts`. Settings → Runtime exposes memory,
+key is (`StoreReferenceLabel`). A first read that fails is one settled failure: the list's
+`ErrorState` (*Could not read the secret stores*, with Try again even for a plain network failure)
+and no picture waiting over it. Checked by `deploy-secret-stores.spec.ts`. Settings → Runtime exposes memory,
 CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
 periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each
 protected volume's backup standing (`settings/volume-backup.ts`). The Runtime page's service cards carry the

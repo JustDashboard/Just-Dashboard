@@ -86,7 +86,7 @@ Each is a best-practice change that touches a decision above. The operator answe
 | T7 | Help text under risky settings | **Not adopted.** No help text under titles. The reasoning goes in an `Explain`; a confirmation names its object. | D14 |
 | T8 | Autosave for single toggles | **Not adopted.** Settings keep one save bar. | D8 |
 | T9 | Move `--chart-5` off the success hue | **Adopted.** `--chart-5`, the RX colour of every in/out pair, moves to a cyan near hue 200. | [`foundations/colour.md`](foundations/colour.md) |
-| T10 | Keyboard alternatives on canvases (WCAG 2.5.7) | **Adopted.** Arrow keys slide the server map, the databases map, a database's Diagram and a drawing, and move what Enter or a click picked on them. | [`foundations/layout-phone.md`](foundations/layout-phone.md) |
+| T10 | Keyboard and single-pointer alternatives on canvases (WCAG 2.1.1, 2.5.7) | **Adopted.** Arrow keys slide the server map, the databases map, a database's Diagram and a drawing, and move what Enter or a click picked on them (2.1.1). The keys are not a single pointer: on the two maps the inspector's Move buttons carry the chosen box or system a press at a time (2.5.7, 0.9.1); the Diagram and a drawing have no such way yet. | [`foundations/layout-phone.md`](foundations/layout-phone.md), [`patterns/accessibility.md`](patterns/accessibility.md) |
 
 ## What the linter refuses today
 

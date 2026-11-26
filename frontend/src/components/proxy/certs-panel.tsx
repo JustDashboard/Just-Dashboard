@@ -63,6 +63,7 @@ import { IssueCommand } from "@/components/proxy/private-cert-dialog"
 import { ReloadHookOption, RenewalRecord, RenewalRuns } from "@/components/proxy/renewal-health"
 import { SigningRequests } from "@/components/proxy/signing-requests"
 import { WatchedDomains } from "@/components/proxy/watched-domains"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * The width of a view that manages rather than lists: these were drawn for a
@@ -158,9 +159,7 @@ export function CertificatesPage() {
   const shown = views.some((view) => view.key === tab) ? tab : "certificates"
   const showRuns = () => {
     setTab("renewal")
-    requestAnimationFrame(() =>
-      document.getElementById(RUNS_ID)?.scrollIntoView({ behavior: "smooth", block: "start" }),
-    )
+    requestAnimationFrame(() => scrollIntoViewRespectingMotion(document.getElementById(RUNS_ID)))
   }
 
   return (

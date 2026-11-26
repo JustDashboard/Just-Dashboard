@@ -82,6 +82,7 @@ import { releaseVerbs, runVerbs, type RunVerbKey } from "@/components/deploy/run
 import { DataCopiesPanel, RestoreDataDialog, useDataCopies } from "@/components/deploy/data-copies"
 import { dataPointTag } from "@/components/deploy/data-rollback-model"
 import { badgeOf } from "@/components/deploy/vulnerabilities-model"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 type StatusFilter = "all" | "ready" | "failed" | "cancelled"
 
@@ -534,7 +535,7 @@ export function ProjectDeployments() {
           mark={sourceProduct(deployment, project.configuration?.source)}
           onFailureClick={() => {
             changeFilter("failed")
-            list.current?.scrollIntoView({ block: "start", behavior: "smooth" })
+            scrollIntoViewRespectingMotion(list.current)
           }}
         />
       )}

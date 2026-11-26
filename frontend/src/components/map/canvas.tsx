@@ -45,7 +45,7 @@ import { motionMs } from "@/lib/motion"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
-import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
+import { arrowOf, moved, panned, type Direction } from "@/components/map/canvas-keys"
 import { CanvasZoom, CanvasZoomWord, FLOAT } from "@/components/canvas-zoom"
 import { SERVER_BOARD, type MapBoard } from "@/components/map/board"
 import { edgeTypes, type WireData } from "@/components/map/edges"
@@ -685,6 +685,35 @@ export function MapCanvas({
   }
 
   /**
+   * One step of a box (by its id) or a system's frame (`frame:<id>`), kept
+   * as a drag keeps it. The arrow keys come here, and so do the inspector's
+   * Move buttons, the way to place one with a single pointer and no drag
+   * (WCAG 2.5.7).
+   */
+  const moveBy = (subject: string, direction: Direction, shift: boolean) => {
+    if (subject.startsWith("frame:")) {
+      const sid = subject.slice("frame:".length)
+      const p = bySystem.get(sid)
+      if (!p) return
+      update((d) => ({
+        ...d,
+        frames: { ...d.frames, [sid]: moved(d.frames[sid] ?? atlasCorner(p), direction, shift) },
+      }))
+      return
+    }
+    const seat = seats.get(subject)
+    const n = seat && settled.get(seat.system.id)?.nodes.find((node) => node.id === subject)
+    if (!n) return
+    update((d) => ({
+      ...d,
+      positions: {
+        ...d.positions,
+        [subject]: moved(d.positions[subject] ?? { x: n.x, y: n.y }, direction, shift),
+      },
+    }))
+  }
+
+  /**
    * The arrows, while the keyboard is on the canvas (T10): what is picked
    * moves by a step, kept as a drag keeps it — the chosen box, or the frame
    * Enter picked — and with nothing picked the picture slides, as on the
@@ -702,24 +731,8 @@ export function MapCanvas({
     const subject = [framePickedRef.current, chosen].find(
       (id) => id && (seats.has(id) || (id.startsWith("frame:") && bySystem.has(id.slice(6)))),
     )
-    if (!bare && subject?.startsWith("frame:")) {
-      const sid = subject.slice("frame:".length)
-      const p = bySystem.get(sid)!
-      update((d) => ({
-        ...d,
-        frames: { ...d.frames, [sid]: moved(d.frames[sid] ?? atlasCorner(p), direction, shift) },
-      }))
-    } else if (!bare && subject) {
-      const seat = seats.get(subject)!
-      const n = settled.get(seat.system.id)?.nodes.find((node) => node.id === subject)
-      if (!n) return true
-      update((d) => ({
-        ...d,
-        positions: {
-          ...d.positions,
-          [subject]: moved(d.positions[subject] ?? { x: n.x, y: n.y }, direction, shift),
-        },
-      }))
+    if (!bare && subject) {
+      moveBy(subject, direction, shift)
     } else {
       const all = flow.getNodes()
       const next = panned(
@@ -952,6 +965,12 @@ export function MapCanvas({
             node={chosenNode}
             notices={notices ?? undefined}
             kinds={kinds}
+            // What it shows is what its Move buttons carry: the chosen box,
+            // or else the system it is reading, by its frame.
+            onMove={(direction) => {
+              const subject = chosenNode ? chosenNode.id : focusSystem && `frame:${focusSystem.id}`
+              if (subject) moveBy(subject, direction, true)
+            }}
             onKinds={selectKinds}
             onChoose={(id) => {
               choose(id)
