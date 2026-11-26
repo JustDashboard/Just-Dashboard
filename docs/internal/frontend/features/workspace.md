@@ -534,8 +534,8 @@ a strip, swipe and a slideshow; audio plays as a queue whose player is one line 
 foot and keeps playing across folders (`audio-queue.tsx`); a video the browser cannot play says so
 and offers Download (`playable-video.tsx`). Checked by `tests/browser/files-viewing.spec.ts`
 
-**Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`
-and `tests/browser/files-transfer.spec.ts`;
+**Implementation:** files page and `components/files/`, the page's keys decided in the unit-tested
+`keymap.ts`; checked by `tests/browser/files-ui.spec.ts` and `tests/browser/files-transfer.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
 
 A delete moves to the Trash (`delete-flow.tsx`): before the confirmation opens it asks

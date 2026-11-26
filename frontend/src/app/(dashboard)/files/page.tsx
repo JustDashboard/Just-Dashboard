@@ -75,8 +75,8 @@ import { ImageEditorSheet } from "@/components/files/image-editor"
 import { MediaViewer } from "@/components/files/media-viewer"
 import { PathBar } from "@/components/files/path-bar"
 import { useFolderNavigation } from "@/components/files/use-folder-navigation"
-import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
-import { matchName } from "@/components/files/navigation"
+import { filesOwnKeyboard, isTypingTarget, keepsOwnKeys } from "@/components/files/keyboard"
+import { filesKey, moveIndex, type MoveKey } from "@/components/files/keymap"
 import { FilesShortcuts } from "@/components/files/shortcuts-dialog"
 import { PlacesMenu } from "@/components/files/places-menu"
 import { MoreMenu } from "@/components/files/more-menu"
@@ -1243,26 +1243,12 @@ export default function FilesPage() {
   }
 
   /** Vertical arrows follow rendered tile rows, including after a resize. */
-  const moveActive = (
-    key: "ArrowDown" | "ArrowUp" | "ArrowLeft" | "ArrowRight" | "Home" | "End",
-    extend: boolean,
-  ) => {
+  const moveActive = (key: MoveKey, extend: boolean) => {
     if (entries.length === 0) return
     const index = activeEntry ? entries.findIndex((e) => e.path === activeEntry.path) : -1
     const grid = listingElement.current?.querySelector<HTMLElement>("[data-file-grid]")
     const columns = grid ? getComputedStyle(grid).gridTemplateColumns.split(" ").length : 1
-    const step = key === "ArrowDown" || key === "ArrowUp" ? columns : 1
-    const next =
-      key === "Home"
-        ? 0
-        : key === "End"
-          ? entries.length - 1
-          : index < 0
-            ? 0
-            : key === "ArrowDown" || key === "ArrowRight"
-              ? Math.min(entries.length - 1, index + step)
-              : Math.max(0, index - step)
-    const entry = entries[next]
+    const entry = entries[moveIndex(key, index, entries.length, columns)]
     focusEntry(entry)
     if (extend && anchor.current) {
       setSelected(
@@ -1285,178 +1271,123 @@ export default function FilesPage() {
   // read the old history position and went nowhere.
   useLayoutEffect(() => {
     const onKey = (event: KeyboardEvent) => {
-      if (!filesOwnKeyboard(event) || isTypingTarget(event.target)) return
-      const target = event.target as HTMLElement | null
-      const mod = event.metaKey || event.ctrlKey
-      const key = event.key.toLowerCase()
-      if (mod && event.shiftKey && key === "f") {
-        event.preventDefault()
-        setQuickMode("content")
-        setQuickOpen(true)
-        return
-      }
-      if (mod && !event.shiftKey && (key === "p" || key === "f")) {
-        event.preventDefault()
-        setQuickMode("names")
-        setQuickOpen(true)
-        return
-      }
-      if ((event.key === "F5" || (mod && key === "r")) && !event.shiftKey && !event.altKey) {
-        event.preventDefault()
-        reload()
-        return
-      }
-      if ((event.altKey && event.key === "ArrowLeft") || (event.metaKey && key === "[")) {
-        if (navigation.canBack) {
-          event.preventDefault()
+      const owned = filesOwnKeyboard(event)
+      const typing = owned && isTypingTarget(event.target)
+      const plain = !(event.metaKey || event.ctrlKey || event.altKey)
+      const { prevent, action } = filesKey(
+        {
+          key: event.key,
+          code: event.code,
+          metaKey: event.metaKey,
+          ctrlKey: event.ctrlKey,
+          shiftKey: event.shiftKey,
+          altKey: event.altKey,
+          owned,
+          typing,
+          // The keymap reads this only for an unmodified key the listing owns.
+          onControl: owned && !typing && plain && keepsOwnKeys(event.target),
+        },
+        {
+          path,
+          entries,
+          active: activeEntry,
+          selected,
+          clipHeld: !!clip,
+          canWrite,
+          canDestruct,
+          canBack: navigation.canBack,
+          canForward: navigation.canForward,
+          up: parentReachable && parent ? parent : null,
+          view,
+          typed: nameTyping.current,
+          now: performance.now(),
+        },
+      )
+      if (prevent) event.preventDefault()
+      switch (action?.kind) {
+        case "search":
+          setQuickMode(action.mode)
+          setQuickOpen(true)
+          break
+        case "reload":
+          reload()
+          break
+        case "back":
           navigation.back()
-        }
-        return
-      }
-      if ((event.altKey && event.key === "ArrowRight") || (event.metaKey && key === "]")) {
-        if (navigation.canForward) {
-          event.preventDefault()
+          break
+        case "forward":
           navigation.forward()
-        }
-        return
-      }
-      if (event.altKey && event.key === "ArrowUp") {
-        event.preventDefault()
-        if (parentReachable && parent) navigate(parent)
-        return
-      }
-      if (mod && event.shiftKey && key === "n" && canWrite) {
-        event.preventDefault()
-        newFolder()
-        return
-      }
-      if (mod && event.shiftKey && (key === "." || event.code === "Period")) {
-        event.preventDefault()
-        setShowHidden((previous) => !previous)
-        return
-      }
-      if (mod && event.code === "Space" && activeEntry) {
-        event.preventDefault()
-        toggleSelected(activeEntry, !selected.has(activeEntry.path))
-        return
-      }
-      if (mod && key === "a") {
-        event.preventDefault()
-        setSelected(new Set(entries.map((e) => e.path)))
-        return
-      }
-      // Copy, cut and paste are left to the browser so their clipboard events
-      // can reach the system clipboard; the timer covers one that sends none.
-      if (mod && (key === "c" || key === "x") && canWrite) {
-        const paths = selected.size > 0 ? [...selected] : activeEntry ? [activeEntry.path] : []
-        if (paths.length > 0) {
-          const held: Clip = { mode: key === "c" ? "copy" : "cut", paths }
+          break
+        case "up":
+          navigate(action.path)
+          break
+        case "new-folder":
+          newFolder()
+          break
+        case "toggle-hidden":
+          setShowHidden((previous) => !previous)
+          break
+        case "toggle":
+          toggleSelected(action.entry, action.on)
+          break
+        case "select-all":
+          setSelected(new Set(action.paths))
+          break
+        // The clipboard event the shortcut causes takes what is held; the timer covers a browser
+        // that sends none.
+        case "hold-clip": {
+          const held = action.clip
           pendingClip.current = held
           setTimeout(() => {
             if (pendingClip.current !== held) return
             pendingClip.current = null
             cutCopy(held.mode, held.paths)
           })
+          break
         }
-        return
-      }
-      if (mod && key === "v" && canWrite && path) {
-        pendingPaste.current = true
-        setTimeout(() => {
-          if (!pendingPaste.current) return
-          pendingPaste.current = false
-          void paste()
-        })
-        return
-      }
-      if (mod || event.altKey) return
-      // File name buttons belong to the listing; other controls keep their
-      // own Space, Enter and arrow behavior.
-      const onControl =
-        !target?.closest("[data-file-name]") &&
-        target?.closest("button, a, input, select, textarea, [role='checkbox'], [role='menuitem']")
-      switch (event.key) {
-        case "Escape":
-          event.preventDefault()
+        case "hold-paste":
+          pendingPaste.current = true
+          setTimeout(() => {
+            if (!pendingPaste.current) return
+            pendingPaste.current = false
+            void paste()
+          })
+          break
+        case "escape":
           nameTyping.current.query = ""
-          if (selected.size > 0 || activeEntry) {
+          if (action.clear === "selection") {
             clearSelection()
             setActive({ dir: path ?? "/", entry: null })
             listingElement.current?.focus({ preventScroll: true })
-          } else if (clip) setClip(null)
+          } else if (action.clear === "clip") setClip(null)
           break
-        case "F2":
-          if (activeEntry && canWrite) {
-            event.preventDefault()
-            rename(activeEntry)
-          }
+        case "rename":
+          rename(action.entry)
           break
-        case "Delete":
-          if (!canDestruct) break
-          event.preventDefault()
-          if (selected.size > 0) bulkDelete(event.shiftKey)
-          else if (activeEntry) deleteEntry(activeEntry, event.shiftKey)
+        case "delete-selected":
+          bulkDelete(action.permanent)
           break
-        case "Backspace":
-          event.preventDefault()
-          if (parentReachable && parent) navigate(parent)
+        case "delete":
+          deleteEntry(action.entry, action.permanent)
           break
-        case "Enter":
-          if (activeEntry && !onControl) {
-            event.preventDefault()
-            openEntry(activeEntry)
-          }
+        case "open":
+          openEntry(action.entry)
           break
-        case " ":
-          if (activeEntry && !activeEntry.isDir && !onControl) {
-            event.preventDefault()
-            viewEntry(activeEntry)
-          }
+        case "view":
+          viewEntry(action.entry)
           break
-        case "ArrowDown":
-        case "ArrowUp":
-        case "ArrowLeft":
-        case "ArrowRight":
-        case "Home":
-        case "End":
-          if (onControl) break
-          event.preventDefault()
-          if (view === "list" && event.key === "ArrowRight") {
-            if (activeEntry?.isDir) openEntry(activeEntry)
-            break
-          }
-          if (view === "list" && event.key === "ArrowLeft") {
-            if (parentReachable && parent) navigate(parent)
-            break
-          }
-          moveActive(event.key, event.shiftKey)
+        case "move":
+          moveActive(action.key, action.extend)
           break
-        case "?":
-          if (onControl) break
-          event.preventDefault()
+        case "shortcuts":
           setShortcutsOpen(true)
           break
-        default: {
-          if (onControl || event.key.length !== 1 || event.key === " ") break
-          const now = performance.now()
-          const previous = nameTyping.current
-          const fresh = previous.dir !== path || now - previous.time > 700
-          const repeated = [...previous.query].every((letter) => letter.toLocaleLowerCase() === key)
-          const query = fresh || repeated ? event.key : previous.query + event.key
-          nameTyping.current = { query, time: now, dir: path }
-          const cycling = [...query].every((letter) => letter.toLocaleLowerCase() === key)
-          const index = activeEntry ? entries.findIndex((e) => e.path === activeEntry.path) : -1
-          const next = matchName(
-            entries.map((e) => e.name),
-            cycling ? event.key : query,
-            cycling ? index : index - 1,
-          )
-          if (next >= 0) {
-            event.preventDefault()
-            anchor.current = entries[next].path
-            focusEntry(entries[next])
+        case "find":
+          nameTyping.current = action.typed
+          if (action.entry) {
+            anchor.current = action.entry.path
+            focusEntry(action.entry)
           }
-        }
       }
     }
     const onClipWrite = (event: ClipboardEvent) => {
