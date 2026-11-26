@@ -51,6 +51,13 @@ func TemplateHostPort(id string) int {
 	return 20000 + int(hash.Sum32()%20000)
 }
 
+// LoopbackHostPort is the loopback port a stack's private service asks for,
+// a preference derived like TemplateHostPort so the document stays a function
+// of the definition.
+func LoopbackHostPort(id, service, port string) int {
+	return TemplateHostPort(id + "/" + service + "/" + port)
+}
+
 // renderComposeTemplate fills the plan fields a Compose template answers
 // differently from a single image: the image and port the release follows are
 // the public service's, the footprint is the sum of every service's limit, and
@@ -127,15 +134,24 @@ func renderComposeDocument(blueprint *Blueprint, public *Service) (string, error
 			addPair(node, "environment", environment)
 		}
 		isPublic := service.Name == public.Name
-		if isPublic {
-			for _, port := range service.Ports {
-				if port.Exposure == "proxy" {
-					// Loopback only: the ingress finds the container behind this
-					// publication and reaches it over the edge network.
-					binding := fmt.Sprintf("127.0.0.1:%d:%d", TemplateHostPort(blueprint.ID), port.Internal)
-					addPair(node, "ports", sequenceNode(quoted(binding)))
-				}
+		published := sequenceNode()
+		for _, port := range service.Ports {
+			switch {
+			case isPublic && port.Exposure == "proxy":
+				// Loopback only: the ingress finds the container behind this
+				// publication and reaches it over the edge network.
+				binding := fmt.Sprintf("127.0.0.1:%d:%d", TemplateHostPort(blueprint.ID), port.Internal)
+				published.Content = append(published.Content, quoted(binding))
+			case port.Exposure == "loopback":
+				// A stack's private web interface, for the operator on this
+				// server; Compose's port recovery moves it when taken, as it
+				// does the proxied one.
+				binding := fmt.Sprintf("127.0.0.1:%d:%d", LoopbackHostPort(blueprint.ID, service.Name, port.Name), port.Internal)
+				published.Content = append(published.Content, quoted(binding))
 			}
+		}
+		if len(published.Content) > 0 {
+			addPair(node, "ports", published)
 		}
 		if len(service.Volumes) > 0 {
 			mounts := sequenceNode()

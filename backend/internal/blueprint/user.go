@@ -71,6 +71,12 @@ func validateUserRules(definition *Blueprint, fixtures bool) error {
 	if definition.Retired != "" {
 		return fail("a template added here is deleted rather than retired")
 	}
+	if definition.Stack != "" {
+		// A stack's presets are configured by reviewed adapters compiled into
+		// the dashboard, which trust the services the preset declares to be
+		// the ones they were written for.
+		return fail("a template added here cannot be a preset of a stack; the stacks are reviewed built-ins")
+	}
 	if definition.Profile == ProfileGame || definition.Category == CategoryGame {
 		// The console, players and server settings pages are written for the
 		// two reviewed Minecraft definitions and find them by id.
