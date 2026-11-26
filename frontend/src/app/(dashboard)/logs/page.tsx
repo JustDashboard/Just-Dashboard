@@ -240,6 +240,31 @@ function LogsScreen() {
   const router = useRouter()
   const requests = useRequestRecords()
 
+  // The source the address names, among those the rail lists.
+  const listedPick = useMemo(
+    () =>
+      picked
+        ? listed.find(
+            (s) => s.id === picked || (picked.startsWith("journal:") && s.kind === "journal"),
+          )
+        : undefined,
+    [listed, picked],
+  )
+  // A link can name a source the rail does not list under that id: a page's
+  // log card names a container by its name where the inventory lists it by
+  // id, and Interfaces offers the kernel ring that the rail leaves out where
+  // kern.log holds the same lines. Such a source is asked about on its own,
+  // through the same parsing and administrator gate as reading it, and only
+  // said to be gone when that answer is that it is.
+  const unlisted = Boolean(picked) && sources.data !== undefined && !listedPick && !record
+  const linkedSource = usePoll(
+    (signal) => get<LogSource>("/logs/source", { source: picked }, signal),
+    0,
+    [picked],
+    { enabled: unlisted },
+  )
+  const resolved = unlisted && linkedSource.data?.id === picked ? linkedSource.data : undefined
+
   // The first source is streaming before you choose one. Landing on an empty
   // pane and a "pick something" sign wastes the visit: nine times out of ten
   // the answer is in syslog, and the operator can switch in one click if it is
@@ -255,12 +280,8 @@ function LogsScreen() {
         null
       )
     }
-    return (
-      list.find(
-        (s) => s.id === picked || (picked.startsWith("journal:") && s.kind === "journal"),
-      ) ?? null
-    )
-  }, [listed, picked])
+    return listedPick ?? resolved ?? null
+  }, [listed, picked, listedPick, resolved])
 
   // The journal is one source with a thousand faces, so the unit rides on the
   // id rather than filling the rail with systemd's inventory.
@@ -332,8 +353,8 @@ function LogsScreen() {
 
   // Another log opened on a stretch of time, from a view or a request —
   // History on it, narrowed where the asker knows how. A source the rail
-  // does not list is said to be gone, as a link to one is, rather than
-  // swapped for another.
+  // does not list is asked about on its own, as a link to one is, and said to
+  // be gone rather than swapped for another when it is.
   const openLog = (id: string | undefined, at: OpenAt) => {
     commitQuestion()
     setRecord("")
@@ -690,14 +711,14 @@ function LogsScreen() {
               <EmptyState
                 icon={Logs}
                 title={
-                  sources.loading
+                  sources.loading || linkedSource.loading
                     ? "Looking for logs…"
                     : picked
                       ? "Requested log source unavailable"
                       : "No log sources on this host"
                 }
                 description={
-                  sources.loading
+                  sources.loading || linkedSource.loading
                     ? undefined
                     : picked
                       ? `The requested source (${picked}) is not in the current inventory. It may have been removed or its owner may be unavailable. Rescan or choose another source.`
