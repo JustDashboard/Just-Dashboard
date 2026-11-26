@@ -67,8 +67,8 @@ configuration steps against the live release's containers and records each step'
 (`Kick`). A pass runs when the environment's live release is a release of one of the stack's preset
 templates and either the release is not the one last configured, the manifest version changed, or
 a pass was requested. At most two stacks are configured at once, one pass per stack. A pass for a
-release that stopped being live is cancelled; one a restart cut short is queued again
-(`ResetInterrupted`). Changing the source to the other preset's template moves the stack to that
+release that stopped being live is cancelled, and so is one for a deployment that was removed; one a
+restart cut short is queued again (`ResetInterrupted`). Changing the source to the other preset's template moves the stack to that
 preset. A deployment whose source is no longer a preset is left alone.
 
 The stack is registered in the commit request (`registerStack`, after the blueprint schedules), keyed

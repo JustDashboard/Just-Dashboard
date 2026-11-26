@@ -141,6 +141,21 @@ func (s *Service) Tick(ctx context.Context) {
 		}
 		return
 	}
+	// A stack whose deployment was removed is gone with it (its rows
+	// cascade): a pass still running for it would go on setting up
+	// containers that are being taken away, in one of the two places a pass
+	// runs in.
+	listed := make(map[int64]bool, len(records))
+	for _, record := range records {
+		listed[record.ProjectID] = true
+	}
+	s.mu.Lock()
+	for projectID, current := range s.running {
+		if !listed[projectID] {
+			current.cancel()
+		}
+	}
+	s.mu.Unlock()
 	for _, record := range records {
 		manifest, found := s.deps.Manifest(record.StackID)
 		if !found {

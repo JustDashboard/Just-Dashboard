@@ -2,6 +2,7 @@ package stacks_test
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 )
 
 type serviceFixture struct {
+	db       *sql.DB
 	store    *stacks.Store
 	service  *stacks.Service
 	mu       sync.Mutex
@@ -41,7 +43,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		t.Fatal(err)
 	}
 	project, _ := result.LastInsertId()
-	fixture := &serviceFixture{store: stacks.NewStore(st.DB, sealer), project: project, liveErr: stacks.ErrNoLiveRelease}
+	fixture := &serviceFixture{db: st.DB, store: stacks.NewStore(st.DB, sealer), project: project, liveErr: stacks.ErrNoLiveRelease}
 	fixture.manifest = &stacks.Manifest{ID: "test", Version: "1", Title: "Test",
 		Presets: []stacks.Preset{
 			{ID: "small", Template: "test-small", Services: []string{"a"}},
@@ -189,5 +191,39 @@ func TestServiceRunsAPassARestartInterruptedAgain(t *testing.T) {
 	record := f.settle(t)
 	if record.Status != stacks.StatusReady || record.ConfiguredReleaseID != 21 || f.passCount() != 1 {
 		t.Fatalf("after the restart: %+v, %d passes", record, f.passCount())
+	}
+}
+
+// A deployment removed while its stack is being configured takes the pass
+// with it: the next look stops it rather than leaving it to set up
+// containers that are going away, holding one of the two places a pass
+// runs in.
+func TestServiceStopsThePassOfADeploymentThatWasRemoved(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	started := make(chan struct{})
+	f.manifest.Steps[0].Timeout = time.Minute
+	f.manifest.Steps[0].Run = func(ctx context.Context, _ stacks.Env) (stacks.Result, error) {
+		close(started)
+		<-ctx.Done()
+		return stacks.Result{}, ctx.Err()
+	}
+	f.goLive(31, "test-small")
+	f.service.Tick(ctx)
+	select {
+	case <-started:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the pass did not start")
+	}
+	if _, err := f.db.Exec(`DELETE FROM deploy_projects WHERE id = ?`, f.project); err != nil {
+		t.Fatal(err)
+	}
+	f.service.Tick(ctx)
+	deadline := time.Now().Add(5 * time.Second)
+	for f.service.Running(f.project) {
+		if time.Now().After(deadline) {
+			t.Fatal("the pass of a removed deployment is still running")
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
