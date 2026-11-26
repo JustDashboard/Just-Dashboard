@@ -590,9 +590,8 @@ func (clickhouseDialect) Statements(ctx context.Context, db *sql.DB, opts Statem
 	out.Since = &since
 	for rows.Next() {
 		var s Statement
-		// The table is one row per schema and digest, so a digest that ran
-		// in two schemas is two rows: the schema is what tells them apart.
-		if err := rows.Scan(&s.ID, &s.Variant, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &out.TotalMs); err != nil {
+		// Grouped by normalized_query_hash, so each ID is one row: no variant.
+		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &out.TotalMs); err != nil {
 			return nil, err
 		}
 		s.HitRatio = -1
