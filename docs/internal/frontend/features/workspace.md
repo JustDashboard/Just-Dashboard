@@ -514,7 +514,9 @@ foot (`phone-panes.tsx`) under a one-row strip: back, the path, find, New, and t
 the rows that changed laid over the listing so selection, scroll and dialogs stay put. The uploads panel
 (`uploads.tsx`) holds uploads (in pieces over 32 MiB, with pause, resume and cancel, carrying on after a
 dropped connection) and links being fetched by the server (New → *From a link*), each one line with
-how far it is in words (`transfer-words.ts`)
+how far it is in words (`transfer-words.ts`). A worker stops for good once its upload is paused, and
+Resume pressed while that worker still waits on a request leaves the upload queued until it has
+exited, so one upload never has two workers sending its pieces
 
 Each row says the most telling thing the server knows about the entry after its name, with its logo
 ("Postgres volume of shop-db", "Served at example.com by nginx"); a tile carries the logo in its
