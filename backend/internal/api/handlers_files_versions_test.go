@@ -161,7 +161,7 @@ func TestHistoryFollowsAMoveThroughTheDashboard(t *testing.T) {
 		t.Fatalf("save: %d %s", w.Code, w.Body)
 	}
 	body, _ := json.Marshal(map[string]any{"from": dir, "to": filepath.Join(root, "etc", "web")})
-	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusNoContent {
+	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusOK {
 		t.Fatalf("move: %d %s", w.Code, w.Body)
 	}
 	moved := filepath.Join(root, "etc", "web", "nginx.conf")
@@ -317,7 +317,7 @@ func TestReplaceThenUndoGivesEachFileItsOwnHistory(t *testing.T) {
 	only(b, "old a\n")
 	// Undo: a moves back, then b comes back from the Trash.
 	body, _ := json.Marshal(map[string]any{"from": b, "to": a})
-	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusNoContent {
+	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusOK {
 		t.Fatalf("move back: %d %s", w.Code, w.Body)
 	}
 	restore(id)

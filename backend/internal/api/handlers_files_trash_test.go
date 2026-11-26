@@ -3,8 +3,10 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
@@ -125,8 +127,10 @@ func TestReplacingMoveAndCopyKeepWhatTheyReplace(t *testing.T) {
 	if got, _ := os.ReadFile(b); string(got) != "moved" {
 		t.Fatalf("b is %q", got)
 	}
-	// A move with nothing in the way is still a 204.
-	if w := c.do(http.MethodPost, "/api/v1/files/move", `{"from":"`+b+`","to":"`+a+`","overwrite":true}`, nil); w.Code != http.StatusNoContent {
+	// A move with nothing in the way names what landed and nothing replaced.
+	w = c.do(http.MethodPost, "/api/v1/files/move", `{"from":"`+b+`","to":"`+a+`","overwrite":true}`, nil)
+	var plain movedResponse
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &plain) != nil || plain.Identity == "" || plain.Replaced != nil {
 		t.Fatalf("plain move: %d %s", w.Code, w.Body.String())
 	}
 
@@ -151,5 +155,71 @@ func TestReplacingMoveAndCopyKeepWhatTheyReplace(t *testing.T) {
 	json.Unmarshal(c.do(http.MethodGet, "/api/v1/files/trash", "", nil).Body.Bytes(), &listing)
 	if len(listing.Items) != 0 {
 		t.Fatalf("emptied Trash holds %+v", listing.Items)
+	}
+}
+
+// An undo waits its turn behind the one before it. A copy's undo puts the
+// copy in the Trash and a move's moves it back, by name; with the identity
+// the operation answered as `expect`, whatever took the name meanwhile is
+// left alone.
+func TestAQueuedUndoLeavesAnEntryThatTookTheNameAlone(t *testing.T) {
+	c, s := newClient(t)
+	root := fileFixture(t, s)
+	a, b, copied := filepath.Join(root, "a.txt"), filepath.Join(root, "b.txt"), filepath.Join(root, "a copy.txt")
+	os.WriteFile(a, []byte("a"), 0o644)
+	os.WriteFile(b, []byte("b"), 0o644)
+	identityOf := func(w *httptest.ResponseRecorder) string {
+		t.Helper()
+		var answer movedResponse
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &answer) != nil || answer.Identity == "" {
+			t.Fatalf("no identity: %d %s", w.Code, w.Body)
+		}
+		return answer.Identity
+	}
+	trash := func(path, expect string) *httptest.ResponseRecorder {
+		return c.do(http.MethodDelete, query("/api/v1/files/delete", map[string]string{"path": path, "recursive": "true", "expect": expect}), "", nil)
+	}
+
+	ours := identityOf(c.do(http.MethodPost, "/api/v1/files/copy", `{"from":"`+a+`","to":"`+copied+`"}`, nil))
+	// Before the undo runs, another copy replaces ours.
+	theirs := identityOf(c.do(http.MethodPost, "/api/v1/files/copy", `{"from":"`+b+`","to":"`+copied+`","overwrite":true}`, nil))
+	if theirs == ours {
+		t.Fatal("the replacing copy has the identity of the one it replaced")
+	}
+	if w := trash(copied, ours); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "entry_changed") {
+		t.Fatalf("the undo trashed what took the name: %d %s", w.Code, w.Body)
+	}
+	if got, _ := os.ReadFile(copied); string(got) != "b" {
+		t.Fatalf("what took the name is %q", got)
+	}
+	if w := trash(copied, theirs); w.Code != http.StatusOK {
+		t.Fatalf("the entry the identity names: %d %s", w.Code, w.Body)
+	}
+
+	// A move keeps the entry's identity; a file renamed over it does not.
+	moved := filepath.Join(root, "moved.txt")
+	before, err := s.modules.hostFiles.Identity(a)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := identityOf(c.do(http.MethodPost, "/api/v1/files/move", `{"from":"`+a+`","to":"`+moved+`"}`, nil)); got != before {
+		t.Fatalf("the move answered %q for an entry that was %q", got, before)
+	}
+	elsewhere := filepath.Join(root, "elsewhere.txt")
+	os.WriteFile(elsewhere, []byte("someone else's"), 0o644)
+	os.Rename(elsewhere, moved)
+	back := `{"from":"` + moved + `","to":"` + a + `","expect":"` + before + `"}`
+	if w := c.do(http.MethodPost, "/api/v1/files/move", back, nil); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "entry_changed") {
+		t.Fatalf("the undo moved what took the name: %d %s", w.Code, w.Body)
+	}
+	if _, err := os.Lstat(a); !os.IsNotExist(err) {
+		t.Fatal("a refused move moved something")
+	}
+	if got, _ := os.ReadFile(moved); string(got) != "someone else's" {
+		t.Fatalf("what took the name is %q", got)
+	}
+	// Without expect a move is as it always was.
+	if w := c.do(http.MethodPost, "/api/v1/files/move", `{"from":"`+moved+`","to":"`+a+`"}`, nil); w.Code != http.StatusOK {
+		t.Fatalf("a move without expect: %d %s", w.Code, w.Body)
 	}
 }

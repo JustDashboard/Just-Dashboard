@@ -15,8 +15,9 @@ import {
 
 const RUNNER: UndoRunner = {
   restore: (id) => post("/files/trash/restore", { id }),
-  move: (from, to) => post("/files/move", { from, to }),
-  trash: (path) => del("/files/delete", { query: { path, recursive: true } }),
+  move: (from, to, identity) => post("/files/move", { from, to, expect: identity }),
+  trash: (path, identity) =>
+    del("/files/delete", { query: { path, recursive: true, expect: identity } }),
 }
 
 /** Why an undo step failed, in words: a taken name is the usual reason. */
@@ -28,6 +29,9 @@ function failure(step: UndoStep, error: unknown): string | undefined {
   }
   if (error instanceof ApiError && error.code === "not_in_trash") {
     return "It is no longer in the Trash."
+  }
+  if (error instanceof ApiError && error.code === "entry_changed") {
+    return "Something else has taken its name since, and was left alone."
   }
   return error instanceof Error ? error.message : undefined
 }

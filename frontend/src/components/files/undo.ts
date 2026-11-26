@@ -14,10 +14,13 @@ import type { TrashItem } from "@/components/files/trash"
 export type UndoStep =
   /** Put a Trash item back where it was. */
   | { kind: "restore"; id: string; name: string }
-  /** Move an entry back. */
-  | { kind: "move"; from: string; to: string }
-  /** Put an entry in the Trash: the copy an undone copy made. */
-  | { kind: "trash"; path: string }
+  /**
+   * Move an entry back. `identity` is the entry the move answered with: an
+   * undo that waited its turn leaves whatever took the name meanwhile alone.
+   */
+  | { kind: "move"; from: string; to: string; identity?: string }
+  /** Put an entry in the Trash: the copy an undone copy made, by its identity too. */
+  | { kind: "trash"; path: string; identity?: string }
 
 export type FileOperation = {
   /** What was done, worded to follow "Undid" and "Could not undo": "the move of 3 items". */
@@ -46,19 +49,19 @@ export function deleteOperation(
   }
 }
 
-export type Moved = { from: string; to: string; replaced?: TrashItem }
+export type Moved = { from: string; to: string; identity?: string; replaced?: TrashItem }
 
 /** A move or a rename: the last moved goes back first, then what it replaced returns. */
 export function moveOperation(label: string, moved: Moved[]): FileOperation {
   const steps: UndoStep[] = []
   for (const m of [...moved].reverse()) {
-    steps.push({ kind: "move", from: m.to, to: m.from })
+    steps.push({ kind: "move", from: m.to, to: m.from, identity: m.identity })
     if (m.replaced) steps.push({ kind: "restore", id: m.replaced.id, name: m.replaced.name })
   }
   return { label, steps }
 }
 
-export type Copied = { to: string; replaced?: TrashItem }
+export type Copied = { to: string; identity?: string; replaced?: TrashItem }
 
 /**
  * A copy or a duplicate: the copy goes to the Trash, then what it replaced
@@ -71,7 +74,7 @@ export function copyOperation(label: string, copied: Copied[], canTrash: boolean
   }
   const steps: UndoStep[] = []
   for (const c of [...copied].reverse()) {
-    steps.push({ kind: "trash", path: c.to })
+    steps.push({ kind: "trash", path: c.to, identity: c.identity })
     if (c.replaced) steps.push({ kind: "restore", id: c.replaced.id, name: c.replaced.name })
   }
   return { label, steps }
@@ -79,8 +82,8 @@ export function copyOperation(label: string, copied: Copied[], canTrash: boolean
 
 export type UndoRunner = {
   restore: (id: string) => Promise<unknown>
-  move: (from: string, to: string) => Promise<unknown>
-  trash: (path: string) => Promise<unknown>
+  move: (from: string, to: string, identity?: string) => Promise<unknown>
+  trash: (path: string, identity?: string) => Promise<unknown>
 }
 
 /**
@@ -96,8 +99,8 @@ export async function runUndo(
   for (const step of op.steps) {
     try {
       if (step.kind === "restore") await run.restore(step.id)
-      else if (step.kind === "move") await run.move(step.from, step.to)
-      else await run.trash(step.path)
+      else if (step.kind === "move") await run.move(step.from, step.to, step.identity)
+      else await run.trash(step.path, step.identity)
       done++
     } catch (error) {
       return { done, failed: { step, error } }

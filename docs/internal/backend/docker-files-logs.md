@@ -614,8 +614,13 @@ renames back with no-replace; a taken place is a 409 `already_exists` unless `co
 checked against `^[0-9a-f]{32}$` before it reaches a path. Items older than `JD_FILES_TRASH_DAYS` (30;
 0 keeps everything) are removed hourly by `expireFileTrash`, each removal an audit entry
 (`file.trash.expire`, actor `system`); the same sweep removes the leftovers of a trash that never
-finished. A move or copy with `overwrite` first puts what it replaces in the Trash
-(`trashReplaced`) and answers 200 `{replaced: {item}}` instead of 204: a move renames the occupant
+finished. A move or copy answers 200 `{identity, replaced?}`: `identity` names what now has the
+destination's name (`Service.Identity`: device, inode and, where the filesystem records it, birth
+time, so a rename keeps it and a copy or a file renamed over the name does not), and the page's undo
+sends it back as `expect` on `POST /files/move` and `DELETE /files/delete`, which answer
+`409 entry_changed` and touch nothing when the entry at that name is no longer the one named. A move or
+copy with `overwrite` first puts what it replaces in the Trash (`trashReplaced`) and names it in
+`replaced: {item}`: a move renames the occupant
 away; a copy keeps a regular file by a hard link, so the copy's atomic replacement still reads the old
 file's owner, mode and ACL, and renames a folder away (so Replace replaces rather than merges); a
 symbolic link at a copy's destination is left to Copy, which refuses it. If the operation then fails,

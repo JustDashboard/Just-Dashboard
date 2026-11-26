@@ -543,7 +543,10 @@ recorded as data (`undo.ts`: the steps that undo it, in order) on this visit's s
 (`use-file-undo.ts`); its notice carries Undo, and Ctrl/Cmd+Z undoes the newest, then the one before,
 while text fields, dialogs and menus keep their own. Undos run one after another in the order asked
 for: a press while the last one is still with the server waits its turn rather than being dropped,
-and an operation asked for twice runs once. An operation that cannot be undone (a permanent
+and an operation asked for twice runs once. A move or copy answers the identity of what it left
+(`identity`), and its undo sends it back as `expect`: an entry that took the name while the undo waited
+is refused (`409 entry_changed`, "Something else has taken its name since, and was left alone") rather
+than moved or put in the Trash. An operation that cannot be undone (a permanent
 delete, a copy by an account that may not delete) says so on its notice instead. Name search passes
 the folder on screen as `here` and says the index's age beside the count when the index answered.
 

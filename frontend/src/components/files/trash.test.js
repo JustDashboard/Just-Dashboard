@@ -136,6 +136,20 @@ describe("undo, as data", () => {
     expect(result.failed.step.kind).toBe("move")
   })
 
+  test("a step names the entry its operation left, and the runner is given it", async () => {
+    const op = moveOperation("moving x", [{ from: "/a/x", to: "/b/x", identity: "9:12:1.5" }])
+    const copy = copyOperation("copying y", [{ to: "/b/y", identity: "9:13:2.5" }], true)
+    const calls = []
+    const runner = {
+      move: async (from, to, identity) => calls.push(`move ${from} ${to} ${identity}`),
+      restore: async (id) => calls.push(`restore ${id}`),
+      trash: async (path, identity) => calls.push(`trash ${path} ${identity}`),
+    }
+    await runUndo(op, runner)
+    await runUndo(copy, runner)
+    expect(calls).toEqual(["move /b/x /a/x 9:12:1.5", "trash /b/y 9:13:2.5"])
+  })
+
   test("the stack keeps the newest operations", () => {
     let stack = []
     for (let i = 0; i < UNDO_DEPTH + 5; i++)

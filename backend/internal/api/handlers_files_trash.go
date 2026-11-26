@@ -86,6 +86,10 @@ func (s *Server) handleFileDelete(w http.ResponseWriter, r *http.Request) error 
 	if err != nil {
 		return mapFileError(err)
 	}
+	// An undo that puts a copy in the Trash names the copy it made.
+	if err := s.expectEntry(entry, r.URL.Query().Get("expect")); err != nil {
+		return err
+	}
 	if !permanent {
 		item, err := s.modules.fileTrash.Put(path, trashActor(r))
 		if err != nil {
@@ -168,14 +172,39 @@ func (s *Server) settleReplaced(replaced *replacedEntry, failed bool) {
 	}
 }
 
-// respondReplaced answers a move or a copy: 204 as before, or what was
+// movedResponse answers a move or a copy: the identity of what now sits at
+// the destination, which the page's undo sends back as `expect`, and what was
 // replaced and where it went when something was.
-func respondReplaced(w http.ResponseWriter, replaced *replacedEntry) {
-	if replaced == nil {
-		httpx.NoContent(w)
-		return
+type movedResponse struct {
+	Identity string         `json:"identity,omitempty"`
+	Replaced *replacedEntry `json:"replaced,omitempty"`
+}
+
+func (s *Server) respondMoved(w http.ResponseWriter, dst string, replaced *replacedEntry) {
+	identity, err := s.modules.hostFiles.Identity(dst)
+	if err != nil {
+		// Done all the same; the undo simply cannot check it.
+		s.Log.Warn("a moved or copied entry's identity could not be read", "path", dst, "err", err)
 	}
-	httpx.JSON(w, http.StatusOK, map[string]any{"replaced": replaced})
+	httpx.JSON(w, http.StatusOK, movedResponse{Identity: identity, Replaced: replaced})
+}
+
+// expectEntry refuses a mutation of an entry that is not the one the caller
+// last saw at that name: a queued undo of a copy or a move, run after
+// something else took the name, must leave that something alone.
+func (s *Server) expectEntry(path, expect string) error {
+	if expect == "" {
+		return nil
+	}
+	identity, err := s.modules.hostFiles.Identity(path)
+	if err != nil {
+		return mapFileError(err)
+	}
+	if identity != expect {
+		return httpx.Err(http.StatusConflict, "entry_changed",
+			"what has that name now is not the entry this was about, so it was left alone")
+	}
+	return nil
 }
 
 func (s *Server) handleFileTrashList(w http.ResponseWriter, r *http.Request) error {

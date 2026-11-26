@@ -337,6 +337,10 @@ type moveRequest struct {
 	// an occupied destination is a 409, which is what lets the page ask
 	// "replace, keep both or skip" instead of finding out afterwards.
 	Overwrite bool `json:"overwrite,omitempty"`
+	// Expect, when given, is the identity From must still have (what a move
+	// or a copy answered, kept by the page's undo): an entry that has taken
+	// the name since is refused with 409 entry_changed rather than moved.
+	Expect string `json:"expect,omitempty"`
 }
 
 // An empty side of a move or copy resolves to the first configured root —
@@ -361,6 +365,9 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
+	if err := s.expectEntry(src, req.Expect); err != nil {
+		return err
+	}
 	replaced, err := s.trashReplaced(r, src, dst, req.Overwrite, false)
 	if err != nil {
 		return err
@@ -373,7 +380,7 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 	s.holdReplacedVersions(r.Context(), dst, replaced)
 	s.moveFileVersions(r.Context(), src, dst)
 	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
-	respondReplaced(w, replaced)
+	s.respondMoved(w, dst, replaced)
 	return nil
 }
 
@@ -399,7 +406,7 @@ func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) error {
 	}
 	s.holdReplacedVersions(r.Context(), dst, replaced)
 	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
-	respondReplaced(w, replaced)
+	s.respondMoved(w, dst, replaced)
 	return nil
 }
 

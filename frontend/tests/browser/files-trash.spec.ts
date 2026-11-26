@@ -200,7 +200,9 @@ async function mockServer(
       if (index >= 0) trash.splice(index, 1)
       return route.fulfill({ status: 204 })
     }
-    if (path === "/files/move" || path === "/files/copy") return route.fulfill({ status: 204 })
+    // Each move or copy names what landed, as the server does, for its undo.
+    if (path === "/files/move" || path === "/files/copy")
+      return json(route, { identity: `entry-${calls.length}` })
     if (path === "/files/find")
       return json(route, {
         root: url.searchParams.get("path"),
@@ -304,16 +306,47 @@ test("Ctrl+Z undoes the last file operation, then the one before", async ({ page
   await page.keyboard.press("Control+z")
   release()
   await expect.poll(() => calls.filter((c) => c.path === "/files/delete").length).toBe(1)
-  expect(calls.find((c) => c.path === "/files/delete")!.query.get("path")).toMatch(/report/)
+  const trashed = calls.find((c) => c.path === "/files/delete")!
+  expect(trashed.query.get("path")).toMatch(/report/)
+  // Each undo names the entry its operation left, so a queued one cannot
+  // reach something that took the name while it waited.
+  const copied = calls.findIndex((c) => c.path === "/files/copy")
+  expect(trashed.query.get("expect")).toBe(`entry-${copied + 1}`)
   await expect.poll(() => calls.filter((c) => c.path === "/files/move").length).toBe(2)
+  const renamed = calls.findIndex((c) => c.path === "/files/move")
   expect(calls.filter((c) => c.path === "/files/move")[1].body).toEqual({
     from: `${home}/ideas.md`,
     to: `${home}/notes.md`,
+    expect: `entry-${renamed + 1}`,
   })
   // One after the other, in the order asked for: the rename is undone only
   // once the duplicate is gone.
   const order = calls.map((c) => c.path).filter((p) => p === "/files/delete" || p === "/files/move")
   expect(order).toEqual(["/files/move", "/files/delete", "/files/move"])
+})
+
+test("an undo leaves alone what took the copy's name while it waited", async ({ page }) => {
+  const { calls } = await mockServer(page)
+  await openFiles(page)
+  await row(page, "report.csv").click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Duplicate", exact: true }).click()
+  await expect(page.getByText(/Duplicated as/)).toBeVisible()
+  // Something else has the copy's name now: the server says so.
+  await page.route("**/api/v1/files/delete**", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "entry_changed", message: "changed" } }),
+    }),
+  )
+  await page
+    .locator("[data-files-workspace] table")
+    .first()
+    .click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press("Control+z")
+  await expect(page.getByText("Could not undo duplicating report.csv")).toBeVisible()
+  await expect(page.getByText("Something else has taken its name since")).toBeVisible()
+  expect(calls.filter((c) => c.path === "/files/trash/restore")).toHaveLength(0)
 })
 
 test("Shift+Delete deletes for good, and says it cannot be undone", async ({ page }) => {
