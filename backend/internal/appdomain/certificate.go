@@ -159,6 +159,11 @@ func (s *Service) issue(ctx context.Context, opts IssueOptions, log func(stream,
 	})
 	s.record(ctx, "app.domain.certificate", st.Hostname, err == nil, errorDetail(err))
 	if err != nil {
+		// The loop waits autoIssueRetry from now, however it was asked.
+		select {
+		case s.issueFailed <- struct{}{}:
+		default:
+		}
 		return result, err
 	}
 	if serveErr := s.certs.ServeAppDomainRenewal(ctx, st.Handle); serveErr != nil && log != nil {
@@ -275,10 +280,10 @@ const autoIssueRetry = time.Hour
 
 // autoIssue issues the held handle's wildcard when it is missing, failed or
 // due, without anyone pressing Issue. It runs at every check (start-up, the
-// hourly refresh, a page asking), so a server whose first issuance failed
-// mends itself once the cause is gone, for example after an update. certbot's
-// own timer renews a valid wildcard. This also catches a timer that does not
-// run.
+// hourly refresh, a page asking) and once a failure's hour is over
+// (retryAfter), so a server whose first issuance failed mends itself once the
+// cause is gone, for example after an update. certbot's own timer renews a
+// valid wildcard. This also catches a timer that does not run.
 func (s *Service) autoIssue(ctx context.Context, st State) {
 	if !s.Enabled() || !st.held() || s.certs == nil || s.jobs == nil || st.Zone == "" {
 		return

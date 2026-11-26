@@ -1019,6 +1019,76 @@ func TestAHeldAddressIssuesItsWildcardWithoutAButton(t *testing.T) {
 	}
 }
 
+// The retry is an hour after the failure, not at the first hourly check
+// after that. The 10:00 check starts an issuance that fails at 10:02; the
+// 11:00 check is two minutes early for it, and without its own wait the
+// next try would be the noon check, 118 minutes after the failure.
+func TestAFailedWildcardIsTriedAgainAnHourAfterTheFailure(t *testing.T) {
+	e := newEnv(t, true)
+	clock := time.Date(2026, 11, 26, 8, 59, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return clock }
+	advance := func(d time.Duration) { e.mu.Lock(); clock = clock.Add(d); e.mu.Unlock() }
+	type wait struct {
+		d    time.Duration
+		fire chan time.Time
+	}
+	waits := make(chan wait, 4)
+	e.svc.after = func(d time.Duration) <-chan time.Time {
+		w := wait{d, make(chan time.Time, 1)}
+		waits <- w
+		return w.fire
+	}
+	// The hourly ticks are the test's: it calls refresh for them.
+	e.svc.refreshEvery, e.svc.addressEvery, e.svc.linkEvery = 24*time.Hour, 24*time.Hour, 24*time.Hour
+
+	// A first failure, before the loop starts: the start-up check retries it.
+	e.certs.fail = errors.New("the zone's nameservers did not answer")
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+
+	// 10:00: the check starts an issuance, which takes two minutes and fails.
+	advance(61 * time.Minute)
+	e.certs.gate = make(chan struct{})
+	e.svc.Start(t.Context())
+	advance(2 * time.Minute)
+	close(e.certs.gate)
+	e.waitIssued(2)
+	var retry wait
+	select {
+	case retry = <-waits:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no retry was scheduled after the failure")
+	}
+	if retry.d != time.Hour {
+		t.Fatalf("the retry waits %v from the failure, want an hour", retry.d)
+	}
+
+	// 11:00: the hourly check is two minutes early and leaves it.
+	advance(58 * time.Minute)
+	e.svc.refresh(t.Context())
+	if got := len(e.certs.orders()); got != 2 {
+		t.Fatalf("ordered within the hour of the failure: %d orders", got)
+	}
+
+	// 11:02: the failure's hour is over and the retry orders it.
+	advance(2 * time.Minute)
+	e.certs.mu.Lock()
+	e.certs.fail = nil
+	e.certs.mu.Unlock()
+	retry.fire <- clock
+	e.waitIssued(3)
+	if v, _ := e.svc.View(t.Context()); v.Certificate == nil || v.Certificate.State != "valid" {
+		t.Fatalf("after the retry = %+v", v.Certificate)
+	}
+	select {
+	case w := <-waits:
+		t.Fatalf("a retry was scheduled after a success: %v", w.d)
+	default:
+	}
+}
+
 // A wildcard that went missing (deleted by hand, a restore onto a new host)
 // is issued again at the next check, with no failure on record to wait for.
 func TestAMissingWildcardIsIssuedAtTheNextCheck(t *testing.T) {

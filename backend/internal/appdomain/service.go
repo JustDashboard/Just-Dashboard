@@ -109,6 +109,12 @@ type Service struct {
 	claimMu sync.Mutex
 	// kick asks the loop to ask the site now: a link was just approved.
 	kick chan struct{}
+	// issueFailed tells the loop an issuance failed, so the automatic one
+	// tries again autoIssueRetry after the failure, not at the first hourly
+	// check after that, which can be nearly an hour later.
+	issueFailed chan struct{}
+	// after is time.After; tests hold its waits.
+	after func(time.Duration) <-chan time.Time
 	// linkEvery is how often the loop looks for a link made or replaced by
 	// another process (the terminal's --admin link).
 	linkEvery time.Duration
@@ -151,6 +157,7 @@ func New(o Options) *Service {
 		address: o.PublicAddress, waitTXT: o.WaitTXT, now: o.Now,
 		addressEvery: 15 * time.Minute, refreshEvery: time.Hour, refreshAtMost: time.Minute, txtWait: 120 * time.Second,
 		linkEvery: 30 * time.Second, kick: make(chan struct{}, 1),
+		issueFailed: make(chan struct{}, 1), after: time.After,
 	}
 	if s.log == nil {
 		s.log = slog.New(slog.DiscardHandler)
@@ -214,6 +221,11 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) run(ctx context.Context) {
+	// A failure from before the loop is the start-up check's to retry.
+	select {
+	case <-s.issueFailed:
+	default:
+	}
 	if st, err := readState(ctx, s.st.DB); err == nil && st.Handle != "" {
 		if err := s.ensureHook(ctx); err != nil {
 			s.log.Warn("app domain hook credential", "err", err)
@@ -228,10 +240,18 @@ func (s *Service) run(ctx context.Context) {
 	defer addresses.Stop()
 	defer refreshes.Stop()
 	defer links.Stop()
+	var retry <-chan time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-s.issueFailed:
+			retry = s.retryAfter(ctx)
+		case <-retry:
+			retry = nil
+			if st, err := readState(ctx, s.st.DB); err == nil {
+				s.autoIssue(ctx, st)
+			}
 		case <-addresses.C:
 			s.followAddress(ctx)
 		case <-refreshes.C:
@@ -250,6 +270,19 @@ func (s *Service) run(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// retryAfter fires when the failed wildcard's wait is over: autoIssueRetry
+// after the failure (CertificateTriedAt). The hourly check alone can come up
+// to an hour after that, as when the 10:00 check starts an issuance that
+// fails at 10:02: the 11:00 check is two minutes early, and the noon one
+// would be the next. nil when nothing failed.
+func (s *Service) retryAfter(ctx context.Context) <-chan time.Time {
+	st, err := readState(ctx, s.st.DB)
+	if err != nil || !st.held() || st.CertificateError == "" || st.CertificateTriedAt == 0 {
+		return nil
+	}
+	return s.after(max(time.Unix(st.CertificateTriedAt, 0).Add(autoIssueRetry).Sub(s.now()), 0))
 }
 
 // serverID is the stored link's server id, or "" with no link.
