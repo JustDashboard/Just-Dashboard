@@ -392,8 +392,9 @@ only renderer/executor/validation authority for their feature.
   attempt ("which was started while the build ran"), shows its transcript, and answers from it — an
   issued certificate as it is, so one run never orders twice, and a refused order as the step's own
   failure. When the background attempt found the names already covered, or never got an answer (cut
-  short, or out of time waiting for certbot's turn), the step asks again itself as before, which finds
-  the certificate reused. Its evidence carries `prewarm` (`startedDuringBuild`, when it started and
+  short, ended by a fault in the dashboard, or out of time waiting for certbot's turn), the step asks
+  again itself as before, which finds the certificate reused. The issuer runs under `safego.Try`, so a
+  panic in certbot's handling still publishes an interrupted answer and the step stops waiting. Its evidence carries `prewarm` (`startedDuringBuild`, when it started and
   finished, its own outcome, how long the step waited), and the audit entry of an order placed in the
   background carries `startedDuringBuild: true`. Cancelling the run cancels the attempt
   (`CleanupCancelledRun` and the run-finished `HousekeepingObserver`), and so does the step's own
@@ -885,7 +886,9 @@ only renderer/executor/validation authority for their feature.
   run numbers its steps from #1 and interleaved lines could not be read apart. The release's artifacts,
   `ResolvedComposeSnapshot.Services` and `PreparedBuild.ComposeServices` are assembled in the file's
   order. The first failure cancels the others; each service it stopped says `Stopped Compose service X:
-  service Y failed` after its own lines, and the error is Y's `ComposeServiceError`. Cancelling the run
+  service Y failed` after its own lines, and the error is Y's `ComposeServiceError`. A held line the
+  transcript refuses when it is finally written, after its service recorded success, is that service's
+  failure (`orderedBuildOutput.finish` hands it back). Cancelling the run
   cancels every build, and the executor records the cancellation as before.
 - Every build method's image reaches the daemon the same way (`dockerx/build_export.go`). On
   containerd's image store (`docker info` driver status `driver-type io.containerd.snapshotter.v1`, read
@@ -1206,7 +1209,8 @@ only renderer/executor/validation authority for their feature.
   failed attempt it inspects the target's container (`dockerx.ContainerLiveness`: state, exit code,
   restart count, no log). An `exited` or `dead` container, which nothing will start again (Docker marks
   one its policy restarts as `restarting` the moment it exits), ends the check at once. One that is
-  `restarting` ends it after five restarts and thirty seconds from the check's start, so an application
+  `restarting` (read before `running`: while its policy backs off, Docker reports the container as both)
+  ends it after five restarts and thirty seconds from the check's start, so an application
   that exits while the database it waits for comes up is not given up on. The last attempt's code is
   `application_exited`, with the container's state, exit code and `restarts`, and the message says the
   application kept exiting (code N, restarted M times) instead of "could not connect" after every
@@ -2765,9 +2769,9 @@ directive from `JD_TLS` — `tailscale` (a real certificate from `JD_DATA_DIR/ce
 renewed by the backend), `internal` (Caddy's CA, the source of the browser warning) or `off` (plain HTTP,
 loopback only, which browsers treat as a secure context and therefore do not warn about). It also
 decides `Strict-Transport-Security` (`JD_HSTS_DIRECTIVE`): sent over HTTPS for a `JD_SITE` that is a
-name, never for `localhost`, `*.localhost` or an IP literal, because a browser keeps the policy per host
-and not per port, so a year's pin on `localhost` would hold every local port on the operator's machine
-to HTTPS. A Caddyfile
+name, never for `localhost`, `*.localhost` or an IP literal, whatever the name's letter case
+(`LOCALHOST` is the same host to a browser), because a browser keeps the policy per host and not per
+port, so a year's pin on `localhost` would hold every local port on the operator's machine to HTTPS. A Caddyfile
 cannot branch, and generating one would put a tracked file in the way of every `git pull`. One origin for UI and API is
 load-bearing: `SameSite=Strict` cookies, the mutation CSRF header and the WebSocket origin check all
 depend on it. The frontend's `src/proxy.ts` creates a fresh CSP nonce per document and passes the policy

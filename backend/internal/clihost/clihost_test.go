@@ -69,7 +69,7 @@ func TestInstallPutsJDOnlyWhereNothingIs(t *testing.T) {
 	target := filepath.Join(host, Path)
 
 	// /usr/local/bin may not exist yet on a minimal host.
-	if installed, err := Install(host, built); err != nil || !installed {
+	if installed, err := Install(target, built); err != nil || !installed {
 		t.Fatalf("nothing there: installed=%v %v", installed, err)
 	}
 	info, err := os.Stat(target)
@@ -88,7 +88,7 @@ func TestInstallPutsJDOnlyWhereNothingIs(t *testing.T) {
 		if err := os.WriteFile(target, []byte(content), 0o755); err != nil {
 			t.Fatal(err)
 		}
-		if installed, err := Install(host, built); err != nil || installed {
+		if installed, err := Install(target, built); err != nil || installed {
 			t.Fatalf("%q: installed=%v %v", content, installed, err)
 		}
 		if raw, _ := os.ReadFile(target); string(raw) != content {
@@ -101,7 +101,7 @@ func TestInstallPutsJDOnlyWhereNothingIs(t *testing.T) {
 	if err := os.WriteFile(other, []byte("not it"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if installed, err := Install(t.TempDir(), other); err == nil || installed {
+	if installed, err := Install(filepath.Join(t.TempDir(), Path), other); err == nil || installed {
 		t.Fatalf("not jd: installed=%v %v", installed, err)
 	}
 }

@@ -195,24 +195,23 @@ export function publicServices(
   return live.slice(0, 1)
 }
 
-/** The newest value a recorded history holds for each reading, and when it was taken. */
-export type NewestReadings = {
-  cpu?: number
-  mem?: number
-  pids?: number
-  netRx?: number
-  netTx?: number
-  blockRead?: number
-  blockWrite?: number
-  /** The moment (epoch ms) of the newest row that held any of them. */
-  ts?: number
-}
+/** A recorded figure, and the moment (epoch ms) of the row it was read from. */
+export type RecordedReading = { value: number; ts: number }
+
+/**
+ * The newest value a recorded history holds for each reading, each with when
+ * it was taken: the rows that hold them need not be the same row.
+ */
+export type NewestReadings = Partial<
+  Record<"cpu" | "mem" | "pids" | "netRx" | "netTx" | "blockRead" | "blockWrite", RecordedReading>
+>
 
 /**
  * What a reading falls back to before the live socket's first frame: the
  * newest recorded value of each figure, walking back from the window's end,
  * so a tile does not say "—" over a chart that has the figure. Each field is
- * the newest row that has it; `ts` is the newest row that had anything.
+ * the newest row that has it, and keeps that row's moment: a fresh memory
+ * sample does not make an older processor figure read as of its minute.
  */
 export function newestReadings(
   rows: readonly {
@@ -232,10 +231,8 @@ export function newestReadings(
     const row = rows[index]
     for (const key of keys) {
       const value = row[key]
-      if (out[key] === undefined && value !== null && value !== undefined) {
-        out[key] = value
-        out.ts ??= row.ts
-      }
+      if (out[key] === undefined && value !== null && value !== undefined)
+        out[key] = { value, ts: row.ts }
     }
     if (keys.every((key) => out[key] !== undefined)) break
   }

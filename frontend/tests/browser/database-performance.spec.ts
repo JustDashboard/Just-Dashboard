@@ -3366,6 +3366,41 @@ test("a name with a dot and one with a slash are each one segment of an address,
   await expect(page.getByText(/not among the ones the server lists/)).toBeVisible()
 })
 
+test("one digest listed twice keeps each row's page when the two swap places", async ({ page }) => {
+  await holdTime(page)
+  let swapped = false
+  const posts = "SELECT * FROM posts WHERE author_id = $1"
+  const shop = (calls: number, share: number) =>
+    statement("a1", posts, share, { variant: "shop", calls })
+  const blog = (calls: number, share: number) =>
+    statement("a1", posts, share, { variant: "blog", calls })
+  await mockOps(page, {
+    answers: {
+      "GET 1/statements": () => ({
+        ...STATEMENTS,
+        statements: swapped ? [blog(30, 0.6), shop(10, 0.2)] : [shop(9, 0.5), blog(3, 0.1)],
+      }),
+    },
+  })
+  await visit(page, "/databases/1/performance?view=statements")
+  const rows = region(page, "Statements").getByRole("row", { name: /FROM posts/ })
+  await expect(rows).toHaveCount(2)
+  await rows.nth(1).click()
+  // The row is addressed by what the engine says it is, not by its place.
+  await expect(page).toHaveURL(/\/performance\/statements\/a1~7Eblog$/)
+  await expect(aboutStatement(page)).toContainText("3 calls")
+
+  // The next read lists them the other way round: the page is still blog's.
+  swapped = true
+  await tick(page)
+  await expect(aboutStatement(page)).toContainText("30 calls")
+  await expect(page).toHaveURL(/\/performance\/statements\/a1~7Eblog$/)
+
+  // The id alone, as History links it, is the statement across both schemas.
+  await visit(page, "/databases/1/performance/statements/a1")
+  await expect(aboutStatement(page)).toContainText("40 calls")
+})
+
 test("a statement's page walks its list: the rail, the arrows, Alt and the arrow keys, with the view kept", async ({
   page,
 }) => {

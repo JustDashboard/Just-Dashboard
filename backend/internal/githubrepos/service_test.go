@@ -816,6 +816,38 @@ func TestForgettingTheAppRemovesEveryConnection(t *testing.T) {
 	}
 }
 
+// A GitHub account's grant counts as revoked only once GitHub accepted a
+// token for it. An older connection's token can be dead, past its expiry
+// with a refresh GitHub refuses, while a newer connection to the same account
+// holds one that works; that one revokes the grant.
+func TestForgettingTheAppRevokesAGrantThroughAnyConnectionThatStillWorks(t *testing.T) {
+	h := newHarness(t)
+	h.createApp()
+	h.connect(h.alice, 1001)
+	// Alice's tokens stop working on GitHub and her access token expires
+	// here; Bob signs in to the same account afterwards.
+	h.clock = h.clock.Add(9 * time.Hour)
+	h.fake.RevokeAll()
+	h.connect(h.bob, 1001)
+	h.connect(h.bob, 1002)
+	if !h.fake.Authorized(1001) || !h.fake.Authorized(1002) {
+		t.Fatal("the accounts are not authorized to begin with")
+	}
+	if err := h.s.ForgetApp(context.Background()); err != nil {
+		t.Fatal(err)
+	}
+	for _, account := range []int64{1001, 1002} {
+		if h.fake.Authorized(account) {
+			t.Errorf("account %d still has a grant on GitHub: %v", account, paths(h.fake.Requests()))
+		}
+	}
+	for _, user := range []int64{h.alice, h.bob} {
+		if list, _ := h.s.Connections(context.Background(), user); len(list) != 0 {
+			t.Fatalf("left %+v", list)
+		}
+	}
+}
+
 func paths(requests []githubfake.Request) []string {
 	var out []string
 	for _, r := range requests {

@@ -1,7 +1,8 @@
 "use client"
 
 import { createContext, useContext } from "react"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { StickToBottom, useStickToBottomContext } from "use-stick-to-bottom"
 import { ArrowDown } from "@/components/icons"
 import { cn } from "@/lib/utils"

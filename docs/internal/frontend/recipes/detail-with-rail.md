@@ -26,7 +26,10 @@ in `components/detail-page.tsx`, and `BackLink` in `components/page.tsx`
 3. **The identity line**: the item's mark, its name, its state in words and its facts
    ([`../components/page-header.md`](../components/page-header.md)).
 4. **The views**: a `ViewTabs` strip and the open view's pane. From `xl` the head stays put and
-   the views scroll under it. Narrower, the page scrolls as a whole.
+   the views scroll under it. Narrower, the page scrolls as a whole. The body that scrolls from
+   `xl` is marked `data-detail-scroll`, so a field reached by Tab stops short of a floating save
+   bar there as it does in the shell's scroller; a pane with a scroller of its own inside it (an
+   account's) takes the mark too.
 
 That is the order on screen. In the document the item comes first and the rail last (`DetailPage`
 places the rail with `order` from `xl`), so a keyboard reaches the way back, the views and the
@@ -78,7 +81,9 @@ Workspace too: it returns true when the page used the key itself (letting go of 
 - A view is written to the history at once with `replaceState`. It is never pushed, because Back
   does not step through views. It is never debounced either: a debounced write cancels a
   navigation the router has pending, which shows up as CI-only "URL did not change" failures.
-- An address that changes under the page is followed.
+- An address that changes under the page is followed, by the rules it opens on: one that names a
+  view opens it, and one with no `?tab=` (a link to the bare page, Back past a view) opens the
+  remembered view or the first, never the view that was on screen.
 - With `remember`, a page opened without `?tab=` opens on the view last left.
 - `visited` holds the views opened so far, so their panes can stay mounted.
 

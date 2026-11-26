@@ -33,6 +33,7 @@ import type {
 } from "@/components/database/mongo/types"
 import type { Workbench } from "@/components/database/mongo/workbench"
 import { ReadError } from "@/components/database/kit/read-error"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 const LEVEL_HINT: Record<MongoValidationLevel, string> = {
   strict: "Every insert and every update is checked.",
@@ -205,7 +206,7 @@ export function ValidationView({ mongo, catalog, collection: info, confirm }: Wo
       setBusy(null)
       // The answer is drawn under the form: it is brought into sight.
       requestAnimationFrame(() =>
-        resultRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+        scrollIntoViewRespectingMotion(resultRef.current, { block: "nearest" }),
       )
     }
   }

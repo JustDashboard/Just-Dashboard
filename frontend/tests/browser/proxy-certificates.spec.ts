@@ -1007,6 +1007,38 @@ test("an active timer whose last run failed reads failing, with certbot's reason
   await expect(newest.getByText("failed", { exact: true })).toBeVisible()
 })
 
+test("with animations paused, Show log brings the runs in at once rather than gliding", async ({
+  page,
+}) => {
+  // A glide asked for by hand overrides the page's own rule for reduced
+  // motion, so this one glided on a paused page (A11Y-17).
+  await page.addInitScript(() => {
+    localStorage.setItem("just-dashboard.motion", "paused")
+    const asked: (ScrollBehavior | undefined)[] = []
+    const scroll = Element.prototype.scrollIntoView
+    Element.prototype.scrollIntoView = function (
+      this: Element,
+      options?: boolean | ScrollIntoViewOptions,
+    ) {
+      if (this.id === "renewal-runs")
+        asked.push(typeof options === "object" ? options.behavior : undefined)
+      return scroll.call(this, options)
+    }
+    ;(window as unknown as { asked: typeof asked }).asked = asked
+  })
+  await mockProxy(page, { included: true })
+  await mockFailingRenewal(page)
+  await page.goto("/proxy/certificates?tab=renewal")
+  await expect(page.locator("html")).toHaveAttribute("data-motion", "paused")
+
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  await lineages.getByRole("button", { name: "Show log", exact: true }).click()
+  await expect(page.getByRole("region", { name: "Renewal runs" })).toBeInViewport()
+  expect(await page.evaluate(() => (window as unknown as { asked: unknown[] }).asked)).toEqual([
+    "instant",
+  ])
+})
+
 test("a failure renewed since reads recovered, and a passing run healthy until the next", async ({
   page,
 }) => {

@@ -34,7 +34,13 @@ import (
 // PASSWORD as it came (statements_shape.go).
 
 type Statement struct {
-	ID      string  `json:"id"`
+	ID string `json:"id"`
+	// Variant tells apart the rows an engine lists under one ID: the role
+	// that ran it on PostgreSQL (and whether it ran nested, from 14 on), the
+	// schema it ran in on MySQL. Empty where the ID is the row on its own.
+	// It is the engine's, so a row keeps it however the list is sorted and
+	// whatever else comes and goes in it.
+	Variant string  `json:"variant,omitempty"`
 	Query   string  `json:"query"`
 	Calls   int64   `json:"calls"`
 	TotalMs float64 `json:"totalMs"`
@@ -412,10 +418,22 @@ func (postgresDialect) Statements(ctx context.Context, db *sql.DB, opts Statemen
 	// Column names changed in 13 (total_time became total_exec_time). The
 	// view is asked which it has rather than the version being parsed.
 	timeCol, meanCol, maxCol := "total_exec_time", "mean_exec_time", "max_exec_time"
-	var modern bool
-	if err := db.QueryRowContext(ctx, `SELECT EXISTS (SELECT 1 FROM information_schema.columns
-	  WHERE table_name = 'pg_stat_statements' AND column_name = 'total_exec_time')`).Scan(&modern); err == nil && !modern {
-		timeCol, meanCol, maxCol = "total_time", "mean_time", "max_time"
+	// A query id is one row per role that ran it and, from 14 on, one more
+	// where it ran nested inside a function: the role and that flag are what
+	// tell its rows apart, and toplevel is asked for like the time columns.
+	variant := "userid::text"
+	var modern, nested bool
+	if err := db.QueryRowContext(ctx, `SELECT
+	    EXISTS (SELECT 1 FROM information_schema.columns
+	            WHERE table_name = 'pg_stat_statements' AND column_name = 'total_exec_time'),
+	    EXISTS (SELECT 1 FROM information_schema.columns
+	            WHERE table_name = 'pg_stat_statements' AND column_name = 'toplevel')`).Scan(&modern, &nested); err == nil {
+		if !modern {
+			timeCol, meanCol, maxCol = "total_time", "mean_time", "max_time"
+		}
+		if nested {
+			variant = "userid::text || CASE WHEN toplevel THEN '' ELSE '-nested' END"
+		}
 	}
 	order := map[string]string{
 		StatementsByTotal: timeCol, StatementsByMean: meanCol, StatementsByCalls: "calls",
@@ -425,14 +443,14 @@ func (postgresDialect) Statements(ctx context.Context, db *sql.DB, opts Statemen
 	// read all statistics, and for utility statements with tracking off; the
 	// text is NULL in the same rows.
 	rows, err := db.QueryContext(ctx, fmt.Sprintf(`
-	  SELECT COALESCE(queryid::text, ''), COALESCE(LEFT(query, 1000), ''), calls, %s, %s, %s, rows,
+	  SELECT COALESCE(queryid::text, ''), %s, COALESCE(LEFT(query, 1000), ''), calls, %s, %s, %s, rows,
 	         CASE WHEN shared_blks_hit + shared_blks_read > 0
 	              THEN shared_blks_hit::float8 / (shared_blks_hit + shared_blks_read) ELSE -1 END,
 	         (SELECT COALESCE(sum(%s), 0) FROM pg_stat_statements
 	          WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database()))
 	  FROM pg_stat_statements
 	  WHERE dbid = (SELECT oid FROM pg_database WHERE datname = current_database())
-	  ORDER BY %s DESC LIMIT $1`, timeCol, meanCol, maxCol, timeCol, order), opts.Limit)
+	  ORDER BY %s DESC LIMIT $1`, variant, timeCol, meanCol, maxCol, timeCol, order), opts.Limit)
 	if err != nil {
 		// The extension exists but the view is not readable by this role, or
 		// the library is not preloaded: say so rather than fail the page.
@@ -442,7 +460,7 @@ func (postgresDialect) Statements(ctx context.Context, db *sql.DB, opts Statemen
 	out := &StatementsReport{Statements: []Statement{}, Supported: true}
 	for rows.Next() {
 		var s Statement
-		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &s.HitRatio, &out.TotalMs); err != nil {
+		if err := rows.Scan(&s.ID, &s.Variant, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &s.HitRatio, &out.TotalMs); err != nil {
 			return nil, err
 		}
 		s.Query = pgStatementShape(s.Query)
@@ -485,7 +503,7 @@ func (mysqlDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsO
 		StatementsByRows: "SUM_ROWS_SENT", StatementsByMax: "MAX_TIMER_WAIT",
 	}[opts.Sort]
 	rows, err := db.QueryContext(ctx, `
-	  SELECT COALESCE(DIGEST, ''), COALESCE(LEFT(DIGEST_TEXT, 1000), ''), COUNT_STAR,
+	  SELECT COALESCE(DIGEST, ''), COALESCE(SCHEMA_NAME, ''), COALESCE(LEFT(DIGEST_TEXT, 1000), ''), COUNT_STAR,
 	         SUM_TIMER_WAIT / 1e9, AVG_TIMER_WAIT / 1e9, MAX_TIMER_WAIT / 1e9, SUM_ROWS_SENT,
 	         (SELECT COALESCE(SUM(SUM_TIMER_WAIT), 0) / 1e9
 	          FROM performance_schema.events_statements_summary_by_digest WHERE `+mysqlStatementsScope+`)
@@ -499,7 +517,9 @@ func (mysqlDialect) Statements(ctx context.Context, db *sql.DB, opts StatementsO
 	out := &StatementsReport{Statements: []Statement{}, Supported: true}
 	for rows.Next() {
 		var s Statement
-		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &out.TotalMs); err != nil {
+		// The table is one row per schema and digest, so a digest that ran
+		// in two schemas is two rows: the schema is what tells them apart.
+		if err := rows.Scan(&s.ID, &s.Variant, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &out.TotalMs); err != nil {
 			return nil, err
 		}
 		s.HitRatio = -1
@@ -570,6 +590,7 @@ func (clickhouseDialect) Statements(ctx context.Context, db *sql.DB, opts Statem
 	out.Since = &since
 	for rows.Next() {
 		var s Statement
+		// Grouped by normalized_query_hash, so each ID is one row: no variant.
 		if err := rows.Scan(&s.ID, &s.Query, &s.Calls, &s.TotalMs, &s.MeanMs, &s.MaxMs, &s.Rows, &out.TotalMs); err != nil {
 			return nil, err
 		}

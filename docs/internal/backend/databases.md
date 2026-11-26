@@ -1681,7 +1681,10 @@ are decided here, not by the page.
   day, SQL Server's `sys.dm_exec_query_stats` summed by query hash for plans compiled in this database
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
-  `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
+  `share` of everything tracked and, where the engine lists one id more than once, the `variant` that
+  tells its rows apart (the role that ran it on PostgreSQL, with `-nested` where `toplevel` is false
+  on 14+, and the schema on MySQL; the other engines group by their id), and `supported: false` comes
+  with what would enable it (`enable`) or
   with the grant the account lacks (`reason`). On PostgreSQL `enable` says how far the module is from
   loaded: `configured` when the list the next start loads names it and the running list does not —
   that list is the last line the configuration files hold for it, read from `pg_file_settings` by a
@@ -1964,7 +1967,7 @@ and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
 The control center's *Alerts* line (`components/database/fleet/fleet-protection.tsx`) reads every
 rule and the channels, and its *Turn on* creates the usual kinds as rules over every database
 (`connectionId: null`, no channels, each kind's defaults), skipping a kind that already has such a
-rule, paused or not.
+rule, paused or not, by the rules it reads again just before it makes any.
 
 - **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
   database of an engine can be watched for, and the create route refuses a rule for one database
@@ -2313,7 +2316,9 @@ the detail of each classifier is below, with the surface it guards.
   is not complete ends with an object whose only key is `__export`; a SQL file always ends with a
   comment. And a caller that names its export (`exportId`) can ask `GET /{id}/export/status` afterwards,
   which is the only way a browser saving a CSV learns it was cut at the limit: browsers show trailers
-  to nothing, and a CSV has nowhere to say it. The registry is memory, keyed by account, connection and
+  to nothing, and a CSV has nowhere to say it. The page asks it with the export's own abort signal
+  (`settledExport` in `lib/stream-export.ts`), and saves nothing once Cancel was pressed, however
+  late. The registry is memory, keyed by account, connection and
   name. A **failure** is never a response that ends: the first 64 KiB are held so that a statement
   refused before then is an ordinary error response, and past that the response is flushed and the
   connection aborted (`http.ErrAbortHandler`), which a browser reports as a failed download and every

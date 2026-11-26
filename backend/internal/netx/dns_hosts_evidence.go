@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"net/netip"
-	"os"
 	"strings"
 	"time"
 )
@@ -93,7 +92,7 @@ func (s *Service) PreviewHostRecords(ctx context.Context, records []HostRecord) 
 	// Where the block sits decides which line a reader meets first. A file with
 	// no block gets one at its end, after every foreign line.
 	blockLine := 1 << 30
-	if data, err := os.ReadFile(hostFilePath(s.paths.Hosts)); err == nil {
+	if data, err := s.readHostsFile(); err == nil {
 		if span, err := findHostsBlock(s.paths.Hosts, splitHostsLines(data)); err == nil && span.begin >= 0 {
 			blockLine = span.begin + 1
 		}

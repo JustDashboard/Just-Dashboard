@@ -192,10 +192,16 @@ func (s *Service) set(ctx context.Context, name string) error {
 			return nil
 		}
 	}
-	if err := s.replace("/etc/hostname", []byte(name+"\n")); err != nil {
+	before, existed, err := s.swap("/etc/hostname", []byte(name+"\n"))
+	if err != nil {
 		return errors.Join(managed, fmt.Errorf("write %s: %w", "/etc/hostname", err))
 	}
 	if err := s.command(ctx, "hostname", name); err != nil {
+		// The kernel kept its name, so the server must also boot with the
+		// one it had: a refused rename leaves the machine as it found it.
+		if undo := s.restore("/etc/hostname", before, existed); undo != nil {
+			return errors.Join(managed, err, fmt.Errorf("put %s back: %w", "/etc/hostname", undo))
+		}
 		return errors.Join(managed, err)
 	}
 	return nil

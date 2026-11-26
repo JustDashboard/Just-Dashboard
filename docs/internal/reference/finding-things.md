@@ -76,7 +76,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | `handlers_network*.go` | 27 | Network |
 | `handlers_proxy*.go` | 18 | Proxy; with `handlers_certificates*.go`, `handlers_tls*.go`, `handlers_ports*.go` |
 | `handlers_assistant*.go` | 9 | The assistant |
-| `handlers_git*.go` | 12 | Local Git (4), its GitHub half (5, `handlers_github*.go`) and the GitHub page (3, `handlers_githubrepos*.go`) |
+| `handlers_git*.go` | 13 | Local Git (4), its GitHub half (5, `handlers_github*.go`) and the GitHub page (4, `handlers_githubrepos*.go`) |
 | `handlers_files*.go` | 8 | Files: browsing, the Trash, versions, what a folder is to the server, transfers, thumbnails, Find's index |
 | `handlers_mcp*.go` | 5 | The MCP endpoint and its keys |
 | other `handlers_*.go` | 58 | One to four files per remaining area |

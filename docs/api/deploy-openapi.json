@@ -16237,6 +16237,15 @@
           "action": {
             "type": "string"
           },
+          "baseDigests": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "class": {
             "type": "string"
           },

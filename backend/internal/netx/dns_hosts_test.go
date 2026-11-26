@@ -202,6 +202,100 @@ func TestSetHostRecordsWritesThroughASymlink(t *testing.T) {
 	}
 }
 
+// In the shipped stack the server's /etc/hosts is reached as /host/etc/hosts
+// from the container and edited in the server's mount namespace. A link with
+// an absolute target names one file from there and another, or none, from
+// here: the edit reads, changes and writes the one the server's programs read,
+// and never carries another file's lines into it.
+func TestSetHostRecordsEditsTheServersFileWhereALinkDiffersAcrossViews(t *testing.T) {
+	s := testService(t)
+	dir := t.TempDir()
+	// What the link reaches from the container: Docker's kind of file.
+	containerTarget := filepath.Join(dir, "container", "hosts")
+	const containerHosts = "127.0.0.1 localhost\n172.17.0.2 0123456789ab\n"
+	// What the same link reaches in the server's namespace: its own file.
+	serverTarget := filepath.Join(dir, "server", "run", "hosts")
+	const serverHosts = "127.0.0.1 localhost\n# the provider wrote this\n10.0.0.5 build.internal\n"
+	serverLink := filepath.Join(dir, "server", "etc", "hosts")
+	for path, content := range map[string]string{containerTarget: containerHosts, serverTarget: serverHosts} {
+		if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.MkdirAll(filepath.Dir(serverLink), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(containerTarget, s.paths.Hosts); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(serverTarget, serverLink); err != nil {
+		t.Fatal(err)
+	}
+	entered := 0
+	s.onServer = func(real, _ string, fn func(string) error) error {
+		if real != s.paths.Hosts {
+			t.Errorf("handed over %q, not the hosts file", real)
+		}
+		entered++
+		return fn(serverLink)
+	}
+
+	view, err := s.SetHostRecords(context.Background(), []HostRecord{{Address: "10.0.0.1", Names: []string{"a.internal"}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if b, _ := os.ReadFile(serverTarget); string(b) != serverHosts+"# BEGIN Just Dashboard\n10.0.0.1 a.internal\n# END Just Dashboard\n" {
+		t.Fatalf("the server's file became:\n%s", b)
+	}
+	if b, _ := os.ReadFile(containerTarget); string(b) != containerHosts {
+		t.Fatalf("the container's file was written:\n%s", b)
+	}
+	for _, link := range []string{s.paths.Hosts, serverLink} {
+		if st, err := os.Lstat(link); err != nil || st.Mode()&os.ModeSymlink == 0 {
+			t.Fatalf("%s is no longer a link: %v", link, err)
+		}
+	}
+	// What the page is shown is the server's file too.
+	var names []string
+	for _, l := range view.Other {
+		names = append(names, l.Names...)
+	}
+	if got := strings.Join(names, " "); got != "localhost build.internal" || len(view.Managed) != 1 {
+		t.Fatalf("view = %+v", view)
+	}
+	if entered == 0 {
+		t.Fatal("the edit never entered the server's namespace")
+	}
+}
+
+// The server's /etc/hosts as a link whose absolute target names nothing in
+// the container is still the server's file, handed to its namespace by the
+// mirrored path, and not Docker's copy at /etc/hosts.
+func TestHostFilePathKeepsALinkTheContainerCannotFollow(t *testing.T) {
+	root := t.TempDir()
+	defer func(was string) { serverMount = was }(serverMount)
+	serverMount = root
+	mirrored := filepath.Join(root, "etc", "hosts")
+	if got := hostFilePath("/etc/hosts"); got != "/etc/hosts" {
+		t.Fatalf("with no server mount: %q", got)
+	}
+	if err := os.MkdirAll(filepath.Dir(mirrored), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("/nonexistent-in-this-view/hosts", mirrored); err != nil {
+		t.Fatal(err)
+	}
+	if got := hostFilePath("/etc/hosts"); got != mirrored {
+		t.Fatalf("a dangling link fell back to %q", got)
+	}
+	if got := hostFilePath("/srv/hosts"); got != "/srv/hosts" {
+		t.Fatalf("another path moved to %q", got)
+	}
+}
+
 func TestCleanHostRecords(t *testing.T) {
 	t.Parallel()
 	long := strings.Repeat("a", 63)

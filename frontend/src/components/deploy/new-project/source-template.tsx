@@ -42,6 +42,7 @@ import { breakpointQuery } from "@/lib/breakpoints"
 import { useSourceInspection } from "./use-source-inspection"
 import { BlueprintField, useSuggestedDomain } from "./blueprint-field"
 import { templateDraftSource, templateInputErrors } from "./template-inputs"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * What a template is *for*, which is how somebody looking for one thinks.
@@ -263,12 +264,7 @@ export function SourceTemplate({
     requestAnimationFrame(() => {
       const panel = document.getElementById(id)
       panel?.focus({ preventScroll: true })
-      panel?.scrollIntoView({
-        block: "start",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "instant"
-          : "smooth",
-      })
+      scrollIntoViewRespectingMotion(panel)
     })
   }
   const select = (entry: BlueprintSummary) => {

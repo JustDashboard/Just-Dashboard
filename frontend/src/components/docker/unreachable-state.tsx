@@ -252,13 +252,19 @@ function InstallDocker({
  * work without the daemon (Remote Desktop, a database's container): it asks
  * the daemon itself, so the page only says where it goes. `onAnswer` is
  * called when Docker answers again, for the page to read again.
+ *
+ * `answering` is what is drawn while the daemon answers its ping: a page
+ * whose own read of Docker failed anyway (a listing that timed out) says that
+ * failure there, which the ping cannot see. Without it nothing is drawn.
  */
 export function DockerMissing({
   size = "block",
   onAnswer,
+  answering = null,
 }: {
   size?: "page" | "block"
   onAnswer?: () => void
+  answering?: React.ReactNode
 }) {
   const ping = usePoll((signal) => get<DockerPing>("/docker/ping", undefined, signal), 30_000)
   const available = ping.data?.available === true
@@ -273,7 +279,7 @@ export function DockerMissing({
   }, [available])
   if (ping.loading && !ping.data) return <LoadingPanel plain />
   if (ping.error && !ping.data) return <ErrorState error={ping.error} onRetry={ping.refresh} />
-  if (available) return null
+  if (available) return answering
   return (
     <DockerUnreachableState
       ping={ping.data ?? { available: false }}

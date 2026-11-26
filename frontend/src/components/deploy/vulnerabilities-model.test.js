@@ -17,6 +17,7 @@ import {
   countsLine,
   floorWords,
   inFlight,
+  reportReachable,
   scanVerdict,
   vulnerable,
 } from "./vulnerabilities-model"
@@ -122,6 +123,15 @@ describe("vulnerabilities", () => {
     }
     expect(vulnerable(scan({ summary: { ...scan().summary, fixable: [tooling] } }))).toBe(false)
     expect(vulnerable(scan({ state: "scanning" }))).toBe(false)
+    // Another base moved, not the one that carries these: the server gives
+    // them no rebuild, and a newer Bun is no fix for what Node carries.
+    const otherBaseMoved = scan({
+      summary: {
+        ...scan().summary,
+        fixable: scan().summary.fixable.map((finding) => ({ ...finding, action: undefined })),
+      },
+    })
+    expect(vulnerable(otherBaseMoved)).toBe(false)
     expect(
       vulnerable(
         scan({
@@ -133,6 +143,24 @@ describe("vulnerabilities", () => {
     expect(vulnerable(null)).toBe(false)
     expect(inFlight(scan({ state: "queued" }))).toBe(true)
     expect(inFlight(scan())).toBe(false)
+  })
+
+  test("the report is a link away as soon as the live release can be scanned", () => {
+    // Scan now is the report's: the first scan is asked for there.
+    expect(reportReachable(reading({ scan: null }))).toBe(true)
+    expect(
+      reportReachable(reading({ scan: scan({ state: "queued", finishedAt: undefined }) })),
+    ).toBe(true)
+    expect(reportReachable(reading({ scan: null, releaseId: undefined }))).toBe(false)
+    expect(reportReachable(reading({ scan: null, available: false }))).toBe(false)
+    expect(
+      reportReachable(reading({ scan: null, policy: { enabled: false, severityFloor: "HIGH" } })),
+    ).toBe(false)
+    // A scan already read keeps its report, whatever the terms say now.
+    expect(reportReachable(reading({ policy: { enabled: false, severityFloor: "HIGH" } }))).toBe(
+      true,
+    )
+    expect(reportReachable(undefined)).toBe(false)
   })
 
   test("the header says what there is to do, and is quiet when there is nothing", () => {
@@ -409,6 +437,7 @@ describe("what the overview says", () => {
       ...quiet,
       newerBase: true,
       summary: { ...quiet.summary, fixable: [zlib, esbuild, next, npmGlob] },
+      actionable: counts({ critical: 1, high: 1 }),
     }
     const actions = scanActions(scan)
     expect(actions.map((action) => action.kind)).toEqual(["rebuild", "upgrade"])
@@ -416,6 +445,29 @@ describe("what the overview says", () => {
     expect(upgradeTitle(actions[1].group)).toBe("Upgrade next to 16.4.7")
     expect(dependencyWords(actions[1].group)).toBe("in package.json")
     expect(overviewLead(scan).title).toBe("2 high or worse to fix in release 1")
+  })
+
+  test("a list filled by a development tool's findings still says what there is to fix", () => {
+    // The server cut the list at 200 criticals from esbuild's Go; the count of
+    // what can be done was read before the cut.
+    const crowded = {
+      ...quiet,
+      newerBase: true,
+      summary: { ...quiet.summary, fixable: Array.from({ length: 200 }, () => esbuild) },
+      actionable: counts({ high: 1 }),
+    }
+    expect(overviewLead(crowded).title).toBe("1 high or worse to fix in release 1")
+    expect(
+      scanVerdict({
+        policy: { enabled: true, severityFloor: "HIGH" },
+        available: true,
+        scan: { ...crowded, finishedAt: "2026-10-29T09:00:00Z" },
+      }),
+    ).toEqual({ tone: "danger", line: "1 to fix" })
+    // A medium the reader can act on is not counted at a high floor.
+    expect(overviewLead({ ...crowded, actionable: counts({ medium: 2 }) }).title).toBe(
+      "Nothing high or worse to fix in release 1",
+    )
   })
 
   test("Go's standard library is the Go a binary was built with", () => {

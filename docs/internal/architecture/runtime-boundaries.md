@@ -297,7 +297,9 @@ answer (`httpx.WriteError`); requests that succeed are logged at debug.
   container's namespace. The kernel refuses a rename over a mount point by whichever path the caller
   names it, so `/host/etc/hosts` is as busy as `/etc/hosts` here (`EBUSY`). `write` runs with the
   server's own path through `IntoHostMounts` and, where that cannot be entered, here with the
-  `/host` path. `RenameOver(tmp, path, data)` is the rename such writers make: where it is refused as
+  `/host` path. A caller that edits the file reads it inside `write` too, by the path `write` is
+  given: a link resolved once in each namespace can name two different files, and the server's would
+  be replaced with the other's lines. `RenameOver(tmp, path, data)` is the rename such writers make: where it is refused as
   busy, it writes `data` over the file's old bytes and cuts it to length, so the file is never empty.
   The same thing `hostnamectl` does, the server's namespace replacing the file, detaches Docker's
   mount from the backend container's `/etc/hosts`, which then reads the server's own file until the

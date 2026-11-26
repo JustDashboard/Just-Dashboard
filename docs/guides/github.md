@@ -2,8 +2,11 @@
 
 [← README](../../README.md) · [Features](../../FEATURES.md) · [Install](install.md) · [Configuration](configuration.md) · [Command line](cli.md) · [Administration](administration.md) · [Linking & usage count](linking-and-usage.md) · [GitHub](github.md) · [Security](../../SECURITY.md)
 
-The **GitHub** page manages repositories on GitHub: it lists what your GitHub accounts can reach,
-creates repositories, and works with their branches, commits, pull requests, issues, Actions,
+The **GitHub** page manages repositories on GitHub. It opens on your account the way GitHub's own
+profile does (your contribution calendar, the repositories you pushed to last, your pull requests,
+review requests, assigned issues and public activity), lists every pull request and issue you are
+part of across your repositories, shows what your GitHub accounts can reach as cards, creates
+repositories, and works with their README, branches, commits, pull requests, issues, Actions,
 collaborators and settings. **Local Git** is the other page, for the checkouts on this server; it
 does not need GitHub to be connected, and nothing here changes it. **Clone to server** joins the
 two: it copies a GitHub repository into one of the Git roots, where Local Git finds it.
@@ -94,5 +97,9 @@ repository, or a permission the installation was not granted.
   lifts.
 - **A new repository does not appear**: an installation limited to selected repositories does not
   include it until it is added there on GitHub.
+- **Public activity only**: the activity on the Overview is what GitHub shows anyone. The App does
+  not ask for the account permission GitHub requires for private events.
+- **No contribution calendar**: GitHub sometimes declines to share it; the page says so in its place
+  and tries again on the next visit.
 - **Removing the setup**: **Remove GitHub setup** forgets the App and every connection on this
   dashboard. The App stays on GitHub until its owner deletes it in its settings.

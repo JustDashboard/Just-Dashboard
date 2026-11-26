@@ -8,6 +8,7 @@ import { windowActivity, windowLabel, windowProgram } from "@/lib/terminal/activ
 import { TERMINAL_WINDOW_DRAG } from "@/lib/terminal/layout"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { ActivityMark, ProgramMark } from "@/components/terminal/activity-mark"
+import { scrollBehavior } from "@/lib/motion"
 
 /**
  * The strip's controls at its ends, each in a slot of its own beside the tabs
@@ -56,7 +57,7 @@ export function WindowStrip({
   const scrolling = overflow.start || overflow.end
   const scrollBy = (direction: 1 | -1) => {
     const el = scrollerRef.current
-    el?.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: "smooth" })
+    el?.scrollBy({ left: direction * el.clientWidth * 0.8, behavior: scrollBehavior() })
   }
   useEffect(() => {
     const el = scrollerRef.current

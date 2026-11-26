@@ -128,6 +128,7 @@ export function RoleTester({
         </Field>
         <Field
           label="Settings it carries"
+          group
           hint="What current_setting reads in a policy, such as app.tenant_id. They last for the one query."
         >
           <div className="space-y-2">

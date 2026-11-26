@@ -16,7 +16,8 @@ export function RowLink({
   title,
   className,
   children,
-}: {
+  ...props
+}: Omit<React.ComponentProps<"button">, "type" | "onClick" | "title" | "children"> & {
   onClick: () => void
   mono?: boolean
   /** For a title long enough to ellipse — the secondary line beside it has one. */
@@ -24,8 +25,12 @@ export function RowLink({
   className?: string
   children: React.ReactNode
 }) {
+  // The rest reach the button: above all `ROW_NAME`, the mark a table row
+  // looks for to leave the keyboard to its name. Dropped here, every row
+  // whose name this is was a second Tab stop beside it.
   return (
     <button
+      {...props}
       type="button"
       onClick={onClick}
       title={title}

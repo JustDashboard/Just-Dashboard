@@ -438,17 +438,26 @@ func spliceServerNames(content string, bucket, maxSize int) (string, bool) {
 		if maxSize > 0 {
 			add.WriteString(nl + "    " + fmt.Sprintf("%s %d; %s", maxSizeDirective, maxSize, namesLineMark))
 		}
-		// The rest of the opener's line stays on it: the marked lines go
-		// after it, so nothing else moves to another line number but the
-		// lines below them.
 		end := strings.Index(content[at:], "\n")
 		if end < 0 {
+			end = len(content) - at
+		}
+		rest := strings.TrimSuffix(content[at:at+end], "\r")
+		if trimmed := strings.TrimLeft(rest, " \t"); trimmed != "" && !strings.HasPrefix(trimmed, "#") {
+			// The block goes on past the brace on the same line, and may
+			// close there (`http { include sites-enabled/*; }`): what
+			// follows the line is outside it. The marked lines go straight
+			// after the brace, and the rest of the line onto its own, since
+			// a marked line is dropped whole on the next fit.
+			return content[:at] + add.String() + nl + "    " + content[at+len(rest)-len(trimmed):], true
+		}
+		// Only a comment, or nothing, follows the brace: it stays on the
+		// opener's line, and the marked lines go after it, so nothing else
+		// moves to another line number but the lines below them.
+		if at+end == len(content) {
 			return content + add.String() + nl, true
 		}
-		at += end
-		if at > 0 && content[at-1] == '\r' {
-			at--
-		}
+		at += len(rest)
 		return content[:at] + add.String() + content[at:], true
 	}
 	return "", false

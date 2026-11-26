@@ -6530,6 +6530,8 @@ export type VulnerabilityFinding = {
   class?: string
   /** A base the release was built on carries it too, so a newer base may fix it. */
   fromBase?: boolean
+  /** The pinned digests of the bases that carry it: only a newer image of one of them fixes it. */
+  baseDigests?: string[]
   /** Where the package is in the image: its package.json, or the binary it is compiled into. */
   path?: string
   /**
@@ -8731,6 +8733,12 @@ export type AppDomainStatus = {
     error: string | null
   } | null
   usedBy: AppDomainUse[]
+  /**
+   * Deployment names under a handle this server held and does not hold now: the stored one while
+   * it is not held, and every handle it held before (changed or released). The backend leaves
+   * them out of each release. Absent from a backend older than 0.9.1.
+   */
+  detached?: AppDomainUse[]
   /**
    * The handle the account chose for this server when it approved the link (or later on the
    * site), which the server claims by itself. Null when there is none, or once a domain is held.

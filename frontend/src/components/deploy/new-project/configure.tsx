@@ -80,6 +80,7 @@ import {
 } from "@/components/deploy/new-project/draft"
 import { useTemplateStack } from "@/components/deploy/stack/use-stack"
 import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * The rail of the plan and the step's fields beside it, held to the window
@@ -547,12 +548,7 @@ export function Configure({
         heading.tabIndex = -1
         heading.focus({ preventScroll: true })
       }
-      header?.scrollIntoView({
-        block: "start",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "instant"
-          : "smooth",
-      })
+      scrollIntoViewRespectingMotion(header)
     })
 
   const goto = (next: ConfigureStepKey) => {
@@ -592,9 +588,7 @@ export function Configure({
         const element = document.getElementById(fold)
         if (element instanceof HTMLDetailsElement) element.open = true
       }
-      document
-        .getElementById(SECTION_IDS[section])
-        ?.scrollIntoView({ block: "start", behavior: "smooth" })
+      scrollIntoViewRespectingMotion(document.getElementById(SECTION_IDS[section]))
     })
   }, [opening, current])
 

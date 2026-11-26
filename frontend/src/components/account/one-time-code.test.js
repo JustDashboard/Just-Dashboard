@@ -2,22 +2,36 @@ import { describe, expect, test } from "bun:test"
 import { createElement as h } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import { Field } from "../form"
-import { OneTimeCodeInput, RecoveryCodes } from "./one-time-code"
+import { CODE_LENGTH, OneTimeCodeInput, RecoveryCodes, codeDigits } from "./one-time-code"
 
 const input = (html) => html.match(/<input[^>]*>/)?.[0] ?? ""
 const attr = (tag, name) => tag.match(new RegExp(`\\s${name}="([^"]*)"`))?.[1]
 
 describe("OneTimeCodeInput", () => {
-  test("is always numeric, a one-time code and six characters, at both sizes", () => {
+  test("is always numeric and a one-time code, at both sizes", () => {
     for (const size of ["flow", "reading", undefined]) {
       const tag = input(
         renderToStaticMarkup(h(OneTimeCodeInput, { id: "code", value: "", onChange() {}, size })),
       )
       expect(attr(tag, "inputMode")).toBe("numeric")
       expect(attr(tag, "autoComplete")).toBe("one-time-code")
-      expect(attr(tag, "maxLength")).toBe("6")
       expect(attr(tag, "id")).toBe("code")
+      // The six is applied to the digits, not by the browser to what was
+      // pasted: a maxLength of 6 cut "123 456" to "123 45" before the space
+      // went, and left five digits.
+      expect(attr(tag, "maxLength")).toBeUndefined()
     }
+  })
+
+  test("a grouped code arrives as its six digits, and a seventh is not kept", () => {
+    expect(codeDigits("123 456")).toBe("123456")
+    expect(codeDigits("123-456")).toBe("123456")
+    expect(codeDigits(" 12 34 56 ")).toBe("123456")
+    expect(codeDigits("Your code is 123 456.")).toBe("123456")
+    expect(codeDigits("1234567")).toBe("123456")
+    expect(codeDigits("12a3")).toBe("123")
+    expect(codeDigits("")).toBe("")
+    expect(codeDigits("123 456 789")).toHaveLength(CODE_LENGTH)
   })
 
   test("one letter spacing in both registers", () => {

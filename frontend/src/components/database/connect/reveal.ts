@@ -1,4 +1,5 @@
 import { breakpointQuery } from "@/lib/breakpoints"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * Brings one of a flow screen's two columns into view where they are stacked.
@@ -9,11 +10,6 @@ export function reveal(id: string) {
   requestAnimationFrame(() => {
     const panel = document.getElementById(id)
     panel?.focus({ preventScroll: true })
-    panel?.scrollIntoView({
-      block: "start",
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-        ? "instant"
-        : "smooth",
-    })
+    scrollIntoViewRespectingMotion(panel)
   })
 }

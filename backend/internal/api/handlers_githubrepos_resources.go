@@ -14,7 +14,8 @@ import (
 
 // What is inside one GitHub repository on the GitHub page, under
 // /github/connections/{connection}/repos/{owner}/{repo}: branches, commits,
-// pull requests, issues and labels, workflows and runs, collaborators.
+// pull requests, issues and labels, workflows and runs, collaborators, and
+// the README and languages its overview draws.
 //
 // Every handler starts from s.githubRepo(r), which resolves the signed-in
 // account's own connection and the repository with its abilities, and every
@@ -25,7 +26,7 @@ import (
 //
 //	read            branches and their protection, commits, pull requests
 //	                with reviews and checks, issues, labels, workflows, runs,
-//	                collaborators
+//	                collaborators, the README and the languages
 //	service.control creating a branch, merging, closing and reopening a pull
 //	                request, opening and editing an issue, starting,
 //	                re-running and cancelling a workflow run, inviting a
@@ -48,6 +49,8 @@ func (s *Server) mountGitHubResourceRoutes(r chi.Router) {
 	r.Method(http.MethodGet, "/actions/workflows", s.handle(s.handleGitHubRepoWorkflows))
 	r.Method(http.MethodGet, "/actions/runs", s.handle(s.handleGitHubRepoRuns))
 	r.Method(http.MethodGet, "/collaborators", s.handle(s.handleGitHubRepoCollaborators))
+	r.Method(http.MethodGet, "/readme", s.handle(s.handleGitHubRepoReadme))
+	r.Method(http.MethodGet, "/languages", s.handle(s.handleGitHubRepoLanguages))
 
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapServiceControl))
@@ -183,6 +186,20 @@ func (s *Server) handleGitHubRepoBranchDelete(w http.ResponseWriter, r *http.Req
 	}
 	httpx.NoContent(w)
 	return nil
+}
+
+// --- README and languages ---
+
+func (s *Server) handleGitHubRepoReadme(w http.ResponseWriter, r *http.Request) error {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.Readme, error) {
+		return access.Readme(r.Context())
+	})
+}
+
+func (s *Server) handleGitHubRepoLanguages(w http.ResponseWriter, r *http.Request) error {
+	return ghResourceRead(s, w, r, func(access *githubrepos.RepoAccess) (*githubrepos.Languages, error) {
+		return access.Languages(r.Context())
+	})
 }
 
 // --- commits ---

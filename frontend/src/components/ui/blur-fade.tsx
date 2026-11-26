@@ -1,6 +1,7 @@
 "use client"
 
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 
 import { cn } from "@/lib/utils"
 
@@ -9,7 +10,7 @@ import { cn } from "@/lib/utils"
  * Magic UI's `blur-fade`, from the shadcn registry, trimmed to the one use it
  * has here — a grid of cards landing one after another, so a page of twelve
  * projects reads as arriving rather than appearing. It is `animate-rise`
- * with a stagger; reduced motion renders the children as they are.
+ * with a stagger; reduced motion puts the children in place at once.
  */
 export function BlurFade({
   children,
@@ -24,17 +25,13 @@ export function BlurFade({
   duration?: number
   offset?: number
 }) {
+  // One element whichever the answer: Pause animations turned on under a
+  // grid that has landed must not draw the cards again from nothing.
   const reduced = useReducedMotion()
-  if (reduced)
-    return (
-      <div data-slot="blur-fade" className={className}>
-        {children}
-      </div>
-    )
   return (
     <motion.div
       data-slot="blur-fade"
-      initial={{ y: offset, opacity: 0, filter: "blur(4px)" }}
+      initial={reduced ? false : { y: offset, opacity: 0, filter: "blur(4px)" }}
       animate={{ y: 0, opacity: 1, filter: "blur(0px)" }}
       transition={{ delay, duration, ease: [0.16, 1, 0.3, 1] }}
       className={cn("min-w-0", className)}

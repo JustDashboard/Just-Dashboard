@@ -649,6 +649,50 @@ test("the containers table keeps native status without issue badges", async ({ p
  * a container nobody limited, and the table showed `97 MB / 62.7 GB` as though
  * that were a budget.
  */
+test("a container's row is one Tab stop, its name, and Tab goes straight on to its next control", async ({
+  page,
+}) => {
+  // RowLink dropped the ROW_NAME the table spread on it, so the row stayed a
+  // stop of its own beside the name: two presses of Tab for every container.
+  await mockDocker(page)
+  await page.goto("/docker/containers")
+  // Running both, listed by name: db, then web.
+  const db = page.locator('tr[data-workspace-item="2222222222222222"]')
+  const web = page.locator('tr[data-workspace-item="1111111111111111"]')
+  const name = web.getByRole("button", { name: "web", exact: true })
+  await expect(name).toHaveAttribute("data-workspace-primary", "")
+  await expect(web).not.toHaveAttribute("tabindex")
+  const at = () =>
+    page.evaluate(() => {
+      const el = document.activeElement as HTMLElement
+      return {
+        tag: el.tagName,
+        row: el.closest("[data-workspace-item]")?.getAttribute("data-workspace-item"),
+        name: el.getAttribute("aria-label") ?? el.textContent?.trim(),
+      }
+    })
+
+  // Back from the name is the row before's last control, not this row.
+  await name.focus()
+  await page.keyboard.press("Shift+Tab")
+  const back = await at()
+  expect(back.tag).not.toBe("TR")
+  expect(back.row).toBe("2222222222222222")
+  await expect(db).not.toBeFocused()
+  // And on from there is the name again, the row's one stop.
+  await page.keyboard.press("Tab")
+  await expect(name).toBeFocused()
+
+  // On from the name is the row's next control, inside the row.
+  await page.keyboard.press("Tab")
+  const next = await at()
+  expect(next.tag).not.toBe("TR")
+  expect(next.row).toBe("1111111111111111")
+  expect(next.name).not.toBe("web")
+  await page.keyboard.press("Shift+Tab")
+  await expect(name).toBeFocused()
+})
+
 test("memory says no limit rather than inventing one", async ({ page }) => {
   await mockDocker(page)
   await page.goto("/docker/containers")
@@ -1943,9 +1987,11 @@ test("workspace: container name typing, adjacent details and Back retain list fo
   )
   await page.goto("/docker/containers")
   await expect(page.locator("[data-workspace-item]").first()).toBeVisible()
-  await page.locator("[data-workspace-item]").first().focus()
-  // A table's row is what the keyboard moves between, as on Live and Services.
-  const web = page.locator('tr[data-workspace-item="1111111111111111"]')
+  await page.locator("[data-workspace-item] [data-workspace-primary]").first().focus()
+  // A row's place is its name (ROW_NAME), which is what the keyboard moves between.
+  const web = page
+    .locator('tr[data-workspace-item="1111111111111111"]')
+    .getByRole("button", { name: "web", exact: true })
   await page.keyboard.press("w")
   await expect(web).toBeFocused()
   await page.keyboard.press("Enter")
@@ -1990,11 +2036,11 @@ test("workspace: Back restores a long container list's scroll and focused row", 
   await expect(page).toHaveURL(/0000000000000051$/)
   await page.goBack()
   await expect(page).toHaveURL(/\/docker\/containers$/)
-  const item = page.locator('tr[data-workspace-item="0000000000000051"]')
-  await expect(item).toBeFocused()
+  // Back on the row's name, its place (ROW_NAME), not on the row around it.
+  await expect(row).toBeFocused()
   await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
   await page.reload()
-  await expect(item).toBeFocused()
+  await expect(row).toBeFocused()
   await expect.poll(() => shell.evaluate((element) => element.scrollTop)).toBe(before)
 })
 

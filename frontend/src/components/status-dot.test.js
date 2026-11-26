@@ -24,6 +24,9 @@ describe("toneFor", () => {
       "deactivating",
       "launching",
       "stopping",
+      // Docker's own word while a container is being taken away: a known
+      // transition, not a missing reading.
+      "removing",
       "connecting",
       "reconnecting",
     ],

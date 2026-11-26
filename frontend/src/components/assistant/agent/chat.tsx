@@ -2,7 +2,8 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { AnimatePresence, MotionConfig, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, MotionConfig, motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { ChevronRight, CornerUpLeft, Plus, Sparkles } from "@/components/icons"
 import {
   assistantDestination,

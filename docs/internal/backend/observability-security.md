@@ -156,8 +156,9 @@ what each reads are tabled in
 - **What a rename does**, in order: holds the tailnet name, sets the name, checks the kernel answers
   to it, then records it in the hosts file. `hostnamectl set-hostname` sets it wherever systemd keeps
   the name; a server without `hostnamectl`, or one whose `hostnamed` will not answer, gets
-  `/etc/hostname` written and `hostname <name>` run instead. Asking for the name the server has
-  changes nothing.
+  `/etc/hostname` written and `hostname <name>` run instead. When `hostname` then refuses, the file
+  is put back as it was (or removed, where the server had none), so a refused rename leaves the name
+  the server boots with as well as the kernel's. Asking for the name the server has changes nothing.
 - **The tailnet name is held, not followed.** Tailscale reports a new host name to its control
   server and the node's MagicDNS name follows it, which would take the dashboard's own address, its
   certificate and every address published on the tailnet away in one press. So before the name

@@ -55,6 +55,7 @@ import {
   type FlowAnchor,
   type FlowViewKey,
 } from "@/components/network/flows/views"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * Reading register: the socket recorder, the hours it has kept and what
@@ -97,7 +98,7 @@ export function SocketHistoryPage() {
       show(FLOW_ANCHOR_VIEW[anchor])
       const reach = (tries: number) => {
         const target = document.getElementById(anchor)
-        if (target) target.scrollIntoView({ block: "start", behavior: "smooth" })
+        if (target) scrollIntoViewRespectingMotion(target)
         else if (tries > 0) requestAnimationFrame(() => reach(tries - 1))
       }
       requestAnimationFrame(() => reach(10))

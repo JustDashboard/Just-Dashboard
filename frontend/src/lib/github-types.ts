@@ -420,3 +420,146 @@ export type GitHubCollaborators = {
 }
 export type GitHubCollaboratorRole = "read" | "triage" | "write" | "maintain" | "admin"
 export type GitHubCollaboratorResult = { invited: boolean }
+
+/**
+ * `GET /github/connections/{id}/profile` — the connected account as its
+ * GitHub profile draws it: who it is, and its last year of contributions.
+ * The profile is GitHub's REST `/user`; the calendar is GraphQL, and when
+ * GitHub would not answer that half the profile still comes back, with
+ * `contributionsMessage` saying why the calendar is missing.
+ */
+export type GitHubProfile = {
+  login: string
+  name?: string
+  bio?: string
+  company?: string
+  location?: string
+  /** The website on the profile, as GitHub holds it (may lack a scheme). */
+  blog?: string
+  htmlUrl: string
+  followers: number
+  following: number
+  publicRepos: number
+  createdAt?: string
+  contributions?: GitHubContributions
+  contributionsMessage?: string
+}
+
+/** GitHub's contribution calendar: week columns, oldest first, each Sunday to Saturday. */
+export type GitHubContributions = {
+  total: number
+  weeks: { days: GitHubContributionDay[] }[]
+}
+
+export type GitHubContributionDay = {
+  /** `YYYY-MM-DD`. */
+  date: string
+  count: number
+  /** GitHub's quartile, 0 for none to 4 for the busiest days. */
+  level: 0 | 1 | 2 | 3 | 4
+  /** 0 is Sunday. */
+  weekday: number
+}
+
+/**
+ * Which of the account's pull requests or issues to list, GitHub's search
+ * qualifiers by name: ones it opened (`author:`), is assigned (`assignee:`),
+ * is mentioned in (`mentions:`), or, for pull requests, is asked to review
+ * (`review-requested:`).
+ */
+export type GitHubInboxFilter = "created" | "assigned" | "mentioned" | "review"
+
+/** One pull request or issue in any repository the account reaches. */
+export type GitHubInboxItem = {
+  /** `owner/name`. */
+  repository: string
+  number: number
+  title: string
+  /** An issue is open or closed; a pull request may be merged. */
+  state: "open" | "closed" | "merged"
+  /** Issues only: why it was closed. */
+  stateReason?: "completed" | "not_planned" | "reopened"
+  /** Pull requests only. */
+  draft: boolean
+  author: string
+  labels: GitHubLabel[]
+  comments: number
+  createdAt: string
+  updatedAt: string
+  closedAt?: string
+  htmlUrl: string
+}
+
+/**
+ * `GET /github/connections/{id}/pulls?filter=&state=open|closed&page=` and
+ * `GET /github/connections/{id}/issues?…` (no `review` filter): GitHub's
+ * issue search, newest update first, thirty a page.
+ */
+export type GitHubInboxPage = {
+  items: GitHubInboxItem[]
+  /** GitHub's count of every match, not only this page. */
+  total: number
+  hasMore: boolean
+  /** GitHub's search timed out and the page may miss some. */
+  incomplete: boolean
+}
+
+/**
+ * `GET /github/connections/{id}/events` — what the account did lately, as
+ * GitHub's own activity feed lists it (`/users/{login}/events`), newest
+ * first, the last thirty. Public events only: GitHub adds private ones only
+ * for a token with the Events account permission, which the App does not ask
+ * for.
+ */
+export type GitHubEvent = {
+  id: string
+  kind:
+    | "push"
+    | "pull"
+    | "issue"
+    | "comment"
+    | "review"
+    | "create"
+    | "delete"
+    | "star"
+    | "fork"
+    | "release"
+    | "public"
+    | "member"
+  /** `owner/name`. */
+  repository: string
+  createdAt: string
+  /** GitHub's word for what happened: opened, closed, merged, reopened, published, created… */
+  action?: string
+  /** A branch or tag, without `refs/heads/`. */
+  ref?: string
+  /** For create and delete: branch, tag or repository. */
+  refType?: "branch" | "tag" | "repository"
+  /** A pull request's or issue's number. */
+  number?: number
+  /** A pull request's or issue's title, a release's name. */
+  title?: string
+  /** For a push: how many commits it carried. */
+  commits?: number
+  /** Where it is on GitHub. */
+  htmlUrl?: string
+}
+export type GitHubEventList = { events: GitHubEvent[] }
+
+/**
+ * `GET …/repos/{owner}/{repo}/readme` — the repository's README at its
+ * default branch, as Markdown source. A repository without one answers
+ * `found: false`, not an error.
+ */
+export type GitHubReadme = {
+  found: boolean
+  /** Where it is in the repository, e.g. `README.md` or `docs/README.md`. */
+  path?: string
+  /** The Markdown, cut at 512 KiB. */
+  content?: string
+  truncated?: boolean
+  htmlUrl?: string
+}
+
+/** `GET …/repos/{owner}/{repo}/languages` — bytes per language, largest first. */
+export type GitHubLanguages = { languages: { name: string; bytes: number }[] }

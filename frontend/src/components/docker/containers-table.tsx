@@ -290,7 +290,7 @@ function Identity({
       <ProductLogo id={containerProduct(container)} size="sm" fallback={Box} />
       <div className="min-w-0 flex-1">
         <div className="flex min-w-0 items-center gap-1.5">
-          {/* The row's name (ROW_NAME): it lands once RowLink passes its props on. */}
+          {/* The row's name (ROW_NAME), so the row leaves the keyboard to it. */}
           <RowLink {...ROW_NAME} title={container.name} onClick={() => onOpen(container.id)}>
             {container.name}
           </RowLink>

@@ -344,6 +344,12 @@ export type DbStatementSort = "total" | "mean" | "calls" | "rows" | "max"
 
 export type DbStatement = {
   id: string
+  /**
+   * Which of the rows listed under one id this is: the role that ran it on
+   * PostgreSQL (and "-nested" where it ran inside a function), the schema on
+   * MySQL. Absent where the id is the row on its own.
+   */
+  variant?: string
   /** A shape: the constants are already replaced. Not runnable as it stands. */
   query: string
   calls: number

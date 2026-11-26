@@ -43,6 +43,9 @@ func (s *Server) mountGitHubAccountRoutes(r chi.Router) {
 	r.Method(http.MethodPost, "/connections/{connection}/refresh", s.handle(s.handleGitHubConnectionRefresh))
 	r.Method(http.MethodGet, "/connections/{connection}/repositories", s.handle(s.handleGitHubRepositories))
 	r.Method(http.MethodGet, "/connections/{connection}/create-options", s.handle(s.handleGitHubCreateOptions))
+	// The account itself: profile, its pull requests and issues everywhere,
+	// recent activity (handlers_githubrepos_account.go).
+	s.mountGitHubAccountReads(r)
 	r.Group(func(r chi.Router) {
 		r.Use(httpx.RequireCapability(auth.CapServiceControl))
 		r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/connections/authorize", s.handle(s.handleGitHubAuthorize))

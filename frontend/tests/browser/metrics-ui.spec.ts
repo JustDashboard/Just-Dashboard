@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { host, mockHost, snapshot } from "./host-fixture"
+import { history, host, mockHost, snapshot } from "./host-fixture"
 import { risen } from "./risen"
 
 const recordWorkspace = process.env.JD_WORKSPACE_VIDEO === "1"
@@ -97,6 +97,29 @@ test("the metrics page is readings on the page, not boxes", async ({ page }) => 
   // Sensors appear beside the cores, hottest first.
   await expect(page.getByRole("heading", { name: "Temperatures" })).toBeVisible()
   await expect(page.getByText("nvme_Composite")).toBeVisible()
+})
+
+test("with no window to draw yet, each tile's bar is a meter named for what it measures", async ({
+  page,
+}) => {
+  // A history with no points: a host that has just started sampling. The
+  // tiles fall back from their trend to a bar, and Disk I/O's bar is how busy
+  // the disks are, not the rate its figure says. It was an unnamed meter.
+  await page.route("**/api/v1/system/metrics/history**", (route) =>
+    route.fulfill({ json: { ...history(Date.now() - 3_600_000, Date.now(), 20), points: [] } }),
+  )
+  await page.goto("/metrics")
+  const tiles = page.locator("[data-slot=stat-tile]")
+  await expect(tiles).toHaveCount(5)
+  const meters = tiles.getByRole("meter")
+  await expect(meters).toHaveCount(4)
+  expect(
+    await meters.evaluateAll((all) => all.map((meter) => meter.getAttribute("aria-label"))),
+  ).toEqual(["CPU", "Memory", "Load", "Disk busy"])
+  await expect(tiles.getByRole("meter", { name: "Disk busy" })).toHaveAttribute(
+    "aria-valuenow",
+    "12",
+  )
 })
 
 test("each resource reads what it is now beside what it did", async ({ page }) => {
