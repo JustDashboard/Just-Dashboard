@@ -125,6 +125,10 @@ One mark, one model. The strips that looked like tabs once had four.
   so a keyboard reader sees what Enter would pick. Selection never borrows the
   ring's colour, and hover, selection and focus are three different marks
   ([`../foundations/states.md`](../foundations/states.md)).
+- **What the eye cannot see is not a Tab stop.** A fact the phone's identity line clips is `inert`
+  until the line has room for it ([`../components/page-header.md`](../components/page-header.md)),
+  and a detail page's own scroller stops a focused field short of the save bar
+  (`data-detail-scroll`).
 - **Focus goes somewhere on purpose.** A dialog returns it to its opener; a removed row hands it to
   its neighbour (`useFocusTrail`); a view strip keeps it on the tab.
 - **A hover reveal is also a focus reveal**, and on touch the controls are simply drawn

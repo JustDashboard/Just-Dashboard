@@ -315,6 +315,8 @@ function ProjectLine({
   const titleRef = useRef<HTMLParagraphElement>(null)
   const stateRef = useRef<HTMLDivElement>(null)
   const stateLeadsFacts = useStateLeadsFacts(nameRef, titleRef, stateRef)
+  const factsRef = useRef<HTMLDivElement>(null)
+  useFactsLeftOff(factsRef)
   const stateBox = state !== undefined && (
     <div
       ref={stateRef}
@@ -380,10 +382,14 @@ function ProjectLine({
         {menu}
       </div>
       {/* On a phone one line that never grows: what wraps falls past its
-          foot and is clipped, a whole fact at a time. A `FactLine` is held to
-          the line too, so its own wrapped rows never stand it taller than the
-          state beside it and pull the state off the line's centre. */}
-      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:h-4 max-sm:overflow-clip max-sm:[overflow-clip-margin:2px] sm:col-span-1 sm:col-start-2 max-sm:[&>[data-slot=fact-line]]:h-4">
+          foot and is clipped, a whole fact at a time, and is left off for the
+          keyboard too (`useFactsLeftOff`). A `FactLine` is held to the line
+          too, so its own wrapped rows never stand it taller than the state
+          beside it and pull the state off the line's centre. */}
+      <div
+        ref={factsRef}
+        className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:h-4 max-sm:overflow-clip max-sm:[overflow-clip-margin:2px] sm:col-span-1 sm:col-start-2 max-sm:[&>[data-slot=fact-line]]:h-4"
+      >
         {stateLeadsFacts && stateBox}
         {facts}
       </div>
@@ -460,6 +466,65 @@ function useStateLeadsFacts(
     }
   }, [phone, measure, nameRef, stateRef, titleRef])
   return leads
+}
+
+/**
+ * On a phone the facts are one line, and a fact the line has no room for is
+ * left off whole: it wraps past the line's foot, where the line clips it. A
+ * link or a button inside it was still a Tab stop, so the focus went where
+ * nothing could be seen (Remote Desktop's "over Tailscale" after the count and
+ * the ready computers, on a narrow phone). So a fact past the foot is `inert`:
+ * left off for the keyboard and a screen reader as it is for the eye, and
+ * back the moment the line has room for it. Off a phone nothing is clipped
+ * and nothing is left off.
+ */
+function useFactsLeftOff(boxRef: React.RefObject<HTMLDivElement | null>) {
+  const phone = useIsPhone()
+  const observer = useRef<ResizeObserver | null>(null)
+  const watched = useRef(new WeakSet<Element>())
+  const measure = useCallback(() => {
+    const box = boxRef.current
+    if (!box) return
+    const foot = box.getBoundingClientRect().bottom
+    for (const fact of factsOf(box)) {
+      const off = phone && fact.getBoundingClientRect().top >= foot
+      if (fact.inert !== off) fact.inert = off
+      // A fact that grows or shrinks moves the ones after it across the
+      // line's end without the line changing size. Each is watched once:
+      // watching one again reports it again, and the report measures.
+      if (observer.current && !watched.current.has(fact)) {
+        watched.current.add(fact)
+        observer.current.observe(fact)
+      }
+    }
+  }, [boxRef, phone])
+  // Every render: facts come and go without the line changing size.
+  useLayoutEffect(measure)
+  useEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    const watch = new ResizeObserver(() => measure())
+    observer.current = watch
+    watched.current = new WeakSet()
+    watch.observe(box)
+    measure()
+    // A web font landing changes the facts' widths and nothing else.
+    document.fonts?.ready.then(() => measure())
+    return () => {
+      watch.disconnect()
+      observer.current = null
+    }
+  }, [boxRef, measure])
+}
+
+/** The facts in a line: a `FactLine`'s facts, or what the line was given, less the state leading it. */
+function factsOf(box: HTMLElement): HTMLElement[] {
+  const facts = box.querySelectorAll<HTMLElement>('[data-slot="fact"]')
+  if (facts.length > 0) return [...facts]
+  return [...box.children].filter(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.dataset.slot !== "identity-state",
+  )
 }
 
 /** `gap-x-3` between the name and its state. */
