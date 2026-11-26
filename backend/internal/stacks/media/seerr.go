@@ -129,6 +129,12 @@ type seerrLibrary struct {
 // seerrSetup signs Seerr in to Jellyfin as the stack's administrator, which
 // makes that account Seerr's owner, keeps Seerr's API key, and turns on the
 // Movies and Shows libraries.
+// markerSeerrSetUpByStack is kept with the stack's credentials, though it is
+// not a secret: it records that this stack sent the request that set Seerr
+// up, so the stack's administrator password is only ever sent to a Seerr the
+// stack pointed at its own Jellyfin.
+const markerSeerrSetUpByStack = "seerr-set-up-by-stack"
+
 func seerrSetup(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	base, err := env.BaseURL(ctx, "seerr", PortSeerr)
 	if err != nil {
@@ -153,6 +159,24 @@ func seerrSetup(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	message := "Seerr is signed in to Jellyfin"
 	if !keyed {
 		api.key = ""
+		if public.MediaServerType != seerrServerNotConfigured && !found {
+			// Set up, and not by an earlier attempt of this step: which
+			// Jellyfin it signs in to cannot be read without signing in, and
+			// signing in would hand the stack's administrator password to
+			// whatever server that is.
+			if _, started, err := env.LookupCredential(ctx, markerSeerrSetUpByStack); err != nil {
+				return stacks.Result{}, err
+			} else if !started {
+				return stacks.Result{}, seerrTakenOver("Seerr was already set up before the stack configured it.")
+			}
+		}
+		if public.MediaServerType == seerrServerNotConfigured {
+			// Written before the request that sets Seerr up, so an attempt
+			// that loses its answer is known as this stack's on the next one.
+			if err := env.SetCredential(ctx, markerSeerrSetUpByStack, "set-up-by-the-stack"); err != nil {
+				return stacks.Result{}, err
+			}
+		}
 		if err := seerrSignIn(ctx, env, api, public); err != nil {
 			return stacks.Result{}, err
 		}

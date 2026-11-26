@@ -153,6 +153,11 @@ func TestSeerrSetupBySomeoneElseIsAnAction(t *testing.T) {
 			if credential(env, CredentialSeerrAPIKey) != "" || seerr.libraries[0].Enabled {
 				t.Fatal("a key was stored or a library turned on in a Seerr that is not the stack's")
 			}
+			// Which Jellyfin it signs in to is unknown, so the stack's
+			// administrator password is never sent to it.
+			if seerr.lastSignIn != nil {
+				t.Fatalf("signed in to a Seerr the stack did not set up: %v", seerr.lastSignIn)
+			}
 		})
 	}
 }
