@@ -17,7 +17,11 @@
 #   docs/api/deploy-openapi.json                 what the SDKs are generated from
 #
 # The seventh place is the tag v<version>, which this does not make:
-# .github/workflows/release.yml tags the merge once Verify has passed on it.
+# .github/workflows/release.yml tags the merge once Verify has passed on it,
+# and only while main's changelog still names that version as its newest. So
+# before writing anything this asks origin whether every version already on
+# main has its tag, and refuses while one does not (scripts/release-tags.sh):
+# cutting the next release is the last chance to publish the one before it.
 # A build of any commit but the tagged one says so by itself, as 0.6+98c9349
 # (backend/internal/version, scripts/build-stamp.sh).
 #
@@ -54,6 +58,27 @@ CURRENT=$(sed -n 's/^const Version = "\(.*\)"$/\1/p' backend/internal/version/ve
 [ -n "$CURRENT" ] || die "could not read the current version out of backend/internal/version/version.go"
 
 printf '\n%sReleasing Just Dashboard %s → %s%s\n\n' "$BOLD" "$CURRENT" "$VERSION" "$RESET"
+
+# Asked of origin, never assumed; scripts/release-tags.sh says why.
+# shellcheck source=scripts/release-tags.sh
+source scripts/release-tags.sh
+untagged=$(jd_untagged_releases . "$VERSION") \
+	|| die "could not check that every release on main is tagged (see above); cut a release with origin in reach"
+if [ -n "$untagged" ]; then
+	die "merged into main but never tagged, so never published: $(printf '%s\n' "$untagged" | paste -sd ' ' -)
+
+Installs are offered a version only once origin has its tag v<version>, and
+.github/workflows/release.yml tags only the version main's changelog names as
+latest: once $VERSION reaches main, nothing will tag a version it moved past.
+
+Find the Verify run of that merge: gh run list --workflow verify.yml --branch main
+  still running   wait for it; Release follows when it passes
+  cancelled       re-run it (gh run rerun <id>); Release follows when it passes
+  failed          fix main first; Release follows the run of the fix
+If the operator decides to leave a version unpublished instead, add it and the
+reason to jd_known_untagged_releases in scripts/release-tags.sh."
+fi
+ok "every release on main is tagged but those known not to be: $(jd_known_untagged_releases | cut -f1 | paste -sd ' ' -) (scripts/release-tags.sh)"
 
 # The changelog is checked before anything is written, so a run that stops here
 # leaves the tree exactly as it found it.
@@ -122,6 +147,10 @@ that merge, .github/workflows/release.yml tags it v$VERSION and publishes the
 GitHub release from this changelog entry, and the tag is what installs wait
 for: they are offered $VERSION, and install exactly that commit, only once
 v$VERSION exists. They look every two hours and whenever the dashboard is
-opened. If Verify fails, nothing is tagged and nothing is offered; fix main and
-the next green run tags it.
+opened. If Verify fails or is cancelled, nothing is tagged and nothing is
+offered. A later green run on main tags it only while main still carries
+$VERSION as its newest release, so publish it before the next version is cut;
+this script refuses to cut one while $VERSION is on main without its tag.
+Until main's run of the merge has finished, push its commit to no other
+branch: a run of the same commit on a new patch branch cancels it.
 EOF

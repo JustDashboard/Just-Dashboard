@@ -165,12 +165,23 @@ announcement and the tag only decorated the Releases page: 0.8.5 was offered to 
 with a failed Verify run and no tag. Now a failed run means nothing is tagged and nothing is offered. The version
 comes from the changelog, never from the branch name, so a merge whose version is already released
 publishes nothing.
-A version merged whose run failed, and which the next release overtook before anyone tagged it, stays
+A version merged whose run did not pass, and which the next release overtook before anyone tagged it, stays
 in the history as what it is: 0.8.7 was never published, and its entry's title and summary say so and
 name the release that carries its changes (0.9.0). That is said in the entry's text, not with a new
 field: installs on 0.8.5 and older read the published changelog with `ParseManifest`, which refuses a
 field it does not know, so a field added to any entry would stop their update check altogether.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
+
+The workflow publishes only `latest`, so the time to publish a version whose run did not pass is
+before the next version reaches `main`, and nothing used to say it was missed. 0.8.5's run failed on
+the Streamlit fixture, which installed whatever was newest until 0.8.6 pinned it; 0.8.7's was
+cancelled, because the same commit was pushed to `patch/0.9.0` while it ran and Verify's push runs
+share one concurrency group per commit. `scripts/release.sh` now sources `scripts/release-tags.sh`
+before it writes anything: it reads the changelog of origin's `main` and the `v*` tags origin has, and
+refuses to cut a release while a version from 0.7.2 (the workflow's first) on `main` has no tag, other
+than the one being cut and those `jd_known_untagged_releases` lists with why (0.8.5 and 0.8.7). When
+origin cannot be asked it stops and says so; it never passes without looking.
+`python3 scripts/test_release_tags.py` holds both to fixture origins made in a temporary directory.
 
 ### Which build this is
 

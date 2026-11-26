@@ -318,7 +318,7 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | The stack | `docker-compose.yml`, `deploy/Caddyfile`, `deploy/proxy-entrypoint.sh`, `backend/Dockerfile`, `frontend/Dockerfile` | [`implementation.md`](../deployments/implementation.md), [`overview.md`](../overview.md) |
 | Installer | `install.sh`, and the helpers it sources: `scripts/preflight.sh`, `scripts/install-dependencies.sh`, `scripts/dotenv.sh`, `scripts/password.sh` | [`terminal-tools.md`](../operations/terminal-tools.md), [`install.md`](../../guides/install.md) |
 | Operator's terminal tools | `scripts/manage.sh`; its account and link commands run `backend/internal/admin/` | [`terminal-tools.md`](../operations/terminal-tools.md) |
-| Release | `scripts/release.sh`, `backend/internal/selfupdate/changelog.json`, `backend/scripts/gen-changelog.go`, `backend/internal/version/`, `.github/workflows/release.yml` | [`platform.md`](../backend/platform.md) |
+| Release | `scripts/release.sh`, `scripts/release-tags.sh`, `backend/internal/selfupdate/changelog.json`, `backend/scripts/gen-changelog.go`, `backend/internal/version/`, `.github/workflows/release.yml` | [`platform.md`](../backend/platform.md) |
 | Self-update | `backend/internal/selfupdate/`; the `-self-update` mode in `backend/cmd/server/main.go` | [`platform.md`](../backend/platform.md) |
 | Local checks and CI | `scripts/test-changed.sh`, `scripts/ci-plan.py`, `.github/workflows/verify.yml` | [`AGENTS.md`](../../../AGENTS.md#required-checks), [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) |
 | The `jd` command line | `backend/cmd/jd/`; `backend/internal/clihost/` keeps the server's copy current; `api/handlers_cli.go` serves it | [`cli.md`](../../guides/cli.md) |
