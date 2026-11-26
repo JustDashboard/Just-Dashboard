@@ -1,3 +1,4 @@
+import AxeBuilder from "@axe-core/playwright"
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
 import { dockerInventory, dockerlessInventory, mockFleet, refusal } from "./database-fleet-fixture"
@@ -849,8 +850,17 @@ test.describe("found on this server", () => {
     const row = foundRow(page, "orders-db")
     const before = await row.boundingBox()
     await page.getByRole("button", { name: "Connect orders-db" }).click()
-    const why = row.getByRole("button", { name: "Why orders-db did not connect" })
+    const why = row.getByRole("button", { name: "Failed: show why orders-db did not connect" })
     await expect(why).toHaveText("Failed")
+    // Named by the word it shows first, so "click Failed" reaches it.
+    const scan = await new AxeBuilder({ page })
+      .include('[data-slot="choice-row"] button[aria-haspopup="dialog"]')
+      .withRules(["label-content-name-mismatch"])
+      .analyze()
+    expect(
+      scan.violations.flatMap((violation) => violation.nodes.map((node) => node.html)),
+    ).toEqual([])
+    expect(scan.passes.flatMap((rule) => rule.nodes)).toHaveLength(1)
     // What the server said is behind the state, not a paragraph under the row.
     await expect(row).not.toContainText("connection refused")
     expect((await row.boundingBox())?.height).toBe(before?.height)

@@ -652,6 +652,9 @@ function VerbFace({ word }: { word: string }) {
  * A connect that failed just now, as the row's state: "Failed" in the danger
  * ink where the state word stands, and what the server said in a popover off
  * it. The row keeps its height; pressing the row tries again.
+ *
+ * Its name begins with the word it shows (WCAG 2.5.3): someone who says
+ * "click Failed" reaches it, and the server and what it opens follow.
  */
 function Failed({ name, message }: { name: string; message: string }) {
   return (
@@ -660,7 +663,7 @@ function Failed({ name, message }: { name: string; message: string }) {
         <Button
           size="xs"
           variant="ghost"
-          aria-label={`Why ${name} did not connect`}
+          aria-label={`Failed: show why ${name} did not connect`}
           className="-mx-1.5"
         >
           <Status tone="danger" label="Failed" />
