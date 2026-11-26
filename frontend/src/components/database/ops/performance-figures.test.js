@@ -13,6 +13,8 @@ import {
   shapeFields,
   shapeSlots,
   shareWords,
+  statementAt,
+  statementIdOf,
   statementKeys,
   statementSorts,
 } from "./performance-figures"
@@ -127,13 +129,79 @@ describe("a statement's figures", () => {
     expect(millis(0)).toBe("0.00 ms")
   })
 
-  test("a digest listed twice is two rows with two keys", () => {
-    expect(statementKeys([{ id: "a1" }, { id: "b2" }, { id: "a1" }, { id: "a1" }])).toEqual([
-      "a1",
+  test("a digest listed twice is two rows, each keyed by what the engine says it is", () => {
+    const rows = [
+      { id: "a1", variant: "16384" },
+      { id: "b2" },
+      { id: "a1", variant: "16390" },
+      { id: "a1", variant: "16384-nested" },
+    ]
+    expect(statementKeys(rows)).toEqual(["a1~16384", "b2", "a1~16390", "a1~16384-nested"])
+    // The two rows swap places between two reads: each keeps its key.
+    const swapped = [rows[2], rows[1], rows[0], rows[3]]
+    expect(statementKeys(swapped)).toEqual(["a1~16390", "b2", "a1~16384", "a1~16384-nested"])
+  })
+
+  test("rows with no identity of their own are still told apart by their place", () => {
+    expect(statementKeys([{ id: "" }, { id: "b2" }, { id: "" }, { id: "" }])).toEqual([
+      "",
       "b2",
+      "~1",
+      "~2",
+    ])
+    // A place after a variant never takes another row's key.
+    expect(statementKeys([{ id: "a1", variant: "1" }, { id: "a1" }, { id: "a1" }])).toEqual([
       "a1~1",
+      "a1",
       "a1~2",
     ])
+  })
+
+  test("a key is the engine's id before its first ~", () => {
+    expect(statementIdOf("a1~16384-nested")).toBe("a1")
+    expect(statementIdOf("-812736")).toBe("-812736")
+    expect(statementIdOf("~1")).toBe("")
+  })
+
+  test("an address is the row of its key, never the row in its place", () => {
+    const of = (id, variant, calls) => ({
+      id,
+      variant,
+      query: "select 1",
+      calls,
+      totalMs: calls * 2,
+      meanMs: 2,
+      maxMs: calls,
+      rows: calls,
+      hitRatio: 0.5,
+      share: calls / 100,
+    })
+    const read = (list) => {
+      const keys = statementKeys(list)
+      return list.map((statement, index) => ({ key: keys[index], statement }))
+    }
+    const first = read([of("a1", "shop", 9), of("a1", "blog", 3)])
+    const second = read([of("a1", "blog", 30), of("a1", "shop", 10)])
+    expect(statementAt(first, "a1~blog")?.statement.calls).toBe(3)
+    expect(statementAt(second, "a1~blog")?.statement.calls).toBe(30)
+    expect(statementAt(second, "a1~gone")).toBeUndefined()
+
+    // The id alone is that id's statement: its one row, or its rows together.
+    const single = statementAt(read([of("a1", "shop", 9)]), "a1")
+    expect(single?.key).toBe("a1~shop")
+    const together = statementAt(second, "a1")
+    expect(together?.key).toBeUndefined()
+    expect(together?.statement).toMatchObject({
+      id: "a1",
+      calls: 40,
+      totalMs: 80,
+      meanMs: 2,
+      maxMs: 30,
+      rows: 40,
+      hitRatio: -1,
+      share: 0.4,
+    })
+    expect(statementAt(second, null)).toBeUndefined()
   })
 
   test("a share is never zero for something that ran", () => {

@@ -1681,7 +1681,10 @@ are decided here, not by the page.
   day, SQL Server's `sys.dm_exec_query_stats` summed by query hash for plans compiled in this database
   (the plan cache: no reset, no start time), or Oracle's `v$sqlstats` (no longest execution, so
   `sort=max` is a 400 there); `sort` is one of a closed set, `limit` clamps at 200, each row carries its
-  `share` of everything tracked, and `supported: false` comes with what would enable it (`enable`) or
+  `share` of everything tracked and, where the engine lists one id more than once, the `variant` that
+  tells its rows apart (the role that ran it on PostgreSQL, with `-nested` where `toplevel` is false
+  on 14+, and the schema on MySQL; the other engines group by their id), and `supported: false` comes
+  with what would enable it (`enable`) or
   with the grant the account lacks (`reason`). On PostgreSQL `enable` says how far the module is from
   loaded: `configured` when the list the next start loads names it and the running list does not —
   that list is the last line the configuration files hold for it, read from `pg_file_settings` by a
