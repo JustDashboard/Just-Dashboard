@@ -198,10 +198,25 @@ func TestCancellingTheRunCancelsThePrewarm(t *testing.T) {
 		t.Fatal(err)
 	}
 	waitFor(t, issuer.stopped, "the background order to stop")
-	if executor.prewarms.take(13, names) != nil {
-		t.Fatal("a cancelled run's attempt was still held")
-	}
+	// The issuer says it stopped before it returns; the attempt is let go of
+	// a moment later, once its goroutine has the lock, so it is waited for
+	// as a failed build's is (TestAFailedBuildLetsThePrewarmFinish).
 	deadline := time.Now().Add(5 * time.Second)
+	for {
+		executor.prewarms.mu.Lock()
+		_, held := executor.prewarms.runs[13]
+		executor.prewarms.mu.Unlock()
+		if !held {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("a cancelled run's attempt was still held")
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	if executor.prewarms.take(13, names) != nil {
+		t.Fatal("a cancelled run's attempt was handed to the step")
+	}
 	for !executor.prewarms.start(context.Background(), 14, names, issuer) {
 		if time.Now().After(deadline) {
 			t.Fatal("a cancelled order cooled the names off")
