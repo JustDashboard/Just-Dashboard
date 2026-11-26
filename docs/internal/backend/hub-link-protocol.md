@@ -335,7 +335,7 @@ vectors has the fingerprint `21fe:31df:a154:a261`.
 | Response field names | `siteKey`, `siteKeys`, `owner.label` keep their names so one decoder reads both | Here "site key" means the hub key, and `owner.label` is the hub's name |
 | Key rotation | `siteKeys` in a heartbeat reply adds a successor key and retires old ones | None in version 1. A v1 hub never sends `siteKeys`; a dashboard decodes it if present and never applies it (4.3). A new hub key needs a new link |
 | The peer's machine | Web PKI on just-dashboard.com | The hub node is pinned by `StableNodeID` (2.4) |
-| Heartbeat body | The snapshot, field for field (section 5) | Adds one optional top-level key, `signIn`, only when hub sign-in is switched on (section 9.3). The hub validates it field by field (5.3) |
+| Heartbeat body | The snapshot, field for field (section 5) | Adds optional top-level keys of its own: the fleet fields `os`, `signins`, `certificates` and `imageScans` (5.4), and `signIn`, only when hub sign-in is switched on (section 9.3). The hub validates them field by field (5.3) |
 | Heartbeat reply | `ok`, `heartbeatSeconds`, `pendingCommands`, `siteKeys` | Adds `fleet` and `notices` (always), and `signIn` (optional). `siteKeys` is never sent |
 | Heartbeat interval | Clamped to 10–600 s | The hub's default is 15 s, not 30. The dashboard paces itself to 12 in any 61 s, not 4; the hub allows 15 per server in any 60 s |
 | Sequence | Raised by one | `max(stored + 1, unix milliseconds)` (3.1) |
@@ -520,7 +520,8 @@ could not be asked).
 
 ### 4.3 `POST /heartbeat`
 
-Signed. The body is the snapshot (section 5), plus `signIn` when hub sign-in is on (section 9.3). The dashboard
+Signed. The body is the snapshot (section 5), plus the fleet fields (5.4) and `signIn` when hub sign-in is on
+(section 9.3). The dashboard
 sends one every `heartbeatSeconds`, right after a command finishes, after `snapshot.now`, after a scope change
 and when a person presses Sync.
 
@@ -702,8 +703,9 @@ says "Hub unreachable". Nothing on the dashboard depends on the hub.
 ## 5. The heartbeat body
 
 The heartbeat body is the account link's snapshot, field for field (`accountlink.Snapshot`, pinned by
-`snapshot_test.go`), built by the same `Host.Collect` and cut by the same `Snapshot.Redact(scope)`. On the hub
-link one optional top-level key is added: `signIn` (section 9.3).
+`snapshot_test.go`), built by the same `Host.Collect` and cut by the same `Snapshot.Redact(scope)`. The hub link
+adds optional top-level keys of its own: the fleet fields `os`, `signins`, `certificates` and `imageScans` (5.4),
+and `signIn` (section 9.3). They are never part of `accountlink.Snapshot`, so the account link never sends them.
 
 Every section except `protocol`, `sentAt` and `server` may be absent when the dashboard cannot read it, which is
 different from empty: `"alerts": []` says nothing is firing, and no `alerts` key says the dashboard does not
@@ -780,6 +782,22 @@ out.
 | `deployments.projects` | int | observe | Projects that are not archived |
 | `deployments.lastRun.status`, `.at` | string, int | observe | The newest run |
 | `deployments.lastRun.project` | string | operate | Its project's name |
+| `os.updates` | object, optional | hub link only, observe | The host's package updates (5.4) |
+| `os.updates.pending` | int | observe | Packages with an upgrade available |
+| `os.updates.security` | int, optional | observe | How many of those are security updates. Absent on a package manager that cannot tell (Alpine, Arch) |
+| `os.updates.rebootRequired` | bool | observe | The host asks for a reboot |
+| `os.updates.checkedAt` | int | observe | Unix seconds the list was read |
+| `signins` | object, optional | hub link only, observe | Sign-ins to this dashboard over the last 24 hours, counts only (5.4) |
+| `signins.successes`, `signins.failures` | int | observe | Completed and refused sign-ins |
+| `signins.lastFailureAt` | int, optional | observe | Unix seconds of the newest refused sign-in in the last 30 days |
+| `certificates` | array | hub link only, operate | Every certificate this server serves, soonest to expire first (5.4) |
+| `certificates[].name` | string | operate | The certificate's name: its domain, or the certbot lineage's or file's name |
+| `certificates[].daysLeft` | int | operate | Whole days until it expires; negative once it has |
+| `certificates[].issuer` | string, optional | operate | The issuer's common name, for example `R11` |
+| `imageScans` | array | hub link only, operate | The latest finished scan of each deployment's live release, worst first (5.4) |
+| `imageScans[].deployment`, `imageScans[].environment` | string | operate | The project's and the environment's names |
+| `imageScans[].critical`, `imageScans[].high` | int | operate | Findings of that severity that the owner can act on |
+| `imageScans[].scannedAt` | int | operate | Unix seconds the scan finished |
 | `signIn` | object, optional | hub link only, every scope | Section 9.3. Only when `JD_HUB_SIGNIN=true` |
 
 **Alerts below `operate`.** At `observe`, an alert keeps its `subject` and `reading` only for `cpu_high`,
@@ -788,15 +806,18 @@ kind added later, is sent with `kind` and `since` only. At every scope a `readin
 `^(exit )?[0-9]{1,3}(\.[0-9]{1,2})?%?$` is dropped.
 
 **Never sent, at any scope:** `.env` contents, `JD_ALLOWED_CIDRS`, dashboard accounts (except the opt-in grants
-in `signIn`, section 9.3), API keys, file paths beyond mount points, logs, alert messages, connection strings,
+in `signIn`, section 9.3; `signins` is counts only, with no account, address or device), API keys, file paths beyond mount points, logs, alert messages, connection strings,
 deployment variables, backup credentials.
 
 ### 5.2 Size
 
-The body is at most 64 KiB. The dashboard keeps the whole body, `signIn` included, under 63 KiB. Lists are cut to
-200 containers, 100 stacks, 100 backup jobs and 50 alerts. If it is still too large, the container list, then the
-job list, then the stacks, then the alerts are halved until it fits. The counts always stay, and `signIn` is never
-cut (at most 100 grants is a few KiB). The hub stores at most those numbers of each list.
+The body is at most 64 KiB. The dashboard keeps the whole body, `signIn` and the fleet fields included, under
+63 KiB. Lists are cut to 200 containers, 100 stacks, 100 backup jobs and 50 alerts, and the fleet lists to 100
+certificates and 100 image scans. The two fleet lists together are kept under 24 KiB: the longer of the two, in
+bytes, is halved until they fit, and since each is sorted worst first, what goes is what needs attention least.
+If the body is still too large, the container list, then the job list, then the stacks, then the alerts are halved
+until it fits. The counts always stay, and `signIn`, `os`, `signins` and what is left of the fleet lists are never
+cut further (at most 100 grants is a few KiB). The hub stores at most those numbers of each list.
 
 ### 5.3 What the hub accepts
 
@@ -852,6 +873,16 @@ them), Cf (format: the bidirectional controls among them), Zl or Zp.
 | `backups.list[].id` | Integer, 1 to 2^53 − 1 |
 | `backups.list[].name`, `deployments.lastRun.project` | Text rule, 1–128 characters |
 | `signIn.grants[]` | At most 100. `userId` an integer of at least 1, `username` text rule 1–64 characters, `hubUser` the pattern of 6.3. An element that fails is dropped |
+| `os.updates.pending`, `.security`, `signins.successes`, `.failures`, `imageScans[].critical`, `.high` | Integer, 0 to 2^53 − 1 |
+| `os.updates.checkedAt`, `signins.lastFailureAt`, `imageScans[].scannedAt` | Integer, 1 to 2^53 − 1 |
+| `os.updates.rebootRequired` | Boolean |
+| `certificates[]` | At most 100. An element that fails a rule is dropped |
+| `certificates[].name` | Text rule, 1–253 characters |
+| `certificates[].daysLeft` | Integer, −100000 to 100000 |
+| `certificates[].issuer` | Text rule, 1–128 characters |
+| `imageScans[]` | At most 100. An element that fails a rule is dropped |
+| `imageScans[].deployment`, `.environment` | Text rule, 1–128 characters |
+| `certificates`, `imageScans` in a body whose `server.scope` is `observe` | Dropped whole |
 
 **Endpoint rule.** `access.endpoint` is kept only if it is an `https` origin (no user name or password, no path
 other than `/`, no query, no fragment, at most 255 characters) whose host equals the node name WhoIs gives for
@@ -863,6 +894,39 @@ heartbeat carries a good one. The same rule decides the approval screen's flag f
 **Messages.** Server-supplied text goes into an email header only Q-encoded (`mime.QEncoding`) after the text
 rule has removed CR and LF, and into webhook, Discord, Telegram and ntfy bodies only as a JSON string value or
 the channel's own escaping.
+
+### 5.4 The fleet fields (hub link only)
+
+What a hub needs to know what each server needs (patches, certificates, fixes) and who failed to sign in. They are
+request fields, so a hub that does not know them drops them (5.3 step 2) and nothing else changes; they came in
+Just Dashboard 0.9.1, and a hub that wants them reads their absence from an older server as "not reported". The
+dashboard sends them through the hub link's own `HeartbeatExtra`, never through `accountlink.Snapshot` (section 5).
+
+Each field is read off the heartbeat's path: a heartbeat carries the last reading, and starts the next one in the
+background when that reading is older than the field's interval. A field that has not been read yet, or whose last
+reading failed, is absent, which says "not known", exactly as an absent snapshot section does. A failed reading is
+tried again after 2 minutes. An empty list says "none".
+
+| Key | Read from | Read every | Scope |
+| --- | --- | --- | --- |
+| `os.updates` | The Packages page's check (`updates.Service.Check`), which reads the package database already on disk and never refreshes it. Absent on a host with no package manager the dashboard reads, and when the listing failed | 6 hours | observe |
+| `signins` | The audit log, over the last 24 hours (below) | 1 minute | observe |
+| `certificates` | The Certificates page's inventory (`proxysvc.CertificateInventory`): certbot's, imported, the local CA's and the Docker ingress's. One that could not be read is left out | 10 minutes | operate |
+| `imageScans` | The latest finished scan of each live release (`deploy.LiveImageScans`): every environment that scans, without previews and archived ones. A release not yet scanned, or whose scan failed, is left out | 5 minutes | operate |
+
+**Sign-in counts.** A success is a completed sign-in. `auth.login` is written as soon as the password is right, even
+while a code is still owed, so `auth.login` and `auth.passkey.login` count only when their entry says nothing was
+owed (`needsTotp` and `needsEnrollment` false or absent); the code that completes the others counts as its own
+successful `auth.2fa.verify`. A successful `hub.signin` counts. A failure is an `auth.login`, `auth.2fa.verify` or
+`auth.passkey.login` that was refused, a locked account included. A refused `hub.signin` is not counted: the hub
+refused it, or knows of it from the ticket it signed. `lastFailureAt` is the newest failure of the last 30 days, which
+can be outside the 24 hours the counts cover. No account, address or device is ever sent (Decision D6 of the hub's
+plan: counts only).
+
+**Image scan counts.** `critical` and `high` count only the findings the owner can act on: an upgrade of the
+application's own package, or a rebuild that picks up a fixed base, as the deployment's own page counts them
+(`ImageScan.Actionable`). A base image's findings that nobody has published a fix for, and a development tool's, are
+not counted: they are most of a scanner's total and none of them is work for anyone.
 
 ## 6. The heartbeat reply: fleet, notices, sign-in users
 
@@ -1982,7 +2046,8 @@ fails three of them (a key in another case, a repeated key, `next: null`), which
 - A field added to a **response** is a new protocol version. A v1 dashboard decodes responses strictly.
 - A field added to a **request** body is not, because the hub ignores what it does not know. A field added to
   the snapshot still has to be added to `snapshot_test.go`'s pinned set and to the scope table on the Settings
-  page, and here in 5.1.
+  page, and here in 5.1. A field only the hub should see goes into the hub link's own keys (5.4), never the
+  snapshot, which the account link sends to just-dashboard.com.
 - A new command kind is a new protocol version on both sides.
 - The hub link must stay byte-compatible with the account link's signing. If one changes, both change, and the
   reference vectors here are updated with the site's.
