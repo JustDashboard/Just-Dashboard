@@ -97,8 +97,11 @@ page waiting for its pass (PRM-29). A tile that is a destination is a `Link` aro
 `StatLink`, which drew that, went in 0.9.0.
 
 **Props.** `label`, `value`, `trailing` (a unit or a delta beside the figure), `meter` (0–100) or
-`trend`, `tone` (colours the figure, never a mark beside it), `hint`. `StatGrid dense` sets two to a
-row on a phone; `framed` restores a box. `StatButton` adds `pressed` and the revealed funnel.
+`trend`, `tone` (colours the figure, never a mark beside it), `hint`. `meterLabel` names the bar
+when `label` is a node (a series key beside the word) or the bar measures something the label does
+not say: Metrics' Disk I/O figure is a rate, and its bar is "Disk busy". A tile's bar without a name
+is decoration, hidden from a screen reader. `StatGrid dense` sets two to a row on a phone; `framed`
+restores a box. `StatButton` adds `pressed` and the revealed funnel.
 
 **Example.** `app/(dashboard)/metrics/page.tsx`.
 
@@ -110,10 +113,13 @@ colours the figure above it.
 **Props.** `value` (clamped), `tone` or `color` (a measure's hue, for a bar that says which reading
 it is rather than how worried to be), `size` (`thin` under a figure in a tile, `default` in a row,
 `cell` a 32px bar beside a figure in a table cell, which is what the process table's `MiniBar` is),
-`mark` (a threshold line, in the muted ink), `label`, `decorative`.
+`mark` (a threshold line, in the muted ink), and one of `label` or `decorative`: the type asks
+for a name unless the bar is decorative.
 
 **Accessibility.** `role="meter"` with its value and `label`; `decorative` hides it from a screen
-reader where the figure beside it already says the reading (a table cell).
+reader where the figure beside it already says the reading (a table cell). A meter is exposed only
+with a name: one that arrives with an empty `label` is hidden too, and says so on the console while
+developing, because a `role="meter"` with no name is read as a bare number.
 
 ## SplitBar
 

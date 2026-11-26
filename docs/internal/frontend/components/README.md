@@ -238,7 +238,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `HUE` | [Readings](readings.md) | `components/live-figure.tsx` | Each measure's colour, wherever it is drawn. | keep |
 | `CoreBars`, `SeriesKey`, `StreamState` | [Readings](readings.md) | `components/live-figure.tsx` | Every core's share, the key before a reading's name, and whether the socket is live. | keep |
 | `utilisationTone` | [Readings](readings.md) | `components/meter.tsx` | The thresholds that colour a utilisation figure and its bar alike. | keep |
-| `Meter` | [Readings](readings.md) | `components/meter.tsx` | A bar for a figure between 0 and 100, with a threshold mark; `color`, `size="cell"` and `decorative`. | keep |
+| `Meter` | [Readings](readings.md) | `components/meter.tsx` | A bar for a figure between 0 and 100, with a threshold mark; `color`, `size="cell"`, and a `label` unless `decorative`. | keep |
 | `RankList`, `RankSkeleton`, `RankItem` (type), `SplitPart` (type) | [Readings](readings.md) | `components/rank-list.tsx` | A ranked list read in columns (a name, a figure, its share), and its rows waiting. | keep |
 | `percent` | [Readings](readings.md) | `components/rank-list.tsx` | A share in whole percent; `sharePercent` from `lib/format.ts` is it. | retired (0.9.0) |
 | `SplitBar`, `splitWidths` | [Readings](readings.md) | `components/rank-list.tsx` | One whole as one strip of coloured parts, with an optional legend that names or narrows. | keep |
