@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useState } from "react"
+import { createContext, useCallback, useContext, useMemo, useState } from "react"
 import { External } from "@/components/icons"
 import { forgeMediaUrl } from "@/hooks/use-github"
 import { isForgeMedia } from "@/lib/markdown"
@@ -9,7 +9,11 @@ import { ImageLightbox } from "@/components/image-lightbox"
 
 type Media = { src: string; alt: string }
 
-const Lightbox = createContext<((src: string) => void) | null>(null)
+/** Opening the lightbox on a picture, and saying a picture has loaded as one. */
+const Lightbox = createContext<{
+  open: (src: string) => void
+  loaded: (src: string) => void
+} | null>(null)
 
 const VIDEO = /\.(mp4|webm|mov)(\?|$)/i
 
@@ -22,7 +26,7 @@ const VIDEO = /\.(mp4|webm|mov)(\?|$)/i
  * does not say what it is, so it is tried as a picture and then as a video.
  */
 export function MediaImage({ src, alt, fill }: Media & { fill?: boolean }) {
-  const open = useContext(Lightbox)
+  const lightbox = useContext(Lightbox)
   const [kind, setKind] = useState<"image" | "video" | "link">(() =>
     !isForgeMedia(src) ? "link" : VIDEO.test(src) ? "video" : "image",
   )
@@ -57,7 +61,7 @@ export function MediaImage({ src, alt, fill }: Media & { fill?: boolean }) {
     <button
       type="button"
       aria-label={alt ? `Enlarge ${alt}` : "Enlarge the image"}
-      onClick={() => open?.(src)}
+      onClick={() => lightbox?.open(src)}
       className={cn(
         "inline-block max-w-full cursor-zoom-in overflow-hidden rounded-lg border border-hairline align-top focus-ring",
         // The image's own frame is its placeholder until it loads.
@@ -71,7 +75,10 @@ export function MediaImage({ src, alt, fill }: Media & { fill?: boolean }) {
         src={forgeMediaUrl(src)}
         alt={alt}
         loading="lazy"
-        onLoad={() => setLoaded(true)}
+        onLoad={() => {
+          setLoaded(true)
+          lightbox?.loaded(src)
+        }}
         onError={() => setKind(VIDEO.test(src) ? "link" : "video")}
         className={cn("block h-auto max-h-[32rem] max-w-full", fill && "w-full object-contain")}
       />
@@ -91,25 +98,35 @@ export function MediaGrid({ children, count }: { children: React.ReactNode; coun
 /**
  * Enlarging a picture, and stepping through the rest of the body from it. A
  * screenshot in a 400px column is a thumbnail of what the author meant to show.
+ *
+ * It steps only through what has loaded as a picture. A recording is drawn as
+ * a video, and an upload's address does not say which it is until the picture
+ * fails, so a gallery of every address offered recordings as broken pictures.
+ * The one shown is held by its address, so a picture that loads while the
+ * lightbox is open joins the walk without moving it.
  */
 export function MediaLightbox({ media, children }: { media: Media[]; children: React.ReactNode }) {
-  const [at, setAt] = useState<number>()
-  const open = (src: string) => {
-    const index = media.findIndex((item) => item.src === src)
-    if (index >= 0) setAt(index)
-  }
+  const [shown, setShown] = useState<string>()
+  const [pictures, setPictures] = useState<ReadonlySet<string>>(() => new Set())
+  const loaded = useCallback(
+    (src: string) => setPictures((known) => (known.has(src) ? known : new Set(known).add(src))),
+    [],
+  )
+  const value = useMemo(() => ({ open: setShown, loaded }), [loaded])
+  const gallery = media.filter((item) => pictures.has(item.src) || item.src === shown)
+  const at = gallery.findIndex((item) => item.src === shown)
   return (
-    <Lightbox.Provider value={open}>
+    <Lightbox.Provider value={value}>
       {children}
       <ImageLightbox
-        images={media.map((item) => ({
+        images={gallery.map((item) => ({
           src: forgeMediaUrl(item.src),
           alt: item.alt,
           original: item.src,
         }))}
-        at={at}
-        onAt={setAt}
-        onClose={() => setAt(undefined)}
+        at={at < 0 ? undefined : at}
+        onAt={(index) => setShown(gallery[index]?.src)}
+        onClose={() => setShown(undefined)}
       />
     </Lightbox.Provider>
   )
