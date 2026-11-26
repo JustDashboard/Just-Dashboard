@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import Link from "next/link"
 import { ArrowUpRight, GridMasonry, Warning } from "@/components/icons"
 import { get, post } from "@/lib/api"
@@ -9,16 +9,12 @@ import { usePoll } from "@/hooks/use-poll"
 import { useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
-  BlueprintInput,
   BlueprintService,
   BlueprintSummary,
-  DeploymentDraftSource,
-  DeploymentHostnameSuggestion,
   GameImportPreview,
   GameVersionList,
-  WorkloadProfile,
 } from "@/lib/types"
-import { Disclosure, Field, FormNote, OptionRow } from "@/components/form"
+import { Disclosure, Field, FormNote } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { cn } from "@/lib/utils"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
@@ -29,9 +25,7 @@ import { LoadingRows } from "@/components/loading"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -46,7 +40,8 @@ import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-p
 import { isUserTemplate, splitCatalogue, templateProvenance } from "@/components/deploy/templates"
 import { breakpointQuery } from "@/lib/breakpoints"
 import { useSourceInspection } from "./use-source-inspection"
-import { templateInputErrors } from "./template-inputs"
+import { BlueprintField, useSuggestedDomain } from "./blueprint-field"
+import { templateDraftSource, templateInputErrors } from "./template-inputs"
 
 /**
  * What a template is *for*, which is how somebody looking for one thinks.
@@ -239,7 +234,7 @@ export function SourceTemplate({
   // search left on each, so a search that empties a shelf says so before the
   // shelf is opened.
   const needle = filter.trim().toLowerCase()
-  const { shelves, yoursMatched } = useMemo(() => {
+  const { shelves, yoursMatched, listed } = useMemo(() => {
     const search = filter.trim().toLowerCase()
     const { builtIn, yours } = splitCatalogue(catalogue.data ?? [])
     const map = new Map<TopicKey, BlueprintSummary[]>()
@@ -254,6 +249,7 @@ export function SourceTemplate({
         entries: map.get(shelf.key)!,
       })),
       yoursMatched: yours.filter((entry) => matchesSearch(entry, search)),
+      listed: builtIn.length + yours.length,
     }
   }, [catalogue.data, filter])
   const shown =
@@ -297,54 +293,13 @@ export function SourceTemplate({
   // which the template cannot be used at all.
   const basic = declared.filter((input) => !input.advanced || input.required)
   const advanced = declared.filter((input) => input.advanced && !input.required)
-  const blocked = definition?.deploymentSupported === false
+  // A stack's preset reached by a link: it is offered on the Stacks tab, with
+  // what the stack sets up beside it, and is not used from here.
+  const inStack = Boolean(definition?.stack)
+  const blocked = definition?.deploymentSupported === false || inStack
 
-  /**
-   * The public name this template's own application will be told it answers
-   * to — asked for under the name the project is about to be created with,
-   * which is the same question the public-address field asks later.
-   *
-   * Eight of the reviewed definitions declare a required `domain`: n8n writes
-   * it into every webhook URL, Vaultwarden into its WebAuthn origin, Nextcloud
-   * refuses any other host. That is a real requirement of those applications
-   * and not something the dashboard invented — but nobody's first server owns
-   * a domain, and the answer already exists: `/deploy/hostname` returns a
-   * `<slug>.<address>.sslip.io` name that resolves to this host with no record
-   * to create. A `domain` input *is* the plan's domain — `Render` puts it in
-   * `plan.Domains` — so filling it in here is the same act as setting the
-   * route, and the application's idea of its URL cannot drift from the route
-   * that serves it.
-   */
-  const wantsDomain = declared.some((input) => input.kind === "domain")
   const projectName = definition ? deploymentName(definition.name) : ""
-  const suggestion = usePoll(
-    (signal) =>
-      get<DeploymentHostnameSuggestion>(
-        `/deploy/hostname?name=${encodeURIComponent(projectName)}`,
-        undefined,
-        signal,
-      ),
-    0,
-    [projectName],
-    { enabled: wantsDomain && Boolean(projectName) },
-  )
-  const suggested =
-    suggestion.data && suggestion.data.method !== "none" ? suggestion.data.hostname : undefined
-  useEffect(() => {
-    if (!definition || !suggested) return
-    setInputs((current) => {
-      // Keyed on presence, not on emptiness: a domain the operator cleared on
-      // purpose stays cleared rather than being filled in again under them.
-      const seeded = { ...current }
-      let changed = false
-      for (const input of definition.inputs ?? []) {
-        if (input.kind !== "domain" || input.default || input.name in seeded) continue
-        seeded[input.name] = suggested
-        changed = true
-      }
-      return changed ? seeded : current
-    })
-  }, [definition, suggested, setInputs])
+  const suggestion = useSuggestedDomain(definition, projectName, setInputs)
 
   /**
    * What the reviewed definition will refuse, asked here instead.
@@ -372,22 +327,7 @@ export function SourceTemplate({
     setFailure(undefined)
     let current = true
     try {
-      // A multi-service template runs through the Compose release path, so
-      // it is a Compose source the server renders from the definition.
-      const stack = (definition.services?.length ?? 0) > 0
-      const profile: WorkloadProfile =
-        definition.profile === "game" ? "game" : stack ? "compose" : "service"
-      const source: DeploymentDraftSource = {
-        kind: stack ? "compose" : "blueprint",
-        mode: "blueprint",
-        blueprintId: definition.id,
-        blueprintVersion: definition.version,
-        blueprintInputs: Object.fromEntries(
-          declared
-            .filter((input) => input.kind !== "secret" && input.name in inputs)
-            .map((input) => [input.name, inputs[input.name]]),
-        ),
-      }
+      const { profile, source } = templateDraftSource(definition, inputs)
       current = await inspection.inspect(() =>
         inspectAndPrepare(deploymentName(definition.name), profile, source, {
           sourceLabel: definition.name,
@@ -400,7 +340,6 @@ export function SourceTemplate({
     }
   }
 
-  const listed = (catalogue.data ?? []).length
   const featured = shown
     .flatMap((shelf) => shelf.entries.map((entry) => entry.id))
     .filter(hasProductLogo)
@@ -638,10 +577,17 @@ export function SourceTemplate({
                   </p>
                 </div>
 
-                {blocked && (
-                  <Notice tone="warning" icon={Warning} title="Blueprint deployment unavailable">
-                    {definition.unavailableReason || "Choose a different template."}
+                {inStack ? (
+                  <Notice title="This is a preset of a stack">
+                    Choose it on the Stacks tab, which says what the stack sets up and what it
+                    cannot do.
                   </Notice>
+                ) : (
+                  blocked && (
+                    <Notice tone="warning" icon={Warning} title="Blueprint deployment unavailable">
+                      {definition.unavailableReason || "Choose a different template."}
+                    </Notice>
+                  )
                 )}
 
                 <AccessPromise access={definition.access} />
@@ -681,7 +627,7 @@ export function SourceTemplate({
                     input={input}
                     value={inputs[input.name] ?? input.default ?? ""}
                     error={attempted ? errors[input.name] : undefined}
-                    suggested={input.kind === "domain" ? suggestion.data : undefined}
+                    suggested={input.kind === "domain" ? suggestion : undefined}
                     onChange={(value) =>
                       setInputs((current) => ({ ...current, [input.name]: value }))
                     }
@@ -927,131 +873,6 @@ function listNames(services: BlueprintService[]) {
   return names.length <= 1
     ? (names[0] ?? "")
     : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`
-}
-
-function BlueprintField({
-  input,
-  value,
-  error,
-  suggested,
-  onChange,
-}: {
-  input: BlueprintInput
-  value: string
-  /** The definition requires this and it is empty, and Use has been pressed. */
-  error?: string
-  /** Where a pre-filled hostname came from, so the field can say so. */
-  suggested?: DeploymentHostnameSuggestion
-  onChange: (value: string) => void
-}) {
-  const id = `blueprint-${input.name}`
-  if (input.kind === "secret") {
-    return (
-      <Notice title={input.label}>
-        {input.description} Connect a database or enter {input.variable ?? input.name} in the
-        Variables step. Credentials stay out of the template settings.
-      </Notice>
-    )
-  }
-  if (input.kind === "accept") {
-    return (
-      <Label
-        htmlFor={id}
-        className="flex min-h-11 items-start gap-2 text-body leading-snug text-foreground"
-      >
-        <Checkbox
-          id={id}
-          checked={value === "true"}
-          onCheckedChange={(checked) => onChange(checked === true ? "true" : "false")}
-        />
-        <span className="space-y-1">
-          <span className="block font-medium">{input.label}</span>
-          {input.description && (
-            <span className="block text-hint font-normal text-muted-foreground">
-              {input.description}
-            </span>
-          )}
-          {input.acceptUrl && (
-            <Link
-              href={input.acceptUrl}
-              target="_blank"
-              rel="noreferrer noopener"
-              className="inline-flex items-center gap-1 text-hint font-normal underline underline-offset-4"
-            >
-              Read the agreement <ArrowUpRight className="size-3" />
-            </Link>
-          )}
-          {error && (
-            <span role="alert" className="block text-hint font-normal text-destructive">
-              {error}
-            </span>
-          )}
-        </span>
-      </Label>
-    )
-  }
-  // A yes-or-no answer is an option, not a field: its label is the sentence
-  // and the switch answers it (§7). It was a switch under a label with "On"
-  // or "Off" written beside it — the state said twice, once in a word 12px
-  // high.
-  if (input.kind === "boolean") {
-    // The error stays with it: a required yes-or-no with no default is
-    // "Required." until answered, and without the line Use this template was
-    // refused with nothing on screen saying why.
-    return (
-      <div className="space-y-1.5">
-        <OptionRow
-          title={input.label}
-          hint={input.description}
-          checked={value === "true"}
-          onCheckedChange={(checked) => onChange(checked ? "true" : "false")}
-        />
-        {error && (
-          <p role="alert" className="text-hint leading-relaxed text-destructive">
-            {error}
-          </p>
-        )}
-      </div>
-    )
-  }
-  return (
-    <Field
-      label={input.label}
-      htmlFor={id}
-      hint={
-        suggested && value === suggested.hostname && suggested.method === "sslip"
-          ? `${suggested.detail} Replace it with your own domain if you have one.`
-          : input.description
-      }
-      error={error}
-      trailing={input.required && <span className="text-hint text-muted-foreground">Required</span>}
-    >
-      {input.kind === "choice" ? (
-        <Select value={value} onValueChange={onChange}>
-          <SelectTrigger id={id} className="w-full">
-            <SelectValue placeholder="Choose" />
-          </SelectTrigger>
-          <SelectContent>
-            {(input.choices ?? []).map((choice) => (
-              <SelectItem key={choice.value} value={choice.value}>
-                {choice.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      ) : (
-        <Input
-          id={id}
-          value={value}
-          type={input.kind === "number" || input.kind === "memory" ? "number" : "text"}
-          inputMode={input.kind === "number" || input.kind === "memory" ? "numeric" : undefined}
-          min={input.minimum}
-          max={input.maximum}
-          onChange={(event) => onChange(event.target.value)}
-        />
-      )}
-    </Field>
-  )
 }
 
 /**

@@ -201,7 +201,11 @@ segment under `/api/v1`.
 
 One database's own pages (`app/databases/[id]/…`) and one project's (`app/deploy/[id]/(project)/…`)
 are not in `NAV`: `components/database/shell/nav-scope.tsx` builds the first from the engine, and
-`PROJECT_NAV` and `PROJECT_SETTINGS_NAV` in `nav.ts` list the second.
+`PROJECT_NAV` and `PROJECT_SETTINGS_NAV` in `nav.ts` list the second. A smart stack's two surfaces
+are under Deployments: the Stacks tab of `/deploy/new` is
+`components/deploy/new-project/source-stack.tsx`, and a stack project's page
+(`app/deploy/[id]/(project)/stack/`) is `components/deploy/stack/`, with `deploy-new-stack.spec.ts`
+and `deploy-stack-page.spec.ts` over `deploy-stack-fixture.ts`.
 
 **Packages behind Deployments and Network.** Both sections reach more packages than fit a cell.
 
