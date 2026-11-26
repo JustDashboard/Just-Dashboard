@@ -221,10 +221,19 @@ func (s *Service) Stop() {
 }
 
 func (s *Service) run(ctx context.Context) {
-	// A failure from before the loop is the start-up check's to retry.
+	// A failure from before the loop is on record, and is waited for from
+	// there: the signal it sent is not needed. One whose hour is over is
+	// the start-up check's to retry. One still within it, as after a
+	// restart for an update minutes after the failure, gets the rest of its
+	// wait here: the start-up check leaves it, and the next hourly check can
+	// be nearly an hour after the wait ends.
 	select {
 	case <-s.issueFailed:
 	default:
+	}
+	var retry <-chan time.Time
+	if wait, failed := s.retryWait(ctx); failed && wait > 0 {
+		retry = s.after(wait)
 	}
 	if st, err := readState(ctx, s.st.DB); err == nil && st.Handle != "" {
 		if err := s.ensureHook(ctx); err != nil {
@@ -240,13 +249,15 @@ func (s *Service) run(ctx context.Context) {
 	defer addresses.Stop()
 	defer refreshes.Stop()
 	defer links.Stop()
-	var retry <-chan time.Time
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-s.issueFailed:
-			retry = s.retryAfter(ctx)
+			retry = nil
+			if wait, failed := s.retryWait(ctx); failed {
+				retry = s.after(wait)
+			}
 		case <-retry:
 			retry = nil
 			if st, err := readState(ctx, s.st.DB); err == nil {
@@ -272,17 +283,18 @@ func (s *Service) run(ctx context.Context) {
 	}
 }
 
-// retryAfter fires when the failed wildcard's wait is over: autoIssueRetry
-// after the failure (CertificateTriedAt). The hourly check alone can come up
-// to an hour after that, as when the 10:00 check starts an issuance that
-// fails at 10:02: the 11:00 check is two minutes early, and the noon one
-// would be the next. nil when nothing failed.
-func (s *Service) retryAfter(ctx context.Context) <-chan time.Time {
+// retryWait is how long until the failed wildcard's wait is over:
+// autoIssueRetry after the failure (CertificateTriedAt), 0 once it is.
+// The hourly check alone can come up to an hour after that, as when the
+// 10:00 check starts an issuance that fails at 10:02: the 11:00 check is two
+// minutes early, and the noon one would be the next. failed is false when
+// no failure of the held handle's wildcard is on record.
+func (s *Service) retryWait(ctx context.Context) (wait time.Duration, failed bool) {
 	st, err := readState(ctx, s.st.DB)
 	if err != nil || !st.held() || st.CertificateError == "" || st.CertificateTriedAt == 0 {
-		return nil
+		return 0, false
 	}
-	return s.after(max(time.Unix(st.CertificateTriedAt, 0).Add(autoIssueRetry).Sub(s.now()), 0))
+	return max(time.Unix(st.CertificateTriedAt, 0).Add(autoIssueRetry).Sub(s.now()), 0), true
 }
 
 // serverID is the stored link's server id, or "" with no link.

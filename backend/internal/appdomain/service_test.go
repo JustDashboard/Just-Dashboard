@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -1170,6 +1171,70 @@ func TestAFailedWildcardIsTriedAgainAnHourAfterTheFailure(t *testing.T) {
 	case w := <-waits:
 		t.Fatalf("a retry was scheduled after a success: %v", w.d)
 	default:
+	}
+}
+
+// The dashboard restarts within a failure's hour, as an update minutes after
+// it does. The retry is still an hour after the failure: the loop starts
+// with the rest of the wait, read from the failure on record, since the
+// start-up check leaves it and the next hourly check would come later.
+func TestARestartWithinTheHourKeepsTheRetry(t *testing.T) {
+	e := newEnv(t, true)
+	clock := time.Date(2026, 11, 26, 10, 2, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return clock }
+	advance := func(d time.Duration) { e.mu.Lock(); clock = clock.Add(d); e.mu.Unlock() }
+	type wait struct {
+		d    time.Duration
+		fire chan time.Time
+	}
+	waits := make(chan wait, 4)
+	e.svc.after = func(d time.Duration) <-chan time.Time {
+		w := wait{d, make(chan time.Time, 1)}
+		waits <- w
+		return w.fire
+	}
+	e.svc.refreshEvery, e.svc.addressEvery, e.svc.linkEvery = 24*time.Hour, 24*time.Hour, 24*time.Hour
+
+	// 10:02: the issuance fails, in the process the update replaces.
+	e.certs.fail = errors.New("the zone's nameservers did not answer")
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+
+	// 10:30: the new process starts.
+	advance(28 * time.Minute)
+	e.svc.Start(t.Context())
+	var retry wait
+	select {
+	case retry = <-waits:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restart lost the retry")
+	}
+	if retry.d != 32*time.Minute {
+		t.Fatalf("the retry waits %v, want the 32 minutes left of the hour", retry.d)
+	}
+	// The start-up check asks the site and leaves the wildcard to its wait.
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(e.link.callLog(), "GET") {
+		if time.Now().After(deadline) {
+			t.Fatal("the start-up check did not run")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := len(e.certs.orders()); got != 1 {
+		t.Fatalf("ordered within the hour of the failure: %d orders", got)
+	}
+
+	// 11:02: the wait is over and the retry orders it.
+	advance(32 * time.Minute)
+	e.certs.mu.Lock()
+	e.certs.fail = nil
+	e.certs.mu.Unlock()
+	retry.fire <- clock
+	e.waitIssued(2)
+	if v, _ := e.svc.View(t.Context()); v.Certificate == nil || v.Certificate.State != "valid" {
+		t.Fatalf("after the retry = %+v", v.Certificate)
 	}
 }
 

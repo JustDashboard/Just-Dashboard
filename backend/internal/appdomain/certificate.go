@@ -281,7 +281,7 @@ const autoIssueRetry = time.Hour
 // autoIssue issues the held handle's wildcard when it is missing, failed or
 // due, without anyone pressing Issue. It runs at every check (start-up, the
 // hourly refresh, a page asking) and once a failure's hour is over
-// (retryAfter), so a server whose first issuance failed mends itself once the
+// (retryWait), so a server whose first issuance failed mends itself once the
 // cause is gone, for example after an update. certbot's own timer renews a
 // valid wildcard. This also catches a timer that does not run.
 func (s *Service) autoIssue(ctx context.Context, st State) {

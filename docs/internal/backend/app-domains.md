@@ -87,9 +87,10 @@ One loop, through `safego`, started with the account link and only when the feat
   stopped it (the host's `jd`, for one), after a restore onto a new host. A failure waits an hour
   (`autoIssueRetry`; Let's Encrypt refuses a name after five failed validations in an hour) and the card says it
   tries again by itself. The hour runs from the failure: every failed issuance, whoever asked for it, sets the
-  loop a wait of its own (`retryAfter`) that issues again when it ends, because the hourly check can come nearly
-  an hour later (one that starts an issuance at 10:00 that fails at 10:02 is two minutes early at 11:00). A valid
-  wildcard is left to certbot's own renewal timer.
+  loop a wait of its own (`retryWait`) that issues again when it ends, because the hourly check can come nearly
+  an hour later (one that starts an issuance at 10:00 that fails at 10:02 is two minutes early at 11:00). The
+  wait is read from the stored failure, so a restart within the hour (an update minutes after the failure) keeps
+  it: the loop starts with the rest of the wait. A valid wildcard is left to certbot's own renewal timer.
 - **When the account link is cleared**, whatever the reason, the account link's `OnClear` hook runs
   `appdomain.DetachInTx` in the transaction that ends it (the running dashboard's link and `--admin unlink`
   both carry the hook). A link found missing by the loop is detached too.
