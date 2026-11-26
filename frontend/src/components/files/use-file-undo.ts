@@ -6,6 +6,7 @@ import { notify } from "@/lib/toast"
 import { sentenceCase } from "@/lib/format"
 import { filesOwnKeyboard, isTypingTarget } from "@/components/files/keyboard"
 import {
+  carryIdentity,
   pushOperation,
   runUndo,
   type FileOperation,
@@ -52,6 +53,8 @@ function failure(step: UndoStep, error: unknown): string | undefined {
 export function useFileUndo(onChange: () => void) {
   const stack = useRef<FileOperation[]>([])
   const taken = useRef(new WeakSet<FileOperation>())
+  // Asked for and waiting its turn, or running: a save can still carry it.
+  const queued = useRef(new Set<FileOperation>())
   const queue = useRef<Promise<void>>(Promise.resolve())
   const changed = useRef(onChange)
   useEffect(() => {
@@ -66,6 +69,7 @@ export function useFileUndo(onChange: () => void) {
       notify.info(`${sentenceCase(op.label)} cannot be undone`, { description: op.why })
       return queue.current
     }
+    queued.current.add(op)
     const run = queue.current.then(async () => {
       try {
         const result = await runUndo(op, RUNNER)
@@ -77,6 +81,7 @@ export function useFileUndo(onChange: () => void) {
           notify.success(`Undid ${op.label}`)
         }
       } finally {
+        queued.current.delete(op)
         changed.current()
       }
     })
@@ -109,7 +114,16 @@ export function useFileUndo(onChange: () => void) {
     [undo],
   )
 
-  return useMemo(() => ({ record, undo, undoLast }), [record, undo, undoLast])
+  /**
+   * The editor saved `path`, replacing the file that had identity `was` with
+   * one that has `now`: an undo still to run that names that file follows it.
+   */
+  const saved = useCallback((path: string, was?: string, now?: string) => {
+    if (!was || !now) return
+    for (const op of [...stack.current, ...queued.current]) carryIdentity(op, path, was, now)
+  }, [])
+
+  return useMemo(() => ({ record, undo, undoLast, saved }), [record, undo, undoLast, saved])
 }
 
 /**

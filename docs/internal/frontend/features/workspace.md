@@ -546,7 +546,11 @@ for: a press while the last one is still with the server waits its turn rather t
 and an operation asked for twice runs once. A move or copy answers the identity of what it left
 (`identity`), and its undo sends it back as `expect`: an entry that took the name while the undo waited
 is refused (`409 entry_changed`, "Something else has taken its name since, and was left alone") rather
-than moved or put in the Trash. An operation that cannot be undone (a permanent
+than moved or put in the Trash. A save in the editor sheet writes a new file over the name, so the
+write answers the identity it replaced and the one it left, and an undo still to run that names the
+saved file follows it (`carryIdentity`); a rename, then a save, then Ctrl+Z still undoes the rename,
+while a step expecting something else at that name is left as it was. An operation that cannot be
+undone (a permanent
 delete, a copy by an account that may not delete) says so on its notice instead. Name search passes
 the folder on screen as `here` and says the index's age beside the count when the index answered.
 

@@ -325,6 +325,79 @@ test("Ctrl+Z undoes the last file operation, then the one before", async ({ page
   expect(order).toEqual(["/files/move", "/files/delete", "/files/move"])
 })
 
+test("a rename is still undone after the renamed file was saved in the editor", async ({
+  page,
+}) => {
+  const { calls } = await mockServer(page)
+  // The listing follows the rename, and the editor reads and saves the file.
+  let names = ["notes.md", "report.csv"]
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, {
+      path: home,
+      parent: "/home",
+      roots: ["/"],
+      entries: names.map((name) => entry(name)),
+    }),
+  )
+  await page.route("**/api/v1/files/read**", (route) =>
+    json(route, {
+      path: new URL(route.request().url()).searchParams.get("path"),
+      content: "# Ideas\n",
+      size: 8,
+      language: "markdown",
+      binary: false,
+      modeOctal: "0644",
+      revision: "r1",
+    }),
+  )
+  const saves: unknown[] = []
+  await page.route("**/api/v1/files/write", async (route) => {
+    saves.push(route.request().postDataJSON())
+    // A save writes a new file over the name: the server says which file it
+    // replaced (the one the rename left) and which it left.
+    const renamed = calls.findIndex((c) => c.path === "/files/move")
+    await json(route, {
+      ...entry("ideas.md"),
+      revision: "r2",
+      identity: "entry-saved",
+      previousIdentity: `entry-${renamed + 1}`,
+    })
+  })
+  await openFiles(page)
+  await row(page, "notes.md").click()
+  await page.keyboard.press("F2")
+  const input = page.getByRole("dialog").getByRole("textbox")
+  await input.fill("ideas.md")
+  names = ["ideas.md", "report.csv"]
+  await input.press("Enter")
+  await expect(page.getByText("Renamed to ideas.md")).toBeVisible()
+
+  await row(page, "ideas.md").dblclick()
+  const editor = page.getByRole("dialog")
+  await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await editor.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("more\n")
+  await editor.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => saves.length).toBe(1)
+  await page.keyboard.press("Escape")
+  await expect(editor).toHaveCount(0)
+
+  await page
+    .locator("[data-files-workspace] table")
+    .first()
+    .click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press("Control+z")
+  await expect.poll(() => calls.filter((c) => c.path === "/files/move").length).toBe(2)
+  // The undo names the file the save left, which is the renamed file.
+  expect(calls.filter((c) => c.path === "/files/move")[1].body).toEqual({
+    from: `${home}/ideas.md`,
+    to: `${home}/notes.md`,
+    expect: "entry-saved",
+  })
+  await expect(page.getByText("Undid renaming notes.md")).toBeVisible()
+})
+
 test("an undo leaves alone what took the copy's name while it waited", async ({ page }) => {
   const { calls } = await mockServer(page)
   await openFiles(page)

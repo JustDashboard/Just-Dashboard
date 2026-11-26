@@ -193,6 +193,11 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err := httpx.DecodeJSON(r, &req); err != nil {
 		return err
 	}
+	// A save writes a new file and renames it over the name, which gives the
+	// file another identity: the answer names the one it replaced and the one
+	// it left, so the Files page can carry a pending undo from the first to
+	// the second (an absent file has none to replace).
+	previous, _ := s.modules.hostFiles.Identity(req.Path)
 	if err := s.writeFileKept(r, req.Path, req.Content, req.ExpectedRevision); err != nil {
 		return mapFileError(err)
 	}
@@ -201,10 +206,16 @@ func (s *Server) handleFileWrite(w http.ResponseWriter, r *http.Request) error {
 	if err != nil {
 		return mapFileError(err)
 	}
+	identity, err := s.modules.hostFiles.Identity(req.Path)
+	if err != nil {
+		s.Log.Warn("a saved file's identity could not be read", "path", req.Path, "err", err)
+	}
 	httpx.JSON(w, http.StatusOK, struct {
 		*files.Entry
-		Revision string `json:"revision"`
-	}{entry, contentguard.Revision(req.Content)})
+		Revision         string `json:"revision"`
+		Identity         string `json:"identity,omitempty"`
+		PreviousIdentity string `json:"previousIdentity,omitempty"`
+	}{entry, contentguard.Revision(req.Content), identity, previous})
 	return nil
 }
 

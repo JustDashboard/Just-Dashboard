@@ -2200,7 +2200,12 @@ export default function FilesPage() {
         root={path ?? undefined}
         revealLine={searchLocation?.path === editing ? searchLocation.line : undefined}
         onOpenChange={(open) => !open && setEditing(null)}
-        onSaved={reload}
+        onSaved={(saved, identities) => {
+          // A save leaves a new file at the name: an undo waiting on the one
+          // it replaced follows it.
+          undo.saved(saved, identities?.previousIdentity, identities?.identity)
+          reload()
+        }}
       />
       <ImageEditorSheet
         path={editingImage}

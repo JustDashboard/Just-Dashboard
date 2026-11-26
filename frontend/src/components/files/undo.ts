@@ -109,6 +109,24 @@ export async function runUndo(
   return { done }
 }
 
+/**
+ * A save in the dashboard's editor writes a new file over the name, which
+ * gives the file another identity (`PUT /files/write` answers the one it
+ * replaced and the one it left): a step waiting on the file it saved is
+ * carried from the one to the other. A step that expects anything else at
+ * that name, or another path, is left as it is, so what took the name is
+ * still refused.
+ */
+export function carryIdentity(op: FileOperation, path: string, was: string, now: string) {
+  if (!was || !now || was === now) return
+  op.steps = op.steps.map((step) =>
+    (step.kind === "move" && step.from === path && step.identity === was) ||
+    (step.kind === "trash" && step.path === path && step.identity === was)
+      ? { ...step, identity: now }
+      : step,
+  )
+}
+
 /** The stack of this visit's operations, newest last, kept to a bound. */
 export const UNDO_DEPTH = 50
 

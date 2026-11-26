@@ -419,7 +419,8 @@ exact binary revisions, changes during staging, concurrent text/image writers an
 Editor reads (`GET /files/read`) return a SHA-256 `revision` of the bytes they read
 (`internal/contentguard`, which Compose and crontab edits share). The Files
 and Git editors send it as `expectedRevision` to `PUT /files/write`, whose successful response
-returns the saved revision. `WriteChecked` serializes the content comparison and atomic publish
+returns the saved revision (and the saved file's `identity` and `previousIdentity`, for the Files undo,
+below). `WriteChecked` serializes the content comparison and atomic publish
 with Compose saves to the same resolved path, checks the bytes before staging and immediately
 before publish, and reports a stale, removed, nonregular or oversized backing file as
 `409 content_conflict`. Guarded disk reads use nonblocking open and an opened-file type check, so a
@@ -618,7 +619,12 @@ finished. A move or copy answers 200 `{identity, replaced?}`: `identity` names w
 destination's name (`Service.Identity`: device, inode and, where the filesystem records it, birth
 time, so a rename keeps it and a copy or a file renamed over the name does not), and the page's undo
 sends it back as `expect` on `POST /files/move` and `DELETE /files/delete`, which answer
-`409 entry_changed` and touch nothing when the entry at that name is no longer the one named. A move or
+`409 entry_changed` and touch nothing when the entry at that name is no longer the one named.
+`PUT /files/write` writes a new file and renames it over the name, so a save changes that identity too:
+its answer (the entry and its `revision`, as before) adds `identity`, the saved file's, and
+`previousIdentity`, the file it replaced (absent for a new file), and the page carries an undo still
+waiting on the replaced file to the saved one (`carryIdentity` in `undo.ts`). Something else at the name
+keeps its own identity, so its undo is still refused. A move or
 copy with `overwrite` first puts what it replaces in the Trash (`trashReplaced`) and names it in
 `replaced: {item}`: a move renames the occupant
 away; a copy keeps a regular file by a hard link, so the copy's atomic replacement still reads the old

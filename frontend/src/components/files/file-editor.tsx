@@ -86,6 +86,13 @@ const LANGUAGES = [
   "diff",
 ]
 
+/**
+ * What a save answers of the file it left and the one it replaced: a save
+ * writes a new file over the name, so the Files page's undo follows it from
+ * one to the other (`carryIdentity`).
+ */
+export type SavedIdentity = { identity?: string; previousIdentity?: string }
+
 export function FileEditorSheet({
   path,
   onOpenChange,
@@ -98,7 +105,7 @@ export function FileEditorSheet({
 }: {
   path: string | null
   onOpenChange: (open: boolean) => void
-  onSaved?: (path: string) => void
+  onSaved?: (path: string, saved?: SavedIdentity) => void
   root?: string
   revealLine?: number
   destination?: boolean
@@ -139,7 +146,7 @@ function FileEditorPanel({
 }: {
   path: string | null
   onOpenChange: (open: boolean) => void
-  onSaved?: (path: string) => void
+  onSaved?: (path: string, saved?: SavedIdentity) => void
   root?: string
   revealLine?: number
   destination?: boolean
@@ -228,7 +235,7 @@ function FileEditorPanel({
       const destination = target ?? path
       setSaving(true)
       try {
-        const result = await put<{ revision?: string }>("/files/write", {
+        const result = await put<{ revision?: string } & SavedIdentity>("/files/write", {
           path: destination,
           content: draft,
           expectedRevision: destination === path ? file.revision : "",
@@ -242,7 +249,10 @@ function FileEditorPanel({
           // over the editor comes back rather than "No changes".
           if (grouped) setReviewing(false)
         }
-        onSaved?.(destination)
+        onSaved?.(destination, {
+          identity: result.identity,
+          previousIdentity: result.previousIdentity,
+        })
       } catch (err) {
         if (err instanceof ApiError && err.code === "content_conflict" && destination === path)
           setConflict(true)

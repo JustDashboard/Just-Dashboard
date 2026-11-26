@@ -223,3 +223,57 @@ func TestAQueuedUndoLeavesAnEntryThatTookTheNameAlone(t *testing.T) {
 		t.Fatalf("a move without expect: %d %s", w.Code, w.Body)
 	}
 }
+
+// The editor's save writes a new file and renames it over the name, so the
+// file it saved has another identity than the one an undo was given. The
+// write answers both, the one it replaced and the one it left, and an undo
+// carried from the first to the second still goes through; the old identity
+// is still refused, and so is anything else at the name.
+func TestASaveAnswersTheIdentityItReplacedAndTheOneItLeft(t *testing.T) {
+	c, s := newClient(t)
+	root := fileFixture(t, s)
+	a, b := filepath.Join(root, "a.txt"), filepath.Join(root, "b.txt")
+	os.WriteFile(a, []byte("a"), 0o644)
+	var moved movedResponse
+	w := c.do(http.MethodPost, "/api/v1/files/move", `{"from":"`+a+`","to":"`+b+`"}`, nil)
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &moved) != nil || moved.Identity == "" {
+		t.Fatalf("rename: %d %s", w.Code, w.Body)
+	}
+	body, _ := json.Marshal(map[string]any{"path": b, "content": "edited"})
+	w = c.do(http.MethodPut, "/api/v1/files/write", string(body), nil)
+	var saved struct {
+		Name             string `json:"name"`
+		Revision         string `json:"revision"`
+		Identity         string `json:"identity"`
+		PreviousIdentity string `json:"previousIdentity"`
+	}
+	// The write answers as it did, the entry and its revision, and now the
+	// identities too.
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &saved) != nil || saved.Name != "b.txt" || saved.Revision == "" {
+		t.Fatalf("save: %d %s", w.Code, w.Body)
+	}
+	if saved.PreviousIdentity != moved.Identity || saved.Identity == "" || saved.Identity == moved.Identity {
+		t.Fatalf("save answered previous %q and identity %q for a file that was %q", saved.PreviousIdentity, saved.Identity, moved.Identity)
+	}
+	back := func(expect string) *httptest.ResponseRecorder {
+		return c.do(http.MethodPost, "/api/v1/files/move", `{"from":"`+b+`","to":"`+a+`","expect":"`+expect+`"}`, nil)
+	}
+	if w := back(moved.Identity); w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "entry_changed") {
+		t.Fatalf("the identity from before the save: %d %s", w.Code, w.Body)
+	}
+	if w := back(saved.Identity); w.Code != http.StatusOK {
+		t.Fatalf("the undo carried through the save: %d %s", w.Code, w.Body)
+	}
+	if got, _ := os.ReadFile(a); string(got) != "edited" {
+		t.Fatalf("a is %q", got)
+	}
+
+	// A new file has no identity before it.
+	created := filepath.Join(root, "new.txt")
+	body, _ = json.Marshal(map[string]any{"path": created, "content": "new"})
+	w = c.do(http.MethodPut, "/api/v1/files/write", string(body), nil)
+	saved.PreviousIdentity, saved.Identity = "", ""
+	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &saved) != nil || saved.Identity == "" || saved.PreviousIdentity != "" {
+		t.Fatalf("new file: %d %s", w.Code, w.Body)
+	}
+}
