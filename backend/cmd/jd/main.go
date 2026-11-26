@@ -43,7 +43,8 @@ Deployments
   deployments [ls]              List deployments with their health and last run
   deploy APP [--wait] [--ref R] Queue a deploy; with --wait, follow it and exit with its result
   runs APP [--limit N]          List an application's runs
-  logs APP [--run N] [--follow] Print a run's transcript (default: the active run, else the last)
+  logs APP [--run N] [--follow] Print a run's transcript (default: the active run, else the last;
+                                -f is short for --follow)
   releases APP                  List retained releases
   rollback APP [--to ID] [--wait]  Go back to a release (default: the one before the live one)
   rollback APP --instant [--wait]  Switch traffic back to the release kept warm after the last deploy
@@ -55,11 +56,17 @@ Deployments
   maintenance APP on|off        Switch the maintenance page at once (--bypass CIDR,... for who is let past)
   status APP                    Environments, live release, rollback watch, maintenance and rehearsal
   create --name N --image IMG [--port P]  Create a deployment from an image, through a draft
+                                (--profile web|static|service|worker, default web; --no-check leaves
+                                out the HTTP readiness check; --ack CODE or --ack-warnings accepts
+                                the preflight's warnings)
 
 Variables (write-only: values are never shown, only their digests)
   vars ls APP                   Names, type, scopes and value digests
   vars set APP KEY=VALUE ...    Set variables; KEY=- reads that value from stdin
-  vars import APP FILE.env      Set every variable in a .env file (FILE - reads stdin; --dry-run)
+                                (--plain or --secret, the default; --scope runtime,build,release_task
+                                says where the value is given, default runtime)
+  vars import APP FILE.env      Set every variable in a .env file (FILE - reads stdin; --dry-run;
+                                --plain, --secret and --scope as for vars set)
   vars rm APP KEY ...           Remove variables
 
 Settings
@@ -237,7 +244,7 @@ func (a *app) dispatch(command string, pre, rest, words []string) error {
 	case "source":
 		return a.nested("source", pre, rest, map[string]func([]string) error{"set": a.sourceSet})
 	case "app-domain":
-		return a.appDomain(pre, rest)
+		return a.nested("app-domain", pre, rest, map[string]func([]string) error{"challenge": a.appDomainChallenge})
 	case "drafts", "draft":
 		return a.nested("drafts", pre, rest, map[string]func([]string) error{
 			"ls": a.draftsList, "list": a.draftsList, "create": a.draftsCreate, "show": a.draftsShow,
@@ -266,7 +273,7 @@ func (a *app) nested(name string, pre, rest []string, verbs map[string]func([]st
 }
 
 func verbList(verbs map[string]func([]string) error) string {
-	order := []string{"ls", "create", "show", "get", "set", "save", "import", "detect", "preflight", "commit", "rm", "status", "promote", "abort"}
+	order := []string{"ls", "create", "show", "get", "set", "save", "import", "detect", "preflight", "commit", "rm", "status", "promote", "abort", "challenge"}
 	var out []string
 	for _, v := range order {
 		if _, ok := verbs[v]; ok {
