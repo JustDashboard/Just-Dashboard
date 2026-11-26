@@ -224,7 +224,9 @@ account's Reconnect and the account picker, the rate limit's time, a partial ins
 access list and `?installed=1`, Disconnect; the Overview's profile, calendar (53 weeks on a desk,
 fewer at one height on a phone, the day under the pointer), recent cards, previews and activity, and
 the main column holding still while the profile lands; the pull requests' and issues' filters,
-states, glyphs, where a row opens, and rows of one height; the create dialog's rule, refusal and
+states, glyphs, where a row opens, and rows of one height, the filter and state kept in the address,
+the list's refresh button and the page's Refresh both reading past the server's minute of memory,
+and a failed first page keeping no other filter's total; the create dialog's rule, refusal and
 unreachable result, the clone streaming to Open in Local Git and a failed clone, and no sideways
 scroll on any view at a phone's width with the icon command. `design-system.spec.ts` holds `/github` to the item-page rules, the identity line's rules
 and the layout-shift budget at both widths.
