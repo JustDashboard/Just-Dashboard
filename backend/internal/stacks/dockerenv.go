@@ -211,7 +211,16 @@ func (e *DockerEnv) Exec(ctx context.Context, service, user string, argv []strin
 	if err != nil {
 		return ExecResult{ExitCode: -1}, err
 	}
-	output, err := e.Docker.ExecCapture(ctx, id, user, argv, 0)
+	// The step's own deadline bounds the command, not a fixed minute: a first
+	// quality-profile sync can take longer than that on a slow server.
+	timeout := time.Minute
+	if deadline, ok := ctx.Deadline(); ok {
+		timeout = time.Until(deadline)
+		if timeout <= 0 {
+			return ExecResult{ExitCode: -1}, context.DeadlineExceeded
+		}
+	}
+	output, err := e.Docker.ExecCapture(ctx, id, user, argv, timeout)
 	return ExecResult{Stdout: string(output.Stdout), Stderr: string(output.Stderr), ExitCode: output.ExitCode}, err
 }
 
