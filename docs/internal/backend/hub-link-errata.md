@@ -1,5 +1,13 @@
 # Hub link errata, 2026-11-05
 
+> **A snapshot of the Just Hub repository's file.** This is the hub's
+> `docs/protocol/hub-link-errata.md` as of Just Hub commit `105a137a2472` (2026-11-05), the last commit to
+> change it there. The hub's copy is the record; this one is kept so that a JD reader can follow the entries
+> without access to that private repository. Below, "here" and "this repository" mean the hub, and the paths are
+> the hub's tree (`backend/internal/link`, `scripts/sync-vectors.sh`, `docs/architecture.md`, …) unless they name
+> `docs/internal/`. The copy differs from the hub's file only where its links into the hub's tree became plain
+> paths, and in the three sentences that said JD keeps no copy of it.
+
 Amendments to the hub link protocol and hub sign-in after the adversarial review
 the Just Hub repository's `docs/reviews/spec-review-hub-link.md` (24 findings: 2 high, 10 medium,
 12 low). Entry HL-n answers finding n. Each entry gives the amendment, the exact sections changed, and the
@@ -10,8 +18,8 @@ The amended texts are:
 - [`hub-link-protocol.md`](hub-link-protocol.md). These amendments were made here first, and JD's copy at
   `docs/internal/backend/hub-link-protocol.md` took them on `feat/0.8.5-hub-link`. Since then JD's copy is the
   source of the text: this repository takes it, and `hub-link-vectors.json`, byte for byte at the JD commit in
-  [`JD_COMMIT`](JD_COMMIT), which `scripts/sync-vectors.sh` checks. This file stays the hub's own record, and
-  JD keeps no copy of it. ["Since the first pin"](#since-the-first-pin-jds-changes-to-the-shared-text) lists
+  its `docs/protocol/JD_COMMIT`, which `scripts/sync-vectors.sh` checks. This file stays the hub's own record;
+  JD keeps only the snapshot described at the top. ["Since the first pin"](#since-the-first-pin-jds-changes-to-the-shared-text) lists
   what JD changed after that and what the hub did about each change.
 - [`hub-link-vectors.json`](hub-link-vectors.json): the sign-in ticket context and cases, and the notes. Keys,
   canonical JSON, rejected arguments, request and command signatures and hello bodies are byte-identical to
@@ -831,8 +839,8 @@ on all three of its branches, and nothing that is signed or in the vectors chang
   `?username=hub:<hub name>` shows the hub's commands but never its sign-ins. Done: a `signin` entry's
   `serverAuditUrl` is `<endpoint>/audit?action=hub.signin` (hub-api.md 13.5, `activity/handlers.go`).
 - **13, changing the protocol.** Unchanged in JD. Its last bullet still says the dashboard's copy takes "the
-  errata file" with the amendments, and links to it. JD keeps no copy of this file, so `sync-vectors.sh` now
-  compares the protocol and the vectors only. That bullet is a follow-up for JD (below).
+  errata file" with the amendments, and links to it. JD keeps only a snapshot of this file, which `sync-vectors.sh`
+  does not compare: it compares the protocol and the vectors only. That bullet is a follow-up for JD (below).
 
 ## Follow-ups outside this change
 
@@ -845,6 +853,6 @@ These documents are owned elsewhere or were outside this task; each needs the ch
 | `docs/ui-guidelines.md` 22.6 (Add server) | Screens 2 and 3: the hub shows no code; the owner types the code the server shows (h1 "Type the code db-01 shows"); lead with the WhoIs node; show `flags`; confirm a replacement as destructive. "By command": the command without the token, the token separately with Copy, "paste the token when asked", 15-minute default. The approved-but-not-collected state ("Waiting for db-01 to pick up the approval…"). Also the spine label "Check the code" becomes "Type the code", the vocabulary row `code` becomes "the 8 characters the server shows and the owner types into the hub", and the "By command" bullet's `--token …` becomes `--token-stdin` | HL-6, HL-10, HL-11 |
 | `docs/ui-guidelines.md` 22.11 (Hub, Account) | Turning hub sign-in off ends every grant on every server; renaming retires the old name for good | HL-8 |
 | `docs/design-report.html` | "The hub itself is taken over" row and "the link adds no new way into the server"; the installer's `--token <one-time>` command becomes a pipe into `--token-stdin`. Pairing (found in the verification pass): the summary bullet "check that both screens show the same 8-character code", the sequence diagram's step 5 label and `aria-label`, its caption ("approves it after checking that the codes match") and the steps list ("Both tabs show the same code … check they match and click Approve") all describe the one-click compare that HL-11 removed; each becomes "type the code the server shows into the hub" | HL-10, HL-11, HL-12 |
-| JD `docs/internal/backend/hub-link-protocol.md` section 13 | Taken: JD's copy and the vectors are the source now (see "Since the first pin"). Its last bullet still says the dashboard's copy takes the errata file and links to `hub-link-errata.md`, which JD does not keep; it becomes "this repository's errata stay in the hub repository" or names the hub repository's path | all |
+| JD `docs/internal/backend/hub-link-protocol.md` section 13 | Taken: JD's copy and the vectors are the source now (see "Since the first pin"). Its last bullet still says the dashboard's copy takes the errata file and links to `hub-link-errata.md`, of which JD keeps only a snapshot; it becomes "this repository's errata stay in the hub repository" or names the hub repository's path | all |
 | JD `docs/internal/security/invariants.md`, `SECURITY.md` | HL-12 | HL-12 |
 | `docs/licence-api.md` | Nothing: the seat claim stays at approval, and releasing an uncollected approval's seat uses the existing `DELETE /seats/{fp}` | HL-6 |
