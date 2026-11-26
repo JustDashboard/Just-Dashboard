@@ -1,0 +1,35 @@
+---
+addic7ed:
+  cookies: ''
+  password: ''
+  user_agent: ''
+  username: ''
+  vip: false
+analytics:
+  enabled: true
+anidb:
+  api_client: ''
+  api_client_ver: 1
+animetosho:
+  anidb_api_client: ''
+  anidb_api_client_ver: 1
+  search_threshold: 6
+anticaptcha:
+  anti_captcha_key: ''
+assrt:
+  token: ''
+auth:
+  apikey: 0123456789abcdef0123456789abcdef
+  password: ''
+  type: null
+  username: ''
+avistaz:
+  cookies: ''
+  user_agent: ''
+backup:
+  day: 6
+  folder: /config/backup
+  frequency: Weekly
+  hour: 3
+  retention: 31
+betaseries:
