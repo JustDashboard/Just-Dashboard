@@ -184,7 +184,7 @@ func (e *NormalizedStepExecutor) takeOverLeftoverRoutes(ctx context.Context, exe
 		return nil
 	}
 	if err := e.routeOwners.MarkDeploymentRoutes(listCtx, candidates); err != nil {
-		_ = stepLog(execution, "warning", "The routes already answering this deployment's domains could not be matched to their deployments, so none was taken over: "+err.Error())
+		_ = stepLog(execution, "stderr", "The routes already answering this deployment's domains could not be matched to their deployments, so none was taken over: "+err.Error())
 		return nil
 	}
 	taken := []proxysvc.DeploymentRouteSnapshot{}
@@ -194,11 +194,11 @@ func (e *NormalizedStepExecutor) takeOverLeftoverRoutes(ctx context.Context, exe
 		}
 		snapshot, err := proxy.SnapshotDeploymentRoute(ctx, vhost.Name)
 		if err != nil {
-			_ = stepLog(execution, "warning", "The leftover route "+vhost.Name+" could not be read, so it was left in place: "+err.Error())
+			_ = stepLog(execution, "stderr", "The leftover route "+vhost.Name+" could not be read, so it was left in place: "+err.Error())
 			continue
 		}
 		if err := proxy.RemoveDeploymentRoute(ctx, vhost.Name); err != nil {
-			_ = stepLog(execution, "warning", "The leftover route "+vhost.Name+" could not be removed: "+err.Error())
+			_ = stepLog(execution, "stderr", "The leftover route "+vhost.Name+" could not be removed: "+err.Error())
 			continue
 		}
 		taken = append(taken, snapshot)
@@ -217,7 +217,7 @@ func (e *NormalizedStepExecutor) restoreLeftoverRoutes(ctx context.Context, exec
 	defer cancel()
 	for _, snapshot := range taken {
 		if err := e.proxy.RestoreDeploymentRoute(recovery, snapshot); err != nil {
-			_ = stepLog(execution, "warning", "The leftover route "+snapshot.Name+" could not be put back: "+err.Error())
+			_ = stepLog(execution, "stderr", "The leftover route "+snapshot.Name+" could not be put back: "+err.Error())
 			continue
 		}
 		_ = stepLog(execution, "status", "Put the leftover route "+snapshot.Name+" back")
