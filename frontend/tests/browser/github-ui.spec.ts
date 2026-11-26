@@ -669,6 +669,36 @@ test.describe("pull requests and issues", () => {
       ])
   })
 
+  test("a list whose first page failed keeps nothing of the filter read before it", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mockGitHubPage(page, {
+      handle: async (route, path, url) => {
+        if (!/\/pulls$/.test(path) || url.searchParams.get("filter") !== "mentioned") return false
+        await route.fulfill({
+          status: 502,
+          contentType: "application/json",
+          body: JSON.stringify({ error: "github_unavailable", message: "GitHub did not answer" }),
+        })
+        return true
+      },
+    })
+    await page.goto("/github?tab=pulls")
+    const view = page.locator("[data-slot=github-inbox-pull]")
+    await expect(view.getByRole("button", { name: "Created 3" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    )
+    await view.getByRole("button", { name: "Mentioned" }).click()
+    // Once its read has failed, the chosen chip does not carry Created's total.
+    await expect(view.getByRole("button", { name: "Try again" })).toBeVisible()
+    const mentioned = view.getByRole("button", { name: /^Mentioned/ })
+    await expect(mentioned).toHaveAttribute("aria-pressed", "true")
+    await expect(view.getByRole("listitem")).toHaveCount(0)
+    await expect(mentioned).toHaveAccessibleName("Mentioned")
+  })
+
   for (const width of [1440, 390]) {
     test(`every row is one height at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
