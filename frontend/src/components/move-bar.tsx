@@ -19,6 +19,12 @@ const MOVES: { direction: Direction; word: string; Glyph: typeof ArrowLeft }[] =
  * step, kept as a drag is. The maps and a database's Diagram have them in
  * their inspector's foot, and a drawing under its canvas, where the
  * selection is. The caller says what is moved (`name`).
+ *
+ * Enter and Space press a Move button and do nothing else. Each canvas hears
+ * its keys on something round the bar, and took them for its own: on the
+ * map Enter opened the chosen box's page, and in a drawing Excalidraw took
+ * Enter for the selected shape's text and Space for a held slide, so the
+ * press moved nothing.
  */
 export function MoveBar({
   name,
@@ -35,6 +41,9 @@ export function MoveBar({
       aria-label={`Move ${name}`}
       data-slot="move-bar"
       className={cn("flex shrink-0 items-center gap-1", className)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" || event.key === " ") event.stopPropagation()
+      }}
     >
       <span aria-hidden className="mr-auto text-hint text-muted-foreground">
         Move

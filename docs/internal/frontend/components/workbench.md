@@ -144,8 +144,12 @@ something is selected. A drawing's press is made of
 Excalidraw's own arrows (`nudgeSelection` in `boards/board-workspace.tsx`), the one move of its that
 carries a shape's text, a frame's contents and the arrows bound to it, none of which it exports. It is
 left out on a phone and where nothing may move (a locked layout, a drawing that can only be read).
-Specs: `server-map.spec.ts`, *a single pointer moves a box and a system*; `database-schema.spec.ts`,
-*a single pointer moves a table*; `boards-ui.spec.ts`, *a single pointer moves a selection*.
+Enter and Space on a Move button press it and go no further: the canvas round the bar hears its own
+keys, and took them (the map's Enter opened the chosen box's page, Excalidraw's opened the shape's
+text, and its Space was a held slide).
+Specs: `server-map.spec.ts`, *a single pointer moves a box and a system* and *a Move button answers
+Enter as a button*; `database-schema.spec.ts`, *a single pointer moves a table*; `boards-ui.spec.ts`,
+*a single pointer moves a selection* and *a Move button under the drawing answers Enter and Space*.
 
 ## Related
 
