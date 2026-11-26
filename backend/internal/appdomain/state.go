@@ -18,6 +18,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 )
 
 // settingsKey holds the State.
@@ -37,12 +39,18 @@ const (
 type State struct {
 	// Revision is raised by every write, so a write that read an older copy
 	// is never the one stored (update).
-	Revision int64  `json:"revision"`
-	Handle   string `json:"handle,omitempty"`
-	Zone     string `json:"zone,omitempty"`
-	Hostname string `json:"hostname,omitempty"`
-	Address  string `json:"address,omitempty"`
-	Status   string `json:"status,omitempty"`
+	Revision int64 `json:"revision"`
+	// Generation is raised by every change to which handle this server
+	// holds and how: a claim, a release, a detach, a link started or ended,
+	// the site's record mirrored with another handle, status or address. A
+	// GET /domain asked before one describes a state that is gone, and its
+	// answer is dropped (refresh).
+	Generation int64  `json:"generation,omitempty"`
+	Handle     string `json:"handle,omitempty"`
+	Zone       string `json:"zone,omitempty"`
+	Hostname   string `json:"hostname,omitempty"`
+	Address    string `json:"address,omitempty"`
+	Status     string `json:"status,omitempty"`
 	// Reason is why the domain is suspended or detached, for the page.
 	Reason string `json:"reason,omitempty"`
 	// AutoAssign gives new deployments the address by default.
@@ -70,6 +78,12 @@ type State struct {
 	OfferTried   string `json:"offerTried,omitempty"`
 	OfferTriedAt int64  `json:"offerTriedAt,omitempty"`
 	OfferError   string `json:"offerError,omitempty"`
+	// Previous is <handle>.<zone> for each handle this server held before
+	// the one it holds now, newest first, kept through changes and releases.
+	// Their names stay detached, never ordinary (Classify): a release saved
+	// before the change can still name one, and another server may hold
+	// that handle now.
+	Previous []string `json:"previous,omitempty"`
 }
 
 // holdsDomain reports a handle the site holds for this server, usable or
@@ -85,6 +99,46 @@ func (s State) base() string {
 		return ""
 	}
 	return s.Handle + "." + s.Zone
+}
+
+// remember puts base first in Previous, once.
+func (s *State) remember(base string) {
+	if base == "" {
+		return
+	}
+	s.forget(base)
+	s.Previous = append([]string{base}, s.Previous...)
+}
+
+// forget takes base out of Previous: its handle is this server's again.
+func (s *State) forget(base string) {
+	s.Previous = slices.DeleteFunc(s.Previous, func(b string) bool { return b == base })
+	if len(s.Previous) == 0 {
+		s.Previous = nil
+	}
+}
+
+// heldBefore reports a name under a handle in Previous.
+func (s State) heldBefore(hostname string) bool {
+	for _, base := range s.Previous {
+		if underBase(hostname, base) {
+			return true
+		}
+	}
+	return false
+}
+
+// underBase reports an app name of base, <handle>.<zone>: base itself or
+// <app>.<base>, one label deep, as far as the wildcard reaches.
+func underBase(hostname, base string) bool {
+	if base == "" {
+		return false
+	}
+	if hostname == base {
+		return true
+	}
+	app, ok := strings.CutSuffix(hostname, "."+base)
+	return ok && app != "" && !strings.Contains(app, ".")
 }
 
 type queryer interface {
@@ -146,16 +200,27 @@ func update(ctx context.Context, db *sql.DB, change func(*State) (bool, error)) 
 	return st, tx.Commit()
 }
 
+// owner is what Generation counts changes of.
+func (s State) owner() [4]string { return [4]string{s.Handle, s.Hostname, s.Address, s.Status} }
+
 // DetachInTx marks a held handle detached, inside a transaction that ends
-// the account link. The site deletes a server's records when it is unlinked
-// or removed, so the handle is no longer this server's to use. It is the
-// account link's OnClear hook (and the terminal unlink's).
+// or starts an account link. The site deletes a server's records when it is
+// unlinked or removed, so the handle is no longer this server's to use. It is
+// the account link's OnClear hook (and the terminal's link and unlink). It
+// raises Generation even with no handle held: an answer the old link was
+// given, an offer for instance, is not the new one's. For the same reason
+// the offer already stored, and how its claim went, are cleared: the new
+// link's first check stores the offer its account chose, if any.
 func DetachInTx(ctx context.Context, tx *sql.Tx, now int64) error {
 	st, err := readState(ctx, tx)
-	if err != nil || st.Handle == "" || st.Status == StatusDetached {
+	if err != nil {
 		return err
 	}
-	st.Status, st.Reason, st.UpdatedAt = StatusDetached, "The account link was cleared, so the site released this server's handle and deleted its records.", now
+	if st.Handle != "" && st.Status != StatusDetached {
+		st.Status, st.Reason, st.UpdatedAt = StatusDetached, "The account link was cleared, so the site released this server's handle and deleted its records.", now
+	}
+	st.Offer, st.OfferTried, st.OfferTriedAt, st.OfferError = "", "", 0, ""
+	st.Generation++
 	st.Revision++
 	return writeState(ctx, tx, st)
 }

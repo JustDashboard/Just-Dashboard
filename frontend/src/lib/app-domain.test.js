@@ -81,6 +81,30 @@ test("a name is the server's, detached, or not an app name at all", () => {
   ).toBe("detached")
 })
 
+test("a name under a handle held before stays detached, as the backend lists it", () => {
+  const use = (hostname) => ({
+    projectId: 1,
+    project: "shop",
+    environmentId: 2,
+    environment: "production",
+    hostname,
+  })
+  // The handle changed from acme to other: acme's saved names are the backend's to list.
+  const changed = {
+    ...status(held("active", "other")),
+    detached: [use("shop.acme.just-dashboard.com"), use("acme.just-dashboard.com")],
+  }
+  expect(appDomainStateOf("SHOP.acme.just-dashboard.com", undefined, changed)).toBe("detached")
+  expect(appDomainStateOf("acme.just-dashboard.com", undefined, changed)).toBe("detached")
+  expect(appDomainStateOf("shop.other.just-dashboard.com", undefined, changed)).toBe("active")
+  // The zone's other names stay ordinary.
+  expect(appDomainStateOf("www.just-dashboard.com", undefined, changed)).toBeUndefined()
+  // Released: nothing held, and the old names are still listed.
+  const released = { ...status(null), detached: [use("shop.acme.just-dashboard.com")] }
+  expect(appDomainStateOf("shop.acme.just-dashboard.com", undefined, released)).toBe("detached")
+  expect(appDomainStateOf("shop.never.just-dashboard.com", undefined, released)).toBeUndefined()
+})
+
 test("the certificate reads as a dot, a word and the one thing to do", () => {
   expect(certificateReading(null)).toMatchObject({ label: "No certificate yet", action: "Issue" })
   expect(certificateReading({ name: "x", state: "issuing", expiresAt: null, error: null })).toEqual(

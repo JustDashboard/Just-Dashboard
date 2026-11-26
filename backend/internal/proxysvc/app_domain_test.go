@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
 
 // fakeManualCertbot is a certbot that answers a manual DNS order the way the
@@ -148,6 +150,70 @@ func TestAppDomainOrderRefusesWithoutTheHookBinary(t *testing.T) {
 	_, err := service.IssueAppDomainCertificate(context.Background(), AppDomainOrder{Handle: "acme", Zone: "just-dashboard.com", Credentials: "/c.json"}, nil)
 	if !errors.Is(err, ErrAppDomainHookMissing) || !strings.Contains(err.Error(), "install-cli") {
 		t.Fatalf("err = %v", err)
+	}
+	if raw, _ := os.ReadFile(argv); strings.Contains(string(raw), "certonly") {
+		t.Fatal("certbot was asked to order without a hook to answer it")
+	}
+}
+
+// A certbot this process runs on its own side, with no /host mount (the
+// backend running on the server itself): a missing jd is installed where
+// that certbot runs it, and the order goes ahead. An installer that wrote
+// jd somewhere certbot does not look, as one writing under /host did on such
+// a server, is not taken at its word.
+func TestAMissingHookIsInstalledWhereCertbotRunsIt(t *testing.T) {
+	root := t.TempDir()
+	letsencrypt := filepath.Join(root, "letsencrypt")
+	t.Cleanup(UseCertificateDirsForTest(letsencrypt, filepath.Join(root, "imported")))
+	t.Setenv("JD_ACME_DIRECTORY", "")
+	argv := fakeManualCertbot(t, letsencrypt, []string{"*.acme.just-dashboard.com", "acme.just-dashboard.com"})
+	previous, install := AppDomainHookBinary, InstallAppDomainHook
+	AppDomainHookBinary = filepath.Join(root, "server", "usr", "local", "bin", "jd")
+	t.Cleanup(func() { AppDomainHookBinary, InstallAppDomainHook = previous, install })
+	hooks := filepath.Join(root, "jd.log")
+	writeJD := func(path string) {
+		mkdir(t, filepath.Dir(path))
+		writeExecutable(t, path, fmt.Sprintf("#!/bin/sh\necho \"$*\" >> %q\n", hooks))
+	}
+	var asked []string
+	InstallAppDomainHook = func(target string) (bool, error) {
+		asked = append(asked, target)
+		writeJD(target)
+		return true, nil
+	}
+	var said []string
+	log := func(_, text string) { said = append(said, text) }
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	order := AppDomainOrder{Handle: "acme", Zone: "just-dashboard.com", Credentials: "/c.json"}
+	if _, err := service.IssueAppDomainCertificate(t.Context(), order, log); err != nil {
+		t.Fatal(err)
+	}
+	if len(asked) != 1 || asked[0] != hostexec.HostPath(AppDomainHookBinary) {
+		t.Fatalf("installed at %v, certbot runs %s", asked, AppDomainHookBinary)
+	}
+	if ran, _ := os.ReadFile(hooks); !strings.Contains(string(ran), "app-domain challenge add --credentials /c.json") {
+		t.Fatalf("certbot did not run the installed jd: %q", ran)
+	}
+	if !strings.Contains(strings.Join(said, "\n"), "Installed jd at "+AppDomainHookBinary) {
+		t.Fatalf("log = %q", said)
+	}
+
+	// The old installer: it wrote under /host whatever certbot's side was.
+	if err := os.Remove(AppDomainHookBinary); err != nil {
+		t.Fatal(err)
+	}
+	InstallAppDomainHook = func(string) (bool, error) {
+		writeJD(filepath.Join(root, "host", "usr", "local", "bin", "jd"))
+		return true, nil
+	}
+	said = nil
+	_ = os.Truncate(argv, 0)
+	_, err := service.IssueAppDomainCertificate(t.Context(), order, log)
+	if !errors.Is(err, ErrAppDomainHookMissing) {
+		t.Fatalf("err = %v", err)
+	}
+	if strings.Contains(strings.Join(said, "\n"), "Installed jd") {
+		t.Fatalf("an install certbot cannot see was reported: %q", said)
 	}
 	if raw, _ := os.ReadFile(argv); strings.Contains(string(raw), "certonly") {
 		t.Fatal("certbot was asked to order without a hook to answer it")

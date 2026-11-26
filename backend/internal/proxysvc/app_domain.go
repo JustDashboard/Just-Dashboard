@@ -49,10 +49,13 @@ func AppDomainHookCommand(action, credentials string) string {
 // tests, which run a jd of their own.
 var AppDomainHookBinary = "/usr/local/bin/jd"
 
-// InstallAppDomainHook installs AppDomainHookBinary on the host when it is
-// missing there (clihost.Install, set by cmd/server). It reports whether it
-// installed it. Nil where nothing can be installed, as in tests.
-var InstallAppDomainHook func() (bool, error)
+// InstallAppDomainHook installs jd at target when nothing is there
+// (clihost.Install, set by cmd/server). target is AppDomainHookBinary as
+// this process opens the filesystem certbot runs on (certbotRuntime.path):
+// the host's root through PID 1 in the backend's container, the path itself
+// on a server where the backend runs directly. It reports whether it
+// installed it. Nil where nothing can be installed.
+var InstallAppDomainHook func(target string) (bool, error)
 
 // SetAppDomainBase tells the service the name of this server's
 // just-dashboard.com handle, <handle>.<zone>, held or held before, or ""
@@ -184,16 +187,20 @@ func (s *Service) IssueAppDomainCertificate(ctx context.Context, order AppDomain
 	// certbot on the host runs the host's jd, which install.sh installs only
 	// when asked. The address cannot be proved or renewed without it, so it
 	// is installed here, rather than the operator sent to a terminal.
-	if missing := rt.missingFiles(ctx, []string{AppDomainHookBinary}); missing[AppDomainHookBinary] && rt.onHost && InstallAppDomainHook != nil {
-		installed, installErr := InstallAppDomainHook()
+	// It is written where certbot's stat looks, and called installed only
+	// once that stat finds it.
+	missing := rt.missingFiles(ctx, []string{AppDomainHookBinary})[AppDomainHookBinary]
+	if missing && rt.onHost && InstallAppDomainHook != nil {
+		installed, installErr := InstallAppDomainHook(rt.path(AppDomainHookBinary))
+		missing = rt.missingFiles(ctx, []string{AppDomainHookBinary})[AppDomainHookBinary]
 		switch {
 		case installErr != nil && log != nil:
 			log("status", "Could not install jd at "+AppDomainHookBinary+" on this host: "+installErr.Error())
-		case installed && log != nil:
+		case installed && !missing && log != nil:
 			log("status", "Installed jd at "+AppDomainHookBinary+" on this host: certbot runs it to prove and renew this certificate.")
 		}
 	}
-	if missing := rt.missingFiles(ctx, []string{AppDomainHookBinary}); missing[AppDomainHookBinary] {
+	if missing {
 		side := "on this host"
 		if !rt.onHost {
 			side = "in the dashboard's container"

@@ -76,14 +76,16 @@ func Refresh(hostRoot, built string) (bool, error) {
 	return true, nil
 }
 
-// Install puts the jd built beside the dashboard at hostRoot+Path when
-// nothing is there yet. A feature calls it when it needs jd on the server
-// itself: certbot runs `jd app-domain challenge` to prove and renew a
+// Install puts the jd built beside the dashboard at target when nothing is
+// there yet. A feature calls it when it needs jd on the server itself:
+// certbot runs `jd app-domain challenge` to prove and renew a
 // just-dashboard.com address's wildcard, so that address cannot work
 // without it, and the operator who claimed one has asked for what it
-// needs. Whatever is already at the path, jd or another program, is left
-// alone. It reports whether it installed anything.
-func Install(hostRoot, built string) (bool, error) {
+// needs. The caller names target as it opens the filesystem certbot runs
+// on, which is not always /host: a backend running on the server itself
+// has no such mount. Whatever is already at the path, jd or another
+// program, is left alone. It reports whether it installed anything.
+func Install(target, built string) (bool, error) {
 	want, err := os.ReadFile(built)
 	if err != nil {
 		return false, err
@@ -91,7 +93,6 @@ func Install(hostRoot, built string) (bool, error) {
 	if !bytes.Contains(want, []byte(Marker)) {
 		return false, fmt.Errorf("%s does not look like jd", built)
 	}
-	target := filepath.Join(hostRoot, Path)
 	if _, err := os.Lstat(target); err == nil {
 		return false, nil
 	} else if !errors.Is(err, fs.ErrNotExist) {
