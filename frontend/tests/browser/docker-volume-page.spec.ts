@@ -349,6 +349,10 @@ for (const width of [1280, 390]) {
 test("the picture is one height whatever a volume has on either side", async ({ page }) => {
   await open(page, "/docker/volumes/shop_uploads")
   await expect(picture(page).getByRole("link", { name: "Open shop-web-1" })).toBeVisible()
+  // Measured once the fonts are in: on a loaded runner the first frame can be
+  // laid out before them, and the picture then sits a fraction of a pixel
+  // from where it rests (233 against 233.21 on CI).
+  await page.evaluate(() => document.fonts.ready)
   await risen(page)
   const two = await picture(page).boundingBox()
 
@@ -356,6 +360,7 @@ test("the picture is one height whatever a volume has on either side", async ({ 
   for (const name of ["minio-data", "scratch"]) {
     await rail(page).getByRole("link", { name }).click()
     await expect(identity(page, name)).toBeVisible()
+    await page.evaluate(() => document.fonts.ready)
     await risen(page)
     expect((await picture(page).boundingBox())?.height).toBe(two?.height)
     expect((await picture(page).boundingBox())?.y).toBe(two?.y)
