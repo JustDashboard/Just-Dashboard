@@ -112,7 +112,7 @@ One mark, one model. The strips that looked like tabs once had four.
 | A dialog or a sheet | `dialog`; `alertdialog` for a question | focus trapped inside, Escape closes, focus returns to what opened it | `Modal`, `SidePanel`, `ConfirmDialog` |
 | An explanation | a button; `tooltip` on hover or focus, `dialog` when pinned | focus opens it, Enter or Space pins it, Escape closes | `Explain` |
 | A side column's edge | `separator` with a value | arrows nudge, Home resets | `ResizeHandle` |
-| A canvas | the library's own, plus the page's keys | arrows slide it; Enter picks the box or frame the focus ring is on, and the arrows then move it (T10); zoom is buttons too | `CanvasZoom`, `CANVAS_MOVE` |
+| A canvas | the library's own, plus the page's keys | arrows slide it; Enter picks the box or frame the focus ring is on, and the arrows then move it (T10); zoom is buttons too; on the map, the inspector's Move buttons carry the chosen box or the system it reads | `CanvasZoom`, `CANVAS_MOVE`, `MapInspector` |
 | A terminal, an editor | theirs | they own their keys; Escape leaves where the page says so; a terminal has a screen reader mode | `XtermPane`, `CodeEditor` |
 
 - **Single keys can be turned off** (2.1.4). One-character shortcuts (`?`, `n`, a name's first
@@ -129,8 +129,15 @@ One mark, one model. The strips that looked like tabs once had four.
   its neighbour (`useFocusTrail`); a view strip keeps it on the tab.
 - **A hover reveal is also a focus reveal**, and on touch the controls are simply drawn
   (`RowActions`, `rowReveal`).
-- **Dragging has another way** (2.5.7): a handle answers arrows, a canvas pans with the keys, an
-  order changes from a menu.
+- **What a drag does has two other ways, and they are two criteria.** Keys are the keyboard's
+  way (2.1.1): a handle answers arrows, a canvas slides and moves what is picked with them. They
+  do not meet 2.5.7, which asks for a way with one pointer and no drag: a click or a tap at a
+  time. That is an order changed from a menu, a canvas slid by its zoom buttons, Fit and (on the
+  map) a system picked from the rail, and a box or a system on the server map or the databases
+  map moved by the inspector's four Move buttons, one longer step a press (`MoveBar` in
+  `components/map/inspector.tsx`, spec `server-map.spec.ts`, *a single pointer moves a box and a
+  system*). Still keys or a drag only: a table on a database's Diagram, a shape in a drawing, and
+  a side column's edge beyond its double-click reset.
 
 ## Tooltips and toggletips
 

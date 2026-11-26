@@ -84,7 +84,8 @@ round its containers, a checkout, a certificate and the logs round sub-nodes und
 to; what two systems share is drawn in each and marked. A rail lists the systems by what anchors
 them and flies the canvas to one (`?system=` opens on it); choosing a box lights its wiring and the
 inspector names each line; boxes drag and stay where they were put, and a whole system is carried by
-its head, per account; the canvas moves like a whiteboard's (two fingers slide it, a pinch zooms, a
+its head, per account (the arrows move what Enter or a click picked, and the inspector's four Move
+buttons move the chosen box, or else the system it reads, for a pointer that cannot drag); the canvas moves like a whiteboard's (two fingers slide it, a pinch zooms, a
 mouse drags open ground) and nothing on it changes size but by the zoom. No bar runs over the
 canvas. Below `lg` it is the canvas alone, and a tap floats one *Open* button to the box's page.
 Read-only: every box opens its own page. With no place left behind and every system at once too
