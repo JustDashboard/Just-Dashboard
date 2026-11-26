@@ -1,3 +1,4 @@
+import { lineDiff } from "@/lib/line-diff"
 import type { NetworkChangeStatus } from "@/lib/types"
 
 export type DriftStatus =
@@ -32,6 +33,17 @@ export type OwnedRepair = {
   before?: string
   after?: string
   effect?: "boot_files" | "runtime"
+}
+
+/**
+ * A repair's change as its review draws it. A file repair's is exact: it is
+ * the change reviewed before it is written, so an absent file is no lines and
+ * a trailing space or a final newline is a change. The runtime repair's before
+ * and after describe kernel rules rather than hold a file, so they are read as
+ * text, with no note about a newline no file ends in.
+ */
+export function driftRepairDiff(item: Pick<OwnedRepair, "before" | "after" | "effect">) {
+  return lineDiff(item.before ?? "", item.after ?? "", { exact: item.effect !== "runtime" })
 }
 
 export type DriftReport = {
