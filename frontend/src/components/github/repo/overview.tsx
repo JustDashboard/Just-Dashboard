@@ -278,7 +278,7 @@ function Readme() {
         )}
       </div>
       <div className={cn("min-w-0 px-5 pt-2 pb-6", !data && README_WAITING)}>
-        {data?.found && data.content !== undefined ? (
+        {data?.found && data.content ? (
           <>
             <Markdown
               source={absoluteReadme(data.content, repo.fullName, repo.defaultBranch, data.path)}
@@ -290,9 +290,13 @@ function Readme() {
               </p>
             )}
           </>
-        ) : data?.found ? (
+        ) : data?.found && data.truncated ? (
           <p className="py-4 text-body text-muted-foreground">
             The README is too long to read here; it is on GitHub.
+          </p>
+        ) : data?.found ? (
+          <p className="py-4 text-body text-muted-foreground">
+            {data.path ?? "The README"} is empty.
           </p>
         ) : data ? (
           <p className="py-4 text-body text-muted-foreground">{repo.fullName} has no README yet.</p>
@@ -414,7 +418,8 @@ function AboutFact({
 /**
  * What it is written in: GitHub's bar in Linguist's colours, the one strip a
  * forge draws for a whole, and under it each language by its own logo and
- * share. Nothing is drawn while GitHub has measured nothing.
+ * share. Nothing is drawn while GitHub has measured nothing; a read GitHub
+ * refused says so in one line, with Try again, rather than waiting on.
  */
 function Languages() {
   const { repo, path } = useRepo()
@@ -435,6 +440,17 @@ function Languages() {
           <LanguageBar languages={shares} className="h-2" />
           <LanguageList languages={shares} max={6} className="flex-wrap gap-y-2" />
         </>
+      ) : read.error ? (
+        <p className="text-body text-muted-foreground" data-slot="github-languages-failed">
+          GitHub did not hand over the languages.{" "}
+          <button
+            type="button"
+            onClick={read.refresh}
+            className="rounded-sm font-medium text-foreground focus-ring hover:underline"
+          >
+            Try again
+          </button>
+        </p>
       ) : (
         <div aria-hidden className="space-y-3">
           <Skeleton className="h-2 w-full rounded-full" />

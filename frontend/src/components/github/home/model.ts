@@ -142,6 +142,37 @@ export const PULL_FILTERS: { key: GitHubInboxFilter; label: string }[] = [
 export const ISSUE_FILTERS = PULL_FILTERS.filter((filter) => filter.key !== "review")
 
 /**
+ * The filter a listing's address names (`?filter=`), or Created when it
+ * names none the listing has: Review requests is for pull requests only.
+ */
+export function inboxFilterOf(kind: "pull" | "issue", value: string | null): GitHubInboxFilter {
+  const filters = kind === "pull" ? PULL_FILTERS : ISSUE_FILTERS
+  return filters.find((filter) => filter.key === value)?.key ?? "created"
+}
+
+/** Open or closed, as a listing's address names it (`?state=`); open unless it says closed. */
+export function inboxStateOf(value: string | null): "open" | "closed" {
+  return value === "closed" ? "closed" : "open"
+}
+
+/**
+ * When a row's request or issue last changed, in GitHub's own order of
+ * words: "opened 2 days ago by mona" while it is open, "by mona was merged
+ * 2 days ago" once it is not. The author is who opened it; search does not
+ * say who closed or merged it, so the row never names them.
+ */
+export function inboxWhen(
+  item: Pick<GitHubInboxItem, "state" | "createdAt" | "updatedAt" | "closedAt">,
+): { open: boolean; verb: "opened" | "merged" | "closed"; at: string } {
+  if (item.state === "open") return { open: true, verb: "opened", at: item.createdAt }
+  return {
+    open: false,
+    verb: item.state === "merged" ? "merged" : "closed",
+    at: item.closedAt ?? item.updatedAt,
+  }
+}
+
+/**
  * Where a pull request or issue opens. One in a repository the page lists
  * opens in place, on that repository's own page with the request or issue
  * open (`?pull=`, `?issue=`), so the reader can act on it here. One anywhere

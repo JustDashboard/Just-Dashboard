@@ -12,9 +12,11 @@ import (
 )
 
 // The account's own pull requests and issues, across every repository it
-// reaches: GitHub's issue search with the connection's login in the
-// qualifier. The login is always the connection's own and never a request's,
-// so nobody searches as, or for, somebody else from here.
+// reaches: GitHub's issue search with @me in the qualifier, which GitHub
+// reads as whoever the token belongs to. No login is ever spelled into a
+// query, neither a request's nor the one stored when the account was
+// connected: an account renamed on GitHub since, whose old login somebody
+// else then took, would otherwise list that person's work as its own.
 
 const (
 	// InboxPulls and InboxIssues are the two listings.
@@ -96,10 +98,10 @@ func (q InboxQuery) check() error {
 	return nil
 }
 
-// searchLoginRE is what a login may be to go into a search qualifier or a
-// path: GitHub's own alphabet, plus the underscore of an enterprise-managed
-// account. A login is GitHub's answer and not a request's, but a space in
-// one would read as a second qualifier, so it is held to this anyway.
+// searchLoginRE is what a login may be to go into a path: GitHub's own
+// alphabet, plus the underscore of an enterprise-managed account. A login is
+// GitHub's answer and not a request's, but a slash in one would read as
+// another path, so it is held to this anyway.
 var searchLoginRE = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,99}$`)
 
 func unusableLogin(path string) error {
@@ -107,18 +109,15 @@ func unusableLogin(path string) error {
 }
 
 // searchPath is GET /search/issues for one listing, newest update first.
-func (q InboxQuery) searchPath(login string) (string, error) {
+func (q InboxQuery) searchPath() (string, error) {
 	if err := q.check(); err != nil {
 		return "", err
-	}
-	if !searchLoginRE.MatchString(login) {
-		return "", unusableLogin("/search/issues")
 	}
 	is := "is:pr"
 	if q.Kind == InboxIssues {
 		is = "is:issue"
 	}
-	terms := []string{is, "is:" + q.State, "archived:false", inboxQualifiers[q.Filter] + ":" + login}
+	terms := []string{is, "is:" + q.State, "archived:false", inboxQualifiers[q.Filter] + ":@me"}
 	values := url.Values{
 		"q": {strings.Join(terms, " ")}, "sort": {"updated"}, "order": {"desc"},
 		"per_page": {strconv.Itoa(inboxPerPage)}, "page": {strconv.Itoa(q.Page)},
@@ -225,8 +224,8 @@ func (raw rawSearchItem) item() (InboxItem, bool) {
 
 // searchInbox reads one page. An item whose repository GitHub did not name
 // is left out: the page could not say where it is.
-func searchInbox(ctx context.Context, client *Client, login string, query InboxQuery) (InboxPage, error) {
-	path, err := query.searchPath(login)
+func searchInbox(ctx context.Context, client *Client, query InboxQuery) (InboxPage, error) {
+	path, err := query.searchPath()
 	if err != nil {
 		return InboxPage{}, err
 	}
@@ -276,7 +275,7 @@ func (s *Service) Inbox(ctx context.Context, userID, id int64, query InboxQuery,
 			return cached, nil
 		}
 	}
-	page, err := searchInbox(ctx, s.client(c), c.Login, query)
+	page, err := searchInbox(ctx, s.client(c), query)
 	if err != nil {
 		return InboxPage{}, err
 	}

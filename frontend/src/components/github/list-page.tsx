@@ -37,6 +37,7 @@ import { githubCallbackRegistered, githubCallbackUrl, localCheckoutsOf } from "@
 import type {
   GitHubConnection,
   GitHubEventList,
+  GitHubInboxFilter,
   GitHubProfile,
   GitHubRepository,
   GitHubRepositoryList,
@@ -211,6 +212,10 @@ export function GitHubListPage() {
     { enabled: Boolean(current && active && tab === "overview") },
   )
 
+  // Bumped by Refresh: the pull request and issue lists on screen (the
+  // Overview's previews, or a whole view) read again from GitHub.
+  const [inboxRound, setInboxRound] = useState(0)
+
   const refreshList = useCallback(() => {
     askFresh("list", current?.id)
     list.refresh()
@@ -223,6 +228,7 @@ export function GitHubListPage() {
       askFresh("events", current?.id)
       events.refresh()
     }
+    setInboxRound((n) => n + 1)
   }, [refreshList, profile, events, tab, current?.id])
 
   // Local Git's checkouts, once, for the "On this server" mark and Open in
@@ -637,6 +643,7 @@ export function GitHubListPage() {
                   ) : undefined
                 }
                 listed={listed}
+                inboxRound={inboxRound}
                 events={events.data?.events}
                 eventsLoading={!events.data && !events.error}
                 local={local.data?.repos}
@@ -672,8 +679,12 @@ export function GitHubListPage() {
                 refreshing={list.loading}
               />
             }
-            pulls={<InboxView kind="pull" connection={current.id} listed={listed} />}
-            issues={<InboxView kind="issue" connection={current.id} listed={listed} />}
+            pulls={
+              <InboxView kind="pull" connection={current.id} listed={listed} round={inboxRound} />
+            }
+            issues={
+              <InboxView kind="issue" connection={current.id} listed={listed} round={inboxRound} />
+            }
           />
         )}
       </div>
@@ -1102,8 +1113,19 @@ function HomeViews({
     label: HOME_TAB_LABEL[key],
     count: key === "repositories" ? counts?.all : undefined,
   }))
+  // The pull request and issue views keep their filter in the address; the
+  // next view starts on its own defaults rather than the last one's.
+  const choose = (next: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete("filter")
+    url.searchParams.delete("state")
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+    }
+    setTab(next)
+  }
   return (
-    <Tabs value={tab} onValueChange={setTab} className="gap-0">
+    <Tabs value={tab} onValueChange={choose} className="gap-0">
       <ViewTabList label={`Views of @${connection.login}`} views={views} value={tab} sticky />
       <TabsContent value="overview" className="pt-6">
         {tab === "overview" && overview}
@@ -1121,10 +1143,14 @@ function HomeViews({
   )
 }
 
-/** The address of one of the page's views, on the account it is on. */
-function viewHref(connection: number, tab: HomeTab) {
+/**
+ * The address of one of the page's views, on the account it is on, and for
+ * the pull request and issue views on one of their filters.
+ */
+function viewHref(connection: number, tab: HomeTab, filter?: GitHubInboxFilter) {
   const query = new URLSearchParams({ account: String(connection) })
   if (tab !== "overview") query.set("tab", tab)
+  if (filter && filter !== "created") query.set("filter", filter)
   return `/github?${query}`
 }
 
@@ -1151,6 +1177,7 @@ function Overview({
   listLoading,
   listError,
   listed,
+  inboxRound,
   events,
   eventsLoading,
   local,
@@ -1168,6 +1195,7 @@ function Overview({
   /** The list's failed first read, said where the recent repositories would stand. */
   listError?: React.ReactNode
   listed: Set<string>
+  inboxRound: number
   events?: GitHubEventList["events"]
   eventsLoading: boolean
   local?: GitRepo[]
@@ -1234,6 +1262,7 @@ function Overview({
           connection={connection.id}
           listed={listed}
           href={viewHref(connection.id, "pulls")}
+          round={inboxRound}
         />
         <InboxPreview
           title="Review requests"
@@ -1241,7 +1270,8 @@ function Overview({
           filter="review"
           connection={connection.id}
           listed={listed}
-          href={viewHref(connection.id, "pulls")}
+          href={viewHref(connection.id, "pulls", "review")}
+          round={inboxRound}
         />
         <InboxPreview
           title="Assigned issues"
@@ -1249,7 +1279,8 @@ function Overview({
           filter="assigned"
           connection={connection.id}
           listed={listed}
-          href={viewHref(connection.id, "issues")}
+          href={viewHref(connection.id, "issues", "assigned")}
+          round={inboxRound}
         />
         <Section title="Public activity">
           <ActivityFeed
