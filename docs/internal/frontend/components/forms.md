@@ -80,8 +80,10 @@ clause is the ⓘ's.
   error until the reader types again) or null (nothing added); without it an entry is trimmed and
   one already listed is skipped. `disabled` draws the values without their controls.
 - `OneTimeCodeInput({ id?, value, onChange, size? = "reading", autoFocus?, required? })`: always
-  `inputMode="numeric"`, `autoComplete="one-time-code"`, `maxLength={6}`; anything but a digit is
-  dropped, so "123 456" pasted from a message arrives as the code.
+  `inputMode="numeric"`, `autoComplete="one-time-code"`; anything but a digit is dropped and then
+  the first six are kept (`codeDigits`), so "123 456" pasted from a message arrives as the code. It
+  has no `maxLength`: the browser applies one to the pasted text, before the space goes, and
+  "123 456" became "12345".
 - `RecoveryCodes({ codes, onDone, framed?, busy? })`.
 - `SettingsColumn({ strip?, sectioned? = true, className?, children })`. `sectioned={false}` when
   the children already hold the strip and the sections, because one wrapper has to hold both (a
