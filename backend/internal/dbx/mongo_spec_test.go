@@ -280,3 +280,35 @@ func TestMongoPlainValues(t *testing.T) {
 		t.Errorf("plain values do not encode: %v", err)
 	}
 }
+
+// normaliseBSON is what the grid, an export and an aggregation show. A date
+// reads the same whichever form it comes in: the driver's primitive.DateTime,
+// which a decoded document holds, or a time.Time, whose String once won and
+// showed Go's debugging form, "2024-05-01 02:00:00 +0200 CEST".
+func TestMongoGridValues(t *testing.T) {
+	at := time.Date(2024, 5, 1, 2, 0, 0, 0, time.FixedZone("CEST", 2*60*60))
+	raw, err := bson.Marshal(bson.M{"at": at})
+	if err != nil {
+		t.Fatal(err)
+	}
+	decoded := bson.M{}
+	if err := bson.Unmarshal(raw, &decoded); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := decoded["at"].(primitive.DateTime); !ok {
+		t.Fatalf("the driver decoded a date as %T", decoded["at"])
+	}
+	for name, value := range map[string]any{"a decoded date": decoded["at"], "a time.Time": at} {
+		if got := normaliseBSON(bson.M{"at": value}).(map[string]any)["at"]; got != "2024-05-01T00:00:00Z" {
+			t.Errorf("%s shows as %#v", name, got)
+		}
+	}
+	// What has a String and is not a date still shows by it.
+	price, err := primitive.ParseDecimal128("19.90")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := normaliseBSON(price); got != "19.90" {
+		t.Errorf("a decimal shows as %#v", got)
+	}
+}
