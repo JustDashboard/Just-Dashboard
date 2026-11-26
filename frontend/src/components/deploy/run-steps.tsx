@@ -50,6 +50,7 @@ import { EvidenceView, StepTile, stepSummary } from "@/components/deploy/run-evi
 import { buildTimingOf, buildTimingSentence } from "@/components/deploy/build-timing"
 import { failureCause } from "@/components/deploy/failure-cause"
 import { failureExcerpt } from "@/components/deploy/failure-excerpt"
+import { ranStep } from "@/components/deploy/run-step-rows"
 import { useBreakpoint } from "@/lib/breakpoints"
 import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
@@ -89,14 +90,7 @@ const LINE: Partial<Record<DeploymentStep["state"], string>> = {
   running: "bg-brand/60",
 }
 
-/**
- * A step with something of its own to read: it ran, or it is running. A step
- * the plan skipped has a reason and nothing else, and one the run has not
- * reached has nothing at all.
- */
-export function ranStep(step: DeploymentStep) {
-  return step.state !== "skipped" && step.state !== "pending"
-}
+export { ranStep }
 
 /**
  * The step the inspector opens on: the one that failed, else the one at work,
@@ -224,7 +218,10 @@ function drawnElsewhere(step: DeploymentStep): string[] {
  * nineteen — each a button onto a record with nothing in it. The steps the
  * plan skipped are one list under the stages, each with its reason (the
  * whole of what such a step records), and the ones the run never reached, or
- * has not reached yet, one line of names. A stage whose steps all fell in
+ * has not reached yet, one line of names. A skip that did something first —
+ * preview cleanup removing the route of a preview with no live release — is a
+ * row like a step that ran, since its evidence is more than its reason
+ * (`run-step-rows.ts`). A stage whose steps all fell in
  * those two is not drawn: the release path above already shows it was not
  * part of what ran.
  *
@@ -282,7 +279,8 @@ export function RunDetails({
   const rail = useRef<HTMLDivElement>(null)
   const inspector = useRef<HTMLDivElement>(null)
   const ran = steps.filter(ranStep)
-  const skipped = steps.filter((step) => step.state === "skipped")
+  // A skip that did something anyway is a row above, not a line here.
+  const skipped = steps.filter((step) => step.state === "skipped" && !ranStep(step))
   const waiting = steps.filter((step) => step.state === "pending")
   const current = ran.find((step) => step.id === selected) ?? initialStep(ran)
   const currentId = current?.id

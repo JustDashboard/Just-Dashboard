@@ -100,6 +100,17 @@ export function actionableFindings(scan: ImageScan) {
   )
 }
 
+/**
+ * How many findings at or above the floor there are to fix. The server counts
+ * them before it cuts the listed findings at their bound, so a list filled by a
+ * development tool's findings never makes this read as nothing.
+ */
+export function toFixCount(scan: ImageScan) {
+  return scan.actionable
+    ? countAtLeast(scan.actionable, scan.floor)
+    : actionableFindings(scan).length
+}
+
 /** "1 critical, 2 high", or nothing: how many of each, every severity. */
 const totalOf = (counts: VulnerabilityCounts | undefined) =>
   counts ? countAtLeast(counts, "LOW") : 0
@@ -125,7 +136,8 @@ export function originParts(scan: ImageScan) {
   )
 }
 
-function joinAnd(parts: string[]) {
+/** "a, b and c". */
+export function joinAnd(parts: string[]) {
   if (parts.length <= 1) return parts.join("")
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`
 }
@@ -138,7 +150,7 @@ function joinAnd(parts: string[]) {
 export function overviewLead(scan: ImageScan) {
   const total = totalOf(scan.summary.counts)
   const release = `release ${scan.releaseNumber}`
-  const toFix = actionableFindings(scan).length
+  const toFix = toFixCount(scan)
   if (toFix > 0)
     return { title: `${toFix} ${floorWords(scan.floor)} to fix in ${release}`, where: "" }
   if (total === 0) return { title: `No known vulnerabilities in ${release}`, where: "" }
@@ -226,13 +238,29 @@ export function ageWords(hours: number | undefined) {
 
 /**
  * The alert's condition, as the page reads it: a fixable finding at or above
- * the floor that a base carries, and a base whose tag names a newer image.
+ * the floor that a base carries, and a newer image under that base's tag,
+ * which the server marks as the finding's rebuild. Another base moving is
+ * not it: a newer Bun does not fix what Node carries.
  */
 export function vulnerable(scan: ImageScan | null | undefined) {
   if (!scan || scan.state !== "scanned" || !scan.newerBase) return false
   return scan.summary.fixable.some(
-    (finding) => originOf(finding) === "base" && atLeast(finding.severity, scan.floor),
+    (finding) =>
+      originOf(finding) === "base" &&
+      finding.action === "rebuild" &&
+      atLeast(finding.severity, scan.floor),
   )
+}
+
+/**
+ * Whether the overview links to the report: as soon as there is a live release
+ * that can be scanned, scanned yet or not, since Scan now is the report's verb
+ * and the first scan is asked for there. A scan already read keeps its link.
+ */
+export function reportReachable(reading: ImageScanReading | undefined) {
+  if (!reading) return false
+  if (reading.scan?.finishedAt) return true
+  return Boolean(reading.releaseId && reading.policy.enabled && reading.available)
 }
 
 /** Whether a scan is waiting or running, which the panel polls faster for. */
@@ -254,7 +282,7 @@ export function scanVerdict(reading: ImageScanReading): { tone: DotTone; line: s
   if (scan.state === "scanning" && !scan.finishedAt) return { tone: "unknown", line: "Scanning" }
   if (scan.state === "failed" && !scan.finishedAt)
     return { tone: "warning", line: "Could not scan" }
-  const toFix = actionableFindings(scan).length
+  const toFix = toFixCount(scan)
   if (toFix > 0) return { tone: "danger", line: `${toFix} to fix` }
   return { tone: "running", line: `Nothing ${floorWords(scan.floor)} to fix` }
 }

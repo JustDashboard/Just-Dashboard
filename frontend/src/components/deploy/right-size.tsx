@@ -16,6 +16,7 @@ import { ReadingLine, ReadingLines, ReadingMark } from "@/components/reading-lin
 import { Row, RowList } from "@/components/row-list"
 import { Status, StatusDot } from "@/components/status-dot"
 import { InfoTip } from "@/components/form"
+import { Explain } from "@/components/explain"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import {
@@ -246,8 +247,8 @@ function SizingBody({ sizing, product }: { sizing: EnvironmentSizing; product?: 
  * It was a block of its own: a tile, an eyebrow, the words, a gauge the width
  * of half the page and the readings under it, beside the reading lines it
  * repeated the shape of without being one. The gauge sits where those lines
- * keep their last hour, and the readings in full are its name and the
- * detail's title.
+ * keep their last hour, and the readings in full are its name and the tip of
+ * the detail, which a tap opens where the gauge is not drawn.
  */
 function LimitLine({
   name,
@@ -292,7 +293,25 @@ function LimitLine({
           {name} {rule}
         </>
       }
-      hint={<span title={readings}>{use}</span>}
+      hint={
+        // The line keeps one height, so on a phone its detail is cut before
+        // the peak and the throttling, and the gauge named by the readings is
+        // not drawn: the usage is a term whose tip, on a tap as on a hover or
+        // focus, holds every reading and the suggestion.
+        <Explain
+          face="term"
+          label={`${name}: what it used`}
+          tip={
+            <>
+              <span className="block">{readings}</span>
+              <span className="block">Suggested {suggestion}</span>
+            </>
+          }
+          className="block max-w-full truncate text-left underline-offset-2 focus-ring-inset"
+        >
+          {use}
+        </Explain>
+      }
       trend={
         <span
           role="img"

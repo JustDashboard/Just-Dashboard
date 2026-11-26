@@ -6381,6 +6381,8 @@ export type VulnerabilityFinding = {
   class?: string
   /** A base the release was built on carries it too, so a newer base may fix it. */
   fromBase?: boolean
+  /** The pinned digests of the bases that carry it: only a newer image of one of them fixes it. */
+  baseDigests?: string[]
   /** Where the package is in the image: its package.json, or the binary it is compiled into. */
   path?: string
   /**

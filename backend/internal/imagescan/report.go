@@ -15,6 +15,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -80,6 +81,9 @@ type Finding struct {
 	// version is in one of the base images the release was built from, so a
 	// newer base may be what fixes it.
 	FromBase bool `json:"fromBase,omitempty"`
+	// BaseDigests are the digests of the bases that carry it, so a newer
+	// image under one base's tag is not read as a fix for another's.
+	BaseDigests []string `json:"baseDigests,omitempty"`
 	// Path is where the package is in the image: the package.json or
 	// metadata file Trivy read it from, or the binary it is compiled into.
 	// Empty for an OS package, which the distribution's database names.
@@ -304,27 +308,41 @@ func sortFindings(findings []Finding) {
 	})
 }
 
+// BaseFindings is what one base image's scan found, under the digest the
+// release was pinned on.
+type BaseFindings struct {
+	Digest   string
+	Findings []Finding
+}
+
 // MarkFromBase marks each finding of an image that one of its base images
 // carries too: the same vulnerability in the same package at the same
-// version. What the base carries a newer base may fix; what it does not came
-// with the application.
+// version, with the digest of each base that carries it. What the base
+// carries a newer image of that base may fix; what it does not came with the
+// application.
 //
 // A language package is matched at its path too: npm's own glob in the base
 // and the application's glob at the same version are two packages. A base
 // read before paths were kept matches on the package alone.
-func MarkFromBase(findings []Finding, bases ...[]Finding) []Finding {
-	placed, loose := map[string]bool{}, map[string]bool{}
+func MarkFromBase(findings []Finding, bases ...BaseFindings) []Finding {
+	placed, loose := map[string][]string{}, map[string][]string{}
 	for _, base := range bases {
-		for _, finding := range base {
-			placed[finding.placedKey()] = true
+		for _, finding := range base.Findings {
+			placed[finding.placedKey()] = append(placed[finding.placedKey()], base.Digest)
 			if finding.Path == "" {
-				loose[finding.key()] = true
+				loose[finding.key()] = append(loose[finding.key()], base.Digest)
 			}
 		}
 	}
 	out := make([]Finding, len(findings))
 	for i, finding := range findings {
-		finding.FromBase = placed[finding.placedKey()] || loose[finding.key()]
+		carriers := append(slices.Clone(placed[finding.placedKey()]), loose[finding.key()]...)
+		finding.FromBase, finding.BaseDigests = len(carriers) > 0, nil
+		for _, digest := range carriers {
+			if digest != "" && !slices.Contains(finding.BaseDigests, digest) {
+				finding.BaseDigests = append(finding.BaseDigests, digest)
+			}
+		}
 		out[i] = finding
 	}
 	return out
@@ -392,7 +410,9 @@ type Summary struct {
 const MaxListed = 200
 
 // Summarize counts findings and lists those at or above floor. An invalid
-// floor is HIGH, the default.
+// floor is HIGH, the default. A list longer than its bound keeps the
+// findings with an Action before the rest: what the reader can do something
+// about is never cut for a development tool's that nobody here can fix.
 func Summarize(findings []Finding, floor string) Summary {
 	if !ValidFloor(floor) {
 		floor = SeverityHigh
@@ -400,6 +420,7 @@ func Summarize(findings []Finding, floor string) Summary {
 	summary := Summary{Fixable: []Finding{}, Unfixed: []Finding{}}
 	sorted := append([]Finding(nil), findings...)
 	sortFindings(sorted)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Action != "" && sorted[j].Action == "" })
 	for _, finding := range sorted {
 		summary.Counts.Add(finding.Severity)
 		if finding.Fixable() {
@@ -418,6 +439,7 @@ func Summarize(findings []Finding, floor string) Summary {
 		}
 		*list = append(*list, finding)
 	}
+	sortFindings(summary.Fixable)
 	return summary
 }
 

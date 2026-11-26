@@ -322,3 +322,65 @@ func TestCertificateStepAsksAgainWhenThePrewarmWaitedOutCertbot(t *testing.T) {
 		t.Fatal("waiting for certbot cooled the names off")
 	}
 }
+
+// faultingIssuer panics on its first ask once released, as a fault in
+// certbot's handling would, and issues on every ask after.
+type faultingIssuer struct {
+	mu      sync.Mutex
+	calls   int
+	release chan struct{}
+}
+
+func (f *faultingIssuer) EnsureDeploymentCertificate(
+	context.Context,
+	[]string,
+	func(stream, text string),
+) (proxysvc.DeploymentCertificate, error) {
+	f.mu.Lock()
+	f.calls++
+	first := f.calls == 1
+	f.mu.Unlock()
+	if first {
+		<-f.release
+		panic("fixture fault in certbot's handling")
+	}
+	return issuedFixture, nil
+}
+
+func (f *faultingIssuer) count() int {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.calls
+}
+
+// A panic in the background attempt ends it, not the dashboard, and reads as
+// cut short: the step waiting for it stops at once and orders itself, and
+// the names are not cooled off.
+func TestAFaultedPrewarmFallsBackToTheStepsOwnOrder(t *testing.T) {
+	t.Parallel()
+	issuer := &faultingIssuer{release: make(chan struct{})}
+	executor := &NormalizedStepExecutor{certificates: issuer}
+	names := []string{"app.example.com"}
+	executor.prewarms.start(context.Background(), 9, names, issuer)
+	attempt := executor.prewarms.take(9, names)
+	logged := make(chan string, 16)
+	result := make(chan StepResult, 1)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	go func() {
+		result <- executor.certificateStepAfterPrewarm(ctx, attempt, names, func(_, text string) { logged <- text })
+	}()
+	if line := <-logged; !strings.Contains(line, "started while the build ran") {
+		t.Fatalf("the step did not wait for the background attempt: %q", line)
+	}
+	close(issuer.release)
+	step := <-result
+	evidence := decodeCertificateEvidence(t, step.Evidence)
+	if step.State != StepPassed || evidence.Outcome != "issued" || evidence.Prewarm == nil ||
+		evidence.Prewarm.Outcome != "interrupted" || issuer.count() != 2 {
+		t.Fatalf("step = %#v, evidence %s, asked %d: want the step's own order after the fault", step, step.Evidence, issuer.count())
+	}
+	if !executor.prewarms.start(context.Background(), 10, names, issuer) {
+		t.Fatal("a fault in the background attempt cooled the names off")
+	}
+}
