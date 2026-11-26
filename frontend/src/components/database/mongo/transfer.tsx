@@ -85,7 +85,7 @@ export function useMongoExport() {
       // nothing is saved.
       if (read.cut) throw new Error("The export broke off")
       const { received } = read
-      saveExport(exportBlob(read.parts, response), response, `${name}.${format}`)
+      saveExport(exportBlob(read.parts, response), response, `${name}.${format}`, controller.signal)
 
       notify.dismiss(toast)
       const truncated = response.headers.get("X-Export-Truncated")
