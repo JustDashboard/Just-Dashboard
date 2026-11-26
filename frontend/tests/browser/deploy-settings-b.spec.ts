@@ -2152,9 +2152,11 @@ test.describe("Danger zone", () => {
     })
     let purged = 0
     let purgeConfirm: string | undefined
-    await page.route("**/api/v1/deploy/7/permanent", (route) => {
+    let purgeUrl = ""
+    await page.route("**/api/v1/deploy/7/permanent**", (route) => {
       purged++
       purgeConfirm = route.request().headers()["x-confirm"]
+      purgeUrl = route.request().url()
       return route.fulfill({ status: 204 })
     })
     await page.goto("/deploy/7/settings/danger")
@@ -2183,10 +2185,13 @@ test.describe("Danger zone", () => {
     // Rare and unrecoverable, so the deployment's name is typed first.
     await expect(purgeDialog.getByRole("button", { name: "Delete permanently" })).toBeDisabled()
     await purgeDialog.getByRole("textbox").fill(project.name)
+    // Unticked, the routes stay and the request does not ask for them.
+    await purgeDialog.getByRole("checkbox", { name: "Remove its routes too" }).click()
     await purgeDialog.getByRole("button", { name: "Delete permanently" }).click()
     await expect(page).toHaveURL(/\/deploy\?view=archived$/)
     expect(purged).toBe(1)
     expect(purgeConfirm).toBe(encodeURIComponent(project.name))
+    expect(new URL(purgeUrl).searchParams.has("routes")).toBe(false)
   })
 })
 

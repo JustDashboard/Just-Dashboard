@@ -439,3 +439,50 @@ test("a run lights its project's Deployments, and the step back lights Projects"
   await page.getByRole("button", { name: "Back to Deployments" }).click()
   await expect(lit).toHaveText(["Projects"])
 })
+
+/** The shell with the proxy's status answered: which engine this server has. */
+async function mockShellWithProxy(page: Page, status: Record<string, unknown>) {
+  await mockShell(page)
+  await page.route("**/api/v1/proxy/status", (route) => json(route, status))
+}
+
+const NGINX = { nginx: true, caddy: false, nginxDir: "/etc/nginx", caddyFile: "", certbot: true }
+
+test("a server with no nginx has no Streams or Configuration in the rail, and both still open", async ({
+  page,
+}) => {
+  await mockShellWithProxy(page, {
+    ...NGINX,
+    nginx: false,
+    caddy: true,
+    certbot: false,
+    ingressContainer: "just-dashboard-ingress",
+    ingressState: "running",
+  })
+  await page.goto("/proxy")
+  for (const name of ["Overview", "Sites", "Certificates", "Ports", "Traffic", "Alerts"])
+    await expect(rail(page).getByRole("link", { name, exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Streams", exact: true })).toHaveCount(0)
+  await expect(rail(page).getByRole("link", { name: "Configuration", exact: true })).toHaveCount(0)
+
+  // The address still opens the page, and the rail says where you are while on it.
+  await page.route("**/api/v1/proxy/streams/", (route) =>
+    json(route, { included: false, module: { state: "unknown", usable: false }, streams: [] }),
+  )
+  await page.route("**/api/v1/proxy/streams/traffic", (route) => json(route, {}))
+  await page.goto("/proxy/streams")
+  await expect(page.getByRole("heading", { name: "Streams need nginx" })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Streams", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  await expect(rail(page).getByRole("link", { name: "Configuration", exact: true })).toHaveCount(0)
+})
+
+test("a server with nginx keeps every page of Proxy & TLS in the rail", async ({ page }) => {
+  await mockShellWithProxy(page, NGINX)
+  await page.goto("/proxy")
+  await expect(rail(page).getByRole("link", { name: "Sites", exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Streams", exact: true })).toBeVisible()
+  await expect(rail(page).getByRole("link", { name: "Configuration", exact: true })).toBeVisible()
+})

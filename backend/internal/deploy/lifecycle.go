@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/url"
 	"sort"
 	"strings"
 	"time"
@@ -169,7 +170,7 @@ func (s *PlanningStore) RemovalPlan(ctx context.Context, projectID int64) (*Remo
 		}
 		name := deploymentRouteName(environmentID)
 		add(RemovalTarget{Kind: "proxy_site", ResourceID: name, DisplayName: name,
-			Owner: "proxy", DeepLink: "/proxy/sites"})
+			Owner: "proxy", DeepLink: "/proxy/sites/" + url.PathEscape(name)})
 	}
 	if err := rows.Close(); err != nil {
 		return nil, err

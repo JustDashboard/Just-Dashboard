@@ -1,6 +1,7 @@
 package dockerx
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"slices"
@@ -147,4 +148,60 @@ func TestNetworkedBuilderCloseWithoutAClientRemovesAtOnce(t *testing.T) {
 	if waiting {
 		t.Fatal("a builder with no client was left waiting")
 	}
+}
+
+// A dashboard that stops removes the builders its client left waiting, once
+// each, and stops the timers that would have: those timers end with the
+// process. Another client's builders are its own business.
+func TestStoppingRemovesTheWaitingNetworkedBuilders(t *testing.T) {
+	t.Parallel()
+	stopping, other := &Client{}, &Client{}
+	removed := make(chan string, 4)
+	wait := func(client *Client, name string) *waitingBuilder {
+		waiting := &waitingBuilder{client: client, networks: []string{strings.TrimPrefix(name, "jd-build-")},
+			remove: func(context.Context) { removed <- name }}
+		waitingBuilders.Lock()
+		waiting.timer = time.AfterFunc(time.Hour, func() { removeWaitingBuilder(name, waiting) })
+		waitingBuilders.byName[name] = waiting
+		waitingBuilders.Unlock()
+		return waiting
+	}
+	first := wait(stopping, "jd-build-e900000003-db-stopfirst")
+	second := wait(stopping, "jd-build-e900000003-db-stopsecond")
+	kept := wait(other, "jd-build-e900000004-db-stopother")
+	t.Cleanup(func() {
+		takeWaitingBuilder("jd-build-e900000004-db-stopother")
+		waitingBuilders.Lock()
+		delete(waitingBuilders.drained, stopping)
+		waitingBuilders.Unlock()
+	})
+	stopping.RemoveWaitingNetworkedBuilders(t.Context())
+	close(removed)
+	got := []string{}
+	for name := range removed {
+		got = append(got, name)
+	}
+	if !slices.Equal(got, []string{"jd-build-e900000003-db-stopfirst", "jd-build-e900000003-db-stopsecond"}) {
+		t.Fatalf("removed %v", got)
+	}
+	for _, waiting := range []*waitingBuilder{first, second} {
+		if waiting.timer.Stop() {
+			t.Fatal("a removed builder's timer is still running")
+		}
+	}
+	if !kept.timer.Stop() {
+		t.Fatal("another client's builder stopped waiting")
+	}
+	waitingBuilders.Lock()
+	_, firstWaits := waitingBuilders.byName["jd-build-e900000003-db-stopfirst"]
+	_, keptWaits := waitingBuilders.byName["jd-build-e900000004-db-stopother"]
+	drained, otherDrained := waitingBuilders.drained[stopping], waitingBuilders.drained[other]
+	waitingBuilders.Unlock()
+	if firstWaits || !keptWaits || !drained || otherDrained {
+		t.Fatalf("first waits %v, other waits %v, drained %v, other drained %v", firstWaits, keptWaits, drained, otherDrained)
+	}
+	// Stopping again finds nothing left to remove.
+	stopping.RemoveWaitingNetworkedBuilders(t.Context())
+	var none *Client
+	none.RemoveWaitingNetworkedBuilders(t.Context())
 }

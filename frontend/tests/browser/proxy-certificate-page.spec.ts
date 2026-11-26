@@ -163,7 +163,11 @@ for (const width of [1280, 390]) {
     await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
     await expect(identity).toContainText("6 certificates")
     await expect(identity).toContainText("1 expiring")
+    // The expired import and Caddy's certificate are served by nothing, so
+    // both are unused. Only Caddy's is left out of refused: an import may be
+    // what a Caddy route's copy is refreshed from.
     await expect(identity).toContainText("3 refused")
+    if (width > 640) await expect(identity).toContainText("2 unused")
     await expect(identity.getByRole("button", { name: "Issue certificate" })).toBeVisible()
     expect(
       await page.evaluate(
@@ -240,7 +244,10 @@ test("a row opens the certificate's page, with the sheet's contents as views", a
   await mockProxy(page, { included: true })
   await mockCertificates(page)
   await page.goto("/proxy/certificates")
-  await rows(page).filter({ hasText: "wide.example.com" }).getByRole("link").click()
+  await rows(page)
+    .filter({ hasText: "wide.example.com" })
+    .getByRole("link", { name: "Open wide.example.com" })
+    .click()
   await expect(page).toHaveURL(/\/proxy\/certificates\/wide\.example\.com$/)
 
   const identity = page.locator("[data-slot='host-identity']")
@@ -327,7 +334,10 @@ test("a name two certificates share is told apart by its file", async ({ page })
   await mockProxy(page, { included: true })
   await mockCertificates(page, [...certs, copy])
   await page.goto("/proxy/certificates")
-  await rows(page).filter({ hasText: "site file" }).getByRole("link").click()
+  await rows(page)
+    .filter({ hasText: "site file" })
+    .getByRole("link", { name: /^Open / })
+    .click()
   await expect(page).toHaveURL(/path=%2Fetc%2Fnginx%2Fssl%2Fapp\.example\.com\.pem/)
   await expect(page.getByText("/etc/nginx/ssl/app.example.com.pem")).toBeVisible()
 })

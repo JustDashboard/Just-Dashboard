@@ -1,0 +1,8 @@
+[
+  {
+    "isWarning": false,
+    "propertyName": "ApiKey",
+    "errorMessage": "API Key is invalid",
+    "severity": "error"
+  }
+]

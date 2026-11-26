@@ -10,7 +10,29 @@ Traffic show observed inventories and records. Certificates keeps its views in t
 (`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
 domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
 two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
-in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there.
+A certificate's row says who serves it in words (`UsedBy`, from the API's `usedByLabels` through
+`certificateUsers`): a deployment's route as its project and environment, linking to the project, a
+route nothing deploys as "leftover route", linking to its page under Sites, and "Unused" as a status
+for one nothing serves. That column stays from `md` up; the date gives way below `xl`. Beside the
+source chips are Unused and Expired, drawn where a certificate is in that state. The header leaves
+only a certificate Caddy holds for a name nothing routes out of refused and expiring
+(`countCertificates` over `certWatched`, `lib/certificates.ts`; the Overview's figure too): Caddy lets
+it lapse, and it is "N unused", which narrows the list to them. An unused certbot lineage or import
+still counts, since certbot renews every lineage and `usedBy` does not see a Caddy route's copy of
+one. A certificate Caddy
+holds has Delete behind its menu once no route serves it (`DELETE /certificates/caddy`), and the verb
+held with "Served by <project>" as its reason while one does. Under the list, "Delete unused"
+(`certificate-cleanup.tsx`) is a checklist of every unused certbot, imported and Caddy certificate
+with its source, only Caddy's ticked; "N leftover certificate copies · Remove"
+(`caddy-evidence.tsx`) clears the copies deployments left.
+Where the Docker Caddy ingress runs and certbot is not installed (`caddyOnly` in the work context,
+from `/proxy/status`'s `ingressContainer` and certbot's `certbot_unavailable`), the header says
+"renewed by Caddy" rather than "no certbot", the ACME accounts view is not drawn and Signing requests
+only while one waits, Renewal puts Install certbot second, for an nginx site or a wildcard, and an
+empty list's next step is "Add a domain to a project" (`/deploy`). Wherever the ingress runs,
+certbot or not, Renewal opens on the certificates Caddy renews (`CaddyRenewals`), so its place does
+not wait on certbot's read. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are the alerts kit,
 `components/alerts/kit.tsx`, `kinds.ts` and `alert-parts.tsx`, shared with `/metrics/alerts`); the overview's line says what
@@ -18,7 +40,25 @@ fires and leads there, and its menu has Alerts. Ports (`/proxy/ports`) opens on 
 networks reach which listening programs and the list of sockets; each listening port has its own page
 (`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
 reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
-it. Site/stream configuration, certificate issuance/renewal,
+it. A port's "Routed by" names the site as a link to its page, and the stream that listens on it
+likewise (`ProxyWords` in `ports-proxy.tsx`); *Publish through proxy…* and *Forward as stream…* are
+nginx's forms, so without nginx a loopback app is offered *Add a domain to a project* (`/deploy`) and no
+stream, and Traffic's empty hour offers the same in place of *New site*.
+
+On a server whose sites the Docker Caddy ingress serves (`ingressContainer` set, no nginx), the pages that
+read nginx say so in one sentence and offer no install, since Caddy holds ports 80 and 443: Streams reads
+"Streams need nginx" with a link to Sites, and Configuration, which asks `ingressContainer` before `caddy`
+(the backend sets `caddy` for a running ingress, which has no Caddyfile on the server), reads "Deployments
+write the Caddy ingress's routes" with Sites and Deployments. The rail leaves both pages out there
+([`shell.md`](../shell.md)). Alerts draws a rule kind that judges nothing on the server as "not on this
+server" (`absent` on `GET /proxy/alerts`): its area in the picture is not offered, the add cards and the
+form's choice are disabled with those words, its rule's row says it in place of *Watching*, and it is not
+counted in "N rules on" or in the all-clear (`presentKinds`, `judging` in `alerts/kinds.ts`).
+
+A finding's link on a deploy check and in the new-project review is named for where it goes
+(`findingLinkLabel` in `lib/finding-destinations.ts`: *Open site*, *Open sites*, *Open certificate*,
+*Open certificates*, *Open port*, *Open stream*, *Open domains*), and reads "Open owning page" only for an
+address that table does not name. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints
@@ -48,9 +88,10 @@ hostname → Cloudflare's edge → connector → this server, and the hostnames 
 connected, the dashed picture, a choice of token or API and one form (administrators only).
 
 Sites (`/proxy/sites`, 0.8.7) lists every site as a one-line row (`SiteRow` in `vhosts-panel.tsx`):
-what it fronts with its engine in the tile's corner, its name over where its requests go, then its
-hour in words (`HourWords`: requests an hour and the 5xx share), ports, TLS, certificate and state
-in aligned columns, every verb in its menu. New site is the line's command, Import and Export all
+what it fronts with its engine in the tile's corner, its title over who writes it and where its
+requests go, then its hour in words (`HourWords`: requests an hour and the 5xx share; read wherever
+nginx or the ingress container is, since `/proxy/traffic` covers both), ports, TLS, certificate and
+state in aligned columns, every verb in its menu. New site is the line's command, Import and Export all
 are behind its menu, and under the list a line saying what an unknown host gets
 (`UnknownHostsFact`, leading to Configuration → Settings, where the catch-all is a section saved
 by the page's bar), then Password files (`auth-files-panel.tsx`), Access lists (`access-lists-panel.tsx`), the URL resolver
@@ -64,10 +105,45 @@ parts (`&view=` general, https, access, hardening, headers, paths, file), with a
 parts that hold unsaved changes (`site-sections.ts`, unit-tested) and one floating bar holding the
 form's saves (`site-settings.tsx`); leaving it with unsaved changes asks first. A new site, or a copy
 of one, is still made in a sheet over the list (`SiteForm`, the same fields). `?site=<name>` lands on
-the site's Settings for an administrator and a file the form owns, and opens the config viewer
-otherwise. On Settings the identity line does not offer Edit, as its command or in its menu: the
+the site's Settings for an administrator and a file the form owns, opens the config viewer for
+another file, and lands on the site's page where there is no file. On Settings the identity line does not offer Edit, as its command or in its menu: the
 form is what is on screen. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
 `proxy-sites-list.spec.ts` and `proxy-sites-tools.spec.ts`.
+
+A site is called by its domain, not its file (0.9.1). `siteTitle` (`site-details.ts`) is the first
+real server name (not `_`, not empty) and falls back to the file name; the Sites row, the Overview's
+routes, the rail, the site page's heading and every confirmation and toast say it. The file name
+stays in the address (`/proxy/sites/<name>`), on the row's mono line where it differs from the
+title, as a mono fact on the page's identity line, and in search. Under the title, `siteKind` (the
+Overview's `routeKind` is the same function) says who writes the site: `<project> · <environment>`
+for a live deployment's route, `Leftover · its deployment was deleted` or `Leftover · <project> is
+archived`, `Caddyfile`, `Ingress Caddyfile` for a `docker-caddy:` row, `Caddy route`, or `nginx
+site`. It never names the engine, which is the tile's corner mark. Search (`matchesSearch`) also
+finds a site by its owner's project and environment, and `/proxy/sites?q=<text>` fills the search
+(the chip is let go and `q` is taken off the address once read).
+
+A **leftover** is a route with a deployment's name (`just-dashboard-env-<id>.conf`) whose owner is
+gone or archived (`isLeftover`). Its state word is a warning `leftover` in place of `serving`
+(`ServingStatus`, the rail too), it sorts straight after broken links (`byUrgency`), it has a
+Leftover chip, and a notice over the list counts them with one button, Remove all
+(`leftoverRetirement`, `retireLeftovers` in `site-verbs.tsx`): the confirmation names the domains,
+each route is retired in turn through `DELETE /proxy/vhosts/{name}/deployment-route`, and one toast
+says how many went and which did not, with the server's reason. A reader sees the notice without
+the button.
+
+A site that cannot be removed from here says why in one line (`siteOrigin`, drawn by
+`SiteOriginLine` on the site's Overview and as a held Remove item with the reason in the row's
+menu): a live deployment's route is "Written by <project> on every deploy" with a link to
+`/deploy/<projectId>/settings/domains`, a Caddyfile site says to edit the Caddyfile, a
+`docker-caddy:` row that it is defined in the ingress container's own Caddyfile. A leftover's line
+("Left by a deleted deployment") comes before the picture with a plain Remove button: Remove route
+is a destructive verb, so it stays behind `⋯` on the identity line and the button is in the body.
+
+The list's switch, rename, delete and route removal live in `useSiteChanges` (`site-changes.tsx`),
+which the list and the site's page both call; the list passes its per-row busy word and reload
+tracking, and the page goes back to the list after a delete or a removal and to the new address
+after a rename. The page's menu offers Enable or Disable, Rename and Delete for the same sites the
+list does. `?site=<name>` for a route with no file on the host is replaced by the route's page.
 
 Every page of the section opens on an identity line laid out as a project's header (0.8.7): the
 name with its state beside it, the facts under them, one command at the end and the rest behind

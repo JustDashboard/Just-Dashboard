@@ -536,7 +536,11 @@ function closing(text: string, from: number, open: string): number {
   return -1
 }
 
-/** Every picture and video in a body, in reading order: what a lightbox steps through. */
+/**
+ * Every picture and video in a body, in reading order: what a lightbox may step
+ * through. An upload's address does not say which it is, so the lightbox keeps
+ * those that load as pictures (`MediaLightbox`).
+ */
 export function markdownMedia(blocks: Block[]): { src: string; alt: string }[] {
   const out: { src: string; alt: string }[] = []
   const walkInline = (runs: Inline[]) => {

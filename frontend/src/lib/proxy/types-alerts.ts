@@ -80,4 +80,10 @@ export type ProxyAlerts = {
   /** Absent before the first pass since the dashboard started. */
   lastPass?: string
   intervalSeconds: number
+  /**
+   * The kinds that judge nothing on this server: the engine's on one with no
+   * systemd unit (the Docker Caddy ingress), nginx's without nginx, certbot's
+   * without certbot, expiry with no certificate file to read.
+   */
+  absent?: ProxyAlertKind[]
 }

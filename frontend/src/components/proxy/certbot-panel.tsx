@@ -1993,7 +1993,14 @@ function hostOf(url: string) {
  * list's dashed box (PRX-04). An admin can install it with the host's package
  * manager from here; a host without one says why in the refusal.
  */
-export function CertbotMissing({ onInstall }: { onInstall?: (job: Job) => void }) {
+export function CertbotMissing({
+  onInstall,
+  beside,
+}: {
+  onInstall?: (job: Job) => void
+  /** Caddy renews this server's certificates, so certbot is an extra and says what for. */
+  beside?: boolean
+}) {
   const [busy, setBusy] = useState(false)
   const install = async () => {
     if (!onInstall) return
@@ -2021,8 +2028,9 @@ export function CertbotMissing({ onInstall }: { onInstall?: (job: Job) => void }
         )
       }
     >
-      Install it to issue and renew Let&apos;s Encrypt certificates from here. A certificate placed
-      on disk by any other means still shows up in the list below.
+      {beside
+        ? "Install it for an nginx site or a wildcard certificate. Caddy renews what its routes serve without it."
+        : "Install it to issue and renew Let's Encrypt certificates from here. A certificate placed on disk by any other means still shows up in the list below."}
     </MissingThing>
   )
 }

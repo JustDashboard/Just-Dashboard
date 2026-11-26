@@ -289,6 +289,12 @@ func validateNodeRecipeContent(content []byte, files nodeRootFiles, config Build
 	if framework != nil {
 		result = nodeRecipeFramework{name: framework.Name, label: framework.Label, resolution: framework.resolve(manifest, files, runner)}
 	}
+	// The type check beside the build starts from the source, so it is the
+	// check next build would make only when nothing runs before next build
+	// that could write a file the source imports.
+	if result.resolution.TypeCheckBeside && !nextBuildIsPlain(manifest.Scripts, config.BuildCommand) {
+		result.resolution.TypeCheckBeside = false
+	}
 	result.serving = planNodeServing(manifest, result, config)
 	if result.name != "sveltekit" {
 		return result, nil

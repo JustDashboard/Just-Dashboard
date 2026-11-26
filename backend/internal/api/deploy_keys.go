@@ -118,6 +118,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/openapi.json":                       keyOpen, // the description of this API, static
 	"GET /deploy/openapi.yaml":                       keyOpen,
 	"GET /deploy/blueprints/":                        keyOpen,
+	"GET /deploy/stacks":                             keyOpen,
 	"GET /deploy/blueprints/{id}":                    keyOpen,
 	"GET /deploy/blueprints/{id}/versions":           keyOpen,
 	"GET /deploy/templates":                          keyOpen,
@@ -157,6 +158,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/lifecycle":                                        keyOpen,
 	"GET /deploy/{id}/lifecycle/stream":                                 keyOpen,
 	"GET /deploy/{id}/availability":                                     keyOpen,
+	"GET /deploy/{id}/stack":                                            keyOpen,
 	"GET /deploy/{id}/alerts":                                           keyOpen,
 	"GET /deploy/{id}/commits":                                          keyOpen,
 	"GET /deploy/{id}/operations":                                       keyOpen,
@@ -194,6 +196,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// Running: what an ordinary key may already do.
 	"POST /deploy/{id}/run":                         keyOpen,
 	"POST /deploy/{id}/environments/{env}/runs":     keyOpen,
+	"POST /deploy/{id}/stack/configure":             keyOpen,
 	"POST /deploy/{id}/runs/{run}/cancel":           keyOpen,
 	"POST /deploy/{id}/runs/{run}/retry":            keyOpen,
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,
@@ -271,6 +274,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 
 	// Session-only, whatever the key.
 	"GET /deploy/{id}/environments/{env}/variables/{name}/reveal": keySession(whyReveal),
+	"GET /deploy/{id}/stack/credentials/{name}/reveal":            keySession(whyReveal),
 	"GET /deploy/shared-variables/{name}/reveal":                  keySession(whyReveal),
 	"GET /deploy/{id}/shared-variables/{name}/reveal":             keySession(whyReveal),
 	"GET /deploy/{id}/env/reveal":                                 keySession(whyReveal),

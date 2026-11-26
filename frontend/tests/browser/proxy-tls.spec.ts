@@ -1305,7 +1305,11 @@ test("plain HTTP on the TLS port is named, with the listen directive to fix", as
   await expect(page.getByText("listen 443 ssl;", { exact: false })).toBeVisible()
   await expect(page.getByText("answered “HTTP/”")).toBeVisible()
   expect((await tiles(page)).Handshake).toBe("plain HTTP")
-  await expect(page.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/proxy/sites")
+  // The link names the domain, so Sites opens on the site that answers it.
+  await expect(page.getByRole("link", { name: "Sites" })).toHaveAttribute(
+    "href",
+    "/proxy/sites?q=app.example.com",
+  )
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390)
 })
 

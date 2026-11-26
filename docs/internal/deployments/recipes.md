@@ -1385,32 +1385,44 @@ inside one. On a Next.js 16 application that was 30 to 50 s of a 60 to 106 s bui
 runs in a stage of its own, `typecheck`, beside the `build` stage, both from the `source` stage: BuildKit
 runs stages that do not depend on each other at once. It runs `next typegen`, which writes the route
 types and settles `tsconfig.json` as `next build` would, then `/opt/just-dashboard/typecheck.cjs`, which
-asks the application's TypeScript which of its two faces it has, as Next.js does
-(`getTypeScriptPackageInfo`): the compiler API is `lib/typescript.js`, and the command is the package's
-`tsc` bin. **With an API** (TypeScript 5 and 6) it does what `runTypeCheck` does on it — the files
-`tsconfig.json` names less `.next/dev/types`, nothing emitted, errors less a configuration with no inputs
-and anything in a `__tests__` or `__mocks__` folder or a `.test.`/`.spec.` file, which that check leaves
-out too. **With none** (TypeScript 7, the native compiler, whose package exports a version and nothing
-else) it does what `runTypeCheckCli` does, which is the only check `next build` has for such a package:
+makes the check `next build` would. Next.js 16.4 chooses between TypeScript's two faces by its loaded
+configuration's `experimental.useTypeScriptCli` (`build/type-check.js`), which is true unless the
+project's `next.config` sets it false, so the script loads the configuration the way `next build` and
+`next typegen` do (`next/dist/server/config` at `phase-production-build`; a Next.js without that loader is
+taken at 16.4's default) and reads the package as Next.js does (`getTypeScriptPackageInfo`): the compiler
+API is `lib/typescript.js`, and the command is the package's `tsc` bin. **On the command** — the default,
+whatever TypeScript the project has, and the only check a package with no API has (TypeScript 7, the
+native compiler, whose package exports a version and nothing else) — it does what `runTypeCheckCli` does:
 the command `next build` finds (the `tsc` bin, or the `tscN` an aliased package renames it to, and
 `lib/tsc.js` in place of an extensionless bin of an ES module package), run under the stage's Node.js as
 `tsc --showConfig` to learn whether the project is incremental and then as `tsc --project tsconfig.json
 --noEmit --declarationMap false --emitDeclarationOnly false`, with `--tsBuildInfoFile` when it is. That
 check leaves nothing out, tests and `.next/dev/types` included, and neither does `next build` on the
 command; `--pretty false` is the one argument added, so its errors read `file(line,col): error TSnnnn`
-whatever the compiler makes of a build's output. The script never calls an API the package does not
-have: before it asked, every TypeScript 7 deployment failed with `ts.getParsedCommandLineOfConfigFile is
-not a function`. Next.js 16.4 chooses between the two by `experimental.useTypeScriptCli`, which defaults
-to the command; the stage chooses by what the package has, so a TypeScript 5 or 6 application at that
-default is checked on the API, without its test files, where `next build` would check them. Either check
-runs incrementally with its state in the environment's `next-typecheck` cache mount. The stage has the build's
+whatever the compiler makes of a build's output. **On the API**, for a project that sets
+`useTypeScriptCli: false` and whose package has one (TypeScript 5 and 6), it does what `runTypeCheck`
+does on it — the files `tsconfig.json` names less `.next/dev/types`, nothing emitted, errors less a
+configuration with no inputs and anything in a `__tests__` or `__mocks__` folder or a `.test.`/`.spec.`
+file, which that check leaves out too. An opt-out whose package has no API stops with the sentence
+`next build` stops with ("does not provide the compiler API required by Next.js"), and the script never
+calls an API the package does not have: before it asked, every TypeScript 7 deployment failed with
+`ts.getParsedCommandLineOfConfigFile is not a function`. Until it read the setting the stage chose by what
+the package had, so a TypeScript 5 or 6 application at the default was checked on the API, without its
+test files, and could pass a type error in one that `next build` rejects. Either check runs
+incrementally with its state in the environment's `next-typecheck` cache mount. The stage has the build's
 own values, guards and defaults, since `next typegen` loads `next.config` as `next build` does, but not
 the adapter. The build stage writes a one-line build adapter to `/opt/just-dashboard/next-adapter.mjs`,
 and the build command's RUN names it in `NEXT_ADAPTER_PATH`, which Next.js 16.4 reads as `adapterPath`;
 its `modifyConfig` sets `typescript.ignoreBuildErrors` and nothing else. The server image copies the
 empty file `/tmp/jd-typecheck-passed` from the `typecheck` stage, so the image waits for the check, and a
 type error still fails the build as `error TSnnnn` (`build_type_error`). It applies only where it is the
-check `next build` would make: a package that declares `typescript` and has a `tsconfig.json`, `next`
+check `next build` would make: a build command that is `next build` and nothing before it
+(`nextBuildIsPlain`) — `next build` itself, with options and values for its environment, through its
+bin or a runner's exec, or a package script that is, followed a few scripts deep, with no `pre` script
+of its own, which npm, Yarn 1 and Bun run first — since the stage starts from the source and never runs
+what comes before `next build` (`generate-types && next build`, a `prebuild` hook, a task runner), so a
+page importing a file that writes would fail the check with TS2307 where the build passes; a package that
+declares `typescript` and has a `tsconfig.json`, `next`
 declared at 16.4 or later, a `next.config` that names none of `ignoreBuildErrors`, `tsconfigPath` or
 `adapterPath`, no build value named `NEXT_ADAPTER_PATH`, a server rather than a static export, and a
 server with four cores and 6 GiB (`hostTypeCheckBeside`), since the check and the compile then peak

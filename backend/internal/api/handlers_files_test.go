@@ -297,7 +297,7 @@ func TestFolderColoursFollowTheFolder(t *testing.T) {
 	// Renaming the parent carries the label on the folder inside it.
 	moved := filepath.Join(root, "config")
 	if w := c.do(http.MethodPost, "/api/v1/files/move",
-		`{"from":"`+etc+`","to":"`+moved+`"}`, nil); w.Code != http.StatusNoContent {
+		`{"from":"`+etc+`","to":"`+moved+`"}`, nil); w.Code != http.StatusOK {
 		t.Fatalf("move: %d %s", w.Code, w.Body.String())
 	}
 	now := colours()

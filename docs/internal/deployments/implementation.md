@@ -142,7 +142,14 @@ only renderer/executor/validation authority for their feature.
   offered for resumption behind a counted button beside the question; a source strip offers a Git
   repository (connected GitHub list or a pasted URL), Docker (what this server already has, or a
   registry reference), a reviewed template (shelved client-side by topic, with the server's `category`
-  as the fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has
+  as the fallback shelf for a blueprint the frontend does not name), a stack and a database. The Stacks
+  tab (`new-project/source-stack.tsx`, `?source=stack`) reads `GET /deploy/stacks` and offers each
+  stack's presets as one choice, with what a preset runs and how each service is reached, what it asks
+  of the server and what it cannot do said before anything is pressed. A preset is a reviewed Compose
+  template marked with its `stack`, so its options are that template's inputs, asked with the Template
+  tab's own fields and rules (`blueprint-field.tsx`, `template-inputs.ts`), and Continue makes the same
+  draft the Template tab makes for a multi-service template (`kind: "compose"`, `mode: "blueprint"`).
+  The Template tab leaves out every blueprint that names a stack (`splitCatalogue`). A Compose stack has
   no tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
   Project step's *Deploy as a Compose stack*), from its files on this server through the Docker tab, or
   resumed as an unfinished setup. The Docker tab (`new-project/source-image.tsx` over
@@ -375,7 +382,9 @@ only renderer/executor/validation authority for their feature.
   the names, method, DNS provider and lineage, never a credential); a reuse or a refusal before
   ordering changes nothing and is not. Preflight asks the same question for an uncovered wildcard on
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
-  blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
+  blocked with the refusal and a deep link to `/proxy/certificates?tab=dns`, where a provider's
+  credentials are saved (the DNS-challenge `certificate_automatic` and `dns_record_missing` link there
+  too, and `domain_link_missing` to `/proxy/sites?q=<hostname>`); a covered one is
   `certificate_available`.
   **The work starts while the build runs** (`certificate_prewarm.go`). The domains are in the stored
   plan before `build_artifact`, so that step starts the same `EnsureDeploymentCertificate` in the
@@ -1663,7 +1672,21 @@ only renderer/executor/validation authority for their feature.
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
   availability. A deploy re-runs those host observations from its frozen configuration in `analyze_plan`
   — alongside the source checks above — before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
-  treated as reusable ownership. HTTPS activation resolves an already-issued certificate/key pair through
+  treated as reusable ownership. Preflight reads which sites already answer each managed domain
+  (`DomainObservation.claims`, `deploy/leftover_routes.go`) and asks the API layer which deployment
+  writes each route (`RouteOwners`, the same `markDeploymentRoutes` the Sites list uses). A domain held
+  only by **leftover** routes — `just-dashboard-env-<id>.conf` whose environment is gone or archived —
+  passes as `domain_takeover`, whose words name every name those routes answer (`DomainClaim.names`),
+  since each whole route goes and a name this deployment does not claim stops answering with it; and
+  activation removes those routes (`SnapshotDeploymentRoute`, then
+  `RemoveDeploymentRoute`) just before `ApplyDeploymentRoute` writes its own, keeping the certificate
+  since the new route serves the same name, and puts them back if the release does not go live — a
+  refused cutover, a failed public-route check or route verification, the tailnet step or the commit —
+  once the failure's recovery has taken its own route out (not where that failed, which would leave two
+  routes claiming one name). Anything else is
+  `domain_conflict`, naming the claimer: a live deployment's route links its Domains settings, any other
+  site its own page (`/proxy/sites/<name>`). When the owners cannot be read nothing counts as a
+  leftover, so a live route is never taken over. HTTPS activation resolves an already-issued certificate/key pair through
   Proxy and fails closed if it no longer exists; deployment activation never invents certificate paths or
   performs issuance itself.
 - A configured backup dependency executes as a step before candidate start. A linked database whose
@@ -1989,7 +2012,7 @@ only renderer/executor/validation authority for their feature.
   its operationId, and made through the router as the MCP key with the deploy key gate and every
   handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
-  destructive actions. 101 tools generated, 114 tools in all; previews' approvals, reveals, saved
+  destructive actions. 104 tools generated, 117 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
   [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
@@ -2155,8 +2178,10 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 162 reviewed definitions, 157 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 56 are the multi-service templates of the next item). The
+  catalogue ships 164 reviewed definitions, 159 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 58 are the multi-service templates of the next item, two of
+  them the media stack's presets, which the Stacks tab offers instead of the template catalogue —
+  [smart stacks](smart-stacks.md)). The
   three counts the competitive report quotes — built in, deployable, Compose — are constants in
   `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
   definitions disagree, so they are bumped deliberately in the change that adds a template. Every
@@ -2232,6 +2257,9 @@ only renderer/executor/validation authority for their feature.
   states before the press what the stack does by itself: only the public service is reachable, the
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
+  A template marked `stack` is a smart stack's preset: it may publish private web interfaces on
+  loopback (`exposure: loopback`), a data volume another of its services writes may be mounted
+  read-only, and once its release is live the dashboard configures it ([smart stacks](smart-stacks.md)).
   A template is not a Git source, so it is never offered a pull-request preview, though a Compose
   stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
@@ -2831,14 +2859,27 @@ own.
 
 **The project's pages are on the sidebar, not in a strip above them.** `ProjectShell` publishes them
 through `useNavScope` (`components/shell/nav-scope.tsx`) and the rail draws a third level inside Deployments:
-Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, then a
+Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, Stack
+for a project the server says is a stack, then a
 Settings group of the nine settings pages, each marked while it holds a saved change that is not live
 yet (`PENDING_KIND_PAGE` maps a pending change's kind to its page). The panel's head is the project's
 favicon or product and its name as written, and a run page keeps the project's panel with Deployments
 marked current, because that is where a run is opened from. The strip of eight tabs and
 the settings rail beside them are both gone; the lists themselves live in `components/shell/nav.ts` as
 `PROJECT_NAV` and `PROJECT_SETTINGS_NAV`, which is also what the rail draws from the route alone until
-the project's read lands. Stop and Restart need the destructive capability, as the Docker container
+the project's read lands. The Stack row is earned by an answer from `GET /deploy/{id}/stack`, which is
+asked only for a project whose template names a stack (`components/deploy/stack/use-stack.ts`), so an
+ordinary project makes no request that is refused; the run page asks the same way, since a stack's first
+run is watched from there and the row is the way on to the page. That page
+(`components/deploy/stack/stack-page.tsx`, words and reads in `stack-model.ts`) leads with the server's
+sentence and state and says installed, healthy, connected, able to fetch and able to play each on its
+own, then what only the person can do (blocking first), each failed step's whole error, the services
+as cards of one height (a public one links to its address; a private one gives its loopback address
+with the SSH tunnel behind the mark beside it, and no button that would open nothing; a card opens its
+container in Docker), the setup by stage with every skipped step folded into one line by reason, and
+the accounts that exist, each revealed through the audited route where its mask was. It polls every
+two seconds while the state is `waiting` or `configuring` and every fifteen otherwise; Retry or Repair
+is one button, and a `stack_busy` or `stack_waiting` refusal is answered in words on the page. Stop and Restart need the destructive capability, as the Docker container
 verbs do, and each asks first, since either is one press from a fleet card's menu; the menu hides
 them otherwise. Legacy `?tab=` links
 redirect to these routes. Operation failures are titled by the operation and re-read the project at

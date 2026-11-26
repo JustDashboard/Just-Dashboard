@@ -258,6 +258,7 @@ func (s *Server) handleDeploymentDraftCommit(w http.ResponseWriter, r *http.Requ
 		return mapDeploymentPlanningError(err)
 	}
 	scheduled := s.applyBlueprintSchedules(r, draft, result)
+	s.registerStack(r, draft, result)
 	detail := map[string]any{
 		"draftId": chi.URLParam(r, "draft"), "environmentId": result.EnvironmentID,
 		"planRevision": result.PlanRevision, "created": result.Created,

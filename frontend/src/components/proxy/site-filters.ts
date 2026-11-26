@@ -5,7 +5,8 @@ import type {
   SitesTraffic,
   VHost,
 } from "@/lib/types"
-import { byUrgency, isBroken, isDisabled, isPlain } from "./site-order"
+import { isLeftover } from "./site-details"
+import { byTitle, byUrgency, isBroken, isDisabled, isPlain } from "./site-order"
 import { isDown, upstreamsOf } from "./upstream-health"
 
 /**
@@ -19,6 +20,7 @@ import { isDown, upstreamsOf } from "./upstream-health"
 export type SiteChip =
   | "all"
   | "broken"
+  | "leftover"
   | "notlive"
   | "down"
   | "expiring"
@@ -34,6 +36,7 @@ export type SiteChip =
 export const CHIP_LABEL: Record<SiteChip, string> = {
   all: "All",
   broken: "Broken",
+  leftover: "Leftover",
   notlive: "Not live",
   down: "Upstream down",
   expiring: "Cert expiring",
@@ -126,6 +129,8 @@ export function matchesChip(v: VHost, chip: SiteChip, r: SiteReadings): boolean 
       return true
     case "broken":
       return isBroken(v)
+    case "leftover":
+      return isLeftover(v)
     case "notlive":
       return r.notLive(v)
     case "down":
@@ -163,7 +168,7 @@ export function sortSites(sites: VHost[], sort: SiteSort, traffic?: SitesTraffic
     case "urgency":
       return out.sort(byUrgency)
     case "name":
-      return out.sort((a, b) => a.name.localeCompare(b.name) || byUrgency(a, b))
+      return out.sort(byTitle)
     case "modified":
       return out.sort(
         (a, b) => (b.modified ?? "").localeCompare(a.modified ?? "") || byUrgency(a, b),

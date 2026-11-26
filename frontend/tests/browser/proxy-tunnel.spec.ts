@@ -26,7 +26,7 @@ const disconnected: TunnelStatus = {
   api: {
     available: false,
     reason:
-      "no Cloudflare credentials are saved: save an API token for the Cloudflare DNS provider under Certificates, with Zone › DNS › Edit and Account › Cloudflare Tunnel › Edit",
+      "no Cloudflare credentials are saved: save an API token for the Cloudflare DNS provider under Certificates, on its DNS challenge view, with Zone › DNS › Edit and Account › Cloudflare Tunnel › Edit",
   },
   origin: {
     service: "http://just-dashboard-ingress:80",
@@ -98,9 +98,10 @@ test("a pasted install command connects the tunnel, and the page reads cloudflar
   await page.getByRole("radio", { name: "Create with the API" }).click()
   await expect(page.getByRole("button", { name: "Create tunnel" })).toHaveCount(0)
   await expect(page.getByText(/No Cloudflare credentials are saved/).first()).toBeVisible()
+  // On the view the token is saved on, not the list of certificates.
   await expect(page.getByRole("link", { name: "Open Certificates" })).toHaveAttribute(
     "href",
-    "/proxy/certificates",
+    "/proxy/certificates?tab=dns",
   )
   await page.getByRole("radio", { name: "Paste a token" }).click()
 

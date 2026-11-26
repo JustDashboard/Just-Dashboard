@@ -1,0 +1,692 @@
+{
+  "id": "media-complete",
+  "version": "1.0.0",
+  "name": "Media server (Complete)",
+  "stack": "media",
+  "category": "http",
+  "profile": "compose",
+  "description": "Jellyfin, Seerr, Radarr, Sonarr, Prowlarr, qBittorrent, Bazarr and Recyclarr, set up and connected to each other by the dashboard. It fetches only from sources you add; none is included.",
+  "iconId": "globe",
+  "docsUrl": "https://jellyfin.org/docs/",
+  "access": {
+    "kind": "setup",
+    "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and keeps the accounts it creates. Reveal them on the stack's page."
+  },
+  "provenance": {
+    "maintainer": "Just Dashboard",
+    "license": "GPL-2.0",
+    "upstreamUrl": "https://github.com/jellyfin/jellyfin",
+    "reviewedAt": "2026-11-26",
+    "minimumDashboard": "0.9.1"
+  },
+  "inputs": [
+    {
+      "name": "domain",
+      "kind": "domain",
+      "label": "Jellyfin's domain",
+      "required": false,
+      "description": "Optional; the address you and your apps open Jellyfin at. Seerr and the managers stay on this server until you publish them."
+    },
+    {
+      "name": "quality",
+      "kind": "choice",
+      "label": "Quality",
+      "variable": "MEDIA_QUALITY",
+      "default": "1080p",
+      "required": true,
+      "description": "What Radarr and Sonarr look for. Higher needs more disk and a faster connection; 4K is not transcoded on most servers.",
+      "choices": [
+        {
+          "value": "720p",
+          "label": "720p",
+          "description": "Smallest files"
+        },
+        {
+          "value": "1080p",
+          "label": "1080p",
+          "description": "Full HD, the usual choice"
+        },
+        {
+          "value": "2160p",
+          "label": "4K",
+          "description": "Large files; play it on a screen that decodes 4K itself"
+        }
+      ]
+    },
+    {
+      "name": "subtitle-languages",
+      "kind": "text",
+      "label": "Subtitle languages",
+      "variable": "MEDIA_SUBTITLE_LANGUAGES",
+      "default": "en",
+      "required": false,
+      "pattern": "^$|^[a-z]{2}(,[a-z]{2}){0,9}$",
+      "description": "Two-letter codes, separated by commas (en,fr). Empty leaves Bazarr without languages, so it fetches nothing."
+    },
+    {
+      "name": "request-approval",
+      "kind": "choice",
+      "label": "Requests",
+      "variable": "MEDIA_REQUEST_APPROVAL",
+      "default": "admin",
+      "required": true,
+      "description": "Who decides what is fetched. People you let in to Seerr can always ask.",
+      "choices": [
+        {
+          "value": "admin",
+          "label": "You approve each request",
+          "description": "Nothing is fetched until an administrator approves it"
+        },
+        {
+          "value": "auto",
+          "label": "Approve automatically",
+          "description": "A request from anyone you let in is fetched at once"
+        }
+      ]
+    }
+  ],
+  "secrets": [
+    {
+      "name": "radarr-api-key",
+      "variable": "RADARR_API_KEY",
+      "label": "Radarr API key",
+      "length": 32,
+      "alphabet": "hex",
+      "description": "Generated here and handed to Radarr, Recyclarr and the stack's own setup; Prowlarr, Bazarr and Seerr are given it by the stack."
+    },
+    {
+      "name": "sonarr-api-key",
+      "variable": "SONARR_API_KEY",
+      "label": "Sonarr API key",
+      "length": 32,
+      "alphabet": "hex",
+      "description": "Generated here and handed to Sonarr, Recyclarr and the stack's own setup; Prowlarr, Bazarr and Seerr are given it by the stack."
+    },
+    {
+      "name": "prowlarr-api-key",
+      "variable": "PROWLARR_API_KEY",
+      "label": "Prowlarr API key",
+      "length": 32,
+      "alphabet": "hex",
+      "description": "Generated here and handed to Prowlarr and the stack's own setup."
+    }
+  ],
+  "services": [
+    {
+      "name": "jellyfin",
+      "role": "app",
+      "purpose": "Plays the library on every screen, behind the domain",
+      "image": {
+        "reference": "jellyfin/jellyfin:12.4",
+        "tagPolicy": "minor",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8096,
+          "protocol": "tcp",
+          "purpose": "The web interface and the apps",
+          "exposure": "proxy",
+          "primary": true
+        }
+      ],
+      "volumes": [
+        {
+          "name": "jellyfin-config",
+          "target": "/config",
+          "purpose": "Library metadata, users and settings",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "jellyfin-cache",
+          "target": "/cache",
+          "purpose": "Transcodes and thumbnails",
+          "data": true,
+          "backup": false
+        },
+        {
+          "name": "media",
+          "target": "/data",
+          "purpose": "The library, read-only: Jellyfin plays what the managers file here and never changes it",
+          "data": true,
+          "backup": false,
+          "readOnly": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 3072,
+        "minMemoryMb": 1536
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:8096/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 90
+      }
+    },
+    {
+      "name": "seerr",
+      "role": "app",
+      "purpose": "Where people search for a title and ask for it; signs in with Jellyfin accounts",
+      "image": {
+        "reference": "ghcr.io/seerr-team/seerr:v3.5.2",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "info"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 5055,
+          "protocol": "tcp",
+          "purpose": "The request desk, on this server's loopback until you publish it",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "seerr-config",
+          "target": "/app/config",
+          "purpose": "settings.json, the database of users and requests, and the logs",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "wget",
+          "-q",
+          "--spider",
+          "--tries=1",
+          "--timeout=3",
+          "http://localhost:5055/api/v1/status"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "dependsOn": [
+        {
+          "service": "jellyfin",
+          "condition": "healthy"
+        }
+      ],
+      "egress": true
+    },
+    {
+      "name": "radarr",
+      "role": "app",
+      "purpose": "Finds films through Prowlarr, sends them to qBittorrent and files them in the library",
+      "image": {
+        "reference": "lscr.io/linuxserver/radarr:7.0.3.10918-ls328",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "PUID",
+          "value": "1000"
+        },
+        {
+          "name": "PGID",
+          "value": "1000"
+        },
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "RADARR__AUTH__APIKEY",
+          "value": "{{secret.radarr-api-key}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 7878,
+          "protocol": "tcp",
+          "purpose": "Radarr's web interface, on this server's loopback only",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "radarr-config",
+          "target": "/config",
+          "purpose": "Radarr's database of films, profiles and settings",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "media",
+          "target": "/data",
+          "purpose": "Downloads and the library, on one volume so a finished download is moved into the library rather than copied",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 768,
+        "minMemoryMb": 384
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:7878/ping"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "egress": true
+    },
+    {
+      "name": "sonarr",
+      "role": "app",
+      "purpose": "Finds series through Prowlarr, sends them to qBittorrent and files them in the library",
+      "image": {
+        "reference": "lscr.io/linuxserver/sonarr:4.0.20.3014-ls6",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "PUID",
+          "value": "1000"
+        },
+        {
+          "name": "PGID",
+          "value": "1000"
+        },
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "SONARR__AUTH__APIKEY",
+          "value": "{{secret.sonarr-api-key}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8989,
+          "protocol": "tcp",
+          "purpose": "Sonarr's web interface, on this server's loopback only",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "sonarr-config",
+          "target": "/config",
+          "purpose": "Sonarr's database of series, profiles and settings",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "media",
+          "target": "/data",
+          "purpose": "Downloads and the library, on one volume so a finished download is moved into the library rather than copied",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 768,
+        "minMemoryMb": 384
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:8989/ping"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "egress": true
+    },
+    {
+      "name": "prowlarr",
+      "role": "app",
+      "purpose": "Keeps the sources you add and shares them with Radarr and Sonarr",
+      "image": {
+        "reference": "lscr.io/linuxserver/prowlarr:3.1.0.5799-ls170",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "PUID",
+          "value": "1000"
+        },
+        {
+          "name": "PGID",
+          "value": "1000"
+        },
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "PROWLARR__AUTH__APIKEY",
+          "value": "{{secret.prowlarr-api-key}}"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 9696,
+          "protocol": "tcp",
+          "purpose": "Prowlarr's web interface, on this server's loopback only",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "prowlarr-config",
+          "target": "/config",
+          "purpose": "Prowlarr's sources, their settings and the applications it syncs to",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:9696/ping"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "egress": true
+    },
+    {
+      "name": "qbittorrent",
+      "role": "app",
+      "purpose": "Downloads what Radarr and Sonarr send it into the shared volume",
+      "image": {
+        "reference": "lscr.io/linuxserver/qbittorrent:5.3.1_v2.1.3-ls490",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "PUID",
+          "value": "1000"
+        },
+        {
+          "name": "PGID",
+          "value": "1000"
+        },
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "WEBUI_PORT",
+          "value": "8080"
+        },
+        {
+          "name": "TORRENTING_PORT",
+          "value": "6881"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8080,
+          "protocol": "tcp",
+          "purpose": "qBittorrent's web interface, on this server's loopback only",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "qbittorrent-config",
+          "target": "/config",
+          "purpose": "qBittorrent's settings, categories and the list of downloads",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "media",
+          "target": "/data",
+          "purpose": "Downloads and the library, on one volume so a finished download is moved into the library rather than copied",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:8080/"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "egress": true
+    },
+    {
+      "name": "bazarr",
+      "role": "app",
+      "purpose": "Fetches subtitles in your languages for what Radarr and Sonarr filed",
+      "image": {
+        "reference": "lscr.io/linuxserver/bazarr:v1.6.2-ls374",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "PUID",
+          "value": "1000"
+        },
+        {
+          "name": "PGID",
+          "value": "1000"
+        },
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 6767,
+          "protocol": "tcp",
+          "purpose": "Bazarr's web interface, on this server's loopback only",
+          "exposure": "loopback"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "bazarr-config",
+          "target": "/config",
+          "purpose": "Bazarr's settings, providers and subtitle history",
+          "data": true,
+          "backup": true
+        },
+        {
+          "name": "media",
+          "target": "/data",
+          "purpose": "Downloads and the library, on one volume so a finished download is moved into the library rather than copied",
+          "data": true,
+          "backup": false
+        }
+      ],
+      "resources": {
+        "memoryMb": 512,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:6767/"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "egress": true
+    },
+    {
+      "name": "recyclarr",
+      "role": "worker",
+      "purpose": "Keeps Radarr's and Sonarr's quality profiles in step with the quality you chose, once a day",
+      "image": {
+        "reference": "recyclarr/recyclarr:8.8.1",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "CRON_SCHEDULE",
+          "value": "@daily"
+        },
+        {
+          "name": "RADARR_API_KEY",
+          "value": "{{secret.radarr-api-key}}"
+        },
+        {
+          "name": "SONARR_API_KEY",
+          "value": "{{secret.sonarr-api-key}}"
+        }
+      ],
+      "volumes": [
+        {
+          "name": "recyclarr-config",
+          "target": "/config",
+          "purpose": "recyclarr.yml, written by the stack from your quality choice, and its cache",
+          "data": true,
+          "backup": true
+        }
+      ],
+      "resources": {
+        "memoryMb": 256,
+        "minMemoryMb": 128
+      },
+      "healthcheck": {
+        "test": [
+          "recyclarr",
+          "--version"
+        ],
+        "intervalSeconds": 60,
+        "timeoutSeconds": 20,
+        "retries": 3,
+        "startPeriodSeconds": 30
+      },
+      "dependsOn": [
+        {
+          "service": "radarr",
+          "condition": "healthy"
+        },
+        {
+          "service": "sonarr",
+          "condition": "healthy"
+        }
+      ],
+      "egress": true
+    }
+  ],
+  "checks": [
+    {
+      "name": "Jellyfin answers",
+      "kind": "http",
+      "phase": "readiness",
+      "required": true,
+      "path": "/health",
+      "timeoutSeconds": 180
+    }
+  ],
+  "operations": {},
+  "update": {
+    "detector": "registry",
+    "notes": "Back up first: Jellyfin and the managers migrate their databases on start and cannot go back without a restore. The stack configures itself again after every deploy.",
+    "backupFirst": true
+  },
+  "security": {},
+  "fixtures": [
+    {
+      "name": "default",
+      "inputs": {},
+      "digest": "sha256:55fb4d2fb6c898c442ad176ad16546a81ca5230834d1acb018ec8efe79fa34ab"
+    }
+  ]
+}

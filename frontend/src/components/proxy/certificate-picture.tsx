@@ -3,6 +3,7 @@
 import { createRef, useRef, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, Globe, LockClosed, ShieldCheck, ArrowLeftRight } from "@/components/icons"
+import { certificateUsers } from "@/lib/certificates"
 import { plural } from "@/lib/format"
 import type { Certificate, VHost } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -48,13 +49,16 @@ export function CertificatePicture({ cert, vhosts }: { cert: Certificate; vhosts
     createRef<HTMLDivElement>(),
   ])
 
+  // A deployment's route is drawn under its project's name, and opens it.
+  const said = new Map(certificateUsers(cert).map((user) => [user.key, user]))
   const users: User[] = [
     ...cert.usedBy.map((name) => {
       const vhost = vhosts?.find((v) => v.name === name)
+      const user = said.get(`site:${name}`)
       return {
         key: `site:${name}`,
-        name,
-        href: sitePath(name),
+        name: user?.label ?? name,
+        href: user?.href ?? sitePath(name),
         kind: "site" as const,
         product: vhost ? siteProduct(vhost) : "nginx-static",
         live: vhost ? vhost.enabled : true,

@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test"
-import { mockPanel } from "./git-panel-fixture"
+import { mockPanel, open } from "./git-panel-fixture"
 
 /**
  * The workspace as it was complained about: a description whose pictures were
@@ -50,6 +50,81 @@ test.describe("a pull request's media", () => {
     await expect(box).toContainText("2 of 3")
     await box.getByRole("button", { name: "Close" }).click()
     await expect(box).toHaveCount(0)
+  })
+})
+
+test.describe("a pull request's recordings", () => {
+  test.use({ viewport: { width: 1440, height: 1000 } })
+
+  test("the lightbox steps through pictures, not the recordings beside them", async ({ page }) => {
+    const shot = "https://github.com/user-attachments/assets/1d2c-screenshot"
+    const recording = "https://github.com/user-attachments/assets/7e8f-recording"
+    const clip = "https://github.com/user-attachments/assets/clip.mp4"
+    const second =
+      "https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/0dc98260/after.png"
+    // An upload's address does not say what it is: the recording is not a picture.
+    await mockPanel(page, async (url) =>
+      url.includes("recording") || url.includes("clip") ? Buffer.from("not a picture") : undefined,
+    )
+    const described = {
+      ...open[0],
+      body: `A screenshot beside a recording.\n\n![The new band](${shot})\n\n![](${recording})\n\n<video src="${clip}"></video>\n\n![After](${second})\n`,
+    }
+    await page.route("**/api/v1/git/github/pulls**", async (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname.endsWith("/pulls/411")) return route.fulfill({ json: described })
+      if (url.pathname.endsWith("/pulls") && url.searchParams.get("state") === "open")
+        return route.fulfill({ json: [described, ...open.slice(1)] })
+      return route.fallback()
+    })
+    await page.goto(`${address}&pull=411`)
+    const preview = page.locator("[data-slot='git-preview']")
+    await expect(preview.getByRole("img", { name: "After" })).toBeVisible()
+    // The recordings are not offered as pictures on the page either.
+    await expect(preview.getByRole("button", { name: /^Enlarge/ })).toHaveCount(2)
+
+    await preview.getByRole("button", { name: "Enlarge The new band" }).click()
+    const box = page.getByRole("dialog")
+    await expect(box).toContainText("1 of 2")
+    await page.keyboard.press("ArrowRight")
+    await expect(box).toContainText("2 of 2")
+    await expect(box.getByRole("img", { name: "After" })).toBeVisible()
+    await expect(box.getByText("This image could not be opened.")).toHaveCount(0)
+  })
+
+  test("the lightbox still steps to a picture the page has not loaded yet", async ({ page }) => {
+    const shot = "https://github.com/user-attachments/assets/1d2c-screenshot"
+    const folded =
+      "https://raw.githubusercontent.com/JustDashboard/Just-Dashboard/0dc98260/before.png"
+    const far = "https://github.com/user-attachments/assets/9a0b-far-below"
+    await mockPanel(page)
+    // A picture in a closed fold, and one far below the first: neither is
+    // fetched until it is opened or scrolled to.
+    const filler = Array.from({ length: 120 }, (_, i) => `Paragraph ${i + 1} of the notes.`)
+    const described = {
+      ...open[0],
+      body: `![The new band](${shot})\n\n<details><summary>Before</summary>\n\n![Before](${folded})\n\n</details>\n\n${filler.join("\n\n")}\n\n![Far below](${far})\n`,
+    }
+    await page.route("**/api/v1/git/github/pulls**", async (route) => {
+      const url = new URL(route.request().url())
+      if (url.pathname.endsWith("/pulls/411")) return route.fulfill({ json: described })
+      if (url.pathname.endsWith("/pulls") && url.searchParams.get("state") === "open")
+        return route.fulfill({ json: [described, ...open.slice(1)] })
+      return route.fallback()
+    })
+    await page.goto(`${address}&pull=411`)
+    const preview = page.locator("[data-slot='git-preview']")
+    await expect(preview.getByRole("img", { name: "The new band" })).toBeVisible()
+
+    await preview.getByRole("button", { name: "Enlarge The new band" }).click()
+    const box = page.getByRole("dialog")
+    await expect(box).toContainText("1 of 3")
+    await page.keyboard.press("ArrowRight")
+    await expect(box).toContainText("2 of 3")
+    await expect(box.getByRole("img", { name: "Before" })).toBeVisible()
+    await page.keyboard.press("ArrowRight")
+    await expect(box).toContainText("3 of 3")
+    await expect(box.getByRole("img", { name: "Far below" })).toBeVisible()
   })
 })
 

@@ -23,9 +23,12 @@ import {
   type AlertTone,
 } from "@/components/alerts/alert-parts"
 import {
+  NOT_HERE,
   alertCounts,
   areaProduct,
+  judging,
   kindProduct,
+  presentKinds,
   reaches,
   type AlertArea,
   type AlertKinds,
@@ -122,28 +125,34 @@ export function KindCard<K extends string>({
   kinds,
   kind,
   engine,
+  absent,
   onClick,
 }: {
   kinds: AlertKinds<K>
   kind: K
   engine?: string
+  /** Nothing on this server for the kind to read: said in its line, and not offered. */
+  absent?: boolean
   /** Left out, the card is drawn but cannot be pressed: an account that only reads. */
   onClick?: () => void
 }) {
   const spec = kinds.kinds[kind]
+  const press = absent ? undefined : onClick
   return (
     <ChoiceCard
-      onClick={onClick}
-      disabled={!onClick}
+      onClick={press}
+      disabled={!press}
       className="min-h-0 flex-row items-center gap-3 px-3 py-2.5"
     >
       <KindTile kinds={kinds} kind={kind} engine={engine} size="sm" />
       {/* The tooltip is the words' own: a ChoiceCard keeps `title` for its name. */}
       <span className="flex min-w-0 flex-1 flex-col" title={spec.detail ?? spec.hint}>
         <ChoiceCardTitle className="truncate">{spec.label}</ChoiceCardTitle>
-        <ChoiceCardHint className="truncate leading-snug">{spec.fact ?? spec.hint}</ChoiceCardHint>
+        <ChoiceCardHint className="truncate leading-snug">
+          {absent ? NOT_HERE : (spec.fact ?? spec.hint)}
+        </ChoiceCardHint>
       </span>
-      {onClick && <Plus aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
+      {press && <Plus aria-hidden className="size-3.5 shrink-0 text-muted-foreground" />}
     </ChoiceCard>
   )
 }
@@ -156,10 +165,13 @@ export function KindCard<K extends string>({
 export function KindCards<K extends string>({
   kinds,
   engine,
+  absent,
   onAdd,
 }: {
   kinds: AlertKinds<K>
   engine?: string
+  /** The kinds that judge nothing on this server. */
+  absent?: ReadonlySet<string>
   onAdd?: (kind: K) => void
 }) {
   return (
@@ -175,6 +187,7 @@ export function KindCards<K extends string>({
           kinds={kinds}
           kind={kind}
           engine={engine}
+          absent={absent?.has(kind)}
           onClick={onAdd ? () => onAdd(kind) : undefined}
         />
       ))}
@@ -216,6 +229,7 @@ export function AlertsPicture<K extends string>({
   title,
   reach,
   waiting,
+  absent,
   onAdd,
   phone = "marks",
 }: {
@@ -229,11 +243,17 @@ export function AlertsPicture<K extends string>({
   /** Its second line: what it does with a change, or who it tells. */
   reach: React.ReactNode
   waiting?: boolean
+  /**
+   * The kinds that judge nothing on this server. An area with no other kind
+   * says so in place of "not watched" and cannot be pressed; a rule of such a
+   * kind is not a rule watching its area.
+   */
+  absent?: ReadonlySet<string>
   onAdd?: (kind: K) => void
   /** The phone's form: the marks alone, or every word stacked. */
   phone?: "marks" | "stack"
 }) {
-  const enabled = rules.filter((rule) => rule.enabled)
+  const enabled = judging(rules, absent)
   return (
     <WireFlow
       phone={phone}
@@ -247,6 +267,7 @@ export function AlertsPicture<K extends string>({
             rules: enabled.filter((rule) => area.kinds.includes(rule.kind)),
             subjects: subjects.filter((subject) => area.kinds.includes(subject.kind)),
             waiting,
+            present: presentKinds(area, absent),
             onAdd,
           }),
         ),
@@ -274,6 +295,7 @@ function areaNode<K extends string>({
   rules,
   subjects,
   waiting,
+  present,
   onAdd,
 }: {
   area: AlertArea<K>
@@ -282,6 +304,8 @@ function areaNode<K extends string>({
   rules: AlertRuleView<K>[]
   subjects: AlertSubjectView[]
   waiting?: boolean
+  /** Its kinds with something to read on this server; none, and the area is not here. */
+  present: K[]
   onAdd?: (kind: K) => void
 }): WireFlowNode {
   const product = areaProduct(area, engine)
@@ -289,19 +313,22 @@ function areaNode<K extends string>({
   const { firing, holding } = alertCounts(subjects)
   const watched = rules.length > 0
   const tone = firing > 0 ? "danger" : holding > 0 ? "warning" : undefined
-  const words = !watched
-    ? "not watched"
-    : firing > 0
-      ? `${firing} firing`
-      : holding > 0
-        ? `${holding} holding`
-        : `${plural(rules.length, "rule")}, all quiet`
+  const here = present.length > 0
+  const words = !here
+    ? NOT_HERE
+    : !watched
+      ? "not watched"
+      : firing > 0
+        ? `${firing} firing`
+        : holding > 0
+          ? `${holding} holding`
+          : `${plural(rules.length, "rule")}, all quiet`
   return {
     id: `area-${area.key}`,
     name: `${area.title}: ${words}`,
-    label: watched ? undefined : `Watch ${area.title.toLowerCase()}`,
+    label: watched || !here ? undefined : `Watch ${area.title.toLowerCase()}`,
     placeholder: !watched,
-    onPress: !watched && !waiting && onAdd ? () => onAdd(area.kinds[0]) : undefined,
+    onPress: here && !watched && !waiting && onAdd ? () => onAdd(present[0]) : undefined,
     mark: (size) =>
       watched ? (
         <WireMark tone={tone ?? "logo"} size={size}>
@@ -374,6 +401,7 @@ export function RuleForm<K extends string>({
   kinds,
   kind,
   onKind,
+  absent,
   engine,
   channels,
   selected,
@@ -389,6 +417,8 @@ export function RuleForm<K extends string>({
   kinds: AlertKinds<K>
   kind: K
   onKind: (kind: K) => void
+  /** The kinds that judge nothing on this server: named, and not to be chosen. */
+  absent?: ReadonlySet<string>
   engine?: string
   channels: NotificationChannel[]
   selected: number[]
@@ -421,6 +451,8 @@ export function RuleForm<K extends string>({
             <ChoiceCard
               key={option}
               selected={kind === option}
+              // The kind of the rule being edited stays chosen; any other is not offered.
+              disabled={absent?.has(option) && kind !== option}
               onClick={() => onKind(option)}
               className="min-h-0 flex-row gap-3 p-3"
             >
@@ -429,7 +461,9 @@ export function RuleForm<K extends string>({
                 <ChoiceCardTitle className="block truncate">
                   {kinds.kinds[option].label}
                 </ChoiceCardTitle>
-                <ChoiceCardHint className="line-clamp-2">{kinds.kinds[option].hint}</ChoiceCardHint>
+                <ChoiceCardHint className="line-clamp-2">
+                  {absent?.has(option) ? NOT_HERE : kinds.kinds[option].hint}
+                </ChoiceCardHint>
               </span>
             </ChoiceCard>
           ))}

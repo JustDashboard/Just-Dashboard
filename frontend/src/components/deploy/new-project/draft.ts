@@ -25,7 +25,7 @@ import type {
 } from "@/lib/types"
 
 /** The five ways into a new project — the source strip's own tab keys. */
-export type SourceTabKey = "git" | "image" | "template" | "database"
+export type SourceTabKey = "git" | "image" | "template" | "stack" | "database"
 
 /**
  * The draft state machine every source drives the same way.

@@ -412,6 +412,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// After the engine: a stack is configured once its release is live, and
+	// a pass a restart cut short runs again.
+	s.modules.stacks.Start(ctx)
 	// Release retention's first pass waits a minute after start-up, then
 	// runs daily and after each finished run.
 	s.modules.releaseImages.Start(ctx)
@@ -504,7 +507,7 @@ func (s *Server) startDeployEngine(ctx context.Context) error {
 }
 
 // shutdownDefault is what Shutdown allows itself where nobody gave it a budget:
-// the engine's grace and the three ten-second waits after it.
+// the engine's grace and the ten-second waits after it.
 const shutdownDefault = time.Minute
 
 // Shutdown is ShutdownContext with a budget of its own.
@@ -549,6 +552,12 @@ func (s *Server) shutdown(budget context.Context) {
 		s.Log.Warn("deployment engine did not finish before shutdown", "err", err)
 	}
 	cancel()
+	// A builder a database-reading build left waiting for its environment's
+	// next build is removed by a timer of this process's, so it goes now,
+	// its cache kept, or it would stay on the environment's networks.
+	builderCtx, builderCancel := context.WithTimeout(budget, 10*time.Second)
+	s.modules.docker.RemoveWaitingNetworkedBuilders(builderCtx)
+	builderCancel()
 	if s.ingressStop != nil {
 		s.ingressStop()
 		<-s.ingressDone
