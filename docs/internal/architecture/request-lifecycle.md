@@ -173,7 +173,14 @@ still audited so enumerating hook ids is not silent), and `GET /api/v1/tailnet/w
 deployment's gate asks about every request: still behind the allowlist, outside the API rate limit,
 and answering only a loopback caller that no other proxy forwarded — the dashboard's own Caddy says it
 did in `X-Forwarded-For` — with every refusal audited as `deploy.tailnet.refused`
-([tailnet-only deployments](../deployments/tailnet-apps.md#the-whois-route)).
+([tailnet-only deployments](../deployments/tailnet-apps.md#the-whois-route)). An agent has none of the
+sign-in surface, no discovery probe and no whois route; its exceptions are the two routes it answers
+before a hub enrols it, `GET /api/v1/agent/info` and `POST /api/v1/agent/enrol`, behind the allowlist
+and the login budget per address ([agent mode](../backend/platform.md)). Both routers are held to
+this: `TestEveryAPIRouteIsBehindTheNetworkAllowlist` and `TestNoAPIRouteAnswersWithoutAuthentication`
+(`api/routes_test.go`) walk the normal one and the agent's (`testAgentServer`), and
+`TestTheAgentsPreEnrolmentRoutesTakeTheLoginBudget` (`api/routes_gates_test.go`) checks the limiter in
+front of those two.
 
 ## Handler conventions
 
