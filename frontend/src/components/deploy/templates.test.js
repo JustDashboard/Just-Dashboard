@@ -25,6 +25,18 @@ test("the catalogue splits into the built-ins and this dashboard's own, keeping 
   expect(isUserTemplate(undefined)).toBe(false)
 })
 
+test("a stack's presets are not templates the picker lists", () => {
+  const entries = [
+    { id: "jellyfin", origin: "builtin" },
+    { id: "media-complete", origin: "builtin", stack: "media" },
+    { id: "media-essential", stack: "media" },
+    { id: "user-shop", origin: "user" },
+  ]
+  const { builtIn, yours } = splitCatalogue(entries)
+  expect(builtIn.map((entry) => entry.id)).toEqual(["jellyfin"])
+  expect(yours.map((entry) => entry.id)).toEqual(["user-shop"])
+})
+
 test("a name is saved under the id the server gives it", () => {
   expect(templateId("Analytics Stack")).toBe("user-analytics-stack")
   expect(templateId("  nginx + Redis  ")).toBe("user-nginx-redis")

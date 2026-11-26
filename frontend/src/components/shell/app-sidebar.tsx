@@ -178,7 +178,7 @@ function projectPlaceholder(id: number): Panel {
     named: true,
     groups: [
       {
-        items: PROJECT_NAV.filter((entry) => !entry.game).map((entry) => ({
+        items: PROJECT_NAV.filter((entry) => !entry.game && !entry.stack).map((entry) => ({
           title: entry.title,
           href: `${base}${entry.path}`,
           icon: entry.icon,

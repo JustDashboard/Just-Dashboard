@@ -142,7 +142,14 @@ only renderer/executor/validation authority for their feature.
   offered for resumption behind a counted button beside the question; a source strip offers a Git
   repository (connected GitHub list or a pasted URL), Docker (what this server already has, or a
   registry reference), a reviewed template (shelved client-side by topic, with the server's `category`
-  as the fallback shelf for a blueprint the frontend does not name) and a database. A Compose stack has
+  as the fallback shelf for a blueprint the frontend does not name), a stack and a database. The Stacks
+  tab (`new-project/source-stack.tsx`, `?source=stack`) reads `GET /deploy/stacks` and offers each
+  stack's presets as one choice, with what a preset runs and how each service is reached, what it asks
+  of the server and what it cannot do said before anything is pressed. A preset is a reviewed Compose
+  template marked with its `stack`, so its options are that template's inputs, asked with the Template
+  tab's own fields and rules (`blueprint-field.tsx`, `template-inputs.ts`), and Continue makes the same
+  draft the Template tab makes for a multi-service template (`kind: "compose"`, `mode: "blueprint"`).
+  The Template tab leaves out every blueprint that names a stack (`splitCatalogue`). A Compose stack has
   no tab of its own since 2026-10-05: one is deployed from the repository that holds its file (the
   Project step's *Deploy as a Compose stack*), from its files on this server through the Docker tab, or
   resumed as an unfinished setup. The Docker tab (`new-project/source-image.tsx` over
@@ -2832,14 +2839,27 @@ own.
 
 **The project's pages are on the sidebar, not in a strip above them.** `ProjectShell` publishes them
 through `useNavScope` (`components/shell/nav-scope.tsx`) and the rail draws a third level inside Deployments:
-Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, then a
+Overview, Deployments, Logs, Runtime, Console, Players and Server settings for a game server, Stack
+for a project the server says is a stack, then a
 Settings group of the nine settings pages, each marked while it holds a saved change that is not live
 yet (`PENDING_KIND_PAGE` maps a pending change's kind to its page). The panel's head is the project's
 favicon or product and its name as written, and a run page keeps the project's panel with Deployments
 marked current, because that is where a run is opened from. The strip of eight tabs and
 the settings rail beside them are both gone; the lists themselves live in `components/shell/nav.ts` as
 `PROJECT_NAV` and `PROJECT_SETTINGS_NAV`, which is also what the rail draws from the route alone until
-the project's read lands. Stop and Restart need the destructive capability, as the Docker container
+the project's read lands. The Stack row is earned by an answer from `GET /deploy/{id}/stack`, which is
+asked only for a project whose template names a stack (`components/deploy/stack/use-stack.ts`), so an
+ordinary project makes no request that is refused; the run page asks the same way, since a stack's first
+run is watched from there and the row is the way on to the page. That page
+(`components/deploy/stack/stack-page.tsx`, words and reads in `stack-model.ts`) leads with the server's
+sentence and state and says installed, healthy, connected, able to fetch and able to play each on its
+own, then what only the person can do (blocking first), each failed step's whole error, the services
+as cards of one height (a public one links to its address; a private one gives its loopback address
+with the SSH tunnel behind the mark beside it, and no button that would open nothing; a card opens its
+container in Docker), the setup by stage with every skipped step folded into one line by reason, and
+the accounts that exist, each revealed through the audited route where its mask was. It polls every
+two seconds while the state is `waiting` or `configuring` and every fifteen otherwise; Retry or Repair
+is one button, and a `stack_busy` or `stack_waiting` refusal is answered in words on the page. Stop and Restart need the destructive capability, as the Docker container
 verbs do, and each asks first, since either is one press from a fleet card's menu; the menu hides
 them otherwise. Legacy `?tab=` links
 redirect to these routes. Operation failures are titled by the operation and re-read the project at

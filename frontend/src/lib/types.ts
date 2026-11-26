@@ -3595,6 +3595,12 @@ export type BlueprintSummary = {
    * built-in.
    */
   origin?: "builtin" | "user"
+  /**
+   * The smart stack this template is a preset of (`media`). A stack's
+   * templates are offered on the Stacks tab with what the stack sets up, and
+   * left out of the template catalogue.
+   */
+  stack?: string
 }
 
 /** How a template added on this dashboard was made. */
@@ -3651,7 +3657,8 @@ export type BlueprintService = {
     internal: number
     protocol: string
     purpose: string
-    exposure: "proxy" | "internal"
+    /** `loopback` is a stack's private web interface, published on 127.0.0.1 only. */
+    exposure: "proxy" | "internal" | "loopback"
     primary?: boolean
   }[]
   volumes?: { name: string; target: string; purpose: string; data: boolean; backup: boolean }[]
@@ -3769,6 +3776,146 @@ export type BlueprintDetail = Omit<
   update: { detector: string; versionSource?: string; notes?: string; backupFirst?: boolean }
   /** A multi-service template's services; the top-level image is then empty. */
   services?: BlueprintService[]
+}
+
+/** How a stack's service is reached: on the deployment's domain, on this server only, or not at all. */
+export type SmartStackAccess = "public" | "private" | "worker"
+
+/** One service of a stack as the catalogue describes it. */
+export type SmartStackCatalogueService = {
+  name: string
+  title: string
+  purpose: string
+  port?: number
+  access: SmartStackAccess
+  docsUrl?: string
+  /** The pinned reference the preset's template runs. */
+  image: string
+}
+
+/** One preset of a stack: a reviewed Compose template and what it runs. */
+export type SmartStackPreset = {
+  id: string
+  title: string
+  description: string
+  /** The blueprint a draft of this preset deploys. */
+  templateId: string
+  templateVersion: string
+  /** Service names, in order. */
+  services: string[]
+  recommended?: boolean
+  /** Said before Deploy and again on the stack's page. */
+  limitations?: string[]
+  /** The services' memory limits added up. */
+  memoryMb: number
+  /** An estimate for application data, not for media. */
+  diskGb: number
+}
+
+/** One smart stack, as `GET /deploy/stacks` lists it. */
+export type SmartStackCatalogueEntry = {
+  id: string
+  version: string
+  title: string
+  description: string
+  presets: SmartStackPreset[]
+  services: SmartStackCatalogueService[]
+}
+
+export type SmartStackStatus = "waiting" | "configuring" | "ready" | "action_required" | "failed"
+
+export type SmartStackStage = "readiness" | "initialize" | "link" | "verify"
+
+export type SmartStackStepStatus =
+  "pending" | "running" | "done" | "failed" | "action_required" | "skipped"
+
+export type SmartStackServiceStatus =
+  "ok" | "configuring" | "action_required" | "failed" | "waiting" | "skipped"
+
+export type SmartStackReadiness = {
+  /** A release is live. */
+  installed: boolean
+  /** Every service's container is running and healthy. */
+  healthy: boolean
+  /** Every applicable link step is done. */
+  connected: boolean
+  /** It can fetch new titles. */
+  acquisition: boolean
+  /** Jellyfin is set up with its libraries. */
+  playback: boolean
+}
+
+export type SmartStackService = {
+  name: string
+  title: string
+  purpose: string
+  access: SmartStackAccess
+  image: string
+  docsUrl?: string
+  /** A private service's loopback address, as Docker published it. */
+  address?: string
+  /** A public service's URL, when the deployment has a domain. */
+  url?: string
+  /** Absent when no container exists. */
+  container?: { name: string; state: string; health?: string }
+  status: SmartStackServiceStatus
+}
+
+export type SmartStackStep = {
+  id: string
+  service: string
+  title: string
+  stage: SmartStackStage
+  status: SmartStackStepStatus
+  attempts: number
+  /** What it did, or why it was skipped. */
+  message?: string
+  /** The last error, redacted by the server. */
+  error?: string
+  startedAt?: string
+  finishedAt?: string
+}
+
+/** Something only the person can do; a blocking one keeps the stack from ready. */
+export type SmartStackAction = {
+  id: string
+  service: string
+  title: string
+  description: string
+  blocking: boolean
+}
+
+/** An account the stack created. Its value is read through the reveal route. */
+export type SmartStackCredential = {
+  name: string
+  service: string
+  label: string
+  username?: string
+  /** False until the step that creates it has run. */
+  stored: boolean
+}
+
+/** A stack project's state, as `GET /deploy/{id}/stack` answers. */
+export type SmartStackState = {
+  stackId: string
+  title: string
+  version: string
+  preset: string
+  presetTitle: string
+  status: SmartStackStatus
+  /** The one sentence the page leads with. */
+  summary: string
+  readiness: SmartStackReadiness
+  services: SmartStackService[]
+  steps: SmartStackStep[]
+  actions: SmartStackAction[]
+  credentials: SmartStackCredential[]
+  limitations: string[]
+  liveReleaseId?: number
+  configuredReleaseId?: number
+  startedAt?: string
+  finishedAt?: string
+  updatedAt: string
 }
 
 export type GameImportPreview = {

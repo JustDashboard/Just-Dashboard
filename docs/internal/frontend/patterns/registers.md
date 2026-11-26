@@ -76,6 +76,7 @@ the reader through it.
 | --- | --- | --- |
 | Host Overview, metrics, Docker, Security, Network, proxy, Processes, System, Backups, Packages, audit, Git, files, terminal | Reading | The reader arrives to find out what is true. |
 | Deployments list, a project's overview, runtime, logs, deployments, requests | Reading | A project that exists is a thing you read. |
+| A stack project's Stack page (`/deploy/[id]/stack`) | Reading | The reader arrives to find out how far the stack's own setup is: the server's sentence and state, the five facts each on its own (installed, healthy, connected, able to fetch, able to play), what only the person can do, the services and how each is reached, the setup step by step and the accounts it made. Retry is a verb on the lead's title line, not a sequence. |
 | `/deploy/new` — the source chooser | **Flow** | Step one of three, and the screen is asking a question. |
 | Databases — the control center, a database's home, Search, Generate, Performance, Access, Backups, Alerts, Settings | Reading | The reader arrives to find out what is true of a server and of everything on it. |
 | `/databases/[id]/import` — bring a database over from another server | **Flow** | A sequence with an outcome: which server it is on now, how it should come over, and — for a replication — when to cut over, ending in a database here. The spine is taken from the import the server keeps, so a reload, or the next day, finds it where it was. |
@@ -134,7 +135,7 @@ Each of these is bought against a specific failure, and each is the smallest thi
   `variant={pickable.length > 0 ? "outline" : "default"}` — which is the rule stated in code rather
   than a colour chosen once and left to be wrong half the time.
 - **A choice is something you pick.** `ChoiceCard` in a `ChoiceGrid` for the *kinds* of thing — the
-  four sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
+  five sources, the templates, the databases. `ChoiceRow` in a `ChoiceList` for *instances* of one
   kind — twenty-two repositories, a page of image tags. The split is load-bearing: a three-column
   grid of twenty-two 13px names is a wall, and a flat row is the listing this register exists to stop
   a decision from looking like. Both keep §12's shape — the title is a real `<button>` carrying the

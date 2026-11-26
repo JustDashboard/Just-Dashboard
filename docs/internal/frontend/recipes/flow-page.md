@@ -141,7 +141,7 @@ height. The command is the full width at the foot of the surface.
    the Git page's filter strip — and laid out as `ChoiceGrid columns="fill"`, whose rows are equal,
    with the card's hint clamped to two lines beside a `logo`: sixty cards at three heights read as a
    grid that failed to load. The strip that picks between kinds of source is a `role="group"` of
-   pressed buttons, never a tablist — a tablist must own tabs, and these are four toggles for one
+   pressed buttons, never a tablist — a tablist must own tabs, and these are five toggles for one
    answer — and on a phone it runs to the screen's edge, where the source cut off is the cue that
    there are more, as a `ChipStrip` does; the scroll shade is drawn in the page's own ground and
    cannot show on it.
