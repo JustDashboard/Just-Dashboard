@@ -65,6 +65,9 @@ export function appDomainStateOf(
   const zone = status?.zone?.toLowerCase()
   const name = hostname.toLowerCase()
   if (!zone || !name.endsWith(`.${zone}`)) return undefined
+  // A saved name under a handle held before the one held now: the backend lists it, since only it
+  // keeps the handles held before.
+  if (status?.detached?.some((use) => use.hostname.toLowerCase() === name)) return "detached"
   // Only `<app>.<handle>.<zone>` under the handle this server holds or held is an app name.
   // The server name, the zone's own names (the site that runs it may be deployed here) and
   // names under handles that were never this server's are ordinary domains, as the backend

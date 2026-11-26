@@ -8583,6 +8583,12 @@ export type AppDomainStatus = {
   } | null
   usedBy: AppDomainUse[]
   /**
+   * Deployment names under a handle this server held and does not hold now: the stored one while
+   * it is not held, and every handle it held before (changed or released). The backend leaves
+   * them out of each release. Absent from a backend older than 0.9.1.
+   */
+  detached?: AppDomainUse[]
+  /**
    * The handle the account chose for this server when it approved the link (or later on the
    * site), which the server claims by itself. Null when there is none, or once a domain is held.
    */
