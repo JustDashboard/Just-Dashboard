@@ -43,6 +43,11 @@ type User struct {
 	ID    int64
 	Login string
 	Name  string
+	// The rest is what GET /user says of a profile; GitHub answers null for
+	// what a person left empty, and so does the fake.
+	Bio, Company, Location, Blog string
+	Followers, Following         int
+	PublicRepos                  int
 }
 
 // Installation is the App installed on an account.
@@ -115,6 +120,12 @@ type Fake struct {
 	DeviceFlowDisabled bool
 	// Override, when it returns true, answered the request itself.
 	Override func(w http.ResponseWriter, r *http.Request) bool
+	// Search is what GET /search/issues answers for every query, a page of
+	// PageSize at a time. A test reads the query it was asked off Requests.
+	Search []map[string]any
+	// Events is what GET /users/{login}/events answers for the token's own
+	// login.
+	Events []map[string]any
 
 	mu            sync.Mutex
 	requests      []Request
@@ -596,7 +607,32 @@ func (f *Fake) api(w http.ResponseWriter, r *http.Request, body string) {
 	parts := strings.Split(strings.Trim(path, "/"), "/")
 	switch {
 	case r.Method == http.MethodGet && path == "/user":
-		writeJSON(w, 200, map[string]any{"id": user.ID, "login": user.Login, "name": user.Name, "html_url": "https://github.com/" + user.Login})
+		writeJSON(w, 200, map[string]any{
+			"id": user.ID, "login": user.Login, "name": orNull(user.Name), "html_url": "https://github.com/" + user.Login,
+			"bio": orNull(user.Bio), "company": orNull(user.Company), "location": orNull(user.Location), "blog": user.Blog,
+			"followers": user.Followers, "following": user.Following, "public_repos": user.PublicRepos, "created_at": "2019-05-06T07:08:09Z",
+		})
+	case r.Method == http.MethodPost && path == "/graphql":
+		// The one query the page sends: the viewer's contribution calendar.
+		day := func(date, level string, count, weekday int) map[string]any {
+			return map[string]any{"date": date, "contributionCount": count, "contributionLevel": level, "weekday": weekday}
+		}
+		writeJSON(w, 200, map[string]any{"data": map[string]any{"viewer": map[string]any{"contributionsCollection": map[string]any{"contributionCalendar": map[string]any{
+			"totalContributions": 9,
+			"weeks": []map[string]any{
+				{"contributionDays": []map[string]any{day("2026-11-20", "NONE", 0, 5), day("2026-11-21", "FIRST_QUARTILE", 1, 6)}},
+				{"contributionDays": []map[string]any{day("2026-11-22", "SECOND_QUARTILE", 2, 0), day("2026-11-23", "THIRD_QUARTILE", 2, 1), day("2026-11-24", "FOURTH_QUARTILE", 4, 2)}},
+			},
+		}}}}})
+	case r.Method == http.MethodGet && path == "/search/issues":
+		items := f.page(w, r, f.Search)
+		writeJSON(w, 200, map[string]any{"total_count": len(f.Search), "incomplete_results": false, "items": nonNil(items)})
+	case r.Method == http.MethodGet && len(parts) == 3 && parts[0] == "users" && parts[2] == "events":
+		if !strings.EqualFold(parts[1], user.Login) {
+			writeJSON(w, 404, map[string]any{"message": "Not Found"})
+			return
+		}
+		writeJSON(w, 200, nonNil(f.Events))
 	case r.Method == http.MethodGet && path == "/user/installations":
 		var items []map[string]any
 		for _, i := range f.visibleInstallations(user.ID) {
@@ -707,6 +743,14 @@ func (f *Fake) api(w http.ResponseWriter, r *http.Request, body string) {
 	default:
 		writeJSON(w, 404, map[string]any{"message": "Not Found", "path": url.PathEscape(path)})
 	}
+}
+
+// orNull is a profile field as GitHub answers it: null when empty.
+func orNull(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
 }
 
 func nonNil(items []map[string]any) []map[string]any {

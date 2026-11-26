@@ -18,8 +18,8 @@
 - [`network-egress.md`](network-egress.md) — monitored egress groups: member paths, hysteresis, guarded switching, connection pinning, boot restore and the simulation automation waits on.
 - [`docker-files-logs.md`](docker-files-logs.md) — Docker, files, archives, previews, and logs.
 - [`processes-terminal-github.md`](processes-terminal-github.md) — processes, PTYs, terminal organization, and GitHub.
-- [`github-page.md`](github-page.md) — the GitHub page's repository App, sign-in, connections, repositories and cloning.
-- [`github-page-repository.md`](github-page-repository.md) — branches, commits, pull requests, issues, Actions and collaborators on the GitHub page.
+- [`github-page.md`](github-page.md) — the GitHub page's repository App, sign-in, connections, the account's profile, pull requests, issues and activity, repositories and cloning.
+- [`github-page-repository.md`](github-page-repository.md) — branches, commits, pull requests, issues, Actions, collaborators, the README and languages on the GitHub page.
 - [`git-backups-users.md`](git-backups-users.md) — Git, backup execution/restore, host users, and SSH keys.
 - [`remote-desktop.md`](remote-desktop.md) — guacd as an owned loopback container, the server-side Guacamole handshake and relay, sealed sign-ins and the session history; Stream mode's Moonlight Web bridge, proxied, and Sunshine pairing.
 - [`databases.md`](databases.md) — the Databases section: inventory, connections, the SQL workbench, schema and operations, Redis, MongoDB, transfer, the MCP server and the `/databases` route table.

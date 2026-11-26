@@ -98,10 +98,12 @@ strategy, and feature ownership behind those rules.
 - [`backend/github-page.md`](backend/github-page.md) — the GitHub page's repository App: why it is a second
   App, the manifest with no webhook, the web sign-in with PKCE and the device flow for addresses GitHub
   cannot return to, state, token rotation and reconnecting, per-account connections, the route table,
-  abilities, caching and rate limits, and cloning with a downscoped token.
+  the account's own profile, contribution calendar, pull requests, issues and activity, abilities,
+  caching and rate limits, and cloning with a downscoped token.
 - [`backend/github-page-repository.md`](backend/github-page-repository.md) — what is inside one repository
-  on the GitHub page: branches, protection and rulesets, commits, pull requests and merging, issues,
-  Actions with dispatch detection, collaborators, and what is not offered.
+  on the GitHub page: its route table, branches, protection and rulesets, commits, pull requests and
+  merging, issues, Actions with dispatch detection, collaborators, the README and languages, and what
+  is not offered.
 - [`backend/git-workspace-expansion.md`](backend/git-workspace-expansion.md) — conflict resolution,
   partial staging, recovery, local rebase, worktrees, provider reviews, LFS and patch exchange.
 - [`backend/databases.md`](backend/databases.md) — the Databases section: the inventory of what is on

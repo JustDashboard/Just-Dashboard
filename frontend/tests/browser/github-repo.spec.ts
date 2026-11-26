@@ -1,5 +1,5 @@
 import { expect, test, type Locator } from "@playwright/test"
-import { HEAD_SHA, mockGitHubRepo } from "./github-repo-fixture"
+import { HEAD_SHA, commits, mockGitHubRepo } from "./github-repo-fixture"
 
 /**
  * One GitHub repository's page (`/github/[owner]/[repo]`), against the
@@ -137,6 +137,48 @@ test.describe("the views", () => {
     const abilities = page.locator("[data-slot=github-abilities]")
     await expect(abilities.getByRole("listitem")).toHaveCount(8)
     await expect(page.getByText("for selected repositories only")).toBeVisible()
+  })
+
+  test("Overview draws the README under the last commit, About and the languages", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mockGitHubRepo(page)
+    await page.goto(API)
+    const readme = page.locator("[data-slot=github-readme]")
+    await expect(readme.getByRole("heading", { name: "api" })).toBeVisible()
+    await expect(readme.getByRole("heading", { name: "Getting started" })).toBeVisible()
+    // A link beside the README goes to GitHub's page of that file.
+    await expect(readme.getByRole("link", { name: "CONTRIBUTING.md" })).toHaveAttribute(
+      "href",
+      "https://github.com/northwind/api/blob/main/CONTRIBUTING.md",
+    )
+    await expect(readme).toContainText(commits[0].message.split("\n")[0])
+    const languages = page.locator("[data-slot=github-languages]")
+    await expect(languages.getByRole("img", { name: /^Go 8\d%/ })).toBeVisible()
+    await expect(languages).toContainText("TypeScript")
+    // The side column stands beside the README on a desk and above it on a phone.
+    const about = page.getByRole("complementary", { name: "About this repository" })
+    const aside = (await about.boundingBox())!
+    const pane = (await readme.boundingBox())!
+    expect(aside.x).toBeGreaterThan(pane.x + pane.width - 1)
+    await page.setViewportSize({ width: 390, height: 844 })
+    const phoneAside = (await about.boundingBox())!
+    const phonePane = (await readme.boundingBox())!
+    expect(phoneAside.y + phoneAside.height).toBeLessThanOrEqual(phonePane.y)
+  })
+
+  test("a repository without a README or languages says so in one line", async ({ page }) => {
+    await mockGitHubRepo(page)
+    // Registered after the mock, so it answers first.
+    await page.route("**/api/v1/github/connections/1/repos/mira-dev/notes/readme", (route) =>
+      route.fulfill({ status: 200, contentType: "application/json", body: '{"found":false}' }),
+    )
+    await page.goto("/github/mira-dev/notes?account=1")
+    await expect(page.locator("[data-slot=github-readme]")).toContainText(
+      "mira-dev/notes has no README yet.",
+    )
+    await expect(page.locator("[data-slot=github-languages]")).toHaveCount(0)
   })
 
   test("a repository with no checkout offers Clone", async ({ page }) => {

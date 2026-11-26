@@ -30,9 +30,11 @@ A real terminal, files, Git on the server and on GitHub, drawings and your own c
 **Local Git** is the checkouts on this server; **GitHub** is the repositories on GitHub, through an
 App the dashboard sets up for itself and each person's own GitHub sign-in ([how to connect it](../guides/github.md)).
 
-- Every repository your accounts and organisations reach, with what the App was given on each installation, counts of public and private, search, filters by owner, language, visibility and archived, and sorting
+- A home like your GitHub profile: your face, bio and the year of contributions as GitHub's green calendar with your streaks, the repositories you pushed to last, your open pull requests, the reviews asked of you, the issues assigned to you and your public activity
+- Every pull request and issue you opened, are assigned, are asked to review or are mentioned in, across every repository, open or closed; one in a repository listed here opens on its page, ready to merge or close
+- Every repository your accounts and organisations reach as a card with its language's logo, stars, forks and open issues, what the App was given on each installation, counts of public and private, search, filters by owner, language, visibility and archived, and sorting
 - New repositories with a README, a .gitignore template and a licence, under your account or an organisation
-- A page per repository: branches with their protection and rules, commits, pull requests with reviews and checks (merge, close, reopen), issues with labels, Actions (run a workflow with its inputs, re-run, cancel), collaborators and invitations, and its settings, archiving, visibility and deletion
+- A page per repository: its README under the last commit, its languages in GitHub's colours, branches with their protection and rules, commits, pull requests with reviews and checks (merge, close, reopen), issues with labels, Actions (run a workflow with its inputs, re-run, cancel), collaborators and invitations, and its settings, archiving, visibility and deletion
 - Every control checks your role on the repository and what the App was granted, and says which is missing when it is off
 - Clone to server copies a repository into a Git root with a read-only token for that repository alone, and opens it in Local Git when it lands
 

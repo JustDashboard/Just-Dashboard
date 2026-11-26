@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -283,5 +284,40 @@ func TestGitHubResourceAuditKeepsNoTextOrValues(t *testing.T) {
 	}
 	if seen != 2 {
 		t.Fatalf("audited %d GitHub changes: %+v", seen, entries)
+	}
+}
+
+// The README and the languages are reads like the rest: anybody with a
+// session, through the repository as it was resolved.
+func TestAReaderGetsARepositorysReadmeAndLanguages(t *testing.T) {
+	rig := newGHResourceRig(t)
+	source := "# Widgets\n\nWhat they are.\n"
+	rig.fake.answer("GET /repos/octo-org/widgets/readme", 200, `{"type":"file","encoding":"base64","size":26,"path":"README.md",
+		"content":"`+base64.StdEncoding.EncodeToString([]byte(source))+`","html_url":"https://github.com/octo-org/widgets/blob/main/README.md"}`)
+	w := rig.readonly.do(http.MethodGet, ghResourceBase+"/readme", "", nil)
+	want := `{"found":true,"path":"README.md","content":"# Widgets\n\nWhat they are.\n","htmlUrl":"https://github.com/octo-org/widgets/blob/main/README.md"}`
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != want {
+		t.Fatalf("readme = %d %s", w.Code, w.Body)
+	}
+	rig.fake.answer("GET /repos/octo-org/widgets/readme", 404, `{"message":"Not Found"}`)
+	w = rig.readonly.do(http.MethodGet, ghResourceBase+"/readme", "", nil)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"found":false}` {
+		t.Fatalf("no readme = %d %s", w.Code, w.Body)
+	}
+	rig.fake.answer("GET /repos/octo-org/widgets/readme", 403, `{"message":"Resource not accessible by integration"}`)
+	w = rig.readonly.do(http.MethodGet, ghResourceBase+"/readme", "", nil)
+	if code, _ := ghErrorCode(t, w); w.Code != http.StatusForbidden || code != "github_forbidden" {
+		t.Fatalf("refused readme = %d %s", w.Code, w.Body)
+	}
+
+	rig.fake.answer("GET /repos/octo-org/widgets/languages", 200, `{"CSS":300,"Go":9000,"Astro":300}`)
+	w = rig.readonly.do(http.MethodGet, ghResourceBase+"/languages", "", nil)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"languages":[{"name":"Go","bytes":9000},{"name":"Astro","bytes":300},{"name":"CSS","bytes":300}]}` {
+		t.Fatalf("languages = %d %s", w.Code, w.Body)
+	}
+	rig.fake.answer("GET /repos/octo-org/widgets/languages", 200, `{}`)
+	w = rig.readonly.do(http.MethodGet, ghResourceBase+"/languages", "", nil)
+	if w.Code != http.StatusOK || strings.TrimSpace(w.Body.String()) != `{"languages":[]}` {
+		t.Fatalf("no languages = %d %s", w.Code, w.Body)
 	}
 }

@@ -199,6 +199,8 @@ export function usePages<T, P extends { hasMore: boolean }>(
     hasMore: boolean
     loading: boolean
     error?: Error
+    /** The last page's whole answer, for what it says besides its items (a total). */
+    last?: P
   }>({ key: null, items: [], page: 0, hasMore: false, loading: true })
   const [ask, setAsk] = useState(0)
   const pickRef = useRef(pick)
@@ -223,6 +225,7 @@ export function usePages<T, P extends { hasMore: boolean }>(
           page,
           hasMore: answer.hasMore,
           loading: false,
+          last: answer,
         }))
       } catch (error) {
         if (signal?.aborted) return
@@ -251,6 +254,7 @@ export function usePages<T, P extends { hasMore: boolean }>(
     hasMore: current && state.hasMore,
     loading: state.loading || !current,
     error: current ? state.error : undefined,
+    last: current ? state.last : undefined,
     more: () => void read(state.page + 1, false),
     reload: () => setAsk((n) => n + 1),
   }
