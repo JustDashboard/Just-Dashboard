@@ -86,6 +86,10 @@ by project; its rows cascade with the project's.
 - Every secret the environment handed out (variables, credentials) is masked out of each recorded
   message and error before it is written, so an application echoing a request back cannot put a key
   in the step's record.
+- What a step says while it runs (`Env.Logf`, such as Recyclarr's sync report) goes to that step's
+  record (`log_json`, the step's `log` in the state), masked the same way and before it is cut to
+  length: the newest 50 lines of the step's last pass, 500 bytes each. Each step gets its own view of
+  the pass's environment for this (`stepEnv`), since three run at once.
 - Steps converge: each reads what is there, changes only what differs from what the stack wants,
   reads it back, and finds its own entries by a fixed name. Running a pass twice makes no second
   change, so Retry and every redeploy simply run the whole graph again.

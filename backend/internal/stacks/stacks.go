@@ -184,6 +184,7 @@ type Env interface {
 
 	// Output is a non-secret fact an earlier step reported, or "".
 	Output(step, key string) string
-	// Logf adds a line to the step's record. Never pass it a secret.
+	// Logf adds a line to the step's record (StepRecord.Log), masked as its
+	// message and error are. Still never pass it a secret on purpose.
 	Logf(format string, args ...any)
 }

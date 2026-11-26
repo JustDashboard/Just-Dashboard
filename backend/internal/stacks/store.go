@@ -49,13 +49,16 @@ type Record struct {
 
 // StepRecord is a step's last outcome.
 type StepRecord struct {
-	StepID     string
-	Status     StepStatus
-	Attempts   int
-	Message    string
-	Error      string
-	Outputs    map[string]string
-	Action     *Action
+	StepID   string
+	Status   StepStatus
+	Attempts int
+	Message  string
+	Error    string
+	Outputs  map[string]string
+	Action   *Action
+	// Log is what the step said while it ran (Env.Logf), masked as Message
+	// and Error are, the newest lines kept.
+	Log        []string
 	StartedAt  time.Time
 	FinishedAt time.Time
 }
@@ -203,7 +206,7 @@ func (s *Store) ResetInterrupted(ctx context.Context) error {
 // Steps returns a stack's step records by step id.
 func (s *Store) Steps(ctx context.Context, projectID int64) (map[string]StepRecord, error) {
 	rows, err := s.db.QueryContext(ctx, `
-		SELECT step_id, status, attempts, message, error, outputs_json, action_json, started_at, finished_at
+		SELECT step_id, status, attempts, message, error, outputs_json, action_json, log_json, started_at, finished_at
 		  FROM deploy_stack_steps WHERE project_id = ?`, projectID)
 	if err != nil {
 		return nil, err
@@ -212,14 +215,15 @@ func (s *Store) Steps(ctx context.Context, projectID int64) (map[string]StepReco
 	out := map[string]StepRecord{}
 	for rows.Next() {
 		var record StepRecord
-		var outputs, action string
+		var outputs, action, log string
 		var started, finished int64
 		if err := rows.Scan(&record.StepID, &record.Status, &record.Attempts, &record.Message, &record.Error,
-			&outputs, &action, &started, &finished); err != nil {
+			&outputs, &action, &log, &started, &finished); err != nil {
 			return nil, err
 		}
 		record.StartedAt, record.FinishedAt = unixTime(started), unixTime(finished)
 		_ = json.Unmarshal([]byte(outputs), &record.Outputs)
+		_ = json.Unmarshal([]byte(log), &record.Log)
 		if action != "" {
 			record.Action = &Action{}
 			if json.Unmarshal([]byte(action), record.Action) != nil {
@@ -242,14 +246,19 @@ func (s *Store) PutStep(ctx context.Context, projectID int64, record StepRecord)
 		raw, _ := json.Marshal(record.Action)
 		action = string(raw)
 	}
+	log, err := json.Marshal(record.Log)
+	if err != nil || record.Log == nil {
+		log = []byte("[]")
+	}
 	_, err = s.db.ExecContext(ctx, `
-		INSERT INTO deploy_stack_steps (project_id, step_id, status, attempts, message, error, outputs_json, action_json, started_at, finished_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		INSERT INTO deploy_stack_steps (project_id, step_id, status, attempts, message, error, outputs_json, action_json, log_json, started_at, finished_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		ON CONFLICT(project_id, step_id) DO UPDATE SET status = excluded.status, attempts = excluded.attempts,
 		       message = excluded.message, error = excluded.error, outputs_json = excluded.outputs_json,
-		       action_json = excluded.action_json, started_at = excluded.started_at, finished_at = excluded.finished_at`,
+		       action_json = excluded.action_json, log_json = excluded.log_json,
+		       started_at = excluded.started_at, finished_at = excluded.finished_at`,
 		projectID, record.StepID, record.Status, record.Attempts, truncate(record.Message, 2000), truncate(record.Error, 2000),
-		string(outputs), action, unixOf(record.StartedAt), unixOf(record.FinishedAt))
+		string(outputs), action, string(log), unixOf(record.StartedAt), unixOf(record.FinishedAt))
 	return err
 }
 

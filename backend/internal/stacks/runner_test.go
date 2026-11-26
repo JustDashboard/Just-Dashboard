@@ -180,6 +180,26 @@ func TestRunnerTurnsAPanicIntoAFailureAndRedactsSecrets(t *testing.T) {
 	}
 }
 
+// A line a step logs is kept in its record, masked as its message and error
+// are: Recyclarr's sync report is read on the step, and a key a line happens
+// to hold is not.
+func TestRunnerKeepsAStepsLogLinesMasked(t *testing.T) {
+	env := fake("a")
+	env.Vars = map[string]string{"RADARR_API_KEY": "0123456789abcdef"}
+	m := manifest(step("a.logs", "a", nil, func(ctx context.Context, env stacks.Env) (stacks.Result, error) {
+		key, _ := env.Variable(ctx, "RADARR_API_KEY")
+		env.Logf("recyclarr: Created 41 New Custom Formats")
+		env.Logf("synced with the key %s", key)
+		return stacks.Result{Message: "synced"}, nil
+	}))
+	var j journal
+	quickRunner().Run(context.Background(), m, env, j.record)
+	logged := j.last["a.logs"].Log
+	if len(logged) != 2 || logged[0] != "recyclarr: Created 41 New Custom Formats" || logged[1] != "synced with the key ••••••" {
+		t.Fatalf("log = %q", logged)
+	}
+}
+
 func TestRunnerCancelledPassIsIncompleteAndLeavesStepsPending(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	m := manifest(

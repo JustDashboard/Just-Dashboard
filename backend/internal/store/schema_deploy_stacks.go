@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS deploy_stacks (
   updated_at            INTEGER NOT NULL
 );
 -- The last outcome of each step. outputs_json holds only the non-secret facts
--- a step reports; error is redacted before it is written.
+-- a step reports; message, error and log_json (the lines the step logged in
+-- its last pass) are redacted before they are written.
 CREATE TABLE IF NOT EXISTS deploy_stack_steps (
   project_id   INTEGER NOT NULL REFERENCES deploy_stacks(project_id) ON DELETE CASCADE,
   step_id      TEXT NOT NULL,
@@ -42,6 +43,7 @@ CREATE TABLE IF NOT EXISTS deploy_stack_steps (
   error        TEXT NOT NULL DEFAULT '',
   outputs_json TEXT NOT NULL DEFAULT '{}',
   action_json  TEXT NOT NULL DEFAULT '',
+  log_json     TEXT NOT NULL DEFAULT '[]',
   started_at   INTEGER NOT NULL DEFAULT 0,
   finished_at  INTEGER NOT NULL DEFAULT 0,
   PRIMARY KEY (project_id, step_id)

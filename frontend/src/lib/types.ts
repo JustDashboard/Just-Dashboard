@@ -3872,6 +3872,8 @@ export type SmartStackStep = {
   message?: string
   /** The last error, redacted by the server. */
   error?: string
+  /** What the step said in its last pass (a tool's report), redacted as the error is. */
+  log?: string[]
   startedAt?: string
   finishedAt?: string
 }

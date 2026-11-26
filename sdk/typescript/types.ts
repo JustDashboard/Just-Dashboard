@@ -5056,6 +5056,7 @@ export interface StackStepState {
   error?: string
   finishedAt?: string | null
   id?: string
+  log?: string[] | null
   message?: string
   service?: string
   stage?: Stage

@@ -57,9 +57,11 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 					fixture.mu.Lock()
 					fixture.passes++
 					fixture.mu.Unlock()
-					if _, err := env.Credential(ctx, "a-admin"); err != nil {
+					password, err := env.Credential(ctx, "a-admin")
+					if err != nil {
 						return stacks.Result{}, err
 					}
+					env.Logf("A signs in with %s", password)
 					return stacks.Result{Message: "A is set up", Outputs: map[string]string{"quality": env.Option("quality")}}, nil
 				}},
 			{ID: "b.link", Service: "b", Title: "Link B", Stage: stacks.StageLink, After: []string{"a.setup"}, Timeout: time.Second, Attempts: 1,
@@ -139,6 +141,9 @@ func TestServiceConfiguresEachLiveReleaseOnceAndAgainOnRequest(t *testing.T) {
 	if steps["a.setup"].Status != stacks.StepDone || steps["a.setup"].Outputs["quality"] != "2160p" ||
 		steps["b.link"].Status != stacks.StepSkipped || steps["b.link"].Message != stacks.AbsentMessage {
 		t.Fatalf("steps = %+v", steps)
+	}
+	if logged := steps["a.setup"].Log; len(logged) != 1 || logged[0] != "A signs in with ••••••" {
+		t.Fatalf("the step's log, read back = %q", logged)
 	}
 	stored, _ := f.store.StoredCredentials(ctx, f.project)
 	if !stored["a-admin"] {

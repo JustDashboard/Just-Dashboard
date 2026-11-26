@@ -5050,6 +5050,7 @@ type StackStepState struct {
 	Error      string     `json:"error,omitempty"`
 	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 	ID         string     `json:"id,omitempty"`
+	Log        []string   `json:"log"`
 	Message    string     `json:"message,omitempty"`
 	Service    string     `json:"service,omitempty"`
 	Stage      Stage      `json:"stage,omitempty"`

@@ -45,7 +45,9 @@ type DockerEnv struct {
 	Lengths map[string]int
 	// Outputs are what earlier steps reported, by step then key.
 	Outputs map[string]map[string]string
-	// Log receives each Logf line; the runner adds it to the step's record.
+	// Log receives each Logf line of a step run on this env directly, as the
+	// live tests do. Under the runner a step's lines go to its own record
+	// instead (stepEnv), so this is unset there.
 	Log func(line string)
 
 	clientOnce sync.Once

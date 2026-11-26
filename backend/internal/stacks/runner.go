@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"time"
 )
@@ -71,7 +72,14 @@ func (r *Runner) Run(ctx context.Context, manifest *Manifest, env RunnerEnv, rec
 		change(current)
 		current.Message = env.Redact(current.Message)
 		current.Error = env.Redact(current.Error)
+		// Every line again: a secret an application handed back is known to
+		// the env only from when the step stored it, which may be after a
+		// line that held it.
+		for index, line := range current.Log {
+			current.Log[index] = env.Redact(line)
+		}
 		copy := *current
+		copy.Log = slices.Clone(current.Log)
 		mu.Unlock()
 		record(copy)
 	}
@@ -206,6 +214,16 @@ func ready(step Step, status map[string]StepStatus, absent map[string]bool) bool
 func (r *Runner) attempt(ctx context.Context, step Step, env RunnerEnv, save func(string, func(*StepRecord))) StepStatus {
 	started := r.Now().UTC()
 	lastError := ""
+	// The step's Logf goes to its own record, through save's redaction: the
+	// env is shared by the steps running at once, so it cannot say whose a
+	// line is.
+	// Masked before it is cut to length, so a cut cannot leave part of a
+	// secret that the mask would no longer match.
+	pass := env
+	env = &stepEnv{RunnerEnv: pass, logf: func(line string) {
+		line = pass.Redact(line)
+		save(step.ID, func(current *StepRecord) { current.Log = appendLogLine(current.Log, line) })
+	}}
 	for attempt := 1; attempt <= step.Attempts; attempt++ {
 		save(step.ID, func(current *StepRecord) {
 			current.Status, current.Attempts, current.StartedAt, current.FinishedAt = StepRunning, attempt, started, time.Time{}
@@ -253,6 +271,30 @@ func (r *Runner) attempt(ctx context.Context, step Step, env RunnerEnv, save fun
 		current.Status, current.Error, current.FinishedAt = StepFailed, lastError, r.Now().UTC()
 	})
 	return StepFailed
+}
+
+// stepEnv is the pass's environment as one step sees it: the same in every
+// way but where its log lines go.
+type stepEnv struct {
+	RunnerEnv
+	logf func(line string)
+}
+
+func (e *stepEnv) Logf(format string, args ...any) { e.logf(fmt.Sprintf(format, args...)) }
+
+// A step's log keeps its newest lines, each bounded: enough for a tool's
+// report (Recyclarr's sync summary), not a log of its own.
+const (
+	stepLogLines    = 50
+	stepLogLineSize = 500
+)
+
+func appendLogLine(lines []string, line string) []string {
+	lines = append(lines, truncate(line, stepLogLineSize))
+	if len(lines) > stepLogLines {
+		lines = slices.Clone(lines[len(lines)-stepLogLines:])
+	}
+	return lines
 }
 
 // runOnce bounds one attempt and turns a panic in an adapter into a failure

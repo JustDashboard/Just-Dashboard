@@ -129,16 +129,19 @@ type stackContainerState struct {
 }
 
 type stackStepState struct {
-	ID         string            `json:"id"`
-	Service    string            `json:"service"`
-	Title      string            `json:"title"`
-	Stage      stacks.Stage      `json:"stage"`
-	Status     stacks.StepStatus `json:"status"`
-	Attempts   int               `json:"attempts"`
-	Message    string            `json:"message,omitempty"`
-	Error      string            `json:"error,omitempty"`
-	StartedAt  *time.Time        `json:"startedAt,omitempty"`
-	FinishedAt *time.Time        `json:"finishedAt,omitempty"`
+	ID       string            `json:"id"`
+	Service  string            `json:"service"`
+	Title    string            `json:"title"`
+	Stage    stacks.Stage      `json:"stage"`
+	Status   stacks.StepStatus `json:"status"`
+	Attempts int               `json:"attempts"`
+	Message  string            `json:"message,omitempty"`
+	Error    string            `json:"error,omitempty"`
+	// Log is what the step said in its last pass (a tool's report), masked
+	// as the message and error are.
+	Log        []string   `json:"log,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
 }
 
 type stackCredentialListing struct {
@@ -275,7 +278,7 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		byService[step.Service] = append(byService[step.Service], current.Status)
 		state.Steps = append(state.Steps, stackStepState{
 			ID: step.ID, Service: step.Service, Title: step.Title, Stage: step.Stage, Status: current.Status,
-			Attempts: current.Attempts, Message: current.Message, Error: current.Error,
+			Attempts: current.Attempts, Message: current.Message, Error: current.Error, Log: current.Log,
 			StartedAt: timePointer(current.StartedAt), FinishedAt: timePointer(current.FinishedAt),
 		})
 		if current.Status == stacks.StepAction && current.Action != nil {
