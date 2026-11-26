@@ -217,7 +217,9 @@ each drain as the service it sends to (OpenTelemetry, Grafana, the webhook mark 
 formats not added as dashed rings an administrator presses), then one line per drain: the host and
 what it carries, a dot and a word (*Shipping*, *Failing 3m*, *Paused*, *Nothing sent*) and one figure
 (what waits, what was dropped, else what was shipped), the count on the head (*2 drains · 1 failing*).
-The destination's own words and the totals open from the state word. It adds or edits one in a side panel: format, endpoint, sealed
+The destination's own words and the totals open from the state word. A first read that fails is one
+settled failure: the list's `ErrorState` (*Could not read the log drains*, with Try again even for a
+plain network failure) and no picture waiting over it (`deploy-log-drains.spec.ts`). It adds or edits one in a side panel: format, endpoint, sealed
 headers, streams — container output, requests and, for an OpenTelemetry drain, traces with the link
 its service opens one at — and projects. A request opened in a project's Logs names its trace and
 links to it through the first drain that exports the project's traces with a link (`traceLinkFor`). `/deploy/secret-stores` (`components/deploy/secret-stores-page.tsx`, its
