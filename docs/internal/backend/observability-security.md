@@ -178,7 +178,11 @@ what each reads are tabled in
   mount points in the backend's namespace (Docker's own files, mounted over the copies `- /etc:/etc`
   gives it), and the kernel refuses to rename over them even by their `/host` paths. So these writes
   go through `hostexec.OnServerPath`, made in the server's mount namespace by their own paths; see
-  [runtime boundaries](../architecture/runtime-boundaries.md).
+  [runtime boundaries](../architecture/runtime-boundaries.md). The hosts file and cloud-init's
+  templates are read the same way, in the view they are written in. The backend takes itself to be
+  in that stack when anything is at `/host/etc/hosts`, a link whose absolute target names nothing
+  from the container included, the rule `internal/netx` uses for host records: a link resolves to
+  the server's own file only in the server's namespace.
 - **Reading the name.** The backend's container has a UTS namespace of its own, holding a copy of
   the host's name that Docker records when it creates the container, and a rename of the server
   never reaches a running container's copy. `hostexec.Hostname` reads the name in PID 1's namespace

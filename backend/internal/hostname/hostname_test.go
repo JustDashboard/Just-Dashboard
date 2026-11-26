@@ -367,7 +367,8 @@ func TestRenameWritesTheServersFilesByTheirOwnPaths(t *testing.T) {
 	if err != nil || len(result.Warnings) != 0 {
 		t.Fatalf("result = %+v, %v", result, err)
 	}
-	want := []string{"/etc/hostname", "/etc/hosts", "/etc/cloud/templates/hosts.debian.tmpl"}
+	// Each hosts file is read, then written, by the same path in the same view.
+	want := []string{"/etc/hostname", "/etc/hosts", "/etc/hosts", "/etc/cloud/templates/hosts.debian.tmpl", "/etc/cloud/templates/hosts.debian.tmpl"}
 	if strings.Join(handed, " ") != strings.Join(want, " ") {
 		t.Fatalf("handed over %v, want %v", handed, want)
 	}
@@ -380,7 +381,12 @@ func TestRenameWritesTheServersFilesByTheirOwnPaths(t *testing.T) {
 func TestRenameWarnsWhenTheServersHostsFileCannotBeWritten(t *testing.T) {
 	_, svc := newHost(t, "vps-1", "hostnamectl")
 	write(t, svc, "/etc/hosts", "127.0.0.1 localhost\n")
-	svc.onServer = func(real, _ string, _ func(string) error) error {
+	handed := 0
+	svc.onServer = func(real, mirrored string, fn func(string) error) error {
+		// The file is read first, in the same view; the write is what fails.
+		if handed++; handed == 1 {
+			return fn(mirrored)
+		}
 		return errors.New("rename " + real + ": device or resource busy")
 	}
 	result, err := svc.Rename(context.Background(), "atlas")
@@ -424,6 +430,85 @@ func TestRenameWarnsAboutAHostsFileItWillNotReplace(t *testing.T) {
 	}
 	if got := read(t, svc, "/etc/static-hosts"); got != "127.0.0.1 localhost\n" {
 		t.Fatalf("the link's target was written: %q", got)
+	}
+}
+
+// In the shipped container the server's root is mounted at /host, and its
+// /etc/hosts may be a link with an absolute target: from the container that
+// names another file or none, in the server's own namespace its real one. The
+// link still says the dashboard runs in the container, so a rename without
+// systemd writes the server's files, never Docker's copies, and reads the hosts
+// file in the view it would be written in.
+func TestRenameReachesTheServerWhereItsHostsLinkDiffersAcrossViews(t *testing.T) {
+	dir := t.TempDir()
+	mount := filepath.Join(dir, "host")     // the server's root, as the container mounts it
+	server := filepath.Join(dir, "server")  // the same root, as the server's programs see it
+	elsewhere := filepath.Join(dir, "none") // what the link's target names from the container
+	defer func(was string) { serverMount = was }(serverMount)
+	serverMount = mount
+	if svc := New(); svc.root != "" {
+		t.Fatalf("with no server mount the root is %q", svc.root)
+	}
+
+	const serverHosts = "127.0.0.1 localhost\n10.0.0.5 build.internal\n"
+	serverTarget := filepath.Join(server, "run", "hosts")
+	for _, d := range []string{filepath.Join(mount, "etc"), filepath.Join(server, "etc"), filepath.Dir(serverTarget)} {
+		if err := os.MkdirAll(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(serverTarget, []byte(serverHosts), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(server, "etc", "hostname"), []byte("vps-1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(filepath.Join(elsewhere, "hosts"), filepath.Join(mount, "etc", "hosts")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink(serverTarget, filepath.Join(server, "etc", "hosts")); err != nil {
+		t.Fatal(err)
+	}
+
+	svc := New()
+	if svc.root != mount {
+		t.Fatalf("a hosts link the container cannot follow left the root at %q", svc.root)
+	}
+	h, fake := newHost(t, "vps-1", "hostname")
+	svc.run, svc.has, svc.current = fake.run, fake.has, fake.current
+	// As hostexec.OnServerPath: a path that differs from its mirror is
+	// handed to the server's namespace, and one that does not stays here.
+	svc.onServer = func(real, mirrored string, fn func(string) error) error {
+		if real == mirrored {
+			t.Errorf("%s would be reached in the container's own view", real)
+			return errors.New("not the server's file")
+		}
+		return fn(filepath.Join(server, real))
+	}
+
+	result, err := svc.Rename(context.Background(), "atlas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if h.name != "atlas" {
+		t.Fatalf("kernel name is %q", h.name)
+	}
+	if b, err := os.ReadFile(filepath.Join(server, "etc", "hostname")); err != nil || string(b) != "atlas\n" {
+		t.Fatalf("the server boots as %q (%v)", b, err)
+	}
+	// The server's hosts link is its own arrangement: read where it resolves,
+	// left as it is, and named in what the rename could not do.
+	if len(result.Warnings) != 1 || !strings.Contains(result.Warnings[0], "/etc/hosts could not be updated") {
+		t.Fatalf("warnings = %q", result.Warnings)
+	}
+	if b, _ := os.ReadFile(serverTarget); string(b) != serverHosts {
+		t.Fatalf("the server's hosts file became %q", b)
+	}
+	if entries, _ := os.ReadDir(filepath.Join(mount, "etc")); len(entries) != 1 {
+		t.Fatalf("the container's view of the server was written: %v", entries)
+	}
+	if _, err := os.Lstat(elsewhere); !errors.Is(err, os.ErrNotExist) {
+		t.Fatalf("something was written where the link names from the container: %v", err)
 	}
 }
 

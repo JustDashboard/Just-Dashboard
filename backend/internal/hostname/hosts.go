@@ -32,8 +32,7 @@ const (
 // is what it could not do; the server is renamed either way.
 func (s *Service) recordInHosts(name string) []string {
 	var warnings []string
-	hosts := filepath.Join(s.root, "/etc/hosts")
-	data, err := os.ReadFile(hosts)
+	data, err := s.read("/etc/hosts")
 	if errors.Is(err, fs.ErrNotExist) {
 		return nil
 	}
@@ -48,15 +47,29 @@ func (s *Service) recordInHosts(name string) []string {
 	}
 	templates, _ := filepath.Glob(filepath.Join(s.root, "/etc/cloud/templates/hosts.*.tmpl"))
 	for _, template := range templates {
-		content, err := os.ReadFile(template)
+		path := strings.TrimPrefix(template, s.root)
+		content, err := s.read(path)
 		if err == nil {
-			err = s.rewrite(strings.TrimPrefix(template, s.root), content, name)
+			err = s.rewrite(path, content, name)
 		}
 		if err != nil {
 			warnings = append(warnings, fmt.Sprintf("cloud-init rewrites /etc/hosts when the server starts, and its template %s could not be updated: %v", filepath.Base(template), err))
 		}
 	}
 	return warnings
+}
+
+// read reads the server's file at path in the view a write of it uses
+// (onServerFile), so a link whose target differs between the container and
+// the server is read as the server's own programs read it.
+func (s *Service) read(path string) ([]byte, error) {
+	var data []byte
+	err := s.onServerFile(path, func(at string) error {
+		var err error
+		data, err = os.ReadFile(at)
+		return err
+	})
+	return data, err
 }
 
 // rewrite gives the server's file at path, which holds data, the name.
