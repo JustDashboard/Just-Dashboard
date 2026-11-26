@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"golang.org/x/crypto/bcrypt"
 	"gopkg.in/yaml.v3"
 )
@@ -171,7 +171,7 @@ func newProvisionFixture(t *testing.T, engine Engine) (*Service, *provisionFixtu
 		json.NewEncoder(w).Encode(value)
 	}))
 	t.Cleanup(server.Close)
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

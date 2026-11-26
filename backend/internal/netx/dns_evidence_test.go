@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func dnsEvidenceJSON(kind string, data ...any) string {
@@ -201,7 +202,7 @@ func TestDNSEvidenceMalformedNativeRecordRefused(t *testing.T) {
 	}
 }
 func TestDNSEvidenceRetentionInterruptedAndImmutableScope(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -279,7 +280,7 @@ func TestDNSEvidenceNativeVersionAndOtherOwnersRefuseWithoutQueries(t *testing.T
 }
 
 func TestDNSEvidenceConcurrentAdmissionAndBoundedRetention(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

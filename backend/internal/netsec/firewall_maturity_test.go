@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // fakeHost is a host with a chosen set of firewall tools: ufw with a listing
@@ -589,7 +589,7 @@ func (f *fakeOwned) Change(_ context.Context, c OwnedChange) error {
 }
 
 func TestRuleHistoryFollowsARuleThroughItsReplacements(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
