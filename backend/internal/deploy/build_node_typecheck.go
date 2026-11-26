@@ -29,6 +29,11 @@ import (
 // type error still fails the build, as `error TSnnnn` (build_type_error).
 //
 // Only where that is the same check next build would make:
+//   - a build command that is next build and nothing before it
+//     (nextBuildIsPlain): next build itself, or a package script that is,
+//     with no pre-script. A step before it (`generate-types && next build`,
+//     a prebuild hook) can write files the source imports, and the check,
+//     started from the source, would never see them;
 //   - a package that declares typescript and has a tsconfig.json;
 //   - Next.js 16.4 or later by its declared range, the release whose
 //     adapter hook this was checked against;
@@ -174,6 +179,41 @@ func nextAdapterRelease(spec string) bool {
 	major, _ := strconv.Atoi(match[1])
 	minor, _ := strconv.Atoi(match[2])
 	return major > 16 || (major == 16 && minor >= 4)
+}
+
+// nextBuildCommandRE is a command that is next build itself: values for its
+// environment, next build's bin or a runner's exec of it, and options only.
+// An argument that is no option (a directory) builds somewhere else.
+var nextBuildCommandRE = regexp.MustCompile(`^(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"$` + "`" + `\\]*"|[^\s'"$` + "`" + `\\;&|<>()]*)\s+)*` +
+	`(?:npx\s+|bunx\s+|bun\s+x\s+|pnpm\s+exec\s+|yarn\s+exec\s+|npm\s+exec\s+(?:--\s+)?)?` +
+	`next\s+build(?:\s+-[-A-Za-z0-9]+(?:=[^\s'"$` + "`" + `\\;&|<>()]*)?)*$`)
+
+// nextBuildScriptRE is a command that runs one of the package's scripts by
+// name, with nothing after it.
+var nextBuildScriptRE = regexp.MustCompile(`^(?:npm\s+run(?:-script)?|pnpm(?:\s+run)?|yarn(?:\s+run)?|bun(?:\s+--bun)?\s+run(?:\s+--bun)?)\s+([A-Za-z0-9:_.-]+)$`)
+
+// nextBuildIsPlain reports whether a build command runs next build and
+// nothing before it: next build itself, or a script of the package's that
+// is, followed a few scripts deep. A script with a pre-script is not, since
+// npm, Yarn 1 and Bun run it first. Anything else (`generate-types && next
+// build`, a monorepo's task runner) is not either, whatever it runs.
+func nextBuildIsPlain(scripts map[string]string, command string) bool {
+	command = strings.TrimSpace(command)
+	for range 4 {
+		if nextBuildCommandRE.MatchString(command) {
+			return true
+		}
+		match := nextBuildScriptRE.FindStringSubmatch(command)
+		if match == nil {
+			return false
+		}
+		script, ok := scripts[match[1]]
+		if _, pre := scripts["pre"+match[1]]; !ok || pre {
+			return false
+		}
+		command = strings.TrimSpace(script)
+	}
+	return false
 }
 
 // buildValueNamed reports whether a build has a value of that name.

@@ -1410,7 +1410,13 @@ and the build command's RUN names it in `NEXT_ADAPTER_PATH`, which Next.js 16.4 
 its `modifyConfig` sets `typescript.ignoreBuildErrors` and nothing else. The server image copies the
 empty file `/tmp/jd-typecheck-passed` from the `typecheck` stage, so the image waits for the check, and a
 type error still fails the build as `error TSnnnn` (`build_type_error`). It applies only where it is the
-check `next build` would make: a package that declares `typescript` and has a `tsconfig.json`, `next`
+check `next build` would make: a build command that is `next build` and nothing before it
+(`nextBuildIsPlain`) — `next build` itself, with options and values for its environment, through its
+bin or a runner's exec, or a package script that is, followed a few scripts deep, with no `pre` script
+of its own, which npm, Yarn 1 and Bun run first — since the stage starts from the source and never runs
+what comes before `next build` (`generate-types && next build`, a `prebuild` hook, a task runner), so a
+page importing a file that writes would fail the check with TS2307 where the build passes; a package that
+declares `typescript` and has a `tsconfig.json`, `next`
 declared at 16.4 or later, a `next.config` that names none of `ignoreBuildErrors`, `tsconfigPath` or
 `adapterPath`, no build value named `NEXT_ADAPTER_PATH`, a server rather than a static export, and a
 server with four cores and 6 GiB (`hostTypeCheckBeside`), since the check and the compile then peak

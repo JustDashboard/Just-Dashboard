@@ -154,6 +154,97 @@ func TestNextBuildKeepsItsOwnTypeCheck(t *testing.T) {
 	}
 }
 
+// typeCheckScripts is typeCheckApp's package.json with these scripts.
+func typeCheckScripts(scripts string) string {
+	return `{"name":"web","version":"0.1.0","scripts":` + scripts + `,"dependencies":{"next":"16.4.6"},"devDependencies":{"typescript":"^5"}}`
+}
+
+// A repository that generates the types its pages import before it
+// compiles — in the build script, in a prebuild hook, or in the build
+// command — keeps next build's own check: the check beside the build starts
+// from the source, which has no generated file, and would fail with TS2307
+// where next build passes.
+func TestABuildThatGeneratesTypesFirstKeepsNextBuildsCheck(t *testing.T) {
+	t.Parallel()
+	generated := map[string]string{
+		"scripts/generate-types.mjs": "import { writeFileSync } from 'node:fs'\nwriteFileSync('generated/types.ts', 'export type Post = { slug: string }\\n')\n",
+		"app/page.tsx":               "import type { Post } from '../generated/types'\nexport default function Page() { const post: Post = { slug: 'a' }; return post.slug }\n",
+	}
+	for _, test := range []struct {
+		name    string
+		scripts string
+		command string
+	}{
+		{name: "the build script generates first", scripts: `{"generate-types":"node scripts/generate-types.mjs","build":"bun run generate-types && next build","start":"next start"}`},
+		{name: "a prebuild hook generates first", scripts: `{"prebuild":"node scripts/generate-types.mjs","build":"next build","start":"next start"}`},
+		{name: "a script it runs has a pre-script", scripts: `{"prebuild:next":"node scripts/generate-types.mjs","build":"bun run build:next","build:next":"next build","start":"next start"}`},
+		{name: "the build command generates first", scripts: `{"build":"next build","start":"next start"}`, command: "node scripts/generate-types.mjs && bun run build"},
+		{name: "the build runs through a task runner", scripts: `{"build":"turbo run build","start":"next start"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			extra := map[string]string{"package.json": typeCheckScripts(test.scripts)}
+			for name, content := range generated {
+				extra[name] = content
+			}
+			dockerfile := prepareTypeCheckApp(t, typeCheckApp(t, "16.4.6", extra), true, BuildPlanConfig{BuildCommand: test.command})
+			assertDockerfile(t, dockerfile, nil, []string{"typecheck", "next typegen", "next-adapter.mjs", "ignoreBuildErrors"})
+		})
+	}
+}
+
+// A build that is next build and nothing before it keeps the check beside
+// it, through whichever runner and script names it.
+func TestAPlainNextBuildTypeChecksBesideIt(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		scripts string
+		command string
+	}{
+		{name: "next build through a script", scripts: `{"build":"next build","start":"next start","postbuild":"next-sitemap"}`},
+		{name: "options and a value for its environment", scripts: `{"build":"NODE_OPTIONS='--max-old-space-size=4096' next build --turbopack","start":"next start"}`},
+		{name: "a script that runs another", scripts: `{"build":"bun run build:next","build:next":"next build","start":"next start"}`},
+		{name: "next build as the command", scripts: `{"build":"bun run generate && next build","start":"next start"}`, command: "bunx next build"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dockerfile := prepareTypeCheckApp(t, typeCheckApp(t, "16.4.6", map[string]string{"package.json": typeCheckScripts(test.scripts)}), true,
+				BuildPlanConfig{BuildCommand: test.command})
+			assertDockerfile(t, dockerfile, []string{"FROM source AS typecheck\n", "next typegen", "next-adapter.mjs"}, nil)
+		})
+	}
+}
+
+func TestNextBuildIsPlainOnlyWhenNothingRunsBeforeIt(t *testing.T) {
+	t.Parallel()
+	scripts := map[string]string{
+		"build": "next build", "build:turbo": "next build --turbopack", "build:gen": "prisma generate && next build",
+		"prebuild:hooked": "node gen.mjs", "build:hooked": "next build", "build:chain": "npm run build:turbo",
+		"loop": "npm run loop", "build:dir": "next build apps/web", "build:env": `NEXT_TELEMETRY_DISABLED=1 ANALYZE="" next build`,
+		"build:subst": "NODE_OPTIONS=$(node opts.js) next build",
+	}
+	for command, want := range map[string]bool{
+		"next build": true, "next build --turbopack --debug": true, "npx next build": true, "bunx next build": true,
+		"bun x next build": true, "pnpm exec next build": true, "yarn exec next build": true, "npm exec -- next build": true,
+		"npm run build": true, "npm run-script build": true, "pnpm build": true, "pnpm run build": true, "yarn build": true,
+		"yarn run build": true, "bun run build": true, "bun --bun run build": true, "bun run --bun build": true,
+		"bun run build:chain": true, "bun run build:env": true,
+		"": false, "bun run build:gen": false, "bun run build:hooked": false, "bun run loop": false, "bun run missing": false,
+		"bun run build:dir": false, "bun run build:subst": false, "bun build": false, "next build; rm -rf /": false,
+		"next build && next export": false, "bun run build -- --turbopack": false, "next dev": false,
+		"NODE_OPTIONS=`id` next build": false,
+	} {
+		if got := nextBuildIsPlain(scripts, command); got != want {
+			t.Errorf("nextBuildIsPlain(%q) = %v, want %v", command, got, want)
+		}
+	}
+	// A prebuild hook makes bun run build run it first.
+	if nextBuildIsPlain(map[string]string{"prebuild": "node gen.mjs", "build": "next build"}, "bun run build") {
+		t.Error("a prebuild hook was left out")
+	}
+}
+
 func TestNextAdapterReleaseReadsWhereARangeStarts(t *testing.T) {
 	t.Parallel()
 	for spec, want := range map[string]bool{
