@@ -500,6 +500,7 @@ function Palette({
         product: entry.product ?? resource?.product ?? (owner && PAGE_PRODUCTS[owner.href]),
         projectId: entry.projectId ?? resource?.projectId,
         state: resource?.state,
+        tone: resource?.tone,
         facts: resource?.facts,
         links: resource?.links,
         previous: i === 0,

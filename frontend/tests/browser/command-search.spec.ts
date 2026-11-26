@@ -112,7 +112,7 @@ test("all live inventories are scoped and duplicate PM2 names keep their daemon 
   await expect(selected(page)).toContainText("deploy")
   await input(page).press("ArrowDown")
   await expect(selected(page)).toContainText("ubuntu")
-  await expect(selected(page)).toHaveAttribute("data-value", "app:ubuntu:0")
+  await expect(selected(page)).toHaveAttribute("data-value", "app:ubuntu/shop-worker")
   await scope(page, "Databases").click()
   await expect(input(page)).toBeFocused()
   await expect(input(page)).toHaveValue("database: shop-worker")

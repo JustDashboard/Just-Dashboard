@@ -212,3 +212,58 @@ test("resources name what they are wired to by exact values and say the rest as 
     fetch.mockRestore()
   }
 })
+
+test("a PM2 cluster is one result for its one page, and two accounts' apps of one name stay apart", async () => {
+  const worker = (id, daemonId, status, restarts) => ({
+    id,
+    daemonId,
+    user: daemonId,
+    name: "shop",
+    namespace: "default",
+    execMode: "cluster_mode",
+    status,
+    pid: status === "online" ? 100 + id : 0,
+    restarts,
+    unstableRestarts: 0,
+  })
+  const fixtures = {
+    "/pm2/": {
+      available: true,
+      processes: [
+        worker(0, "deploy", "online", 1),
+        worker(1, "deploy", "online", 0),
+        worker(2, "deploy", "errored", 4),
+        { ...worker(0, "ubuntu", "stopped", 0), execMode: "fork_mode" },
+      ],
+    },
+  }
+  const fetch = spyOn(globalThis, "fetch").mockImplementation((url) => {
+    const path = String(url)
+      .replace(/^\/api\/v1/, "")
+      .split("?")[0]
+    return Promise.resolve(
+      new Response(JSON.stringify(fixtures[path]), {
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+  })
+  try {
+    const source = INVENTORY_SOURCES.find((s) => s.kind === "app")
+    const items = await source.read(new AbortController().signal)
+    expect(items.map((item) => item.id)).toEqual(["app:deploy/shop", "app:ubuntu/shop"])
+    expect(new Set(items.map((item) => item.href)).size).toBe(items.length)
+    const [cluster, fork] = items
+    expect(cluster.href).toBe("/processes/pm2/shop?account=deploy")
+    expect(cluster.state).toBe("2 of 3 online")
+    expect(cluster.tone).toBe("warning")
+    const facts = Object.fromEntries(cluster.facts.map((f) => [f.label, f.value]))
+    expect(facts.Mode).toBe("cluster of 3")
+    expect(facts.Restarts).toBe("5")
+    expect(cluster.keywords).toEqual(["deploy", "0", "1", "2", "errored"])
+    expect(fork.href).toBe("/processes/pm2/shop?account=ubuntu")
+    expect(fork.state).toBe("stopped")
+    expect(fork.tone).toBeUndefined()
+  } finally {
+    fetch.mockRestore()
+  }
+})
