@@ -80,6 +80,12 @@ type Running = {
   session?: string
   paused?: boolean
   cancelled?: boolean
+  /**
+   * How many times it was paused. A worker stops for good once this moves on
+   * from the count it started with, so Resume pressed while that worker still
+   * waits on a request cannot wake it again beside the new one.
+   */
+  pauses?: number
   wake?: () => void
   /** For the time left: the last progress reading and the rate measured from it. */
   mark?: { at: number; sent: number }
@@ -176,7 +182,8 @@ export function useUploads(onSettled: (dir: string) => void) {
     async (id: string, run: Running) => {
       const { job } = run
       const size = job.file.size
-      const stopped = () => run.paused || run.cancelled
+      const pauses = run.pauses ?? 0
+      const stopped = () => run.paused || run.cancelled || (run.pauses ?? 0) !== pauses
       let failures = 0
       /** After a failure: true to try again (having waited), false to give up. */
       const recover = async (err: unknown, at: number): Promise<boolean> => {
@@ -211,6 +218,8 @@ export function useUploads(onSettled: (dir: string) => void) {
       // The server already held this one: the reloaded page's row for it is
       // this row now.
       setItems((prev) => prev.filter((item) => item.id !== `server:${session.id}`))
+      // Paused while the server was answering: the row says so and stays so.
+      if (stopped()) return
       let offset = session.next
       update(id, { status: "uploading", sent: offset, retryAt: undefined })
 
@@ -240,6 +249,7 @@ export function useUploads(onSettled: (dir: string) => void) {
               return
             }
           }
+          if (stopped()) return
           update(id, { status: "uploading", sent: offset, retryAt: undefined })
         }
       }
@@ -266,19 +276,29 @@ export function useUploads(onSettled: (dir: string) => void) {
   )
 
   const pump = useCallback(() => {
+    // Resumed before its paused worker has exited (still waiting on a
+    // request): it keeps its place at the front, and that worker's exit pumps
+    // again. Two workers on one upload would both send its pieces.
+    const waiting: string[] = []
     while (active.current.size < PARALLEL && queue.current.length > 0) {
       const id = queue.current.shift()!
       const run = jobs.current.get(id)
       if (!run || run.cancelled || run.paused) continue
+      if (active.current.has(id)) {
+        waiting.push(id)
+        continue
+      }
       active.current.add(id)
+      const pauses = run.pauses ?? 0
       const pieces = run.job.file.size > SINGLE_MAX
       update(id, { status: "uploading" })
       void (pieces ? runPieces(id, run) : runSingle(id, run)).finally(() => {
         active.current.delete(id)
-        if (!run.paused) settled.current(run.job.dir)
+        if (!run.paused && (run.pauses ?? 0) === pauses) settled.current(run.job.dir)
         pumpRef.current()
       })
     }
+    queue.current.unshift(...waiting)
   }, [runPieces, runSingle, update])
 
   useEffect(() => {
@@ -342,6 +362,7 @@ export function useUploads(onSettled: (dir: string) => void) {
     const run = jobs.current.get(id)
     if (!run || run.job.file.size <= SINGLE_MAX) return
     run.paused = true
+    run.pauses = (run.pauses ?? 0) + 1
     run.xhr?.abort()
     run.wake?.()
     queue.current = queue.current.filter((queued) => queued !== id)

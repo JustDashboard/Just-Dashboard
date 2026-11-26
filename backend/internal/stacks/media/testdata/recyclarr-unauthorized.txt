@@ -1,0 +1,4 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[INF] just-dashboard-movies: Processing Radarr server just-dashboard-movies
+[ERR] just-dashboard-movies: HTTP 401: Unauthorized - check your api_key

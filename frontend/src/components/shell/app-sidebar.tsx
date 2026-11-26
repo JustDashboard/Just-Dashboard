@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type CSSProperties } from "react"
+import { useEffect, useState, type CSSProperties } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import {
@@ -14,6 +14,7 @@ import {
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
+import { useProxyStatusRead } from "@/components/proxy/proxy-context"
 import { sectionOf, type SectionKey } from "@/lib/sidebar-sections"
 import { useAuth } from "@/hooks/use-auth"
 import { useHiddenSections } from "@/hooks/use-hidden-sections"
@@ -178,7 +179,7 @@ function projectPlaceholder(id: number): Panel {
     named: true,
     groups: [
       {
-        items: PROJECT_NAV.filter((entry) => !entry.game).map((entry) => ({
+        items: PROJECT_NAV.filter((entry) => !entry.game && !entry.stack).map((entry) => ({
           title: entry.title,
           href: `${base}${entry.path}`,
           icon: entry.icon,
@@ -293,6 +294,21 @@ export function AppSidebar() {
     group.items.flatMap((item) => (item.href === undefined ? [] : [item.href])),
   )
 
+  // Whether this server has nginx is asked only while the panel on show holds
+  // a page that reads it (Proxy & TLS's Streams and Configuration), and the
+  // answer is the one the section's layout and the palette share. The last
+  // answer is kept for the tab, so a reload inside the section draws the list
+  // it will settle on rather than two rows that leave a moment later.
+  const asksNginx = panel.groups.some((group) =>
+    group.items.some((item) => "needs" in item && item.needs === "nginx"),
+  )
+  const nginx = useProxyStatusRead(0, asksNginx && can("read")).data?.value.nginx
+  const [lastNginx, setLastNginx] = useSessionState<boolean | null>("shell.proxy.nginx", null)
+  useEffect(() => {
+    if (nginx !== undefined && nginx !== lastNginx) setLastNginx(nginx)
+  }, [nginx, lastNginx, setLastNginx])
+  const noNginx = asksNginx && (nginx ?? lastNginx) === false
+
   // Pressing the section you stepped out of means "put it back", not "throw
   // away the page I was on and open the section's front door". Any other
   // section's row is a link and goes to its landing page; a group has none,
@@ -393,6 +409,7 @@ export function AppSidebar() {
                 pathname,
                 can,
                 Boolean(hub),
+                !noNginx,
               ),
             )
             if (items.length === 0) return null

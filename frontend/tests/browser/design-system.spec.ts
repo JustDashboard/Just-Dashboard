@@ -2,6 +2,7 @@ import { expect, test, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { answerSystemUsers, mockSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
+import { mockStackProject, stackState } from "./deploy-stack-fixture"
 import { risen } from "./risen"
 import { SHIFT_BUDGET, watchShifts } from "./layout-shift"
 import { mockWorkbench } from "./workbench-fixture"
@@ -562,6 +563,9 @@ const ITEM_SURFACES: [path: string, mock: (page: Page) => Promise<unknown>][] = 
   ["/databases/1/performance/sessions/52", (page) => mockDatabases(page, LABELLED)],
   ["/github/northwind/api?account=1", (page) => mockGitHubRepo(page)],
   ["/github", (page) => mockGitHubPage(page)],
+  // A stack project's page, with something for the person to do on it, so
+  // its notices, its service cards and its accounts are all drawn.
+  ["/deploy/7/stack", (page) => mockStackProject(page, { state: stackState("action_required") })],
 ]
 
 for (const [label, viewport] of [

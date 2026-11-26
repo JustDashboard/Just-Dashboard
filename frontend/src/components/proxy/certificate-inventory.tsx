@@ -1,15 +1,20 @@
 "use client"
 
 import { forwardRef } from "react"
+import Link from "next/link"
 import { ShieldCheck } from "@/components/icons"
 import {
   CERT_SORTS,
+  certInState,
   certMatches,
   certSource,
+  certUnused,
+  certificateUsers,
   type CertSort,
   type CertSource,
+  type CertStateFilter,
 } from "@/lib/certificates"
-import { calendarDate, plural } from "@/lib/format"
+import { calendarDate } from "@/lib/format"
 import type { Certificate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { useSessionState } from "@/lib/view-state"
@@ -50,16 +55,41 @@ export function originWord(cert: Certificate): string {
   return SOURCE_LABELS[certSource(cert)]
 }
 
-/** Who names it: the one site or stream, or how many of each. */
-export function usedByWord(cert: Certificate): string {
-  const sites = cert.usedBy.length
-  const streams = cert.usedByStreams?.length ?? 0
-  if (sites + streams === 0) return "used by nothing"
-  if (sites === 1 && streams === 0) return cert.usedBy[0]
-  if (sites === 0 && streams === 1) return `stream ${cert.usedByStreams?.[0]}`
-  return [sites > 0 && plural(sites, "site"), streams > 0 && plural(streams, "stream")]
-    .filter(Boolean)
-    .join(", ")
+/**
+ * Who serves it, in words: the project a deployment's route belongs to, a
+ * site's or a stream's name, with how many more after the first, and "Unused"
+ * for one nothing serves. The first is a link to it.
+ *
+ * It said the route's file name ("just-dashboard-env-12.conf"), which names
+ * nothing the operator knows, and "used by nothing" in the same grey as a
+ * site's name; and the list hid it below `xl`, where most laptops are.
+ */
+export function UsedBy({ cert, className }: { cert: Certificate; className?: string }) {
+  const users = certificateUsers(cert)
+  if (cert.error) return <span className={className}>—</span>
+  if (certUnused(cert)) {
+    return (
+      <span className={className} data-slot="cert-unused">
+        <Status tone="stopped" label="Unused" />
+      </span>
+    )
+  }
+  const [first, ...rest] = users
+  return (
+    <span
+      className={cn("flex min-w-0 items-center gap-1", className)}
+      title={users.map((user) => user.label).join(", ")}
+      data-slot="cert-used-by"
+    >
+      <Link
+        href={first.href}
+        className="min-w-0 truncate rounded-sm focus-ring hover:text-foreground hover:underline"
+      >
+        {first.label}
+      </Link>
+      {rest.length > 0 && <span className="numeric shrink-0">+{rest.length}</span>}
+    </span>
+  )
 }
 
 /**
@@ -73,14 +103,18 @@ export function useCertificateFilters() {
     "proxy.certificates.source",
     "all",
   )
+  const [state, setState] = useSessionState<CertStateFilter>("proxy.certificates.state", "all")
   const [sort, setSort] = useSessionState<CertSort>("proxy.certificates.sort", "urgency")
   const apply = (certs: Certificate[]) =>
     certs
       .filter(
-        (cert) => (source === "all" || certSource(cert) === source) && certMatches(cert, query),
+        (cert) =>
+          (source === "all" || certSource(cert) === source) &&
+          certInState(cert, state) &&
+          certMatches(cert, query),
       )
       .sort(CERT_SORTS[sort])
-  return { query, setQuery, source, setSource, sort, setSort, apply }
+  return { query, setQuery, source, setSource, state, setState, sort, setSort, apply }
 }
 
 /** The search box over the list, which `/` puts the cursor in (the section's own key). */
@@ -109,21 +143,46 @@ export const CERT_SORT_CHOICES: { value: CertSort; label: string }[] = [
   { value: "name", label: "By name" },
 ]
 
+const STATE_LABELS: Record<Exclude<CertStateFilter, "all">, string> = {
+  unused: "Unused",
+  expired: "Expired",
+}
+
+/**
+ * The chips over the list: where a certificate came from, and the two states
+ * a list is cleaned up by — what nothing serves, and what has run out. A
+ * state's chip is drawn only where a certificate is in it.
+ */
 export function SourceChips({
   certs,
   source,
   onSource,
+  state,
+  onState,
 }: {
   certs: Certificate[]
   source: "all" | CertSource
   onSource: (source: "all" | CertSource) => void
+  state: CertStateFilter
+  onState: (state: CertStateFilter) => void
 }) {
   const sources = (Object.keys(SOURCE_LABELS) as CertSource[])
     .map((key) => ({ key, count: certs.filter((cert) => certSource(cert) === key).length }))
     .filter((s) => s.count > 0)
+  const states = (Object.keys(STATE_LABELS) as Exclude<CertStateFilter, "all">[])
+    .map((key) => ({ key, count: certs.filter((cert) => certInState(cert, key)).length }))
+    // The chosen one stays while it is chosen, so a list emptied by a
+    // cleanup still shows what it is narrowed to and how to undo it.
+    .filter((s) => s.count > 0 || s.key === state)
   return (
     <ChipStrip aria-label="Source">
-      <FilterChip selected={source === "all"} onClick={() => onSource("all")}>
+      <FilterChip
+        selected={source === "all" && state === "all"}
+        onClick={() => {
+          onSource("all")
+          onState("all")
+        }}
+      >
         All <ChipCount>{certs.length}</ChipCount>
       </FilterChip>
       {sources.length > 1 &&
@@ -136,6 +195,15 @@ export function SourceChips({
             {SOURCE_LABELS[s.key]} <ChipCount>{s.count}</ChipCount>
           </FilterChip>
         ))}
+      {states.map((s) => (
+        <FilterChip
+          key={s.key}
+          selected={state === s.key}
+          onClick={() => onState(state === s.key ? "all" : s.key)}
+        >
+          {STATE_LABELS[s.key]} <ChipCount>{s.count}</ChipCount>
+        </FilterChip>
+      ))}
     </ChipStrip>
   )
 }
@@ -169,7 +237,7 @@ export function CertificateInventory({
   replacing: (cert: Certificate) => boolean
   searchRef?: React.Ref<HTMLInputElement>
 }) {
-  const { query, setQuery, source, setSource, sort, setSort, apply } = filters
+  const { query, setQuery, source, setSource, state, setState, sort, setSort, apply } = filters
   const ordered = apply(certs)
 
   return (
@@ -192,7 +260,15 @@ export function CertificateInventory({
             </SelectContent>
           </Select>
         }
-        chips={<SourceChips certs={certs} source={source} onSource={setSource} />}
+        chips={
+          <SourceChips
+            certs={certs}
+            source={source}
+            onSource={setSource}
+            state={state}
+            onState={setState}
+          />
+        }
       />
       {ordered.length === 0 ? (
         <EmptyState icon={ShieldCheck} title="No certificates match" />
@@ -243,16 +319,13 @@ function CertificateRow({
       trailing={
         // Fixed widths, so each reading starts on the same edge in every row.
         <span className="flex shrink-0 items-center gap-4 text-hint text-muted-foreground">
-          <span className="w-20 truncate max-md:hidden" data-slot="cert-origin">
+          <span className="w-20 truncate max-lg:hidden" data-slot="cert-origin">
             {originWord(cert)}
           </span>
-          <span
-            className="w-40 truncate max-xl:hidden"
-            title={[...cert.usedBy, ...(cert.usedByStreams ?? [])].join(", ") || undefined}
-          >
-            {usedByWord(cert)}
-          </span>
-          <span className="numeric w-24 max-lg:hidden">
+          {/* Who serves it stays from a tablet up, and the date is what
+              gives way on a laptop: the status beside it says how long. */}
+          <UsedBy cert={cert} className="w-40 max-md:hidden" />
+          <span className="numeric w-24 max-xl:hidden">
             {cert.error || !cert.notAfter ? "—" : calendarDate(cert.notAfter)}
           </span>
           <span className="flex w-28 justify-end text-body max-sm:w-auto">

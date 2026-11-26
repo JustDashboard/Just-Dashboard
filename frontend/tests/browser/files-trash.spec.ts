@@ -200,7 +200,9 @@ async function mockServer(
       if (index >= 0) trash.splice(index, 1)
       return route.fulfill({ status: 204 })
     }
-    if (path === "/files/move" || path === "/files/copy") return route.fulfill({ status: 204 })
+    // Each move or copy names what landed, as the server does, for its undo.
+    if (path === "/files/move" || path === "/files/copy")
+      return json(route, { identity: `entry-${calls.length}` })
     if (path === "/files/find")
       return json(route, {
         root: url.searchParams.get("path"),
@@ -304,16 +306,120 @@ test("Ctrl+Z undoes the last file operation, then the one before", async ({ page
   await page.keyboard.press("Control+z")
   release()
   await expect.poll(() => calls.filter((c) => c.path === "/files/delete").length).toBe(1)
-  expect(calls.find((c) => c.path === "/files/delete")!.query.get("path")).toMatch(/report/)
+  const trashed = calls.find((c) => c.path === "/files/delete")!
+  expect(trashed.query.get("path")).toMatch(/report/)
+  // Each undo names the entry its operation left, so a queued one cannot
+  // reach something that took the name while it waited.
+  const copied = calls.findIndex((c) => c.path === "/files/copy")
+  expect(trashed.query.get("expect")).toBe(`entry-${copied + 1}`)
   await expect.poll(() => calls.filter((c) => c.path === "/files/move").length).toBe(2)
+  const renamed = calls.findIndex((c) => c.path === "/files/move")
   expect(calls.filter((c) => c.path === "/files/move")[1].body).toEqual({
     from: `${home}/ideas.md`,
     to: `${home}/notes.md`,
+    expect: `entry-${renamed + 1}`,
   })
   // One after the other, in the order asked for: the rename is undone only
   // once the duplicate is gone.
   const order = calls.map((c) => c.path).filter((p) => p === "/files/delete" || p === "/files/move")
   expect(order).toEqual(["/files/move", "/files/delete", "/files/move"])
+})
+
+test("a rename is still undone after the renamed file was saved in the editor", async ({
+  page,
+}) => {
+  const { calls } = await mockServer(page)
+  // The listing follows the rename, and the editor reads and saves the file.
+  let names = ["notes.md", "report.csv"]
+  await page.route("**/api/v1/files/list**", (route) =>
+    json(route, {
+      path: home,
+      parent: "/home",
+      roots: ["/"],
+      entries: names.map((name) => entry(name)),
+    }),
+  )
+  await page.route("**/api/v1/files/read**", (route) =>
+    json(route, {
+      path: new URL(route.request().url()).searchParams.get("path"),
+      content: "# Ideas\n",
+      size: 8,
+      language: "markdown",
+      binary: false,
+      modeOctal: "0644",
+      revision: "r1",
+    }),
+  )
+  const saves: unknown[] = []
+  await page.route("**/api/v1/files/write", async (route) => {
+    saves.push(route.request().postDataJSON())
+    // A save writes a new file over the name: the server says which file it
+    // replaced (the one the rename left) and which it left.
+    const renamed = calls.findIndex((c) => c.path === "/files/move")
+    await json(route, {
+      ...entry("ideas.md"),
+      revision: "r2",
+      identity: "entry-saved",
+      previousIdentity: `entry-${renamed + 1}`,
+    })
+  })
+  await openFiles(page)
+  await row(page, "notes.md").click()
+  await page.keyboard.press("F2")
+  const input = page.getByRole("dialog").getByRole("textbox")
+  await input.fill("ideas.md")
+  names = ["ideas.md", "report.csv"]
+  await input.press("Enter")
+  await expect(page.getByText("Renamed to ideas.md")).toBeVisible()
+
+  await row(page, "ideas.md").dblclick()
+  const editor = page.getByRole("dialog")
+  await expect(editor.locator(".monaco-editor")).toBeVisible({ timeout: 20_000 })
+  await editor.locator(".monaco-editor").click()
+  await page.keyboard.press("Control+End")
+  await page.keyboard.insertText("more\n")
+  await editor.getByRole("button", { name: "Save", exact: true }).click()
+  await expect.poll(() => saves.length).toBe(1)
+  await page.keyboard.press("Escape")
+  await expect(editor).toHaveCount(0)
+
+  await page
+    .locator("[data-files-workspace] table")
+    .first()
+    .click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press("Control+z")
+  await expect.poll(() => calls.filter((c) => c.path === "/files/move").length).toBe(2)
+  // The undo names the file the save left, which is the renamed file.
+  expect(calls.filter((c) => c.path === "/files/move")[1].body).toEqual({
+    from: `${home}/ideas.md`,
+    to: `${home}/notes.md`,
+    expect: "entry-saved",
+  })
+  await expect(page.getByText("Undid renaming notes.md")).toBeVisible()
+})
+
+test("an undo leaves alone what took the copy's name while it waited", async ({ page }) => {
+  const { calls } = await mockServer(page)
+  await openFiles(page)
+  await row(page, "report.csv").click({ button: "right" })
+  await page.getByRole("menuitem", { name: "Duplicate", exact: true }).click()
+  await expect(page.getByText(/Duplicated as/)).toBeVisible()
+  // Something else has the copy's name now: the server says so.
+  await page.route("**/api/v1/files/delete**", (route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({ error: { code: "entry_changed", message: "changed" } }),
+    }),
+  )
+  await page
+    .locator("[data-files-workspace] table")
+    .first()
+    .click({ position: { x: 5, y: 5 } })
+  await page.keyboard.press("Control+z")
+  await expect(page.getByText("Could not undo duplicating report.csv")).toBeVisible()
+  await expect(page.getByText("Something else has taken its name since")).toBeVisible()
+  expect(calls.filter((c) => c.path === "/files/trash/restore")).toHaveLength(0)
 })
 
 test("Shift+Delete deletes for good, and says it cannot be undone", async ({ page }) => {

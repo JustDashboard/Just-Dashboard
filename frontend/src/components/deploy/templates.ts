@@ -23,11 +23,16 @@ export function isUserTemplate(id: string | undefined): boolean {
  * The catalogue as the picker draws it: the reviewed built-ins on their
  * shelves, and this dashboard's own in a section of their own, each in the
  * server's order. An entry without an origin is read from its id.
+ *
+ * A stack's presets are left out. They are chosen on the Stacks tab, with
+ * what the stack sets up and what it cannot do said beside them; a card here
+ * would offer eight connected services as one more template.
  */
 export function splitCatalogue(entries: BlueprintSummary[]) {
   const builtIn: BlueprintSummary[] = []
   const yours: BlueprintSummary[] = []
   for (const entry of entries) {
+    if (entry.stack) continue
     const user = entry.origin ? entry.origin === "user" : isUserTemplate(entry.id)
     ;(user ? yours : builtIn).push(entry)
   }

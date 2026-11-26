@@ -2,6 +2,7 @@
 
 import { Trash } from "@/components/icons"
 import { del, get } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { CertificateEvidence, EvidencePrune } from "@/lib/types"
 import { usePoll } from "@/hooks/use-poll"
@@ -11,10 +12,15 @@ import { Hold } from "@/components/loading"
 import { Button } from "@/components/ui/button"
 
 /**
- * Caddy's release copies whose domain no route serves and no release names,
- * and the one way to clear them. Nothing on this host resolves to one any
- * more, so removing them loses only the record of a certificate Caddy has
- * since let go. Offered only when there is one to remove.
+ * The copies of Caddy's certificates that deployments left: kept when one was
+ * activated, for a domain no route serves and no release names any more.
+ * Nothing on this host resolves to one, so removing them loses only the
+ * record of a certificate Caddy has since let go. Offered only when there is
+ * one to remove.
+ *
+ * It was "Caddy release copies" with a button to "Prune evidence for routes
+ * that no longer exist": the code's words for them, which told the operator
+ * neither what they are nor whether it was safe.
  */
 export function CaddyEvidencePrune({ onPruned }: { onPruned: () => void }) {
   const { confirm, dialog } = useConfirm()
@@ -36,14 +42,14 @@ export function CaddyEvidencePrune({ onPruned }: { onPruned: () => void }) {
 
   const prune = () =>
     confirm({
-      title: "Prune evidence for routes that no longer exist",
-      confirmLabel: `Delete ${list.length} ${list.length === 1 ? "copy" : "copies"}`,
+      title: "Remove leftover certificate copies",
+      confirmLabel: `Remove ${plural(list.length, "copy", "copies")}`,
       description: (
         <div className="space-y-3">
           <p>
-            These are the copies of Caddy&apos;s certificates kept when a deployment was activated.
-            No Caddy route serves their domains and no release names them, so nothing here can
-            activate with one again. Any a deployment claims before this runs are kept.
+            A copy of Caddy&apos;s certificate is kept each time a deployment goes live. No route
+            serves these domains and no release names them, so nothing uses them. Any a deployment
+            claims before this runs are kept.
           </p>
           <ul className="space-y-1">
             {list.map((copy) => (
@@ -63,12 +69,10 @@ export function CaddyEvidencePrune({ onPruned }: { onPruned: () => void }) {
         })
         if (result.kept.length > 0) {
           notify.warning(
-            `Deleted ${result.removed.length}; kept ${result.kept.length} a route or release names again`,
+            `Removed ${result.removed.length}; kept ${result.kept.length} a route or release names again`,
           )
         } else {
-          notify.success(
-            `Deleted ${result.removed.length} release ${result.removed.length === 1 ? "copy" : "copies"}`,
-          )
+          notify.success(`Removed ${plural(result.removed.length, "copy", "copies")}`)
         }
         orphans.refresh()
         onPruned()
@@ -78,15 +82,13 @@ export function CaddyEvidencePrune({ onPruned }: { onPruned: () => void }) {
   return (
     <>
       <Notice
-        title={`${list.length} Caddy release ${list.length === 1 ? "copy is" : "copies are"} left from routes that no longer exist`}
+        data-slot="leftover-copies"
+        title={`${list.length} leftover certificate ${list.length === 1 ? "copy" : "copies"}`}
       >
-        <div className="flex flex-wrap items-center gap-2">
-          <span>No route serves their domains and no release names them.</span>
-          <Button size="xs" variant="outline" onClick={prune}>
-            <Trash className="size-3.5" />
-            Prune evidence for routes that no longer exist
-          </Button>
-        </div>
+        <Button size="xs" variant="outline" onClick={prune}>
+          <Trash className="size-3.5" />
+          Remove
+        </Button>
       </Notice>
       {dialog}
       {hold}

@@ -1,0 +1,133 @@
+[
+  {
+    "enable": false,
+    "protocol": "torrent",
+    "priority": 1,
+    "removeCompletedDownloads": true,
+    "removeFailedDownloads": true,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "value": "localhost",
+        "type": "textbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 8080,
+        "type": "textbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 2,
+        "name": "useSsl",
+        "label": "Use SSL",
+        "value": false,
+        "type": "checkbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 3,
+        "name": "urlBase",
+        "label": "URL Base",
+        "type": "textbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 4,
+        "name": "apiKey",
+        "label": "API Key",
+        "type": "textbox",
+        "privacy": "apiKey"
+      },
+      {
+        "order": 5,
+        "name": "username",
+        "label": "Username",
+        "type": "textbox",
+        "privacy": "userName"
+      },
+      {
+        "order": 6,
+        "name": "password",
+        "label": "Password",
+        "type": "password",
+        "privacy": "password"
+      },
+      {
+        "order": 7,
+        "name": "tvCategory",
+        "label": "Category",
+        "value": "tv-sonarr",
+        "type": "textbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 8,
+        "name": "tvImportedCategory",
+        "label": "Post-Import Category",
+        "type": "textbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 9,
+        "name": "recentTvPriority",
+        "label": "Recent Priority",
+        "value": 0,
+        "type": "select",
+        "privacy": "normal"
+      },
+      {
+        "order": 10,
+        "name": "olderTvPriority",
+        "label": "Older Priority",
+        "value": 0,
+        "type": "select",
+        "privacy": "normal"
+      },
+      {
+        "order": 11,
+        "name": "initialState",
+        "label": "Initial State",
+        "value": 0,
+        "type": "select",
+        "privacy": "normal"
+      },
+      {
+        "order": 12,
+        "name": "sequentialOrder",
+        "label": "Sequential Order",
+        "value": false,
+        "type": "checkbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 13,
+        "name": "firstAndLast",
+        "label": "First and Last First",
+        "value": false,
+        "type": "checkbox",
+        "privacy": "normal"
+      },
+      {
+        "order": 14,
+        "name": "contentLayout",
+        "label": "Content Layout",
+        "value": 0,
+        "type": "select",
+        "privacy": "normal"
+      }
+    ],
+    "implementationName": "qBittorrent",
+    "implementation": "QBittorrent",
+    "configContract": "QBittorrentSettings",
+    "infoLink": "https://wiki.servarr.com/sonarr/supported#qbittorrent",
+    "tags": [],
+    "presets": []
+  }
+]

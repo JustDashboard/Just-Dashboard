@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
-import { Box, Clock, Database, GitHubMark, GridMasonry, Trash } from "@/components/icons"
+import { Box, Clock, Database, GitHubMark, GridMasonry, Monorepo, Trash } from "@/components/icons"
 import { ApiError, get } from "@/lib/api"
 import { relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
@@ -38,13 +38,14 @@ import {
 import { SourceGit } from "@/components/deploy/new-project/source-git"
 import { SourceImage } from "@/components/deploy/new-project/source-image"
 import { SourceTemplate } from "@/components/deploy/new-project/source-template"
+import { SourceStack } from "@/components/deploy/new-project/source-stack"
 import { SourceDatabase } from "@/components/deploy/new-project/source-database"
 import { Configure } from "@/components/deploy/new-project/configure"
 import { AssistSwitch } from "@/components/deploy/new-project/assist-switch"
 import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
-// The mark is wayfinding, not decoration: four words set in one line are four
-// words to read, and the reader is choosing between four *kinds* of thing.
+// The mark is wayfinding, not decoration: five words set in one line are five
+// words to read, and the reader is choosing between five *kinds* of thing.
 // §14 bans a glyph in front of a heading because you are already there; a
 // chooser is the opposite case, and the same rule keeps the sidebar's and the
 // overview tiles' marks. Every one is `aria-hidden`, so the button's
@@ -57,6 +58,9 @@ const TABS: {
   { key: "git", label: "Git repository", icon: GitHubMark },
   { key: "image", label: "Docker", icon: Box },
   { key: "template", label: "Template", icon: GridMasonry },
+  // Several applications installed together and connected to each other,
+  // beside the one application a template is.
+  { key: "stack", label: "Stacks", icon: Monorepo },
   { key: "database", label: "Database", icon: Database },
 ]
 
@@ -396,8 +400,8 @@ export function NewProject({
               steps={<FlowSteps steps={CREATION_STEPS} current={0} />}
             />
             {/* A group of pressed buttons, not a tablist: a tablist must own
-              tabs, and these are four toggles for one answer. On a phone the
-              four do not fit, so the strip runs to the screen's edge and
+              tabs, and these are five toggles for one answer. On a phone the
+              five do not fit, so the strip runs to the screen's edge and
               scrolls there, and the source cut off at the edge is what says
               there are more — `ChipStrip`'s answer, since the scroll shade
               is drawn in the page's own ground and cannot show on it. The
@@ -444,6 +448,7 @@ export function NewProject({
               {tab === "template" && (
                 <SourceTemplate key="template" onInspected={inspected} initialTemplate={template} />
               )}
+              {tab === "stack" && <SourceStack key="stack" onInspected={inspected} />}
               {tab === "database" && <SourceDatabase key="database" />}
             </div>
           </>

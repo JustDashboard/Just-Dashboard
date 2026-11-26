@@ -553,8 +553,10 @@ test("archived list can be permanently deleted with confirmation and errors rema
   await page.route("**/api/v1/deploy/?view=archived", (route) =>
     json(route, deleted ? [] : [{ ...archivedProject, archivedAt: now }]),
   )
-  await page.route("**/api/v1/deploy/9/permanent", (route) => {
+  let purgeUrl = ""
+  await page.route("**/api/v1/deploy/9/permanent**", (route) => {
     calls++
+    purgeUrl = route.request().url()
     if (refuse) {
       return route.fulfill({
         status: 409,
@@ -602,6 +604,13 @@ test("archived list can be permanently deleted with confirmation and errors rema
   await expect(dialog.getByText("Deleted for good", { exact: true })).toBeVisible()
   await expect(dialog.getByText("Stays on the server", { exact: true })).toBeVisible()
   await expect(dialog.getByText("4 variables", { exact: true })).toBeVisible()
+  // Its routes go with it unless unticked: a route kept after its project
+  // went on answering the domain and refused the next deployment of it.
+  await expect(dialog.getByRole("checkbox", { name: "Remove its routes too" })).toBeChecked()
+  await expect(dialog.getByText("Its routes, so its domains are free")).toBeVisible()
+  await dialog.getByRole("checkbox", { name: "Remove its routes too" }).click()
+  await expect(dialog.getByText("Its routes, so its domains are free")).toHaveCount(0)
+  await expect(dialog.getByText("Running containers and routes")).toBeVisible()
   await dialog.getByRole("button", { name: "Cancel" }).click()
   expect(calls).toBe(0)
 
@@ -617,6 +626,7 @@ test("archived list can be permanently deleted with confirmation and errors rema
   await dialog.getByRole("button", { name: "Delete permanently" }).click()
   await expect(page.getByText("No archived deployments", { exact: true })).toBeVisible()
   expect(calls).toBe(2)
+  expect(new URL(purgeUrl).searchParams.get("routes")).toBe("remove")
 })
 
 test("a restored project clears a name conflict, then returns to the fleet", async ({ page }) => {

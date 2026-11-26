@@ -366,6 +366,14 @@ never into `docs/audits/`.
   test needs `git-lfs` on PATH (it is included in the backend image); it touches only a temporary
   repository. Provider fixture tests do not publish live comments or reviews. See
   [the Git workspace contract](docs/internal/backend/git-workspace-expansion.md) for limits and setup.
+- The smart stacks' adapters (`internal/stacks/media`) have live tests that start the media stack's
+  pinned images on a network and a volume of their own, run every step twice and require the second
+  pass to change nothing. They need Docker as root and pull several gigabytes:
+  `go test -c -o /tmp/media.test ./internal/stacks/media && sudo env JD_STACKS_LIVE=1 PATH=$PATH /tmp/media.test -test.run Live -test.v`.
+  A change to a stack's template or to `internal/stacks` should also deploy the preset through the
+  API (draft, commit, run) on a dashboard of its own and read its Stack page; see "Verified end to
+  end" in [smart stacks](docs/internal/deployments/smart-stacks.md) for how that was done without
+  touching the host's containers.
 - The blueprint catalogue sweep pulls every deployable definition's pinned image, starts it through the
   real runtime owner with generated secrets and runs its own readiness checks (`JD_BLUEPRINT_ONLY=a,b`
   narrows it; images it pulled are removed again):

@@ -139,11 +139,16 @@ test("the line a site opens on carries its state, one command and the rest in a 
   // One command with a face; everything else is a word in the menu.
   await expect(line.getByRole("button")).toHaveCount(2)
   await line.getByRole("button", { name: "More actions for app.example.com" }).click()
+  // What changes the site is here as it is in the list: the switch, a
+  // rename and a delete, behind the menu since none of them is the command.
   await expect(page.getByRole("menuitem")).toHaveText([
     "Raw config",
     "Open site",
     "TLS report",
+    "Disable",
+    "Rename",
     "Download",
+    "Delete",
   ])
   await page.keyboard.press("Escape")
 
@@ -216,7 +221,7 @@ test("the Sites list stands beside a site, and the next one opens on the view on
     .evaluateAll((rows) => rows.map((row) => row.getBoundingClientRect().height))
   expect(new Set(heights).size).toBe(1)
 
-  await rail.getByRole("link", { name: "just-dashboard-shop" }).click()
+  await rail.getByRole("link", { name: "shop.example.com" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-shop\?tab=logs$/)
 
   // Alt+↑ walks the list, and the list's own search narrows it.
@@ -529,4 +534,113 @@ test("a site's Settings and its save bar fit a phone", async ({ page }) => {
       }),
     ).toBe(true)
   }
+})
+
+/** A route on the Docker Caddy ingress, which has no file on the host. */
+const ingressRoute = {
+  kind: "caddy",
+  path: "",
+  enabled: true,
+  formEditable: false,
+  listen: ["80", "443"],
+  tls: true,
+  modified: "",
+  size: 0,
+}
+/** Its project was deleted, so no environment names it. */
+const leftover = {
+  ...ingressRoute,
+  name: "just-dashboard-env-450.conf",
+  serverNames: ["jellyfin.example.com"],
+  upstreams: ["http://10.0.0.10:8096"],
+}
+const deployed = {
+  ...ingressRoute,
+  name: "just-dashboard-env-175.conf",
+  serverNames: ["shop.example.com"],
+  upstreams: ["http://10.0.0.3:3000"],
+  owner: { projectId: 3, environmentId: 175, project: "shop", environment: "production" },
+}
+
+test("a leftover route's page is titled by its domain, says what it is, and removes it", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const sites: unknown[] = [app, leftover, deployed]
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
+  const calls: string[] = []
+  await page.route("**/api/v1/proxy/vhosts/*/deployment-route", (route) => {
+    calls.push(`${route.request().method()} ${new URL(route.request().url()).pathname}`)
+    sites.splice(1, 1)
+    return json(route, { name: leftover.name, certificates: ["jellyfin.example.com"] })
+  })
+  await page.goto(`/proxy/sites/${leftover.name}`)
+
+  // The domain is the title; the file is a fact on the line.
+  await expect(page.getByRole("heading", { name: "jellyfin.example.com" })).toBeVisible()
+  const line = page.getByRole("region", { name: "About jellyfin.example.com" })
+  await expect(line.getByText("leftover", { exact: true })).toBeVisible()
+  await expect(line.getByText("serving", { exact: true })).toHaveCount(0)
+  await expect(line.getByText(leftover.name, { exact: true })).toBeVisible()
+  await expect(line).toContainText("Leftover · its deployment was deleted")
+  await expect(page.getByText("Docker Caddy ingress")).toHaveCount(0)
+
+  // No destructive verb is the line's command; the page's one line says what
+  // the route is beside the button that removes it.
+  const origin = page.locator("[data-slot='site-origin']")
+  await expect(origin).toContainText("Left by a deleted deployment")
+  await expect(line.getByRole("button", { name: /Remove/ })).toHaveCount(0)
+  await origin.getByRole("button", { name: "Remove", exact: true }).click()
+  const confirm = page.getByRole("dialog", { name: "Remove jellyfin.example.com" })
+  await expect(confirm).toContainText("jellyfin.example.com stops answering")
+  await confirm.getByRole("button", { name: "Remove route" }).click()
+  await expect
+    .poll(() => calls)
+    .toEqual([`DELETE /api/v1/proxy/vhosts/${leftover.name}/deployment-route`])
+  await expect(page.getByText("jellyfin.example.com removed")).toBeVisible()
+  // Gone, so the list is where to be.
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
+})
+
+test("a live deployment's route says where its domain is removed", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, [app, leftover, deployed]))
+  await page.goto(`/proxy/sites/${deployed.name}`)
+
+  await expect(page.getByRole("heading", { name: "shop.example.com" })).toBeVisible()
+  const line = page.getByRole("region", { name: "About shop.example.com" })
+  await expect(line).toContainText("shop · production")
+  await expect(line.getByText("serving", { exact: true })).toBeVisible()
+  const origin = page.locator("[data-slot='site-origin']")
+  await expect(origin).toContainText("Written by shop on every deploy.")
+  await expect(
+    origin.getByRole("link", { name: "Remove the domain in shop · Domains" }),
+  ).toHaveAttribute("href", "/deploy/3/settings/domains")
+  // Nothing here removes it: not on the line, and not as a button in the body.
+  await expect(origin.getByRole("button")).toHaveCount(0)
+  await line.getByRole("button", { name: "More actions for shop.example.com" }).click()
+  await expect(page.getByRole("menuitem", { name: /Remove|Delete/ })).toHaveCount(0)
+})
+
+test("a site deleted from its own page leaves for the list", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  const sites: unknown[] = [...vhosts]
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
+  let deleted: string | undefined
+  await page.route("**/api/v1/proxy/sites/legacy.example.com", (route) => {
+    if (route.request().method() !== "DELETE") return route.fallback()
+    deleted = new URL(route.request().url()).pathname
+    sites.splice(1, 1)
+    return json(route, {
+      name: "legacy.example.com",
+      reload: { validation: { valid: true, output: "" }, reloaded: true, output: "" },
+    })
+  })
+  await page.goto("/proxy/sites/legacy.example.com")
+  await page.getByRole("button", { name: "More actions for legacy.example.com" }).click()
+  await page.getByRole("menuitem", { name: "Delete" }).click()
+  const confirm = page.getByRole("dialog", { name: "Delete legacy.example.com" })
+  await confirm.getByRole("button", { name: "Delete and reload" }).click()
+  await expect.poll(() => deleted).toBe("/api/v1/proxy/sites/legacy.example.com")
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
 })

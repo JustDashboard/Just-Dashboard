@@ -53,7 +53,13 @@ export type TrashPlan = {
 export type DeleteResult = { trashed: boolean; path: string; item?: TrashItem }
 
 /** A move's or a copy's answer when Replace put something in the Trash. */
-export type ReplaceResult = { replaced?: { item?: TrashItem; forGood?: string } } | undefined
+export type ReplaceResult =
+  | {
+      /** What now has the destination's name, for an undo to check it still does. */
+      identity?: string
+      replaced?: { item?: TrashItem; forGood?: string }
+    }
+  | undefined
 
 /** `POST /files/trash/restore`'s answer. */
 export type Restored = { path: string; name: string; replaced?: TrashItem }

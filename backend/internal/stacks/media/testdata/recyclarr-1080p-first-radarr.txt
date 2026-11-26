@@ -1,0 +1,9 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[INF] just-dashboard-movies: Processing Radarr server just-dashboard-movies
+[INF] just-dashboard-movies: Created 41 New Custom Formats
+[INF] just-dashboard-movies: Total of 41 custom formats were synced
+[INF] just-dashboard-movies: All sizes for quality definition movie are already up to date!
+[INF] just-dashboard-movies: Created 1 Profiles: ["HD Bluray + WEB (Just Dashboard)"]
+[INF] just-dashboard-movies: A total of 1 profiles were synced. 0 contain quality changes and 0 contain updated scores
+[INF] just-dashboard-movies: Completed at 11/26/2026 03:37:32

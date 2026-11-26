@@ -166,6 +166,7 @@ segment under `/api/v1`.
 | Logs | `logs/` | `logs/` | `/logs` → `handlers_logs*.go` | `logsx` | `logs-*.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Apps** | | | | | | |
 | Deployments | `deploy/` | `deploy/` | `/deploy` → `handlers_deploy*.go`, `deployment_*.go` | `deploy`, `blueprint`, and the ones below | `deploy-*.spec.ts` | [the deployment guides](../deployments/README.md), [`implementation.md`](../deployments/implementation.md) |
+| Deployments → Stacks (smart stacks) | `deploy/new` (Stacks tab), `deploy/[id]/stack/` | `deploy/new-project/`, `deploy/` | `/deploy/stacks`, `/deploy/{id}/stack` → `handlers_deploy_stacks.go` | `stacks`, `stacks/media`, `stacks/catalog` | `deploy-new-stack.spec.ts`, `deploy-stack-page.spec.ts` | [`smart-stacks.md`](../deployments/smart-stacks.md) |
 | Databases | `databases/` | `database/` | `/databases` → `handlers_db*.go`, `database_*.go` | `dbx`, `dbtls` | `database-*.spec.ts` | [`databases.md`](../backend/databases.md) |
 | Docker | `docker/` | `docker/` | `/docker` → `handlers_docker*.go`, `docker_*.go` | `dockerx`, `imagescan` | `docker-*.spec.ts`, `stacks-ui.spec.ts`, `stack-detail.spec.ts`, `container-page.spec.ts` | [`docker-files-logs.md`](../backend/docker-files-logs.md) |
 | **Workspace** | | | | | | |
@@ -201,7 +202,11 @@ segment under `/api/v1`.
 
 One database's own pages (`app/databases/[id]/…`) and one project's (`app/deploy/[id]/(project)/…`)
 are not in `NAV`: `components/database/shell/nav-scope.tsx` builds the first from the engine, and
-`PROJECT_NAV` and `PROJECT_SETTINGS_NAV` in `nav.ts` list the second.
+`PROJECT_NAV` and `PROJECT_SETTINGS_NAV` in `nav.ts` list the second. A smart stack's two surfaces
+are under Deployments: the Stacks tab of `/deploy/new` is
+`components/deploy/new-project/source-stack.tsx`, and a stack project's page
+(`app/deploy/[id]/(project)/stack/`) is `components/deploy/stack/`, with `deploy-new-stack.spec.ts`
+and `deploy-stack-page.spec.ts` over `deploy-stack-fixture.ts`.
 
 **Packages behind Deployments and Network.** Both sections reach more packages than fit a cell.
 

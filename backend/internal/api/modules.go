@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -167,6 +168,10 @@ type moduleSet struct {
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
+	// stackStore and stacks are the smart stacks: deployments made from a
+	// stack's preset, configured by the dashboard once their release is live.
+	stackStore *stacks.Store
+	stacks     *stacks.Service
 	// releaseImages removes release images retention no longer keeps.
 	releaseImages *deploy.ReleaseImageSweeper
 	// sleeper stops environments that sleep once nobody visits and wakes
@@ -463,6 +468,8 @@ func (s *Server) initModules() {
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).
 		WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable).
 		WithSecretStores(s.modules.secretStores)
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	s.modules.stacks = s.newStackService()
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.githubRepos = githubrepos.New(s.Store.DB, s.Sealer)
@@ -481,7 +488,8 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver())
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver()).
+		WithRouteOwners(deploymentRouteOwners{s: s})
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)
@@ -517,6 +525,7 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),
 	).WithPreflightObserver(s.modules.deployPreflight).
+		WithRouteOwners(deploymentRouteOwners{s: s}).
 		WithBackupGate(newDeploymentBackupGate(s.modules.backupStore, s.modules.backupRunner, s.modules.docker).WithDatabaseSources(s.databaseBackupSources)).
 		// Automatic HTTPS. Issuance is still the Certificates feature's code
 		// and activation still resolves an already-existing pair; what this

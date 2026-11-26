@@ -110,6 +110,17 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 		secrets[secret.Name] = false
 	}
 	volumes := map[string]Volume{}
+	// A data volume one service writes may be mounted read-only by another —
+	// a media server reading the library its managers file — but a data
+	// volume nothing writes is one nothing can ever fill.
+	readOnlyShared := map[string]bool{}
+	for _, service := range blueprint.Services {
+		for _, volume := range service.Volumes {
+			if volume.Data && !volume.ReadOnly {
+				readOnlyShared[volume.Name] = true
+			}
+		}
+	}
 	public := 0
 	for index := range blueprint.Services {
 		service := &blueprint.Services[index]
@@ -138,9 +149,17 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 		if service.Resources.CPUs > 64 {
 			return fail("asks for %.2f CPUs", service.Resources.CPUs)
 		}
-		serviceIsPublic, err := validateServicePorts(service)
+		serviceIsPublic, err := validateServicePorts(blueprint, service)
 		if err != nil {
 			return fail("%v", err)
+		}
+		// Docker publishes no port of a container that is only on a network
+		// declared internal, so a private interface published on loopback
+		// needs the egress network to be published through at all.
+		for _, port := range service.Ports {
+			if port.Exposure == "loopback" && !service.Egress {
+				return fail("publishes port %q on loopback but declares no egress, and Docker publishes nothing from an internal-only network", port.Name)
+			}
 		}
 		if serviceIsPublic {
 			public++
@@ -151,7 +170,7 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 				return fail("is public and so already reaches the internet; egress is for private services")
 			}
 		}
-		if err := validateServiceVolumes(service, volumes); err != nil {
+		if err := validateServiceVolumes(service, volumes, readOnlyShared); err != nil {
 			return fail("%v", err)
 		}
 		if err := validateHealthcheck(service.Healthcheck); err != nil {
@@ -211,7 +230,7 @@ func composePlanVariables(blueprint *Blueprint) map[string]bool {
 	return variables
 }
 
-func validateServicePorts(service *Service) (bool, error) {
+func validateServicePorts(blueprint *Blueprint, service *Service) (bool, error) {
 	names := map[string]bool{}
 	occupied := map[int]bool{}
 	public := false
@@ -243,8 +262,16 @@ func validateServicePorts(service *Service) (bool, error) {
 			}
 			public = true
 		case "internal":
+		case "loopback":
+			// A private web interface the operator opens on this server, never
+			// routed: it is published on 127.0.0.1 only, which nothing outside
+			// the host reaches (invariant 1), and only a stack's services — set
+			// up by the dashboard before anyone can open them — may ask for it.
+			if blueprint.Stack == "" {
+				return false, fmt.Errorf("port %q is published on loopback, which only a stack's private services may be", port.Name)
+			}
 		default:
-			return false, fmt.Errorf("port %q uses exposure %q; a Compose template's ports are proxy or internal", port.Name, port.Exposure)
+			return false, fmt.Errorf("port %q uses exposure %q; a Compose template's ports are proxy, internal or loopback", port.Name, port.Exposure)
 		}
 		if port.HostInput != "" {
 			return false, fmt.Errorf("port %q takes a host port from an input; a Compose template publishes only its proxied port, on loopback", port.Name)
@@ -263,7 +290,7 @@ func validateServicePorts(service *Service) (bool, error) {
 // and lets two services share a volume by name, which is how a server and its
 // worker see the same uploads. A shared volume is one volume, so it has to be
 // described the same way by both.
-func validateServiceVolumes(service *Service, declared map[string]Volume) error {
+func validateServiceVolumes(service *Service, declared map[string]Volume, readOnlyShared map[string]bool) error {
 	targets := map[string]bool{}
 	names := map[string]bool{}
 	data := false
@@ -291,7 +318,7 @@ func validateServiceVolumes(service *Service, declared map[string]Volume) error 
 		}
 		if volume.Data {
 			data = true
-			if volume.ReadOnly {
+			if volume.ReadOnly && !readOnlyShared[volume.Name] {
 				return fmt.Errorf("volume %q holds data and is mounted read-only", volume.Name)
 			}
 		}

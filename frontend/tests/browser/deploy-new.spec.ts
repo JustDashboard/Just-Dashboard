@@ -13,11 +13,12 @@ test("the source strip switches the active source and is the only way in", async
   await mockNewProject(page)
   await page.goto("/deploy/new")
   await expect(page.getByRole("heading", { name: "Import Git repository" })).toBeVisible()
-  // Four toggles for one answer, so a group of pressed buttons: a tablist
+  // Five toggles for one answer, so a group of pressed buttons: a tablist
   // has to own tabs, and these were never tabs. Compose is not one of them:
-  // a stack is deployed from the repository that holds its file.
+  // a Compose file is deployed from the repository that holds it. (Stacks,
+  // the fifth, has its own spec: deploy-new-stack.spec.ts.)
   const strip = page.getByRole("group", { name: "Project source" })
-  await expect(strip.getByRole("button")).toHaveCount(4)
+  await expect(strip.getByRole("button")).toHaveCount(5)
   await expect(strip.getByRole("button", { name: "Compose", exact: true })).toHaveCount(0)
   await expect(page.getByRole("tablist")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Git repository", exact: true })).toHaveAttribute(
@@ -93,7 +94,13 @@ test("the repository list is drawn once, after both GitHub identities have answe
     json(route, {
       configured: true,
       installations: [
-        { id: 1, account: "operator", accountType: "User", htmlUrl: "", repositorySelection: "all" },
+        {
+          id: 1,
+          account: "operator",
+          accountType: "User",
+          htmlUrl: "",
+          repositorySelection: "all",
+        },
       ],
     }),
   )
@@ -1168,7 +1175,9 @@ test("a deploy link arrives on the Git tab with its clone URL and branch filled 
 
   // Importing from the prefilled field inspects that URL at that branch.
   await page.getByRole("button", { name: "Import", exact: true }).click()
-  await expect(page.getByText("https://github.com/operator/other.git", { exact: true })).toBeVisible()
+  await expect(
+    page.getByText("https://github.com/operator/other.git", { exact: true }),
+  ).toBeVisible()
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Branch" })).toHaveValue("release")
 

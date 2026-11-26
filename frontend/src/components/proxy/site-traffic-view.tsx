@@ -247,7 +247,7 @@ function TrafficPage() {
       {summary.error ? (
         <ErrorState error={summary.error} onRetry={summary.refresh} />
       ) : empty ? (
-        <NothingToCount sites={sites} admin={admin} />
+        <NothingToCount sites={sites} admin={admin} nginx={status?.nginx !== false} />
       ) : (
         <div data-slot="traffic-hour" className="space-y-6">
           <HourReadings hour={hour} />
@@ -596,9 +596,12 @@ function HourChart({ hour }: { hour: EdgeHour | undefined }) {
 function NothingToCount({
   sites,
   admin,
+  nginx,
 }: {
   sites: SiteTrafficReading[] | undefined
   admin: boolean
+  /** The new-site form is nginx's; without it a domain is added on a project. */
+  nginx: boolean
 }) {
   if (!sites || sites.length === 0) {
     return (
@@ -607,8 +610,8 @@ function NothingToCount({
         title="No sites to count"
         action={
           <Button asChild size="xs" variant="outline">
-            <Link href={admin ? "/proxy/sites?new=1" : "/proxy/sites"}>
-              {admin ? "New site" : "Open Sites"}
+            <Link href={!admin ? "/proxy/sites" : nginx ? "/proxy/sites?new=1" : "/deploy"}>
+              {!admin ? "Open Sites" : nginx ? "New site" : "Add a domain to a project"}
               <ArrowRight />
             </Link>
           </Button>

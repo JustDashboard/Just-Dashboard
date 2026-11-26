@@ -39,7 +39,7 @@ var databaseBookkeepingSchemas = map[string]bool{"drizzle": true, "topology": tr
 // more is not new.
 const databaseContentsTableLimit = 500
 
-func (c deploymentDatabaseContents) DatabaseHasRows(ctx context.Context, connectionID int64) (bool, error) {
+func (c deploymentDatabaseContents) DatabaseHasRows(ctx context.Context, connectionID int64, database string) (bool, error) {
 	s := c.server
 	if s == nil || s.modules.dbs == nil {
 		return true, errors.New("databases are unavailable on this server")
@@ -47,6 +47,11 @@ func (c deploymentDatabaseContents) DatabaseHasRows(ctx context.Context, connect
 	conn, dsn, err := s.dbConnRow(ctx, connectionID)
 	if err != nil {
 		return true, err
+	}
+	// A value naming another database on the connection's server
+	// (${{database.5.url.app_cache}}) names one this does not count.
+	if database != "" && database != conn.Database {
+		return true, nil
 	}
 	probe, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()

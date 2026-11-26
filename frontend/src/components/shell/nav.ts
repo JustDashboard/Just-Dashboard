@@ -34,6 +34,7 @@ import {
   LockClosed,
   Logs,
   Monitoring,
+  Monorepo,
   NetworkDevice,
   Notes,
   Puzzle,
@@ -91,6 +92,14 @@ export type NavChild = {
    */
   hubLink?: boolean
   /**
+   * What the page reads that a server may not have. Streams and Configuration
+   * are nginx's module and nginx's directory: on a server whose sites the
+   * Caddy ingress serves they open on an absence screen, so the rail leaves
+   * them out once the proxy's status says nginx is not there. The address
+   * still opens the page, and the rail draws the row while you are on it.
+   */
+  needs?: "nginx"
+  /**
    * The heading this page sits under in its section's panel, for a section
    * with more pages than a reader scans as one list. Pages that share one
    * stand together; a page with none opens the panel above every heading.
@@ -122,6 +131,8 @@ export type NavItem = {
   capability?: Capability
   /** See `NavChild.hubLink`. */
   hubLink?: boolean
+  /** See `NavChild.needs`. */
+  needs?: "nginx"
   /**
    * A feature large enough to be several pages. The row opens a panel holding
    * exactly these, and the first of them is the section's own landing page —
@@ -378,12 +389,12 @@ export const NAV: { label: string; items: NavEntry[] }[] = [
           { title: "Sites", href: "/proxy/sites", icon: Globe },
           { title: "Certificates", href: "/proxy/certificates", icon: LockClosed },
           { title: "TLS report", href: "/proxy/tls", icon: Inspect },
-          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight },
+          { title: "Streams", href: "/proxy/streams", icon: ArrowLeftRight, needs: "nginx" },
           { title: "Ports", href: "/proxy/ports", icon: Router },
           { title: "Tunnel", href: "/proxy/tunnel", icon: CloudUpload },
           { title: "Traffic", href: "/proxy/traffic", icon: ChartActivity },
           { title: "Alerts", href: "/proxy/alerts", icon: Bell, capability: "system.admin" },
-          { title: "Configuration", href: "/proxy/config", icon: FileText },
+          { title: "Configuration", href: "/proxy/config", icon: FileText, needs: "nginx" },
         ],
       },
     ],
@@ -500,7 +511,10 @@ export const ACCOUNT_SECTION = {
  *
  * `game` entries belong to a game server and nothing else; the rail learns the
  * profile only once the project's own read lands, so it draws the rest of the
- * list immediately and these two when they are earned.
+ * list immediately and these two when they are earned. The `stack` entry is
+ * the same for a project that is a smart stack, which the server says
+ * (`GET /deploy/{id}/stack`); it stands with them at the end of the list, so
+ * earning it moves no other row.
  */
 export type ProjectNavEntry = {
   title: string
@@ -509,6 +523,8 @@ export type ProjectNavEntry = {
   icon: React.ComponentType<{ className?: string }>
   /** Only for a game server. */
   game?: boolean
+  /** Only for a project the server says is a stack. */
+  stack?: boolean
 }
 
 export const PROJECT_NAV: ProjectNavEntry[] = [
@@ -520,6 +536,7 @@ export const PROJECT_NAV: ProjectNavEntry[] = [
   { title: "Console", path: "/console", icon: Terminal },
   { title: "Players", path: "/players", icon: Users, game: true },
   { title: "Server settings", path: "/game-settings", icon: SettingsSliders, game: true },
+  { title: "Stack", path: "/stack", icon: Monorepo, stack: true },
 ]
 
 /**
@@ -615,20 +632,32 @@ function hideableKey(href: string): SectionKey | null {
  * configuration with Packages hidden is empty to an account that cannot see
  * System users or the audit log. A `hubLink` page follows the same rule with
  * `hubLinked` in place of the account's choice: drawn while this server is
- * linked to a hub, and while you are on it either way.
+ * linked to a hub, and while you are on it either way. A page that `needs`
+ * nginx goes the same way once the server is known to have none: `nginx` is
+ * false only then, so a status not read yet hides nothing.
  */
 export function shownFor(
-  entry: { href?: string; capability?: Capability; children?: NavEntry[]; hubLink?: boolean },
+  entry: {
+    href?: string
+    capability?: Capability
+    children?: NavEntry[]
+    hubLink?: boolean
+    needs?: "nginx"
+  },
   hidden: ReadonlySet<string>,
   pathname: string,
   can: (capability: Capability) => boolean,
   hubLinked = false,
+  nginx = true,
 ): boolean {
   if (entry.capability && !can(entry.capability)) return false
   if (entry.href === undefined) {
-    return (entry.children ?? []).some((child) => shownFor(child, hidden, pathname, can, hubLinked))
+    return (entry.children ?? []).some((child) =>
+      shownFor(child, hidden, pathname, can, hubLinked, nginx),
+    )
   }
   if (entry.hubLink && !hubLinked && !navMatches(entry.href, pathname)) return false
+  if (entry.needs === "nginx" && !nginx && !navMatches(entry.href, pathname)) return false
   const key = hideableKey(entry.href)
   return !key || !hidden.has(key) || navMatches(entry.href, pathname)
 }
