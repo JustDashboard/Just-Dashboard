@@ -455,6 +455,11 @@ with the last row that names it; a sweep once per process removes copies a crash
 History is keyed by resolved path: `/files/move` carries it, and everything under a moved folder,
 with `MoveEnds` (as a folder's colour), byte-compared so `/srv/app` never takes `/srv/app2`'s; a
 delete leaves it where it was, so a file put back at its path (the Trash's restore) finds it again.
+What a Replace puts in the Trash is the exception: its history and head leave the name with it, held
+under `trash:<item id>` (`holdReplacedVersions`, never a path a client can name), so the file that
+takes the name does not inherit it and a move back does not carry it off. The Trash's restore gives it
+back at the path the item returns to (an occupant a `replace` restore displaces is held first), and
+removing, emptying or expiring the item drops it (`Keeper.Forget`, only for the ids that left).
 
 `GET /files/versions?path=` lists a path's versions with the backup runs that hold it, by time:
 `backups.Store.FileCopies` reads only the store (each job's successful runs whose complete manifest

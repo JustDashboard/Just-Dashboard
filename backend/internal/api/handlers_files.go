@@ -370,6 +370,7 @@ func (s *Server) handleFileMove(w http.ResponseWriter, r *http.Request) error {
 		return mapFileError(err)
 	}
 	s.moveFileColours(r.Context(), src, dst)
+	s.holdReplacedVersions(r.Context(), dst, replaced)
 	s.moveFileVersions(r.Context(), src, dst)
 	httpx.SetAudit(r, "file.move", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
 	respondReplaced(w, replaced)
@@ -396,6 +397,7 @@ func (s *Server) handleFileCopy(w http.ResponseWriter, r *http.Request) error {
 		s.settleReplaced(replaced, true)
 		return mapFileError(err)
 	}
+	s.holdReplacedVersions(r.Context(), dst, replaced)
 	httpx.SetAudit(r, "file.copy", req.From, map[string]any{"to": req.To, "overwrite": req.Overwrite})
 	respondReplaced(w, replaced)
 	return nil

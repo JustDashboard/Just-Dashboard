@@ -350,6 +350,77 @@ func (k *Keeper) Move(ctx context.Context, from, to string) error {
 	return tx.Commit()
 }
 
+// Forget drops the history of path, and of everything under it, and the
+// contents nothing else points at: what a Replace held aside for an entry
+// that has since left the Trash for good.
+func (k *Keeper) Forget(ctx context.Context, path string) error {
+	if k == nil || path == "" {
+		return nil
+	}
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	tx, err := k.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var revisions []string
+	for _, table := range []string{"file_versions", "file_version_heads"} {
+		where := ` WHERE path = ? OR (path > ? AND path < ?)`
+		rows, err := tx.QueryContext(ctx, `SELECT revision FROM `+table+where, path, path+"/", path+"0")
+		if err != nil {
+			return err
+		}
+		for rows.Next() {
+			var revision string
+			if err := rows.Scan(&revision); err != nil {
+				rows.Close()
+				return err
+			}
+			revisions = append(revisions, revision)
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if _, err := tx.ExecContext(ctx, `DELETE FROM `+table+where, path, path+"/", path+"0"); err != nil {
+			return err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	return k.release(ctx, revisions)
+}
+
+// PathsWithPrefix lists the paths that have a history or a head and start
+// with prefix, each once.
+func (k *Keeper) PathsWithPrefix(ctx context.Context, prefix string) ([]string, error) {
+	if k == nil || prefix == "" {
+		return nil, nil
+	}
+	// Everything that starts with prefix sorts below prefix with its last
+	// byte raised by one.
+	upper := prefix[:len(prefix)-1] + string([]byte{prefix[len(prefix)-1] + 1})
+	rows, err := k.db.QueryContext(ctx,
+		`SELECT path FROM file_versions WHERE path >= ? AND path < ?
+		 UNION SELECT path FROM file_version_heads WHERE path >= ? AND path < ?`,
+		prefix, upper, prefix, upper)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var paths []string
+	for rows.Next() {
+		var p string
+		if err := rows.Scan(&p); err != nil {
+			return nil, err
+		}
+		paths = append(paths, p)
+	}
+	return paths, rows.Err()
+}
+
 // prune holds a path to its count and everything to the total, oldest
 // first, and removes contents nothing points at any more.
 func (k *Keeper) prune(ctx context.Context, path string) error {
