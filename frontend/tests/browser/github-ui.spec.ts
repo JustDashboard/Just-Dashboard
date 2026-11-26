@@ -630,6 +630,45 @@ test.describe("pull requests and issues", () => {
     await expect(merged).not.toContainText(/merged .* by/)
   })
 
+  test("the page's Refresh reads the Overview's pull requests and issues past the server's memory", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    const reads: string[] = []
+    await mockGitHubPage(page, {
+      handle: async (_route, path, url) => {
+        if (/\/(pulls|issues)$/.test(path)) reads.push(`${path}${url.search}`)
+        return false
+      },
+    })
+    await page.goto("/github")
+    await expect(page.locator("[data-slot=github-inbox-pull-review]")).toContainText(
+      "Lazy-load the product gallery",
+    )
+    // The three previews: your pull requests, review requests, assigned issues.
+    await expect.poll(() => reads.length).toBeGreaterThanOrEqual(3)
+    expect(reads.some((read) => read.includes("refresh"))).toBe(false)
+    const before = reads.length
+    await identity(page).getByRole("button", { name: "More actions for GitHub" }).click()
+    await page.getByRole("menuitem", { name: "Refresh", exact: true }).click()
+    await expect
+      .poll(() =>
+        [
+          ...new Set(
+            reads
+              .slice(before)
+              .filter((read) => read.includes("refresh=1"))
+              .map((read) => read.replace(/\?.*filter=([a-z]+).*/, " $1")),
+          ),
+        ].sort(),
+      )
+      .toEqual([
+        "/github/connections/1/issues assigned",
+        "/github/connections/1/pulls created",
+        "/github/connections/1/pulls review",
+      ])
+  })
+
   for (const width of [1440, 390]) {
     test(`every row is one height at ${width}`, async ({ page }) => {
       await page.setViewportSize({ width, height: 900 })
