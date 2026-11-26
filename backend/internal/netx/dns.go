@@ -1520,15 +1520,23 @@ func (sv dnsServer) lookupServer() string {
 // copy of hosts, hostname and resolv.conf over those three files, and a
 // rename onto a mount point fails (or, worse, a write lands in Docker's copy
 // and the host never sees it). The host's real file is under /host.
+//
+// A link there counts as the server's file even when its target names nothing
+// from here: an absolute target is the server's to resolve, in its own mount
+// namespace (onHostsFile), and falling back would hand over Docker's copy.
 func hostFilePath(path string) string {
 	if path != "/etc/hosts" {
 		return path
 	}
-	if st, err := os.Stat(filepath.Join("/host", path)); err == nil && st.Mode().IsRegular() {
-		return filepath.Join("/host", path)
+	if _, err := os.Lstat(filepath.Join(serverMount, path)); err == nil {
+		return filepath.Join(serverMount, path)
 	}
 	return path
 }
+
+// serverMount is where the shipped container mounts the server's root. Tests
+// point it at a temporary directory.
+var serverMount = "/host"
 
 // validDNSName is a host or domain name in RFC 1123's letters-digits-hyphen
 // form, at most 253 characters with labels of at most 63. Underscores are
