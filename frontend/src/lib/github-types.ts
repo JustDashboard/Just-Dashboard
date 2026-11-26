@@ -222,7 +222,6 @@ export type GitHubCreateResult = {
 }
 
 /** `POST …/repos/{owner}/{repo}/clone` — a job whose console the page shows. */
-export type GitHubCloneRequest = { parent: string; name?: string; branch?: string; depth?: number }
 export type GitHubCloneStart = { jobId: string; target: string }
 
 export type GitHubBranch = { name: string; sha: string; protected: boolean; default: boolean }
@@ -399,7 +398,6 @@ export type GitHubRun = {
 }
 export type GitHubRunPage = { runs: GitHubRun[]; hasMore: boolean }
 
-export type GitHubDispatchRequest = { ref: string; inputs: Record<string, string> }
 export type GitHubDispatchResult = { runId?: number; htmlUrl?: string }
 
 export type GitHubCollaborator = { login: string; type: GitHubOwnerType | "Bot"; role: string }

@@ -9,7 +9,6 @@ import { EmptyState } from "@/components/state"
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu } from "@/components/verbs"
-import { plural } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import type { IPAMPool, IPAMView } from "@/lib/network/ipam"
 import { exact, ownerProduct, poolBand, poolOwners } from "@/components/network/ipam/reading"
@@ -266,6 +265,3 @@ function Owners({ owners }: { owners: string[] }) {
     </span>
   )
 }
-
-/** "2 pools" for the identity line, counting only the ones still handing out blocks. */
-export const poolsWord = (count: number) => plural(count, "pool")

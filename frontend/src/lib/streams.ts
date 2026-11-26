@@ -14,7 +14,6 @@ import type {
   StreamTestOutcome,
   StreamTestRequest,
   StreamTestResult,
-  StreamTrafficSummary,
 } from "@/lib/types"
 import type { DotTone, Verdict } from "@/components/status-dot"
 import { DANGEROUS_PORTS } from "@/components/proxy/findings/shared"
@@ -765,18 +764,6 @@ export const STREAM_STATUSES: Record<string, string> = {
   "500": "nginx failed internally",
   "502": "no server accepted",
   "503": "turned away by a connection limit",
-}
-
-/** A card's traffic line: "142 sessions/h · 3 denied · 1.2 GB". A floor is marked with "+". */
-export function trafficLine(summary: StreamTrafficSummary, size: (n: number) => string): string {
-  const floor = summary.complete ? "" : "+"
-  return [
-    `${summary.sessions.toLocaleString()}${floor} session${summary.sessions === 1 ? "" : "s"}/h`,
-    summary.denied > 0 && `${summary.denied.toLocaleString()}${floor} denied`,
-    summary.bytes > 0 && size(summary.bytes),
-  ]
-    .filter(Boolean)
-    .join(" · ")
 }
 
 /** A session's length: milliseconds under a second, as most short queries are. */

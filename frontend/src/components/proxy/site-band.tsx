@@ -2,14 +2,13 @@
 
 import { Connection } from "@/components/icons"
 import { BarReading } from "@/components/bar-reading"
-import { ProductGlyph, ProductLogo, ProductLogos, hasProductLogo } from "@/components/product-logo"
+import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { DOT_COLOR } from "@/components/status-dot"
 import { NumberTicker } from "@/components/ui/number-ticker"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { siteProduct } from "@/components/proxy/marks"
 import { activeOwner } from "@/components/proxy/site-details"
-import { ProjectFavicon, ProjectMark, ProjectMarkOf } from "@/components/project-mark"
-import { useProjects } from "@/hooks/use-projects"
+import { ProjectFavicon, ProjectMarkOf } from "@/components/project-mark"
 import {
   certCounts,
   certRows,
@@ -28,38 +27,6 @@ import { cn } from "@/lib/utils"
 
 /** How many things each block names; the rest are counted at its strip's end. */
 const SHOWN = 5
-
-/**
- * A site as the things it is made of: the application it hands requests to,
- * drawn as itself — the deployment that writes it as the project, its
- * website's icon first — tucked over the engine that serves it. A site that
- * proxies nothing — files, a redirect — or whose application this host
- * cannot name is its engine alone, never a guessed logo (§14).
- */
-export function SiteMark({
-  vhost,
-  app,
-  size = "md",
-}: {
-  vhost: VHost
-  app?: SiteApp
-  size?: "sm" | "md"
-}) {
-  const engine = siteProduct(vhost)
-  const project = activeOwner(vhost)?.projectId
-  const deployment = useProjects(Boolean(project)).get(project ?? 0)
-  if (deployment)
-    return (
-      <ProductLogos
-        lead={<ProjectMark deployment={deployment} size={size} />}
-        ids={[engine]}
-        size={size}
-        ring="ring-choice-surface"
-      />
-    )
-  if (!app?.product || app.product === engine) return <ProductLogo id={engine} size={size} />
-  return <ProductLogos ids={[app.product, engine]} size={size} ring="ring-choice-surface" />
-}
 
 /**
  * Where the host's sites stand, as three bars over the list: who carried the

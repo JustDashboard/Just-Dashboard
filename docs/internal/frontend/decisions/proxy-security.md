@@ -76,7 +76,7 @@ page to those rows; no chip stands over the settings when nothing is edited. The
 and new value, what the change does to the dashboard's access boundary and which recovery stands
 behind it, and a change that would cut the way in holds the review's button.
 The diagram and the workbench have edges for §7's reasons; tables keep theirs, and forms and
-findings remain plain. `components/security/marks.tsx` supplies the inline address, `PeerIdentity`,
+findings remain plain. `components/security/marks.tsx` supplies the inline address,
 process and interface marks. A product is named only when it can be identified; no logo is guessed
 for ufw, sshd or an unknown interface. Source choices in the firewall dialog use the same lit
 `ChoiceCard` as deployment choices, with Tailscale's own mark for the tailnet.

@@ -3,12 +3,7 @@
 import { networkOf } from "@/lib/clients"
 import { cn } from "@/lib/utils"
 import { NETWORK_GLYPH } from "@/components/client-mark"
-import {
-  ProductGlyph,
-  ProductLogo,
-  hasProductLogo,
-  processProduct,
-} from "@/components/product-logo"
+import { ProductGlyph, hasProductLogo, processProduct } from "@/components/product-logo"
 
 /**
  * What the Security pages are about, drawn as the products they are (§14): a
@@ -86,23 +81,6 @@ export function Address({ ip, className }: { ip: string; className?: string }) {
       )}
       <span className="truncate font-mono">{ip}</span>
     </span>
-  )
-}
-
-/** A peer owns one column: its address and origin stay together at every width. */
-export function PeerIdentity({ ip, detail }: { ip: string; detail?: React.ReactNode }) {
-  const network = networkOf(ip)
-  return (
-    <div className="flex min-w-0 items-center gap-3">
-      <ProductLogo id={network.product} fallback={NETWORK_GLYPH[network.kind]} size="sm" />
-      <div className="min-w-0 space-y-1">
-        <span className="block font-mono text-body font-medium break-all">{ip}</span>
-        <span className="flex flex-wrap items-center gap-x-2 gap-y-1 text-hint text-muted-foreground">
-          {network.label}
-          {detail}
-        </span>
-      </div>
-    </div>
   )
 }
 

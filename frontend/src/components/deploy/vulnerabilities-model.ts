@@ -307,14 +307,6 @@ export function badgeOf(
   }
 }
 
-/** A severity's colour on the bar and its key: the worst red, down to a quiet blue. */
-export const SEVERITY_COLOR: Record<Exclude<VulnerabilitySeverity, "UNKNOWN">, string> = {
-  CRITICAL: "var(--destructive)",
-  HIGH: "color-mix(in oklab, var(--destructive) 62%, var(--warning))",
-  MEDIUM: "var(--warning)",
-  LOW: "var(--chart-2)",
-}
-
 /** The report's sentence: how many, in which release, and whose they are. */
 export function scanLead(scan: ImageScan) {
   const total = totalOf(scan.summary.counts)
