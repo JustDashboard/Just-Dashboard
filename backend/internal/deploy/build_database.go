@@ -57,8 +57,10 @@ type BuildNetworkOwner interface {
 // the application's: migration bookkeeping does not count, since a schema
 // step writes it. An engine it cannot judge holds rows, so nothing that
 // depends on a database being new ever runs against one it cannot read.
+// database is the database on the connection's server a value names, empty
+// for the connection's own; one it does not count holds rows.
 type DatabaseContents interface {
-	DatabaseHasRows(ctx context.Context, connectionID int64) (bool, error)
+	DatabaseHasRows(ctx context.Context, connectionID int64, database string) (bool, error)
 }
 
 // WithDatabaseContents is the executor judging whether a database is new
@@ -345,12 +347,34 @@ func (e *NormalizedStepExecutor) seedBeforeBuild(
 	if e.databases == nil || network == nil {
 		return schemaRetry{reason: "the database's rows could not be counted, so its seed is not run"}
 	}
-	ids := databaseConnectionIDs(network.Hosts)
-	if len(ids) == 0 {
+	command := strings.TrimSpace(candidate.SeedCommand)
+	step := buildSchemaStep{Command: command, Scope: "runtime"}
+	// The seed runs with the application's runtime values, which need not
+	// name the database the build reads: it runs only when every database
+	// they name is one the build reaches, and each of those is counted, with
+	// the very values the step is then handed.
+	values, secret, err := e.schemaStepValues(ctx, execution.Run, step)
+	if err != nil {
+		return schemaRetry{failure: ptr(normalizedStepFailure(err))}
+	}
+	buildValues, _, err := e.buildScopeVariables(ctx, execution.Run)
+	if err != nil {
+		return schemaRetry{failure: ptr(normalizedStepFailure(err))}
+	}
+	counted := []databaseTarget{}
+	for _, target := range databaseTargets(buildValues) {
+		if target.connectionID > 0 && !slices.ContainsFunc(counted, target.sameDatabase) {
+			counted = append(counted, target)
+		}
+	}
+	if len(counted) == 0 {
 		return schemaRetry{reason: "the build reaches no database of this server's that the seed could be judged against"}
 	}
-	for _, id := range ids {
-		hasRows, err := e.databases.DatabaseHasRows(ctx, id)
+	if reason := uncountedSeedTargets(counted, databaseTargets(values)); reason != "" {
+		return schemaRetry{reason: reason}
+	}
+	for _, target := range counted {
+		hasRows, err := e.databases.DatabaseHasRows(ctx, target.connectionID, target.database)
 		if err != nil {
 			return schemaRetry{reason: "the database's rows could not be counted (" + truncateUTF8Prefix(err.Error(), 160) + "), so its seed is not run"}
 		}
@@ -358,9 +382,8 @@ func (e *NormalizedStepExecutor) seedBeforeBuild(
 			return schemaRetry{reason: "the database already holds rows, and a seed only ever runs on a new one"}
 		}
 	}
-	command := strings.TrimSpace(candidate.SeedCommand)
 	return e.runDatabaseStep(ctx, execution, plan, prepared, builder, redacted, databaseStepRun{
-		step: buildSchemaStep{Command: command, Scope: "runtime"}, kind: "seed", gate: hasBackupGate(plan),
+		step: step, values: values, secret: secret, kind: "seed", gate: hasBackupGate(plan),
 		intro:   "The build needs rows the database does not have yet, and the database is new with none at all, so the project's seed runs once with `" + command + "`, then the build runs again",
 		failure: "The build needs the rows the project's seed loads, and running it with `" + boundedCauseCommand(command) + "` failed",
 		code:    "build_seed_step_failed",
@@ -383,10 +406,103 @@ func databaseConnectionIDs(hosts []string) []int64 {
 	return ids
 }
 
+// databaseTarget is a database a variable's value names: the saved
+// connection behind a db-N.jd.internal host or its pooler, and the database
+// on that server its path names. connectionID is 0 for one no row count can
+// be asked of: a preview's branch, a data copy, a database elsewhere, or a
+// connection string that is no URL.
+type databaseTarget struct {
+	variable     string
+	connectionID int64
+	database     string
+}
+
+func (t databaseTarget) sameDatabase(other databaseTarget) bool {
+	return t.connectionID > 0 && t.connectionID == other.connectionID && t.database == other.database
+}
+
+// seedDatabaseSchemes are the URL schemes of the engines a seed's rows go
+// to, so a value naming one elsewhere is a database the seed could write to.
+// A cache is not where they go.
+var seedDatabaseSchemes = []string{
+	"postgres", "postgresql", "postgis", "mysql", "mysql2", "mariadb", "mongodb", "sqlserver", "mssql",
+	"cockroachdb", "libsql", "prisma",
+}
+
+// databaseTargets are the databases values name, by variable.
+func databaseTargets(values map[string]string) []databaseTarget {
+	targets := []databaseTarget{}
+	for name, value := range values {
+		value = strings.TrimSpace(value)
+		lower := strings.ToLower(value)
+		if !strings.Contains(value, "://") {
+			// An ADO.NET string or a bare host names the server without a
+			// database this could compare.
+			if strings.Contains(lower, ".jd.internal") {
+				targets = append(targets, databaseTarget{variable: name})
+			}
+			continue
+		}
+		// A JDBC URL is the engine's own URL behind its prefix.
+		if strings.HasPrefix(lower, "jdbc:") {
+			value = value[len("jdbc:"):]
+		}
+		parsed, err := url.Parse(value)
+		if err != nil {
+			if strings.Contains(lower, ".jd.internal") {
+				targets = append(targets, databaseTarget{variable: name})
+			}
+			continue
+		}
+		host := strings.ToLower(parsed.Hostname())
+		if !strings.HasSuffix(host, ".jd.internal") {
+			if host != "" && slices.ContainsFunc(strings.Split(strings.ToLower(parsed.Scheme), "+"), func(part string) bool {
+				return slices.Contains(seedDatabaseSchemes, part)
+			}) {
+				targets = append(targets, databaseTarget{variable: name})
+			}
+			continue
+		}
+		target := databaseTarget{variable: name, database: strings.Trim(parsed.Path, "/")}
+		if ids := databaseConnectionIDs([]string{host}); len(ids) == 1 {
+			target.connectionID = ids[0]
+		}
+		targets = append(targets, target)
+	}
+	sort.Slice(targets, func(i, j int) bool { return targets[i].variable < targets[j].variable })
+	return targets
+}
+
+// uncountedSeedTargets is why a seed is not run when the databases its own
+// values name are not all ones whose rows were counted, empty when they are.
+func uncountedSeedTargets(counted, seed []databaseTarget) string {
+	if len(seed) == 0 {
+		return "the seed runs with the application's runtime values, which name no database of this server's whose rows could be counted, so its seed is not run"
+	}
+	names := []string{}
+	for _, target := range seed {
+		if !slices.ContainsFunc(counted, target.sameDatabase) {
+			names = append(names, target.variable)
+		}
+	}
+	switch len(names) {
+	case 0:
+		return ""
+	case 1:
+		return "the seed runs with the application's runtime values, where " + names[0] + " names a database other than the one the build reads and whose rows were counted, so its seed is not run"
+	default:
+		return "the seed runs with the application's runtime values, where " + strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1] +
+			" name databases other than the ones the build reads and whose rows were counted, so its seed is not run"
+	}
+}
+
 // databaseStepRun is one database step: what it runs, what it is called in
-// the step's log and how its failure is named.
+// the step's log and how its failure is named. values and secret, when set,
+// are the values the step is handed, already read for the check before it.
 type databaseStepRun struct {
 	step                 buildSchemaStep
+	values               map[string]string
+	secret               map[string]bool
 	kind, intro, failure string
 	code                 string
 	gate                 bool
@@ -409,9 +525,11 @@ func (e *NormalizedStepExecutor) runDatabaseStep(
 	if err != nil {
 		return schemaRetry{reason: "the recipe's Dockerfile could not be read"}
 	}
-	values, secret, err := e.schemaStepValues(ctx, execution.Run, step)
-	if err != nil {
-		return schemaRetry{failure: ptr(normalizedStepFailure(err))}
+	values, secret := run.values, run.secret
+	if values == nil {
+		if values, secret, err = e.schemaStepValues(ctx, execution.Run, step); err != nil {
+			return schemaRetry{failure: ptr(normalizedStepFailure(err))}
+		}
 	}
 	for name, value := range buildLogRedactions(values, secret) {
 		redacted[name] = value

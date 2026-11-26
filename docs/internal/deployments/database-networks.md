@@ -125,7 +125,14 @@ way, once, only when every linked database the build reaches holds no row of the
 (`DatabaseHasRows`, `api/deployment_database_contents.go`: PostgreSQL and MySQL tables, leaving out the
 migration tools' records, Django's content types and permissions and PostGIS's reference systems; any
 other engine, more than 500 tables, or an error counts as holding rows). A seed usually resets the
-tables it fills, so a database with any row is never seeded. The step's log says each of these as it
+tables it fills, so a database with any row is never seeded. The seed runs with the runtime values, not
+the build's, so it runs only when every database those values name is one the build reads and whose
+rows were counted, compared by connection and by the database the URL's path names (`databaseTargets`,
+`uncountedSeedTargets`): a runtime value naming another linked database, a hosted one, a preview's
+branch, another database on the same server (`${{database.5.url.app_shadow}}`, which `DatabaseHasRows`
+does not count), or a connection string that is no URL (ADO.NET's) keeps the seed from running, as do
+runtime values that name no database at all. The step is then handed the very values that were judged.
+The step's log says each of these as it
 happens, and build_artifact's evidence lists them (`databaseSteps`). A step that fails ends the build as
 `build_schema_step_failed` or `build_seed_step_failed` with the command's last line; a refusal to join
 the network ends it before anything builds, as `build_database_network`.
@@ -237,7 +244,9 @@ No hosted-provider account or live provider credentials are required by the loca
   one migrating from the build's output is not run first), which hosts send a build to the network,
   the new signatures from each driver and Next.js, and remedies that follow Cache Components;
   `build_database_executor_test.go` runs build_artifact through a first deploy (network, schema, seed,
-  build), a database with rows never seeded, a build off the network, and each failure.
+  build), a database with rows never seeded, a seed whose runtime values name a database other than the
+  build's counted one never run (and one reading the same database through its pooler run), a build off
+  the network, and each failure.
   `buildkit_network_test.go` covers the builder's arguments and configuration, the networks a waiting
   builder joins and leaves, and that one is claimed once; `JD_DEPLOY_LIVE=1 go test ./internal/dockerx -run
   TestLiveNetworkedBuilderWaitsForTheNextBuild` closes a builder on two networks, starts the next build on
