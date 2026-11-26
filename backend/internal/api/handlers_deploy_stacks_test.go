@@ -5,17 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks/media"
 )
 
-// A stack is an ordinary deployment of its preset's template: committing a
-// draft made from one registers the stack, its page waits for a live release,
+// A stack is an ordinary deployment of its preset's template: a draft takes
+// the preset as it takes any template, committing it registers the stack, its page waits for a live release,
 // Retry says so in words, and the accounts it creates are revealed only by
 // name, audited, never an internal token.
 func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) {
@@ -74,40 +78,32 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 	_ = json.Unmarshal(call(http.MethodPut, "/deploy/drafts/"+draft.ID, fmt.Sprintf(
 		`{"revision":%d,"step":"source","source":{"kind":"compose","mode":"blueprint","blueprintId":%q,"blueprintVersion":"1.0.0","blueprintInputs":{"request-approval":"admin"}}}`,
 		draft.Revision, media.TemplateEssential), http.StatusOK), &draft)
-	_ = json.Unmarshal(call(http.MethodPost, "/deploy/drafts/"+draft.ID+"/detect", fmt.Sprintf(`{"revision":%d}`, draft.Revision), http.StatusOK), &draft)
-	if draft.Data.Configuration == nil {
-		t.Fatalf("detection left no configuration: %+v", draft.Data)
+	if draft.Data.Source == nil || draft.Data.Source.BlueprintID != media.TemplateEssential || len(draft.Data.Source.ComposeFiles) != 1 {
+		t.Fatalf("the draft did not take the preset's template: %+v", draft.Data.Source)
 	}
-	configuration, _ := json.Marshal(draft.Data.Configuration)
-	_ = json.Unmarshal(call(http.MethodPut, "/deploy/drafts/"+draft.ID, fmt.Sprintf(
-		`{"revision":%d,"step":"configuration","configuration":%s}`, draft.Revision, configuration), http.StatusOK), &draft)
-	var preflighted struct {
-		Draft deploy.Draft `json:"draft"`
+	// Committing runs preflight, which needs Docker; the hook the commit
+	// calls is what registers the stack, so it is called as the commit calls
+	// it, for a project as the commit makes one.
+	now := time.Now().Unix()
+	inserted, err := s.Store.DB.Exec(`INSERT INTO deploy_projects (name, repo_path, hook_secret, hook_id, created_at) VALUES ('media', '', 'x', 'hook-media', ?)`, now)
+	if err != nil {
+		t.Fatal(err)
 	}
-	_ = json.Unmarshal(call(http.MethodPost, "/deploy/drafts/"+draft.ID+"/preflight", fmt.Sprintf(`{"revision":%d}`, draft.Revision), http.StatusOK), &preflighted)
-	draft = preflighted.Draft
-	var result deploy.DraftCommitResult
-	committed := c.do(http.MethodPost, "/api/v1/deploy/drafts/"+draft.ID+"/commit",
-		fmt.Sprintf(`{"revision":%d,"acknowledgedWarnings":[]}`, draft.Revision), nil)
-	if committed.Code != http.StatusCreated {
-		// Preflight may ask for warnings to be acknowledged; acknowledge
-		// whatever it named, as Review does.
-		var refusal struct {
-			Error struct {
-				Details struct {
-					Warnings []string `json:"warnings"`
-				} `json:"details"`
-			} `json:"error"`
-		}
-		_ = json.Unmarshal(committed.Body.Bytes(), &refusal)
-		acknowledged, _ := json.Marshal(refusal.Error.Details.Warnings)
-		committed = c.do(http.MethodPost, "/api/v1/deploy/drafts/"+draft.ID+"/commit",
-			fmt.Sprintf(`{"revision":%d,"acknowledgedWarnings":%s}`, draft.Revision, acknowledged), nil)
+	projectID, _ := inserted.LastInsertId()
+	result := &deploy.DraftCommitResult{ProjectID: projectID, EnvironmentID: 424242, Created: true}
+	request := httptest.NewRequest(http.MethodPost, "/", nil).WithContext(httpx.WithPrincipal(context.Background(),
+		&httpx.Principal{User: &auth.User{Username: "tester"}, Kind: "session"}))
+	s.registerStack(request, &draft, result)
+	s.registerStack(request, &draft, result) // a replayed commit is one stack
+	other := draft
+	otherSource := *draft.Data.Source
+	otherSource.BlueprintID = "whoami"
+	other.Data.Source = &otherSource
+	s.registerStack(request, &other, &deploy.DraftCommitResult{ProjectID: projectID + 1000, EnvironmentID: 1})
+	var registered int
+	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM deploy_stacks`).Scan(&registered); err != nil || registered != 1 {
+		t.Fatalf("%d stacks registered: %v", registered, err)
 	}
-	if committed.Code != http.StatusCreated {
-		t.Fatalf("commit = %d %s", committed.Code, committed.Body.String())
-	}
-	_ = json.Unmarshal(committed.Body.Bytes(), &result)
 	path := fmt.Sprintf("/deploy/%d/stack", result.ProjectID)
 
 	var state stackState

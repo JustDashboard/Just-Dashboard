@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
@@ -145,6 +146,18 @@ type stackCredentialListing struct {
 	Label    string `json:"label"`
 	Username string `json:"username,omitempty"`
 	Stored   bool   `json:"stored"`
+}
+
+// stackConfigureAnswer is what Retry answers: the pass has been asked for.
+type stackConfigureAnswer struct {
+	Status stacks.Status `json:"status"`
+}
+
+// stackCredentialReveal is one account the stack created, revealed.
+type stackCredentialReveal struct {
+	Name     string `json:"name"`
+	Username string `json:"username,omitempty"`
+	Password string `json:"password"`
 }
 
 func stackProjectID(r *http.Request) (int64, error) {
@@ -440,7 +453,7 @@ func (s *Server) handleStackConfigure(w http.ResponseWriter, r *http.Request) er
 	httpx.SetAudit(r, "deploy.stack.configure", strconv.FormatInt(record.ProjectID, 10), map[string]any{
 		"stack": record.StackID, "preset": record.Preset,
 	})
-	httpx.JSON(w, http.StatusAccepted, map[string]string{"status": string(stacks.StatusConfiguring)})
+	httpx.JSON(w, http.StatusAccepted, stackConfigureAnswer{Status: stacks.StatusConfiguring})
 	return nil
 }
 
@@ -467,7 +480,7 @@ func (s *Server) handleStackCredentialReveal(w http.ResponseWriter, r *http.Requ
 	s.recordAudit(r, "deploy.stack.credential.reveal", name, map[string]any{
 		"deploymentId": record.ProjectID, "stack": record.StackID,
 	})
-	httpx.JSON(w, http.StatusOK, map[string]string{"name": name, "username": spec.Username, "password": value})
+	httpx.JSON(w, http.StatusOK, stackCredentialReveal{Name: name, Username: spec.Username, Password: value})
 	return nil
 }
 
@@ -500,14 +513,22 @@ func (s *Server) registerStack(r *http.Request, draft *deploy.Draft, result *dep
 // rendered from.
 func (s *Server) stackLiveRelease(ctx context.Context, environmentID int64) (stacks.Live, error) {
 	var live stacks.Live
+	var blueprintID, template string
+	// A Compose template's release names its template in the source identity
+	// ("media-essential@1.0.0"); blueprint_id is a single image's.
 	err := s.Store.DB.QueryRowContext(ctx, `
-		SELECT e.live_release_id, COALESCE(rt.kind, ''), COALESCE(rt.runtime_id, ''), COALESCE(r.blueprint_id, '')
+		SELECT e.live_release_id, COALESCE(rt.kind, ''), COALESCE(rt.runtime_id, ''), COALESCE(r.blueprint_id, ''),
+		       COALESCE(json_extract(r.source_identity_json, '$.template'), '')
 		  FROM deploy_environments e
 		  LEFT JOIN deploy_release_runtimes rt ON rt.release_id = e.live_release_id
 		  LEFT JOIN deploy_releases r ON r.id = e.live_release_id
-		 WHERE e.id = ?`, environmentID).Scan(&live.ReleaseID, &live.Kind, &live.RuntimeID, &live.TemplateID)
+		 WHERE e.id = ?`, environmentID).Scan(&live.ReleaseID, &live.Kind, &live.RuntimeID, &blueprintID, &template)
 	if errors.Is(err, sql.ErrNoRows) || (err == nil && live.ReleaseID == 0) {
 		return stacks.Live{}, stacks.ErrNoLiveRelease
+	}
+	live.TemplateID = blueprintID
+	if id, _, found := strings.Cut(template, "@"); found && id != "" {
+		live.TemplateID = id
 	}
 	return live, err
 }
