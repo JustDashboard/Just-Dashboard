@@ -93,31 +93,50 @@ export function ProfileColumn({
         </div>
       </div>
 
-      {profile?.bio && <p className="text-body text-pretty">{profile.bio}</p>}
-
-      {profile ? (
-        <div className="flex min-w-0 flex-wrap gap-x-4 gap-y-2 text-body text-muted-foreground lg:flex-col">
-          <p className="numeric flex items-center gap-2">
-            <Users aria-hidden className="size-4 shrink-0" />
-            <span>
-              <span className="font-medium text-foreground">{profile.followers}</span>{" "}
-              {profile.followers === 1 ? "follower" : "followers"} ·{" "}
-              <span className="font-medium text-foreground">{profile.following}</span> following
-            </span>
-          </p>
-          {facts.map(({ key, icon: Glyph, node }) => (
-            <p key={key} className="flex max-w-full min-w-0 items-center gap-2">
-              <Glyph aria-hidden className="size-4 shrink-0" />
-              <span className="min-w-0 truncate">{node}</span>
-            </p>
-          ))}
-        </div>
-      ) : (
-        <div className="space-y-2" aria-hidden>
-          <Skeleton className="h-5 w-40" />
-          <Skeleton className="h-5 w-28" />
-        </div>
-      )}
+      {/* On a phone this is one block of one height whatever GitHub says —
+          the facts on one line, the bio in at most two under them — so the
+          calendar below does not move when the profile lands (§11). On a desk
+          the column stands beside the main one and runs to its own length. */}
+      <div className="flex min-w-0 flex-col gap-2 max-lg:h-17 lg:gap-5">
+        {profile ? (
+          <>
+            {profile.bio && (
+              <p className="text-body leading-5 text-pretty max-lg:order-last max-lg:line-clamp-2">
+                {profile.bio}
+              </p>
+            )}
+            <div className="flex min-w-0 gap-x-4 gap-y-2 text-body leading-5 text-muted-foreground max-lg:h-5 max-lg:overflow-hidden lg:flex-col">
+              <p className="numeric flex shrink-0 items-center gap-2">
+                <Users aria-hidden className="size-4 shrink-0" />
+                <span>
+                  <span className="font-medium text-foreground">{profile.followers}</span>{" "}
+                  {profile.followers === 1 ? "follower" : "followers"} ·{" "}
+                  <span className="font-medium text-foreground">{profile.following}</span> following
+                </span>
+              </p>
+              {/* A phone's one line holds the people and the first fact; the
+                  rest, cut to a letter each, said nothing there. */}
+              {facts.map(({ key, icon: Glyph, node }, index) => (
+                <p
+                  key={key}
+                  className={cn(
+                    "flex max-w-full min-w-0 items-center gap-2",
+                    index > 0 && "max-lg:hidden",
+                  )}
+                >
+                  <Glyph aria-hidden className="size-4 shrink-0" />
+                  <span className="min-w-0 truncate">{node}</span>
+                </p>
+              ))}
+            </div>
+          </>
+        ) : (
+          <div className="space-y-2" aria-hidden>
+            <Skeleton className="h-5 w-40" />
+            <Skeleton className="h-5 w-28" />
+          </div>
+        )}
+      </div>
     </aside>
   )
 }

@@ -80,6 +80,7 @@ export function ContributionCalendar({
   const months = monthLabels(shown)
   const { longest, current } = streaks(contributions)
   const busiest = busiestDay(contributions)
+  const streaky = Boolean(contributions && contributions.total > 0)
   const svgWidth = WEEKDAY_GUTTER + shown.length * (CELL + CELL_GAP) - CELL_GAP
 
   return (
@@ -88,8 +89,11 @@ export function ContributionCalendar({
       data-slot="github-contributions"
       className="flex min-w-0 flex-col gap-3"
     >
-      <div className="flex min-h-6 min-w-0 flex-wrap items-baseline justify-between gap-x-4 gap-y-1">
-        <h2 className="flex min-w-0 items-baseline gap-1.5 text-body text-muted-foreground">
+      {/* The year in words, a fixed shape in every state: the streaks are
+          drawn, unseen, before there are any, and take a line of their own
+          on a phone, so nothing under them moves when the year lands (§11). */}
+      <div className="flex min-w-0 flex-col gap-1 sm:h-6 sm:flex-row sm:items-baseline sm:justify-between sm:gap-4">
+        <h2 className="flex h-6 min-w-0 items-baseline gap-1.5 text-body text-muted-foreground">
           {contributions ? (
             <>
               <NumberTicker
@@ -104,17 +108,21 @@ export function ContributionCalendar({
             <span className="text-foreground">Contributions</span>
           )}
         </h2>
-        {contributions && contributions.total > 0 && (
-          <p className="numeric flex items-center gap-3 text-hint text-muted-foreground">
-            <span>
-              Longest streak{" "}
-              <span className="font-medium text-foreground">{plural(longest, "day")}</span>
-            </span>
-            <span>
-              Current <span className="font-medium text-foreground">{plural(current, "day")}</span>
-            </span>
-          </p>
-        )}
+        <p
+          aria-hidden={!streaky}
+          className={cn(
+            "numeric flex h-4 shrink-0 items-center gap-3 text-hint text-muted-foreground",
+            !streaky && "invisible",
+          )}
+        >
+          <span>
+            Longest streak{" "}
+            <span className="font-medium text-foreground">{plural(longest, "day")}</span>
+          </span>
+          <span>
+            Current <span className="font-medium text-foreground">{plural(current, "day")}</span>
+          </span>
+        </p>
       </div>
 
       <div ref={box} className="min-w-0" style={{ height: HEIGHT }}>

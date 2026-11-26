@@ -61,8 +61,10 @@ the main one), one on a phone.
 - *The profile column* (`home/profile.tsx`): the account's face, round, 112px on a desk and 64px
   on a phone where it shares a row with the name; the name over the login; the bio; followers and
   following; company, location and website, each by its glyph, only when GitHub has one (the
-  website through `blogHref`, which adds a scheme and refuses anything but http and https). Under a
-  hairline, **Reaches**: one line per installation, the account's face, its login, All or Selected
+  website through `blogHref`, which adds a scheme and refuses anything but http and https). On a
+  phone that part is one block of one height (`h-17`): the followers and the first fact on one line,
+  the bio in at most two under it, so the calendar does not move when the profile lands. Under a
+  hairline (at the page's foot on a phone), **Reaches**: one line per installation, the account's face, its login, All or Selected
   (or Suspended), and **Change** (that installation's settings on GitHub); then **Install** and
   **Refresh access** (`POST …/connections/{id}/refresh`, then the list read again past the
   server's cache). Arriving with `?installed=1` refreshes every active connection once and takes
