@@ -14,6 +14,8 @@ import (
 	"syscall"
 	"testing"
 	"time"
+
+	"github.com/Wayy01/Just-Dashboard/backend/internal/ptyhold"
 )
 
 // heldManager is a manager whose holders are this test binary, started as a
@@ -292,6 +294,31 @@ func TestHolderSetupFailureStillAdoptsRunningWindows(t *testing.T) {
 	await(t, output, string(snapshot), "survived-42")
 }
 
+// heldReplay is what the holder behind socket keeps for a dashboard coming
+// back, read the way one reads it: by attaching and taking the replay.
+func heldReplay(socket string) string {
+	link, hello, f, err := ptyhold.Attach(socket)
+	if err != nil {
+		return ""
+	}
+	link.Close()
+	f.Close()
+	return string(hello.Past)
+}
+
+// waitFor polls until cond holds. The deadline is far past what a passing run
+// needs, so a loaded machine makes the test slower rather than wrong.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}
+
 // await reads a subscription until its output contains want.
 func await(t *testing.T, out <-chan []byte, seen, want string) string {
 	t.Helper()
@@ -333,15 +360,23 @@ func TestHeldSessionOutlivesTheManager(t *testing.T) {
 	}
 	await(t, out, "", "marker-42")
 	sess.Unsubscribe(id)
-	// Printed while no dashboard is there to read it.
-	if _, err := sess.Write([]byte("sleep 1; echo meanwhile-$((6*7+1))\n")); err != nil {
+	// Printed while no dashboard is there to read it: the shell waits for the
+	// gate, which opens only once the manager is gone.
+	gate := filepath.Join(t.TempDir(), "gone")
+	if _, err := sess.Write([]byte("until [ -e '" + gate + "' ]; do sleep 0.05; done; echo meanwhile-$((6*7+1))\n")); err != nil {
 		t.Fatal(err)
 	}
 	first.Shutdown()
 	if err := syscall.Kill(sess.PID, 0); err != nil {
 		t.Fatalf("the shell ended with the manager: %v", err)
 	}
-	time.Sleep(1500 * time.Millisecond)
+	if err := os.WriteFile(gate, nil, 0o600); err != nil {
+		t.Fatal(err)
+	}
+	socket := filepath.Join(dir, sess.ID+".sock")
+	waitFor(t, "the holder to keep what the shell printed meanwhile", func() bool {
+		return strings.Contains(heldReplay(socket), "meanwhile-43")
+	})
 
 	second := heldManager(t, dir)
 	second.adopt()

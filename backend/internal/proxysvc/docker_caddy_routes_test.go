@@ -307,6 +307,9 @@ func TestTheUpkeepLoopLooksAgainWhenAContainerChanges(t *testing.T) {
 		service.IngressChanged()
 	}
 	await(2)
+	// The pass is reported once it is over, which can be well after it asked.
+	waitFor(t, "the second pass to be reported", func() bool { return reported.Load() >= 2 })
+	// Nothing of the burst is left to make a third pass.
 	time.Sleep(100 * time.Millisecond)
 	if got := containers.asked.Load(); got != 2 {
 		t.Fatalf("a burst of changes made %d passes, want one more", got-1)
@@ -315,5 +318,18 @@ func TestTheUpkeepLoopLooksAgainWhenAContainerChanges(t *testing.T) {
 	// the caller says a recovery.
 	if got := reported.Load(); got != 2 {
 		t.Fatalf("%d passes were reported, want both", got)
+	}
+}
+
+// waitFor polls until cond holds. The deadline is far past what a passing run
+// needs, so a loaded machine makes the test slower rather than wrong.
+func waitFor(t *testing.T, what string, cond func() bool) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for !cond() {
+		if time.Now().After(deadline) {
+			t.Fatalf("timed out waiting for %s", what)
+		}
+		time.Sleep(5 * time.Millisecond)
 	}
 }
