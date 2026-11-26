@@ -1,0 +1,15 @@
+[
+  {
+    "propertyName": "Path",
+    "errorMessage": "Path '/data/media/movies' does not exist",
+    "attemptedValue": "/data/media/movies",
+    "severity": "error",
+    "errorCode": "PathExistsValidator",
+    "formattedMessageArguments": [],
+    "formattedMessagePlaceholderValues": {
+      "path": "/data/media/movies",
+      "propertyName": "Path",
+      "propertyValue": "/data/media/movies"
+    }
+  }
+]

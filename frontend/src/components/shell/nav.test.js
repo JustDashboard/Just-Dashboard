@@ -277,3 +277,26 @@ test("a database's and a project's own panels light one row", () => {
   expect(lit(project, "/deploy/12")).toEqual(["Overview"])
   expect(lit(project, "/deploy/12/logs")).toEqual(["Logs"])
 })
+
+test("Streams and Configuration leave the rail on a server known to have no nginx", () => {
+  const proxy = NAV.flatMap((group) => group.items).find((entry) => entry.href === "/proxy")
+  const page = (href) => proxy.children.find((child) => child.href === href)
+  const admin = () => true
+  const none = new Set()
+  const needing = proxy.children.filter((child) => child.needs === "nginx").map((c) => c.href)
+  expect(needing).toEqual(["/proxy/streams", "/proxy/config"])
+  for (const href of needing) {
+    // Not read yet is not absent: the default draws the row.
+    expect(shownFor(page(href), none, "/proxy", admin)).toBe(true)
+    expect(shownFor(page(href), none, "/proxy", admin, false, true)).toBe(true)
+    expect(shownFor(page(href), none, "/proxy", admin, false, false)).toBe(false)
+    // Opened by its address, the rail still says where you are.
+    expect(shownFor(page(href), none, href, admin, false, false)).toBe(true)
+  }
+  expect(
+    shownFor(page("/proxy/streams"), none, "/proxy/streams/bastion", admin, false, false),
+  ).toBe(true)
+  // Every other page of the section reads something a Caddy server has.
+  expect(shownFor(page("/proxy/sites"), none, "/proxy", admin, false, false)).toBe(true)
+  expect(shownFor(proxy, none, "/dashboard", admin, false, false)).toBe(true)
+})

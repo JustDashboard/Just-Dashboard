@@ -54,7 +54,7 @@ import {
 import { firstSeen, isNew } from "@/components/proxy/ports-history"
 import { NewMark, PortChanges } from "@/components/proxy/port-changes"
 import { addressLine, ProcessMark, ReachWord } from "@/components/proxy/port-marks"
-import { proxyWords } from "@/components/proxy/ports-proxy"
+import { ProxyWords, proxyWords } from "@/components/proxy/ports-proxy"
 import { PortClients, PortOwner, PortReach } from "@/components/proxy/port-views"
 import { PortPath } from "@/components/proxy/port-path"
 import { socketMenuLabel, useSocketVerbs } from "@/components/proxy/port-verbs"
@@ -439,7 +439,11 @@ function PortIdentity({
               )}
             </Fact>
           )}
-          {proxy && <Fact>{proxy}</Fact>}
+          {proxy && (
+            <Fact>
+              <ProxyWords socket={socket} />
+            </Fact>
+          )}
           {seen && (
             <Fact title={timestamp(seen)}>
               {isNew(socket, listedAt) ? "first seen today" : `listening since ${timestamp(seen)}`}

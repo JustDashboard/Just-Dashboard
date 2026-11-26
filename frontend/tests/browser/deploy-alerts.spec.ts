@@ -38,6 +38,22 @@ test.describe("traffic alerts", () => {
       "tabindex",
       "-1",
     )
+    // A modified arrow is the browser's: Alt+← is Back, and the grid neither
+    // takes it from the browser nor picks another kind with it.
+    await page.evaluate(() => {
+      const seen = window as unknown as { backKept?: boolean }
+      window.addEventListener("keydown", (event) => {
+        if (event.altKey && event.key === "ArrowLeft") seen.backKept = !event.defaultPrevented
+      })
+    })
+    await kinds.getByRole("radio", { name: /^Slow responses/ }).press("Alt+ArrowLeft")
+    await expect(kinds.getByRole("radio", { name: /^Slow responses/ })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+    expect(await page.evaluate(() => (window as unknown as { backKept?: boolean }).backKept)).toBe(
+      true,
+    )
     await expect(page.getByRole("dialog").getByText("ms", { exact: true })).toBeVisible()
     await page.getByLabel("Alert limit").fill("800")
     await page.getByLabel("Alert window in minutes").fill("10")

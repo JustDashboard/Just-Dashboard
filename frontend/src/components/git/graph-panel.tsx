@@ -1,7 +1,8 @@
 "use client"
 
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { Cross } from "@/components/icons"
 import { get } from "@/lib/api"
 import { grouped, plural, relativeTime, timestamp } from "@/lib/format"

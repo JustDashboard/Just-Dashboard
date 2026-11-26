@@ -1,5 +1,5 @@
 import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
-import { json, mockProxy, user } from "./proxy-fixtures"
+import { ingressOnly, json, mockProxy, user } from "./proxy-fixtures"
 import { risen } from "./risen"
 import { carrying, mockCarrying } from "./fixtures/proxy/stream-traffic"
 import {
@@ -741,6 +741,29 @@ test("without nginx the page says so and offers nothing to save", async ({ page 
   await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
   await expect(page.getByRole("button", { name: "Prepare a stream" })).toHaveCount(0)
   await expect(page.getByText("nginx is not reading these yet")).toHaveCount(0)
+})
+
+test("behind the Caddy ingress the page says what streams need and offers no install", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: false })
+  await page.route("**/api/v1/proxy/status", (route) => json(route, ingressOnly))
+  await listing(page, {
+    included: false,
+    module: { state: "unknown", usable: false, detail: "nginx was not found on this host" },
+  })
+  await page.goto("/proxy/streams")
+  const missing = page.locator("[data-slot='missing-thing']")
+  await expect(missing).toContainText(
+    "Streams forward TCP and UDP through nginx's stream module; this server's sites are served by the Caddy ingress.",
+  )
+  await expect(missing.getByRole("link", { name: "Sites" })).toHaveAttribute("href", "/proxy/sites")
+  // Caddy holds 80 and 443 here: an nginx installed to answer on them is not the next step.
+  await expect(page.getByRole("button", { name: /^Install nginx/ })).toHaveCount(0)
+  await expect(page.getByText("nginx answers on ports 80 and 443")).toHaveCount(0)
+  await expect(page.locator("[data-slot='engine-setup']")).toHaveCount(0)
+  await expect(page.locator("[data-slot='host-identity']")).toContainText("Needs nginx")
+  await expect(page.getByRole("button", { name: "New stream" })).toHaveCount(0)
 })
 
 test("TCP+UDP is one choice, and asks how its UDP sessions end", async ({ page }) => {

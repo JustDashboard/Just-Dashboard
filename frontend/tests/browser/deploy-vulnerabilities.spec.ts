@@ -122,6 +122,22 @@ test("a clean scan offers no rebuild", async ({ page }) => {
   await expect(panel.getByRole("button", { name: "Scan now" })).toHaveCount(0)
 })
 
+test("a live release not scanned yet links to the report, where its first scan is asked for", async ({
+  page,
+}) => {
+  const dashboard = await mockProject(page, {
+    vulnerabilities: { ...vulnerableScanReading(), scan: null, releases: [] },
+  })
+  await page.goto("/deploy/7")
+  const panel = page.locator("#vulnerabilities")
+  await expect(panel.getByText("The live release has not been scanned yet.")).toBeVisible()
+  await panel.getByRole("link", { name: "Report" }).click()
+  await expect(page).toHaveURL(/\/deploy\/7\/vulnerabilities$/)
+  const report = page.locator("#vulnerability-report")
+  await report.getByRole("button", { name: "Scan now" }).click()
+  await expect.poll(() => dashboard.actions()).toContain("scan")
+})
+
 test("scanning off says so and points at its terms", async ({ page }) => {
   await mockProject(page, {
     vulnerabilities: {

@@ -184,7 +184,9 @@ alone, its stages a select at every width (the rail of stages beside it went in 
 `--mount` flags are drawn faint, BuildKit's per-instruction clock gives way to the console's
 elapsed column, and a thrown error's kind (`TypeError:`) is an error line the Errors filter finds
 (`build-console.tsx`, `transcript-line.tsx`, `lib/transcript.ts`). Details lists only the steps that ran:
-the ones the plan skipped are a list under them, each beside its reason, the ones the run did not
+the ones the plan skipped are a list under them, each beside its reason (a skip that did something
+first, such as preview cleanup removing the route and address of a preview with no live release, is a
+row with its record instead, `run-step-rows.ts`), the ones the run did not
 reach — or has not reached yet — one line of names, a stage with no step that ran is not drawn, and
 before any step starts Details is not drawn at all. A step's record shows a failed step's excerpt, a
 running step's newest lines and a short step's whole output, and leaves a long passing output to the
@@ -232,7 +234,9 @@ it; an edit adds Test with an optional path and key, which shows the version fou
 environment variable's editor, with *Reference* on, offers the connected stores with path, key and an
 optional version (`StoreReferencePicker`, `components/deploy/secret-store-picker.tsx`), which makes the
 variable secret; a variable reading one draws the store's mark and name, linked here, and where in it the
-key is (`StoreReferenceLabel`). Checked by `deploy-secret-stores.spec.ts`. Settings → Runtime exposes memory,
+key is (`StoreReferenceLabel`). A first read that fails is one settled failure: the list's
+`ErrorState` (*Could not read the secret stores*, with Try again even for a plain network failure)
+and no picture waiting over it. Checked by `deploy-secret-stores.spec.ts`. Settings → Runtime exposes memory,
 CPU and process limits, the restart policy, a Shutdown section (stop signal, grace and drain
 periods — `settings/shutdown.ts`) and the health-check editor; Settings → Storage names each
 protected volume's backup standing (`settings/volume-backup.ts`). The Runtime page's service cards carry the

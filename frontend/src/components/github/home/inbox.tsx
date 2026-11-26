@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useSearchParams } from "next/navigation"
 import { ChatBubble, RefreshClockwise } from "@/components/icons"
 import { plural, relativeTime, timestamp } from "@/lib/format"
 import type { GitHubInboxFilter, GitHubInboxItem, GitHubInboxPage } from "@/lib/github-types"
@@ -20,7 +20,10 @@ import {
   ISSUE_FILTERS,
   ISSUE_STATE_WORD,
   PULL_FILTERS,
+  inboxFilterOf,
   inboxHref,
+  inboxStateOf,
+  inboxWhen,
   issueStateOf,
   type IssueState,
 } from "@/components/github/home/model"
@@ -90,8 +93,12 @@ export function InboxRow({
   index?: number
 }) {
   const where = inboxHref(item, kind, listed, connection)
-  const opened = item.state === "open" ? "opened" : item.state
-  const at = item.state === "open" ? item.createdAt : (item.closedAt ?? item.updatedAt)
+  const when = inboxWhen(item)
+  const at = (
+    <time dateTime={when.at} title={timestamp(when.at)}>
+      {relativeTime(when.at)}
+    </time>
+  )
   return (
     <ChoiceRow
       index={index}
@@ -113,15 +120,16 @@ export function InboxRow({
             ·
           </span>{" "}
           <span className="shrink-0 truncate max-sm:hidden">
-            {opened}{" "}
-            <time dateTime={at} title={timestamp(at)}>
-              {relativeTime(at)}
-            </time>{" "}
-            by
+            {when.open ? <>opened {at} by</> : "by"}
           </span>{" "}
-          <span className="min-w-0 shrink-0 truncate font-mono max-sm:hidden">{item.author}</span>
-          <time dateTime={at} title={timestamp(at)} className="shrink-0 sm:hidden">
-            {relativeTime(at)}
+          <span className="min-w-0 shrink-0 truncate font-mono max-sm:hidden">{item.author}</span>{" "}
+          {!when.open && (
+            <span className="shrink-0 truncate max-sm:hidden">
+              was {when.verb} {at}
+            </span>
+          )}
+          <time dateTime={when.at} title={timestamp(when.at)} className="shrink-0 sm:hidden">
+            {relativeTime(when.at)}
           </time>
         </span>
       }
@@ -164,20 +172,24 @@ export function InboxPreview({
   listed,
   href,
   count = 5,
+  round,
 }: {
   title: string
   kind: InboxKind
   filter: GitHubInboxFilter
   connection: number
   listed: Set<string>
-  /** The whole list: the page's own tab. */
+  /** The whole list: the page's own tab, on this filter. */
   href: string
   count?: number
+  /** Bumped by the page's Refresh: the preview is read again from GitHub. */
+  round?: number
 }) {
   const pages = usePages<GitHubInboxItem, GitHubInboxPage>(
     apiPath(connection, kind),
     { filter, state: "open" },
     (page) => page.items,
+    { kept: true, round },
   )
   const total = pages.last?.total
   const [, many] = NOUN[kind]
@@ -220,25 +232,46 @@ export function InboxPreview({
  * Pull requests and Issues pages list them: which part (opened, asked to
  * review, assigned, mentioned) as chips, open or closed beside them, thirty
  * at a time with Show more. GitHub's count of the whole is on the chosen
- * chip. The filters stay while the page is open, so going into a request and
- * back finds the list as it was left.
+ * chip. The filter and the state are in the address (`?filter=`, `?state=`),
+ * so the Overview's sections open the list on their own filter, and going
+ * into a request and Back finds the list as it was left. The refresh button,
+ * like the page's Refresh, reads it from GitHub again rather than from the
+ * server's minute of memory.
  */
 export function InboxView({
   kind,
   connection,
   listed,
+  round,
 }: {
   kind: InboxKind
   connection: number
   listed: Set<string>
+  /** Bumped by the page's Refresh: the list is read again from GitHub. */
+  round?: number
 }) {
   const filters = kind === "pull" ? PULL_FILTERS : ISSUE_FILTERS
-  const [filter, setFilter] = useState<GitHubInboxFilter>("created")
-  const [state, setState] = useState<"open" | "closed">("open")
+  const search = useSearchParams()
+  const filter = inboxFilterOf(kind, search.get("filter"))
+  const state = inboxStateOf(search.get("state"))
+  // A chip is not a step Back returns from, as the view itself is not: the
+  // address entry is replaced, and the defaults leave it.
+  const choose = (change: { filter?: GitHubInboxFilter; state?: "open" | "closed" }) => {
+    const next = { filter, state, ...change }
+    const url = new URL(window.location.href)
+    if (next.filter === "created") url.searchParams.delete("filter")
+    else url.searchParams.set("filter", next.filter)
+    if (next.state === "open") url.searchParams.delete("state")
+    else url.searchParams.set("state", next.state)
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+    }
+  }
   const pages = usePages<GitHubInboxItem, GitHubInboxPage>(
     apiPath(connection, kind),
     { filter, state },
     (page) => page.items,
+    { kept: true, round },
   )
   const [, many] = NOUN[kind]
   const total = pages.last?.total
@@ -250,7 +283,7 @@ export function InboxView({
             <FilterChip
               key={option.key}
               selected={filter === option.key}
-              onClick={() => setFilter(option.key)}
+              onClick={() => choose({ filter: option.key })}
             >
               {option.label}
               {filter === option.key && total !== undefined && <ChipCount>{total}</ChipCount>}
@@ -261,7 +294,7 @@ export function InboxView({
           <Segments
             label="State"
             value={state}
-            onChange={setState}
+            onChange={(next) => choose({ state: next })}
             options={[
               { value: "open", label: "Open" },
               { value: "closed", label: "Closed" },

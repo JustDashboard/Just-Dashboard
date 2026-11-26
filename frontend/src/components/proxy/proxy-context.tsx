@@ -2,8 +2,9 @@
 
 import { createContext, useContext } from "react"
 import type { Certificate, Listener, StreamStatus, VHost } from "@/lib/types"
-import type { PollState } from "@/hooks/use-poll"
-import type { Reading } from "@/components/proxy/freshness"
+import { get } from "@/lib/api"
+import { usePoll, type PollState } from "@/hooks/use-poll"
+import { reading, type Reading } from "@/components/proxy/freshness"
 import type { ConfigTest } from "@/components/proxy/test-result"
 
 export type ProxyStatus = {
@@ -98,6 +99,21 @@ export function engineUnit(status: ProxyStatus | undefined): string | undefined 
   if (status.nginx) return "nginx.service"
   if (status.caddy && !status.ingressContainer) return "caddy.service"
   return undefined
+}
+
+/**
+ * The proxy's status, read once for everyone who asks: the section's layout
+ * on its minute, and the shell's rail and palette, which only need the one
+ * answer (`every` 0). They share a request and its answer by the poll's key,
+ * so opening the section from a page whose rail already asked asks nothing.
+ */
+export function useProxyStatusRead(every: number, enabled = true) {
+  return usePoll(
+    (signal) => reading(get<ProxyStatus>("/proxy/status", undefined, signal)),
+    every,
+    [],
+    { key: "/proxy/status", enabled },
+  )
 }
 
 /**

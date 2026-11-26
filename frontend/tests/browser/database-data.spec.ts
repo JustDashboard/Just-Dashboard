@@ -108,6 +108,8 @@ type EditorMock = DatabaseMock & {
   countHeld?: Promise<unknown>
   /** What `GET /export` answers. */
   exported?: { status: number; body: string; state?: Record<string, unknown> }
+  /** `GET /export/status` answers only once this settles. */
+  statusHeld?: Promise<unknown>
 }
 
 async function json(route: Route, body: unknown, status = 200) {
@@ -126,6 +128,7 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
     changes: [] as Record<string, unknown>[],
     rowsSql: [] as Record<string, unknown>[],
     exports: [] as URL[],
+    status: [] as URL[],
     imports: [] as { options: Record<string, unknown>; file: string }[],
   }
   const all = options.held ?? rowsOf(options.total ?? 250)
@@ -338,13 +341,16 @@ async function mockEditor(page: Page, options: EditorMock = {}) {
       })
     }
     if (rest === "/export/status") {
+      sent.status.push(url)
+      await options.statusHeld
+      // A read the page gave up on while it was held has nothing to answer.
       return json(route, {
         status: "complete",
         rows: 1,
         format: "csv",
         startedAt: "2026-10-01T09:00:00Z",
         ...options.exported?.state,
-      })
+      }).catch(() => {})
     }
     if (rest === "/import/upload") {
       const raw = request.postData() ?? ""
@@ -1100,6 +1106,30 @@ test("an export is saved by the page, which says when it is not the whole table"
   expect(asked.searchParams.get("exportId")).toMatch(/^[A-Za-z0-9_-]{8,64}$/)
   await expect(page.getByText("The export of items is not the whole table")).toBeVisible()
   await expect(page.getByRole("button", { name: "Export up to 1,000,000" })).toBeVisible()
+})
+
+test("Cancel pressed while the export's ending is still being asked saves no file", async ({
+  page,
+}) => {
+  const status = hold()
+  const { sent } = await mockEditor(page, { statusHeld: status.until })
+  const downloads: string[] = []
+  page.on("download", (download) => downloads.push(download.suggestedFilename()))
+  await page.goto(ITEMS)
+  await expect(cell(page, 0, 1)).toHaveText("Item 1")
+
+  await page.getByRole("button", { name: "Export", exact: true }).click()
+  await page.getByRole("menuitem", { name: /^CSV/ }).click()
+  // The whole file has come; the server's record of how it ended has not.
+  await expect.poll(() => sent.status.length).toBe(1)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByText("The export of items was cancelled")).toBeVisible()
+  status.release()
+
+  // The record landing after Cancel hands nothing to the browser.
+  await page.waitForTimeout(600)
+  expect(downloads).toEqual([])
+  await expect(page.getByText(/^Exported .*items/)).toHaveCount(0)
 })
 
 test("an export the server refuses is an error on the page, not a page of JSON", async ({

@@ -2,7 +2,8 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useSearchParams } from "next/navigation"
-import { AnimatePresence, motion, useReducedMotion } from "motion/react"
+import { AnimatePresence, motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { useMarquee } from "@/components/files/use-marquee"
 import { rangePaths } from "@/components/files/selection"
 import {
@@ -745,7 +746,12 @@ export default function FilesPage() {
             to: joinPath(dest, name),
             overwrite,
           })
-          done.push({ from: src, to: joinPath(dest, name), replaced: answer?.replaced?.item })
+          done.push({
+            from: src,
+            to: joinPath(dest, name),
+            identity: answer?.identity,
+            replaced: answer?.replaced?.item,
+          })
           taken.add(name)
           if (mode === "move") moved.add(src)
           ok++
@@ -810,9 +816,11 @@ export default function FilesPage() {
       submit: async (name) => {
         if (name === entry.name) return
         const to = joinPath(path ?? "/", name)
-        await post("/files/move", { from: entry.path, to })
+        const answer = await post<ReplaceResult>("/files/move", { from: entry.path, to })
         undo.record(
-          moveOperation(`renaming ${entry.name}`, [{ from: entry.path, to }]),
+          moveOperation(`renaming ${entry.name}`, [
+            { from: entry.path, to, identity: answer?.identity },
+          ]),
           `Renamed to ${name}`,
         )
         setActive({ dir: path ?? "/", entry: null })
@@ -825,9 +833,13 @@ export default function FilesPage() {
     const name = uniqueName(entry.name, names)
     try {
       const to = joinPath(path ?? "/", name)
-      await post("/files/copy", { from: entry.path, to })
+      const answer = await post<ReplaceResult>("/files/copy", { from: entry.path, to })
       undo.record(
-        copyOperation(`duplicating ${entry.name}`, [{ to }], canDestruct),
+        copyOperation(
+          `duplicating ${entry.name}`,
+          [{ to, identity: answer?.identity }],
+          canDestruct,
+        ),
         `Duplicated as ${name}`,
       )
       reload()
@@ -2189,7 +2201,12 @@ export default function FilesPage() {
         root={path ?? undefined}
         revealLine={searchLocation?.path === editing ? searchLocation.line : undefined}
         onOpenChange={(open) => !open && setEditing(null)}
-        onSaved={reload}
+        onSaved={(saved, identities) => {
+          // A save leaves a new file at the name: an undo waiting on the one
+          // it replaced follows it.
+          undo.saved(saved, identities?.previousIdentity, identities?.identity)
+          reload()
+        }}
       />
       <ImageEditorSheet
         path={editingImage}

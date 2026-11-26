@@ -78,7 +78,9 @@ import {
   type EnvironmentRow,
   type FlowUpdate,
 } from "@/components/deploy/new-project/draft"
+import { useTemplateStack } from "@/components/deploy/stack/use-stack"
 import { withoutPlatformVariables } from "@/components/deploy/settings/dotenv"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * The rail of the plan and the step's fields beside it, held to the window
@@ -322,6 +324,12 @@ export function Configure({
     projectId: number
     environmentId: number
   }>()
+  // A stack's preset is a template that names its stack, and the outcome
+  // points at the stack's page. Read from the definition rather than carried
+  // on the flow, so a setup resumed from its draft knows it too.
+  const stackOf = useTemplateStack(
+    flow.source.mode === "blueprint" ? flow.source.blueprintId : undefined,
+  )
   // Once the project exists nothing about this setup is unfinished, and the
   // next "New project" starts blank. Forgotten on the way out rather than at
   // commit, so the "Deployment created" panel is not swapped for the source
@@ -540,12 +548,7 @@ export function Configure({
         heading.tabIndex = -1
         heading.focus({ preventScroll: true })
       }
-      header?.scrollIntoView({
-        block: "start",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "instant"
-          : "smooth",
-      })
+      scrollIntoViewRespectingMotion(header)
     })
 
   const goto = (next: ConfigureStepKey) => {
@@ -585,9 +588,7 @@ export function Configure({
         const element = document.getElementById(fold)
         if (element instanceof HTMLDetailsElement) element.open = true
       }
-      document
-        .getElementById(SECTION_IDS[section])
-        ?.scrollIntoView({ block: "start", behavior: "smooth" })
+      scrollIntoViewRespectingMotion(document.getElementById(SECTION_IDS[section]))
     })
   }, [opening, current])
 
@@ -966,14 +967,25 @@ export function Configure({
               </div>
             )}
             <p className="text-body text-muted-foreground">
-              Your project, configuration and environment are saved. Open the deployment to check
-              its run history and continue.
+              {stackOf
+                ? "Your stack is saved. Once its first release is live the dashboard sets the applications up and connects them; the stack's page says how far that is and what is left for you."
+                : "Your project, configuration and environment are saved. Open the deployment to check its run history and continue."}
             </p>
           </FlowPanelBody>
-          <FlowActions>
+          {/* A stack's next page is the one that says how its setup is going;
+              its run history is the quieter way on. */}
+          <FlowActions
+            secondary={
+              stackOf && (
+                <Button variant="ghost" asChild>
+                  <Link href={`/deploy/${created.projectId}/deployments`}>Open deployment</Link>
+                </Button>
+              )
+            }
+          >
             <Button asChild>
-              <Link href={`/deploy/${created.projectId}/deployments`}>
-                Open deployment
+              <Link href={`/deploy/${created.projectId}/${stackOf ? "stack" : "deployments"}`}>
+                {stackOf ? "Open the stack" : "Open deployment"}
                 <ArrowRight className="size-4" />
               </Link>
             </Button>

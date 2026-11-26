@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -721,7 +722,7 @@ func imageAlertReading(scans []deploy.LiveImageScan) hostAlertReading {
 // imageAlertDetail says what a newer base may fix, the worst first, and
 // which base moved.
 func imageAlertDetail(scan deploy.ImageScan) string {
-	fixable := scan.BaseFixable()
+	fixable := scan.NewerBaseFixes()
 	var counts imagescan.Counts
 	for _, finding := range fixable {
 		counts.Add(finding.Severity)
@@ -748,11 +749,22 @@ func imageAlertDetail(scan deploy.ImageScan) string {
 		worst := fixable[0]
 		detail += fmt.Sprintf(" (%s in %s %s, fixed in %s)", worst.ID, worst.Package, worst.Installed, worst.Fixed)
 	}
+	// The base that moved under the worst finding, else the first that did.
+	moved := ""
 	for _, update := range scan.BaseUpdates {
-		if update.State == "outdated" {
-			detail += ", and " + update.Reference + " now names a newer image than the one it was built on."
+		if update.State != "outdated" {
+			continue
+		}
+		if moved == "" {
+			moved = update.Reference
+		}
+		if len(fixable) > 0 && slices.Contains(fixable[0].BaseDigests, update.Pinned) {
+			moved = update.Reference
 			break
 		}
+	}
+	if moved != "" {
+		detail += ", and " + moved + " now names a newer image than the one it was built on."
 	}
 	if scan.Rebuildable {
 		detail += " Rebuild it from the project's overview to pick that image up."
@@ -766,6 +778,9 @@ func imageAlertDetail(scan deploy.ImageScan) string {
 func imageAlertClear(scan deploy.ImageScan) string {
 	if len(scan.BaseFixable()) == 0 {
 		return fmt.Sprintf("Release %d has no %s or worse finding with a fix that a newer base would bring.", scan.ReleaseNumber, strings.ToLower(scan.Floor))
+	}
+	if scan.NewerBase {
+		return fmt.Sprintf("Release %d is built on the image each base with a fixable finding names now.", scan.ReleaseNumber)
 	}
 	return fmt.Sprintf("Release %d is built on the image each of its bases names now.", scan.ReleaseNumber)
 }

@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { availability, json, mockProxy, user } from "./proxy-fixtures"
+import { availability, ingressOnly, json, mockProxy, user } from "./proxy-fixtures"
 import { risen } from "./risen"
 
 /**
@@ -271,6 +271,23 @@ test("a host with no sites says so once, with the way to add one", async ({ page
   await expect(page.locator("[data-slot='traffic-errors']")).toContainText(
     "The application took too long to answer",
   )
+})
+
+test("without nginx the empty hour offers a domain on a project, not nginx's new-site form", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/status", (route) => json(route, ingressOnly))
+  await page.route("**/api/v1/proxy/traffic", (route) =>
+    json(route, { observedAt: new Date().toISOString(), sites: [] }),
+  )
+  await page.goto("/proxy/traffic")
+  await expect(page.getByText("No sites to count")).toBeVisible()
+  await expect(page.getByRole("link", { name: "Add a domain to a project" })).toHaveAttribute(
+    "href",
+    "/deploy",
+  )
+  await expect(page.getByRole("link", { name: "New site" })).toHaveCount(0)
 })
 
 test("sites that keep no access log claim no zero and point at the fix", async ({ page }) => {

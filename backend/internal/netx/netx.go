@@ -134,6 +134,10 @@ type Service struct {
 	// namespaces are opened from (the host's /run/netns otherwise).
 	egressNetns     string
 	egressNetnsRoot string
+	// onServer runs work on one of the server's files in the server's own
+	// mount namespace (hostexec.OnServerPath when nil). Tests stand in for
+	// that namespace, where a path can name another file than it does here.
+	onServer func(real, mirrored string, fn func(path string) error) error
 }
 
 // Paths are where the module reads and writes on the host. Tests point them

@@ -3,6 +3,7 @@ package proxysvc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -330,6 +331,92 @@ func TestFitWritesMarkedLinesWhereNoDirectoryIsIncluded(t *testing.T) {
 	}
 	if len(log.changes) != 2 {
 		t.Fatalf("recorded %d changes", len(log.changes))
+	}
+}
+
+// An http block that opens and closes on one line, and includes only the
+// sites, gets the marked lines inside it: at the brace, not after the line,
+// which is past the block's end.
+func TestFitWritesMarkedLinesInsideAOneLineHTTPBlock(t *testing.T) {
+	conf := "events {}\nhttp { include $ROOT/sites-enabled/*; }\n"
+	service, _, root := hashHost(t, conf)
+	serveName(t, root, "store", longName)
+	if res := service.testNginx(context.Background()); !res.Valid {
+		t.Fatalf("refused: %s", res.Output)
+	}
+	raw, _ := os.ReadFile(filepath.Join(root, "nginx.conf"))
+	want := "events {}\nhttp {\n    server_names_hash_bucket_size 128; " + namesLineMark + "\n    include " + root + "/sites-enabled/*; }\n"
+	if string(raw) != want {
+		t.Fatalf("nginx.conf:\n%s\nwant:\n%s", raw, want)
+	}
+	assertNamesInHTTP(t, string(raw), 1)
+}
+
+func TestSpliceServerNamesAtTheOpeningBrace(t *testing.T) {
+	mark := func(d string, n int) string { return fmt.Sprintf("    %s %d; %s", d, n, namesLineMark) }
+	for _, tc := range []struct{ name, conf, want string }{
+		{
+			"a block closed on its line, with a comment after it",
+			"http { include sites-enabled/*; } # the sites\n",
+			"http {\n" + mark(bucketDirective, 128) + "\n" + mark(maxSizeDirective, 1024) + "\n    include sites-enabled/*; } # the sites\n",
+		},
+		{
+			"CRLF, no space before the brace's content and no final newline",
+			"events {}\r\nhttp {include sites-enabled/*;}",
+			"events {}\r\nhttp {\r\n" + mark(bucketDirective, 128) + "\r\n" + mark(maxSizeDirective, 1024) + "\r\n    include sites-enabled/*;}",
+		},
+		{
+			"only a comment after the brace stays on the opener's line",
+			"http { # the sites\n    include sites-enabled/*;\n}\n",
+			"http { # the sites\n" + mark(bucketDirective, 128) + "\n" + mark(maxSizeDirective, 1024) + "\n    include sites-enabled/*;\n}\n",
+		},
+		{
+			"the brace ends the file",
+			"http {",
+			"http {\n" + mark(bucketDirective, 128) + "\n" + mark(maxSizeDirective, 1024) + "\n",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			got, ok := spliceServerNames(tc.conf, 128, 1024)
+			if !ok || got != tc.want {
+				t.Fatalf("got %q, %v\nwant %q", got, ok, tc.want)
+			}
+			if strings.Contains(tc.conf, "}") {
+				assertNamesInHTTP(t, got, 2)
+			}
+			// A later fit starts from the file this one left, and puts
+			// the same lines back where they are.
+			if again, ok := spliceServerNames(got, 128, 1024); !ok || again != got {
+				t.Fatalf("second splice: %q, %v", again, ok)
+			}
+		})
+	}
+}
+
+// assertNamesInHTTP reads content as nginx does and checks that the marked
+// directives, n of them, sit directly in its http block.
+func assertNamesInHTTP(t *testing.T, content string, n int) {
+	t.Helper()
+	directives, err := ParseNginxFile("nginx.conf", content, nil)
+	if err != nil {
+		t.Fatalf("%v in:\n%s", err, content)
+	}
+	inside := 0
+	for _, d := range directives {
+		if d.Name == bucketDirective || d.Name == maxSizeDirective {
+			t.Fatalf("%s at line %d is outside http:\n%s", d.Name, d.Line, content)
+		}
+		if d.Name != "http" {
+			continue
+		}
+		for _, in := range d.Block {
+			if in.Name == bucketDirective || in.Name == maxSizeDirective {
+				inside++
+			}
+		}
+	}
+	if inside != n {
+		t.Fatalf("%d marked directives in http, want %d:\n%s", inside, n, content)
 	}
 }
 

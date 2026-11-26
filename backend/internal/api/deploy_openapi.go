@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -115,6 +116,7 @@ var openapiTags = []struct{ Name, Description string }{
 	{"secret stores", "Connections to Vault, OpenBao, Infisical and Doppler that variables read through."},
 	{"github-app", "The dashboard's own GitHub App: its status, repositories, manifest flow and removal."},
 	{"blueprints", "The template catalogue and the plan a template renders to."},
+	{"stacks", "Smart stacks: several applications deployed as one preset template, then set up and connected to each other by the dashboard once the release is live."},
 	{"templates", "Templates added on this dashboard: made from a Compose file or a deployment's frozen plan, imported, changed, exported and removed."},
 	{"game", "Operating a deployed game server: players, console, properties and importing an existing one."},
 	{"keys", "What the holder of a key reads to use this API: this description."},
@@ -136,6 +138,10 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(deploy.RunState("")):            {"requested", "validating", "queued", "preparing", "running", "verifying", "activating", "failed_activation", "restoring_previous", "cancelling", "succeeded", "failed", "cancelled", "rolled_back", "superseded"},
 	reflect.TypeOf(deploy.StepKey("")):             {"resolve_source", "acquire_source", "analyze_plan", "prepare_context", "build_artifact", "render_runtime", "release_task", "backup_gate", "rehearse_migration", "provision_certificate", "start_candidate", "verify_readiness", "verify_smoke", "replay_traffic", "canary", "activate", "retire_previous", "record_release", "notify", "legacy_pipeline"},
 	reflect.TypeOf(metrics.Verdict("")):            {"too_tight", "oversized", "unlimited", "right", "insufficient_history"},
+	reflect.TypeOf(stacks.Stage("")):               {"readiness", "initialize", "link", "verify"},
+	reflect.TypeOf(stacks.StepStatus("")):          {"pending", "running", "done", "failed", "action_required", "skipped"},
+	reflect.TypeOf(stacks.Status("")):              {"waiting", "configuring", "ready", "action_required", "failed"},
+	reflect.TypeOf(stacks.Access("")):              {"public", "private", "worker"},
 	reflect.TypeOf(deploy.StepState("")):           {"pending", "blocked", "running", "passed", "warning", "failed", "skipped", "cancelled", "unavailable"},
 	reflect.TypeOf(deploy.CheckKind("")):           {"http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe"},
 	reflect.TypeOf(deploy.EventType("")):           {"run.state", "step.state", "step.log", "step.evidence", "queue.position", "finding", "artifact", "heartbeat", "resync"},
@@ -248,7 +254,8 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/{id}/archive":   {Tag: "fleet", Summary: "Archive a deployment: it leaves the fleet and keeps its record and resources until unarchived or removed.", Response: (*deploy.Project)(nil)},
 	"POST /deploy/{id}/unarchive": {Tag: "fleet", Summary: "Restore an archived deployment to the fleet.", Response: (*deploy.Project)(nil)},
 	"DELETE /deploy/{id}/permanent": {Tag: "fleet", Summary: "Delete an archived deployment's record for good, with the typed confirmation of its name.", Status: http.StatusNoContent,
-		Note: "Destructive. The deployment's name is typed as its confirmation, sent in the " + httpx.ConfirmHeader + " header as the dashboard sends it."},
+		Note: "Destructive. The deployment's name is typed as its confirmation, sent in the " + httpx.ConfirmHeader + " header as the dashboard sends it. " +
+			"With ?routes=remove the proxy routes its environments wrote are removed too, after the records, and the answer is 200 with routesRemoved and routeErrors (each route that was not removed, with the reason)."},
 	"POST /deploy/{id}/removal-plan": {Tag: "fleet", Summary: "Plan the removal of a deployment's managed resources: what would be removed, what is kept, and what has to be confirmed.", Response: (*deploy.RemovalPlan)(nil)},
 	"POST /deploy/{id}/remove-managed": {Tag: "fleet", Summary: "Remove a deployment's managed resources as planned, with the typed confirmation.", Request: deploy.RemoveManagedRequest{}, Response: (*deploy.RemovalExecution)(nil),
 		Note: "Destructive. A removal that stopped part-way answers with its error status and the execution so far, under error and execution."},
@@ -466,14 +473,18 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/blueprints/{id}/render":  {Tag: "blueprints", Summary: "Render a template with its inputs into the plan a draft would commit.", Request: blueprintRenderRequest{}, Response: (*deploy.BlueprintPlan)(nil)},
 
 	// Templates added on this dashboard.
-	"GET /deploy/templates":                   {Tag: "templates", Summary: "List the templates added on this dashboard, with how each was made and how many deployments' sources name it.", Response: []deploy.UserTemplate(nil)},
-	"GET /deploy/templates/{template}":        {Tag: "templates", Summary: "Read a template added on this dashboard, with its whole definition.", Response: (*deploy.UserTemplateDetail)(nil)},
-	"GET /deploy/templates/{template}/export": {Tag: "templates", Summary: "Export a template's definition as a JSON file: a built-in's or one added here, in the catalogue's own schema.", Response: (*blueprint.Blueprint)(nil)},
-	"POST /deploy/templates":                  {Tag: "templates", Summary: "Add a template from a pasted Compose file and the inputs declared for the variables it reads.", Request: deploy.ComposeTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal password in the file becomes a secret the template generates; a host port is dropped, since the public service is published on loopback behind the proxy."},
-	"POST /deploy/templates/from-deployment":  {Tag: "templates", Summary: "Save a deployment as a template: the definition its live release's frozen plan was deployed from.", Request: deploy.DeploymentTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "A secret variable becomes a secret input and its value is never read; the domain becomes the domain input and a fixed host port a number input. With dryRun, nothing is stored and the definition is answered with 200."},
-	"POST /deploy/templates/import":           {Tag: "templates", Summary: "Import a template's JSON definition; an id outside the user- namespace is put in it.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil), Status: http.StatusCreated},
-	"PUT /deploy/templates/{template}":        {Tag: "templates", Summary: "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil)},
-	"DELETE /deploy/templates/{template}":     {Tag: "templates", Summary: "Remove a template from the catalogue; deployments made from it keep running from their own copy.", Status: http.StatusNoContent, Note: "Destructive, with an ordinary confirmation."},
+	"GET /deploy/stacks":                               {Tag: "stacks", Summary: "List the smart stacks: each preset with the template it deploys, its memory and disk estimate and what it cannot do, and the services.", Response: []stackCatalogueEntry(nil)},
+	"GET /deploy/{id}/stack":                           {Tag: "stacks", Summary: "Read a stack deployment's state: whether it is installed, healthy, connected and able to play and to acquire, each service's container and private address, each configuration step, the actions only a person can take, and the accounts it created.", Response: (*stackState)(nil), Note: "404 stack_not_found when the deployment is not a stack."},
+	"POST /deploy/{id}/stack/configure":                {Tag: "stacks", Summary: "Run the stack's configuration again now; every step converges, so nothing already set up is done twice; audited.", Response: stackConfigureAnswer{}, Status: http.StatusAccepted, Note: "409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs, 409 stack_not_preset when the live release is not one of the stack's presets."},
+	"GET /deploy/{id}/stack/credentials/{name}/reveal": {Tag: "stacks", Summary: "Reveal an account the stack created; audited without its value.", Response: stackCredentialReveal{}},
+	"GET /deploy/templates":                            {Tag: "templates", Summary: "List the templates added on this dashboard, with how each was made and how many deployments' sources name it.", Response: []deploy.UserTemplate(nil)},
+	"GET /deploy/templates/{template}":                 {Tag: "templates", Summary: "Read a template added on this dashboard, with its whole definition.", Response: (*deploy.UserTemplateDetail)(nil)},
+	"GET /deploy/templates/{template}/export":          {Tag: "templates", Summary: "Export a template's definition as a JSON file: a built-in's or one added here, in the catalogue's own schema.", Response: (*blueprint.Blueprint)(nil)},
+	"POST /deploy/templates":                           {Tag: "templates", Summary: "Add a template from a pasted Compose file and the inputs declared for the variables it reads.", Request: deploy.ComposeTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "With dryRun, nothing is stored and the definition the file makes is answered with 200. A literal password in the file becomes a secret the template generates; a host port is dropped, since the public service is published on loopback behind the proxy."},
+	"POST /deploy/templates/from-deployment":           {Tag: "templates", Summary: "Save a deployment as a template: the definition its live release's frozen plan was deployed from.", Request: deploy.DeploymentTemplateRequest{}, Response: anyOf{(*deploy.UserTemplateDetail)(nil), (*deploy.TemplatePreview)(nil)}, Status: http.StatusCreated, Note: "A secret variable becomes a secret input and its value is never read; the domain becomes the domain input and a fixed host port a number input. With dryRun, nothing is stored and the definition is answered with 200."},
+	"POST /deploy/templates/import":                    {Tag: "templates", Summary: "Import a template's JSON definition; an id outside the user- namespace is put in it.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil), Status: http.StatusCreated},
+	"PUT /deploy/templates/{template}":                 {Tag: "templates", Summary: "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil)},
+	"DELETE /deploy/templates/{template}":              {Tag: "templates", Summary: "Remove a template from the catalogue; deployments made from it keep running from their own copy.", Status: http.StatusNoContent, Note: "Destructive, with an ordinary confirmation."},
 
 	// Game servers.
 	"GET /deploy/{id}/game/":                  {Tag: "game", Summary: "Read a game server's overview: version, players online and its checks.", Response: gameOverview{}},

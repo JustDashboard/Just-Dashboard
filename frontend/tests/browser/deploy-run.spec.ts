@@ -248,6 +248,57 @@ test("a resync event replaces the snapshot instead of merging into it", async ({
   await expect(identity.getByText("Ready", { exact: true })).toBeVisible()
 })
 
+test("a skip that removed a preview's route first is a row with its record, not only a reason", async ({
+  page,
+}) => {
+  await mockProject(page)
+  // A preview with no live release: cleanup skips the release, but only
+  // after it removed the route and withdrew the address.
+  const removal = steps.map((step) =>
+    step.key === "retire_previous"
+      ? {
+          ...step,
+          state: "skipped" as const,
+          endedAt: now,
+          evidence: {
+            reason: "preview had no live release",
+            routeRemoved: true,
+            addressWithdrawn: true,
+          },
+        }
+      : step.key === "record_release" || step.key === "notify"
+        ? {
+            ...step,
+            state: "skipped" as const,
+            endedAt: now,
+            evidence: { reason: "nothing to record" },
+          }
+        : { ...step, state: "passed" as const, endedAt: now },
+  )
+  await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
+    socket.send(
+      JSON.stringify({
+        type: "snapshot",
+        data: snapshot({ state: "succeeded", operation: "preview_remove", endedAt: now }, removal),
+        ts: Date.now(),
+      }),
+    )
+  })
+  await page.goto("/deploy/7/runs/84")
+  const list = page.getByRole("list", { name: "Deployment steps" })
+  const cleanup = list.getByRole("button", { name: /Retire previous release/ })
+  await expect(cleanup).toContainText("preview had no live release")
+  await cleanup.click()
+  const record = page.getByRole("region", { name: "Retire previous release" })
+  await expect(record.getByText("Route removed")).toBeVisible()
+  await expect(record.getByText("Address withdrawn")).toBeVisible()
+  // The bare skips stay lines beside their reasons.
+  const skipped = page.getByRole("region", { name: "Skipped steps" })
+  await expect(skipped.getByText("Record release", { exact: true })).toBeVisible()
+  await expect(skipped.getByText("Retire previous release", { exact: true })).toHaveCount(0)
+  await expect(list.getByRole("button", { name: /Record release/ })).toHaveCount(0)
+})
+
 test("Details shows the picked step's record, and only a step with output leads to the console", async ({
   page,
 }) => {

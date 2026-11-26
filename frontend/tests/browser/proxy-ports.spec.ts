@@ -11,7 +11,7 @@ import {
   pastFirewallDatabases,
   privateUplink,
 } from "./fixtures/proxy/ports"
-import { json, mockProxy, user } from "./proxy-fixtures"
+import { ingressOnly, json, mockProxy, user } from "./proxy-fixtures"
 import { risen } from "./risen"
 
 /**
@@ -1309,4 +1309,71 @@ test("an account that only reads is offered nothing it cannot do", async ({ page
   await expect(page.getByRole("button", { name: "Identify", exact: true })).toHaveCount(0)
   await page.getByRole("button", { name: "More actions for tcp 203.0.113.5:6379" }).click()
   await expect(page.getByRole("menuitem", { name: /^Kill|^Terminate/ })).toHaveCount(0)
+})
+
+/** An app on loopback, as `ss` lists a Node process bound to 127.0.0.1:3000. */
+const loopbackApp = {
+  protocol: "tcp",
+  family: "ipv4",
+  address: "127.0.0.1",
+  port: 3000,
+  pid: 5120,
+  process: "node",
+  cmdline: "node server.js",
+  user: "app",
+  scope: "loopback",
+  reach: "loopback",
+  network: "loopback",
+  exposed: false,
+}
+
+test("the site a port is routed by opens that site's page", async ({ page }) => {
+  await mockHost(page, [
+    {
+      ...loopbackApp,
+      routes: [
+        { site: "shop", serverName: "shop.example.test", tls: true },
+        { site: "shop-admin", serverName: "admin.example.test", tls: false },
+      ],
+    },
+  ])
+  await page.goto("/proxy/ports/tcp-3000")
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity).toContainText("Routed by shop.example.test (TLS) and 1 more site")
+  await expect(identity.getByRole("link", { name: "shop.example.test" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/shop",
+  )
+  const routing = page.getByRole("list", { name: "Sites routing to it" })
+  await expect(routing.getByRole("link", { name: "admin.example.test" })).toHaveAttribute(
+    "href",
+    "/proxy/sites/shop-admin",
+  )
+})
+
+test("a loopback app is put behind nginx where there is one, and on a project where there is not", async ({
+  page,
+}) => {
+  await mockHost(page, [loopbackApp])
+  await page.goto("/proxy/ports/tcp-3000")
+  await page.getByRole("button", { name: "More actions for tcp 127.0.0.1:3000" }).click()
+  await expect(page.getByRole("menuitem", { name: "Publish through proxy…" })).toBeVisible()
+  await expect(page.getByRole("menuitem", { name: "Forward as stream…" })).toBeVisible()
+  await page.keyboard.press("Escape")
+
+  // Both forms are nginx's: behind the Caddy ingress neither address opens one.
+  await page.route("**/api/v1/proxy/status", (route) => json(route, ingressOnly))
+  await page.goto("/proxy/ports/tcp-3000")
+  // The rail drops Streams once the status has landed, which is when the verbs know too.
+  await expect(
+    page.getByRole("navigation", { name: "Sidebar" }).getByRole("link", { name: "Ports" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("navigation", { name: "Sidebar" }).getByRole("link", { name: "Streams" }),
+  ).toHaveCount(0)
+  await page.getByRole("button", { name: "More actions for tcp 127.0.0.1:3000" }).click()
+  await expect(page.getByRole("menuitem", { name: "Publish through proxy…" })).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Forward as stream…" })).toHaveCount(0)
+  await page.getByRole("menuitem", { name: "Add a domain to a project" }).click()
+  await expect(page).toHaveURL(/\/deploy$/)
 })

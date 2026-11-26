@@ -1,12 +1,19 @@
 package api
 
 import (
+	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
 
 func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostResources(t *testing.T) {
@@ -75,5 +82,95 @@ func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostRes
 	}
 	if res := admin.do(http.MethodDelete, path, "", nil); res.Code != http.StatusNotFound {
 		t.Fatalf("missing: %d %s", res.Code, res.Body.String())
+	}
+}
+
+// Deleting a project kept its route, which went on answering the domain with
+// nothing left to own it, and the next deployment of that domain was refused
+// as a conflict. Asked to free its domains, the deletion removes the routes
+// its environments wrote, and says which.
+func TestDeploymentPermanentDeletionCanFreeItsDomains(t *testing.T) {
+	c, s, root := vhostServer(t, func(string) string { return "exit 0" })
+	s.modules.proxy = proxysvc.New(root, filepath.Join(root, "Caddyfile"))
+	projectID, environmentID := seedDeployment(t, s, "jellyfin")
+	route := deploy.RouteNameFor(environmentID)
+	other := "shop.example.com"
+	available := func(name string) string { return filepath.Join(root, "sites-available", name) }
+	for _, name := range []string{route, other} {
+		if err := os.WriteFile(available(name), []byte("server { server_name "+name+"; }\n"), 0o644); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.Symlink(available(name), filepath.Join(root, "sites-enabled", name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.modules.deployStore.Archive(t.Context(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/deploy/%d/permanent?routes=remove", projectID)
+	res := c.do(http.MethodDelete, path, "", map[string]string{"X-Confirm": "jellyfin"})
+	if res.Code != http.StatusOK {
+		t.Fatalf("purge: %d %s", res.Code, res.Body.String())
+	}
+	var out purgedRoutes
+	if err := json.Unmarshal(res.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Removed) != 1 || out.Removed[0] != route || len(out.Errors) != 0 {
+		t.Fatalf("out = %+v", out)
+	}
+	for _, p := range []string{available(route), filepath.Join(root, "sites-enabled", route)} {
+		if _, err := os.Lstat(p); !os.IsNotExist(err) {
+			t.Errorf("%s is still there: %v", p, err)
+		}
+	}
+	if _, err := os.Stat(available(other)); err != nil {
+		t.Errorf("another site went with it: %v", err)
+	}
+	entry := lastAudit(t, s, "deploy.project.purge")
+	if !entry.Success || !strings.Contains(string(entry.Detail), route) {
+		t.Errorf("audit = %+v", entry)
+	}
+}
+
+// unreachableIngress is a Docker that does not answer the ingress lookup.
+type unreachableIngress struct{}
+
+func (unreachableIngress) InspectRunning(context.Context) ([]byte, error) {
+	return nil, errors.New("Cannot connect to the Docker daemon")
+}
+
+func (unreachableIngress) InspectOne(context.Context, string) ([]byte, error) {
+	return nil, errors.New("Cannot connect to the Docker daemon")
+}
+
+// A deletion asked to free its domains that cannot read which routes there
+// are says so for each of the project's routes: answering that it removed
+// none, with nothing failed, told the operator the domains were free while
+// the ingress went on serving them.
+func TestDeploymentPermanentDeletionSaysWhenItCouldNotReadItsRoutes(t *testing.T) {
+	c, s, _ := vhostServer(t, func(string) string { return "exit 0" })
+	s.modules.proxy = proxysvc.NewWithDockerIngress(t.TempDir(), filepath.Join(t.TempDir(), "Caddyfile")).
+		WithContainerReader(unreachableIngress{})
+	projectID, environmentID := seedDeployment(t, s, "jellyfin")
+	route := deploy.RouteNameFor(environmentID)
+	if _, err := s.modules.deployStore.Archive(t.Context(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/deploy/%d/permanent?routes=remove", projectID)
+	res := c.do(http.MethodDelete, path, "", map[string]string{"X-Confirm": "jellyfin"})
+	if res.Code != http.StatusOK {
+		t.Fatalf("purge: %d %s", res.Code, res.Body.String())
+	}
+	var out purgedRoutes
+	if err := json.Unmarshal(res.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Removed) != 0 || out.Errors[route] == "" {
+		t.Fatalf("out = %+v, want %s among the routes not removed", out, route)
+	}
+	entry := lastAudit(t, s, "deploy.project.purge")
+	if !strings.Contains(string(entry.Detail), "routeErrors") {
+		t.Errorf("audit = %s", entry.Detail)
 	}
 }

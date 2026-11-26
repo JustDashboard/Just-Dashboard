@@ -41,6 +41,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/app-domain", s.handle(s.handleAppDomainNames))
 		// Static, and registered before /{id} for the reason /hostname is.
 		s.mountTemplateReads(r)
+		r.Method(http.MethodGet, "/stacks", s.handle(s.handleStackCatalogue))
 		// The OpenAPI description of this API (deploy_openapi.go): static,
 		// for any signed-in account and any key, and registered before /{id}
 		// for the reason /hostname is.
@@ -78,6 +79,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/lifecycle", s.handle(s.handleDeploymentLifecycle))
 		r.Method(http.MethodGet, "/{id}/lifecycle/stream", s.handle(s.handleDeploymentLifecycleStream))
 		r.Method(http.MethodGet, "/{id}/availability", s.handle(s.handleDeploymentAvailability))
+		r.Method(http.MethodGet, "/{id}/stack", s.handle(s.handleStackState))
 		r.Method(http.MethodGet, "/{id}/alerts", s.handle(s.handleTrafficAlertList))
 		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
@@ -128,6 +130,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/environments/{env}/promote", s.handle(s.handleDeploymentPromote))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
+			// Configuring a stack again is the control a deploy is: it changes
+			// the applications the deployment runs, never what it is built from.
+			r.Method(http.MethodPost, "/{id}/stack/configure", s.handle(s.handleStackConfigure))
 			// Keeping the new release only removes a container nothing routes
 			// to; it is the same control a deploy is.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/keep", s.handle(s.handleDeploymentKeepRelease))
@@ -180,6 +185,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// a secret the deployment holds; a session opened through Just
 				// Hub may not read one out or make a new one (section 9.9).
 				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/environments/{env}/variables/{name}/reveal", s.handle(s.handleDeploymentVariableReveal))
+				// An account a stack created is revealed on the terms a
+				// variable is.
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/stack/credentials/{name}/reveal", s.handle(s.handleStackCredentialReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariableDelete))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/import", s.handle(s.handleDeploymentDotenvImport))
@@ -1665,13 +1673,100 @@ func (s *Server) handleDeployPurge(w http.ResponseWriter, r *http.Request) error
 	if err := httpx.RequireTypedConfirmation(w, r, current.Name); err != nil {
 		return err
 	}
+	// Read before the records go: the route names are the environments'.
+	var routes []string
+	freeDomains := r.URL.Query().Get("routes") == "remove"
+	if freeDomains {
+		if routes, err = s.projectRouteNames(r.Context(), id); err != nil {
+			return httpx.Internal(err)
+		}
+	}
 	project, err := s.modules.deployStore.PurgeArchived(r.Context(), id)
 	if err != nil {
 		return mapDeployError(err)
 	}
-	httpx.SetAudit(r, "deploy.project.purge", project.Name, map[string]any{"deploymentId": id, "resourcesRemoved": false})
-	httpx.NoContent(w)
+	detail := map[string]any{"deploymentId": id, "resourcesRemoved": false}
+	if !freeDomains {
+		httpx.SetAudit(r, "deploy.project.purge", project.Name, detail)
+		httpx.NoContent(w)
+		return nil
+	}
+	out := s.retireProjectRoutes(r, routes)
+	detail["routesRemoved"] = out.Removed
+	if len(out.Errors) > 0 {
+		detail["routeErrors"] = out.Errors
+	}
+	httpx.SetAudit(r, "deploy.project.purge", project.Name, detail)
+	httpx.JSON(w, http.StatusOK, out)
 	return nil
+}
+
+// purgedRoutes is what deleting a project did to its routes when asked to
+// free its domains. The records are gone either way; a route that could not
+// be removed is a leftover the Sites list offers to remove.
+type purgedRoutes struct {
+	Removed []string          `json:"routesRemoved"`
+	Errors  map[string]string `json:"routeErrors,omitempty"`
+}
+
+// projectRouteNames are the routes a project's environments write, whether or
+// not each exists.
+func (s *Server) projectRouteNames(ctx context.Context, projectID int64) ([]string, error) {
+	rows, err := s.Store.DB.QueryContext(ctx, `SELECT id FROM deploy_environments WHERE project_id = ? ORDER BY id`, projectID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	names := []string{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		names = append(names, deploy.RouteNameFor(id))
+	}
+	return names, rows.Err()
+}
+
+// retireProjectRoutes removes a deleted project's routes, and the
+// certificates Caddy kept only for them. Deleting a project used to keep its
+// route, which went on answering the domain with nothing left to own it, and
+// the next deployment of that domain was refused as a conflict.
+func (s *Server) retireProjectRoutes(r *http.Request, names []string) purgedRoutes {
+	out := purgedRoutes{Removed: []string{}}
+	if s.modules.proxy == nil {
+		return out
+	}
+	ctx, cancel := timeoutCtx(r, 60*time.Second)
+	defer cancel()
+	hosts, err := s.modules.proxy.ListVHosts(ctx)
+	if err != nil {
+		// Not knowing which routes there are is not "none": each stays a
+		// leftover until it can be removed, and the answer says so.
+		out.Errors = map[string]string{}
+		for _, name := range names {
+			out.Errors[name] = "the routes could not be read: " + err.Error()
+		}
+		return out
+	}
+	present := map[string]bool{}
+	for _, host := range hosts {
+		present[host.Name] = true
+	}
+	for _, name := range names {
+		if !present[name] {
+			continue
+		}
+		if _, err := s.modules.proxy.RetireDeploymentRoute(ctx, name); err != nil {
+			if out.Errors == nil {
+				out.Errors = map[string]string{}
+			}
+			out.Errors[name] = err.Error()
+			continue
+		}
+		out.Removed = append(out.Removed, name)
+	}
+	return out
 }
 
 // Each row carries what it deployed beside the project record, so the

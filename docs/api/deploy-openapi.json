@@ -883,6 +883,9 @@
               "null"
             ]
           },
+          "stack": {
+            "type": "string"
+          },
           "unavailableReason": {
             "type": "string"
           },
@@ -2867,6 +2870,447 @@
         "title": "api.sizingOOMs",
         "type": "object"
       },
+      "api.stackCatalogueEntry": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "presets": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackCataloguePreset"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackCatalogueItem"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "title": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackCatalogueEntry",
+        "type": "object"
+      },
+      "api.stackCatalogueItem": {
+        "properties": {
+          "access": {
+            "enum": [
+              "public",
+              "private",
+              "worker"
+            ],
+            "title": "stacks.Access",
+            "type": "string"
+          },
+          "docsUrl": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackCatalogueItem",
+        "type": "object"
+      },
+      "api.stackCataloguePreset": {
+        "properties": {
+          "description": {
+            "type": "string"
+          },
+          "diskGb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "id": {
+            "type": "string"
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "memoryMb": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "recommended": {
+            "type": "boolean"
+          },
+          "services": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "templateId": {
+            "type": "string"
+          },
+          "templateVersion": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackCataloguePreset",
+        "type": "object"
+      },
+      "api.stackConfigureAnswer": {
+        "properties": {
+          "status": {
+            "enum": [
+              "waiting",
+              "configuring",
+              "ready",
+              "action_required",
+              "failed"
+            ],
+            "title": "stacks.Status",
+            "type": "string"
+          }
+        },
+        "title": "api.stackConfigureAnswer",
+        "type": "object"
+      },
+      "api.stackContainerState": {
+        "properties": {
+          "health": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "state": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackContainerState",
+        "type": "object"
+      },
+      "api.stackCredentialListing": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "stored": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackCredentialListing",
+        "type": "object"
+      },
+      "api.stackCredentialReveal": {
+        "properties": {
+          "name": {
+            "type": "string"
+          },
+          "password": {
+            "type": "string"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackCredentialReveal",
+        "type": "object"
+      },
+      "api.stackReadiness": {
+        "properties": {
+          "acquisition": {
+            "type": "boolean"
+          },
+          "connected": {
+            "type": "boolean"
+          },
+          "healthy": {
+            "type": "boolean"
+          },
+          "installed": {
+            "type": "boolean"
+          },
+          "playback": {
+            "type": "boolean"
+          }
+        },
+        "title": "api.stackReadiness",
+        "type": "object"
+      },
+      "api.stackServiceState": {
+        "properties": {
+          "access": {
+            "enum": [
+              "public",
+              "private",
+              "worker"
+            ],
+            "title": "stacks.Access",
+            "type": "string"
+          },
+          "address": {
+            "type": "string"
+          },
+          "container": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/api.stackContainerState"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "docsUrl": {
+            "type": "string"
+          },
+          "image": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "purpose": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "url": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackServiceState",
+        "type": "object"
+      },
+      "api.stackState": {
+        "properties": {
+          "actions": {
+            "items": {
+              "$ref": "#/components/schemas/stacks.Action"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "configuredReleaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "credentials": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackCredentialListing"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "limitations": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "liveReleaseId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "preset": {
+            "type": "string"
+          },
+          "presetTitle": {
+            "type": "string"
+          },
+          "readiness": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/api.stackReadiness"
+              }
+            ]
+          },
+          "services": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackServiceState"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "stackId": {
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "waiting",
+              "configuring",
+              "ready",
+              "action_required",
+              "failed"
+            ],
+            "title": "stacks.Status",
+            "type": "string"
+          },
+          "steps": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackStepState"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "summary": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "updatedAt": {
+            "format": "date-time",
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackState",
+        "type": "object"
+      },
+      "api.stackStepState": {
+        "properties": {
+          "attempts": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "error": {
+            "type": "string"
+          },
+          "finishedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "id": {
+            "type": "string"
+          },
+          "log": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "message": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "stage": {
+            "enum": [
+              "readiness",
+              "initialize",
+              "link",
+              "verify"
+            ],
+            "title": "stacks.Stage",
+            "type": "string"
+          },
+          "startedAt": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "enum": [
+              "pending",
+              "running",
+              "done",
+              "failed",
+              "action_required",
+              "skipped"
+            ],
+            "title": "stacks.StepStatus",
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackStepState",
+        "type": "object"
+      },
       "api.stagingCreateRequest": {
         "properties": {
           "copySecrets": {
@@ -3295,6 +3739,9 @@
               "array",
               "null"
             ]
+          },
+          "stack": {
+            "type": "string"
           },
           "update": {
             "allOf": [
@@ -4466,6 +4913,9 @@
             ]
           },
           "sourceKind": {
+            "type": "string"
+          },
+          "stack": {
             "type": "string"
           },
           "unavailableReason": {
@@ -15787,6 +16237,15 @@
           "action": {
             "type": "string"
           },
+          "baseDigests": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "class": {
             "type": "string"
           },
@@ -16852,6 +17311,27 @@
           }
         },
         "title": "selfcfg.Identity",
+        "type": "object"
+      },
+      "stacks.Action": {
+        "properties": {
+          "blocking": {
+            "type": "boolean"
+          },
+          "description": {
+            "type": "string"
+          },
+          "id": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "stacks.Action",
         "type": "object"
       }
     },
@@ -19463,6 +19943,48 @@
         "summary": "Read every environment's right-sizing verdict from its recorded usage, the ones most off first; a narrowed deploy key sees its own deployments.",
         "tags": [
           "fleet"
+        ],
+        "x-deploy-key": "allowed"
+      }
+    },
+    "/deploy/stacks": {
+      "get": {
+        "operationId": "stackCatalogue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/api.stackCatalogueEntry"
+                  },
+                  "type": [
+                    "array",
+                    "null"
+                  ]
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "List the smart stacks: each preset with the template it deploys, its memory and disk estimate and what it cannot do, and the services.",
+        "tags": [
+          "stacks"
         ],
         "x-deploy-key": "allowed"
       }
@@ -25642,7 +26164,7 @@
     },
     "/deploy/{id}/permanent": {
       "delete": {
-        "description": "Destructive. The deployment's name is typed as its confirmation, sent in the X-Confirm header as the dashboard sends it.",
+        "description": "Destructive. The deployment's name is typed as its confirmation, sent in the X-Confirm header as the dashboard sends it. With ?routes=remove the proxy routes its environments wrote are removed too, after the records, and the answer is 200 with routesRemoved and routeErrors (each route that was not removed, with the reason).",
         "operationId": "deployPurge",
         "responses": {
           "204": {
@@ -28248,6 +28770,155 @@
         }
       ]
     },
+    "/deploy/{id}/stack": {
+      "get": {
+        "description": "404 stack_not_found when the deployment is not a stack.",
+        "operationId": "stackState",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackState"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read a stack deployment's state: whether it is installed, healthy, connected and able to play and to acquire, each service's container and private address, each configuration step, the actions only a person can take, and the accounts it created.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/stack/configure": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs, 409 stack_not_preset when the live release is not one of the stack's presets.",
+        "operationId": "stackConfigure",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackConfigureAnswer"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Run the stack's configuration again now; every step converges, so nothing already set up is done twice; audited.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      }
+    },
+    "/deploy/{id}/stack/credentials/{name}/reveal": {
+      "get": {
+        "operationId": "stackCredentialReveal",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackCredentialReveal"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Reveal an account the stack created; audited without its value.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "refused (session_required): variables are write-only to a deploy key: a value is read back only in the dashboard"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The variable's name.",
+          "in": "path",
+          "name": "name",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
     "/deploy/{id}/unarchive": {
       "parameters": [
         {
@@ -28357,6 +29028,10 @@
     {
       "description": "The template catalogue and the plan a template renders to.",
       "name": "blueprints"
+    },
+    {
+      "description": "Smart stacks: several applications deployed as one preset template, then set up and connected to each other by the dashboard once the release is live.",
+      "name": "stacks"
     },
     {
       "description": "Templates added on this dashboard: made from a Compose file or a deployment's frozen plan, imported, changed, exported and removed.",

@@ -506,8 +506,10 @@ export type GitHubInboxPage = {
 
 /**
  * `GET /github/connections/{id}/events` — what the account did lately, as
- * GitHub's own activity feed lists it (`/users/{login}/events`, which shows a
- * person their private events too), newest first, the last thirty.
+ * GitHub's own activity feed lists it (`/users/{login}/events`), newest
+ * first, the last thirty. Public events only: GitHub adds private ones only
+ * for a token with the Events account permission, which the App does not ask
+ * for.
  */
 export type GitHubEvent = {
   id: string

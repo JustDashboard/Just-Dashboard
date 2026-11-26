@@ -73,6 +73,7 @@ import { RunCanary } from "@/components/deploy/run-canary"
 import { RunDiagnosis } from "@/components/deploy/run-diagnosis"
 import { useRunStream } from "@/components/deploy/run-stream"
 import { useProjectNavScope } from "@/components/deploy/project-shell"
+import { useStackState, useTemplateStack } from "@/components/deploy/stack/use-stack"
 import { releaseVerbs } from "@/components/deploy/run-verbs"
 import {
   deployWithCurrentSettings,
@@ -272,11 +273,16 @@ export function RunPage() {
   )
   // A run is one of its project's Deployments, so the rail keeps the
   // project's panel the reader opened it from.
+  // A stack's first run is watched from here, and the rail's Stack row is the
+  // way from it to the page that says how the setup after it is going.
+  const stackOf = useTemplateStack(project.data?.deployment.sourceTemplate)
+  const stack = useStackState(projectId, validIds && Boolean(stackOf))
   useProjectNavScope(
     project.data && {
       deployment: project.data.deployment,
       name: project.data.project.name,
       archived: Boolean(project.data.project.archivedAt),
+      stack: Boolean(stack.data),
     },
   )
   // Which deployment of which project, in the tab: "Deployment #42 · shop".

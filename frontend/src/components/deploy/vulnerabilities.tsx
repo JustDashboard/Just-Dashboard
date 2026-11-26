@@ -30,6 +30,7 @@ import {
   findingProduct,
   inFlight,
   overviewLead,
+  reportReachable,
   scanActions,
   scanVerdict,
   severityTone,
@@ -170,7 +171,7 @@ export function Vulnerabilities({
     <Panel plain id="vulnerabilities" className="scroll-mt-6">
       <PanelHeader
         title="Vulnerabilities"
-        link={scan?.finishedAt ? { href: report, label: "Report" } : undefined}
+        link={reportReachable(reading) ? { href: report, label: "Report" } : undefined}
         actions={
           <>
             {/* Quiet when there is nothing to do: the sentence says so. */}

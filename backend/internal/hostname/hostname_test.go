@@ -222,21 +222,35 @@ func TestRenameWithoutSystemd(t *testing.T) {
 	}
 }
 
+// A refused rename leaves the server as it was: the kernel's name, and the one
+// it boots with, which the fallback writes before it asks the kernel.
 func TestRenameSaysWhyTheHostRefused(t *testing.T) {
-	h, svc := newHost(t, "vps-1", "hostnamectl", "hostname")
-	h.fail["hostnamectl"] = "Could not set static hostname: Access denied"
-	h.fail["hostname"] = "hostname: you must be root to change the host name"
-	_, err := svc.Rename(context.Background(), "atlas")
-	if err == nil {
-		t.Fatal("reported a rename that did not happen")
-	}
-	for _, want := range []string{"Access denied", "you must be root"} {
-		if !strings.Contains(err.Error(), want) {
-			t.Errorf("error %q does not carry %q", err, want)
+	for _, hadFile := range []bool{true, false} {
+		h, svc := newHost(t, "vps-1", "hostnamectl", "hostname")
+		h.fail["hostnamectl"] = "Could not set static hostname: Access denied"
+		h.fail["hostname"] = "hostname: you must be root to change the host name"
+		if hadFile {
+			write(t, svc, "/etc/hostname", "vps-1\n")
 		}
-	}
-	if h.name != "vps-1" {
-		t.Errorf("kernel name is %q", h.name)
+		_, err := svc.Rename(context.Background(), "atlas")
+		if err == nil {
+			t.Fatalf("hadFile=%v: reported a rename that did not happen", hadFile)
+		}
+		for _, want := range []string{"Access denied", "you must be root"} {
+			if !strings.Contains(err.Error(), want) {
+				t.Errorf("hadFile=%v: error %q does not carry %q", hadFile, err, want)
+			}
+		}
+		if h.name != "vps-1" {
+			t.Errorf("hadFile=%v: kernel name is %q", hadFile, h.name)
+		}
+		boot, err := os.ReadFile(filepath.Join(svc.root, "etc/hostname"))
+		switch {
+		case hadFile && (err != nil || string(boot) != "vps-1\n"):
+			t.Errorf("the server would boot as %q (%v), not vps-1", boot, err)
+		case !hadFile && !errors.Is(err, os.ErrNotExist):
+			t.Errorf("a server with no /etc/hostname was left one holding %q (%v)", boot, err)
+		}
 	}
 }
 

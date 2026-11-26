@@ -49,7 +49,12 @@ export function StatTile({
   hint?: React.ReactNode
   /** 0–100. Draws the utilisation bar under the figure. */
   meter?: number
-  /** Names the bar when `label` is a node (a mark beside the word) rather than a string. */
+  /**
+   * Names the bar when `label` is a node (a mark beside the word) rather than
+   * a string, or when the bar measures something the label does not say — the
+   * Disk I/O tile's figure is a rate and its bar how busy the disks are.
+   * A bar with no name is hidden from a screen reader as decoration.
+   */
   meterLabel?: string
   /**
    * The figure's recent shape, drawn where the meter would be — for a reading
@@ -63,6 +68,10 @@ export function StatTile({
   trailing?: React.ReactNode
   className?: string
 }) {
+  const meterName = meterLabel ?? (typeof label === "string" ? label : undefined)
+  if (meter !== undefined && !meterName && process.env.NODE_ENV !== "production") {
+    console.error("StatTile draws a meter with no name: give it meterLabel.")
+  }
   return (
     <div
       data-slot="stat-tile"
@@ -97,7 +106,7 @@ export function StatTile({
           tone={tone}
           size="thin"
           className="mt-1"
-          label={meterLabel ?? (typeof label === "string" ? label : undefined)}
+          {...(meterName ? { label: meterName } : { decorative: true })}
         />
       )}
 

@@ -315,6 +315,8 @@ function ProjectLine({
   const titleRef = useRef<HTMLParagraphElement>(null)
   const stateRef = useRef<HTMLDivElement>(null)
   const stateLeadsFacts = useStateLeadsFacts(nameRef, titleRef, stateRef)
+  const factsRef = useRef<HTMLDivElement>(null)
+  useFactsLeftOff(factsRef)
   const stateBox = state !== undefined && (
     <div
       ref={stateRef}
@@ -380,10 +382,14 @@ function ProjectLine({
         {menu}
       </div>
       {/* On a phone one line that never grows: what wraps falls past its
-          foot and is clipped, a whole fact at a time. A `FactLine` is held to
-          the line too, so its own wrapped rows never stand it taller than the
-          state beside it and pull the state off the line's centre. */}
-      <div className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:h-4 max-sm:overflow-clip max-sm:[overflow-clip-margin:2px] sm:col-span-1 sm:col-start-2 max-sm:[&>[data-slot=fact-line]]:h-4">
+          foot and is clipped, a whole fact at a time, and is left off for the
+          keyboard too (`useFactsLeftOff`). A `FactLine` is held to the line
+          too, so its own wrapped rows never stand it taller than the state
+          beside it and pull the state off the line's centre. */}
+      <div
+        ref={factsRef}
+        className="col-span-3 flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground max-sm:h-4 max-sm:overflow-clip max-sm:[overflow-clip-margin:2px] sm:col-span-1 sm:col-start-2 max-sm:[&>[data-slot=fact-line]]:h-4"
+      >
         {stateLeadsFacts && stateBox}
         {facts}
       </div>
@@ -462,6 +468,65 @@ function useStateLeadsFacts(
   return leads
 }
 
+/**
+ * On a phone the facts are one line, and a fact the line has no room for is
+ * left off whole: it wraps past the line's foot, where the line clips it. A
+ * link or a button inside it was still a Tab stop, so the focus went where
+ * nothing could be seen (Remote Desktop's "over Tailscale" after the count and
+ * the ready computers, on a narrow phone). So a fact past the foot is `inert`:
+ * left off for the keyboard and a screen reader as it is for the eye, and
+ * back the moment the line has room for it. Off a phone nothing is clipped
+ * and nothing is left off.
+ */
+function useFactsLeftOff(boxRef: React.RefObject<HTMLDivElement | null>) {
+  const phone = useIsPhone()
+  const observer = useRef<ResizeObserver | null>(null)
+  const watched = useRef(new WeakSet<Element>())
+  const measure = useCallback(() => {
+    const box = boxRef.current
+    if (!box) return
+    const foot = box.getBoundingClientRect().bottom
+    for (const fact of factsOf(box)) {
+      const off = phone && fact.getBoundingClientRect().top >= foot
+      if (fact.inert !== off) fact.inert = off
+      // A fact that grows or shrinks moves the ones after it across the
+      // line's end without the line changing size. Each is watched once:
+      // watching one again reports it again, and the report measures.
+      if (observer.current && !watched.current.has(fact)) {
+        watched.current.add(fact)
+        observer.current.observe(fact)
+      }
+    }
+  }, [boxRef, phone])
+  // Every render: facts come and go without the line changing size.
+  useLayoutEffect(measure)
+  useEffect(() => {
+    const box = boxRef.current
+    if (!box) return
+    const watch = new ResizeObserver(() => measure())
+    observer.current = watch
+    watched.current = new WeakSet()
+    watch.observe(box)
+    measure()
+    // A web font landing changes the facts' widths and nothing else.
+    document.fonts?.ready.then(() => measure())
+    return () => {
+      watch.disconnect()
+      observer.current = null
+    }
+  }, [boxRef, measure])
+}
+
+/** The facts in a line: a `FactLine`'s facts, or what the line was given, less the state leading it. */
+function factsOf(box: HTMLElement): HTMLElement[] {
+  const facts = box.querySelectorAll<HTMLElement>('[data-slot="fact"]')
+  if (facts.length > 0) return [...facts]
+  return [...box.children].filter(
+    (child): child is HTMLElement =>
+      child instanceof HTMLElement && child.dataset.slot !== "identity-state",
+  )
+}
+
 /** `gap-x-3` between the name and its state. */
 const STATE_GAP = 12
 
@@ -511,27 +576,35 @@ function naturalWidth(element: HTMLElement) {
  * the password") opened at once on a press and, as the topmost layer, took
  * the Escape meant for the popover, which stayed open. So the tip listens on
  * the command's own box in the page, where nothing in a portal reaches, and
- * its trigger is a box with nothing in it laid over the command, an anchor
- * that takes no pointer and no focus.
+ * its trigger is a box with nothing in it, an anchor that takes no pointer
+ * and no focus.
+ *
+ * The tip names the one button the pointer is on or the keyboard landed on,
+ * and its anchor is laid over that button. A split command is two icons on a
+ * phone (Issue certificate, and the other ways beside it), and a tip that
+ * read every icon in the box said both names over either half, so the icon
+ * was not explained at all.
  */
 function CommandTip({ children }: { children: React.ReactNode }) {
   const ref = useRef<HTMLSpanElement>(null)
-  const [words, setWords] = useState<string | null>(null)
+  const [tip, setTip] = useState<IconTip | null>(null)
   useEffect(() => {
     const box = ref.current
     if (!box) return
-    const hide = () => setWords(null)
-    // A mouse resting on it, or a keyboard landing on it; a finger never
-    // opens a tooltip, since the tap that would is a press.
-    const enter = (event: PointerEvent) => {
-      if (event.pointerType !== "touch") setWords(iconWords(box))
+    const hide = () => setTip(null)
+    // A mouse resting on a button, or a keyboard landing on one; a finger
+    // never opens a tooltip, since the tap that would is a press. `over`
+    // rather than `enter`, so moving from one half to the other says the
+    // other's name.
+    const over = (event: PointerEvent) => {
+      if (event.pointerType !== "touch") setTip(iconTip(box, event.target))
     }
     const focus = (event: FocusEvent) => {
       if (event.target instanceof Element && event.target.matches(":focus-visible"))
-        setWords(iconWords(box))
+        setTip(iconTip(box, event.target))
     }
     const listeners = [
-      ["pointerenter", enter],
+      ["pointerover", over],
       ["pointerleave", hide],
       ["pointerdown", hide],
       ["focusin", focus],
@@ -546,30 +619,57 @@ function CommandTip({ children }: { children: React.ReactNode }) {
   return (
     <span ref={ref} className="relative flex shrink-0 items-center gap-3 sm:contents">
       {children}
-      <TooltipProvider>
-        <Tooltip open={words !== null} onOpenChange={(open) => !open && setWords(null)}>
-          <TooltipTrigger asChild>
-            <span aria-hidden className="pointer-events-none absolute inset-0 sm:hidden" />
-          </TooltipTrigger>
-          {words !== null && <TooltipContent>{words}</TooltipContent>}
-        </Tooltip>
-      </TooltipProvider>
+      {tip && (
+        // Keyed on the button, so the tip opens again on the other half
+        // rather than sliding from where the first one stood.
+        <TooltipProvider key={tip.words}>
+          <Tooltip open onOpenChange={(open) => !open && setTip(null)}>
+            <TooltipTrigger asChild>
+              <span
+                aria-hidden
+                data-slot="command-tip-anchor"
+                className="pointer-events-none absolute sm:hidden"
+                style={tip.at}
+              />
+            </TooltipTrigger>
+            <TooltipContent>{tip.words}</TooltipContent>
+          </Tooltip>
+        </TooltipProvider>
+      )}
     </span>
   )
 }
 
+type IconTip = {
+  words: string
+  /** The button's box inside the command's, where the tip's anchor is laid. */
+  at: { left: number; top: number; width: number; height: number }
+}
+
 /**
- * What the command's icon-only buttons say, or nothing when none is drawn as
- * an icon alone: each one's accessible name, its `aria-label` where it has one
- * (a command drawn with its `short` word), else its words.
+ * What the button an event reached says, and where it is in the command's
+ * box, or nothing when that button is not drawn as an icon alone: its
+ * accessible name, its `aria-label` where it has one (a command drawn with its
+ * `short` word), else its words.
  */
-function iconWords(box: HTMLElement | null) {
-  if (!box || !window.matchMedia(breakpointQuery("sm", "below")).matches) return null
-  const words = Array.from(box.querySelectorAll<HTMLElement>("[data-size]"))
-    .filter((button) => button.getClientRects().length > 0 && button.querySelector("svg"))
-    .map((button) => buttonName(button))
-    .filter(Boolean)
-  return words.length > 0 ? words.join(" · ") : null
+function iconTip(box: HTMLElement, target: EventTarget | null): IconTip | null {
+  if (!window.matchMedia(breakpointQuery("sm", "below")).matches) return null
+  const button = target instanceof Element ? target.closest<HTMLElement>("[data-size]") : null
+  if (!button || !box.contains(button) || button.getClientRects().length === 0) return null
+  if (!button.querySelector("svg")) return null
+  const words = buttonName(button)
+  if (!words) return null
+  const outer = box.getBoundingClientRect()
+  const inner = button.getBoundingClientRect()
+  return {
+    words,
+    at: {
+      left: inner.left - outer.left,
+      top: inner.top - outer.top,
+      width: inner.width,
+      height: inner.height,
+    },
+  }
 }
 
 /** A button's name as a screen reader hears it, for the tip that says it aloud on a phone. */

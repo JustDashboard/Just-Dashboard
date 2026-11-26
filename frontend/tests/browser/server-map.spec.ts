@@ -565,6 +565,55 @@ test("a system's frame Enter picks moves with the arrows, everything in it with 
     .toEqual([s])
 })
 
+test("a single pointer moves a box and a system from the inspector, one press at a time", async ({
+  page,
+}) => {
+  // WCAG 2.5.7 is more than the keys of 2.1.1: what a drag does, a click or
+  // a tap does too, with no drag and no keyboard.
+  const mock = await open(page, "/map?system=system:stack:monitoring")
+  await still(page)
+  const s = "system:stack:monitoring"
+  const id = `${s}/volume:prom-data`
+  const anchor = `${s}/container:c-prom`
+  const offset = async () => {
+    const [a, b] = [await at(page, id), await at(page, anchor)]
+    const z = (await view(page)).zoom
+    return { x: Math.round((a.x - b.x) / z), y: Math.round((a.y - b.y) / z) }
+  }
+  const moves = (name: string) => inspector(page).getByRole("group", { name: `Move ${name}` })
+
+  // The chosen box: each press is the arrows' longer step, kept as a drag is,
+  // and the camera stays where it was.
+  await node(page, id).click()
+  await expect(inspector(page).getByRole("heading", { name: "prom-data" })).toBeVisible()
+  const before = await offset()
+  const camera = await view(page)
+  await moves("prom-data").getByRole("button", { name: "Move prom-data right" }).click()
+  await moves("prom-data").getByRole("button", { name: "Move prom-data down" }).click()
+  await expect.poll(offset).toEqual({ x: before.x + 40, y: before.y + 40 })
+  expect(await view(page)).toEqual(camera)
+  await expect
+    .poll(() => Object.keys((mock.saved.layout as { positions?: object } | null)?.positions ?? {}))
+    .toEqual([id])
+
+  // A press on the system's head reads the system, and the buttons carry its
+  // frame, with everything in it.
+  const was = await at(page, `frame:${s}`)
+  await frame(page, s).locator(".map-frame-grip").click()
+  const group = inspector(page).locator("[data-slot=map-move]")
+  await expect(group).toHaveCount(1)
+  await expect(inspector(page).getByRole("heading", { name: "prom-data" })).toHaveCount(0)
+  await group.getByRole("button", { name: / left$/ }).click()
+  const zoom = (await view(page)).zoom
+  await expect
+    .poll(async () => Math.round(((await at(page, `frame:${s}`)).x - was.x) / zoom))
+    .toBe(-40)
+  expect(await offset()).toEqual({ x: before.x + 40, y: before.y + 40 })
+  await expect
+    .poll(() => Object.keys((mock.saved.layout as { frames?: object } | null)?.frames ?? {}))
+    .toEqual([s])
+})
+
 test("a click on open ground inside a system leaves the arrows sliding the canvas", async ({
   page,
 }) => {

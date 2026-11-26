@@ -151,7 +151,7 @@ func (w *ImageScanWatcher) ScanRelease(ctx context.Context, releaseID int64, tri
 	if len(images) == 0 {
 		reasons = append(reasons, "This release has no image on this server to scan.")
 	}
-	var baseFindings [][]imagescan.Finding
+	var baseFindings []imagescan.BaseFindings
 	// A scan read before the current reading has bases whose findings
 	// have no paths to be matched by, so they are read again too.
 	readBases := trigger != ImageScanTriggerSchedule || previous == nil || previous.reading < imageScanReading
@@ -166,7 +166,7 @@ func (w *ImageScanWatcher) ScanRelease(ctx context.Context, releaseID int64, tri
 		} else {
 			target, _, _ = w.scanTarget(ctx, base, true, &result)
 		}
-		baseFindings = append(baseFindings, target.Findings())
+		baseFindings = append(baseFindings, imagescan.BaseFindings{Digest: base.Digest, Findings: target.Findings()})
 		result.Targets = append(result.Targets, target)
 	}
 	result.Findings = imagescan.MarkFromBase(found, baseFindings...)

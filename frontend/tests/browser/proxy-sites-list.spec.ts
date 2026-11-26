@@ -1027,7 +1027,9 @@ test("a site file kept outside the nginx directory keeps its switch", async ({ p
   expect(posted).toEqual({ enabled: false, reload: true })
 
   // In conf.d there is no switch, and the delete could only answer "no such site".
-  const confdMenu = await openMenu(page, "outside.conf")
+  // Its row is titled by its domain, with the file on the mono line.
+  await expect(card(page, "outside.conf")).toHaveCount(1)
+  const confdMenu = await openMenu(page, "confd.outside.example.com")
   await expect(confdMenu.getByRole("menuitem", { name: "Open site" })).toBeVisible()
   await expect(
     confdMenu.getByRole("menuitem", { name: /^(Delete|Duplicate|Enable|Disable)$/ }),
@@ -1215,27 +1217,39 @@ test("a deployment's route leads to its deployment and is edited only after aski
   })
   await page.goto("/proxy/sites")
 
+  // Titled by the domain its visitors type; the file stays on its mono line.
   const shop = card(page, "just-dashboard-env-7.conf")
-  await expect(shop).toContainText("Managed by shop · production")
-  const menu = await openMenu(page, "just-dashboard-env-7.conf")
+  await expect(shop.getByRole("link", { name: "Open shop.example.com" })).toBeVisible()
+  await expect(shop).toContainText("shop · production")
+  await expect(shop).not.toContainText("Managed by")
+  const menu = await openMenu(page, "shop.example.com")
   await expect(menu.getByRole("menuitem", { name: "Open deployment" })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: "View config" })).toBeVisible()
   await expect(
     menu.getByRole("menuitem", { name: /^(Edit|Delete|Disable|Duplicate)$/ }),
   ).toHaveCount(0)
+  // Remove is there and held, so the menu says why instead of saying nothing.
+  await expect(menu.getByRole("menuitem", { name: "Remove", exact: true })).toHaveAttribute(
+    "aria-disabled",
+    "true",
+  )
   await expect(menu.getByRole("menuitem", { name: "Access log" })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: "Error log" })).toBeVisible()
   await expect(menu.getByRole("menuitem", { name: "Edit anyway" })).toBeVisible()
   await page.keyboard.press("Escape")
 
   // Its card opens the route page, where the file is read-only.
-  await shop.getByRole("link", { name: "Open just-dashboard-env-7.conf" }).click()
+  await shop.getByRole("link", { name: "Open shop.example.com" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-7\.conf$/)
-  await expect(page.getByRole("heading", { name: "just-dashboard-env-7.conf" })).toBeVisible()
-  await expect(about(page)).toContainText("The next deploy of shop writes this route again")
+  await expect(page.getByRole("heading", { name: "shop.example.com" })).toBeVisible()
+  // Why it is not removed here, and where it is.
+  await expect(about(page)).toContainText("Written by shop on every deploy.")
+  await expect(
+    about(page).getByRole("link", { name: "Remove the domain in shop · Domains" }),
+  ).toHaveAttribute("href", "/deploy/3/settings/domains")
   // The deployment is the page's command; the file is behind its menu.
   await expect(page.getByRole("button", { name: "Open deployment" })).toBeVisible()
-  await page.getByRole("button", { name: "More actions for just-dashboard-env-7.conf" }).click()
+  await page.getByRole("button", { name: "More actions for shop.example.com" }).click()
   await page.getByRole("menuitem", { name: "View config" }).click()
   const viewer = page.getByRole("dialog")
   await expect(viewer.locator(".monaco-editor .view-lines")).toContainText(
@@ -1259,11 +1273,11 @@ test("a deployment's route leads to its deployment and is edited only after aski
   // Editing anyway says what the next deploy does, then opens the route's
   // Settings on the form rather than on the same question.
   await (
-    await openMenu(page, "just-dashboard-env-7.conf")
+    await openMenu(page, "shop.example.com")
   )
     .getByRole("menuitem", { name: "Edit anyway" })
     .click()
-  const confirm = page.getByRole("dialog", { name: "Edit just-dashboard-env-7.conf anyway" })
+  const confirm = page.getByRole("dialog", { name: "Edit shop.example.com anyway" })
   await expect(confirm).toContainText("shop writes this route on every deploy")
   await confirm.getByRole("button", { name: "Edit anyway" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-7\.conf\?tab=settings$/)
@@ -1282,16 +1296,21 @@ test("an archived deployment's route is the operator's, and a live one's menu le
   await serveSites(page, [app, owned, leftBehind])
   // An archived environment deploys nothing: its route is the operator's.
   await page.goto("/proxy/sites")
-  const leftMenu = await openMenu(page, "just-dashboard-env-9.conf")
+  const left = card(page, "just-dashboard-env-9.conf")
+  await expect(left).toContainText("Leftover · shop is archived")
+  await expect(left.getByText("leftover", { exact: true })).toBeVisible()
+  const leftMenu = await openMenu(page, "pr-12.shop.example.com")
   await expect(leftMenu.getByRole("menuitem", { name: "Edit", exact: true })).toBeVisible()
   await expect(leftMenu.getByRole("menuitem", { name: "Delete" })).toBeVisible()
   await page.keyboard.press("Escape")
   await page.goto("/proxy/sites/just-dashboard-env-9.conf")
-  await expect(about(page)).toContainText("Written by shop · pr-12, which is archived")
+  await expect(page.locator("[data-slot='site-origin']")).toContainText(
+    "Left by shop, which is archived",
+  )
 
   await page.goto("/proxy/sites")
   await (
-    await openMenu(page, "just-dashboard-env-7.conf")
+    await openMenu(page, "shop.example.com")
   )
     .getByRole("menuitem", { name: "Open deployment" })
     .click()
@@ -1308,10 +1327,12 @@ test("a reader sees who manages a route and reaches its deployment, and nothing 
   )
   await page.goto("/proxy/sites")
   const shop = card(page, "just-dashboard-env-7.conf")
-  await expect(shop).toContainText("Managed by shop · production")
-  const menu = await openMenu(page, "just-dashboard-env-7.conf")
+  await expect(shop).toContainText("shop · production")
+  const menu = await openMenu(page, "shop.example.com")
   await expect(menu.getByRole("menuitem", { name: "Open deployment" })).toBeVisible()
-  await expect(menu.getByRole("menuitem", { name: /anyway|Enable|Disable|Delete/ })).toHaveCount(0)
+  await expect(
+    menu.getByRole("menuitem", { name: /anyway|Enable|Disable|Delete|Remove/ }),
+  ).toHaveCount(0)
 })
 
 test("a Docker Caddy route its project left behind can be removed, and a live one cannot", async ({
@@ -1352,20 +1373,34 @@ test("a Docker Caddy route its project left behind can be removed, and a live on
   })
   await page.goto("/proxy/sites")
 
+  // The leftover reads as one, under its domain, and leads the list; the
+  // live route reads as its deployment and as serving.
+  const rows = page.locator("[data-slot='choice-row']")
+  await expect(rows.first()).toContainText("lampino.example.com")
+  await expect(card(page, orphan.name).getByText("leftover", { exact: true })).toBeVisible()
+  await expect(card(page, orphan.name)).toContainText("Leftover · its deployment was deleted")
+  await expect(card(page, orphan.name).getByText("serving", { exact: true })).toHaveCount(0)
+  await expect(card(page, live.name).getByText("serving", { exact: true })).toBeVisible()
+  await expect(page.getByText("Docker Caddy ingress")).toHaveCount(0)
+
   await expect(
-    (await openMenu(page, live.name)).getByRole("menuitem", { name: "Remove route" }),
+    (await openMenu(page, "shop.example.com")).getByRole("menuitem", { name: "Remove route" }),
   ).toHaveCount(0)
   await page.keyboard.press("Escape")
 
-  await (await openMenu(page, orphan.name)).getByRole("menuitem", { name: "Remove route" }).click()
-  const confirm = page.getByRole("dialog", { name: `Remove ${orphan.name}` })
+  await (
+    await openMenu(page, "lampino.example.com")
+  )
+    .getByRole("menuitem", { name: "Remove route" })
+    .click()
+  const confirm = page.getByRole("dialog", { name: "Remove lampino.example.com" })
   await expect(confirm).toContainText("The deployment that wrote this route is gone.")
   await expect(confirm).toContainText("lampino.example.com stops answering")
   await confirm.getByRole("button", { name: "Remove route" }).click()
   await expect
     .poll(() => removed)
     .toBe(`DELETE /api/v1/proxy/vhosts/${orphan.name}/deployment-route`)
-  await expect(page.getByText(`${orphan.name} removed`)).toBeVisible()
+  await expect(page.getByText("lampino.example.com removed")).toBeVisible()
   await expect(page.getByText(/completed/)).toHaveCount(0)
   await expect(card(page, orphan.name)).toHaveCount(0)
 })
@@ -1870,4 +1905,133 @@ test("Edit on a row is the site's Settings, and a copy starts in the new-site sh
     .click()
   await expect(page).toHaveURL(/\/proxy\/sites\/legacy\.example\.com\?tab=settings$/)
   await expect(page.getByRole("textbox", { name: "Domains" })).toHaveValue("legacy.example.com")
+})
+
+/** A route on the Docker Caddy ingress, which has no file on the host. */
+const ingressRoute = {
+  kind: "caddy",
+  path: "",
+  enabled: true,
+  formEditable: false,
+  listen: ["80", "443"],
+  tls: true,
+  modified: "",
+  size: 0,
+}
+const leftoverRoute = (id: number, domain: string) => ({
+  ...ingressRoute,
+  name: `just-dashboard-env-${id}.conf`,
+  serverNames: [domain],
+  upstreams: [`http://10.0.0.${id % 250}:3000`],
+})
+const liveRoute = {
+  ...leftoverRoute(175, "shop.example.com"),
+  owner: { projectId: 3, environmentId: 175, project: "shop", environment: "production" },
+}
+
+test("the routes deleted deployments left are said over the list and removed together", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const sites: { name: string }[] = [
+    app,
+    liveRoute,
+    leftoverRoute(450, "jellyfin.example.com"),
+    leftoverRoute(451, "wiki.example.com"),
+    leftoverRoute(452, "held.example.com"),
+  ]
+  await page.route("**/api/v1/proxy/vhosts", (route) => json(route, sites))
+  const calls: string[] = []
+  await page.route("**/api/v1/proxy/vhosts/*/deployment-route", (route) => {
+    const path = new URL(route.request().url()).pathname
+    calls.push(`${route.request().method()} ${path}`)
+    const name = decodeURIComponent(path.split("/").at(-2) ?? "")
+    // One the engine would not let go: the rest are still removed.
+    if (name === "just-dashboard-env-452.conf") {
+      return route.fulfill({
+        status: 409,
+        contentType: "application/json",
+        body: JSON.stringify({
+          error: { code: "route_unmanaged", message: "The route was changed outside." },
+        }),
+      })
+    }
+    sites.splice(
+      sites.findIndex((site) => site.name === name),
+      1,
+    )
+    return json(route, { name, certificates: [] })
+  })
+  await page.goto("/proxy/sites")
+
+  const notice = page.locator("[data-slot='site-leftovers']")
+  await expect(notice).toContainText(
+    "3 routes were left by deleted deployments and still answer their domains",
+  )
+  // Its chip holds exactly them.
+  const chips = page.getByLabel("Filter sites")
+  await expect(chips.getByRole("button", { name: /Leftover/ })).toContainText("3")
+
+  await notice.getByRole("button", { name: "Remove all" }).click()
+  const confirm = page.getByRole("dialog", { name: "Remove 3 leftover routes" })
+  // The confirmation names the domains that stop answering, and no live one.
+  await expect(confirm).toContainText("jellyfin.example.com, wiki.example.com, held.example.com")
+  await expect(confirm).not.toContainText("shop.example.com")
+  await confirm.getByRole("button", { name: "Remove all" }).click()
+
+  await expect
+    .poll(() => calls)
+    .toEqual([
+      "DELETE /api/v1/proxy/vhosts/just-dashboard-env-450.conf/deployment-route",
+      "DELETE /api/v1/proxy/vhosts/just-dashboard-env-451.conf/deployment-route",
+      "DELETE /api/v1/proxy/vhosts/just-dashboard-env-452.conf/deployment-route",
+    ])
+  // One report for the run: how many are gone, and the one that is not, with why.
+  await expect(page.getByText("2 routes removed, 1 could not be")).toBeVisible()
+  await expect(page.getByText(/held\.example\.com: .*changed outside/)).toBeVisible()
+  await expect(card(page, "jellyfin.example.com")).toHaveCount(0)
+  await expect(card(page, "wiki.example.com")).toHaveCount(0)
+  await expect(card(page, "shop.example.com")).toHaveCount(1)
+  await expect(notice).toContainText("1 route was left by a deleted deployment")
+})
+
+test("a reader is told of leftover routes and offered nothing that removes them", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, leftoverRoute(450, "jellyfin.example.com")])
+  await page.route("**/api/v1/auth/session", (route) =>
+    json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
+  )
+  await page.goto("/proxy/sites")
+  const notice = page.locator("[data-slot='site-leftovers']")
+  await expect(notice).toContainText("1 route was left by a deleted deployment")
+  await expect(notice.getByRole("button")).toHaveCount(0)
+})
+
+test("?q= fills the list's search, and a site is found by its project", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, legacy, liveRoute, leftoverRoute(450, "jellyfin.example.com")])
+  await page.goto("/proxy/sites?q=jellyfin.example.com")
+  const search = page.getByLabel("Search sites")
+  await expect(search).toHaveValue("jellyfin.example.com")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(card(page, "jellyfin.example.com")).toHaveCount(1)
+  // Taken off the address once read, so a reload does not undo what is typed next.
+  await expect(page).toHaveURL(/\/proxy\/sites$/)
+
+  // The project and the environment that deploy a route find it; so does its file.
+  await search.fill("production")
+  await expect(page.locator("[data-slot='choice-row']")).toHaveCount(1)
+  await expect(card(page, "shop.example.com")).toHaveCount(1)
+  await search.fill("env-175")
+  await expect(card(page, "shop.example.com")).toHaveCount(1)
+})
+
+test("?site= for a route with no file opens the route's page", async ({ page }) => {
+  await mockProxy(page, { included: true })
+  await serveSites(page, [app, liveRoute])
+  await page.goto(`/proxy/sites?site=${liveRoute.name}`)
+  await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-env-175\.conf$/)
+  await expect(page.getByRole("heading", { name: "shop.example.com" })).toBeVisible()
 })

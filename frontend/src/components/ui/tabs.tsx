@@ -6,9 +6,21 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 
 import { cn } from "@/lib/utils"
 
+/**
+ * Whether the panels here are the one view a strip did not draw (`ViewTabs`
+ * with `hideWhenSingle`). Such a panel has no tab to be labelled by: a tab
+ * panel pointing at a trigger that is not there has no name, and announces a
+ * tab list nobody can reach. So it is a plain box, neither a tab panel nor a
+ * tab stop. What the view holds names itself: an account's view is a region
+ * named for it, and a second region of that name round it was the same
+ * landmark twice.
+ */
+const LoneView = React.createContext(false)
+
 function Tabs({
   className,
   orientation = "horizontal",
+  children,
   ...props
 }: React.ComponentProps<typeof TabsPrimitive.Root>) {
   return (
@@ -18,7 +30,10 @@ function Tabs({
       orientation={orientation}
       className={cn("group/tabs flex gap-2 data-[orientation=horizontal]:flex-col", className)}
       {...props}
-    />
+    >
+      {/* A strip of its own inside a lone view's panel draws its tabs again. */}
+      <LoneView.Provider value={false}>{children}</LoneView.Provider>
+    </TabsPrimitive.Root>
   )
 }
 
@@ -93,13 +108,16 @@ function TabsTrigger({ className, ...props }: React.ComponentProps<typeof TabsPr
 }
 
 function TabsContent({ className, ...props }: React.ComponentProps<typeof TabsPrimitive.Content>) {
+  const lone = React.useContext(LoneView)
   return (
     <TabsPrimitive.Content
       data-slot="tabs-content"
       className={cn("flex-1 focus-ring", className)}
       {...props}
+      // Radix spreads these over its own role, label and tab stop.
+      {...(lone && { role: undefined, "aria-labelledby": undefined, tabIndex: undefined })}
     />
   )
 }
 
-export { Tabs, TabsList, TabsTrigger, TabsContent, tabsListVariants }
+export { Tabs, TabsList, TabsTrigger, TabsContent, LoneView, tabsListVariants }

@@ -105,7 +105,8 @@ export function StatementsView() {
   const data = statements.data
   const openSetup = useStatementsSetup(statements.refresh)
   // A row is addressed by a key no other row has: the engine's digest names
-  // a statement twice when it ran in two schemas.
+  // a statement twice when it ran in two schemas or for two roles, and the
+  // engine says which of them a row is.
   const keyed = useMemo(() => {
     const list = data?.statements ?? []
     const keys = statementKeys(list)

@@ -33,6 +33,7 @@ import { useConfirm } from "@/components/confirm-dialog"
 import { ProductGlyph, buildMethodProduct, hasProductLogo } from "@/components/product-logo"
 import { BranchChip } from "@/components/git/marks"
 import { useProject } from "@/components/deploy/project-context"
+import { useStackState } from "@/components/deploy/stack/use-stack"
 import { projectCommand, useProjectVerbs } from "@/components/deploy/project-verbs"
 import { PROJECT_NAV, PROJECT_SETTINGS_NAV } from "@/components/shell/nav"
 import { useNavScope, type NavScope } from "@/components/shell/nav-scope"
@@ -166,11 +167,15 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const command = projectCommand(verbs)
   const menu = verbs.filter((verb) => verb !== command)
 
+  // The template's definition is already read here, so the stack is asked
+  // for only where the template names one.
+  const stack = useStackState(project.projectId, Boolean(project.blueprint?.stack))
   useProjectNavScope({
     deployment,
     name: record.name,
     archived: project.archived,
     pendingKinds: project.configuration?.pending.changes.map((change) => change.kind),
+    stack: Boolean(stack.data),
   })
 
   const domain = project.operations?.domains.domains.find((route) => route.hostname === hostOf(url))
@@ -315,16 +320,24 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
  * Each settings page that holds a saved change not yet live carries the mark
  * the group label has always had, so the reader lands on the page with the
  * change rather than on the group; `pendingKinds` are the kinds of those
- * changes, where the caller has read them.
+ * changes, where the caller has read them. `stack` is whether the server
+ * answered for this project's stack, which is what earns the Stack page its
+ * row.
  */
 export function useProjectNavScope(
   project:
-    | { deployment: DeploymentSummary; name: string; archived: boolean; pendingKinds?: string[] }
+    | {
+        deployment: DeploymentSummary
+        name: string
+        archived: boolean
+        pendingKinds?: string[]
+        stack?: boolean
+      }
     | undefined,
 ) {
   let scope: NavScope | null = null
   if (project) {
-    const { deployment, name, archived, pendingKinds = [] } = project
+    const { deployment, name, archived, pendingKinds = [], stack = false } = project
     const base = `/deploy/${deployment.id}`
     const pending = Boolean(deployment.pendingChanges) && !archived
     const pendingPages = new Set(
@@ -341,13 +354,13 @@ export function useProjectNavScope(
       mark: <ProjectMark deployment={deployment} size="xs" />,
       groups: [
         {
-          items: PROJECT_NAV.filter((entry) => !entry.game || deployment.profile === "game").map(
-            (entry) => ({
-              title: entry.title,
-              href: `${base}${entry.path}`,
-              icon: entry.icon,
-            }),
-          ),
+          items: PROJECT_NAV.filter(
+            (entry) => (!entry.game || deployment.profile === "game") && (!entry.stack || stack),
+          ).map((entry) => ({
+            title: entry.title,
+            href: `${base}${entry.path}`,
+            icon: entry.icon,
+          })),
         },
         {
           label: "Settings",

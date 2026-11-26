@@ -29,7 +29,7 @@ import { useContainerScales, useContainerUsage } from "@/components/docker/conta
 import { saveText } from "@/lib/download"
 import { useBreakpoint } from "@/lib/breakpoints"
 import { VerbMenu } from "@/components/verbs"
-import { newestReadings } from "@/components/deploy/runtime-model"
+import { newestReadings, type RecordedReading } from "@/components/deploy/runtime-model"
 
 // The Metrics page's colours and words for the same measurements (§10), so a
 // container's network is the line the host's network is. Its processes stand
@@ -428,14 +428,20 @@ function Readings({
   // row stands in, marked with its minute, so a tile never says "—" over a
   // line and a chart that have the figure.
   const newest = useMemo(() => newestReadings(rows), [rows])
-  const asOf = newest.ts !== undefined ? `as of ${minuteAt(new Date(newest.ts))}` : undefined
+  // Each figure is marked with its own row's minute; a tile showing two (in
+  // and out, read and written) says the older, so neither reads newer than
+  // it is.
+  const asOf = (...readings: (RecordedReading | undefined)[]) => {
+    const times = readings.filter((reading) => reading !== undefined).map((reading) => reading.ts)
+    return times.length > 0 ? `as of ${minuteAt(new Date(Math.min(...times)))}` : undefined
+  }
 
   const trend = (values: number[], name: string, color: string, max?: number) =>
     values.length < 2 ? undefined : (
       <TileTrend values={values} max={max} color={color} label={`${name} over ${over}`} />
     )
   const liveCpu = stats?.cpuReady ? stats.cpuPercent : undefined
-  const cpu = liveCpu ?? newest.cpu
+  const cpu = liveCpu ?? newest.cpu?.value
   const quotaShare = cpu !== undefined && stats?.cpuLimit ? cpu / stats.cpuLimit : undefined
   const cpuTrend = trend(
     trends.cpu,
@@ -449,13 +455,13 @@ function Readings({
   // would not be drawn at all: headroom over the top keeps it a line at its level.
   const pidsTrend = trend(trends.pids, "Processes", HUE.load, Math.max(...trends.pids, 1) * 1.25)
   const live = now?.netRx != null || now?.netTx != null
-  const rx = now?.netRx ?? (live ? null : (newest.netRx ?? null))
-  const tx = now?.netTx ?? (live ? null : (newest.netTx ?? null))
+  const rx = now?.netRx ?? (live ? null : (newest.netRx?.value ?? null))
+  const tx = now?.netTx ?? (live ? null : (newest.netTx?.value ?? null))
   const liveDisk = now?.blockRead != null || now?.blockWrite != null
-  const read = now?.blockRead ?? (liveDisk ? null : (newest.blockRead ?? null))
-  const write = now?.blockWrite ?? (liveDisk ? null : (newest.blockWrite ?? null))
-  const mem = stats ? stats.memUsage : newest.mem
-  const pids = stats ? stats.pids : newest.pids
+  const read = now?.blockRead ?? (liveDisk ? null : (newest.blockRead?.value ?? null))
+  const write = now?.blockWrite ?? (liveDisk ? null : (newest.blockWrite?.value ?? null))
+  const mem = stats ? stats.memUsage : newest.mem?.value
+  const pids = stats ? stats.pids : newest.pids?.value
 
   return (
     <StatGrid columns={5}>
@@ -474,7 +480,7 @@ function Readings({
         hint={
           liveCpu === undefined
             ? cpu !== undefined
-              ? asOf
+              ? asOf(newest.cpu)
               : undefined
             : stats?.cpuLimit
               ? `of a ${stats.cpuLimit}-core quota`
@@ -498,7 +504,7 @@ function Readings({
         hint={
           !stats
             ? mem !== undefined
-              ? asOf
+              ? asOf(newest.mem)
               : undefined
             : stats.memLimited
               ? `of ${bytes(stats.memLimit)}`
@@ -523,7 +529,7 @@ function Readings({
         hint={
           !stats
             ? pids !== undefined
-              ? asOf
+              ? asOf(newest.pids)
               : undefined
             : pidsLimit > 0
               ? `of ${pidsLimit.toLocaleString()}`
@@ -541,9 +547,9 @@ function Readings({
         trend={trend(trends.net, "Network", HUE.net)}
         hint={
           tx !== null
-            ? `${rate(tx)} out${live ? "" : ` · ${asOf}`}`
+            ? `${rate(tx)} out${live ? "" : ` · ${asOf(newest.netRx, newest.netTx)}`}`
             : rx !== null && !live
-              ? asOf
+              ? asOf(newest.netRx)
               : undefined
         }
         trailing={rx !== null ? "in" : undefined}
@@ -563,9 +569,9 @@ function Readings({
         trend={trend(trends.disk, "Disk I/O", HUE.disk)}
         hint={
           write !== null
-            ? `${rate(write)} written${liveDisk ? "" : ` · ${asOf}`}`
+            ? `${rate(write)} written${liveDisk ? "" : ` · ${asOf(newest.blockRead, newest.blockWrite)}`}`
             : read !== null && !liveDisk
-              ? asOf
+              ? asOf(newest.blockRead)
               : undefined
         }
         trailing={read !== null ? "read" : undefined}

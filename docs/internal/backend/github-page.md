@@ -74,8 +74,10 @@ how one App serves a dashboard reached at several addresses (a LAN address and a
 the admin adds the address on GitHub, then records it here from that address. The dashboard keeps its
 own copy only to refuse a sign-in GitHub would refuse with a page the person cannot get back from.
 
-`DELETE /github/app` (`system.admin`, `s.destructive`) revokes every connection's grant best effort,
-deletes every connection and forgets the App. The App stays on GitHub until its owner deletes it.
+`DELETE /github/app` (`system.admin`, `s.destructive`) revokes every GitHub account's grant best
+effort, deletes every connection and forgets the App. A grant is one per account, so it is revoked
+through the account's connections in turn, each token refreshed first as a disconnect does, until GitHub
+accepts one: an older connection's token can be dead while a newer one works. The App stays on GitHub until its owner deletes it.
 
 Settings links: a user-owned App's settings are at `https://github.com/settings/apps/<slug>`, an
 organisation's at `https://github.com/organizations/<org>/settings/apps/<slug>`; it is installed from
@@ -223,7 +225,7 @@ looked at), acts with the person's own user access token, and maps its errors th
 | Profile | `GET /user` | a user token; no App permission | an error |
 | Contribution calendar | `POST /graphql`, `viewer.contributionsCollection.contributionCalendar` | a user token; GitHub decides what it counts | the profile still answers, without `contributions`, with `contributionsMessage` |
 | Pull requests, issues | `GET /search/issues?q=…&sort=updated&order=desc&per_page=30&page=N` | metadata: read; pull_requests / issues: read for private repositories | an error; a spent search budget is 429 `github_rate_limited` |
-| Activity | `GET /users/{login}/events?per_page=30` | a user token; **Events: read** (an account permission) for private events | an error |
+| Activity | `GET /user` when no profile was read lately, then `GET /users/{login}/events?per_page=30` | a user token; **Events: read** (an account permission) for private events | an error |
 
 - **Profile.** Login, name, bio, company, location, blog, page address, followers, following, public
   repositories and creation date from `GET /user`. What GitHub holds as null or empty is **absent**
@@ -240,17 +242,27 @@ looked at), acts with the person's own user access token, and maps its errors th
   read.
 - **Pull requests and issues** are GitHub's issue search across every repository, never one walk per
   repository. The query is `is:pr` or `is:issue`, `is:open` or `is:closed`, `archived:false` and one
-  qualifier naming **the connection's own login**: `filter=created` → `author:`, `assigned` →
-  `assignee:`, `mentioned` → `mentions:`, `review` → `review-requested:` (pull requests only). No
-  request can name another login. `filter` (default `created`), `state` (default `open`) and `page`
-  (default 1, at most 34: search stops at 1,000 results) are checked by `ParseInboxQuery` before the
-  connection is looked up; anything else, `review` on `/issues` included, is 400 `bad_request` with no
-  request to GitHub. The query string is built with `url.Values`, and a login that is not GitHub's
-  alphabet (letters, digits, hyphen, the underscore of a managed account) never reaches a qualifier.
+  qualifier naming **`@me`**, which GitHub reads as whoever the token belongs to: `filter=created` →
+  `author:@me`, `assigned` → `assignee:@me`, `mentioned` → `mentions:@me`, `review` →
+  `review-requested:@me` (pull requests only). No login is ever spelled into a query, neither a
+  request's nor the one stored at connection time: an account renamed on GitHub since, whose old login
+  somebody else then took, would otherwise list that person's work as its own. `filter` (default
+  `created`), `state` (default `open`) and `page` (default 1, at most 34: search stops at 1,000
+  results) are checked by `ParseInboxQuery` before the connection is looked up; anything else,
+  `review` on `/issues` included, is 400 `bad_request` with no request to GitHub. The query string is
+  built with `url.Values`.
   Each item's `repository` is read from `repository_url`; an item without one is left out. A pull
   request whose `pull_request.merged_at` is set is `merged`; `stateReason` is an issue's only;
   `draft` is false for an issue. `total` is GitHub's `total_count`, `incomplete` its
   `incomplete_results`, and `hasMore` its Link header naming a next page (never past page 34).
+- **Activity** is read by the account's login **as GitHub has it now** (`currentLogin`): the profile's
+  when one was read in the last five minutes, and otherwise `GET /user`'s, never the login stored at
+  connection time. A login outside GitHub's alphabet (letters, digits, hyphen, the underscore of a
+  managed account) never reaches the path.
+- **A renamed account is followed.** When the profile or `currentLogin` reads a login that is not the
+  stored one, the connection is stored under the new login, name and page (`followLogin`, best
+  effort) and its repository list and activity are dropped, so everything that names the account by
+  login (which repositories are its own, the identity line) follows it without a reconnect.
 - **Activity** is the account's last thirty events folded into one flat shape per kind
   (`rawEvent.event`): `PushEvent` → `push`, `PullRequestEvent` → `pull`, `IssuesEvent` → `issue`,
   `IssueCommentEvent` → `comment`, `PullRequestReviewEvent` → `review` (its action is the review's
@@ -310,12 +322,14 @@ full name. The answer carries the rate limit GitHub last stated.
 | A connection's installations (stored on the row) | read again after 60 s by what depends on them | `refresh`, every listing |
 | `.gitignore` templates and licences | 24 h | — |
 | A connection's profile with its calendar | 5 min; 60 s when the calendar is missing | `refresh=1`, connect, refresh, disconnect, a revocation or expiry |
-| One page of the account's pull requests or issues, by listing, filter, state and page | 60 s | the same |
-| A connection's activity | 60 s | the same |
+| One page of the account's pull requests or issues, by listing, filter, state and page | 60 s | the same, and every change made here to any repository (`Forget`) |
+| A connection's activity | 60 s | the same, and a rename followed (`followLogin`) |
 
 Each map is bounded (`maxCached`, 512 entries: what has expired goes first, then anything). The last
 three are `answers` in `service.go`, dropped with everything else of the connection by
-`forgetConnection`; a change to a repository does not drop them. A rate limit is 429
+`forgetConnection`. A change made here to a repository (`Forget`, through `forgetGitHubRepo`) also
+drops the connection's inbox pages, all of them, since a page that did not list the repository yet may
+now (an issue just opened), and its activity; it keeps the profile. A rate limit is 429
 `github_rate_limited` with `Retry-After` from GitHub's reset or retry-after; the page shows when it
 lifts. **Search has its own budget of thirty requests a minute**, apart from the 5,000 an hour of
 everything else, which is why an inbox page is kept a minute and why the page should not ask for

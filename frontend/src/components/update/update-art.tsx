@@ -1,6 +1,7 @@
 "use client"
 
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import { cn } from "@/lib/utils"
 import { kindCounts } from "@/lib/release-kinds"
 import type { Release } from "@/lib/types"

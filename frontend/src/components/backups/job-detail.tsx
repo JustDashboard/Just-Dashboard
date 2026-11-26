@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import {
@@ -174,10 +174,30 @@ export function JobPage() {
   // where the rail was a box cut off at 320px over the run it showed.
   const phone = useBelow("lg")
   const opened = selectedId !== null && runList.some((run) => run.id === selectedId)
+  // The switch hides the pane that has the keyboard, the rail's button going
+  // in and Back coming out, so the keyboard is moved with it: to the run's
+  // heading once it is shown, and back to the run it came from once the rail
+  // is. The selection lands through the address, so this waits for that.
+  const arrival = useRef<{ to: "run" } | { to: "rail"; id: number } | null>(null)
   const openRun = (id: number | null) => {
+    if (phone) {
+      arrival.current =
+        id !== null ? { to: "run" } : selectedId !== null ? { to: "rail", id: selectedId } : null
+    }
     setSelectedId(id)
     if (phone) document.querySelector("[data-workspace-shell-scroll]")?.scrollTo({ top: 0 })
   }
+  useEffect(() => {
+    const next = arrival.current
+    if (!next || (next.to === "run") !== opened) return
+    arrival.current = null
+    if (next.to === "run") {
+      document.querySelector<HTMLElement>("[data-run-heading]")?.focus({ preventScroll: true })
+    } else {
+      // Scrolled to if it has to be: the run opened may have been far down the list.
+      document.querySelector<HTMLElement>(`[data-workspace-item="run:${next.id}"]`)?.focus()
+    }
+  }, [opened])
 
   // ?run=<id>&restore=<connection> is how a deployment's data-aware rollback
   // hands the reader here ("Restore in place to this point"): that run's
@@ -593,7 +613,14 @@ function RunInspector({
           className="-mt-1.25 -mr-2 self-start pointer-coarse:-mt-2.25"
         />
         <div className="min-w-0 flex-1 space-y-1">
-          <h3 className="flex min-w-0 items-center gap-3 text-title font-semibold tracking-tight">
+          {/* Where the keyboard lands when a phone opens the run, so it is
+              read first; Back is one Shift+Tab away. Reached only from
+              script, so it draws no ring and is no stop of its own. */}
+          <h3
+            data-run-heading
+            tabIndex={-1}
+            className="flex min-w-0 items-center gap-3 text-title font-semibold tracking-tight outline-none"
+          >
             Run {run.id}
             <Status state={run.status} tone={run.status === "failed" ? "danger" : undefined} />
           </h3>

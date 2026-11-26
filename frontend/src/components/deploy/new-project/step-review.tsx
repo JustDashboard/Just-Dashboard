@@ -24,6 +24,7 @@ import {
   secretShape,
 } from "@/components/deploy/new-project/plan-reading"
 import type { Icon } from "@/components/icons"
+import { findingLinkLabel } from "@/lib/finding-destinations"
 
 /**
  * Step four: **is this right.**
@@ -444,7 +445,7 @@ function Verdict({
                       <>
                         {" · "}
                         <Link href={finding.deepLink} className="underline underline-offset-2">
-                          Open owning page
+                          {findingLinkLabel(finding.deepLink)}
                         </Link>
                       </>
                     )}

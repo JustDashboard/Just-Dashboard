@@ -224,6 +224,59 @@ func TestTheFirstComposeFailureStopsTheOthersAndIsNamed(t *testing.T) {
 	}
 }
 
+// A service that ends before the one ahead of it has its held lines written
+// only when that one ends, after it recorded its own success: a line the
+// transcript refuses then is still its failure, and stops the rest.
+func TestARefusedHeldLineFailsTheServiceThatEndedFirst(t *testing.T) {
+	t.Parallel()
+	refused := errors.New("the transcript refused a line")
+	// gate starts only once web's slot is free, which is after web's end was
+	// recorded, so api ends last and its end is what writes web's lines.
+	gateStarted := make(chan struct{})
+	jobs := []composeJob{
+		{service: "api", run: func(ctx context.Context, emit func(BuildLog) error) error {
+			select {
+			case <-gateStarted:
+			case <-time.After(10 * time.Second):
+				return errors.New("web's slot was never freed")
+			}
+			return emit(BuildLog{Stream: "stdout", Text: "api built"})
+		}},
+		{service: "web", run: func(_ context.Context, emit func(BuildLog) error) error {
+			return emit(BuildLog{Stream: "stdout", Text: "web built"})
+		}},
+		{service: "gate", run: func(ctx context.Context, _ func(BuildLog) error) error {
+			close(gateStarted)
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(10 * time.Second):
+				return errors.New("web's refused line did not stop the other services")
+			}
+		}},
+	}
+	var mu sync.Mutex
+	written := []string{}
+	errs, failed := runComposeJobs(context.Background(), jobs, 2, func(line BuildLog) error {
+		if line.Text == "web built" {
+			return refused
+		}
+		mu.Lock()
+		defer mu.Unlock()
+		written = append(written, line.Text)
+		return nil
+	})
+	if failed != 1 || !errors.Is(errs[1], refused) {
+		t.Fatalf("failed = %d, errs = %v: want web's refused line named as the failure", failed, errs)
+	}
+	if errs[0] != nil || !errors.Is(errs[2], context.Canceled) {
+		t.Fatalf("errs = %v, want api built and gate stopped", errs)
+	}
+	if !slices.Equal(written, []string{"api built"}) {
+		t.Fatalf("transcript = %q", written)
+	}
+}
+
 // Cancelling the run stops every build, and nothing is named as the
 // failure: the executor reads the run's own cancellation.
 func TestCancellingTheRunStopsEveryComposeBuild(t *testing.T) {

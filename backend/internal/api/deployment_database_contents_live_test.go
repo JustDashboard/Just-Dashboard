@@ -75,7 +75,7 @@ func TestLiveDatabaseContentsSaysWhenADatabaseIsNew(t *testing.T) {
 			contents := deploymentDatabaseContents{server: s}
 			hasRows := func() bool {
 				t.Helper()
-				present, err := contents.DatabaseHasRows(t.Context(), conn.ID)
+				present, err := contents.DatabaseHasRows(t.Context(), conn.ID, "app")
 				if err != nil {
 					t.Fatal(err)
 				}

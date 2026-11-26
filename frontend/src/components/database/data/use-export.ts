@@ -81,7 +81,7 @@ export function useExport(id: number) {
         })
         const blob = exportBlob(read.parts, response)
         const tail = await blob.slice(Math.max(0, blob.size - MARK_TAIL)).text()
-        const state = await settledExport(id, exportId)
+        const state = await settledExport(id, exportId, controller.signal)
         // A broken connection is a failed export whatever else is known; the
         // server's record, when it has one, says why.
         const end = exportEnd(state, request.format, tail)
@@ -89,7 +89,7 @@ export function useExport(id: number) {
         const report = exportReport(ended, request.table, limit)
 
         if (ended.status !== "failed")
-          saveExport(blob, response, `${request.table}.${request.format}`)
+          saveExport(blob, response, `${request.table}.${request.format}`, controller.signal)
 
         notify.dismiss(toast)
         if (report.tone === "success") notify.success(report.title)

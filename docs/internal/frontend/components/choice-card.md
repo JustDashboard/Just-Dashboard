@@ -28,7 +28,7 @@ you open): it is a button that happens to be large, and its selection is its edg
 | Prop | Does |
 | --- | --- |
 | `columns` | `2`, `3`, `fill` (as many 16rem columns as the grid holds, equal rows) or `compact` (a run of `ProductCard`s) |
-| `mode="single"` | One choice out of the set: a `radiogroup` named by `label`, each card's control a `radio` with `aria-checked`, one tab stop (the picked card, or the first), and the arrow keys, Home and End move the pick as a native radio does |
+| `mode="single"` | One choice out of the set: a `radiogroup` named by `label`, each card's control a `radio` with `aria-checked`, one tab stop (the picked card, or the first), and the arrow keys, Home and End move the pick as a native radio does. Only a bare key does (`choiceStep`): Alt+←, Ctrl/⌘ and Shift with a key stay the browser's and the page's |
 | `mode="multi"` (default) | Several may be taken: each card is a toggle with `aria-pressed` |
 | `label` | The set's name, which a single-choice grid needs ("Alert kind") |
 

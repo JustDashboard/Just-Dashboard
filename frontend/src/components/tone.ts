@@ -116,6 +116,9 @@ export function toneFor(state: string | undefined): DotTone {
     case "deactivating":
     case "launching":
     case "stopping":
+    // Docker's state while a container is taken away (`ContainerStatus` says
+    // "Being removed"): a transition it is in, not a reading that is missing.
+    case "removing":
     case "connecting":
     case "reconnecting":
       return "warning"

@@ -6,7 +6,7 @@
     "symfony/asset-mapper": "8.1.11",
     "symfony/console": "8.1.11",
     "symfony/dotenv": "8.1.6",
-    "symfony/framework-bundle": "8.1.11",
+    "symfony/framework-bundle": "8.1.12",
     "symfony/runtime": "8.1.11",
     "symfony/twig-bundle": "8.1.9",
     "symfony/yaml": "8.1.11"

@@ -21,6 +21,9 @@ type versionsBody struct {
 	Keeping  bool   `json:"keeping"`
 	TooLarge bool   `json:"tooLarge"`
 	Backups  bool   `json:"backups"`
+	LastSave *struct {
+		Revision string `json:"revision"`
+	} `json:"lastSave"`
 	Versions []struct {
 		ID      string `json:"id"`
 		Kind    string `json:"kind"`
@@ -158,7 +161,7 @@ func TestHistoryFollowsAMoveThroughTheDashboard(t *testing.T) {
 		t.Fatalf("save: %d %s", w.Code, w.Body)
 	}
 	body, _ := json.Marshal(map[string]any{"from": dir, "to": filepath.Join(root, "etc", "web")})
-	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusNoContent {
+	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusOK {
 		t.Fatalf("move: %d %s", w.Code, w.Body)
 	}
 	moved := filepath.Join(root, "etc", "web", "nginx.conf")
@@ -257,4 +260,96 @@ func TestABackupCopyIsOpenedOnlyByAnAdministrator(t *testing.T) {
 			}
 		}
 	}
+}
+
+// Replace in the conflict dialog is undone by moving the file back and
+// restoring what it replaced from the Trash. Each must come back with its own
+// history: a's Restore offering b's old content would put another file's
+// bytes in it.
+func TestReplaceThenUndoGivesEachFileItsOwnHistory(t *testing.T) {
+	c, s, root := versionsClient(t)
+	a, b := filepath.Join(root, "a.txt"), filepath.Join(root, "b.txt")
+	for _, f := range []struct{ path, name string }{{a, "a"}, {b, "b"}} {
+		empty := ""
+		if w := saveThroughFiles(t, c, f.path, "old "+f.name+"\n", &empty); w.Code != http.StatusOK {
+			t.Fatalf("create %s: %d %s", f.name, w.Code, w.Body)
+		}
+		old := contentguard.Revision("old " + f.name + "\n")
+		if w := saveThroughFiles(t, c, f.path, f.name+" now\n", &old); w.Code != http.StatusOK {
+			t.Fatalf("save %s: %d %s", f.name, w.Code, w.Body)
+		}
+	}
+	only := func(path, want string) {
+		t.Helper()
+		got := versionsOf(t, c, path)
+		if len(got.Versions) != 1 {
+			t.Fatalf("%s has %d versions, want one: %+v", filepath.Base(path), len(got.Versions), got.Versions)
+		}
+		if text := versionText(t, c, path, got.Versions[0].ID); text != want {
+			t.Fatalf("%s offers %q, want %q", filepath.Base(path), text, want)
+		}
+	}
+	replace := func(route string) string {
+		t.Helper()
+		body, _ := json.Marshal(map[string]any{"from": a, "to": b, "overwrite": true})
+		w := c.do(http.MethodPost, route, string(body), nil)
+		var answer struct {
+			Replaced struct {
+				Item struct {
+					ID string `json:"id"`
+				} `json:"item"`
+			} `json:"replaced"`
+		}
+		if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &answer) != nil || answer.Replaced.Item.ID == "" {
+			t.Fatalf("%s with Replace: %d %s", route, w.Code, w.Body)
+		}
+		return answer.Replaced.Item.ID
+	}
+	restore := func(id string) {
+		t.Helper()
+		if w := c.do(http.MethodPost, "/api/v1/files/trash/restore", `{"id":"`+id+`"}`, nil); w.Code != http.StatusOK {
+			t.Fatalf("restore: %d %s", w.Code, w.Body)
+		}
+	}
+
+	// A move with Replace: b's name now holds a, and a's history.
+	id := replace("/api/v1/files/move")
+	only(b, "old a\n")
+	// Undo: a moves back, then b comes back from the Trash.
+	body, _ := json.Marshal(map[string]any{"from": b, "to": a})
+	if w := c.do(http.MethodPost, "/api/v1/files/move", string(body), nil); w.Code != http.StatusOK {
+		t.Fatalf("move back: %d %s", w.Code, w.Body)
+	}
+	restore(id)
+	only(a, "old a\n")
+	only(b, "old b\n")
+	if got := versionsOf(t, c, b); got.LastSave == nil || got.LastSave.Revision != contentguard.Revision("b now\n") {
+		t.Fatalf("b's last save did not come back with it: %+v", got.LastSave)
+	}
+
+	// A copy with Replace: the copy is a new file with no history of b's.
+	id = replace("/api/v1/files/copy")
+	if got := versionsOf(t, c, b); len(got.Versions) != 0 || got.LastSave != nil {
+		t.Fatalf("the copy took on b's history: %+v", got)
+	}
+	// Undo: the copy goes to the Trash, then b comes back.
+	if w := c.do(http.MethodDelete, query("/api/v1/files/delete", map[string]string{"path": b}), "", nil); w.Code != http.StatusOK {
+		t.Fatalf("trash the copy: %d %s", w.Code, w.Body)
+	}
+	restore(id)
+	only(b, "old b\n")
+	only(a, "old a\n")
+
+	// Removed from the Trash for good, a replaced entry's history goes with it.
+	id = replace("/api/v1/files/move")
+	if w := c.do(http.MethodDelete, query("/api/v1/files/trash/item", map[string]string{"id": id}), "", nil); w.Code != http.StatusNoContent {
+		t.Fatalf("remove from the Trash: %d %s", w.Code, w.Body)
+	}
+	var held int
+	if err := s.Store.DB.QueryRow(`SELECT
+		(SELECT COUNT(*) FROM file_versions WHERE path LIKE 'trash:%') +
+		(SELECT COUNT(*) FROM file_version_heads WHERE path LIKE 'trash:%')`).Scan(&held); err != nil || held != 0 {
+		t.Fatalf("%d rows still held for an item that is gone (%v)", held, err)
+	}
+	only(b, "old a\n")
 }

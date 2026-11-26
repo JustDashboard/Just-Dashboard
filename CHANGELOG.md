@@ -43,9 +43,9 @@ Every page now draws from the same set of parts, and a test opens every page and
 
 ## 0.8.7 — 14 November 2026
 
-**Every page reads like the deployment pages, and HTTPS works on older nginx**
+**Never published: everything in it shipped in 0.9.0**
 
-The rest of the dashboard now opens the way a project's pages do: one line that says what the page is about, pictures that carry the facts, and a page of its own for each item, with its list as a rail beside it. Network, the proxy, Security, Docker, the databases, settings and the account pages were all rebuilt this way, and Files, the terminal and remote sessions show one pane at a time on a phone. A first HTTPS deployment on Ubuntu 22.04 or 24.04 no longer fails at its last step.
+0.8.7 was merged but never released. Its Verify run on main failed, so it has no tag and no GitHub release, and installs on 0.8.6 or later, which take only tagged versions, were never offered it; installs on 0.8.5 or older, which took what the branch named, were offered it until 0.9.0 replaced it on 18 November. The next release, 0.9.0, carries every change below. The rest of the dashboard now opens the way a project's pages do: one line that says what the page is about, pictures that carry the facts, and a page of its own for each item, with its list as a rail beside it. Network, the proxy, Security, Docker, the databases, settings and the account pages were all rebuilt this way, and Files, the terminal and remote sessions show one pane at a time on a phone. A first HTTPS deployment on Ubuntu 22.04 or 24.04 no longer fails at its last step.
 
 ### Added
 

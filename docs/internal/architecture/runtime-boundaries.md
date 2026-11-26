@@ -118,8 +118,10 @@ request's context descends from (`http.Server.BaseContext`), which is the only t
 response held open on purpose (an assistant's answer, an export) or a hijacked socket, neither of which
 `http.Server.Shutdown` cancels by itself. Handlers have eight seconds in all to return. Then
 `api.Server.ShutdownContext(budget)` runs the module shutdown above with what is left: the deployment
-engine's 30-second grace and the three 10-second waits (socket history, captures, diagnostics) keep their
-own limits and are cut short by the budget. It ends by waiting for the goroutines `Start` launched itself
+engine's 30-second grace, then the removal of the networked builders a build left waiting
+(`RemoveWaitingNetworkedBuilders`, 10 seconds; [database networks](../deployments/database-networks.md#builds-that-read-their-database)),
+and the three 10-second waits (socket history, captures, diagnostics) keep their own limits and are cut
+short by the budget. It ends by waiting for the goroutines `Start` launched itself
 (`Server.background`: the store's health, block expiry, the Remote Desktop and database upgrade
 recoveries), and `main` waits for the session janitor, so nothing is still writing when the store closes.
 `Shutdown` runs once; the deferred call after a signal's is a no-op. Before this the HTTP drain alone
@@ -160,7 +162,9 @@ there after Compose restarted the container, it went down again.
   worker that died), the kernel socket observer, the fan-out inside a loop's pass (one repository's
   check, one egress round, one container's log reader), a link's inner loops, the container feed the
   first subscribing page starts, the keepalive and control reader every WebSocket handler starts, a
-  build's certificate prewarm and a link the Files page fetches onto the server.
+  build's certificate prewarm and a link the Files page fetches onto the server (whose download runs
+  inside `safego.Try` as well, so a panic fails that fetch with its finish time rather than leaving it
+  `running`).
   The two cron schedulers (backups, base backups) wrap each job the same way, since `robfig/cron`
   recovers nothing.
 - `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
@@ -297,7 +301,9 @@ answer (`httpx.WriteError`); requests that succeed are logged at debug.
   container's namespace. The kernel refuses a rename over a mount point by whichever path the caller
   names it, so `/host/etc/hosts` is as busy as `/etc/hosts` here (`EBUSY`). `write` runs with the
   server's own path through `IntoHostMounts` and, where that cannot be entered, here with the
-  `/host` path. `RenameOver(tmp, path, data)` is the rename such writers make: where it is refused as
+  `/host` path. A caller that edits the file reads it inside `write` too, by the path `write` is
+  given: a link resolved once in each namespace can name two different files, and the server's would
+  be replaced with the other's lines. `RenameOver(tmp, path, data)` is the rename such writers make: where it is refused as
   busy, it writes `data` over the file's old bytes and cuts it to length, so the file is never empty.
   The same thing `hostnamectl` does, the server's namespace replacing the file, detaches Docker's
   mount from the backend container's `/etc/hosts`, which then reads the server's own file until the

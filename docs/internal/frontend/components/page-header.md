@@ -171,7 +171,9 @@ shape while it loads and nothing under the line moves when the words land (D11).
 - The state stands after the name when both fit, and otherwise leads the facts line. The line
   measures that before it paints, so it never shows the state in one place and then the other.
 - The facts are one line that never wraps. A fact that does not fit is left off whole, at a fact's
-  edge, never cut inside a word. A fact that only states the expected answer ("Auto-deploy on" when
+  edge, never cut inside a word, and it is left off for the keyboard and a screen reader too: while
+  the line has no room for it the fact is `inert`, so a link in it (Remote Desktop's "over
+  Tailscale") is never a Tab stop the eye cannot see. Write a fact whose link matters early. A fact that only states the expected answer ("Auto-deploy on" when
   it is on) is not on a phone's line at all: it takes `max-sm:hidden` at its call site, so the line
   keeps the facts that differ.
 - The row has a control's height and the facts a line's whatever is in them, so a loading line is
@@ -192,7 +194,9 @@ shape while it loads and nothing under the line moves when the words land (D11).
   name and come up in a tooltip on hover and focus; `⋯`'s name says whose actions it holds. The
   tooltip stands beside the command, never around it, and listens on the command's own box in the
   page: a command that is a popover (Connect) opens, closes on Escape and returns the focus exactly
-  as it does anywhere else, and nothing pressed inside the popover reaches the tooltip.
+  as it does anywhere else, and nothing pressed inside the popover reaches the tooltip. The tip
+  names the one button the pointer is on or the keyboard landed on, and stands over that button:
+  a split command's two icons each say their own name, never both.
 
 ## What enforces it
 
@@ -203,6 +207,10 @@ shape while it loads and nothing under the line moves when the words land (D11).
   it fits.
 - `tests/browser/deploy-header.spec.ts`, `deploy-run.spec.ts`, `network-vpn-page.spec.ts`,
   `network-device-page.spec.ts`, `account-ui.spec.ts`: the headers as pages draw them.
+- `tests/browser/proxy-cert-tools.spec.ts`: on a phone each half of a split command says its own
+  name in the tip, anchored on that half, by pointer and by keyboard.
+- `tests/browser/remote-desktop.spec.ts`: on a narrow phone every fact the keyboard reaches on the
+  identity line is on screen, and every one on screen is reached.
 - `tests/browser/design-system.spec.ts` (*… keeps the identity line's rules*, at 1440 and on a touch
   phone): no destructive verb in the brand face, and on a phone a command that is its icon with a
   name. `tests/browser/axe-gate.spec.ts` reads every route's header with the rest of the page.

@@ -463,6 +463,73 @@ const BAR_LIST_IMPORT = /(?:^|\/)bar-list(?:\.tsx?)?$/
  */
 const PRIMITIVE_HOMES = /src[\\/]components[\\/](?:ui[\\/]|state\.tsx$|loading\.tsx$|icons\.tsx$)/
 
+/**
+ * The controls that take a `Field`'s id when they set none of their own
+ * (`useFieldControl`). A `Switch` that names itself does not.
+ */
+const FIELD_CONTROLS = new Set([
+  "Input",
+  "InputGroupInput",
+  "Textarea",
+  "SelectTrigger",
+  "Switch",
+  "SearchInput",
+  "SecretField",
+  "OneTimeCodeInput",
+  "ListField",
+])
+
+function takesFieldId(opening) {
+  const name = elementName(opening)
+  if (!FIELD_CONTROLS.has(name)) return false
+  const has = (prop) =>
+    opening.attributes.some((a) => a.type === "JSXAttribute" && a.name?.name === prop)
+  if (has("id")) return false
+  return name !== "Switch" || !(has("aria-label") || has("aria-labelledby"))
+}
+
+/**
+ * How many controls under a node can take a field's id at once. Two branches
+ * of a choice are one at a time; a control drawn by a callback (a `map`) is
+ * drawn as many times as there are items, which is more than one.
+ */
+function fieldIdTakers(node) {
+  if (!node) return 0
+  const sum = (nodes) => nodes.reduce((total, one) => total + fieldIdTakers(one), 0)
+  switch (node.type) {
+    case "JSXElement":
+      // A field inside is its own.
+      if (elementName(node.openingElement) === "Field") return 0
+      return (takesFieldId(node.openingElement) ? 1 : 0) + sum(node.children)
+    case "JSXFragment":
+      return sum(node.children)
+    case "JSXExpressionContainer":
+    case "TSAsExpression":
+    case "TSNonNullExpression":
+      return fieldIdTakers(node.expression)
+    case "ConditionalExpression":
+      return Math.max(fieldIdTakers(node.consequent), fieldIdTakers(node.alternate))
+    case "LogicalExpression":
+      return fieldIdTakers(node.left) + fieldIdTakers(node.right)
+    case "ArrayExpression":
+      return sum(node.elements)
+    case "CallExpression":
+      return node.arguments.reduce((total, argument) => {
+        const looped =
+          argument.type === "ArrowFunctionExpression" || argument.type === "FunctionExpression"
+        return total + (looped ? 2 * fieldIdTakers(argument.body) : fieldIdTakers(argument))
+      }, 0)
+    case "BlockStatement":
+      return sum(node.body)
+    case "ReturnStatement":
+      return fieldIdTakers(node.argument)
+    case "IfStatement":
+      return Math.max(fieldIdTakers(node.consequent), fieldIdTakers(node.alternate))
+    default:
+      return 0
+  }
+}
+
 const primitives = {
   meta: {
     type: "problem",
@@ -473,6 +540,23 @@ const primitives = {
     const filename = context.filename ?? ""
     const home = PRIMITIVE_HOMES.test(filename)
     return {
+      // A field of several controls is a group: given to each, the field's
+      // id was one id on many elements and its label named the first
+      // (0.9.1 review of #508). `htmlFor` names the one the label is for.
+      JSXElement(node) {
+        const opening = node.openingElement
+        if (elementName(opening) !== "Field") return
+        const props = new Set(
+          opening.attributes.filter((a) => a.type === "JSXAttribute").map((a) => a.name?.name),
+        )
+        if (props.has("htmlFor") || props.has("group")) return
+        if (node.children.reduce((total, child) => total + fieldIdTakers(child), 0) < 2) return
+        context.report({
+          node: opening,
+          message:
+            "[field-group] This Field holds several controls, and each would take its id. Give it `group`, so it is their named group and each control names itself, or `htmlFor` the one its label is for.",
+        })
+      },
       JSXOpeningElement(node) {
         if (home || node.name?.type !== "JSXIdentifier") return
         if (node.name.name === "LoaderCircle") {

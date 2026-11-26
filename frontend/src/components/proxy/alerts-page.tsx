@@ -59,6 +59,8 @@ import {
   isFiring,
 } from "@/components/alerts/kit"
 import {
+  NOT_HERE,
+  judging,
   reaches,
   type AlertArea,
   type AlertKindSpec,
@@ -380,7 +382,11 @@ export function AlertsPage() {
   const paused = rules.filter((rule) => !rule.enabled).length
   const every = Math.round((data?.intervalSeconds ?? 300) / 60)
 
-  const on = rules.length - paused
+  // A rule whose kind reads nothing here is on and can never fire: it is not
+  // counted as watching, and the picture, the cards and the form say why.
+  const absent = new Set<string>(data?.absent ?? [])
+  const on = judging(rules, absent).length
+  const idle = rules.length - paused - on
   const told = channelList.filter((channel) => reaches(rules, channel)).length
 
   return (
@@ -420,6 +426,11 @@ export function AlertsPage() {
             )
           ) : (
             <>
+              {idle > 0 && (
+                <span className="numeric">
+                  {idle} {NOT_HERE}
+                </span>
+              )}
               <span className="numeric">
                 {told === 0 ? "telling nobody yet" : `telling ${plural(told, "channel")}`}
               </span>
@@ -456,6 +467,7 @@ export function AlertsPage() {
               engine={engine}
               title={`checks every ${every} min`}
               reach="tells each change once"
+              absent={absent}
               onAdd={admin ? (kind) => edit({ kind }) : undefined}
             />
           </div>
@@ -484,7 +496,7 @@ export function AlertsPage() {
                 />
                 <PanelBody>
                   {active.length === 0 ? (
-                    <AllClear rules={rules.length} cadence={`every ${every} minutes`} />
+                    <AllClear rules={on} idle={idle} cadence={`every ${every} minutes`} />
                   ) : (
                     <ul aria-label="Firing" className="animate-rise space-y-2">
                       {active.map((subject) => (
@@ -517,7 +529,7 @@ export function AlertsPage() {
                   count={
                     rules.length > 0
                       ? `${plural(rules.length, "rule")}${paused > 0 ? ` · ${paused} paused` : ""}`
-                      : `${KIND_ORDER.length} to choose from`
+                      : `${KIND_ORDER.length - absent.size} to choose from`
                   }
                 />
                 <PanelBody>
@@ -525,6 +537,7 @@ export function AlertsPage() {
                     <KindCards
                       kinds={PROXY_KINDS}
                       engine={engine}
+                      absent={absent}
                       onAdd={admin ? (kind) => edit({ kind }) : undefined}
                     />
                   ) : (
@@ -559,6 +572,8 @@ export function AlertsPage() {
                                 <Status tone="stopped" label="Paused" />
                               ) : fires > 0 ? (
                                 <Status tone="danger" label={`${fires} firing`} />
+                              ) : absent.has(rule.kind) ? (
+                                <Status tone="unknown" label="Not on this server" />
                               ) : (
                                 <Status tone="running" label="Watching" />
                               )
@@ -682,6 +697,7 @@ export function AlertsPage() {
             key={session}
             rule={editing.rule}
             kind={editing.kind}
+            absent={absent}
             engine={engine}
             channels={channelList}
             onDone={() => {
@@ -701,6 +717,7 @@ export function AlertsPage() {
 function ProxyRuleForm({
   rule,
   kind: preset,
+  absent,
   engine,
   channels,
   onDone,
@@ -708,12 +725,15 @@ function ProxyRuleForm({
 }: {
   rule?: ProxyAlertRule
   kind?: ProxyAlertKind
+  absent: ReadonlySet<string>
   engine?: string
   channels: NotificationChannel[]
   onDone: () => void
   onCancel: () => void
 }) {
-  const start = rule?.kind ?? preset ?? "cert_expiring"
+  // A new rule opens on the first kind this server has something to read for.
+  const start =
+    rule?.kind ?? preset ?? KIND_ORDER.find((option) => !absent.has(option)) ?? "cert_expiring"
   const [kind, setKind] = useState<ProxyAlertKind>(start)
   const initial = { ...DEFAULT_PARAMS[start], ...rule?.params }
   const [days, setDays] = useState<string[]>((initial.days ?? EXPIRY_DAYS).map(String))
@@ -778,6 +798,7 @@ function ProxyRuleForm({
       kinds={PROXY_KINDS}
       kind={kind}
       onKind={choose}
+      absent={absent}
       engine={engine}
       channels={channels}
       selected={selected}

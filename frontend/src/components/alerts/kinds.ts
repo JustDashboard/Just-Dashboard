@@ -43,6 +43,28 @@ export type AlertKinds<K extends string> = {
   areas: readonly AlertArea<K>[]
 }
 
+/**
+ * Words for a kind that judges nothing on this server: a rule of it is on and
+ * can never fire, so it is not counted as watching and not offered to add.
+ */
+export const NOT_HERE = "not on this server"
+
+/** The kinds of an area that have something to read on this server. */
+export function presentKinds<K extends string>(
+  area: AlertArea<K>,
+  absent?: ReadonlySet<string>,
+): K[] {
+  return area.kinds.filter((kind) => !absent?.has(kind))
+}
+
+/** The enabled rules that judge something here: what "rules on" counts. */
+export function judging<R extends AlertRuleView<string>>(
+  rules: R[],
+  absent?: ReadonlySet<string>,
+): R[] {
+  return rules.filter((rule) => rule.enabled && !absent?.has(rule.kind))
+}
+
 /** A rule, in the fields the kit reads. */
 export type AlertRuleView<K extends string> = { kind: K; enabled: boolean; channels: number[] }
 

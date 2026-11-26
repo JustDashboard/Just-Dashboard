@@ -51,6 +51,7 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/environments/{env}/variables/import", "DELETE /deploy/{id}/environments/{env}/variables/{name}",
 	"PUT /deploy/{id}/environments/{env}/variables/{name}", "POST /deploy/{id}/environments/{env}/variables/{name}/generate",
 	"GET /deploy/{id}/environments/{env}/variables/{name}/reveal", "POST /deploy/{id}/environments/{env}/variables/{name}/rotate",
+	"GET /deploy/{id}/stack/credentials/{name}/reveal",
 	"POST /deploy/{id}/environments/{env}/watch-paths/simulate",
 	"PUT /deploy/{id}/game/properties",
 	"POST /deploy/{id}/previews/approvals/{approval}/approve", "POST /deploy/{id}/previews/approvals/{approval}/reject",

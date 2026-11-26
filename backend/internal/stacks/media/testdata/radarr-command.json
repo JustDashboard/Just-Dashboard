@@ -1,0 +1,27 @@
+{
+  "name": "CheckHealth",
+  "commandName": "Check Health",
+  "body": {
+    "sendUpdatesToClient": true,
+    "updateScheduledTask": true,
+    "requiresDiskAccess": false,
+    "isExclusive": false,
+    "isTypeExclusive": false,
+    "isLongRunning": false,
+    "name": "CheckHealth",
+    "trigger": "manual",
+    "suppressMessages": true
+  },
+  "priority": "normal",
+  "status": "completed",
+  "result": "successful",
+  "queued": "2026-11-26T03:12:53Z",
+  "started": "2026-11-26T03:12:53Z",
+  "ended": "2026-11-26T03:12:53Z",
+  "duration": "00:00:00.8484980",
+  "trigger": "manual",
+  "stateChangeTime": "2026-11-26T03:12:53Z",
+  "sendUpdatesToClient": true,
+  "updateScheduledTask": true,
+  "id": 3
+}

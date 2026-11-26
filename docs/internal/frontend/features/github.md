@@ -31,7 +31,8 @@ reader already has. It opens on its identity line in every state: the GitHub mar
 facts. Connected, the facts are `@login · 9 repositories · 4 private · 1 archived` (`accountFacts`,
 from `repositoryCounts`), a warning "Sign-in ended" first when the account's sign-in is over; with
 several connections the login is the account picker (a menu of every connection with its state,
-written to `?account=`; the default is the first active one, `pickConnection`). The command is
+written to `?account=` with the view the page is on, `viewHref`; the default is the first active
+one, `pickConnection`). The command is
 **New** (a repository; `service.control`), its icon alone on a phone. `⋯` holds Connect another
 account, Sign in with a code, Refresh, Install on another account, App settings (administrator),
 Disconnect @login (ordinary confirmation) and Remove GitHub setup (administrator, ordinary
@@ -114,18 +115,25 @@ the main one), one on a phone.
 **Pull requests** and **Issues** (`InboxView`): GitHub's own lists of the account's, across every
 repository it reaches (`GET …/pulls` and `…/issues`, GitHub's issue search). Chips for which part
 — Created, Review requests (pull requests only), Assigned, Mentioned — with GitHub's total on the
-chosen one; Open or Closed as segments; a refresh. Rows (`InboxRow`, `ChoiceRow` without an arrow,
-one height): the state as GitHub's glyph in its colour (a request open, draft, merged or closed; an
-issue open, closed as completed, or closed as not planned), the title, `owner/name #n · opened 2
-days ago by login`, and from a tablet two labels in their colours, the comment count and the
-author's face. A row in a repository the page lists opens on that repository's page with the
+chosen one; Open or Closed as segments; a refresh, which reads the list past the server's minute of
+memory (`?refresh=1`). The chip and the state are in the address (`?filter=`, `?state=`, read by
+`inboxFilterOf` and `inboxStateOf`, the defaults left out, written with `replaceState`), so the
+Overview's **All pull requests** under Review requests opens on Review requests, and Back from a
+request finds the list as it was left; switching views drops both, and the next view starts on its
+own defaults. Rows (`InboxRow`, `ChoiceRow` without an arrow, one height): the state as GitHub's
+glyph in its colour (a request open, draft, merged or closed; an issue open, closed as completed, or
+closed as not planned), the title, `owner/name #n ·` then GitHub's words (`inboxWhen`): `opened 2
+days ago by login` while open, `by login was merged 2 days ago` once not (the login is who opened
+it; search does not say who closed or merged it), and from a tablet two labels in their colours,
+the comment count and the author's face. A row in a repository the page lists opens on that repository's page with the
 request or issue open (`?tab=pulls&pull=n`, `?tab=issues&issue=n`, `inboxHref`); any other opens on
 GitHub. Thirty a page, **Show more**. An `incomplete` search is a warning over the list.
 
 Nothing here polls: GitHub's rate limit is the reader's own. The App and the connections are read
 on arrival; the list, the profile and the events on arrival and on Refresh (each past the server's
 cache then); the pull requests and issues when their view or preview is drawn (the server keeps
-each answer a minute); Local Git's list once, for the marks.
+each answer a minute), and again past that cache on Refresh (`usePages`' `kept` and `round`) or
+their own refresh button; Local Git's list once, for the marks.
 
 ### Setting up the App
 
@@ -213,11 +221,14 @@ and as read-only, Connect posting the origin, the code sign-in through to the ne
 device flow off, the callback posting once and a cancel explained, the identity line's counts,
 search, chips, owner, language and sort, Show more holding still, every card one height at 1440 and
 390, the server mark on exactly the two cloned repositories and a menu of words, the expired
-account's Reconnect and the account picker, the rate limit's time, a partial installation, the
-access list and `?installed=1`, Disconnect; the Overview's profile, calendar (53 weeks on a desk,
-fewer at one height on a phone, the day under the pointer), recent cards, previews and activity, and
+account's Reconnect and the account picker (which keeps the view), the rate limit's time, a
+partial installation, the access list and `?installed=1`, Disconnect; the Overview's profile,
+calendar (53 weeks on a desk, fewer at one height on a phone, the day under the pointer), recent
+cards, previews and activity, and
 the main column holding still while the profile lands; the pull requests' and issues' filters,
-states, glyphs, where a row opens, and rows of one height; the create dialog's rule, refusal and
+states, glyphs, where a row opens, and rows of one height, the filter and state kept in the address,
+the list's refresh button and the page's Refresh both reading past the server's minute of memory,
+and a failed first page keeping no other filter's total; the create dialog's rule, refusal and
 unreachable result, the clone streaming to Open in Local Git and a failed clone, and no sideways
 scroll on any view at a phone's width with the icon command. `design-system.spec.ts` holds `/github` to the item-page rules, the identity line's rules
 and the layout-shift budget at both widths.

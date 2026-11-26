@@ -16,6 +16,27 @@ const FILL: Record<Tone, string> = {
 }
 
 /**
+ * A meter's name, or the word that it has none on purpose. An exposed meter
+ * is a reading a screen reader says ("Disk busy, 34"), and it needs words for
+ * what it measures; a bar whose figure is spelled out beside it is hidden
+ * rather than read twice.
+ */
+type MeterName =
+  | {
+      /** What the figure measures: "Disk busy", "Memory against its limit". */
+      label: string
+      decorative?: false
+    }
+  | {
+      /**
+       * The figure beside it already says the reading, so the bar is hidden from
+       * a screen reader rather than read twice: a table cell's bar.
+       */
+      decorative: true
+      label?: undefined
+    }
+
+/**
  * A horizontal bar for a figure between 0 and 100.
  *
  * Four of these existed: `StatTile` drew `h-1` on `bg-muted`, `ui/progress` drew
@@ -37,7 +58,7 @@ export function Meter({
   label,
   decorative = false,
   className,
-}: {
+}: MeterName & {
   /** 0–100. Clamped, because a percentage computed from a stale total can exceed it. */
   value: number
   tone?: Tone
@@ -58,20 +79,18 @@ export function Meter({
    * "how close" is seen rather than worked out from two numbers.
    */
   mark?: number
-  /**
-   * What the figure measures. A bar with no accessible name is a decoration to a
-   * screen reader; with one it is the same reading everyone else gets.
-   */
-  label?: string
-  /**
-   * The figure beside it already says the reading, so the bar is hidden from a
-   * screen reader rather than read twice: a table cell's bar.
-   */
-  decorative?: boolean
   className?: string
 }) {
   const pct = Math.max(0, Math.min(value, 100))
-  const reading = decorative
+  // A meter is exposed only with its name: `role="meter"` with a value and
+  // no name was a reading a screen reader announced as a bare number. A bar
+  // that reaches here unnamed — a name computed from something that turned
+  // out not to be words — is drawn as the decoration it then is.
+  const named = !decorative && Boolean(label?.trim())
+  if (!decorative && !named && process.env.NODE_ENV !== "production") {
+    console.error("Meter needs a label, or decorative when the figure beside it says the reading.")
+  }
+  const reading = !named
     ? { "aria-hidden": true as const }
     : {
         role: "meter",

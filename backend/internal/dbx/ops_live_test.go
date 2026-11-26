@@ -7,6 +7,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -1144,6 +1145,74 @@ func TestLiveOpsPostgresStatements(t *testing.T) {
 	}
 }
 
+// One query id is a row per role that ran it. The role is the row's variant,
+// so the two rows are two statements whose addresses do not swap when their
+// order does.
+func TestLiveOpsPostgresStatementVariants(t *testing.T) {
+	db, _ := opsLive(t, DriverPostgres, "JD_TEST_POSTGRES_DSN")
+	ctx := t.Context()
+	report, err := TopStatements(ctx, db, DriverPostgres, StatementsOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !report.Supported {
+		t.Skipf("pg_stat_statements is not enabled here: %s", report.Reason)
+	}
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	exec := func(stmt string) {
+		t.Helper()
+		if _, err := conn.ExecContext(ctx, stmt); err != nil {
+			t.Fatalf("%s: %v", stmt, err)
+		}
+	}
+	exec(`DROP ROLE IF EXISTS jd_b3_ops_variant`)
+	exec(`CREATE ROLE jd_b3_ops_variant`)
+	t.Cleanup(func() { db.Exec(`DROP ROLE IF EXISTS jd_b3_ops_variant`) })
+	probe := `SELECT count(*) FROM pg_class WHERE relname = 'jd_b3_ops_variant_probe'`
+	for i := 0; i < 3; i++ {
+		exec(probe)
+	}
+	exec(`SET ROLE jd_b3_ops_variant`)
+	exec(probe)
+	exec(`RESET ROLE`)
+
+	report, err = TopStatements(ctx, db, DriverPostgres, StatementsOptions{Sort: StatementsByCalls, Limit: maxStatementsLimit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var mine []Statement
+	for _, s := range report.Statements {
+		if strings.Contains(s.Query, "FROM pg_class WHERE relname = $1") && s.Calls <= 3 {
+			mine = append(mine, s)
+		}
+	}
+	var role string
+	if err := db.QueryRowContext(ctx, `SELECT oid::text FROM pg_roles WHERE rolname = 'jd_b3_ops_variant'`).Scan(&role); err != nil {
+		t.Fatal(err)
+	}
+	var theirs *Statement
+	for i := range mine {
+		if mine[i].Variant == role {
+			theirs = &mine[i]
+		}
+	}
+	if theirs == nil || theirs.Calls != 1 {
+		t.Fatalf("no row of role %s among %+v", role, mine)
+	}
+	for _, s := range report.Statements {
+		if s.ID == theirs.ID && s.Variant == theirs.Variant && s.Calls != theirs.Calls {
+			t.Errorf("one id and variant is two rows: %+v and %+v", s, *theirs)
+		}
+		if s.ID == theirs.ID && s.Variant == "" {
+			t.Errorf("a row of a listed id has no variant: %+v", s)
+		}
+	}
+}
+
 // --- MySQL / MariaDB ---------------------------------------------------------
 
 func TestLiveOpsMySQL(t *testing.T) {
@@ -1682,6 +1751,20 @@ func TestLiveOpsMySQL(t *testing.T) {
 				}
 				if !report.Supported || !report.Resettable || len(report.Statements) == 0 {
 					t.Fatalf("statements: %+v", report)
+				}
+				// A digest is one row per schema it ran in, and the schema is
+				// the row's variant.
+				var schema string
+				if err := db.QueryRowContext(ctx, `SELECT DATABASE()`).Scan(&schema); err != nil {
+					t.Fatal(err)
+				}
+				for _, s := range report.Statements {
+					if s.Variant != "" && s.Variant != schema {
+						t.Errorf("a row of schema %q is listed from %q: %+v", s.Variant, schema, s)
+					}
+				}
+				if !slices.ContainsFunc(report.Statements, func(s Statement) bool { return s.Variant == schema }) {
+					t.Errorf("no row says it ran in %q: %+v", schema, report.Statements)
 				}
 				if _, err := ResetStatements(ctx, db, DriverMySQL); err != nil {
 					t.Fatal(err)

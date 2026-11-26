@@ -267,3 +267,25 @@ func TestWatchedGradeRuleRotatesLargeWatchListsAfterTwoPasses(t *testing.T) {
 		t.Fatalf("batch did not rotate: %+v", seen)
 	}
 }
+
+func TestProxyAlertKindsAbsentNamesWhatAnIngressOnlyServerCannotJudge(t *testing.T) {
+	// Deployments behind the Docker Caddy ingress and nothing else: no nginx,
+	// no unit, no certbot, no certificate file.
+	got := proxyAlertKindsAbsent(proxyAlertHost{})
+	want := []string{
+		proxyAlertCertExpiring, proxyAlertCertExpired, proxyAlertRenewalFailed, proxyAlertServedDrift,
+		proxyAlertEngineDown, proxyAlertUpstreamDown, proxyAlertSiteErrors,
+	}
+	if strings.Join(got, ",") != strings.Join(want, ",") {
+		t.Fatalf("ingress-only: %v, want %v", got, want)
+	}
+	// An imported certificate is a file the expiry rules read, with or without nginx.
+	got = proxyAlertKindsAbsent(proxyAlertHost{Certificates: 1})
+	if strings.Contains(strings.Join(got, ","), "cert_") {
+		t.Fatalf("a server with a certificate file lost its expiry kinds: %v", got)
+	}
+	// nginx with certbot judges every kind, and the answer is a list either way.
+	if got = proxyAlertKindsAbsent(proxyAlertHost{Nginx: true, EngineUnit: true, Certbot: true}); got == nil || len(got) != 0 {
+		t.Fatalf("an nginx server: %#v", got)
+	}
+}

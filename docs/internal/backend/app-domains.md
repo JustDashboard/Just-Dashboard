@@ -28,6 +28,13 @@ existed: the zone's own apex and `www`, the operator's other subdomains, and nam
 this server's. The site that runs the zone is itself often deployed from a dashboard, at the zone's apex; an
 earlier rule that took every name under the zone as an app name failed each of its releases.
 
+A handle the server held before the one it holds now, changed or released, stays its for this purpose: the
+state keeps `previous`, `<handle>.<zone>` for each, through changes and releases, and their names are
+`Detached`, never ordinary. A change or a release needs no current deployment to use the old names, but a saved
+release can still name one, and a rollback to it then leaves the name out instead of ordering a certificate for
+a name the site points elsewhere, under a handle another server may hold now. Claiming the handle again takes
+it out of `previous`.
+
 ## Trust model
 
 - **Identity is the account link.** Every call is signed with the link's identity and takes its number from
@@ -55,6 +62,16 @@ domains, and the last issuance error. Every write is a read-modify-write in one 
 `revision` (`update`). A state with no handle holds nothing and keeps `autoAssign` (default on) for the next
 claim. `settings['app.domain.hook']` holds the SHA-256 of the hook's token.
 
+`generation` is raised by every change to which handle the server holds and how: a claim (a repair of the same
+handle too), a release, a detach, a link started or ended (`DetachInTx`, even with no handle), and a site record
+mirrored with another handle, status or address. `refresh` reads it before it sends `GET /domain` and drops an
+answer that finds it moved: the answer describes the moment the site was asked, so one with no domain would
+detach a handle claimed while it was out, one with the old domain would bring back a handle just released, and
+an old link's offer would be claimed through the new one. The next check asks again. The address follow-up's
+`PUT /domain` answer is dropped the same way (one that crosses an unlink would make the detached handle active
+again), and an automatic claim goes ahead only while the generation is still the one its offer was read at.
+`DetachInTx` also clears the stored offer and how its claim went: they were the old link's.
+
 ## Background work (`appdomain/service.go`)
 
 One loop, through `safego`, started with the account link and only when the feature is on:
@@ -69,7 +86,11 @@ One loop, through `safego`, started with the account link and only when the feat
   is issued without anyone pressing Issue (`autoIssue`): after the claim, after an update that removed what
   stopped it (the host's `jd`, for one), after a restore onto a new host. A failure waits an hour
   (`autoIssueRetry`; Let's Encrypt refuses a name after five failed validations in an hour) and the card says it
-  tries again by itself. A valid wildcard is left to certbot's own renewal timer.
+  tries again by itself. The hour runs from the failure: every failed issuance, whoever asked for it, sets the
+  loop a wait of its own (`retryWait`) that issues again when it ends, because the hourly check can come nearly
+  an hour later (one that starts an issuance at 10:00 that fails at 10:02 is two minutes early at 11:00). The
+  wait is read from the stored failure, so a restart within the hour (an update minutes after the failure) keeps
+  it: the loop starts with the rest of the wait. A valid wildcard is left to certbot's own renewal timer.
 - **When the account link is cleared**, whatever the reason, the account link's `OnClear` hook runs
   `appdomain.DetachInTx` in the transaction that ends it (the running dashboard's link and `--admin unlink`
   both carry the hook). A link found missing by the loop is detached too.
@@ -117,8 +138,8 @@ Under the account link's routes, inside the admin-only `/dashboard` group.
 site not asked or not reachable), `zone`, `reason`, `publicAddress`, `autoAssign`, `domain` (`handle`, `hostname`,
 `wildcard`, `address`, `status`, `reason`, `updatedAt`), `certificate` (`name`, `state` one of `missing`,
 `issuing`, `valid`, `expiring`, `failed`, `expiresAt`, `error`, `jobId`), `usedBy` (every configured deployment
-domain under the handle, across projects and environments), and `detached` (deployment domains under the zone
-that the handle does not cover), and `offer` (`handle`, `hostname`, `error`: the address chosen on the site that
+domain under the handle, across projects and environments), and `detached` (deployment domains under a handle
+this server held and does not hold now: the stored one while it is not held, and those in `previous`), and `offer` (`handle`, `hostname`, `error`: the address chosen on the site that
 the server claims by itself; `null` with no offer or while the server holds a domain; `error` is the last
 automatic claim's failure, `null` while it has not been tried or is under way). A field with nothing to say is
 `null`; the lists are never `null`.
@@ -136,7 +157,7 @@ certbot issues `jd-app-domain-<handle>` for `*.<handle>.<zone>` and `<handle>.<z
 --credentials <data dir>/app-domain-hook.json"` and the matching `--manual-cleanup-hook`, through the certbot
 gate and the Certificates page's runtime (`proxysvc.IssueAppDomainCertificate`). A dry run is `--dry-run`
 against staging, as the page's test runs are; a forced renewal is `--force-renewal`; otherwise
-`--keep-until-expiring`. When certbot runs on the host and `/usr/local/bin/jd` is missing there, the dashboard installs the `jd` built beside it first (`clihost.Install`, which never replaces a file already at that path), and says so in the job's log; only if that fails does it refuse before certbot runs, naming `manage.sh install-cli`. After an
+`--keep-until-expiring`. When certbot runs on the host and `/usr/local/bin/jd` is missing there, the dashboard installs the `jd` built beside it first (`clihost.Install`, which never replaces a file already at that path), and says so in the job's log. It writes the path as certbot's side is opened from the backend (`certbotRuntime.path`, chosen as the runtime chooses where certbot runs: the host's root through PID 1 from the backend's container, the path itself on a server where the backend runs directly, with no `/host` mount), and calls it installed only once certbot's side finds it. Only if that fails does it refuse before certbot runs, naming `manage.sh install-cli`. After an
 issuance the Docker Caddy ingress's copies are refreshed and nginx reloaded (`ServeAppDomainRenewal`).
 `certificate.state` comes from the lineage on disk (`AppDomainCertificate`). A test certificate from a
 staging authority is `valid` while `JD_ACME_DIRECTORY` names a staging directory (it is what that directory
@@ -198,7 +219,9 @@ did not answer" rather than as Let's Encrypt's vague error.
 | Server not linked | The card says why; suggestions stay sslip.io | `TestTheViewSaysWhyNothingIsOffered`, `TestAClaimIsRefusedWithoutWhatItNeeds` |
 | Unlinking a server whose address is in use | `GET /dashboard/link/domain`'s `usedBy` is what the unlink confirmation lists; the link's end detaches the handle | `TestUnlinkingDetachesTheHandle` |
 | Released, suspended or detached while in use | The card shows it; the next release leaves the name out (warning) or fails (`app_domain_detached`) | `TestTheStateFollowsTheSite`, `TestEveryStepReadsAReleaseWithoutItsDetachedNames`, `TestTheCertificateStepNamesTheDetachedNamesItLeftOut` |
+| A check out while a claim, a release or a link change commits | Its answer is dropped; the claim stays held, the release stays released, the old link's offer is not claimed | `TestAnAnswerThatCrossesAClaimIsDropped`, `TestAnAnswerThatCrossesAReleaseDoesNotBringTheHandleBack`, `TestAnAnswerThatCrossesALinkChangeIsDropped` |
 | Changing the handle | Refused while any deployment uses it; the error lists them | `TestAHandleInUseCannotBeChangedOrReleased` |
+| Rollback to a release that names a handle changed or released since | The old handle's names are detached and left out, never ordered a certificate; the zone's other names stay ordinary | `TestAHandleHeldBeforeKeepsItsNamesDetached` |
 | Server IP changes | Updated within 15 minutes | `TestTheAddressFollowsTheServer` |
 | Site unreachable | Existing apps keep working; claiming, releasing and issuing fail with a message; renewal retries on certbot's schedule | `TestTheStateFollowsTheSite` (state unchanged); the rest is a live run |
 | Reinstall or restore onto a new server | A new link is a new server; the same account can claim the handle again | the site's quarantine rule; a live run |

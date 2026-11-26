@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test"
 import {
   eventNames,
   isCharacterShortcut,
+  isComposingKey,
   isTypingTarget,
   keyOwnedElsewhere,
   shortcutName,
@@ -61,6 +62,20 @@ describe("isTypingTarget", () => {
     expect(isTypingTarget(element("span", { parent: lines }))).toBe(true)
     const xterm = element("div", { classes: ["xterm"] })
     expect(isTypingTarget(element("div", { parent: xterm }))).toBe(true)
+  })
+})
+
+describe("isComposingKey", () => {
+  test("a key an input method is composing with is the input method's", () => {
+    expect(isComposingKey({ isComposing: true, keyCode: 13 })).toBe(true)
+    // Safari: the composition has ended by the time the Enter that ended it
+    // arrives, and only its key code says whose it was.
+    expect(isComposingKey({ isComposing: false, keyCode: 229 })).toBe(true)
+  })
+
+  test("a plain Enter or Escape is the field's", () => {
+    expect(isComposingKey({ isComposing: false, keyCode: 13 })).toBe(false)
+    expect(isComposingKey({ isComposing: false, keyCode: 27 })).toBe(false)
   })
 })
 

@@ -34,6 +34,7 @@ import type { Verb } from "@/components/verbs"
 import { FormFact } from "@/components/form"
 import { SourcePull } from "@/components/git/glyphs"
 import { ProductGlyph } from "@/components/product-logo"
+import { Checkbox } from "@/components/ui/checkbox"
 import type { ProjectOperation } from "@/components/deploy/project-context"
 import { ProjectMark } from "@/components/project-mark"
 import { runPlanIsStale } from "@/components/deploy/failure-cause"
@@ -595,57 +596,116 @@ export function archiveRequest(
  * offered — the header's menu, the archive's row, the Danger zone. It is rare
  * and cannot be undone, so the name is typed first. What goes and what stays
  * are two lists, because they are the facts the decision is made on.
+ *
+ * Its routes go with it unless the reader unticks them. A route kept after
+ * its project went on answering the domain with nothing left to own it, and
+ * the next deployment of that domain was refused as a conflict.
  */
 export function purgeRequest(
   project: ProjectSubject,
   { variables, releases, onDone }: { variables?: number; releases?: number; onDone?: () => void },
 ): ConfirmRequest {
+  // Read by the action when the dialog confirms; the lists below write it.
+  const choice = { freeDomains: true }
   return {
     title: `Delete ${project.name} permanently`,
     confirmLabel: "Delete permanently",
     phrase: project.name,
     subject: project,
     description: (
-      <div className="space-y-4">
-        <div className="grid gap-4 sm:grid-cols-2">
-          <div className="space-y-1.5">
-            <p className="eyebrow text-destructive">Deleted for good</p>
-            <ul className="space-y-1 text-body">
-              <li>Saved configuration</li>
-              <li>{variables === undefined ? "Variables" : plural(variables, "variable")}</li>
-              <li>
-                {releases === undefined ? "Release history" : plural(releases, "release")} and
-                deployment logs
-              </li>
-            </ul>
-          </div>
-          <div className="space-y-1.5">
-            <p className="eyebrow">Stays on the server</p>
-            <ul className="space-y-1 text-body">
-              <li>Running containers and routes</li>
-              <li>Images and files</li>
-              <li>Persistent data</li>
-            </ul>
-          </div>
-        </div>
-        <p className="text-muted-foreground">
-          The dashboard forgets that it owns what stays, and its persistent data remain on the
-          server. To remove them too, use{" "}
-          <Link
-            href={`/deploy/${project.id}/settings/danger`}
-            className="rounded-sm text-foreground underline-offset-2 focus-ring hover:underline"
-          >
-            Settings → Danger zone
-          </Link>{" "}
-          first. This cannot be undone.
-        </p>
-      </div>
+      <PurgeLists
+        project={project}
+        variables={variables}
+        releases={releases}
+        onFreeDomains={(free) => (choice.freeDomains = free)}
+      />
     ),
     action: async (phrase) => {
-      await del(`/deploy/${project.id}/permanent`, { confirm: phrase })
+      if (!choice.freeDomains) {
+        await del(`/deploy/${project.id}/permanent`, { confirm: phrase })
+        return
+      }
+      const out = await del<PurgedRoutes>(`/deploy/${project.id}/permanent`, {
+        confirm: phrase,
+        query: { routes: "remove" },
+      })
+      const failed = Object.keys(out?.routeErrors ?? {})
+      if (failed.length > 0) {
+        notify.warning(`${project.name} deleted, but not ${plural(failed.length, "route")}`, {
+          description: "Remove them from Proxy → Sites, where they are marked leftover.",
+        })
+        return "reported"
+      }
     },
     onDone,
   }
+}
+
+/** What a deletion that frees its domains did to the project's routes. */
+type PurgedRoutes = { routesRemoved: string[]; routeErrors?: Record<string, string> }
+
+function PurgeLists({
+  project,
+  variables,
+  releases,
+  onFreeDomains,
+}: {
+  project: ProjectSubject
+  variables?: number
+  releases?: number
+  onFreeDomains: (free: boolean) => void
+}) {
+  const [freeDomains, setFreeDomains] = useState(true)
+  return (
+    <div className="space-y-4">
+      <div className="grid gap-4 sm:grid-cols-2">
+        <div className="space-y-1.5">
+          <p className="eyebrow text-destructive">Deleted for good</p>
+          <ul className="space-y-1 text-body">
+            <li>Saved configuration</li>
+            <li>{variables === undefined ? "Variables" : plural(variables, "variable")}</li>
+            <li>
+              {releases === undefined ? "Release history" : plural(releases, "release")} and
+              deployment logs
+            </li>
+            {freeDomains && <li>Its routes, so its domains are free</li>}
+          </ul>
+        </div>
+        <div className="space-y-1.5">
+          <p className="eyebrow">Stays on the server</p>
+          <ul className="space-y-1 text-body">
+            <li>{freeDomains ? "Running containers" : "Running containers and routes"}</li>
+            <li>Images and files</li>
+            <li>Persistent data</li>
+          </ul>
+        </div>
+      </div>
+      <div className="flex min-h-11 items-center gap-3">
+        <Checkbox
+          id={`purge-routes-${project.id}`}
+          checked={freeDomains}
+          onCheckedChange={(checked) => {
+            setFreeDomains(checked === true)
+            onFreeDomains(checked === true)
+          }}
+        />
+        <label htmlFor={`purge-routes-${project.id}`} className="text-body">
+          Remove its routes too
+        </label>
+      </div>
+      <p className="text-muted-foreground">
+        The dashboard forgets that it owns what stays, and its persistent data remain on the server.
+        To remove them too, use{" "}
+        <Link
+          href={`/deploy/${project.id}/settings/danger`}
+          className="rounded-sm text-foreground underline-offset-2 focus-ring hover:underline"
+        >
+          Settings → Danger zone
+        </Link>{" "}
+        first. This cannot be undone.
+      </p>
+    </div>
+  )
 }
 
 /** What keeps the release serving; everything else in the run's groups builds one. */

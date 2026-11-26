@@ -1,0 +1,9 @@
+[
+  {
+    "isWarning": false,
+    "detailedDescription": "Failed to connect to qBittorrent. Check your settings and qBittorrent configuration.",
+    "propertyName": "Host",
+    "errorMessage": "Unable to connect to qBittorrent",
+    "severity": "error"
+  }
+]

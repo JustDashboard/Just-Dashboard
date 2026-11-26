@@ -222,6 +222,7 @@ func (s *Service) Profile(ctx context.Context, userID, id int64, refresh bool) (
 	if profile.HTMLURL == "" {
 		profile.HTMLURL = c.HTMLURL
 	}
+	s.followLogin(ctx, c, profile.Login, profile.Name, profile.HTMLURL)
 	ttl := profileTTL
 	if profile.Contributions == nil {
 		ttl = listTTL
@@ -230,4 +231,45 @@ func (s *Service) Profile(ctx context.Context, userID, id int64, refresh bool) (
 	s.profiles.put(id, profile, s.now(), ttl)
 	s.mu.Unlock()
 	return profile, nil
+}
+
+// followLogin stores the login GitHub has the account under now when it is
+// no longer the one stored: an account renamed on GitHub since it was
+// connected is then named rightly everywhere the stored login is read (its
+// activity, which repositories are its own, the page's identity line). What
+// was cached by the old login goes with it. Best effort: the answer that
+// read the login stands whether or not the store took it.
+func (s *Service) followLogin(ctx context.Context, c Connection, login, name, htmlURL string) {
+	if login == "" || login == c.Login {
+		return
+	}
+	if err := s.store.setProfile(ctx, c.ID, profile{Login: login, Name: name, HTMLURL: htmlURL}, s.now()); err != nil {
+		return
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	delete(s.lists, c.ID)
+	delete(s.events, c.ID)
+}
+
+// currentLogin is the account's login as GitHub has it now: the profile's,
+// when one was read in the last few minutes, or else GitHub's answer for the
+// token. The login stored at connection time is not asked: it is stale for
+// an account renamed since, and somebody else may hold it by now.
+func (s *Service) currentLogin(ctx context.Context, c Connection, client *Client) (string, error) {
+	s.mu.Lock()
+	cached, ok := s.profiles.get(c.ID, s.now())
+	s.mu.Unlock()
+	if ok && cached.Login != "" {
+		return cached.Login, nil
+	}
+	var who profile
+	if _, err := client.Do(ctx, http.MethodGet, "/user", nil, &who); err != nil {
+		return "", err
+	}
+	if who.Login == "" {
+		return "", &APIError{Status: http.StatusBadGateway, Kind: KindUnavailable, Message: "GitHub did not say whose sign-in this is", Path: "/user"}
+	}
+	s.followLogin(ctx, c, who.Login, who.Name, webURL(who.HTMLURL))
+	return who.Login, nil
 }

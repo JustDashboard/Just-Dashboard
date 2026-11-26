@@ -8,16 +8,6 @@ export interface Acceptance {
   url?: string
 }
 
-/** blueprint.Access in the dashboard's source. */
-export interface Access {
-  kind?: AccessKind
-  note?: string
-  path?: string
-  secretVariable?: string
-  username?: string
-  usernameVariable?: string
-}
-
 /** One of the values of blueprint.AccessKind. */
 export const AccessKind = {
   Setup: "setup",
@@ -57,16 +47,6 @@ export interface AccesslogSummary {
   total?: number
   truncated?: boolean
 }
-
-/** One of the values of dnsrecords.Action. */
-export const Action = {
-  Create: "create",
-  Update: "update",
-  Keep: "keep",
-  Conflict: "conflict",
-  Stale: "stale",
-} as const
-export type Action = (typeof Action)[keyof typeof Action]
 
 /** deploy.ActiveWork in the dashboard's source. */
 export interface ActiveWork {
@@ -223,7 +203,7 @@ export interface BackupSummary {
 
 /** blueprint.Blueprint in the dashboard's source. */
 export interface Blueprint {
-  access?: Access
+  access?: BlueprintAccess
   automation?: Automation[] | null
   category?: Category
   checks?: Check[] | null
@@ -245,14 +225,25 @@ export interface Blueprint {
   secrets?: Secret[] | null
   security?: Security
   services?: Service[] | null
+  stack?: string
   update?: Update
   version?: string
   volumes?: Volume[] | null
 }
 
+/** blueprint.Access in the dashboard's source. */
+export interface BlueprintAccess {
+  kind?: AccessKind
+  note?: string
+  path?: string
+  secretVariable?: string
+  username?: string
+  usernameVariable?: string
+}
+
 /** api.blueprintDetail in the dashboard's source. */
 export interface BlueprintDetail {
-  access?: Access
+  access?: BlueprintAccess
   automation?: Automation[] | null
   category?: Category
   checks?: Check[] | null
@@ -275,6 +266,7 @@ export interface BlueprintDetail {
   secrets?: Secret[] | null
   security?: Security
   services?: Service[] | null
+  stack?: string
   unavailableReason?: string
   update?: Update
   version?: string
@@ -325,7 +317,7 @@ export interface BlueprintRenderRequest {
 
 /** blueprint.Summary in the dashboard's source. */
 export interface BlueprintSummary {
-  access?: Access
+  access?: BlueprintAccess
   category?: Category
   deploymentSupported?: boolean
   description?: string
@@ -344,6 +336,7 @@ export interface BlueprintSummary {
   reviewedAt?: string
   services?: ServiceSummary[] | null
   sourceKind?: string
+  stack?: string
   unavailableReason?: string
   version?: string
 }
@@ -491,7 +484,7 @@ export interface CauseFix {
 
 /** dnsrecords.Change in the dashboard's source. */
 export interface Change {
-  action?: Action
+  action?: DnsrecordsAction
   current?: string[] | null
   currentTtl?: number
   detail?: string
@@ -653,7 +646,7 @@ export interface ComposeServicePlan {
 
 /** deploy.ComposeTemplateRequest in the dashboard's source. */
 export interface ComposeTemplateRequest {
-  access?: Access | null
+  access?: BlueprintAccess | null
   category?: Category
   compose?: string
   description?: string
@@ -799,7 +792,7 @@ export interface CurrentStep {
 
 /** api.dnsRecordChange in the dashboard's source. */
 export interface DNSRecordChange {
-  action?: Action
+  action?: DnsrecordsAction
   current?: string[] | null
   currentTtl?: number
   detail?: string
@@ -2112,6 +2105,16 @@ export interface DiagnosisEvidence {
   text?: string
 }
 
+/** One of the values of dnsrecords.Action. */
+export const DnsrecordsAction = {
+  Create: "create",
+  Update: "update",
+  Keep: "keep",
+  Conflict: "conflict",
+  Stale: "stale",
+} as const
+export type DnsrecordsAction = (typeof DnsrecordsAction)[keyof typeof DnsrecordsAction]
+
 /** deploy.DockerfileArg in the dashboard's source. */
 export interface DockerfileArg {
   consumed?: boolean
@@ -2507,6 +2510,7 @@ export interface Facet {
 /** imagescan.Finding in the dashboard's source. */
 export interface Finding {
   action?: string
+  baseDigests?: string[] | null
   class?: string
   dependency?: string
   fixed?: string
@@ -4939,6 +4943,165 @@ export const SourceMode = {
 } as const
 export type SourceMode = (typeof SourceMode)[keyof typeof SourceMode]
 
+/** api.stackCatalogueEntry in the dashboard's source. */
+export interface StackCatalogueEntry {
+  description?: string
+  id?: string
+  presets?: StackCataloguePreset[] | null
+  services?: StackCatalogueItem[] | null
+  title?: string
+  version?: string
+}
+
+/** api.stackCatalogueItem in the dashboard's source. */
+export interface StackCatalogueItem {
+  access?: StacksAccess
+  docsUrl?: string
+  image?: string
+  name?: string
+  port?: number
+  purpose?: string
+  title?: string
+}
+
+/** api.stackCataloguePreset in the dashboard's source. */
+export interface StackCataloguePreset {
+  description?: string
+  diskGb?: number
+  id?: string
+  limitations?: string[] | null
+  memoryMb?: number
+  recommended?: boolean
+  services?: string[] | null
+  templateId?: string
+  templateVersion?: string
+  title?: string
+}
+
+/** api.stackConfigureAnswer in the dashboard's source. */
+export interface StackConfigureAnswer {
+  status?: StacksStatus
+}
+
+/** api.stackContainerState in the dashboard's source. */
+export interface StackContainerState {
+  health?: string
+  name?: string
+  state?: string
+}
+
+/** api.stackCredentialListing in the dashboard's source. */
+export interface StackCredentialListing {
+  label?: string
+  name?: string
+  service?: string
+  stored?: boolean
+  username?: string
+}
+
+/** api.stackCredentialReveal in the dashboard's source. */
+export interface StackCredentialReveal {
+  name?: string
+  password?: string
+  username?: string
+}
+
+/** api.stackReadiness in the dashboard's source. */
+export interface StackReadiness {
+  acquisition?: boolean
+  connected?: boolean
+  healthy?: boolean
+  installed?: boolean
+  playback?: boolean
+}
+
+/** api.stackServiceState in the dashboard's source. */
+export interface StackServiceState {
+  access?: StacksAccess
+  address?: string
+  container?: StackContainerState | null
+  docsUrl?: string
+  image?: string
+  name?: string
+  purpose?: string
+  status?: string
+  title?: string
+  url?: string
+}
+
+/** api.stackState in the dashboard's source. */
+export interface StackState {
+  actions?: StacksAction[] | null
+  configuredReleaseId?: number
+  credentials?: StackCredentialListing[] | null
+  finishedAt?: string | null
+  limitations?: string[] | null
+  liveReleaseId?: number
+  preset?: string
+  presetTitle?: string
+  readiness?: StackReadiness
+  services?: StackServiceState[] | null
+  stackId?: string
+  startedAt?: string | null
+  status?: StacksStatus
+  steps?: StackStepState[] | null
+  summary?: string
+  title?: string
+  updatedAt?: string
+  version?: string
+}
+
+/** api.stackStepState in the dashboard's source. */
+export interface StackStepState {
+  attempts?: number
+  error?: string
+  finishedAt?: string | null
+  id?: string
+  log?: string[] | null
+  message?: string
+  service?: string
+  stage?: Stage
+  startedAt?: string | null
+  status?: StepStatus
+  title?: string
+}
+
+/** One of the values of stacks.Access. */
+export const StacksAccess = {
+  Public: "public",
+  Private: "private",
+  Worker: "worker",
+} as const
+export type StacksAccess = (typeof StacksAccess)[keyof typeof StacksAccess]
+
+/** stacks.Action in the dashboard's source. */
+export interface StacksAction {
+  blocking?: boolean
+  description?: string
+  id?: string
+  service?: string
+  title?: string
+}
+
+/** One of the values of stacks.Status. */
+export const StacksStatus = {
+  Waiting: "waiting",
+  Configuring: "configuring",
+  Ready: "ready",
+  ActionRequired: "action_required",
+  Failed: "failed",
+} as const
+export type StacksStatus = (typeof StacksStatus)[keyof typeof StacksStatus]
+
+/** One of the values of stacks.Stage. */
+export const Stage = {
+  Readiness: "readiness",
+  Initialize: "initialize",
+  Link: "link",
+  Verify: "verify",
+} as const
+export type Stage = (typeof Stage)[keyof typeof Stage]
+
 /** deploy.StagingCopy in the dashboard's source. */
 export interface StagingCopy {
   adjusted?: string[] | null
@@ -5013,6 +5176,17 @@ export const StepState = {
   Unavailable: "unavailable",
 } as const
 export type StepState = (typeof StepState)[keyof typeof StepState]
+
+/** One of the values of stacks.StepStatus. */
+export const StepStatus = {
+  Pending: "pending",
+  Running: "running",
+  Done: "done",
+  Failed: "failed",
+  ActionRequired: "action_required",
+  Skipped: "skipped",
+} as const
+export type StepStatus = (typeof StepStatus)[keyof typeof StepStatus]
 
 /** deploy.StorageMount in the dashboard's source. */
 export interface StorageMount {

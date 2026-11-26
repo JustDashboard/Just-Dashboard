@@ -8,7 +8,10 @@ import {
   busiestDay,
   dayTitle,
   eventWords,
+  inboxFilterOf,
   inboxHref,
+  inboxStateOf,
+  inboxWhen,
   issueStateOf,
   monthLabels,
   recentRepositories,
@@ -100,6 +103,50 @@ test("recentRepositories leads with the latest pushed, archived left out", () =>
   ]
   expect(recentRepositories(repos, 2).map((r) => r.fullName)).toEqual(["a/new", "a/mid"])
   expect(repos[0].fullName).toBe("a/old")
+})
+
+describe("a listing's address", () => {
+  test("names a filter the listing has, or Created", () => {
+    expect(inboxFilterOf("pull", "review")).toBe("review")
+    expect(inboxFilterOf("pull", "mentioned")).toBe("mentioned")
+    expect(inboxFilterOf("pull", null)).toBe("created")
+    expect(inboxFilterOf("pull", "involves")).toBe("created")
+    // Review requests are for pull requests only.
+    expect(inboxFilterOf("issue", "review")).toBe("created")
+    expect(inboxFilterOf("issue", "assigned")).toBe("assigned")
+  })
+  test("is open unless it says closed", () => {
+    expect(inboxStateOf("closed")).toBe("closed")
+    expect(inboxStateOf(null)).toBe("open")
+    expect(inboxStateOf("merged")).toBe("open")
+  })
+})
+
+describe("inboxWhen", () => {
+  const times = {
+    createdAt: "2026-11-01T10:00:00Z",
+    updatedAt: "2026-11-03T10:00:00Z",
+    closedAt: "2026-11-02T10:00:00Z",
+  }
+  test("an open one is when it was opened", () => {
+    expect(inboxWhen({ ...times, state: "open", closedAt: undefined })).toEqual({
+      open: true,
+      verb: "opened",
+      at: "2026-11-01T10:00:00Z",
+    })
+  })
+  test("a merged or closed one is when it was, never who did it", () => {
+    expect(inboxWhen({ ...times, state: "merged" })).toEqual({
+      open: false,
+      verb: "merged",
+      at: "2026-11-02T10:00:00Z",
+    })
+    expect(inboxWhen({ ...times, state: "closed", closedAt: undefined })).toEqual({
+      open: false,
+      verb: "closed",
+      at: "2026-11-03T10:00:00Z",
+    })
+  })
 })
 
 describe("inboxHref", () => {

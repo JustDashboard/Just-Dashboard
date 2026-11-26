@@ -14,16 +14,6 @@ type Acceptance struct {
 	URL   string `json:"url,omitempty"`
 }
 
-// Access is blueprint.Access in the dashboard's source.
-type Access struct {
-	Kind             AccessKind `json:"kind,omitempty"`
-	Note             string     `json:"note,omitempty"`
-	Path             string     `json:"path,omitempty"`
-	SecretVariable   string     `json:"secretVariable,omitempty"`
-	Username         string     `json:"username,omitempty"`
-	UsernameVariable string     `json:"usernameVariable,omitempty"`
-}
-
 // AccessKind is one of the values of blueprint.AccessKind.
 type AccessKind string
 
@@ -65,18 +55,6 @@ type AccesslogSummary struct {
 	Total           int64            `json:"total,omitempty"`
 	Truncated       bool             `json:"truncated,omitempty"`
 }
-
-// Action is one of the values of dnsrecords.Action.
-type Action string
-
-// The values of Action.
-const (
-	ActionCreate   Action = "create"
-	ActionUpdate   Action = "update"
-	ActionKeep     Action = "keep"
-	ActionConflict Action = "conflict"
-	ActionStale    Action = "stale"
-)
 
 // ActiveWork is deploy.ActiveWork in the dashboard's source.
 type ActiveWork struct {
@@ -235,62 +213,74 @@ type BackupSummary struct {
 
 // Blueprint is blueprint.Blueprint in the dashboard's source.
 type Blueprint struct {
-	Access      Access         `json:"access,omitzero"`
-	Automation  []Automation   `json:"automation"`
-	Category    Category       `json:"category,omitempty"`
-	Checks      []Check        `json:"checks"`
-	Description string         `json:"description,omitempty"`
-	DocsURL     string         `json:"docsUrl,omitempty"`
-	Files       []ConfigFile   `json:"files"`
-	Fixtures    []Fixture      `json:"fixtures"`
-	IconID      string         `json:"iconId,omitempty"`
-	ID          string         `json:"id,omitempty"`
-	Image       BlueprintImage `json:"image,omitzero"`
-	Inputs      []Input        `json:"inputs"`
-	Name        string         `json:"name,omitempty"`
-	Operations  Operations     `json:"operations,omitzero"`
-	Ports       []Port         `json:"ports"`
-	Profile     Profile        `json:"profile,omitempty"`
-	Provenance  Provenance     `json:"provenance,omitzero"`
-	Resources   Resources      `json:"resources,omitzero"`
-	Retired     string         `json:"retired,omitempty"`
-	Secrets     []Secret       `json:"secrets"`
-	Security    Security       `json:"security,omitzero"`
-	Services    []Service      `json:"services"`
-	Update      Update         `json:"update,omitzero"`
-	Version     string         `json:"version,omitempty"`
-	Volumes     []Volume       `json:"volumes"`
+	Access      BlueprintAccess `json:"access,omitzero"`
+	Automation  []Automation    `json:"automation"`
+	Category    Category        `json:"category,omitempty"`
+	Checks      []Check         `json:"checks"`
+	Description string          `json:"description,omitempty"`
+	DocsURL     string          `json:"docsUrl,omitempty"`
+	Files       []ConfigFile    `json:"files"`
+	Fixtures    []Fixture       `json:"fixtures"`
+	IconID      string          `json:"iconId,omitempty"`
+	ID          string          `json:"id,omitempty"`
+	Image       BlueprintImage  `json:"image,omitzero"`
+	Inputs      []Input         `json:"inputs"`
+	Name        string          `json:"name,omitempty"`
+	Operations  Operations      `json:"operations,omitzero"`
+	Ports       []Port          `json:"ports"`
+	Profile     Profile         `json:"profile,omitempty"`
+	Provenance  Provenance      `json:"provenance,omitzero"`
+	Resources   Resources       `json:"resources,omitzero"`
+	Retired     string          `json:"retired,omitempty"`
+	Secrets     []Secret        `json:"secrets"`
+	Security    Security        `json:"security,omitzero"`
+	Services    []Service       `json:"services"`
+	Stack       string          `json:"stack,omitempty"`
+	Update      Update          `json:"update,omitzero"`
+	Version     string          `json:"version,omitempty"`
+	Volumes     []Volume        `json:"volumes"`
+}
+
+// BlueprintAccess is blueprint.Access in the dashboard's source.
+type BlueprintAccess struct {
+	Kind             AccessKind `json:"kind,omitempty"`
+	Note             string     `json:"note,omitempty"`
+	Path             string     `json:"path,omitempty"`
+	SecretVariable   string     `json:"secretVariable,omitempty"`
+	Username         string     `json:"username,omitempty"`
+	UsernameVariable string     `json:"usernameVariable,omitempty"`
 }
 
 // BlueprintDetail is api.blueprintDetail in the dashboard's source.
 type BlueprintDetail struct {
-	Access              Access         `json:"access,omitzero"`
-	Automation          []Automation   `json:"automation"`
-	Category            Category       `json:"category,omitempty"`
-	Checks              []Check        `json:"checks"`
-	DeploymentSupported bool           `json:"deploymentSupported,omitempty"`
-	Description         string         `json:"description,omitempty"`
-	DocsURL             string         `json:"docsUrl,omitempty"`
-	Files               []ConfigFile   `json:"files"`
-	Fixtures            []Fixture      `json:"fixtures"`
-	IconID              string         `json:"iconId,omitempty"`
-	ID                  string         `json:"id,omitempty"`
-	Image               BlueprintImage `json:"image,omitzero"`
-	Inputs              []Input        `json:"inputs"`
-	Name                string         `json:"name,omitempty"`
-	Operations          Operations     `json:"operations,omitzero"`
-	Ports               []Port         `json:"ports"`
-	Profile             Profile        `json:"profile,omitempty"`
-	Provenance          Provenance     `json:"provenance,omitzero"`
-	Resources           Resources      `json:"resources,omitzero"`
-	Retired             string         `json:"retired,omitempty"`
-	Secrets             []Secret       `json:"secrets"`
-	Security            Security       `json:"security,omitzero"`
-	Services            []Service      `json:"services"`
-	UnavailableReason   string         `json:"unavailableReason,omitempty"`
-	Update              Update         `json:"update,omitzero"`
-	Version             string         `json:"version,omitempty"`
-	Volumes             []Volume       `json:"volumes"`
+	Access              BlueprintAccess `json:"access,omitzero"`
+	Automation          []Automation    `json:"automation"`
+	Category            Category        `json:"category,omitempty"`
+	Checks              []Check         `json:"checks"`
+	DeploymentSupported bool            `json:"deploymentSupported,omitempty"`
+	Description         string          `json:"description,omitempty"`
+	DocsURL             string          `json:"docsUrl,omitempty"`
+	Files               []ConfigFile    `json:"files"`
+	Fixtures            []Fixture       `json:"fixtures"`
+	IconID              string          `json:"iconId,omitempty"`
+	ID                  string          `json:"id,omitempty"`
+	Image               BlueprintImage  `json:"image,omitzero"`
+	Inputs              []Input         `json:"inputs"`
+	Name                string          `json:"name,omitempty"`
+	Operations          Operations      `json:"operations,omitzero"`
+	Ports               []Port          `json:"ports"`
+	Profile             Profile         `json:"profile,omitempty"`
+	Provenance          Provenance      `json:"provenance,omitzero"`
+	Resources           Resources       `json:"resources,omitzero"`
+	Retired             string          `json:"retired,omitempty"`
+	Secrets             []Secret        `json:"secrets"`
+	Security            Security        `json:"security,omitzero"`
+	Services            []Service       `json:"services"`
+	Stack               string          `json:"stack,omitempty"`
+	UnavailableReason   string          `json:"unavailableReason,omitempty"`
+	Update              Update          `json:"update,omitzero"`
+	Version             string          `json:"version,omitempty"`
+	Volumes             []Volume        `json:"volumes"`
 }
 
 // BlueprintImage is blueprint.Image in the dashboard's source.
@@ -337,7 +327,7 @@ type BlueprintRenderRequest struct {
 
 // BlueprintSummary is blueprint.Summary in the dashboard's source.
 type BlueprintSummary struct {
-	Access              Access           `json:"access,omitzero"`
+	Access              BlueprintAccess  `json:"access,omitzero"`
 	Category            Category         `json:"category,omitempty"`
 	DeploymentSupported bool             `json:"deploymentSupported,omitempty"`
 	Description         string           `json:"description,omitempty"`
@@ -356,6 +346,7 @@ type BlueprintSummary struct {
 	ReviewedAt          string           `json:"reviewedAt,omitempty"`
 	Services            []ServiceSummary `json:"services"`
 	SourceKind          string           `json:"sourceKind,omitempty"`
+	Stack               string           `json:"stack,omitempty"`
 	UnavailableReason   string           `json:"unavailableReason,omitempty"`
 	Version             string           `json:"version,omitempty"`
 }
@@ -507,15 +498,15 @@ type CauseFix struct {
 
 // Change is dnsrecords.Change in the dashboard's source.
 type Change struct {
-	Action     Action   `json:"action,omitempty"`
-	Current    []string `json:"current"`
-	CurrentTTL int64    `json:"currentTtl,omitempty"`
-	Detail     string   `json:"detail,omitempty"`
-	Name       string   `json:"name,omitempty"`
-	Proxied    bool     `json:"proxied,omitempty"`
-	TTL        int64    `json:"ttl,omitempty"`
-	Type       Type     `json:"type,omitempty"`
-	Want       []string `json:"want"`
+	Action     DnsrecordsAction `json:"action,omitempty"`
+	Current    []string         `json:"current"`
+	CurrentTTL int64            `json:"currentTtl,omitempty"`
+	Detail     string           `json:"detail,omitempty"`
+	Name       string           `json:"name,omitempty"`
+	Proxied    bool             `json:"proxied,omitempty"`
+	TTL        int64            `json:"ttl,omitempty"`
+	Type       Type             `json:"type,omitempty"`
+	Want       []string         `json:"want"`
 }
 
 // ChatAbout is assistant.ChatAbout in the dashboard's source.
@@ -671,17 +662,17 @@ type ComposeServicePlan struct {
 
 // ComposeTemplateRequest is deploy.ComposeTemplateRequest in the dashboard's source.
 type ComposeTemplateRequest struct {
-	Access        *Access  `json:"access,omitempty"`
-	Category      Category `json:"category,omitempty"`
-	Compose       string   `json:"compose,omitempty"`
-	Description   string   `json:"description,omitempty"`
-	DocsURL       string   `json:"docsUrl,omitempty"`
-	DryRun        bool     `json:"dryRun,omitempty"`
-	HealthPath    string   `json:"healthPath,omitempty"`
-	Inputs        []Input  `json:"inputs"`
-	Name          string   `json:"name,omitempty"`
-	PublicService string   `json:"publicService,omitempty"`
-	Slug          string   `json:"slug,omitempty"`
+	Access        *BlueprintAccess `json:"access,omitempty"`
+	Category      Category         `json:"category,omitempty"`
+	Compose       string           `json:"compose,omitempty"`
+	Description   string           `json:"description,omitempty"`
+	DocsURL       string           `json:"docsUrl,omitempty"`
+	DryRun        bool             `json:"dryRun,omitempty"`
+	HealthPath    string           `json:"healthPath,omitempty"`
+	Inputs        []Input          `json:"inputs"`
+	Name          string           `json:"name,omitempty"`
+	PublicService string           `json:"publicService,omitempty"`
+	Slug          string           `json:"slug,omitempty"`
 }
 
 // ConfigFile is blueprint.ConfigFile in the dashboard's source.
@@ -817,16 +808,16 @@ type CurrentStep struct {
 
 // DNSRecordChange is api.dnsRecordChange in the dashboard's source.
 type DNSRecordChange struct {
-	Action     Action   `json:"action,omitempty"`
-	Current    []string `json:"current"`
-	CurrentTTL int64    `json:"currentTtl,omitempty"`
-	Detail     string   `json:"detail,omitempty"`
-	Name       string   `json:"name,omitempty"`
-	Ours       bool     `json:"ours,omitempty"`
-	Proxied    bool     `json:"proxied,omitempty"`
-	TTL        int64    `json:"ttl,omitempty"`
-	Type       Type     `json:"type,omitempty"`
-	Want       []string `json:"want"`
+	Action     DnsrecordsAction `json:"action,omitempty"`
+	Current    []string         `json:"current"`
+	CurrentTTL int64            `json:"currentTtl,omitempty"`
+	Detail     string           `json:"detail,omitempty"`
+	Name       string           `json:"name,omitempty"`
+	Ours       bool             `json:"ours,omitempty"`
+	Proxied    bool             `json:"proxied,omitempty"`
+	TTL        int64            `json:"ttl,omitempty"`
+	Type       Type             `json:"type,omitempty"`
+	Want       []string         `json:"want"`
 }
 
 // DNSRecordManaged is api.dnsRecordManaged in the dashboard's source.
@@ -2080,6 +2071,18 @@ type DiagnosisEvidence struct {
 	Text string `json:"text,omitempty"`
 }
 
+// DnsrecordsAction is one of the values of dnsrecords.Action.
+type DnsrecordsAction string
+
+// The values of DnsrecordsAction.
+const (
+	DnsrecordsActionCreate   DnsrecordsAction = "create"
+	DnsrecordsActionUpdate   DnsrecordsAction = "update"
+	DnsrecordsActionKeep     DnsrecordsAction = "keep"
+	DnsrecordsActionConflict DnsrecordsAction = "conflict"
+	DnsrecordsActionStale    DnsrecordsAction = "stale"
+)
+
 // DockerfileArg is deploy.DockerfileArg in the dashboard's source.
 type DockerfileArg struct {
 	Consumed   bool   `json:"consumed,omitempty"`
@@ -2478,21 +2481,22 @@ type Facet struct {
 
 // Finding is imagescan.Finding in the dashboard's source.
 type Finding struct {
-	Action     string `json:"action,omitempty"`
-	Class      string `json:"class,omitempty"`
-	Dependency string `json:"dependency,omitempty"`
-	Fixed      string `json:"fixed,omitempty"`
-	FromBase   bool   `json:"fromBase,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Installed  string `json:"installed,omitempty"`
-	Origin     string `json:"origin,omitempty"`
-	Package    string `json:"package,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Severity   string `json:"severity,omitempty"`
-	Target     string `json:"target,omitempty"`
-	Title      string `json:"title,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Via        string `json:"via,omitempty"`
+	Action      string   `json:"action,omitempty"`
+	BaseDigests []string `json:"baseDigests"`
+	Class       string   `json:"class,omitempty"`
+	Dependency  string   `json:"dependency,omitempty"`
+	Fixed       string   `json:"fixed,omitempty"`
+	FromBase    bool     `json:"fromBase,omitempty"`
+	ID          string   `json:"id,omitempty"`
+	Installed   string   `json:"installed,omitempty"`
+	Origin      string   `json:"origin,omitempty"`
+	Package     string   `json:"package,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Severity    string   `json:"severity,omitempty"`
+	Target      string   `json:"target,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	Via         string   `json:"via,omitempty"`
 }
 
 // Fixture is blueprint.Fixture in the dashboard's source.
@@ -4933,6 +4937,171 @@ const (
 	SourceModeExistingStack       SourceMode = "existing_stack"
 )
 
+// StackCatalogueEntry is api.stackCatalogueEntry in the dashboard's source.
+type StackCatalogueEntry struct {
+	Description string                 `json:"description,omitempty"`
+	ID          string                 `json:"id,omitempty"`
+	Presets     []StackCataloguePreset `json:"presets"`
+	Services    []StackCatalogueItem   `json:"services"`
+	Title       string                 `json:"title,omitempty"`
+	Version     string                 `json:"version,omitempty"`
+}
+
+// StackCatalogueItem is api.stackCatalogueItem in the dashboard's source.
+type StackCatalogueItem struct {
+	Access  StacksAccess `json:"access,omitempty"`
+	DocsURL string       `json:"docsUrl,omitempty"`
+	Image   string       `json:"image,omitempty"`
+	Name    string       `json:"name,omitempty"`
+	Port    int64        `json:"port,omitempty"`
+	Purpose string       `json:"purpose,omitempty"`
+	Title   string       `json:"title,omitempty"`
+}
+
+// StackCataloguePreset is api.stackCataloguePreset in the dashboard's source.
+type StackCataloguePreset struct {
+	Description     string   `json:"description,omitempty"`
+	DiskGb          int64    `json:"diskGb,omitempty"`
+	ID              string   `json:"id,omitempty"`
+	Limitations     []string `json:"limitations"`
+	MemoryMb        int64    `json:"memoryMb,omitempty"`
+	Recommended     bool     `json:"recommended,omitempty"`
+	Services        []string `json:"services"`
+	TemplateID      string   `json:"templateId,omitempty"`
+	TemplateVersion string   `json:"templateVersion,omitempty"`
+	Title           string   `json:"title,omitempty"`
+}
+
+// StackConfigureAnswer is api.stackConfigureAnswer in the dashboard's source.
+type StackConfigureAnswer struct {
+	Status StacksStatus `json:"status,omitempty"`
+}
+
+// StackContainerState is api.stackContainerState in the dashboard's source.
+type StackContainerState struct {
+	Health string `json:"health,omitempty"`
+	Name   string `json:"name,omitempty"`
+	State  string `json:"state,omitempty"`
+}
+
+// StackCredentialListing is api.stackCredentialListing in the dashboard's source.
+type StackCredentialListing struct {
+	Label    string `json:"label,omitempty"`
+	Name     string `json:"name,omitempty"`
+	Service  string `json:"service,omitempty"`
+	Stored   bool   `json:"stored,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
+// StackCredentialReveal is api.stackCredentialReveal in the dashboard's source.
+type StackCredentialReveal struct {
+	Name     string `json:"name,omitempty"`
+	Password string `json:"password,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
+// StackReadiness is api.stackReadiness in the dashboard's source.
+type StackReadiness struct {
+	Acquisition bool `json:"acquisition,omitempty"`
+	Connected   bool `json:"connected,omitempty"`
+	Healthy     bool `json:"healthy,omitempty"`
+	Installed   bool `json:"installed,omitempty"`
+	Playback    bool `json:"playback,omitempty"`
+}
+
+// StackServiceState is api.stackServiceState in the dashboard's source.
+type StackServiceState struct {
+	Access    StacksAccess         `json:"access,omitempty"`
+	Address   string               `json:"address,omitempty"`
+	Container *StackContainerState `json:"container,omitempty"`
+	DocsURL   string               `json:"docsUrl,omitempty"`
+	Image     string               `json:"image,omitempty"`
+	Name      string               `json:"name,omitempty"`
+	Purpose   string               `json:"purpose,omitempty"`
+	Status    string               `json:"status,omitempty"`
+	Title     string               `json:"title,omitempty"`
+	URL       string               `json:"url,omitempty"`
+}
+
+// StackState is api.stackState in the dashboard's source.
+type StackState struct {
+	Actions             []StacksAction           `json:"actions"`
+	ConfiguredReleaseID int64                    `json:"configuredReleaseId,omitempty"`
+	Credentials         []StackCredentialListing `json:"credentials"`
+	FinishedAt          *time.Time               `json:"finishedAt,omitempty"`
+	Limitations         []string                 `json:"limitations"`
+	LiveReleaseID       int64                    `json:"liveReleaseId,omitempty"`
+	Preset              string                   `json:"preset,omitempty"`
+	PresetTitle         string                   `json:"presetTitle,omitempty"`
+	Readiness           StackReadiness           `json:"readiness,omitzero"`
+	Services            []StackServiceState      `json:"services"`
+	StackID             string                   `json:"stackId,omitempty"`
+	StartedAt           *time.Time               `json:"startedAt,omitempty"`
+	Status              StacksStatus             `json:"status,omitempty"`
+	Steps               []StackStepState         `json:"steps"`
+	Summary             string                   `json:"summary,omitempty"`
+	Title               string                   `json:"title,omitempty"`
+	UpdatedAt           time.Time                `json:"updatedAt,omitzero"`
+	Version             string                   `json:"version,omitempty"`
+}
+
+// StackStepState is api.stackStepState in the dashboard's source.
+type StackStepState struct {
+	Attempts   int64      `json:"attempts,omitempty"`
+	Error      string     `json:"error,omitempty"`
+	FinishedAt *time.Time `json:"finishedAt,omitempty"`
+	ID         string     `json:"id,omitempty"`
+	Log        []string   `json:"log"`
+	Message    string     `json:"message,omitempty"`
+	Service    string     `json:"service,omitempty"`
+	Stage      Stage      `json:"stage,omitempty"`
+	StartedAt  *time.Time `json:"startedAt,omitempty"`
+	Status     StepStatus `json:"status,omitempty"`
+	Title      string     `json:"title,omitempty"`
+}
+
+// StacksAccess is one of the values of stacks.Access.
+type StacksAccess string
+
+// The values of StacksAccess.
+const (
+	StacksAccessPublic  StacksAccess = "public"
+	StacksAccessPrivate StacksAccess = "private"
+	StacksAccessWorker  StacksAccess = "worker"
+)
+
+// StacksAction is stacks.Action in the dashboard's source.
+type StacksAction struct {
+	Blocking    bool   `json:"blocking,omitempty"`
+	Description string `json:"description,omitempty"`
+	ID          string `json:"id,omitempty"`
+	Service     string `json:"service,omitempty"`
+	Title       string `json:"title,omitempty"`
+}
+
+// StacksStatus is one of the values of stacks.Status.
+type StacksStatus string
+
+// The values of StacksStatus.
+const (
+	StacksStatusWaiting        StacksStatus = "waiting"
+	StacksStatusConfiguring    StacksStatus = "configuring"
+	StacksStatusReady          StacksStatus = "ready"
+	StacksStatusActionRequired StacksStatus = "action_required"
+	StacksStatusFailed         StacksStatus = "failed"
+)
+
+// Stage is one of the values of stacks.Stage.
+type Stage string
+
+// The values of Stage.
+const (
+	StageReadiness  Stage = "readiness"
+	StageInitialize Stage = "initialize"
+	StageLink       Stage = "link"
+	StageVerify     Stage = "verify"
+)
+
 // StagingCopy is deploy.StagingCopy in the dashboard's source.
 type StagingCopy struct {
 	Adjusted    []string           `json:"adjusted"`
@@ -5012,6 +5181,19 @@ const (
 	StepStateSkipped     StepState = "skipped"
 	StepStateCancelled   StepState = "cancelled"
 	StepStateUnavailable StepState = "unavailable"
+)
+
+// StepStatus is one of the values of stacks.StepStatus.
+type StepStatus string
+
+// The values of StepStatus.
+const (
+	StepStatusPending        StepStatus = "pending"
+	StepStatusRunning        StepStatus = "running"
+	StepStatusDone           StepStatus = "done"
+	StepStatusFailed         StepStatus = "failed"
+	StepStatusActionRequired StepStatus = "action_required"
+	StepStatusSkipped        StepStatus = "skipped"
 )
 
 // StorageMount is deploy.StorageMount in the dashboard's source.

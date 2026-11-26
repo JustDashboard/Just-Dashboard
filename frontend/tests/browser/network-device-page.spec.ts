@@ -432,6 +432,29 @@ test.describe("a device's page", () => {
     ).toBeVisible()
   })
 
+  test("a page left on a view and handed its bare address opens on Traffic, without a reload", async ({
+    page,
+  }) => {
+    await mockNetwork(page)
+    await page.goto("/network/interfaces/jd-lab?tab=ports")
+    await loaded(page)
+    const tab = (name: string) => page.getByRole("tab", { name: new RegExp(`^${name}`) })
+    await expect(tab("Ports")).toHaveAttribute("aria-selected", "true")
+    // A mark on the document, which a reload would wipe.
+    await page.evaluate(() => Object.assign(window, { stayed: true }))
+    // A client navigation that takes the view out, as a link to the bare page does.
+    await page.evaluate(() => window.history.pushState(null, "", window.location.pathname))
+    await expect(page).toHaveURL(/\/network\/interfaces\/jd-lab$/)
+    await expect(tab("Traffic")).toHaveAttribute("aria-selected", "true")
+    await expect(tab("Ports")).toHaveAttribute("aria-selected", "false")
+    expect(await page.evaluate(() => "stayed" in window)).toBe(true)
+    // Back hands it the view again, which is followed too.
+    await page.goBack()
+    await expect(page).toHaveURL(/\/network\/interfaces\/jd-lab\?tab=ports$/)
+    await expect(tab("Ports")).toHaveAttribute("aria-selected", "true")
+    expect(await page.evaluate(() => "stayed" in window)).toBe(true)
+  })
+
   test("says what it has carried since it was made, in words", async ({ page }) => {
     await mockNetwork(page)
     await page.goto("/network/interfaces/ens3")
