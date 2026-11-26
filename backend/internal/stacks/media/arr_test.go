@@ -405,14 +405,16 @@ func TestProwlarrSourcesAsksForASourceAndNeverAddsOne(t *testing.T) {
 	none := action()
 	if none.ID != "media-source" || none.Service != "prowlarr" || !none.Blocking || none.Title != "Add a media source" ||
 		!strings.Contains(none.Description, "a source you are allowed to use") || !strings.Contains(none.Description, "None is included") ||
-		!strings.Contains(none.Description, "shares it with Radarr and Sonarr") {
+		!strings.Contains(none.Description, "shares it with Radarr and Sonarr") ||
+		!strings.Contains(none.Description, "run the setup again") {
 		t.Fatalf("action: %+v", none)
 	}
 
 	// The fields of an indexer as Prowlarr lists one (GET indexer/schema in
 	// the live run), cut to what the step reads.
 	stack.prowlarr.indexers = []map[string]any{{"id": 1, "name": "A source", "enable": false, "protocol": "torrent", "privacy": "public"}}
-	if off := action(); !strings.Contains(off.Description, "1 media source, but none is switched on") {
+	if off := action(); !strings.Contains(off.Description, "1 media source, but none is switched on") ||
+		!strings.Contains(off.Description, "run the setup again") {
 		t.Fatalf("action: %+v", off)
 	}
 
