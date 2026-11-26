@@ -23,8 +23,15 @@ preview-comment outcomes, and ownership joins. Runs are deleted before variables
 run-to-variable revision references intentionally do not cascade from the variable side. The audit
 log is outside this cascade and survives deletion.
 
-This operation does not invoke Docker, Proxy, Files, Backups, or a host command. Containers, images,
-routes, database networks, persistent storage, checkouts, and on-disk artifacts remain. Release
+This operation does not invoke Docker, Files, Backups, or a host command. Containers, images,
+database networks, persistent storage, checkouts, and on-disk artifacts remain. Routes remain too
+unless the request asks for them: `?routes=remove` (the dialog's **Remove its routes too**, ticked by
+default) retires each route the project's environments wrote, after the records are deleted, through
+`proxysvc.RetireDeploymentRoute` — the route and the certificates Caddy kept only for it — and answers
+200 with `routesRemoved` and any `routeErrors`, which the audit entry also carries. A route kept after
+its project went on answering the domain with nothing left to own it, and the next deployment of that
+domain was refused as a conflict (it is now taken over; see [`implementation.md`](implementation.md)).
+Without the parameter the answer stays 204. Release
 retention's sweep reads only the store, so the deleted project's release images are no longer its to
 remove either; they are removed, if at all, from the Docker images page. While a project is only
 archived, its releases keep the ordinary retention (the live release and the five before it, pins and

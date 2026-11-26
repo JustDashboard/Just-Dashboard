@@ -1659,7 +1659,16 @@ only renderer/executor/validation authority for their feature.
   domain conflicts, DNS, existing certificate pairs, ports, public binds, firewall policy and dependency
   availability. A deploy re-runs those host observations from its frozen configuration in `analyze_plan`
   — alongside the source checks above — before build or backup work; only its exact managed proxy site and exact live Docker runtime may be
-  treated as reusable ownership. HTTPS activation resolves an already-issued certificate/key pair through
+  treated as reusable ownership. Preflight reads which sites already answer each managed domain
+  (`DomainObservation.claims`, `deploy/leftover_routes.go`) and asks the API layer which deployment
+  writes each route (`RouteOwners`, the same `markDeploymentRoutes` the Sites list uses). A domain held
+  only by **leftover** routes — `just-dashboard-env-<id>.conf` whose environment is gone or archived —
+  passes as `domain_takeover`, and activation removes those routes (`SnapshotDeploymentRoute`, then
+  `RemoveDeploymentRoute`) just before `ApplyDeploymentRoute` writes its own, keeping the certificate
+  since the new route serves the same name, and puts them back if the cutover fails. Anything else is
+  `domain_conflict`, naming the claimer: a live deployment's route links its Domains settings, any other
+  site its own page (`/proxy/sites/<name>`). When the owners cannot be read nothing counts as a
+  leftover, so a live route is never taken over. HTTPS activation resolves an already-issued certificate/key pair through
   Proxy and fails closed if it no longer exists; deployment activation never invents certificate paths or
   performs issuance itself.
 - A configured backup dependency executes as a step before candidate start. A linked database whose
