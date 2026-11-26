@@ -48,7 +48,7 @@ cells. `tracking-code` spaces a one-time code.
 | --- | --- |
 | Only the steps above; no `text-[Npx]`. | lint `type-scale`; coming: `text-lg`, `text-xl` refused outside their role (WP-39) |
 | A field is 16px on a touch screen whatever its caller passes (iOS zooms on a smaller one). | spec `touch-targets.spec.ts` |
-| No text ink faded with opacity. | coming: lint `ink-opacity` (WP-39) |
+| No text ink faded with opacity. | lint `ink-opacity` |
 | No sentence under a title. | type |
 
 ## 8. Type

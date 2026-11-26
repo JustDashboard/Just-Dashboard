@@ -2,13 +2,16 @@
 //
 // Nothing read those pages, so they named components that had been renamed or deleted, the
 // catalogue missed exports added after it, and the token page listed values the stylesheet had
-// moved on from. Four checks:
+// moved on from. Five checks:
 //
 //   - every export of a shared folder has a row in the catalogue (components/README.md);
 //   - every name in a catalogue row is an export, unless the row says it is new or retired;
 //   - every backticked PascalCase name in the docs exists in the code, or decisions/ marks it
 //     "(removed)";
-//   - foundations/tokens.md is exactly what frontend/scripts/tokens-doc.mjs prints.
+//   - foundations/tokens.md is exactly what frontend/scripts/tokens-doc.mjs prints;
+//   - what the docs say lint holds is what eslint-rules/ defines: standard.md's "What the linter
+//     refuses today" names every id, no page calls a defined id "coming", and every name written
+//     after "lint" is an id or a rule.
 //
 // The first three are a ratchet. docs-catalogue.baseline.json lists the misses there were when
 // the check arrived (0.9.0, WP-40), by name, and the check fails on a miss that is not listed and
@@ -23,12 +26,16 @@ import { describe, expect, test } from "bun:test"
 import { readdirSync, readFileSync } from "node:fs"
 import { join, relative, sep } from "node:path"
 import { PAGE, STYLESHEET, tokensDoc } from "../scripts/tokens-doc.mjs"
+import designSystem from "../eslint-rules/design-system.mjs"
+import retiredApis, { RETIRED_IDS } from "../eslint-rules/retired-apis.mjs"
 
 const SRC = import.meta.dir
 const REPO = join(SRC, "..", "..")
 const DOCS = join(REPO, "docs", "internal", "frontend")
 const CATALOGUE = join(DOCS, "components", "README.md")
 const BASELINE = join(SRC, "docs-catalogue.baseline.json")
+const STANDARD = join(DOCS, "standard.md")
+const DESIGN_SYSTEM_RULES = join(SRC, "..", "eslint-rules", "design-system.mjs")
 
 // The folders the catalogue covers, as its own introduction defines "shared".
 const SHARED = [/^components\/[^/]+\.tsx?$/, /^components\/(ui|wire|settings|shell)\//, /^hooks\//]
@@ -163,6 +170,45 @@ function read(path) {
   return readFileSync(path, "utf8")
 }
 
+// The ids a refusal is reported under, read from the plugins as Prettier writes them: each of
+// design-system's tokens is an `id:` in its list, each primitive the "[id]" its message opens
+// with, and retired-apis exports its own. The rules are what eslint.config.mjs turns on.
+function lintIds(source) {
+  return {
+    ids: [
+      ...[...source.matchAll(/^\s+id: "([a-z][a-z-]*)",$/gm)].map((m) => m[1]),
+      ...[...source.matchAll(/^\s+"\[([a-z][a-z-]*)\] /gm)].map((m) => m[1]),
+      ...RETIRED_IDS,
+    ],
+    rules: [
+      ...Object.keys(designSystem.rules).map((name) => `design-system/${name}`),
+      ...Object.keys(retiredApis.rules).map((name) => `retired-apis/${name}`),
+    ],
+  }
+}
+
+// A page's section under a `## ` heading, to the next one.
+function section(markdown, heading) {
+  return markdown.match(new RegExp(`^## ${heading}\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, "m"))?.[1]
+}
+
+// What the docs claim of the linter, line by line: the backticked names after "coming" in a
+// cell or sentence (a check still to come), and those right after "lint" (a check that holds).
+function lintClaims(markdown) {
+  const coming = []
+  const held = []
+  const names = (text) => [...text.matchAll(/`([^`]+)`/g)].map((m) => m[1])
+  markdown.split("\n").forEach((line, index) => {
+    for (const m of line.matchAll(/\bcoming\b[^|]*/gi)) {
+      for (const name of names(m[0])) coming.push({ name, line: index + 1 })
+    }
+    for (const m of line.matchAll(/\blint ((?:`[^`]+`(?:,\s*|\s+and\s+)?)+)/g)) {
+      for (const name of names(m[1])) held.push({ name, line: index + 1 })
+    }
+  })
+  return { coming, held }
+}
+
 // Which of these words the backend's Go source (tests aside) has. `git grep` answers in a tenth of
 // a second where reading the 22 MB of it took most of one; outside a checkout, it is read.
 function inBackend(names) {
@@ -259,6 +305,36 @@ describe("the docs", () => {
   })
 })
 
+describe("what the docs say lint holds", () => {
+  const { ids, rules } = lintIds(read(DESIGN_SYSTEM_RULES))
+  const defined = new Set([...ids, ...rules])
+
+  test("reads every id the plugins define", () => {
+    // Fewer means the source moved away from the patterns above, not that rules were removed.
+    expect(ids.length).toBeGreaterThanOrEqual(30)
+    expect(ids).toContain("field-group")
+    expect(ids).toContain("vh-unit")
+  })
+
+  test("standard.md names every id and rule under what the linter refuses today", () => {
+    const today = section(read(STANDARD), "What the linter refuses today") ?? ""
+    expect([...ids, ...rules].filter((id) => !today.includes(`\`${id}\``))).toEqual([])
+  })
+
+  test("no page calls a defined id coming, and every name after lint is defined", () => {
+    const stale = []
+    const unknown = []
+    for (const doc of docs) {
+      const { coming, held } = lintClaims(doc.text)
+      const where = (claim) => `${doc.path}:${claim.line} ${claim.name}`
+      stale.push(...coming.filter((claim) => defined.has(claim.name)).map(where))
+      unknown.push(...held.filter((claim) => !defined.has(claim.name)).map(where))
+    }
+    expect(stale).toEqual([])
+    expect(unknown).toEqual([])
+  })
+})
+
 describe("the token reference", () => {
   test("is what tokens-doc.mjs prints from globals.css", () => {
     // On a difference: from frontend/, bun scripts/tokens-doc.mjs > ../docs/internal/frontend/foundations/tokens.md
@@ -317,6 +393,25 @@ describe("the checks themselves", () => {
       ["ShareBar", 5],
     ])
     expect([...removedIn(md)]).toEqual(["ShareBar"])
+  })
+
+  test("read the lint claims of a page", () => {
+    const md = [
+      "| Three inks | lint `type-scale`, `tone-tint`; coming: lint `ink-opacity` (WP-39) |",
+      "| Motion | convention; coming: WP-39 | lint `design-system/latency-words` and `z-layer` |",
+      "becoming `x` is not coming back",
+    ].join("\n")
+    const { coming, held } = lintClaims(md)
+    expect(coming.map((c) => [c.name, c.line])).toEqual([["ink-opacity", 1]])
+    expect(held.map((h) => [h.name, h.line])).toEqual([
+      ["type-scale", 1],
+      ["tone-tint", 1],
+      ["ink-opacity", 1],
+      ["design-system/latency-words", 2],
+      ["z-layer", 2],
+    ])
+    expect(section("## A\none\n## B\ntwo\n", "A")).toBe("one\n")
+    expect(section("## A\none\n## B\ntwo\n", "B")).toBe("two\n")
   })
 
   test("let the baseline only shrink", () => {

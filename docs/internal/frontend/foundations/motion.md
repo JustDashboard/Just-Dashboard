@@ -8,7 +8,7 @@ Motion says one of four things, and nothing moves to decorate.
 | --- | --- | --- | --- |
 | live | `jd-breathe` | `animate-breathe` | a mark fed by a live source; replaces `animate-pulse` on a status |
 | arrived | `jd-rise` | `animate-rise`, `Page rise` | a fetch settled: the page once, each block once, a figure once |
-| indeterminate | `jd-sweep` | `animate-sweep`, drawn by one `Sweep` (coming, in `components/loading.tsx`) | a wait that cannot say how far it has got |
+| indeterminate | `jd-sweep` | `animate-sweep`, drawn by one `Sweep` (`components/loading.tsx`) | a wait that cannot say how far it has got |
 | level crossed | `jd-drill` | `animate-drill` | the rail drilling into a section and back |
 
 The library marks (`jd-beam`, `jd-beam-back`, `jd-wire`, `jd-shimmer`, `agent-caret`,

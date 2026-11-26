@@ -58,7 +58,7 @@ these carries a comment saying why.
 | Nothing lifts: no gradient, no glow, no drop shadow on a block or a control. A control's face carries one lit pixel along its top (`--edge`), and nothing else. | convention |
 | The sheet is the frame: no box with a border on three sides or more runs along the sheet's side or foot closer than 20px. | spec `design-system.spec.ts` (*nothing on … draws a frame inside the sheet*, every page held to the window at 1440, measured by `tests/browser/sheet-frame.ts`) |
 | A bare `rounded` is `rounded-sm` spelled twice; use the named step. | lint `radius-bare` |
-| Only the steps above. | lint `radius-scale`; coming: `radius-arbitrary` (WP-39) |
+| Only the steps above. | lint `radius-scale`, `radius-arbitrary` |
 | Press feedback is colour (`active:bg-control-active`), never movement or a shadow. | convention |
 
 ## 2. Nothing lifts

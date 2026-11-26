@@ -29,8 +29,8 @@ below) and let the operator decide; it is never a defect.
 | Decision | What it means | Held by |
 | --- | --- | --- |
 | **One mode** | Dark only. No light palette, no theme switch. | convention |
-| **Three inks** | `text-foreground`, `text-muted-foreground` and `text-faint`. Faint has a 4.5:1 floor. Text is never faded with opacity. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*, *no page fades its words with opacity*); coming: lint `ink-opacity` (WP-39) |
-| **Colours are tokens** | Every colour is named once, on `:root` in `app/globals.css`. | lint `hardcoded-palette`, `tone-tint`; coming: lint `colour-var` (WP-39) |
+| **Three inks** | `text-foreground`, `text-muted-foreground` and `text-faint`. Faint has a 4.5:1 floor. Text is never faded with opacity. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*, *no page fades its words with opacity*); lint `ink-opacity` |
+| **Colours are tokens** | Every colour is named once, on `:root` in `app/globals.css`. | lint `hardcoded-palette`, `tone-tint`, `colour-var` |
 | **Nothing lifts** | A surface separates by a step of ground and a border. Shadows only on popovers, menus, dialogs and the floating bars. A block is plain unless it can say why it needs an edge. A control's face carries one lit pixel along its top (`--edge`), no drop shadow. | convention |
 | **The sheet is the frame** (24 Nov 2026) | From `md` up every page is a sheet with its own edge. Nothing inside it draws a frame along that edge: a workbench runs to the sheet's edges with hairlines between its panes, and a pane on a reading page keeps the page's gutter. A frame 12px inside the sheet is a frame in a frame. | spec `design-system.spec.ts` (*nothing on … draws a frame inside the sheet*); [`foundations/surfaces.md`](foundations/surfaces.md) |
 | **One blue, three jobs** | The brand blue is a command's face, where you are, and a location mark. Status has its own three hues. | convention |
@@ -90,13 +90,38 @@ Each is a best-practice change that touches a decision above. The operator answe
 
 ## What the linter refuses today
 
+Every id the two plugins define is below; `docs-catalogue.test.js` fails when one is missing, or
+when a page still calls a defined id "coming".
+
 There is one checkbox and one spinner: `Checkbox` (`components/ui/checkbox`) and `Spinner`
 (`components/loading.tsx`). `design-system/primitives` refuses a native `<input type="checkbox">`
-and a hand-spun `LoaderCircle` outside `components/ui`, `state.tsx`, `loading.tsx` and `icons.tsx`, an import
-of `BarList` anywhere but the Query page's Chart view, and a `Field` of several controls that is not
-a `group` (`field-group`), whose controls would each take its one id. `design-system/tokens` refuses
-`type-scale` (a `text-[Npx]`), `tone-tint`, `radius-bare`, `radius-scale`, `focus-ring` (a
-hand-written focus ring), `row-reveal` (a hand-written hover reveal) and `hardcoded-palette`.
+(`checkbox`) and a hand-spun `LoaderCircle` (`spinner`) outside `components/ui`, `state.tsx`,
+`loading.tsx` and `icons.tsx`, an import of `BarList` anywhere but the Query page's Chart view
+(`bar-list`), and a `Field` of several controls that is not a `group` (`field-group`), whose
+controls would each take its one id.
+
+`design-system/tokens` refuses a value typed by hand where a token exists: `type-scale` (a
+`text-[Npx]`), `tone-tint` (a hand-mixed tint), `radius-bare` (a bare `rounded`), `radius-scale`
+(`rounded-2xl` and up), `radius-arbitrary` (a radius typed by hand), `focus-ring` (a hand-written
+focus ring, or a bare `outline-none`), `row-reveal` (a hand-written hover reveal),
+`hardcoded-palette` (Tailwind's own colours), `ink-opacity` (a text ink faded with `/NN`),
+`colour-var` (a registered colour reached through `var()`), `z-layer` (a z-index typed as a
+number), `media-literal` (a viewport width typed by hand), `container-arbitrary` (a container width
+typed by hand), `animate-pulse-status` (`animate-pulse` on anything but a placeholder) and `vh-unit`
+(a height in `vh`).
+
+`retired-apis/retired` (`eslint-rules/retired-apis.mjs`) refuses a pattern assembled by hand where a
+shared component owns it, and a name kept only so that its callers could move: `fact-dot` (a dot
+drawn as its own item in a line of facts), `host-identity` (the identity header's old name),
+`tab-strip` (a view strip by hand), `toggle-group` (a raw single toggle group), `more-menu` (a
+"more" menu by hand), `clipboard` (the clipboard reached past `lib/clipboard.ts`), `copy-control` (a
+copy control declared beside its caller), `list-skeleton` (a list of cards imitated while it loads),
+`sweep` (a sweep bar by hand), `status-dot` (a status dot by hand), `stat-grid` (a row of tiles
+outside Metrics, the Docker overview and a log lens), `icon-button` (an icon-only button),
+`back-link` (a back link built as a constant) and `route-params` (a route segment decoded by hand).
+Each message names the replacement and its page under `components/`. A file not yet held to an id is
+listed in `eslint.config.mjs` with its reason, and the list only shrinks.
+
 `design-system/latency-words` refuses p50, p95 and p99 in text. `eslint.config.mjs` holds every
 `.tsx` to `jsx-a11y`'s recommended rules and lets only `Modal`, `PaletteModal` and `SidePanel`
 import the raw `Dialog` and `Sheet`.
