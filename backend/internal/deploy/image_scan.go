@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -217,6 +218,9 @@ type ImageScan struct {
 	findings []imagescan.Finding
 	method   BuildMethod
 	reading  int
+	// baseFixable is read from every kept finding, before Summary's lists
+	// are cut at their bound (read).
+	baseFixable []imagescan.Finding
 }
 
 // Vulnerable reports the alert's condition: a fixable finding at or above
@@ -228,15 +232,31 @@ func (scan ImageScan) Vulnerable() bool {
 }
 
 // BaseFixable is the fixable findings at or above the floor that a base
-// carries: what a newer base may fix.
+// carries, worst first: what a newer base may fix. It is every one the scan
+// kept, not only those the panel lists, so a list filled by a development
+// tool's findings cannot clear the alert.
 func (scan ImageScan) BaseFixable() []imagescan.Finding {
-	out := []imagescan.Finding{}
-	for _, finding := range scan.Summary.Fixable {
-		if imagescan.FindingOrigin(finding) == imagescan.OriginBase && imagescan.AtLeast(finding.Severity, scan.Floor) {
-			out = append(out, finding)
-		}
-	}
-	return out
+	return slices.Clone(scan.baseFixable)
+}
+
+// WithFindings is the scan read with these findings at its floor, as the
+// store reads one it kept: for a scan put together outside the store.
+func (scan ImageScan) WithFindings(findings []imagescan.Finding) ImageScan {
+	scan.findings = slices.Clone(findings)
+	sortBySeverity(scan.findings)
+	scan.reading = imageScanReading
+	all := imagescan.Summarize(findings, imagescan.SeverityLow)
+	scan.Summary = imagescan.Summary{Counts: all.Counts, FixableCounts: all.FixableCounts}
+	scan.Origins = nil
+	scan.read(scan.Floor)
+	return scan
+}
+
+// sortBySeverity puts the worst first, keeping the order within a severity.
+func sortBySeverity(findings []imagescan.Finding) {
+	sort.SliceStable(findings, func(i, j int) bool {
+		return imagescan.SeverityRank(findings[i].Severity) > imagescan.SeverityRank(findings[j].Severity)
+	})
 }
 
 // actionOf is what the reader can do about one finding, if anything.
@@ -524,9 +544,7 @@ func (s *OrchestrationStore) FinishImageScan(ctx context.Context, releaseID int6
 		return err
 	}
 	findings := append([]imagescan.Finding(nil), result.Findings...)
-	sort.SliceStable(findings, func(i, j int) bool {
-		return imagescan.SeverityRank(findings[i].Severity) > imagescan.SeverityRank(findings[j].Severity)
-	})
+	sortBySeverity(findings)
 	truncated := len(findings) > maxStoredFindings
 	if truncated {
 		findings = findings[:maxStoredFindings]
@@ -666,12 +684,18 @@ func (scan *ImageScan) read(floor string) {
 			}
 		}
 	}
-	scan.Actionable = imagescan.Counts{}
+	// The verdicts are read here, from every kept finding (worst first, as
+	// they are stored), before the summary cuts its lists: the alert from
+	// baseFixable, the overview's count from Actionable.
+	scan.Actionable, scan.baseFixable = imagescan.Counts{}, []imagescan.Finding{}
 	for i, finding := range scan.findings {
 		finding.Origin = imagescan.FindingOrigin(finding)
 		finding.Action = scan.actionOf(finding)
 		if finding.Action != "" {
 			scan.Actionable.Add(finding.Severity)
+		}
+		if finding.Origin == imagescan.OriginBase && finding.Fixable() && imagescan.AtLeast(finding.Severity, floor) {
+			scan.baseFixable = append(scan.baseFixable, finding)
 		}
 		scan.findings[i] = finding
 	}

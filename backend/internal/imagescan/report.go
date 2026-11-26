@@ -392,7 +392,9 @@ type Summary struct {
 const MaxListed = 200
 
 // Summarize counts findings and lists those at or above floor. An invalid
-// floor is HIGH, the default.
+// floor is HIGH, the default. A list longer than its bound keeps the
+// findings with an Action before the rest: what the reader can do something
+// about is never cut for a development tool's that nobody here can fix.
 func Summarize(findings []Finding, floor string) Summary {
 	if !ValidFloor(floor) {
 		floor = SeverityHigh
@@ -400,6 +402,7 @@ func Summarize(findings []Finding, floor string) Summary {
 	summary := Summary{Fixable: []Finding{}, Unfixed: []Finding{}}
 	sorted := append([]Finding(nil), findings...)
 	sortFindings(sorted)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Action != "" && sorted[j].Action == "" })
 	for _, finding := range sorted {
 		summary.Counts.Add(finding.Severity)
 		if finding.Fixable() {
@@ -418,6 +421,7 @@ func Summarize(findings []Finding, floor string) Summary {
 		}
 		*list = append(*list, finding)
 	}
+	sortFindings(summary.Fixable)
 	return summary
 }
 

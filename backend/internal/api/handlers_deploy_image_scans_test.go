@@ -107,11 +107,11 @@ func TestImageVulnerableIsAHostAlertKindWithNothingToSet(t *testing.T) {
 // flight or failed keeps the subject where it was.
 func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 	scan := func(state string, findings []imagescan.Finding, newer bool) *deploy.ImageScan {
-		return &deploy.ImageScan{
+		read := deploy.ImageScan{
 			ReleaseNumber: 4, State: state, Floor: imagescan.SeverityHigh, NewerBase: newer, Rebuildable: true,
-			Summary:     imagescan.Summarize(findings, imagescan.SeverityHigh),
 			BaseUpdates: []deploy.ReleaseBaseUpdate{{Reference: "node:22-alpine", State: map[bool]string{true: "outdated", false: "current"}[newer]}},
-		}
+		}.WithFindings(findings)
+		return &read
 	}
 	medium := imagescan.Finding{ID: "CVE-9", Package: "x", Installed: "1", Fixed: "2", Severity: imagescan.SeverityMedium}
 	unfixed := imagescan.Finding{ID: "CVE-8", Package: "y", Installed: "1", Severity: imagescan.SeverityCritical}
@@ -218,8 +218,11 @@ func TestTheVulnerabilitiesRoutesReadSaveAndAskForAScan(t *testing.T) {
 	if w.Code != http.StatusOK || json.Unmarshal(w.Body.Bytes(), &reading) != nil {
 		t.Fatalf("read: %d %s", w.Code, w.Body.String())
 	}
-	if reading.Scan == nil || reading.ReleaseID != release || len(reading.Scan.Summary.Fixable) != 1 || !reading.Scan.Vulnerable() {
+	if reading.Scan == nil || reading.ReleaseID != release || len(reading.Scan.Summary.Fixable) != 1 || reading.Scan.Actionable.Critical != 1 {
 		t.Fatalf("scan = %+v", reading.Scan)
+	}
+	if stored, err := s.modules.deployRuns.ImageScan(t.Context(), release); err != nil || !stored.Vulnerable() {
+		t.Fatalf("stored scan = %+v, %v", stored, err)
 	}
 	if len(reading.Releases) != 1 || reading.Releases[0].Fixable != 1 {
 		t.Fatalf("badges = %+v", reading.Releases)

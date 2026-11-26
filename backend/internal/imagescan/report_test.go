@@ -160,6 +160,15 @@ func TestSummariesAreBounded(t *testing.T) {
 	if len(summary.Fixable) != MaxListed || !summary.Truncated || summary.Counts.High != MaxListed+5 {
 		t.Fatalf("listed %d, truncated %v, counted %d", len(summary.Fixable), summary.Truncated, summary.Counts.High)
 	}
+
+	// What the reader can act on is kept when the list is cut, and still
+	// listed in its place, worst first.
+	actionable := Finding{ID: "CVE-1", Package: "zz", Installed: "1", Fixed: "2", Severity: SeverityHigh, Action: "rebuild"}
+	worst := Finding{ID: "CVE-2", Package: "zz", Installed: "1", Fixed: "2", Severity: SeverityCritical}
+	kept := Summarize(append(findings, actionable, worst), SeverityHigh)
+	if len(kept.Fixable) != MaxListed || kept.Fixable[0].ID != "CVE-2" || kept.Fixable[MaxListed-1].ID != "CVE-1" {
+		t.Fatalf("listed %d, first %s, last %s", len(kept.Fixable), kept.Fixable[0].ID, kept.Fixable[MaxListed-1].ID)
+	}
 }
 
 func TestAFindingTheBaseCarriesIsMarkedAsFromTheBase(t *testing.T) {

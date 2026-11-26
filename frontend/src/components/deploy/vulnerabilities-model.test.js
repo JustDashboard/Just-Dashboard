@@ -409,6 +409,7 @@ describe("what the overview says", () => {
       ...quiet,
       newerBase: true,
       summary: { ...quiet.summary, fixable: [zlib, esbuild, next, npmGlob] },
+      actionable: counts({ critical: 1, high: 1 }),
     }
     const actions = scanActions(scan)
     expect(actions.map((action) => action.kind)).toEqual(["rebuild", "upgrade"])
@@ -416,6 +417,29 @@ describe("what the overview says", () => {
     expect(upgradeTitle(actions[1].group)).toBe("Upgrade next to 16.4.7")
     expect(dependencyWords(actions[1].group)).toBe("in package.json")
     expect(overviewLead(scan).title).toBe("2 high or worse to fix in release 1")
+  })
+
+  test("a list filled by a development tool's findings still says what there is to fix", () => {
+    // The server cut the list at 200 criticals from esbuild's Go; the count of
+    // what can be done was read before the cut.
+    const crowded = {
+      ...quiet,
+      newerBase: true,
+      summary: { ...quiet.summary, fixable: Array.from({ length: 200 }, () => esbuild) },
+      actionable: counts({ high: 1 }),
+    }
+    expect(overviewLead(crowded).title).toBe("1 high or worse to fix in release 1")
+    expect(
+      scanVerdict({
+        policy: { enabled: true, severityFloor: "HIGH" },
+        available: true,
+        scan: { ...crowded, finishedAt: "2026-10-29T09:00:00Z" },
+      }),
+    ).toEqual({ tone: "danger", line: "1 to fix" })
+    // A medium the reader can act on is not counted at a high floor.
+    expect(overviewLead({ ...crowded, actionable: counts({ medium: 2 }) }).title).toBe(
+      "Nothing high or worse to fix in release 1",
+    )
   })
 
   test("Go's standard library is the Go a binary was built with", () => {

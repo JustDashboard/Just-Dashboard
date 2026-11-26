@@ -253,31 +253,69 @@ func TestAScanIsReadAtItsEnvironmentsFloorAndAFailedOneKeepsTheLastFindings(t *t
 
 func TestAFixableFindingWithoutANewerBaseIsNotTheAlert(t *testing.T) {
 	t.Parallel()
-	scan := ImageScan{State: ImageScanScanned, Floor: imagescan.SeverityHigh, Summary: imagescan.Summarize([]imagescan.Finding{
-		{ID: "CVE-1", Package: "openssl", Installed: "1", Fixed: "2", Severity: imagescan.SeverityHigh, FromBase: true},
-	}, imagescan.SeverityHigh)}
-	if scan.Vulnerable() {
+	openssl := []imagescan.Finding{{ID: "CVE-1", Package: "openssl", Installed: "1", Fixed: "2", Severity: imagescan.SeverityHigh, FromBase: true}}
+	scan := ImageScan{State: ImageScanScanned, Floor: imagescan.SeverityHigh}
+	if scan.WithFindings(openssl).Vulnerable() {
 		t.Fatal("no newer base: a rebuild would pin the same digest, so there is nothing to tell")
 	}
 	scan.NewerBase = true
-	if !scan.Vulnerable() {
+	if !scan.WithFindings(openssl).Vulnerable() {
 		t.Fatal("a fixable high in the base and a newer base is the alert")
 	}
 	scan.State = ImageScanScanning
-	if scan.Vulnerable() {
+	if scan.WithFindings(openssl).Vulnerable() {
 		t.Fatal("a scan in flight is not a verdict")
 	}
 	// The same finding in what the application or a tool brought is not
 	// the base's to fix, however new the base.
 	scan.State = ImageScanScanned
-	scan.Summary = imagescan.Summarize([]imagescan.Finding{
+	if scan.WithFindings([]imagescan.Finding{
 		{ID: "CVE-1", Package: "stdlib", Installed: "v1.20.7", Fixed: "1.21.11", Severity: imagescan.SeverityCritical,
 			Class: "lang-pkgs", Dependency: imagescan.DependencyDevelopment},
 		{ID: "CVE-2", Package: "next", Installed: "16.4.6", Fixed: "16.4.7", Severity: imagescan.SeverityHigh,
 			Class: "lang-pkgs", Dependency: imagescan.DependencyDirect},
-	}, imagescan.SeverityHigh)
-	if scan.Vulnerable() {
+	}).Vulnerable() {
 		t.Fatal("a newer base was the alert for findings it cannot fix")
+	}
+}
+
+// The verdicts are read from every finding the scan kept, before the
+// panel's list is cut at its bound: a development tool's criticals filling
+// the list do not push out the base's high that a rebuild fixes, so the
+// alert holds and the overview still has it to say.
+func TestADevelopmentToolsFindingsDoNotCrowdOutWhatCanBeFixed(t *testing.T) {
+	t.Parallel()
+	f := newReleaseStoreFixture(t)
+	ctx := context.Background()
+	release := seedScanRelease(t, f, 7, true)
+	findings := []imagescan.Finding{}
+	for index := range imagescan.MaxListed + 20 {
+		findings = append(findings, imagescan.Finding{ID: fmt.Sprintf("CVE-2024-%05d", index), Package: "stdlib",
+			Installed: "v1.20.7", Fixed: "1.21.11", Severity: imagescan.SeverityCritical, Class: "lang-pkgs",
+			Path: "app/node_modules/@esbuild/linux-x64/bin/esbuild", Dependency: imagescan.DependencyDevelopment})
+	}
+	openssl := imagescan.Finding{ID: "CVE-1", Package: "openssl", Installed: "3.0.1", Fixed: "3.0.2",
+		Severity: imagescan.SeverityHigh, Class: "os-pkgs", Target: "alpine 3.22.1", FromBase: true}
+	if err := f.runs.FinishImageScan(ctx, release, ImageScanResult{
+		State: ImageScanScanned, Findings: append(findings, openssl),
+		BaseUpdates: []ReleaseBaseUpdate{{Reference: "node:22-alpine", Pinned: scanNodeBase, Current: scanNodeBaseNow, State: "outdated"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	scan, err := f.runs.ImageScan(ctx, release)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !scan.Vulnerable() || len(scan.BaseFixable()) != 1 || scan.BaseFixable()[0].ID != "CVE-1" {
+		t.Fatalf("vulnerable = %v, base fixable %+v: a full list cleared the alert", scan.Vulnerable(), scan.BaseFixable())
+	}
+	if scan.Actionable != (imagescan.Counts{High: 1}) {
+		t.Fatalf("actionable = %+v", scan.Actionable)
+	}
+	listed := scan.Summary.Fixable
+	if len(listed) != imagescan.MaxListed || !scan.Summary.Truncated || listed[len(listed)-1].ID != "CVE-1" ||
+		listed[len(listed)-1].Action != ImageScanActionRebuild {
+		t.Fatalf("listed %d (truncated %v), last %+v: want the rebuild kept, after the criticals", len(listed), scan.Summary.Truncated, listed[len(listed)-1])
 	}
 }
 

@@ -167,7 +167,11 @@ reading is **due again at once**, its bases read again rather than carried; unti
 `node_modules` in it reads as a development tool's. **A scan that fails keeps the findings of the last one that read the
 image**, so a Docker or a registry that was away for a minute does not read as an image with nothing
 wrong with it. The summary — the fixable findings and the unfixed ones at or above the floor — is
-computed when it is read, so changing the floor needs no rescan.
+computed when it is read, so changing the floor needs no rescan. Each of its lists holds at most 200
+(`imagescan.MaxListed`); a list cut at that bound keeps the findings with an action before the rest, and
+the verdicts are read before the cut, from every finding the row kept: the alert's `BaseFixable` and the
+overview's count, `Actionable`. A development tool's criticals filling the list cannot clear the alert or
+make the overview say there is nothing to fix.
 
 ## The terms
 
@@ -219,7 +223,8 @@ API's description, `docs/api/deploy-openapi.json`.
 
 - The project overview's **Vulnerabilities** panel (`deploy/vulnerabilities.tsx`, its words in
   `vulnerabilities-model.ts`) says **only what can be done**. With something to do: "2 high or worse to
-  fix in release 2" on Trivy's mark, the count in the header, and one row per action (`scanActions`) — a
+  fix in release 2" on Trivy's mark, the count in the header (both from `actionable`, counted before the
+  list was cut), and one row per action (`scanActions`) — a
   rebuild first ("Rebuild on the newer node:22-alpine", what it fixes), then one upgrade per package
   ("Upgrade next to 16.4.7", the version now, and whether package.json names it or what brought it),
   with **Rebuild** in the header. With nothing to do it is one sentence and no verdict in the header:

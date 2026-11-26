@@ -100,6 +100,17 @@ export function actionableFindings(scan: ImageScan) {
   )
 }
 
+/**
+ * How many findings at or above the floor there are to fix. The server counts
+ * them before it cuts the listed findings at their bound, so a list filled by a
+ * development tool's findings never makes this read as nothing.
+ */
+export function toFixCount(scan: ImageScan) {
+  return scan.actionable
+    ? countAtLeast(scan.actionable, scan.floor)
+    : actionableFindings(scan).length
+}
+
 /** "1 critical, 2 high", or nothing: how many of each, every severity. */
 const totalOf = (counts: VulnerabilityCounts | undefined) =>
   counts ? countAtLeast(counts, "LOW") : 0
@@ -138,7 +149,7 @@ function joinAnd(parts: string[]) {
 export function overviewLead(scan: ImageScan) {
   const total = totalOf(scan.summary.counts)
   const release = `release ${scan.releaseNumber}`
-  const toFix = actionableFindings(scan).length
+  const toFix = toFixCount(scan)
   if (toFix > 0)
     return { title: `${toFix} ${floorWords(scan.floor)} to fix in ${release}`, where: "" }
   if (total === 0) return { title: `No known vulnerabilities in ${release}`, where: "" }
@@ -254,7 +265,7 @@ export function scanVerdict(reading: ImageScanReading): { tone: DotTone; line: s
   if (scan.state === "scanning" && !scan.finishedAt) return { tone: "unknown", line: "Scanning" }
   if (scan.state === "failed" && !scan.finishedAt)
     return { tone: "warning", line: "Could not scan" }
-  const toFix = actionableFindings(scan).length
+  const toFix = toFixCount(scan)
   if (toFix > 0) return { tone: "danger", line: `${toFix} to fix` }
   return { tone: "running", line: `Nothing ${floorWords(scan.floor)} to fix` }
 }
