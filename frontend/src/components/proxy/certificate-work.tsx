@@ -20,6 +20,7 @@ import {
   afterReload,
   certbotRunning,
   certSource,
+  certificateUsers,
   renewIfDueLabel,
   replacingTestCertificate,
   runningCertbotJob,
@@ -32,6 +33,7 @@ import {
 import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
 import type {
+  CaddyCertificateDelete,
   CertbotState,
   Certificate,
   DNSProvider,
@@ -70,6 +72,14 @@ export type CertificateWork = {
   certbot: PollState<CertbotState>
   /** certbot is not on this host: nothing here can issue or renew through it. */
   certbotGone: boolean
+  /** The Docker Caddy ingress runs here: it obtains and renews what its routes name. */
+  caddyRenews: boolean
+  /**
+   * Caddy renews and certbot is not here: the operator who deploys every app
+   * behind the ingress. The page says what Caddy does rather than what is
+   * missing, and keeps certbot's views out of the way.
+   */
+  caddyOnly: boolean
   /** A staging directory is configured: nothing issued here is a certificate browsers accept. */
   testAuthority: boolean
   providers: PollState<DNSProvider[]>
@@ -103,6 +113,8 @@ export type CertificateWork = {
   watchedAdded: number
   /** Deletes a certbot lineage or an import, naming the sites that use it first. */
   remove: (source: string, name: string, onDone?: () => void) => void
+  /** Deletes a certificate Caddy holds and no route serves; it asks first. */
+  removeCaddy: (cert: Certificate, onDone?: () => void) => void
   /** Revokes a certbot lineage and deletes it; it asks first. */
   revoke: (name: string, onDone?: () => void) => void
   /** The verbs a certificate has, for its row's menu and its page. */
@@ -201,6 +213,8 @@ export function CertificateWorkProvider({ children }: { children: React.ReactNod
 
   const certbotGone =
     certbot.error instanceof ApiError && certbot.error.code === "certbot_unavailable"
+  const caddyRenews = Boolean(status?.ingressContainer)
+  const caddyOnly = caddyRenews && certbotGone
   // A configured staging directory signs test certificates: nothing issued
   // from here replaces one with a certificate browsers accept.
   const testAuthority = certbot.data?.testAuthority ?? false
@@ -328,6 +342,27 @@ export function CertificateWorkProvider({ children }: { children: React.ReactNod
     })
   }
 
+  // What Caddy holds for a name no route serves. The server reads the routes
+  // again before it removes anything, and keeps one a route serves by then.
+  const removeCaddy = (cert: Certificate, onDone?: () => void) =>
+    confirm({
+      title: `Delete ${cert.name}`,
+      confirmLabel: "Delete",
+      description: (
+        <p>
+          Caddy no longer has this certificate. Nothing is revoked, and if a route asks for{" "}
+          {cert.domains.length === 1 ? "the name" : "one of its names"} later, Caddy orders a new
+          one.
+        </p>
+      ),
+      action: async () => {
+        await del<CaddyCertificateDelete>("/certificates/caddy", { body: { path: cert.path } })
+        notify.success(`Deleted ${cert.name}`)
+        certs.refresh()
+        onDone?.()
+      },
+    })
+
   const busy = certbotRunning(lockJob)
   // Only certbot's own file is replaced in place; a copy a site names
   // elsewhere keeps its test certificate whatever certbot does.
@@ -454,8 +489,25 @@ export function CertificateWorkProvider({ children }: { children: React.ReactNod
         run: () => void copyText(cert.path, "Path copied"),
       })
     }
-    // Only certbot's lineages and the imports are this host's to delete: a
-    // file a site names elsewhere is the site's, and Caddy renews its own.
+    // What Caddy holds can go once no route serves it: a deployment's route
+    // outlives nothing now, but its certificate stayed in Caddy's storage
+    // with no way to remove it. One a route serves keeps the verb, held, with
+    // who serves it as the reason, rather than a menu that says nothing.
+    if (admin && from === "caddy" && !cert.error) {
+      const users = certificateUsers(cert)
+      verbs.push({
+        key: "delete",
+        label: "Delete",
+        icon: Trash,
+        danger: true,
+        disabled: users.length > 0,
+        reason:
+          users.length > 0 ? `Served by ${users.map((user) => user.label).join(", ")}` : undefined,
+        run: () => removeCaddy(cert, options?.onDeleted),
+      })
+    }
+    // certbot's lineages and the imports are this host's to delete too; a
+    // file a site names elsewhere is the site's.
     if (admin && (from === "imported" || (from === "certbot" && !certbotGone))) {
       verbs.push({
         key: "delete",
@@ -485,6 +537,8 @@ export function CertificateWorkProvider({ children }: { children: React.ReactNod
     certs,
     certbot,
     certbotGone,
+    caddyRenews,
+    caddyOnly,
     testAuthority,
     providers,
     requests,
@@ -506,6 +560,7 @@ export function CertificateWorkProvider({ children }: { children: React.ReactNod
     confirm,
     watchedAdded,
     remove,
+    removeCaddy,
     revoke,
     verbsFor,
     replacing,

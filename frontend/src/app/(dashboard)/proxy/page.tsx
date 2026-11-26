@@ -6,6 +6,7 @@ import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Bell, Globe } from "@/components/icons"
 import { ApiError, errorMessage, get, post } from "@/lib/api"
+import { certUnused } from "@/lib/certificates"
 import { ago, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
@@ -291,8 +292,13 @@ export default function ProxyOverviewPage() {
   const disabled = hosts.filter(isParked).length
   // The ports page's own split, so the figure clicked through is on that page.
   const reach = useMemo(() => tallyReach(foldDualStack(listeners ?? [])), [listeners])
+  // Only what something serves: an expired certificate nothing names breaks
+  // nothing, and the Certificates page counts it as unused, not as refused.
   const badCerts = useMemo(
-    () => (certificates ?? []).filter((c) => c.expired || c.expiring || c.error || c.staging),
+    () =>
+      (certificates ?? []).filter(
+        (c) => (c.expired || c.expiring || c.error || c.staging) && !certUnused(c),
+      ),
     [certificates],
   )
   // The proxy drawn as what it does, and each route's far end as the thing

@@ -10,7 +10,26 @@ Traffic show observed inventories and records. Certificates keeps its views in t
 (`?tab=`: certificates, renewal, DNS challenge, ACME accounts, local CA, signing requests, watched
 domains), and a certificate is a page of its own, `/proxy/certificates/<name>` with `?path=` where
 two share a name (`certificate-page.tsx`, its rail and picture; the shared console, forms and verbs
-in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there. Alerts (`/proxy/alerts`, administrators) is its own
+in `certificate-work.tsx`, the certificates layout); the sheet's old `?cert=<file>` lands there.
+A certificate's row says who serves it in words (`UsedBy`, from the API's `usedByLabels` through
+`certificateUsers`): a deployment's route as its project and environment, linking to the project, a
+route nothing deploys as "leftover route", linking to its page under Sites, and "Unused" as a status
+for one nothing serves. That column stays from `md` up; the date gives way below `xl`. Beside the
+source chips are Unused and Expired, drawn where a certificate is in that state. The header counts
+only what something serves as refused or expiring (`countCertificates`, `lib/certificates.ts`): an
+expired certificate nothing names is "N unused", which narrows the list to them. A certificate Caddy
+holds has Delete behind its menu once no route serves it (`DELETE /certificates/caddy`), and the verb
+held with "Served by <project>" as its reason while one does. Under the list, "Delete unused"
+(`certificate-cleanup.tsx`) is a checklist of every unused certbot, imported and Caddy certificate
+with its source, the expired ones and Caddy's ticked; "N leftover certificate copies · Remove"
+(`caddy-evidence.tsx`) clears the copies deployments left.
+Where the Docker Caddy ingress runs and certbot is not installed (`caddyOnly` in the work context,
+from `/proxy/status`'s `ingressContainer` and certbot's `certbot_unavailable`), the header says
+"renewed by Caddy" rather than "no certbot", the ACME accounts view is not drawn and Signing requests
+only while one waits, Renewal puts Install certbot second, for an nginx site or a wildcard, and an
+empty list's next step is "Add a domain to a project" (`/deploy`). Wherever the ingress runs,
+certbot or not, Renewal opens on the certificates Caddy renews (`CaddyRenewals`), so its place does
+not wait on certbot's read. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are the alerts kit,
 `components/alerts/kit.tsx`, `kinds.ts` and `alert-parts.tsx`, shared with `/metrics/alerts`); the overview's line says what

@@ -348,7 +348,7 @@ test("the certificates page offers to turn the renewal timer on", async ({ page 
     .getByRole("list", { name: "Installed certificates" })
     .locator("[data-slot='choice-row']")
   const row = installed.filter({ hasText: "old.example.com" })
-  await expect(row.getByText("Used by nothing")).toBeVisible()
+  await expect(row.getByText("Unused", { exact: true })).toBeVisible()
   await expect(row.locator("img[src='/logos/lets-encrypt.svg']")).toHaveCount(1)
   // And the expired one is first, saying so.
   await expect(installed.first()).toContainText("old.example.com")

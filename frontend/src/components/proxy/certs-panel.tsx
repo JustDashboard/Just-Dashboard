@@ -7,17 +7,25 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 import { Fact } from "@/components/fact-line"
 import { CloudUpload, FileText, RefreshClockwise, ShieldCheck, ShieldOff } from "@/components/icons"
 import { get, post } from "@/lib/api"
-import { renewalReading } from "@/lib/certificates"
-import { plural } from "@/lib/format"
+import {
+  certificateWords,
+  certificateTone,
+  certificateUsers,
+  countCertificates,
+  renewalDue,
+  renewalReading,
+} from "@/lib/certificates"
+import { calendarDate, plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import type { Certificate, CertificateCoverage, Job } from "@/lib/types"
+import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { usePoll } from "@/hooks/use-poll"
 import { RecentJobs } from "@/components/job-console"
 import { IdentityHeader } from "@/components/identity-header"
 import { Page, PageContext } from "@/components/page"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductLogos } from "@/components/product-logo"
+import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { EmptyState, ErrorState } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { Status, StatusDot } from "@/components/status-dot"
@@ -42,13 +50,15 @@ import {
 } from "@/components/proxy/certbot-panel"
 import { CertTransparency } from "@/components/proxy/cert-transparency"
 import { CaddyEvidencePrune } from "@/components/proxy/caddy-evidence"
-import { ExpiredCleanup } from "@/components/proxy/certificate-cleanup"
+import { UnusedCleanup } from "@/components/proxy/certificate-cleanup"
 import { CertificateCoveragePanel } from "@/components/proxy/certificate-coverage"
 import {
   CertificateInventory,
+  UsedBy,
   useCertificateFilters,
 } from "@/components/proxy/certificate-inventory"
 import {
+  certificateHref,
   certificatesHref,
   pageTab,
   sheetRedirect,
@@ -102,7 +112,7 @@ export function CertificatesPage() {
   const params = useSearchParams()
   const work = useCertificateWork()
   const { status, refresh: refreshStatus } = useProxy()
-  const { admin, hasNginx, certs, certbot, certbotGone } = work
+  const { admin, hasNginx, certs, certbot, certbotGone, caddyOnly } = work
 
   // The sheet's address, from the overview, the TLS report, the server map:
   // the certificate is a page now.
@@ -145,14 +155,21 @@ export function CertificatesPage() {
   const filters = useCertificateFilters()
 
   // The views an account has are known from the account alone, so the strip
-  // is the same while the reads are out as after.
+  // is the same while the reads are out as after. The one exception is a
+  // server where Caddy renews and certbot is absent: certbot's accounts have
+  // nothing to show there and a signing request is for a certificate Caddy
+  // would not serve, so those two go unless one has content. The DNS
+  // challenge view stays: the tunnel's Cloudflare token is saved on it.
+  const requested = work.requests.data?.length ?? 0
   const views: { key: PageTab; label: string; count?: number }[] = [
     { key: "certificates", label: "Certificates", count: certs.data?.length },
     { key: "renewal", label: "Renewal" },
     ...(admin ? [{ key: "dns" as const, label: "DNS challenge" }] : []),
-    ...(admin ? [{ key: "accounts" as const, label: "ACME accounts" }] : []),
+    ...(admin && !caddyOnly ? [{ key: "accounts" as const, label: "ACME accounts" }] : []),
     { key: "authority", label: "Local CA" },
-    { key: "requests", label: "Signing requests", count: work.requests.data?.length },
+    ...(!caddyOnly || requested > 0
+      ? [{ key: "requests" as const, label: "Signing requests", count: requested || undefined }]
+      : []),
     { key: "watched", label: "Watched domains" },
   ]
   const shown = views.some((view) => view.key === tab) ? tab : "certificates"
@@ -203,22 +220,35 @@ export function CertificatesPage() {
               <EmptyState
                 icon={ShieldOff}
                 title="No certificates on this server"
-                description="Issue one, import a pair, or point a site at one, and it is listed here."
+                description={
+                  // Where Caddy renews, a certificate comes from a project's
+                  // domain, not from anything issued here.
+                  caddyOnly
+                    ? "Caddy orders one for each domain a project serves."
+                    : "Issue one, import a pair, or point a site at one, and it is listed here."
+                }
                 action={
-                  admin && (
-                    <IssueCommand
-                      onLetsEncrypt={work.issue ? () => work.issue?.() : undefined}
-                      onPrivate={(kind) => work.issuePrivate?.(kind)}
-                      onRequest={() => work.requestSigning?.()}
-                    />
+                  caddyOnly ? (
+                    <Button size="sm" asChild>
+                      <Link href="/deploy">Add a domain to a project</Link>
+                    </Button>
+                  ) : (
+                    admin && (
+                      <IssueCommand
+                        onLetsEncrypt={work.issue ? () => work.issue?.() : undefined}
+                        onPrivate={(kind) => work.issuePrivate?.(kind)}
+                        onRequest={() => work.requestSigning?.()}
+                      />
+                    )
                   )
                 }
               />
             )}
             {admin && certs.data && (
-              <ExpiredCleanup
+              <UnusedCleanup
                 certs={certs.data}
                 certbotBusy={work.certbotBusy}
+                certbotGone={certbotGone}
                 onJob={work.attach}
                 onDeleted={certs.refresh}
               />
@@ -337,8 +367,9 @@ export function CertificatesPage() {
  */
 function CertificatesIdentity() {
   const work = useCertificateWork()
-  const { admin, certs, certbot, certbotGone } = work
+  const { admin, certs, certbot, certbotGone, caddyOnly } = work
   const list = certs.data
+  const filters = useCertificateFilters()
   const counts = useMemo(() => countCertificates(list ?? []), [list])
   const renewal = renewalReading(certbot.data, certbotGone)
   const marks = useMemo(() => {
@@ -380,7 +411,9 @@ function CertificatesIdentity() {
       <ExpiringWords counts={counts} />
     </span>
   ) : counts.all > 0 ? (
-    <Status verdict="ok" label="all valid" />
+    // An expired certificate nothing serves is in the list under this line,
+    // so "all" is said only of what is served while one is there.
+    <Status verdict="ok" label={counts.unusedRefused > 0 ? "all in use valid" : "all valid"} />
   ) : (
     <Status tone="stopped" label="None yet" />
   )
@@ -414,10 +447,32 @@ function CertificatesIdentity() {
                 certbot
                 {certbot.data.version ? ` ${certbot.data.version.replace(/^certbot\s*/i, "")}` : ""}
               </Fact>
+            ) : caddyOnly ? (
+              // Something does renew them here. "no certbot" read as nothing
+              // renewing anything, on a server where Caddy renews every one.
+              <Fact product="caddy" className="max-sm:hidden">
+                renewed by Caddy
+              </Fact>
             ) : certbotGone ? (
               <Fact className="max-sm:hidden">no certbot</Fact>
             ) : null}
             <Fact className="numeric">{plural(counts.all, "certificate")}</Fact>
+            {counts.unused > 0 && (
+              <Fact className="numeric max-sm:hidden">
+                {/* Narrows the list to them, from whichever view is open. */}
+                <Link
+                  href={certificatesHref()}
+                  data-slot="unused-fact"
+                  onClick={() => {
+                    filters.setSource("all")
+                    filters.setState("unused")
+                  }}
+                  className="rounded-sm focus-ring transition-colors hover:text-foreground hover:underline"
+                >
+                  {counts.unused} unused
+                </Link>
+              </Fact>
+            )}
             {counts.expiring > 0 && counts.refused > 0 && (
               <Fact>
                 <ExpiringWords counts={counts} />
@@ -469,30 +524,6 @@ function ExpiringWords({ counts }: { counts: ReturnType<typeof countCertificates
   )
 }
 
-/** The line's figures, read over every certificate rather than what a filter leaves. */
-function countCertificates(all: Certificate[]) {
-  // A test certificate is refused like an expired one, and counted there
-  // rather than as expiring: its days say nothing about when it stops working.
-  const readable = all.filter((c) => !c.error)
-  const expiring = readable.filter((c) => c.expiring && !c.expired && !c.staging)
-  const expired = readable.filter((c) => c.expired && !c.staging).length
-  const test = readable.filter((c) => c.staging).length
-  const unreadable = all.length - readable.length
-  return {
-    all: all.length,
-    expiring: expiring.length,
-    soonest: Math.min(...expiring.map((c) => c.daysLeft)),
-    refused: expired + test + unreadable,
-    refusedWhy: [
-      expired > 0 && `${expired} expired`,
-      test > 0 && plural(test, "test certificate"),
-      unreadable > 0 && `${unreadable} unreadable`,
-    ]
-      .filter(Boolean)
-      .join(" · "),
-  }
-}
-
 /**
  * The list's shape before it has been read: the toolbar, the chips and rows
  * of a certificate row's own height, so the list lands where these stand.
@@ -527,7 +558,7 @@ function InventoryLoading() {
  */
 function RenewalView({ onShowLog }: { onShowLog: () => void }) {
   const work = useCertificateWork()
-  const { admin, hasNginx, certbot, certbotGone, certbotBusy, lockJob } = work
+  const { admin, hasNginx, certbot, certbotGone, certbotBusy, lockJob, caddyOnly } = work
   const [starting, setStarting] = useState(false)
   // The timer's own service, started now: systemd records the run, so the
   // renewal reading changes with it.
@@ -544,9 +575,14 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
   const lineages = certbot.data?.certs ?? []
   return (
     <>
+      {/* What Caddy renews leads wherever the ingress runs, and certbot is
+          the second thing: wanted for an nginx site or a wildcard. Its place
+          does not wait on whether certbot is here, so nothing moves when
+          that read lands. */}
+      {work.caddyRenews && <CaddyRenewals />}
       <Panel plain aria-label="Renewal schedule" className={COLUMN}>
         <PanelHeader
-          title="Schedule"
+          title={caddyOnly ? "certbot" : "Schedule"}
           actions={
             admin &&
             lineages.length > 0 && (
@@ -572,7 +608,7 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
             <RenewalNotice state={certbot.data} admin={admin} onChanged={certbot.refresh} />
           )}
           {certbotGone ? (
-            <CertbotMissing onInstall={admin ? work.attach : undefined} />
+            <CertbotMissing onInstall={admin ? work.attach : undefined} beside={caddyOnly} />
           ) : certbot.loading && !certbot.data ? (
             <LoadingRows rows={3} />
           ) : certbot.error && !certbot.data ? (
@@ -633,6 +669,89 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
           page: the timer's runs are the ones nobody was watching. */}
       {!certbotGone && <RenewalLog certbot={certbot.data} />}
     </>
+  )
+}
+
+/**
+ * What the Docker Caddy ingress renews by itself: each certificate it holds,
+ * who serves it and when it runs out. There is no schedule to show and no
+ * verb to press, which is the point of saying so: the Renewal view of a
+ * server that deploys behind Caddy opened on "certbot is not installed", as
+ * if nothing renewed anything.
+ */
+function CaddyRenewals() {
+  const { certs } = useCertificateWork()
+  const held = (certs.data ?? [])
+    .filter((cert) => cert.source === "caddy" && !cert.error)
+    .sort((a, b) => a.daysLeft - b.daysLeft || a.name.localeCompare(b.name))
+  return (
+    <Panel plain aria-label="Certificates Caddy renews" className={COLUMN}>
+      <PanelHeader
+        title="Renewed by Caddy"
+        actions={
+          <span className="text-hint text-muted-foreground" data-slot="caddy-renewal-rule">
+            about 30 days before expiry
+          </span>
+        }
+      />
+      <PanelBody flush className="pt-3">
+        {!certs.data ? (
+          <LoadingRows rows={2} />
+        ) : held.length === 0 ? (
+          <EmptyState
+            icon={ShieldCheck}
+            title="Caddy holds no certificate yet"
+            action={
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/deploy">Add a domain to a project</Link>
+              </Button>
+            }
+          />
+        ) : (
+          <ChoiceList aria-label="Certificates Caddy renews">
+            {held.map((cert) => (
+              <CaddyRenewalRow
+                key={cert.path}
+                cert={cert}
+                href={certificateHref(cert, certs.data)}
+              />
+            ))}
+          </ChoiceList>
+        )}
+      </PanelBody>
+    </Panel>
+  )
+}
+
+function CaddyRenewalRow({ cert, href }: { cert: Certificate; href: string }) {
+  const due = renewalDue(cert)
+  const users = certificateUsers(cert)
+  return (
+    <ChoiceRow
+      href={href}
+      verb={`Open ${cert.name}`}
+      leading={<ProductLogo id="caddy" size="sm" fallback={ShieldCheck} />}
+      title={cert.name}
+      description={
+        // A certificate no route serves is not renewed: Caddy keeps only
+        // what its routes name.
+        users.length > 0 ? `renews about ${calendarDate(due.toISOString())}` : "no route serves it"
+      }
+      trailing={
+        <span className="flex shrink-0 items-center gap-4 text-hint text-muted-foreground">
+          <UsedBy cert={cert} className="w-40 max-md:hidden" />
+          <span className="numeric w-24 max-sm:hidden">
+            {cert.notAfter ? calendarDate(cert.notAfter) : "—"}
+          </span>
+          <span className="flex w-28 justify-end text-body max-sm:w-auto">
+            <Status
+              verdict={certificateTone(cert)}
+              label={certificateWords(cert, { form: "short" })}
+            />
+          </span>
+        </span>
+      }
+    />
   )
 }
 

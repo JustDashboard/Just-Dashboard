@@ -32,6 +32,7 @@ import { MoreTile, WireMarks } from "@/components/wire/wire-marks"
 import { useMotionHeld } from "@/components/wire/use-motion-held"
 import { Segments } from "@/components/segments"
 import { useNow } from "@/hooks/use-now"
+import { certificatesHref } from "@/components/proxy/certificate-paths"
 import { EmptyMark, OverviewEmpty } from "@/components/proxy/overview-empty"
 import {
   cnameTarget,
@@ -865,7 +866,9 @@ function CreateForm({
         title="Creating a tunnel takes a Cloudflare API token"
         action={
           <Button asChild size="sm" variant="outline">
-            <Link href="/proxy/certificates">Open Certificates</Link>
+            {/* The token is saved on the DNS challenge view: the list of
+                certificates the bare address opens has nowhere to put one. */}
+            <Link href={certificatesHref("dns")}>Open Certificates</Link>
           </Button>
         }
       >

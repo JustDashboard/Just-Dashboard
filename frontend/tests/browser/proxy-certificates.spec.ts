@@ -371,10 +371,13 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
 
   // Refused like an expired one, and not counted as expiring.
   const identity = page.locator("[data-slot='host-identity']")
-  await expect(identity.getByText("2 refused", { exact: true })).toHaveAttribute(
+  // The fixture's expired import is served by nothing, so it is unused and
+  // not one of these.
+  await expect(identity.getByText("1 refused", { exact: true })).toHaveAttribute(
     "title",
-    "1 expired · 1 test certificate",
+    "1 test certificate",
   )
+  await expect(identity).toContainText("1 unused")
   await expect(identity.getByText(/expiring in/)).toHaveText("1 expiring in 29 days")
 
   const inventory = page
@@ -677,7 +680,9 @@ test("a test certificate's row fits a phone with its verb", async ({ page }) => 
       () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
     ),
   ).toBe(true)
-  await certRow(page, "test.example.com").getByRole("link").click()
+  await certRow(page, "test.example.com")
+    .getByRole("link", { name: /^Open / })
+    .click()
   // The command is the identity line's, not the back-link row's.
   const command = page
     .locator("[data-slot='host-identity']")
