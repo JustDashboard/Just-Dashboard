@@ -2085,6 +2085,42 @@ test("the arrows slide the diagram that has the keyboard, and move a chosen tabl
   expect(await place()).toEqual({ x: before.x + 40, y: before.y + 8 })
 })
 
+test("a single pointer moves a table from the inspector, one press at a time", async ({ page }) => {
+  // WCAG 2.5.7 is more than the keys of 2.1.1: what a drag does, a click or a
+  // tap does too, with no drag and no keyboard, as on the server map.
+  const { sent } = await mockSchema(page, { graphs: GRAPHS })
+  await page.goto("/databases/1/diagram?schema=public")
+  await expect(tableNode(page, "public.orders")).toBeVisible()
+  await diagramStill(page)
+  const id = "public.customers"
+  const place = () =>
+    tableNode(page, id).evaluate((el) => {
+      const m = new DOMMatrix(getComputedStyle(el).transform)
+      return { x: Math.round(m.e), y: Math.round(m.f) }
+    })
+  await tableNode(page, id).click({ position: { x: 24, y: 12 } })
+  const inspector = page.getByRole("complementary", { name: "Diagram inspector" })
+  const moves = inspector.getByRole("group", { name: "Move customers" })
+  await expect(moves).toBeVisible()
+  const before = await place()
+  const camera = await diagramView(page)
+
+  // Each press is the arrows' longer step, kept as a drag keeps it, and the
+  // camera stays where it was.
+  await moves.getByRole("button", { name: "Move customers right" }).click()
+  await moves.getByRole("button", { name: "Move customers down" }).click()
+  await expect.poll(place).toEqual({ x: before.x + 40, y: before.y + 40 })
+  expect(await diagramView(page)).toEqual(camera)
+  await expect
+    .poll(() => {
+      const put = sent.layouts.filter((l) => l.method === "PUT").at(-1)?.body as
+        { positions?: Record<string, { x: number; y: number }> } | undefined
+      const at = put?.positions?.[id]
+      return at && { x: Math.round(at.x), y: Math.round(at.y) }
+    })
+    .toEqual({ x: before.x + 40, y: before.y + 40 })
+})
+
 test("on a phone the inspector takes none of the canvas until it is asked for", async ({
   page,
 }) => {

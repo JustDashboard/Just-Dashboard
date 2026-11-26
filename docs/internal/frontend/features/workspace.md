@@ -68,7 +68,10 @@ a head bar: back, Excalidraw's mark, the name edited in place and the save state
 and its words, then Add server item as the one command (Reload in its place while another tab's
 change stops saving) and a menu holding Save now, Reload and Delete drawing; a failed save offers
 Try again beside its words. The page names Excalidraw's menu trigger and takes the footer role off
-its zoom strip (`board-menus.tsx`); the library offers no prop for either. A drawing that is not there, or an address that is no drawing's, is an
+its zoom strip (`board-menus.tsx`); the library offers no prop for either. While something is
+selected and the drawing can be edited, four Move buttons in Excalidraw's foot carry it a step a press,
+for a pointer that cannot drag (`MoveBar`, made of Excalidraw's own arrows so bound text and arrows
+follow). A drawing that is not there, or an address that is no drawing's, is an
 empty state with Excalidraw's mark and Back to drawings. The editor embeds
 Excalidraw and autosaves to server SQLite with a revision guard, or by merging once it has joined
 the drawing's live room, where everyone with it open sees the others' changes, pointers and names as

@@ -210,7 +210,9 @@ a bar at the foot — Tables, Rows and Details on Data, where a row is a card an
 Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
 row limit and the head's menu Format and Save. A schema's and a table's figures are one line of
 facts, a table's Statistics are sentences, and the Diagram is zoomed and fitted from the maps' bar
-at the foot of its canvas (no minimap).
+at the foot of its canvas (no minimap). A table the Diagram's inspector reads moves by the four Move
+buttons in its foot as well as by a drag or the arrows, for a pointer that cannot drag (`MoveBar`;
+not on a phone, nor while the layout is locked).
 
 Backups' dumps are one line each in a framed table (a card of two lines on a phone): when, the
 file's name with its tag and note, what it holds, its size, and Download, Restore and Delete. The

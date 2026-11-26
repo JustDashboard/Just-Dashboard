@@ -8,7 +8,8 @@ between them, the page's keys and place, the terminal, the editor and the canvas
 `useWorkspaceFocus` (`components/workspace/`); `XtermPane` (`xterm-pane.tsx`); `CodeEditor`
 (`code-editor.tsx`); `CANVAS_MOVE`, `zoomKey`, `zoomAbout`, `useCanvasPinch` (`canvas-move.ts`);
 `useIsPhone`, `useMediaQuery` (`hooks/use-mobile.ts`); `WorkbenchHeader` (`workbench-header.tsx`);
-`CanvasZoom` (`canvas-zoom.tsx`) and `useFullscreen` (`hooks/use-fullscreen.ts`). The page frame
+`CanvasZoom` (`canvas-zoom.tsx`), `MoveBar` (`move-bar.tsx`) and `useFullscreen`
+(`hooks/use-fullscreen.ts`). The page frame
 is `Page fill="workspace"` (`components/page.tsx`), with no inset at any width: the working surface
 runs to the sheet's edges and draws no border of its own, since the sheet is its frame
 ([`../foundations/surfaces.md`](../foundations/surfaces.md)). `WORKBENCH_WAITING` is its loading
@@ -133,6 +134,18 @@ wheel zooms, Space held makes any drag a slide, and nothing on it changes size b
 `<ReactFlow>` spreads `CANVAS_MOVE` and calls `useCanvasPinch`; `canvas-move.test.js` fails for one
 that does neither. Arrow keys slide the map, the ER diagram and the boards, and move what Enter picked (T10; the
 row in [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md)).
+
+Keys are not a single pointer (WCAG 2.5.7). Where a canvas lets something be moved, `MoveBar` moves
+it by presses alone: four buttons, named for what they carry ("Move customers left"), each press the
+keys' longer step (`MOVE_STEP.large`), kept as a drag is. It stands where the canvas already shows
+the selection: the maps have it in the inspector's foot for the chosen box or the system it reads, a
+database's Diagram there for the focused table, and a drawing in Excalidraw's own foot while
+something is selected. A drawing's press is made of
+Excalidraw's own arrows (`nudgeSelection` in `boards/board-workspace.tsx`), the one move of its that
+carries a shape's text, a frame's contents and the arrows bound to it, none of which it exports. It is
+left out on a phone and where nothing may move (a locked layout, a drawing that can only be read).
+Specs: `server-map.spec.ts`, *a single pointer moves a box and a system*; `database-schema.spec.ts`,
+*a single pointer moves a table*; `boards-ui.spec.ts`, *a single pointer moves a selection*.
 
 ## Related
 

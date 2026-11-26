@@ -2,10 +2,6 @@
 
 import Link from "next/link"
 import {
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
   ArrowUpRight,
   ChevronRight,
   Copy,
@@ -16,6 +12,7 @@ import {
 } from "@/components/icons"
 import { IconAction, rowReveal } from "@/components/icon-action"
 import { Keycaps } from "@/components/keycaps"
+import { MoveBar } from "@/components/move-bar"
 import { ARROW_CAPS, type Direction } from "@/components/map/canvas-keys"
 import { Status } from "@/components/status-dot"
 import { PaneSection } from "@/components/panel"
@@ -126,7 +123,10 @@ export function MapInspector({
         )}
       </div>
 
-      {onMove && moving && <MoveBar name={moving} onMove={onMove} />}
+      {/* In the foot, so it stays put while the inspector above it scrolls. */}
+      {onMove && moving && (
+        <MoveBar name={moving} onMove={onMove} className="border-t border-hairline px-4 py-2" />
+      )}
 
       {/* The canvas's keys. A key means nothing under a finger, so a touch
           screen is not shown them. */}
@@ -146,46 +146,6 @@ export function MapInspector({
         <Key cap="Shift">Longer step</Key>
       </div>
     </aside>
-  )
-}
-
-const MOVES: { direction: Direction; word: string; Glyph: typeof ArrowLeft }[] = [
-  { direction: { x: -1, y: 0 }, word: "left", Glyph: ArrowLeft },
-  { direction: { x: 0, y: -1 }, word: "up", Glyph: ArrowUp },
-  { direction: { x: 0, y: 1 }, word: "down", Glyph: ArrowDown },
-  { direction: { x: 1, y: 0 }, word: "right", Glyph: ArrowRight },
-]
-
-/**
- * Moving what is shown with one press at a time, for a pointer that cannot
- * drag (WCAG 2.5.7): the arrows' keys answer a keyboard (2.1.1), and these
- * answer a single click or tap. Each press is the keys' longer step
- * (`MOVE_STEP.large`), kept as a drag is. In the foot, so it stays put while
- * the inspector above it scrolls.
- */
-function MoveBar({ name, onMove }: { name: string; onMove: (direction: Direction) => void }) {
-  return (
-    <div
-      role="group"
-      aria-label={`Move ${name}`}
-      data-slot="map-move"
-      className="flex shrink-0 items-center gap-1 border-t border-hairline px-4 py-2"
-    >
-      <span aria-hidden className="mr-auto text-hint text-muted-foreground">
-        Move
-      </span>
-      {MOVES.map(({ direction, word, Glyph }) => (
-        <IconAction
-          key={word}
-          label={`Move ${name} ${word}`}
-          variant="outline"
-          size="icon-sm"
-          onClick={() => onMove(direction)}
-        >
-          <Glyph />
-        </IconAction>
-      ))}
-    </div>
   )
 }
 

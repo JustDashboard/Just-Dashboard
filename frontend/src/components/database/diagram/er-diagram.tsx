@@ -53,7 +53,7 @@ import { useAuth } from "@/hooks/use-auth"
 import { useFullscreen } from "@/hooks/use-fullscreen"
 import { usePoll } from "@/hooks/use-poll"
 import { CANVAS_MOVE, useCanvasPinch, zoomKey } from "@/components/canvas-move"
-import { arrowOf, moved, panned } from "@/components/map/canvas-keys"
+import { arrowOf, moved, panned, type Direction } from "@/components/map/canvas-keys"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Segments } from "@/components/segments"
 import { FormFact } from "@/components/form"
@@ -758,6 +758,17 @@ function Canvas({
     else if (e.key === "h" && focus) hide([focus])
   }
 
+  // One step of the tables given, onto the grid where it snaps, kept as a
+  // drag keeps them. The arrows come here, and so do the inspector's Move
+  // buttons, the way to place a table with a single pointer and no drag
+  // (WCAG 2.5.7).
+  const moveTables = (tables: Node[], direction: Direction, shift: boolean) => {
+    const grid = doc.snap ? GRID : undefined
+    const next = new Map(tables.map((n) => [n.id, moved(n.position, direction, shift, { grid })]))
+    setNodes((ns) => ns.map((n) => (next.has(n.id) ? { ...n, position: next.get(n.id)! } : n)))
+    update((d) => ({ ...d, positions: { ...snapshotPositions(), ...Object.fromEntries(next) } }))
+  }
+
   // The arrows, while the keyboard is on the canvas (T10). Heard before React
   // Flow's own, which moves a selection 5px and keeps nothing: here the
   // chosen tables — the selection, else the focused table — move by a step,
@@ -775,12 +786,7 @@ function Canvas({
     const picked = all.filter((n) => n.selected)
     const chosen = picked.length > 0 ? picked : all.filter((n) => n.id === focus)
     if (!doc.locked && chosen.length > 0) {
-      const grid = doc.snap ? GRID : undefined
-      const next = new Map(
-        chosen.map((n) => [n.id, moved(n.position, direction, e.shiftKey, { grid })]),
-      )
-      setNodes((ns) => ns.map((n) => (next.has(n.id) ? { ...n, position: next.get(n.id)! } : n)))
-      update((d) => ({ ...d, positions: { ...snapshotPositions(), ...Object.fromEntries(next) } }))
+      moveTables(chosen, direction, e.shiftKey)
       return
     }
     const view = panned(
@@ -1264,6 +1270,16 @@ function Canvas({
             onQuery={openQuery}
             hrefOutside={(tableSchema, table) => href("schema", tableParams(tableSchema, table))}
             onClose={toggleInspector}
+            // What it shows is what its Move buttons carry: the focused table,
+            // the keys' longer step a press.
+            onMove={
+              wide && !doc.locked && focused
+                ? (direction) => {
+                    const table = flow.getNode(focused.id)
+                    if (table) moveTables([table], direction, true)
+                  }
+                : undefined
+            }
           />
         )}
       </div>

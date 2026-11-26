@@ -600,7 +600,7 @@ test("a single pointer moves a box and a system from the inspector, one press at
   // frame, with everything in it.
   const was = await at(page, `frame:${s}`)
   await frame(page, s).locator(".map-frame-grip").click()
-  const group = inspector(page).locator("[data-slot=map-move]")
+  const group = inspector(page).locator("[data-slot=move-bar]")
   await expect(group).toHaveCount(1)
   await expect(inspector(page).getByRole("heading", { name: "prom-data" })).toHaveCount(0)
   await group.getByRole("button", { name: / left$/ }).click()
