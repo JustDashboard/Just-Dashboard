@@ -114,7 +114,7 @@ func TestPreflightTreatsAWildcardOnTheCaddyIngressAsOnNginx(t *testing.T) {
 		t.Fatalf("an uncovered wildcard on the Caddy ingress: asked %v, observed %#v", asked, domain)
 	}
 	findings = preflightFindings(draft, configuration, observation, false)
-	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates")
+	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates?tab=dns")
 	if automatic := findingByCode(findings, "certificate_automatic"); automatic == nil || !strings.Contains(automatic.Measured, "DNS challenge through Cloudflare") {
 		t.Fatalf("automatic finding = %#v", automatic)
 	}
@@ -157,7 +157,7 @@ func TestPreflightAsksHowAWildcardWouldBeProved(t *testing.T) {
 		Domains: domains[:1], Checks: []PlannedCheck{}, Variables: []PlannedVariable{}, Dependencies: []PlannedDependency{},
 	}
 	findings := preflightFindings(draft, configuration, observation, false)
-	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates")
+	assertC6Finding(t, findings, "certificate_automatic", PreflightPass, "/proxy/certificates?tab=dns")
 	if automatic := findingByCode(findings, "certificate_automatic"); automatic == nil || !strings.Contains(automatic.Measured, "DNS challenge through Cloudflare") {
 		t.Fatalf("automatic finding = %#v", automatic)
 	}
@@ -173,7 +173,7 @@ func TestPreflightAsksHowAWildcardWouldBeProved(t *testing.T) {
 		t.Fatalf("%#v, %v", observation.Domains, err)
 	}
 	findings = preflightFindings(draft, configuration, observation, false)
-	assertC6Finding(t, findings, "certificate_wildcard_unavailable", PreflightBlocked, "/proxy/certificates")
+	assertC6Finding(t, findings, "certificate_wildcard_unavailable", PreflightBlocked, "/proxy/certificates?tab=dns")
 	if blocked := findingByCode(findings, "certificate_wildcard_unavailable"); blocked == nil || blocked.Action != refusal.Error() {
 		t.Fatalf("blocked finding = %#v", blocked)
 	}

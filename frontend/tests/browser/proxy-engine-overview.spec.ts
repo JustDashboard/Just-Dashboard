@@ -890,11 +890,11 @@ test("the routes lead with what needs attention and say how many there are", asy
   // The list was the first eight by name and never said there were more.
   await expect(page.getByText("Showing 8 of 10", { exact: true })).toBeVisible()
   await expect(cards.first()).toContainText("zz-plain.example.com")
-  // A Caddyfile site and a Docker ingress route were both "Caddy route".
+  // A Caddyfile site and an ingress route are told apart, and neither names
+  // the engine, which is the mark in the tile's corner.
   await expect(cards.filter({ hasText: "blog.example.com" })).toContainText("Caddyfile")
-  await expect(cards.filter({ hasText: "just-dashboard-shop" })).toContainText(
-    "Docker Caddy ingress",
-  )
+  await expect(cards.filter({ hasText: "shop.example.com" })).toContainText("Caddy route")
+  await expect(routes.getByText("Docker Caddy ingress")).toHaveCount(0)
 
   // Each route leads to its own page, including a Docker ingress route.
   await expect(routes.getByRole("link", { name: "Open alpha.example.com" })).toHaveAttribute(
@@ -915,7 +915,8 @@ test("the routes lead with what needs attention and say how many there are", asy
     .evaluate((element) => element.scrollWidth > element.clientWidth + 1)
   expect(overflow).toBe(false)
 
-  await routes.getByRole("link", { name: "Open just-dashboard-shop" }).click()
+  // The row is titled by its domain; its address keeps the file.
+  await routes.getByRole("link", { name: "Open shop.example.com" }).click()
   await expect(page).toHaveURL(/\/proxy\/sites\/just-dashboard-shop$/)
 })
 

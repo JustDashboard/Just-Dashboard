@@ -116,6 +116,10 @@ func TestArchivePreservesResourcesAndRemovalPlanNamesOnlyManagedTargets(t *testi
 		volume.ConfirmationPhrase != "" || !volume.Data {
 		t.Fatalf("removal target semantics route=%#v volume=%#v", route, volume)
 	}
+	// The route's link opens that route's page, not the list it is one row of.
+	if route.DeepLink != "/proxy/sites/"+route.ResourceID || route.ResourceID == "" {
+		t.Fatalf("route deep link = %q for %q", route.DeepLink, route.ResourceID)
+	}
 	remover := &managedRemovalFake{}
 	execution, err := fixture.plans.RemoveManaged(ctx, projectID, "operator", RemoveManagedRequest{
 		PlanDigest: plan.Digest, TargetIDs: []string{route.ID},

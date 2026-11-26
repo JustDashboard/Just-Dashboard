@@ -325,6 +325,88 @@ test.describe("uploads in pieces", () => {
     expect(mock.listReads).toBeGreaterThan(0)
   })
 
+  test("Pause then Resume at once, while a request is held, leaves one worker sending", async ({
+    page,
+  }) => {
+    test.setTimeout(150_000)
+    await mockFiles(page, [entry("notes.txt")])
+    const size = 40 * MiB
+    // Pieces the server stored: a second worker would store some twice.
+    const stored: number[] = []
+    let next = 0
+    let starts = 0
+    let completes = 0
+    let releaseStart: (() => void) | undefined
+    let releasePiece: (() => void) | undefined
+    let pieceHeld = false
+    await page.route("**/api/v1/files/pieces**", async (route) => {
+      const request = route.request()
+      const url = new URL(request.url())
+      const session = () => ({
+        id: "abc",
+        path: `${home}/disk.img`,
+        dir: home,
+        name: "disk.img",
+        size,
+        key: "k",
+        overwrite: false,
+        received: next,
+        next,
+        created: now,
+        updated: now,
+      })
+      if (request.method() === "POST" && url.pathname.endsWith("/complete")) {
+        completes++
+        return json(route, session())
+      }
+      if (request.method() === "POST") {
+        starts++
+        // The first answer about the session is held: the worker that asked
+        // is still waiting on it when Pause and Resume are pressed.
+        if (starts === 1) await new Promise<void>((resolve) => (releaseStart = resolve))
+        return json(route, session())
+      }
+      if (request.method() === "GET" && url.pathname.endsWith("/abc")) return json(route, session())
+      if (request.method() === "GET") return json(route, [])
+      if (request.method() === "PUT") {
+        const offset = Number(url.searchParams.get("offset"))
+        if (offset === 16 * MiB && !pieceHeld) {
+          // Pause cuts this one off in the browser; it is answered later.
+          pieceHeld = true
+          await new Promise<void>((resolve) => (releasePiece = resolve))
+          return route.abort("aborted").catch(() => undefined)
+        }
+        stored.push(offset)
+        next = offset + (request.postDataBuffer()?.length ?? 0)
+        return json(route, { ...session(), received: next, next })
+      }
+      return json(route, {})
+    })
+    await openFiles(page)
+    await chooseBigFile(page, "disk.img", size)
+
+    const row = page.locator("[data-transfer='disk.img']")
+    await expect.poll(() => starts, { timeout: 30_000 }).toBe(1)
+    await row.getByRole("button", { name: "Pause" }).click()
+    await row.getByRole("button", { name: "Resume" }).click()
+    // The resumed upload waits for the paused worker rather than starting a
+    // second one beside it.
+    await expect(row).toHaveAttribute("data-status", "queued")
+    expect(starts).toBe(1)
+    releaseStart?.()
+
+    // Held again, this time on a piece in flight.
+    await expect.poll(() => pieceHeld, { timeout: 60_000 }).toBe(true)
+    await row.getByRole("button", { name: "Pause" }).click()
+    await row.getByRole("button", { name: "Resume" }).click()
+    releasePiece?.()
+
+    await expect.poll(() => completes, { timeout: 60_000 }).toBe(1)
+    await expect(row).toHaveAttribute("data-status", "done")
+    expect(stored).toEqual([0, 8 * MiB, 16 * MiB, 24 * MiB, 32 * MiB])
+    expect(completes).toBe(1)
+  })
+
   test("a reloaded page shows what the server still holds, and cancels it", async ({ page }) => {
     const mock = await mockFiles(page, [entry("notes.txt")])
     mock.uploads = [

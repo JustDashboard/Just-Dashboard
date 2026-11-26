@@ -3,7 +3,13 @@
 import Link from "next/link"
 import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { ShieldCheck, ShieldOff, Warning } from "@/components/icons"
-import { certState, certificateTone, expiredAgo } from "@/lib/certificates"
+import {
+  certState,
+  certUnused,
+  certificateTone,
+  certificateUsers,
+  expiredAgo,
+} from "@/lib/certificates"
 import { calendarDate } from "@/lib/format"
 import type { Certificate } from "@/lib/types"
 import { DetailPage, siblingSteps, useDetailTab, type Step } from "@/components/detail-page"
@@ -32,11 +38,7 @@ import {
   useCertificateDetail,
 } from "@/components/proxy/cert-detail"
 import { CertbotBusy } from "@/components/proxy/certbot-panel"
-import {
-  originWord,
-  usedByWord,
-  useCertificateFilters,
-} from "@/components/proxy/certificate-inventory"
+import { originWord, UsedBy, useCertificateFilters } from "@/components/proxy/certificate-inventory"
 import {
   CERTIFICATE_TABS,
   certificateHref,
@@ -50,8 +52,6 @@ import { CertificateRun, useCertificateWork } from "@/components/proxy/certifica
 import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { PrivateTrustNote } from "@/components/proxy/local-ca-panel"
 import { certificateProduct } from "@/components/proxy/marks"
-import { sitePath } from "@/components/proxy/site-verbs"
-import { streamHref } from "@/components/proxy/stream-facts"
 import { decodeSegment } from "@/lib/route-params"
 import { cn } from "@/lib/utils"
 
@@ -351,7 +351,11 @@ function CertificateIdentity({
           </Fact>
           <Fact>{cert.source === "caddy" ? "renewed by Caddy" : originWord(cert)}</Fact>
           {!urgent && expiry}
-          <Fact>{usedByWord(cert)}</Fact>
+          {/* A word here, not the list's dot and word: the line is one
+              line of text, and its state is said at its end. */}
+          <Fact>
+            {certUnused(cert) ? "unused" : <UsedBy cert={cert} className="inline-flex" />}
+          </Fact>
         </>
       }
     />
@@ -390,14 +394,7 @@ function CertificateOverview({
   vhosts?: Parameters<typeof CertificatePicture>[0]["vhosts"]
   replace?: Verb
 }) {
-  const users = [
-    ...cert.usedBy.map((site) => ({ key: `site:${site}`, href: sitePath(site), label: site })),
-    ...(cert.usedByStreams ?? []).map((stream) => ({
-      key: `stream:${stream}`,
-      href: streamHref(stream),
-      label: `stream ${stream}`,
-    })),
-  ]
+  const users = certificateUsers(cert)
   return (
     <>
       {cert.error && (
@@ -464,8 +461,10 @@ function CertificateOverview({
                   </Link>
                 ))}
               </span>
+            ) : cert.error ? (
+              "—"
             ) : (
-              "nothing"
+              "Unused"
             )}
           </Detail>
           <Detail label={cert.source === "caddy" ? "File in the Caddy container" : "File"}>

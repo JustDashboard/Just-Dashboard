@@ -34,6 +34,10 @@ type Certificate struct {
 	// apart from UsedBy because a stream is not a site: the page links each
 	// to its own list.
 	UsedByStreams []string `json:"usedByStreams"`
+	// UsedByLabels says each of UsedBy in words, with where it opens. The
+	// API fills it from the deployment store: a route's file name
+	// (just-dashboard-env-12.conf) names nothing the operator knows.
+	UsedByLabels []CertificateUser `json:"usedByLabels,omitempty"`
 	// Fingerprint is the SHA-256 of the DER and Serial the serial number,
 	// both in the uppercase colon form `openssl x509 -fingerprint` prints,
 	// so one can be compared by eye with what a browser or a CA shows.
@@ -50,6 +54,20 @@ type Certificate struct {
 	// what deployments were activated with, folded under the certificate
 	// Caddy renews rather than listed as imports of their own.
 	Evidence []CertificateEvidence `json:"evidence,omitempty"`
+}
+
+// CertificateUser is one site or route that serves a certificate, as the
+// page says it.
+type CertificateUser struct {
+	// Site is the entry of UsedBy this describes.
+	Site string `json:"site"`
+	// Label is the project and environment for a deployment's route,
+	// "leftover route" for one whose deployment is gone, and otherwise the
+	// site's own name.
+	Label string `json:"label"`
+	Href  string `json:"href"`
+	// Leftover is a deployment route nothing deploys any more.
+	Leftover bool `json:"leftover,omitempty"`
 }
 
 // expiryWarningDays matches Let's Encrypt's own renewal window: certbot

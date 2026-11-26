@@ -196,7 +196,28 @@ function ConfigurationPage() {
     return (
       <Page rise>
         {header}
-        {status.caddy ? (
+        {status.ingressContainer ? (
+          // Asked before `caddy`, which the backend also sets for a running
+          // ingress: that Caddy has no Caddyfile on this server to open.
+          <MissingThing
+            size="block"
+            thing="caddy"
+            icon={FileText}
+            title="Deployments write the Caddy ingress's routes"
+            step={
+              <Button asChild size="sm" variant="outline">
+                <Link href="/proxy/sites">Sites</Link>
+              </Button>
+            }
+            more={
+              <Button asChild size="sm" variant="outline">
+                <Link href="/deploy">Deployments</Link>
+              </Button>
+            }
+          >
+            This page reads nginx&apos;s directory, and this server has none.
+          </MissingThing>
+        ) : status.caddy ? (
           // nginx's directory is the thing this page reads, and it is not
           // there: the section's absence screen, not an empty block (PRX-04).
           <MissingThing
@@ -212,7 +233,7 @@ function ConfigurationPage() {
           >
             Its one Caddyfile opens from Sites; this page reads nginx&apos;s directory.
           </MissingThing>
-        ) : status.ingressContainer || status.ingressState ? (
+        ) : status.ingressState ? (
           <MissingThing
             size="block"
             thing="docker"

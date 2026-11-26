@@ -68,10 +68,26 @@ describe("the routes the overview draws", () => {
     expect(overviewRoutes([])).toEqual({ shown: [], total: 0 })
   })
 
-  test("a Caddyfile site and a Docker ingress route are told apart", () => {
+  test("a Caddyfile site and an ingress route are told apart, without naming the engine", () => {
     expect(routeKind(vhost({}))).toBe("nginx site")
     expect(routeKind(caddyfile)).toBe("Caddyfile")
-    expect(routeKind(ingress)).toBe("Docker Caddy ingress")
+    expect(routeKind(ingress)).toBe("Caddy route")
+  })
+
+  // The Overview said "Docker Caddy ingress" for a route the Sites list
+  // called "Managed by shop · production": one route, two descriptions.
+  test("a deployment's route is its project and environment, as on Sites", () => {
+    const route = vhost({
+      ...ingress,
+      name: "just-dashboard-env-7.conf",
+      owner: { projectId: 3, environmentId: 7, project: "shop", environment: "production" },
+    })
+    expect(routeKind(route)).toBe("shop · production")
+    expect(routeKind({ ...route, owner: undefined })).toBe("Leftover · its deployment was deleted")
+    expect(routeTarget(route)).toEqual({
+      href: "/proxy/sites/just-dashboard-env-7.conf",
+      verb: "Open shop.example.com",
+    })
   })
 })
 
@@ -82,15 +98,16 @@ describe("what pressing a route does", () => {
   test("every route opens the site's own page, for every reader", () => {
     expect(routeTarget(vhost({ name: "a b" }))).toEqual({
       href: "/proxy/sites/a%20b",
-      verb: "Open a b",
+      verb: "Open app.example.com",
     })
     expect(routeTarget(caddyfile)).toEqual({
       href: "/proxy/sites/blog.example.com",
       verb: "Open blog.example.com",
     })
+    // The address keeps the file; the verb names the domain the row is titled with.
     expect(routeTarget(ingress)).toEqual({
       href: "/proxy/sites/just-dashboard-shop",
-      verb: "Open just-dashboard-shop",
+      verb: "Open shop.example.com",
     })
   })
 })

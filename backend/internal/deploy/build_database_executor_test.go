@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 
@@ -85,13 +86,20 @@ func (f *fakeBuildNetworks) NetworksForBuild(_ context.Context, _ int64, values 
 	return []string{"jd-e1-db-test"}, nil
 }
 
+// fakeDatabaseContents answers for every database at once, or for each by
+// connection and database ("9/app") where rows names it.
 type fakeDatabaseContents struct {
 	hasRows bool
-	asked   []int64
+	rows    map[string]bool
+	asked   []string
 }
 
-func (f *fakeDatabaseContents) DatabaseHasRows(_ context.Context, id int64) (bool, error) {
-	f.asked = append(f.asked, id)
+func (f *fakeDatabaseContents) DatabaseHasRows(_ context.Context, id int64, database string) (bool, error) {
+	key := fmt.Sprintf("%d/%s", id, database)
+	f.asked = append(f.asked, key)
+	if present, ok := f.rows[key]; ok {
+		return present, nil
+	}
 	return f.hasRows, nil
 }
 
@@ -148,7 +156,12 @@ type databaseBuildOptions struct {
 	candidate map[string]any
 	// environmentID is the environment's id, 0 for the next one.
 	environmentID int64
+	// variables replace the fixture's own: DATABASE_URL at value, build and
+	// runtime scoped, beside two runtime values.
+	variables []databaseBuildVariable
 }
+
+type databaseBuildVariable struct{ key, scopes, sensitivity, value string }
 
 func databaseBuildRun(t *testing.T, options databaseBuildOptions) (*NormalizedStepExecutor, StepExecution, *StoredExecutionPlan) {
 	t.Helper()
@@ -165,11 +178,15 @@ func databaseBuildRun(t *testing.T, options databaseBuildOptions) (*NormalizedSt
 		fixture.envID, string(buildJSON), string(buildJSON), digestBytes(buildJSON), fixture.now.Unix()); err != nil {
 		t.Fatal(err)
 	}
-	for _, variable := range []struct{ key, scopes, sensitivity, value string }{
-		{"DATABASE_URL", "runtime,build", "secret", value},
-		{"ADMIN_PASSWORD", "runtime", "secret", "admin-password-value"},
-		{"SITE_URL", "runtime", "plain", "https://shop.example"},
-	} {
+	variables := options.variables
+	if variables == nil {
+		variables = []databaseBuildVariable{
+			{"DATABASE_URL", "runtime,build", "secret", value},
+			{"ADMIN_PASSWORD", "runtime", "secret", "admin-password-value"},
+			{"SITE_URL", "runtime", "plain", "https://shop.example"},
+		}
+	}
+	for _, variable := range variables {
 		sealed, err := fixture.variables.sealer.Seal(variable.value)
 		if err != nil {
 			t.Fatal(err)
@@ -303,7 +320,7 @@ func TestBuildReachesItsDatabaseAppliesTheSchemaAndSeedsANewDatabase(t *testing.
 			t.Fatalf("step secrets = %v", names)
 		}
 	}
-	if len(contents.asked) != 1 || contents.asked[0] != 8 {
+	if len(contents.asked) != 1 || contents.asked[0] != "8/app" {
 		t.Fatalf("rows asked of %v", contents.asked)
 	}
 	var evidence builtStepEvidence
@@ -415,6 +432,144 @@ func TestBuildNeverSeedsADatabaseThatHoldsRows(t *testing.T) {
 	}
 	if transcript := stepTranscript(t, execution); !strings.Contains(transcript, "a seed only ever runs on a new one") {
 		t.Fatalf("transcript:\n%s", transcript)
+	}
+}
+
+// The seed runs with the application's runtime values, not the build's: it
+// runs only when every database those name is one the build reads and whose
+// rows were counted, whatever the variables are called. A build that reads a
+// new database never seeds another one the runtime points at, a hosted one,
+// another database on the same server, a preview's branch, or nothing it
+// could count.
+func TestTheSeedRunsOnlyAgainstTheDatabaseWhoseRowsWereCounted(t *testing.T) {
+	t.Parallel()
+	build := databaseBuildVariable{"DATABASE_URL", "build", "secret", "postgres://app:hunter2@db-8.jd.internal:5432/app"}
+	admin := databaseBuildVariable{"ADMIN_PASSWORD", "runtime", "secret", "admin-password-value"}
+	for _, test := range []struct {
+		name    string
+		runtime []databaseBuildVariable
+		// seeded says the seed runs; otherwise reason is why not.
+		seeded bool
+		reason string
+		asked  string
+	}{
+		{
+			name:    "the runtime reads the same database through its pooler",
+			runtime: []databaseBuildVariable{{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-8-pool.jd.internal:6432/app"}},
+			seeded:  true, asked: "8/app",
+		},
+		{
+			// A cache is not where a seed's rows go, linked from this server
+			// or hosted elsewhere.
+			name: "the runtime also reads a cache linked from this server",
+			runtime: []databaseBuildVariable{
+				{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-8.jd.internal:5432/app"},
+				{"REDIS_URL", "runtime", "secret", "redis://default:hunter2@db-9.jd.internal:6379/0"},
+			},
+			seeded: true, asked: "8/app",
+		},
+		{
+			name:    "the runtime reads another linked database that holds rows",
+			runtime: []databaseBuildVariable{{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-9.jd.internal:5432/app"}},
+			reason:  "where POSTGRES_URL names a database other than the one the build reads",
+		},
+		{
+			name:    "the runtime reads a hosted database",
+			runtime: []databaseBuildVariable{{"POSTGRES_URL", "runtime", "secret", "postgresql://app:hunter2@ep-cool.neon.tech/app?sslmode=require"}},
+			reason:  "where POSTGRES_URL names a database other than the one the build reads",
+		},
+		{
+			name: "the runtime reads another database on the same server, and a hosted one",
+			runtime: []databaseBuildVariable{
+				{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-8.jd.internal:5432/app_shadow"},
+				{"MONGODB_URI", "runtime", "secret", "mongodb+srv://app:hunter2@cluster0.example.mongodb.net/app"},
+			},
+			reason: "where MONGODB_URI and POSTGRES_URL name databases other than the ones the build reads",
+		},
+		{
+			name:    "the runtime reads a preview's branch",
+			runtime: []databaseBuildVariable{{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-8-branch.jd.internal:5432/app"}},
+			reason:  "where POSTGRES_URL names a database other than the one the build reads",
+		},
+		{
+			name:    "the runtime names the server without a database",
+			runtime: []databaseBuildVariable{{"ConnectionStrings__Default", "runtime", "secret", "Host=db-8.jd.internal;Database=other;Username=app;Password=hunter2"}},
+			reason:  "where ConnectionStrings__Default names a database other than the one the build reads",
+		},
+		{
+			name:   "the runtime names no database at all",
+			reason: "which name no database of this server's whose rows could be counted",
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			backend := &databaseBuildBackend{attempts: []scriptedAttempt{emptyParamsAttempt}}
+			executor, execution, plan := databaseBuildRun(t, databaseBuildOptions{
+				backend: backend, build: databaseBuildPlan(),
+				variables: append([]databaseBuildVariable{build, admin}, test.runtime...),
+			})
+			contents := &fakeDatabaseContents{rows: map[string]bool{"9/app": true}}
+			executor.buildNetworks, executor.databases = &fakeBuildNetworks{}, contents
+			result := executor.buildArtifact(context.Background(), execution, plan)
+			transcript := stepTranscript(t, execution)
+			if !test.seeded {
+				if result.State != StepFailed || result.ErrorCode != "build_static_params_empty" || len(backend.steps) != 0 || backend.buildCalls != 1 {
+					t.Fatalf("result = %+v, steps %d, builds %d\n%s", result, len(backend.steps), backend.buildCalls, transcript)
+				}
+				if !strings.Contains(transcript, "The seed was not run before the build: the seed runs with the application's runtime values, "+test.reason) {
+					t.Fatalf("transcript lacks %q:\n%s", test.reason, transcript)
+				}
+				// Nothing is counted for a seed that cannot be judged.
+				if len(contents.asked) != 0 {
+					t.Fatalf("rows asked of %v", contents.asked)
+				}
+				if strings.Contains(transcript, "hunter2") || strings.Contains(transcript, "neon.tech") || strings.Contains(transcript, "mongodb.net") {
+					t.Fatalf("a value reached the transcript:\n%s", transcript)
+				}
+				return
+			}
+			if result.State != StepPassed || len(backend.steps) != 1 || backend.buildCalls != 2 {
+				t.Fatalf("result = %+v, steps %d, builds %d\n%s", result, len(backend.steps), backend.buildCalls, transcript)
+			}
+			if strings.Join(contents.asked, ",") != test.asked {
+				t.Fatalf("rows asked of %v", contents.asked)
+			}
+			// The step is handed the runtime values that were judged, and
+			// not the build-only one.
+			names := []string{}
+			for _, secret := range backend.steps[0].Secrets {
+				names = append(names, secret.ID)
+			}
+			if !slices.Contains(names, "POSTGRES_URL") || slices.Contains(names, "DATABASE_URL") {
+				t.Fatalf("seed secrets = %v", names)
+			}
+		})
+	}
+}
+
+func TestDatabaseTargetsNameEachDatabaseAValueReaches(t *testing.T) {
+	t.Parallel()
+	targets := databaseTargets(map[string]string{
+		"DATABASE_URL": "postgres://app:secret@db-8.jd.internal:5432/app",
+		"POOLED_URL":   "postgres://app:secret@DB-8-pool.jd.internal:6432/app?pgbouncer=true",
+		"JDBC_URL":     "jdbc:postgresql://db-8.jd.internal:5432/app_cache?user=app",
+		"BRANCH_URL":   "postgres://app:secret@db-8-branch.jd.internal:5432/app",
+		"HOSTED_URL":   "postgresql+asyncpg://app:secret@ep-cool.neon.tech/app",
+		"ADO":          "Host=db-8.jd.internal;Database=app",
+		"REDIS_URL":    "redis://cache.example:6379",
+		"VALKEY_URL":   "valkeys://default:secret@db-9.jd.internal:6379/0",
+		"EVENTS_URL":   "clickhouse://default:secret@db-10.jd.internal:9000/events",
+		"METRICS_URL":  "http://default:secret@db-11.jd.internal:8123/metrics",
+		"SITE_URL":     "https://shop.example",
+		"PORT":         "3000",
+	})
+	got := []string{}
+	for _, target := range targets {
+		got = append(got, fmt.Sprintf("%s=%d/%s", target.variable, target.connectionID, target.database))
+	}
+	want := "ADO=0/,BRANCH_URL=0/app,DATABASE_URL=8/app,EVENTS_URL=10/events,HOSTED_URL=0/,JDBC_URL=8/app_cache,METRICS_URL=11/metrics,POOLED_URL=8/app"
+	if strings.Join(got, ",") != want {
+		t.Fatalf("targets = %v\nwant      %s", got, want)
 	}
 }
 

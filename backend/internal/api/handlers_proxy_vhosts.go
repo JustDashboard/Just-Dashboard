@@ -176,6 +176,15 @@ func (s *Server) markDeploymentRoutes(ctx context.Context, hosts []proxysvc.VHos
 	return rows.Err()
 }
 
+// deploymentRouteOwners hands markDeploymentRoutes to the deploy package, so
+// preflight and a release tell a leftover route from a live one exactly as
+// the Sites list does.
+type deploymentRouteOwners struct{ s *Server }
+
+func (o deploymentRouteOwners) MarkDeploymentRoutes(ctx context.Context, hosts []proxysvc.VHost) error {
+	return o.s.markDeploymentRoutes(ctx, hosts)
+}
+
 // handleDeploymentRouteRetire removes a route its deployment no longer writes.
 func (s *Server) handleDeploymentRouteRetire(w http.ResponseWriter, r *http.Request) error {
 	name := httpx.URLParam(r, "name")

@@ -1527,8 +1527,25 @@
   audited as `certificates.delete` / `certificates.imported.delete`, and answer 409 `in_use`, the
   message naming the sites, while an enabled nginx site's `ssl_certificate` resolves inside the
   lineage or import — unless `force`, which the page sends only after its dialog has named those
-  sites. Host-Caddy `tls` file references are not detected. The page's "Delete expired and unused"
-  checklist offers expired certbot/imported certificates whose `UsedBy` is empty and never forces.
+  sites. Host-Caddy `tls` file references are not detected, and neither is a Docker Caddy route that
+  serves a copy of a lineage or import (`docker_caddy_copies.go`): `UsedBy` is nginx's sites only.
+  **A certificate the Docker ingress holds** is deleted by `DELETE /certificates/caddy {path}`
+  (`docker_caddy_cert_delete.go`, `DeleteCaddyCertificate`; system.admin, destructive with an ordinary
+  confirmation, audited as `certificates.caddy.delete` with the path and the release copies removed and
+  kept). `path` is the inventory's, and must be exactly
+  `/data/caddy/certificates/<issuer>/<name>/<file>.crt`, each part a plain directory name
+  (`caddyCertificateDir`; anything else is 400 before the ingress is asked anything). Under the lock an
+  activation writes its route under, the certificates and the routes are read again (`edge.vhosts`): a
+  path Caddy does not hold is 404, a route whose name the certificate covers, wildcards included, is 409
+  `in_use` naming the project (or "the leftover route <file>"), and a Caddy or route list that cannot be
+  read is 503 `caddy_unreadable` with nothing removed. Then only that one directory is removed
+  (`rm -rf -- <dir>` as a fixed script's argument). The release copies for the certificate's names go
+  with it through `PruneCertificateEvidence`, so one a release still names is kept and reported in
+  `keptCopies`. Nothing is revoked; Caddy orders a new certificate if a route names the domain again.
+  The page's "Delete unused" checklist offers every certbot, imported and Caddy certificate whose
+  `UsedBy` and `UsedByStreams` are empty, expired or not, never forces, and ticks only Caddy's: a
+  lineage or import no nginx site names, expired or not, may still be what a Caddy route's copy is
+  refreshed from.
 - **Where an issuance or a renewal failed, and whose it is to fix** (`issue_diagnosis.go`).
   `DiagnoseIssuance` reads a certbot run's output — the authority's per-domain report (`Domain:`,
   `Type:`, `Detail:`), or for a run that failed before or beside validation its meaningful lines, never
@@ -1670,12 +1687,17 @@
   from `archived_name`, as the deploy store reads it, since its `name` column holds an
   `__jd_archived_<id>_<hex>` tombstone — with `archived` when either is archived; a name whose
   environment no longer exists has none. The Sites page leads such a route to its deployment in place
-  of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
-  keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
+  of Edit, Disable, Duplicate and Delete, says under its title `<project> · <environment>`, says why it
+  is not removed there with a link to the deployment's Domains settings
+  (`/deploy/<projectId>/settings/domains`), opens it read-only (its card and a `?site=` link alike; a
+  route with no host file opens its page), and keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
   those verbs on a route, since deployments call proxysvc directly and an administrator may override.
-  A deployment route nothing deploys any more — no owner (its project deleted) or an archived one — and
-  that Delete does not apply to (every Docker Caddy route, which has no host file) has **Remove route**,
-  on its card and its page: `DELETE /proxy/vhosts/{name}/deployment-route` (system.admin, destructive,
+  A deployment route nothing deploys any more — no owner (its project deleted) or an archived one — is a
+  **leftover**: its row and its page are titled by its domain, read `leftover` in place of `serving`, lead
+  the list after broken links, and are counted by a notice over the list whose **Remove all** calls the
+  endpoint below once per route, in turn, and reports the failures with the server's reason. One
+  that Delete does not apply to (every Docker Caddy route, which has no host file) has **Remove route**
+  in its row's menu and its page's, and a plain Remove button on its page: `DELETE /proxy/vhosts/{name}/deployment-route` (system.admin, destructive,
   audited as `proxy.deployment_route.remove`) accepts only a name `deploy.RouteNameFor` spells, answers
   409 `deployment_active` while an unarchived environment still owns it, and runs
   `proxysvc.RetireDeploymentRoute`: `RemoveDeploymentRoute`'s snapshot/restore removal, then on the
@@ -1740,8 +1762,15 @@
   finding apiece; their names are refused to an operator's import. On a Docker Caddy host it lists
   what Caddy serves instead, read from `/data/caddy/certificates` in one `docker exec` (a fixed `sh -c`
   script, the directory its argument): source `caddy`, named by domain, `usedBy` the Caddy routes whose
-  names it covers, `expiring` always false (Caddy renews a third of the term early; expired stays true),
-  and each release copy for its domain folded under it as `evidence`. When Caddy cannot be read the list
+  names it covers, `expiring` true only once its renewal is overdue (`caddyRenewalOverdue`: Caddy renews
+  when a third of the term is left, so the flag turns a day into that window, a quarter of the window on
+  a short term, and a renewal that keeps failing shows amber before the certificate expires rather than
+  staying green until it does), and each release copy for its domain folded under it as `evidence`.
+  `handleCertList` adds `usedByLabels` (`labelCertificateUsers`, through `markDeploymentRoutes`): one
+  `{site, label, href, leftover}` per entry of `usedBy`, a deployment's route as
+  "<project> · <environment>" opening `/deploy/<projectId>`, a route whose environment is gone or
+  archived as "leftover route" opening its page under Sites, and any other site under its own name
+  (`docker-caddy:<container>:<host>` as the host). `usedBy` itself is unchanged. When Caddy cannot be read the list
   carries one unreadable `caddy` entry saying why rather than silently listing none.
   `GET /certificates/evidence` (system.admin) lists the copies no Caddy route serves and no release names
   (`OrchestrationStore.ReleasedHostnames`, every hostname in any release's runtime snapshot, retired ones
@@ -2485,7 +2514,14 @@
   rules are read and edited on their own page, `/proxy/alerts` (`components/proxy/alerts-page.tsx`,
   with the parts that do not know its kinds in the alerts kit (`components/alerts/kit.tsx`,
   `kinds.ts`, `alert-parts.tsx`), which the host's Alerts page shares), and the overview's identity bar links there with the firing count from the same
-  `GET /proxy/alerts`.
+  `GET /proxy/alerts`. The view also carries `absent`, the kinds that judge nothing on this server
+  (`proxyAlertKindsAbsent` over `proxyAlertHost`): `engine_down` where `Engine()` finds no systemd unit
+  (the Docker Caddy ingress is a container), `upstream_down`, `served_drift` and `site_errors` without
+  nginx (each reads nginx's configuration or logs and nothing else), `renewal_failed` without certbot,
+  and the two expiry kinds where there is no nginx and `ListCertificates` finds no file (the ingress
+  renews its own inside its container, where no rule looks). The watched-endpoint kinds dial out and are
+  never absent. A rule of an absent kind may still be stored; the page draws it as "not on this server"
+  instead of counting it as watching (`TestProxyAlertKindsAbsentNamesWhatAnIngressOnlyServerCannotJudge`).
   `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
   source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional
   readings; `TestProxyAlertsCheckCurrentPinnedWatchEndpoints` and

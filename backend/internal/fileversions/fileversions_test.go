@@ -229,6 +229,39 @@ func TestHistoryFollowsAMoveAndAVersionBelongsToItsPath(t *testing.T) {
 	}
 }
 
+func TestForgetDropsAHeldHistoryAndItsContentsOnly(t *testing.T) {
+	ctx := context.Background()
+	k, _ := newKeeper(t, DefaultLimits)
+	for _, p := range []string{"/srv/site/a.conf", "/srv/site/sub/b.conf", "/srv/other.conf"} {
+		if err := k.Record(ctx, save(p, "old "+p, "new "+p)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Held aside under a key that is not a path, folder and all.
+	if err := k.Move(ctx, "/srv/site", "trash:abc"); err != nil {
+		t.Fatal(err)
+	}
+	held, err := k.PathsWithPrefix(ctx, "trash:")
+	if err != nil || strings.Join(held, ",") != "trash:abc/a.conf,trash:abc/sub/b.conf" {
+		t.Fatalf("held: %q (%v)", held, err)
+	}
+	if err := k.Forget(ctx, "trash:abc"); err != nil {
+		t.Fatal(err)
+	}
+	if held, _ := k.PathsWithPrefix(ctx, "trash:"); len(held) != 0 {
+		t.Fatalf("still held: %q", held)
+	}
+	for _, gone := range []string{"old /srv/site/a.conf", "new /srv/site/sub/b.conf"} {
+		object, _ := k.objectPath(revisionOf([]byte(gone)))
+		if _, err := os.Stat(object); !os.IsNotExist(err) {
+			t.Fatalf("%q outlived its history: %v", gone, err)
+		}
+	}
+	if got := contents(t, k, "/srv/other.conf"); len(got) != 1 {
+		t.Fatal("another file's history went with it")
+	}
+}
+
 func TestAFailureToKeepIsReportedNotHidden(t *testing.T) {
 	ctx := context.Background()
 	k, dir := newKeeper(t, DefaultLimits)

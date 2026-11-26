@@ -7,7 +7,7 @@ import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Rail, RailLine, RailName, RailRow, railInk } from "@/components/rail"
 import { siteProduct } from "@/components/proxy/marks"
 import { siteApp } from "@/components/proxy/site-apps"
-import { upstreamTargets } from "@/components/proxy/site-details"
+import { isLeftover, siteTitle, upstreamTargets } from "@/components/proxy/site-details"
 import { isRedirect, isStatic, redirectTargets } from "@/components/proxy/site-filters"
 import { siteHref, type SiteTab } from "@/components/proxy/site-tabs"
 
@@ -27,6 +27,7 @@ export function siteDestination(vhost: VHost): string {
 function railState(vhost: VHost): { tone: DotTone; word?: string } {
   if (vhost.broken === "dangling") return { tone: "danger", word: "broken link" }
   if (vhost.broken === "stale") return { tone: "warning", word: "stale link" }
+  if (isLeftover(vhost)) return { tone: "warning", word: "leftover" }
   if (!vhost.enabled) return { tone: "stopped", word: "disabled" }
   if (vhost.maintenance) return { tone: "warning", word: "maintenance" }
   return { tone: "running" }
@@ -97,7 +98,7 @@ export function SiteRail({
         return (
           <RailRow
             item={railKey(vhost)}
-            name={vhost.name}
+            name={siteTitle(vhost)}
             current={here}
             href={siteHref(vhost.name, tab === "settings" ? "overview" : tab)}
             quiet={!vhost.enabled}
@@ -114,7 +115,7 @@ export function SiteRail({
             }
             dot={<StatusDot tone={state.tone} className="size-1.5" />}
           >
-            <RailName current={here}>{vhost.name}</RailName>
+            <RailName current={here}>{siteTitle(vhost)}</RailName>
             <RailLine
               ink={state.word ? railInk(state.tone) : undefined}
               className={state.word ? undefined : "font-mono"}
