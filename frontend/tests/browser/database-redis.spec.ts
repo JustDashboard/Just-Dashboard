@@ -837,11 +837,44 @@ test.describe("keys", () => {
 
     // Database 0 can be reached, and is asked for by its number.
     await page.getByRole("button", { name: "database: db3" }).click()
-    await expect(page.getByRole("menuitem", { name: /^db3/ })).toContainText("connects here")
-    await expect(page.getByRole("menuitem", { name: /^db7/ })).toContainText("41 keys")
-    await page.getByRole("menuitem", { name: /^db0/ }).click()
+    await expect(page.getByRole("option", { name: /^db3/ })).toContainText("connects here")
+    await expect(page.getByRole("option", { name: /^db7/ })).toContainText("41 keys")
+    await page.getByRole("option", { name: /^db0/ }).click()
     await expect(page).toHaveURL(/[?&]db=0(&|$)/)
     await expect.poll(() => redis.asked("/keys/tree").at(-1)?.query.get("db")).toBe("0")
+  })
+
+  test("sixteen databases are found by keyboard: the box has the keys as it opens, the arrows choose from it", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, { db: 3 })
+    await page.goto(KEYS)
+    const picker = page.getByRole("button", { name: "database: db3" })
+    await picker.focus()
+    await page.keyboard.press("Enter")
+
+    // Past a dozen the list is searched, and the search is where the keys land.
+    const find = page.getByRole("combobox", { name: "Find a database" })
+    await expect(find).toBeFocused()
+    await page.keyboard.type("1")
+    const options = page.getByRole("listbox").getByRole("option")
+    await expect(options).toHaveText([
+      /^db1(?!\d)/,
+      /^db10/,
+      /^db11/,
+      /^db12/,
+      /^db13/,
+      /^db14/,
+      /^db15/,
+    ])
+    await page.keyboard.press("ArrowDown")
+    await expect(find).toBeFocused()
+    await expect(options.nth(1)).toHaveAttribute("aria-selected", "true")
+    await page.keyboard.press("Enter")
+    await expect(page).toHaveURL(/[?&]db=10(&|$)/)
+    await expect.poll(() => redis.asked("/keys/tree").at(-1)?.query.get("db")).toBe("10")
+    // Closed, the keys are back on the control that opened it.
+    await expect(page.getByRole("button", { name: "database: db10" })).toBeFocused()
   })
 
   test("the tree is the server's namespaces, read a level at a time, and a walk that stopped says how far it got", async ({

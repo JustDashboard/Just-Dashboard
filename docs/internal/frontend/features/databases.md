@@ -203,7 +203,8 @@ Data, Query, Schema and Diagram are four workbenches under one head
 (`components/database/workbench/chrome.tsx`) — with one rail kit (`workbench/rail.tsx`: `RailHead`,
 `RailFind`, `RailGroupHead`, `RailRow`, `RailSkeleton`, `RailNoMatch`), one side column
 (`WorkbenchSide`, 256px opening width on every workbench), one open-object strip (`ObjectHead`),
-and one container picker and mark (`kit/container-picker.tsx`, `kit/marks.tsx`): the database's identity and the open thing's verbs in
+and one container picker and mark (`kit/container-picker.tsx`, `kit/marks.tsx`; a menu, and past a
+dozen containers a combobox whose find box has the keyboard as it opens): the database's identity and the open thing's verbs in
 the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
 a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
 Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the
