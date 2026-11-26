@@ -288,8 +288,12 @@ test.describe("what protects the databases", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
+    // Every usual kind over every database: fewer is a Turn on still to finish.
+    const usual = ["down", "disk", "connections", "backup_failed", "backup_missed"].map((kind, i) =>
+      rule(i + 1, kind),
+    )
     const server = await mockFleet(page, {
-      alerts: { rules: [rule(1, "down"), rule(2, "disk")] },
+      alerts: { rules: usual },
       channels: [
         { id: 1, name: "Ops Slack", kind: "slack", enabled: true },
         { id: 2, name: "Old pager", kind: "webhook", enabled: false },
@@ -298,12 +302,12 @@ test.describe("what protects the databases", () => {
     await page.goto("/databases")
     const alerts = line(page, "Alerts")
     await expect(alerts).toContainText("All 5 watched")
-    await expect(alerts).toContainText("2 rules · told to Ops Slack")
+    await expect(alerts).toContainText("5 rules · told to Ops Slack")
     await expect(alerts.getByRole("button")).toHaveCount(0)
 
     server.answer("GET /databases/alerts", () => ({
       body: {
-        rules: [rule(1, "down"), rule(2, "disk")],
+        rules: usual,
         subjects: [
           {
             ruleId: 2,
