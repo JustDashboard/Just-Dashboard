@@ -615,7 +615,9 @@ be "left to systemd" with the timer that does its work; and a **Cron log** (the 
 cron daemon's unit journal, else a cron file, else the journal's `CRON` lines, through the cron lens
 with its sessions hidden as a chip and its runs and lost output counted on its chips). Every
 schedule opens a page of its own (`procs/schedule-page.tsx`): `/processes/scheduled/cron/[id]`
-for a cron line (the id is the account and the line, or "system", the file and the line), and
+for a cron line (the id is the account and the line, or "system", the file and the line; an edit
+that adds or removes the note above a job moves its line, and the page replaces its address with the
+saved job's, `replaceJobAt` in `lib/crontab.ts`), and
 `/processes/scheduled/timers/[unit]` for a timer. Each page sits on the shared
 detail frame with every schedule as a rail, soonest first (`schedule-rail.tsx`). Its Overview is
 built from one set of parts (`procs/schedule-sheet.tsx`): the schedule in a sentence over its

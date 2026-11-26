@@ -63,16 +63,30 @@ export function removeJob(raw: string, job: CronJob): string {
 
 /** Replaces a job's line, and its comment, with the edited values. */
 export function replaceJob(raw: string, job: CronJob, edit: JobEdit): string {
+  return replaceJobAt(raw, job, edit).raw
+}
+
+/**
+ * `replaceJob`, with the line the job is on afterwards. A job is named by its
+ * line, and adding a comment above it moves it down one while removing its
+ * comment moves it up one, so a page addressed by the old line would then
+ * name the comment, or the next job.
+ */
+export function replaceJobAt(
+  raw: string,
+  job: CronJob,
+  edit: JobEdit,
+): { raw: string; line: number } {
   const list = lines(raw)
   const index = job.line - 1
-  if (index < 0 || index >= list.length) return raw
+  if (index < 0 || index >= list.length) return { raw, line: job.line }
   const hadComment = ownsComment(list, index, job)
   const replacement = edit.comment?.trim()
     ? [`# ${edit.comment.trim()}`, jobLine(edit)]
     : [jobLine(edit)]
   const from = hadComment ? index - 1 : index
   list.splice(from, index - from + 1, ...replacement)
-  return join(list)
+  return { raw: join(list), line: from + replacement.length }
 }
 
 /** Appends a job at the end, with its comment above it. */

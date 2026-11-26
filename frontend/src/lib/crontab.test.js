@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { appendJob, removeJob, replaceJob, toggleJob } from "./crontab"
+import { appendJob, removeJob, replaceJob, replaceJobAt, toggleJob } from "./crontab"
 
 const raw = [
   "MAILTO=ops@example.com",
@@ -68,5 +68,25 @@ describe("crontab line edits", () => {
     expect(appendJob("", { schedule: "@reboot", command: "/srv/start.sh" })).toBe(
       "@reboot /srv/start.sh\n",
     )
+  })
+
+  // A job's page is addressed by its line, so a replace says where the job went.
+  test("replace says the job's line after a comment is added or removed", () => {
+    const first = { line: 1, schedule: "@hourly", command: "/bin/a", raw: "@hourly /bin/a" }
+    const text = "@hourly /bin/a\n# b's note\n@daily /bin/b\n"
+    const added = replaceJobAt(text, first, { ...first, comment: "now noted" })
+    expect(added).toEqual({
+      raw: "# now noted\n@hourly /bin/a\n# b's note\n@daily /bin/b\n",
+      line: 2,
+    })
+
+    const noted = { line: 4, schedule: "0 3 * * *", command: "/usr/local/bin/backup" }
+    const removed = replaceJobAt(raw, { ...backup, ...noted }, noted)
+    expect(removed.line).toBe(3)
+    expect(removed.raw.split("\n")[removed.line - 1]).toBe("0 3 * * * /usr/local/bin/backup")
+
+    const kept = replaceJobAt(raw, backup, { ...backup, comment: "still noted" })
+    expect(kept.line).toBe(backup.line)
+    expect(replaceJobAt(raw, { ...backup, line: 99 }, backup)).toEqual({ raw, line: 99 })
   })
 })
