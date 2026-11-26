@@ -716,6 +716,22 @@ func (s *Service) RestoreDeploymentRoute(ctx context.Context, snapshot Deploymen
 	return s.restoreDeploymentRouteLocked(ctx, snapshot)
 }
 
+// SnapshotDeploymentRoute is a deployment route as it stands, for
+// RestoreDeploymentRoute to put back: a release that takes a domain over
+// from a leftover route returns it if its own cutover fails.
+func (s *Service) SnapshotDeploymentRoute(ctx context.Context, name string) (DeploymentRouteSnapshot, error) {
+	if edge, err := s.dockerCaddy(ctx); err != nil {
+		return DeploymentRouteSnapshot{}, err
+	} else if edge != nil {
+		s.mu.Lock()
+		defer s.mu.Unlock()
+		return edge.snapshot(ctx, name)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.snapshotDeploymentRouteLocked(name)
+}
+
 // RemoveDeploymentRoute uses the same snapshot/reload recovery boundary as a
 // cutover. It is intentionally name-scoped so preview cleanup cannot select
 // or remove a route owned by another feature.

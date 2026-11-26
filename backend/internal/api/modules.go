@@ -481,7 +481,8 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 	).WithFirewall(s.modules.netsec).WithTailnet(preflightTailnet{server: s}).WithDependencies(newDeploymentDependencyObserver(
 		s.Store, s.modules.backupStore, s.modules.docker,
-	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver())
+	).withExtensionProbe(s.databaseExtensions)).WithTunnel(s.tunnelObserver()).WithDNSRecords(s.dnsRecordObserver()).
+		WithRouteOwners(deploymentRouteOwners{s: s})
 	s.modules.deployChecker = deploy.NewDeploymentChecker(
 		s.modules.deployRuns, s.modules.deployPlanning, s.modules.deploySources, s.modules.deployPreflight,
 	)
@@ -517,6 +518,7 @@ func (s *Server) initModules() {
 		s.modules.proxy,
 		filepath.Join(s.Cfg.DataDir, "deployment-workspaces"),
 	).WithPreflightObserver(s.modules.deployPreflight).
+		WithRouteOwners(deploymentRouteOwners{s: s}).
 		WithBackupGate(newDeploymentBackupGate(s.modules.backupStore, s.modules.backupRunner, s.modules.docker).WithDatabaseSources(s.databaseBackupSources)).
 		// Automatic HTTPS. Issuance is still the Certificates feature's code
 		// and activation still resolves an already-existing pair; what this

@@ -722,6 +722,7 @@ func (e *NormalizedStepExecutor) activate(
 			}
 		}
 		route = &routeValue
+		takenOver := e.takeOverLeftoverRoutes(ctx, execution, release.Release.EnvironmentID, routeValue.Domains)
 		applied, applyErr := e.proxy.ApplyDeploymentRoute(ctx, routeValue)
 		appliedRoute = &applied
 		routeEvidence := publicRouteActivationEvidence(applied)
@@ -729,6 +730,7 @@ func (e *NormalizedStepExecutor) activate(
 		if applyErr != nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
 			recovery.RouteRestored = applied.Recovered
+			e.restoreLeftoverRoutes(ctx, execution, takenOver)
 			evidence.Recovery = &recovery
 			return StepResult{State: StepFailed, ErrorCode: "proxy_cutover_failed", ErrorMessage: "the proxy rejected the candidate and the prior route recovery was checked" + proxyRefusal(applyErr), Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}

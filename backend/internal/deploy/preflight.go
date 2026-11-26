@@ -113,7 +113,11 @@ type DomainObservation struct {
 	CertificateDNSProvider string `json:"certificateDnsProvider,omitempty"`
 	CertificateRefusal     string `json:"certificateRefusal,omitempty"`
 	Conflict               bool   `json:"conflict"`
-	Detail                 string `json:"detail,omitempty"`
+	// Claims are the sites that already answer the name, each with what it
+	// is to the deployment: a live deployment's route, a leftover one, or a
+	// site of its own.
+	Claims []DomainClaim `json:"claims,omitempty"`
+	Detail string        `json:"detail,omitempty"`
 	// Record is, for a name the lookup says does not reach where it
 	// should, the record it needs and whether saved credentials can write
 	// it (preflight_dns_record.go).
@@ -231,6 +235,14 @@ type HostPreflightObserver struct {
 	volumeRoot string
 	tunnel     TunnelObserver
 	dnsRecords DNSRecordObserver
+	routes     RouteOwners
+}
+
+// WithRouteOwners lets preflight tell a leftover deployment route from a
+// site that still holds its domain (leftover_routes.go).
+func (o *HostPreflightObserver) WithRouteOwners(routes RouteOwners) *HostPreflightObserver {
+	o.routes = routes
+	return o
 }
 
 func (o *HostPreflightObserver) WithTailnet(tailnet PreflightTailnet) *HostPreflightObserver {
@@ -344,7 +356,7 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 	if len(request.Domains) > 0 {
 		proxyAvailable := false
 		certificateAutomation := false
-		claimedDomains := map[string]bool{}
+		claimedDomains := map[string][]DomainClaim{}
 		certificates := []proxysvc.Certificate{}
 		if o.proxy != nil {
 			proxyCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
@@ -356,12 +368,19 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 			vhosts, err := o.proxy.ListVHosts(proxyCtx)
 			cancel()
 			if err == nil {
+				marked := false
+				if o.routes != nil {
+					ownersCtx, ownersCancel := context.WithTimeout(ctx, 5*time.Second)
+					marked = o.routes.MarkDeploymentRoutes(ownersCtx, vhosts) == nil
+					ownersCancel()
+				}
 				for _, vhost := range vhosts {
 					if request.ExistingProxySite != "" && vhost.Name == request.ExistingProxySite {
 						continue
 					}
 					for _, hostname := range vhost.ServerNames {
-						claimedDomains[strings.ToLower(hostname)] = true
+						key := strings.ToLower(hostname)
+						claimedDomains[key] = append(claimedDomains[key], claimOf(vhost, marked))
 					}
 				}
 			}
@@ -398,8 +417,9 @@ func (o *HostPreflightObserver) Observe(ctx context.Context, request Observation
 					DNSAvailable: check.Error == "" && len(check.Addresses) > 0,
 					PointsHere:   check.PointsHere, BehindProxy: check.BehindProxy,
 					ProxyAvailable: proxyAvailable, CertificateAutomation: certificateAutomation,
-					Conflict: claimedDomains[strings.ToLower(planned.Hostname)],
+					Claims: claimedDomains[strings.ToLower(planned.Hostname)],
 				}
+				domain.Conflict = len(domain.Claims) > 0
 				for _, certificate := range certificates {
 					if certificate.Error == "" && !certificate.Expired && certificateCoversDomain(certificate.Domains, planned.Hostname) {
 						domain.CertificateAvailable, domain.CertificateName = true, certificate.Name
@@ -948,12 +968,7 @@ func preflightFindings(
 			findings = append(findings, item)
 		}
 		if observed.Conflict && planned.Ownership == OwnershipManaged {
-			item := finding("domain_conflict", PreflightBlocked,
-				"Domain is already claimed by another proxy site", planned.Hostname,
-				"Creating another managed route would make ownership and routing ambiguous.",
-				"Link the existing site or choose another domain.", "proxy", field)
-			item.DeepLink = "/proxy/sites"
-			findings = append(findings, item)
+			findings = append(findings, domainClaimFinding(planned, observed.Claims, field))
 		} else if planned.Ownership == OwnershipLinked && !observed.Conflict {
 			item := finding("domain_link_missing", PreflightDecision,
 				"Linked proxy site was not found", planned.Hostname,
