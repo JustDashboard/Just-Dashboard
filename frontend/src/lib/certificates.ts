@@ -605,6 +605,21 @@ export function certUnused(cert: Pick<Certificate, "usedBy" | "usedByStreams" | 
 }
 
 /**
+ * Whether a certificate's expiry is the reader's to hear about. One something
+ * serves is, and so is every certbot lineage and import, served or not:
+ * certbot renews every lineage, so one running out means its renewal is
+ * failing, and a Docker Caddy route that serves a copy of a lineage or an
+ * import (a DNS wildcard, the app domain) is not in `usedBy`. Only a
+ * certificate Caddy holds for a name nothing routes is left out: Caddy renews
+ * only what a route asks for, so that one runs out as expected.
+ */
+export function certWatched(
+  cert: Pick<Certificate, "usedBy" | "usedByStreams" | "error" | "source">,
+): boolean {
+  return !certUnused(cert) || cert.source !== "caddy"
+}
+
+/**
  * Whether this server can delete the certificate: certbot's lineages, the
  * imports and what Caddy holds. A file a site names elsewhere is the site's.
  */
@@ -619,13 +634,14 @@ export function unusedDeletable(cert: Certificate): boolean {
 
 /**
  * Whether the cleanup ticks a certificate before the operator has looked.
- * Nothing is lost with an expired one, or with one Caddy holds, which it
- * orders again when a route asks. A valid lineage or import that no site
- * names may be kept for something this server cannot see, so it is listed
- * and left for the operator to tick.
+ * Nothing is lost with one Caddy holds, which it orders again when a route
+ * asks. A lineage or import that no site names, expired or not, may be what
+ * a Caddy route's copy is refreshed from, and an expired lineage goes with
+ * the renewal that would put it right, so it is listed and left for the
+ * operator to tick.
  */
 export function cleanupTicked(cert: Pick<Certificate, "source" | "expired">): boolean {
-  return cert.expired || cert.source === "caddy"
+  return cert.source === "caddy"
 }
 
 /** The state a list can be narrowed to, beside its source. */
@@ -639,20 +655,21 @@ export function certInState(cert: Certificate, state: CertStateFilter): boolean 
 
 /**
  * The header's figures, read over every certificate rather than what a filter
- * leaves. Only a certificate something serves can be refused or run out: an
- * expired one nothing names breaks nothing, and counted as refused it turned
- * the header red on a server whose every site was fine. It is counted as
- * unused, which is what there is to do about it.
+ * leaves. A certificate Caddy holds for a name nothing routes is not counted
+ * as refused or running out: Caddy lets it lapse, and counted as refused it
+ * turned the header red on a server whose every site was fine. It is counted
+ * as unused, which is what there is to do about it. Every other certificate
+ * is counted as served (`certWatched`).
  */
 export function countCertificates(all: Certificate[]) {
   // A test certificate is refused like an expired one, and counted there
   // rather than as expiring: its days say nothing about when it stops working.
   const readable = all.filter((c) => !c.error)
   const unused = readable.filter(certUnused)
-  const served = readable.filter((c) => !certUnused(c))
-  const expiring = served.filter((c) => c.expiring && !c.expired && !c.staging)
-  const expired = served.filter((c) => c.expired && !c.staging).length
-  const test = served.filter((c) => c.staging).length
+  const watched = readable.filter(certWatched)
+  const expiring = watched.filter((c) => c.expiring && !c.expired && !c.staging)
+  const expired = watched.filter((c) => c.expired && !c.staging).length
+  const test = watched.filter((c) => c.staging).length
   const unreadable = all.length - readable.length
   return {
     all: all.length,

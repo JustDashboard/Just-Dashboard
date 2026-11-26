@@ -1541,9 +1541,9 @@
   with it through `PruneCertificateEvidence`, so one a release still names is kept and reported in
   `keptCopies`. Nothing is revoked; Caddy orders a new certificate if a route names the domain again.
   The page's "Delete unused" checklist offers every certbot, imported and Caddy certificate whose
-  `UsedBy` and `UsedByStreams` are empty, expired or not, never forces, and ticks only the expired
-  ones and Caddy's: a valid lineage or import no nginx site names may still be what a Caddy route's
-  copy is refreshed from.
+  `UsedBy` and `UsedByStreams` are empty, expired or not, never forces, and ticks only Caddy's: a
+  lineage or import no nginx site names, expired or not, may still be what a Caddy route's copy is
+  refreshed from.
 - **Where an issuance or a renewal failed, and whose it is to fix** (`issue_diagnosis.go`).
   `DiagnoseIssuance` reads a certbot run's output — the authority's per-domain report (`Domain:`,
   `Type:`, `Detail:`), or for a run that failed before or beside validation its meaningful lines, never

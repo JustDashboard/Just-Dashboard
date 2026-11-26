@@ -24,10 +24,9 @@ import { SOURCE_LABELS } from "@/components/proxy/certificate-inventory"
  * It was "Delete expired and unused" over lineages and imports only, so a
  * server whose every certificate is Caddy's — routes left by deleted
  * deployments, each with a certificate Caddy kept — was offered nothing. Each
- * line names the certificate and where it came from. One that has expired,
- * or that Caddy holds and would order again, is ticked; a valid lineage or
- * import is listed unticked, since it may be kept for something this server
- * cannot see.
+ * line names the certificate and where it came from. One Caddy holds, which
+ * it would order again, is ticked; a lineage or import is listed unticked,
+ * expired or not, since it may be kept for something this server cannot see.
  *
  * Lineages go through one certbot job, which revokes nothing; imports and
  * Caddy's are removed at once, each checked again by the server, which keeps

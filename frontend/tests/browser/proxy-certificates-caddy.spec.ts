@@ -349,13 +349,26 @@ test("Delete unused lists every source, ticks what is safe, and deletes Caddy's 
   // Each names its source.
   await expect(items.filter({ hasText: "old.example.com" }).first()).toContainText("Caddy")
   await expect(items.filter({ hasText: "kept.example.com" })).toContainText("imported")
-  // Caddy's and the expired import are ticked; a valid import waits to be.
+  // Caddy's are ticked; an import waits to be, expired or not, since a Caddy
+  // route's copy may be refreshed from it.
   await expect(
     items.filter({ hasText: "kept.example.com" }).getByRole("checkbox"),
   ).not.toBeChecked()
+  await expect(
+    items
+      .filter({ hasText: "old.example.com" })
+      .filter({ hasText: "imported" })
+      .getByRole("checkbox"),
+  ).not.toBeChecked()
   await expect(items.filter({ hasText: "gone.example.com" }).getByRole("checkbox")).toBeChecked()
-  await expect(dialog.getByRole("button", { name: "Delete 3 certificates" })).toBeVisible()
+  await expect(dialog.getByRole("button", { name: "Delete 2 certificates" })).toBeVisible()
 
+  // Ticked by hand, the expired import goes with them.
+  await items
+    .filter({ hasText: "old.example.com" })
+    .filter({ hasText: "imported" })
+    .getByRole("checkbox")
+    .click()
   await dialog.getByRole("button", { name: "Delete 3 certificates" }).click()
   await expect(dialog).toBeHidden()
   expect(calls.sort()).toEqual(

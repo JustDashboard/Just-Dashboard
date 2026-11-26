@@ -371,11 +371,11 @@ test("a test certificate in the inventory reads as one, without the Let's Encryp
 
   // Refused like an expired one, and not counted as expiring.
   const identity = page.locator("[data-slot='host-identity']")
-  // The fixture's expired import is served by nothing, so it is unused and
-  // not one of these.
-  await expect(identity.getByText("1 refused", { exact: true })).toHaveAttribute(
+  // The fixture's expired import is served by nothing, so it is unused, and
+  // still refused: only an unused certificate Caddy holds is left out.
+  await expect(identity.getByText("2 refused", { exact: true })).toHaveAttribute(
     "title",
-    "1 test certificate",
+    "1 expired · 1 test certificate",
   )
   await expect(identity).toContainText("1 unused")
   await expect(identity.getByText(/expiring in/)).toHaveText("1 expiring in 29 days")

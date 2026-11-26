@@ -15,13 +15,16 @@ A certificate's row says who serves it in words (`UsedBy`, from the API's `usedB
 `certificateUsers`): a deployment's route as its project and environment, linking to the project, a
 route nothing deploys as "leftover route", linking to its page under Sites, and "Unused" as a status
 for one nothing serves. That column stays from `md` up; the date gives way below `xl`. Beside the
-source chips are Unused and Expired, drawn where a certificate is in that state. The header counts
-only what something serves as refused or expiring (`countCertificates`, `lib/certificates.ts`): an
-expired certificate nothing names is "N unused", which narrows the list to them. A certificate Caddy
+source chips are Unused and Expired, drawn where a certificate is in that state. The header leaves
+only a certificate Caddy holds for a name nothing routes out of refused and expiring
+(`countCertificates` over `certWatched`, `lib/certificates.ts`; the Overview's figure too): Caddy lets
+it lapse, and it is "N unused", which narrows the list to them. An unused certbot lineage or import
+still counts, since certbot renews every lineage and `usedBy` does not see a Caddy route's copy of
+one. A certificate Caddy
 holds has Delete behind its menu once no route serves it (`DELETE /certificates/caddy`), and the verb
 held with "Served by <project>" as its reason while one does. Under the list, "Delete unused"
 (`certificate-cleanup.tsx`) is a checklist of every unused certbot, imported and Caddy certificate
-with its source, the expired ones and Caddy's ticked; "N leftover certificate copies · Remove"
+with its source, only Caddy's ticked; "N leftover certificate copies · Remove"
 (`caddy-evidence.tsx`) clears the copies deployments left.
 Where the Docker Caddy ingress runs and certbot is not installed (`caddyOnly` in the work context,
 from `/proxy/status`'s `ingressContainer` and certbot's `certbot_unavailable`), the header says

@@ -163,9 +163,10 @@ for (const width of [1280, 390]) {
     await expect(page.locator("[data-slot='stat-grid']")).toHaveCount(0)
     await expect(identity).toContainText("6 certificates")
     await expect(identity).toContainText("1 expiring")
-    // The expired import and Caddy's certificate are served by nothing: they
-    // are unused, and only what a site serves counts as refused.
-    await expect(identity).toContainText("2 refused")
+    // The expired import and Caddy's certificate are served by nothing, so
+    // both are unused. Only Caddy's is left out of refused: an import may be
+    // what a Caddy route's copy is refreshed from.
+    await expect(identity).toContainText("3 refused")
     if (width > 640) await expect(identity).toContainText("2 unused")
     await expect(identity.getByRole("button", { name: "Issue certificate" })).toBeVisible()
     expect(
