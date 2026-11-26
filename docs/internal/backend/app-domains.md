@@ -28,6 +28,13 @@ existed: the zone's own apex and `www`, the operator's other subdomains, and nam
 this server's. The site that runs the zone is itself often deployed from a dashboard, at the zone's apex; an
 earlier rule that took every name under the zone as an app name failed each of its releases.
 
+A handle the server held before the one it holds now, changed or released, stays its for this purpose: the
+state keeps `previous`, `<handle>.<zone>` for each, through changes and releases, and their names are
+`Detached`, never ordinary. A change or a release needs no current deployment to use the old names, but a saved
+release can still name one, and a rollback to it then leaves the name out instead of ordering a certificate for
+a name the site points elsewhere, under a handle another server may hold now. Claiming the handle again takes
+it out of `previous`.
+
 ## Trust model
 
 - **Identity is the account link.** Every call is signed with the link's identity and takes its number from
@@ -124,8 +131,8 @@ Under the account link's routes, inside the admin-only `/dashboard` group.
 site not asked or not reachable), `zone`, `reason`, `publicAddress`, `autoAssign`, `domain` (`handle`, `hostname`,
 `wildcard`, `address`, `status`, `reason`, `updatedAt`), `certificate` (`name`, `state` one of `missing`,
 `issuing`, `valid`, `expiring`, `failed`, `expiresAt`, `error`, `jobId`), `usedBy` (every configured deployment
-domain under the handle, across projects and environments), and `detached` (deployment domains under the zone
-that the handle does not cover), and `offer` (`handle`, `hostname`, `error`: the address chosen on the site that
+domain under the handle, across projects and environments), and `detached` (deployment domains under a handle
+this server held and does not hold now: the stored one while it is not held, and those in `previous`), and `offer` (`handle`, `hostname`, `error`: the address chosen on the site that
 the server claims by itself; `null` with no offer or while the server holds a domain; `error` is the last
 automatic claim's failure, `null` while it has not been tried or is under way). A field with nothing to say is
 `null`; the lists are never `null`.
@@ -207,6 +214,7 @@ did not answer" rather than as Let's Encrypt's vague error.
 | Released, suspended or detached while in use | The card shows it; the next release leaves the name out (warning) or fails (`app_domain_detached`) | `TestTheStateFollowsTheSite`, `TestEveryStepReadsAReleaseWithoutItsDetachedNames`, `TestTheCertificateStepNamesTheDetachedNamesItLeftOut` |
 | A check out while a claim, a release or a link change commits | Its answer is dropped; the claim stays held, the release stays released, the old link's offer is not claimed | `TestAnAnswerThatCrossesAClaimIsDropped`, `TestAnAnswerThatCrossesAReleaseDoesNotBringTheHandleBack`, `TestAnAnswerThatCrossesALinkChangeIsDropped` |
 | Changing the handle | Refused while any deployment uses it; the error lists them | `TestAHandleInUseCannotBeChangedOrReleased` |
+| Rollback to a release that names a handle changed or released since | The old handle's names are detached and left out, never ordered a certificate; the zone's other names stay ordinary | `TestAHandleHeldBeforeKeepsItsNamesDetached` |
 | Server IP changes | Updated within 15 minutes | `TestTheAddressFollowsTheServer` |
 | Site unreachable | Existing apps keep working; claiming, releasing and issuing fail with a message; renewal retries on certbot's schedule | `TestTheStateFollowsTheSite` (state unchanged); the rest is a live run |
 | Reinstall or restore onto a new server | A new link is a new server; the same account can claim the handle again | the site's quarantine rule; a live run |

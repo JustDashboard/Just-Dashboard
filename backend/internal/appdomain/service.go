@@ -1,12 +1,14 @@
 package appdomain
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
 	"net"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -461,8 +463,12 @@ func (s *Service) Refresh(ctx context.Context) {
 	s.refresh(ctx)
 }
 
-// mirror copies the site's record of the domain onto the state.
+// mirror copies the site's record of the domain onto the state. A handle it
+// replaces is kept in Previous, so its names stay detached.
 func (s *Service) mirror(cur *State, d accountlink.Domain) {
+	if cur.Handle != "" && cur.Handle != d.Handle {
+		cur.remember(s.baseOf(*cur))
+	}
 	cur.Handle, cur.Hostname, cur.Address = d.Handle, strings.ToLower(d.Hostname), d.Address
 	cur.Zone = strings.TrimPrefix(cur.Hostname, d.Handle+".")
 	cur.Status, cur.Reason = d.Status, ""
@@ -470,6 +476,19 @@ func (s *Service) mirror(cur *State, d accountlink.Domain) {
 		cur.Reason = *d.Reason
 	}
 	cur.UpdatedAt = d.UpdatedAt
+	cur.forget(cur.base())
+}
+
+// baseOf is <handle>.<zone> for the state's handle, with the zone the site
+// named or the account site's own, or "" with no handle or zone.
+func (s *Service) baseOf(st State) string {
+	if st.Handle == "" {
+		return ""
+	}
+	if zone := s.zone(st); zone != "" {
+		return st.Handle + "." + zone
+	}
+	return ""
 }
 
 // detachIfHeld detaches a held handle, unless the state's Generation is no
@@ -607,10 +626,13 @@ func (s *Service) Release(ctx context.Context) error {
 		}
 	}
 	if _, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
+		released := s.baseOf(*cur)
 		*cur = State{
 			Revision: cur.Revision, Generation: cur.Generation + 1,
 			AutoAssign: cur.AutoAssign, Zone: cur.Zone, Available: cur.Available, AvailableReason: cur.AvailableReason,
+			Previous: cur.Previous,
 		}
+		cur.remember(released)
 		return true, nil
 	}); err != nil {
 		return err
@@ -760,13 +782,20 @@ func (s *Service) Classify(ctx context.Context, hostname string) NameState {
 	// deployed from a dashboard like this one), its www, the operator's other
 	// subdomains, and names under handles that were never this server's.
 	// Treating them as app names failed their releases as "detached".
-	if st.Handle == "" || appNameHandle(hostname, s.zone(st)) != st.Handle {
-		return NotAppDomain
+	if st.Handle != "" && appNameHandle(hostname, s.zone(st)) == st.Handle {
+		if s.Enabled() && st.held() {
+			return Held
+		}
+		return Detached
 	}
-	if s.Enabled() && st.held() {
-		return Held
+	// A handle held before this one, or released, stays detached: a saved
+	// release can still name it after it left the configuration, and
+	// read as an ordinary name it would be ordered a certificate of its own
+	// and served on a name the site points elsewhere.
+	if st.heldBefore(hostname) {
+		return Detached
 	}
-	return Detached
+	return NotAppDomain
 }
 
 // appNameHandle is the handle an app name sits under, <handle>.<zone> or
@@ -796,13 +825,10 @@ func (s *Service) HandleBase(ctx context.Context) string {
 		return ""
 	}
 	st, err := readState(ctx, s.st.DB)
-	if err != nil || st.Handle == "" {
+	if err != nil {
 		return ""
 	}
-	if zone := s.zone(st); zone != "" {
-		return st.Handle + "." + zone
-	}
-	return ""
+	return s.baseOf(st)
 }
 
 // Zone is the app domain zone, or "" when none is known.
@@ -868,21 +894,28 @@ func (s *Service) UsedBy(ctx context.Context, st State) ([]Use, error) {
 	return s.uses(ctx, st.base(), nil)
 }
 
-// DetachedNames lists the deployment domains under the handle this server
-// held and no longer holds. Other names under the zone are not app names
-// (Classify) and are never listed.
+// DetachedNames lists the deployment domains under a handle this server
+// held and no longer holds: the stored one while it is not held, and those
+// in Previous. Other names under the zone are not app names (Classify) and
+// are never listed.
 func (s *Service) DetachedNames(ctx context.Context, st State) ([]Use, error) {
-	if st.Handle == "" || (s.Enabled() && st.held()) {
-		return []Use{}, nil
+	var bases []string
+	if base := s.baseOf(st); base != "" && !(s.Enabled() && st.held()) {
+		bases = append(bases, base)
 	}
-	zone := s.zone(st)
-	base := st.Handle + "." + zone
-	if zone == "" {
-		return []Use{}, nil
+	bases = append(bases, st.Previous...)
+	out := []Use{}
+	for _, base := range bases {
+		uses, err := s.uses(ctx, base, func(hostname string) bool { return underBase(hostname, base) })
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, uses...)
 	}
-	return s.uses(ctx, base, func(hostname string) bool {
-		return appNameHandle(hostname, zone) == st.Handle
+	slices.SortFunc(out, func(a, b Use) int {
+		return cmp.Or(strings.Compare(a.Project, b.Project), strings.Compare(a.Environment, b.Environment), strings.Compare(a.Hostname, b.Hostname))
 	})
+	return out, nil
 }
 
 // UsedByAny lists every deployment name under the zone, held or not: what

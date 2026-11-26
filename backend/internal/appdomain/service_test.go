@@ -656,6 +656,74 @@ func TestNamesAreClassifiedAgainstTheHandleHeldNow(t *testing.T) {
 	}
 }
 
+// A handle this server held before keeps its names detached once the handle
+// changes or is released. A change or a release needs no current deployment
+// to use the old names, but a saved release can: a rollback to it leaves
+// them out instead of ordering a certificate for a name the site no longer
+// points here, under a handle another server may hold now. The zone's other
+// names stay ordinary.
+func TestAHandleHeldBeforeKeepsItsNamesDetached(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	if _, err := e.svc.Claim(t.Context(), "other", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	// The fake store calls the wildcard valid for any handle.
+	e.waitIssued(1)
+	ordinary := map[string]NameState{
+		"just-dashboard.com": NotAppDomain, "www.just-dashboard.com": NotAppDomain,
+		"shop.never.just-dashboard.com": NotAppDomain, "a.b.acme.just-dashboard.com": NotAppDomain,
+	}
+	check := func(when string, want map[string]NameState) {
+		t.Helper()
+		for name, state := range ordinary {
+			want[name] = state
+		}
+		for name, state := range want {
+			if got := e.svc.Classify(t.Context(), name); got != state {
+				t.Errorf("%s, %s = %v, want %v", when, name, got, state)
+			}
+		}
+	}
+	check("after a change", map[string]NameState{
+		"shop.acme.just-dashboard.com": Detached, "acme.just-dashboard.com": Detached,
+		"shop.other.just-dashboard.com": Held,
+	})
+	// A rollback's names are read the same way the deployment step reads
+	// them; one a person types under the old handle is listed as detached.
+	e.deployment("shop", "production", "shop.acme.just-dashboard.com")
+	e.deployment("site", "production", "www.just-dashboard.com")
+	if v, _ := e.svc.View(t.Context()); len(v.Detached) != 1 || v.Detached[0].Hostname != "shop.acme.just-dashboard.com" {
+		t.Fatalf("detached after a change = %+v", v.Detached)
+	}
+
+	if _, err := e.st.DB.Exec(`DELETE FROM deploy_dependencies WHERE resource_id = 'shop.acme.just-dashboard.com'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	check("after a release", map[string]NameState{
+		"shop.acme.just-dashboard.com": Detached, "shop.other.just-dashboard.com": Detached,
+		"other.just-dashboard.com": Detached,
+	})
+
+	// Claimed again, the old handle's names are held once more.
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	check("claimed again", map[string]NameState{
+		"shop.acme.just-dashboard.com": Held, "shop.other.just-dashboard.com": Detached,
+	})
+	if st, _ := e.svc.state(t.Context()); len(st.Previous) != 1 || st.Previous[0] != "other.just-dashboard.com" {
+		t.Fatalf("previous = %v", st.Previous)
+	}
+}
+
 func TestTheHookPublishesOnlyTheHeldHandlesChallengeAndWaitsForIt(t *testing.T) {
 	e := newEnv(t, true)
 	value := strings.Repeat("v", 43)

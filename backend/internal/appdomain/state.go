@@ -18,6 +18,8 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"slices"
+	"strings"
 )
 
 // settingsKey holds the State.
@@ -76,6 +78,12 @@ type State struct {
 	OfferTried   string `json:"offerTried,omitempty"`
 	OfferTriedAt int64  `json:"offerTriedAt,omitempty"`
 	OfferError   string `json:"offerError,omitempty"`
+	// Previous is <handle>.<zone> for each handle this server held before
+	// the one it holds now, newest first, kept through changes and releases.
+	// Their names stay detached, never ordinary (Classify): a release saved
+	// before the change can still name one, and another server may hold
+	// that handle now.
+	Previous []string `json:"previous,omitempty"`
 }
 
 // holdsDomain reports a handle the site holds for this server, usable or
@@ -91,6 +99,46 @@ func (s State) base() string {
 		return ""
 	}
 	return s.Handle + "." + s.Zone
+}
+
+// remember puts base first in Previous, once.
+func (s *State) remember(base string) {
+	if base == "" {
+		return
+	}
+	s.forget(base)
+	s.Previous = append([]string{base}, s.Previous...)
+}
+
+// forget takes base out of Previous: its handle is this server's again.
+func (s *State) forget(base string) {
+	s.Previous = slices.DeleteFunc(s.Previous, func(b string) bool { return b == base })
+	if len(s.Previous) == 0 {
+		s.Previous = nil
+	}
+}
+
+// heldBefore reports a name under a handle in Previous.
+func (s State) heldBefore(hostname string) bool {
+	for _, base := range s.Previous {
+		if underBase(hostname, base) {
+			return true
+		}
+	}
+	return false
+}
+
+// underBase reports an app name of base, <handle>.<zone>: base itself or
+// <app>.<base>, one label deep, as far as the wildcard reaches.
+func underBase(hostname, base string) bool {
+	if base == "" {
+		return false
+	}
+	if hostname == base {
+		return true
+	}
+	app, ok := strings.CutSuffix(hostname, "."+base)
+	return ok && app != "" && !strings.Contains(app, ".")
 }
 
 type queryer interface {
