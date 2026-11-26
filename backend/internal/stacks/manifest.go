@@ -111,6 +111,17 @@ func (m *Manifest) CredentialByName(name string) (CredentialSpec, bool) {
 	return CredentialSpec{}, false
 }
 
+// CredentialLengths is each generated credential's length by name.
+func CredentialLengths(m *Manifest) map[string]int {
+	lengths := map[string]int{}
+	for _, credential := range m.Credentials {
+		if credential.Length > 0 {
+			lengths[credential.Name] = credential.Length
+		}
+	}
+	return lengths
+}
+
 // Validate is the shape a manifest must have; it runs in a test over every
 // registered manifest, so a mistake fails the build rather than a deploy.
 func (m *Manifest) Validate() error {
