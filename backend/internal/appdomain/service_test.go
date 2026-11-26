@@ -37,6 +37,9 @@ type fakeLink struct {
 	// as a slow network does, until the test closes it; asked hears of
 	// each answer made.
 	held, asked chan struct{}
+	// answered, when set, runs once after the site has made a PUT's answer
+	// and before it arrives, as something committing meanwhile does.
+	answered func()
 }
 
 func (f *fakeLink) Enabled() bool   { return true }
@@ -110,6 +113,10 @@ func (f *fakeLink) PutDomain(_ context.Context, handle, address string) (account
 	// The site clears the offer once the server's domain is active.
 	f.offer = ""
 	f.domain = &accountlink.Domain{Handle: handle, Hostname: handle + ".just-dashboard.com", Address: address, Status: "active", CreatedAt: 1, UpdatedAt: 2}
+	if answered := f.answered; answered != nil {
+		f.answered = nil
+		answered()
+	}
 	return *f.domain, nil
 }
 
@@ -550,6 +557,83 @@ func TestAnAnswerThatCrossesALinkChangeIsDropped(t *testing.T) {
 	}
 	if st, _ := e.svc.state(t.Context()); st.Offer != "" || st.Handle != "" {
 		t.Fatalf("after a stale answer = %+v", st)
+	}
+}
+
+// linkChanged is the account link's OnClear hook, committed in the
+// transaction that ends or replaces the link.
+func (e *env) linkChanged() {
+	e.t.Helper()
+	tx, err := e.st.DB.BeginTx(e.t.Context(), nil)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := DetachInTx(e.t.Context(), tx, e.svc.now().Unix()); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// The address follow-up's PUT is out when the link ends. The site answered
+// it before it heard of the unlink, but the records are gone now: the
+// answer is dropped, rather than make the detached handle active again.
+func TestAnAddressAnswerThatCrossesAnUnlinkIsDropped(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	e.setAddress("198.51.100.20")
+	e.link.mu.Lock()
+	e.link.answered = e.linkChanged
+	e.link.mu.Unlock()
+	e.svc.followAddress(t.Context())
+	if calls := e.link.callLog(); calls[len(calls)-1] != "PUT acme 198.51.100.20" {
+		t.Fatalf("calls = %v", calls)
+	}
+	if st, _ := e.svc.state(t.Context()); st.Status != StatusDetached || st.Address != "203.0.113.10" {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+	if _, _, ok := e.svc.Active(t.Context()); ok {
+		t.Fatal("the detached handle is active again")
+	}
+}
+
+// An offer stored under one link is not claimed once the link has changed:
+// the change clears it, and a claim already on its way with it stops.
+func TestAnOfferReadBeforeALinkChangeIsNotClaimed(t *testing.T) {
+	e := newEnv(t, true)
+	e.link.offer = "acme"
+	// The check stores the offer; its claim has not gone out yet.
+	e.svc.claimMu.Lock()
+	e.svc.refresh(t.Context())
+	e.svc.claimMu.Unlock()
+	read, _ := e.svc.state(t.Context())
+	if read.Offer != "acme" {
+		t.Fatalf("offer not stored: %+v", read)
+	}
+	if v, _ := e.svc.View(t.Context()); v.Offer == nil {
+		t.Fatal("the offer is not shown")
+	}
+
+	e.linkChanged()
+	if st, _ := e.svc.state(t.Context()); st.Offer != "" || st.OfferTried != "" {
+		t.Fatalf("the old link's offer is kept: %+v", st)
+	}
+	if v, _ := e.svc.View(t.Context()); v.Offer != nil {
+		t.Fatalf("the old link's offer is shown: %+v", v.Offer)
+	}
+	e.svc.autoClaim(t.Context(), read)
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("the old link's offer was claimed: %v", got)
+	}
+
+	// The new link's own check claims what its account chose.
+	e.svc.refresh(t.Context())
+	if got := e.puts(); len(got) != 1 || got[0] != "PUT acme 203.0.113.10" {
+		t.Fatalf("puts = %v", got)
 	}
 }
 

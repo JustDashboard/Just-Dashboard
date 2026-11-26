@@ -315,7 +315,10 @@ func (s *Service) linked(ctx context.Context) bool {
 }
 
 // followAddress sends PUT /domain when the server's public address is no
-// longer the one the records point at.
+// longer the one the records point at. Its answer is dropped, as refresh's
+// is, when the Generation moved while the PUT was out: one that crosses an
+// unlink would make the detached handle active again, held by a server
+// whose records the site has deleted. The next follow-up sends it again.
 func (s *Service) followAddress(ctx context.Context) {
 	st, err := readState(ctx, s.st.DB)
 	if err != nil || !st.held() {
@@ -331,7 +334,7 @@ func (s *Service) followAddress(ctx context.Context) {
 		return
 	}
 	_, _ = update(ctx, s.st.DB, func(cur *State) (bool, error) {
-		if cur.Handle != st.Handle {
+		if cur.Generation != st.Generation || cur.Handle != st.Handle {
 			return false, nil
 		}
 		s.mirror(cur, domain)
@@ -440,10 +443,17 @@ func (s *Service) autoClaim(ctx context.Context, st State) {
 	}
 	defer s.claimMu.Unlock()
 	offer := st.Offer
+	// st is the answer refresh just stored. A link change or a claim since
+	// then is newer: the offer was the old link's, or is taken.
+	current := false
 	if _, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
+		if cur.Generation != st.Generation || cur.Offer != offer {
+			return false, nil
+		}
+		current = true
 		cur.OfferTried, cur.OfferTriedAt, cur.OfferError = offer, s.now().Unix(), ""
 		return true, nil
-	}); err != nil {
+	}); err != nil || !current {
 		return
 	}
 	view, err := s.Claim(ctx, offer, "system")

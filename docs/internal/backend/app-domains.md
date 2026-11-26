@@ -67,7 +67,10 @@ handle too), a release, a detach, a link started or ended (`DetachInTx`, even wi
 mirrored with another handle, status or address. `refresh` reads it before it sends `GET /domain` and drops an
 answer that finds it moved: the answer describes the moment the site was asked, so one with no domain would
 detach a handle claimed while it was out, one with the old domain would bring back a handle just released, and
-an old link's offer would be claimed through the new one. The next check asks again.
+an old link's offer would be claimed through the new one. The next check asks again. The address follow-up's
+`PUT /domain` answer is dropped the same way (one that crosses an unlink would make the detached handle active
+again), and an automatic claim goes ahead only while the generation is still the one its offer was read at.
+`DetachInTx` also clears the stored offer and how its claim went: they were the old link's.
 
 ## Background work (`appdomain/service.go`)
 

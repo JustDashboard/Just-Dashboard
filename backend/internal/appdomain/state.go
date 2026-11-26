@@ -208,7 +208,9 @@ func (s State) owner() [4]string { return [4]string{s.Handle, s.Hostname, s.Addr
 // unlinked or removed, so the handle is no longer this server's to use. It is
 // the account link's OnClear hook (and the terminal's link and unlink). It
 // raises Generation even with no handle held: an answer the old link was
-// given, an offer for instance, is not the new one's.
+// given, an offer for instance, is not the new one's. For the same reason
+// the offer already stored, and how its claim went, are cleared: the new
+// link's first check stores the offer its account chose, if any.
 func DetachInTx(ctx context.Context, tx *sql.Tx, now int64) error {
 	st, err := readState(ctx, tx)
 	if err != nil {
@@ -217,6 +219,7 @@ func DetachInTx(ctx context.Context, tx *sql.Tx, now int64) error {
 	if st.Handle != "" && st.Status != StatusDetached {
 		st.Status, st.Reason, st.UpdatedAt = StatusDetached, "The account link was cleared, so the site released this server's handle and deleted its records.", now
 	}
+	st.Offer, st.OfferTried, st.OfferTriedAt, st.OfferError = "", "", 0, ""
 	st.Generation++
 	st.Revision++
 	return writeState(ctx, tx, st)
