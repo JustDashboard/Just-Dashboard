@@ -241,7 +241,9 @@ func (c *Client) DeployOpenAPIYAML(ctx context.Context, opts ...RequestOption) (
 // with the typed confirmation of its name.
 //
 // Destructive. The deployment's name is typed as its confirmation, sent in the X-Confirm header as
-// the dashboard sends it.
+// the dashboard sends it. With ?routes=remove the proxy routes its environments wrote are removed
+// too, after the records, and the answer is 200 with routesRemoved and routeErrors (each route
+// that was not removed, with the reason).
 //
 // A deploy key: refused (session_required): this removal takes its typed confirmation in the
 // dashboard. Destructive: it needs a role that may take destructive actions, and spends their

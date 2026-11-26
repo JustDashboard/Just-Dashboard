@@ -248,7 +248,8 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/{id}/archive":   {Tag: "fleet", Summary: "Archive a deployment: it leaves the fleet and keeps its record and resources until unarchived or removed.", Response: (*deploy.Project)(nil)},
 	"POST /deploy/{id}/unarchive": {Tag: "fleet", Summary: "Restore an archived deployment to the fleet.", Response: (*deploy.Project)(nil)},
 	"DELETE /deploy/{id}/permanent": {Tag: "fleet", Summary: "Delete an archived deployment's record for good, with the typed confirmation of its name.", Status: http.StatusNoContent,
-		Note: "Destructive. The deployment's name is typed as its confirmation, sent in the " + httpx.ConfirmHeader + " header as the dashboard sends it."},
+		Note: "Destructive. The deployment's name is typed as its confirmation, sent in the " + httpx.ConfirmHeader + " header as the dashboard sends it. " +
+			"With ?routes=remove the proxy routes its environments wrote are removed too, after the records, and the answer is 200 with routesRemoved and routeErrors (each route that was not removed, with the reason)."},
 	"POST /deploy/{id}/removal-plan": {Tag: "fleet", Summary: "Plan the removal of a deployment's managed resources: what would be removed, what is kept, and what has to be confirmed.", Response: (*deploy.RemovalPlan)(nil)},
 	"POST /deploy/{id}/remove-managed": {Tag: "fleet", Summary: "Remove a deployment's managed resources as planned, with the typed confirmation.", Request: deploy.RemoveManagedRequest{}, Response: (*deploy.RemovalExecution)(nil),
 		Note: "Destructive. A removal that stopped part-way answers with its error status and the execution so far, under error and execution."},
