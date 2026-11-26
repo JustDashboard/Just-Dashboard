@@ -97,7 +97,7 @@ type stackState struct {
 	ConfiguredReleaseID int64                    `json:"configuredReleaseId,omitempty"`
 	StartedAt           *time.Time               `json:"startedAt,omitempty"`
 	FinishedAt          *time.Time               `json:"finishedAt,omitempty"`
-	UpdatedAt           time.Time                `json:"updatedAt"`
+	UpdatedAt           time.Time                `json:"updatedAt,omitzero"`
 }
 
 type stackReadiness struct {
