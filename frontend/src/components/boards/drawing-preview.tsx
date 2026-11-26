@@ -1,7 +1,8 @@
 "use client"
 
 import { memo, useId } from "react"
-import { motion, useReducedMotion } from "motion/react"
+import { motion } from "motion/react"
+import { useReducedMotion } from "@/components/shell/motion-pause"
 import type { BoardPreview, DrawingElement } from "@/lib/board/boards"
 import {
   arrowhead,

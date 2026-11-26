@@ -243,6 +243,12 @@ const eslintConfig = defineConfig([
               name: "sonner",
               message: "Toasts go through lib/toast.ts, which owns what a failure says.",
             },
+            {
+              name: "motion/react",
+              importNames: ["useReducedMotion"],
+              message:
+                "useReducedMotion comes from components/shell/motion-pause.ts: it follows Pause animations and the system's setting while the component is on screen, where motion's reads once at mount.",
+            },
           ],
         },
       ],
