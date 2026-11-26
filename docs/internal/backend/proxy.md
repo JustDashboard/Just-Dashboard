@@ -1668,12 +1668,17 @@
   from `archived_name`, as the deploy store reads it, since its `name` column holds an
   `__jd_archived_<id>_<hex>` tombstone — with `archived` when either is archived; a name whose
   environment no longer exists has none. The Sites page leads such a route to its deployment in place
-  of Edit, Disable, Duplicate and Delete, opens it read-only (its card and a `?site=` link alike), and
-  keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
+  of Edit, Disable, Duplicate and Delete, says under its title `<project> · <environment>`, says why it
+  is not removed there with a link to the deployment's Domains settings
+  (`/deploy/<projectId>/settings/domains`), opens it read-only (its card and a `?site=` link alike; a
+  route with no host file opens its page), and keeps Edit anyway behind a confirmation; an archived owner's route is the operator's again. The backend does not refuse
   those verbs on a route, since deployments call proxysvc directly and an administrator may override.
-  A deployment route nothing deploys any more — no owner (its project deleted) or an archived one — and
-  that Delete does not apply to (every Docker Caddy route, which has no host file) has **Remove route**,
-  on its card and its page: `DELETE /proxy/vhosts/{name}/deployment-route` (system.admin, destructive,
+  A deployment route nothing deploys any more — no owner (its project deleted) or an archived one — is a
+  **leftover**: its row and its page are titled by its domain, read `leftover` in place of `serving`, lead
+  the list after broken links, and are counted by a notice over the list whose **Remove all** calls the
+  endpoint below once per route, in turn, and reports the failures with the server's reason. One
+  that Delete does not apply to (every Docker Caddy route, which has no host file) has **Remove route**
+  in its row's menu and its page's, and a plain Remove button on its page: `DELETE /proxy/vhosts/{name}/deployment-route` (system.admin, destructive,
   audited as `proxy.deployment_route.remove`) accepts only a name `deploy.RouteNameFor` spells, answers
   409 `deployment_active` while an unarchived environment still owns it, and runs
   `proxysvc.RetireDeploymentRoute`: `RemoveDeploymentRoute`'s snapshot/restore removal, then on the

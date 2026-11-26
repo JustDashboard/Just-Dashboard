@@ -1,4 +1,5 @@
 import type { VHost } from "@/lib/types"
+import { isLeftover, siteTitle } from "@/components/proxy/site-details"
 
 /** Its name in sites-enabled does not serve its file: a link to nothing, or to something else. */
 export function isBroken(v: VHost) {
@@ -20,15 +21,32 @@ export function isParked(v: VHost) {
   return isDisabled(v) && !v.package
 }
 
+/** By what the list calls each site, then by file where two share a domain. */
+export function byTitle(a: VHost, b: VHost): number {
+  return siteTitle(a).localeCompare(siteTitle(b)) || a.name.localeCompare(b.name)
+}
+
 /**
- * Worst first, then by name. The order *is* the page's answer to "which of
- * these needs me": a link to nothing stops every reload, so it leads.
+ * Worst first, then by title. The order *is* the page's answer to "which of
+ * these needs me": a link to nothing stops every reload, so it leads. A
+ * route its deployment left comes next: it answers a domain nobody deploys,
+ * and stood among the serving ones under a green word.
  */
 export function byUrgency(a: VHost, b: VHost): number {
   const rank = (v: VHost) =>
-    v.broken === "dangling" ? 0 : isBroken(v) ? 1 : isPlain(v) ? 2 : isParked(v) ? 3 : 4
+    v.broken === "dangling"
+      ? 0
+      : isBroken(v)
+        ? 1
+        : isLeftover(v)
+          ? 2
+          : isPlain(v)
+            ? 3
+            : isParked(v)
+              ? 4
+              : 5
   if (rank(a) !== rank(b)) return rank(a) - rank(b)
-  return a.name.localeCompare(b.name)
+  return byTitle(a, b)
 }
 
 /**
