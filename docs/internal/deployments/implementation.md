@@ -929,7 +929,9 @@ only renderer/executor/validation authority for their feature.
   application's own data, so a migration or seed of SQLite on a volume reaches the file the release then
   opens — as the release's user with its ulimits, but with no ports, devices, GPUs, capabilities or
   privilege and neither its read-only root nor its kernel parameters, the image's entrypoint replaced by the
-  command, and the container removed however the task ends. The task runs while the live release still
+  command (with a working directory, the image's `/bin/sh` changes to it first, the directory a positional
+  argument rather than text in the script, and a directory it cannot enter fails the task before any of
+  the command runs), and the container removed however the task ends. The task runs while the live release still
   serves from the same volume; a stop-first release stops it only when the candidate starts. The mounts
   are the frozen runtime plan's own — a bind source was resolved and authorised when the plan was saved,
   a preview's are its own preview volumes (and a preview plans no task) — so a task gains no path the
