@@ -256,7 +256,9 @@ What the Docker daemon did and who did it, over a 1h / 6h / 24h / All window: Do
 (the one every Docker section page opens on) with the verdict beside its name (a restart loop named,
 the containers that failed, or nothing) and the socket's state; then the band every Docker page
 opens on (`event-band.tsx`): what happened as one bar of four kinds (failures, restarts, created or
-removed, external), each a press that narrows the page, and Recent, the newest of those on the
+removed, external), each a press that narrows the page (Failures counts what its filter shows:
+failed exits, OOM kills and health checks that turned unhealthy, an OOM kill and its exit once,
+`isFailure` and `failureCount` in `lib/docker-events.ts`), and Recent, the newest of those on the
 window's axis, with the 1h / 6h / 24h / All window on the band's line; the containers the record
 names as a table, worst first, each with its state now from Docker's listing, its window as a lane
 of outcome-coloured marks (a loop a red band), its failures, comebacks and who last acted on it, a

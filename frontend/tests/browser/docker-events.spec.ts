@@ -82,6 +82,31 @@ test("a reading narrows the table and the feed to what it counts", async ({ page
   await expect(feed.getByText("redis started")).toBeVisible()
 })
 
+// The Failures reading counts what its filter shows. A health check that
+// turned unhealthy is one of those, so a record whose only failure is one
+// still offers the reading rather than leaving the event in Recent alone.
+test("an unhealthy check alone is a failure the band counts and narrows to", async ({ page }) => {
+  const start = EVENTS.find((e) => e.name === "redis" && e.action === "start")!
+  const sick = {
+    ...start,
+    time: new Date(Date.now() - 5 * 60_000).toISOString(),
+    action: "health_status: unhealthy",
+    message: "redis is failing its health check",
+    level: "error" as const,
+    source: "daemon" as const,
+  }
+  await mockEvents(page, { events: [sick, start] })
+  await page.goto("/docker/events")
+
+  const band = page.locator("[data-slot=event-band]")
+  await expect(band.getByRole("button", { name: "Show only failures" })).toBeVisible()
+  await expect(band).toContainText("redis unhealthy")
+  await band.getByRole("button", { name: "Show only failures" }).click()
+  const feed = page.getByRole("region", { name: "Event feed" })
+  await expect(feed.getByText("redis is failing its health check")).toBeVisible()
+  await expect(feed.getByText("redis started")).toHaveCount(0)
+})
+
 test("a container's row narrows the feed to its events", async ({ page }) => {
   await mockEvents(page)
   await page.goto("/docker/events")

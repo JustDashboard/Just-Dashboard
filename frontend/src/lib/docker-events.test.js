@@ -5,9 +5,11 @@ import {
   comebacks,
   containerActivity,
   dedupeEvents,
+  failureCount,
   foldBursts,
   foldRestarts,
   healthOf,
+  isFailure,
   lastLinesSearch,
   outcomeOf,
   perSlice,
@@ -303,6 +305,30 @@ test("a container's activity counts its comebacks and its failures once each", (
   expect(apiRow.failures).toBe(0)
   expect(apiRow.restarts).toBe(1)
   expect(apiRow.actors).toEqual(["wayy"])
+})
+
+test("the Failures count is what its filter shows: unhealthy checks too, an OOM and its exit once", () => {
+  const now = base + 120_000
+  // A check that turned unhealthy is a failure the feed shows, so it is counted.
+  const sick = [ev(5, "health_status: unhealthy")]
+  expect(sick.filter(isFailure)).toHaveLength(1)
+  const [sickRow] = containerActivity(sick, now)
+  expect(sickRow.failures).toBe(0)
+  expect(sickRow.unhealthy).toBe(1)
+  expect(failureCount([sickRow])).toBe(1)
+  expect(failureCount(containerActivity([ev(6, "health_status: healthy")], now))).toBe(0)
+
+  const worker = { id: "wk2222222222", name: "worker" }
+  const killed = [
+    ev(30, "oom", worker),
+    ev(30.2, "die", { ...worker, exitCode: "137" }),
+    ev(40, "health_status: unhealthy", worker),
+  ]
+  // Three events the filter shows, and two failures: the OOM kill and the
+  // exit it caused are one.
+  expect(killed.filter(isFailure)).toHaveLength(3)
+  expect(failureCount(containerActivity(killed, now))).toBe(2)
+  expect(failureCount(containerActivity([...sick, ...killed], now))).toBe(3)
 })
 
 test("a loop that stopped going is no longer looping, and a removed container sinks", () => {

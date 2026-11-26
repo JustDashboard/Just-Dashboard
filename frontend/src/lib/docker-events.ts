@@ -432,6 +432,16 @@ export function outcomeOf(event: DockerEvent): EventOutcome {
   return "other"
 }
 
+/**
+ * An event the Failures reading shows: an exit that failed, an OOM kill, or a
+ * health check that turned unhealthy. The reading's count and its filter both
+ * read this, so a failure the feed shows under the reading is one it counts.
+ */
+export function isFailure(event: DockerEvent): boolean {
+  const outcome = outcomeOf(event)
+  return outcome === "failed" || outcome === "unhealthy"
+}
+
 /** One container's part of the record, summed for the Events page's table. */
 export type ContainerActivity = {
   /** The container's id where its events carry one, else its name. */
@@ -445,6 +455,8 @@ export type ContainerActivity = {
   events: DockerEvent[]
   /** Exits that failed, with an OOM kill and the exit it caused counted once. */
   failures: number
+  /** Health checks that turned unhealthy. */
+  unhealthy: number
   /** How many times it came back after exiting — a restart policy firing, or `docker restart`. */
   restarts: number
   oom: boolean
@@ -511,6 +523,7 @@ export function containerActivity(events: DockerEvent[], now: number): Container
       service: newest.find((e) => e.service)?.service,
       events: newest,
       failures: failures + ooms,
+      unhealthy: oldest.filter((e) => outcomeOf(e) === "unhealthy").length,
       restarts,
       oom: newest.some((e) => e.action === "oom"),
       last,
@@ -525,6 +538,14 @@ export function containerActivity(events: DockerEvent[], now: number): Container
   const rank = (row: ContainerActivity) =>
     row.looping ? 0 : row.failures > 0 && !row.removed ? 1 : 2
   return rows.sort((a, b) => rank(a) - rank(b) || at(b.last) - at(a.last))
+}
+
+/**
+ * What the Failures reading counts over the containers: every event `isFailure`
+ * names, with an OOM kill and the exit it caused counted once, as one failure.
+ */
+export function failureCount(rows: Pick<ContainerActivity, "failures" | "unhealthy">[]): number {
+  return rows.reduce((sum, row) => sum + row.failures + row.unhealthy, 0)
 }
 
 /**
