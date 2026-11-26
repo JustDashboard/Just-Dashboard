@@ -1,5 +1,7 @@
 # Networking report implementation ledger
 
+**Closed on 2026-10-10**, when PR #173 merged into `patch/0.7.1`; no row has changed since. Of the 22 prioritized projects, 9 are verified, 7 are implemented with acceptance pending (P6, P8, P10, P11, P13, P14, P15) and 6 are deferred (P16, P18 to P22). Across every row, 123 are verified, 36 implemented / acceptance pending and 28 deferred. The deferred rows wait for a change of their own, which this ledger does not track.
+
 This ledger preserves the full scope requested for [PR #173](https://github.com/JustDashboard/Just-Dashboard/pull/173). The original report remains a dated source assessment; its scores are not raised merely because code changed. Completion requires the stated implementation and acceptance evidence, including live and failure-recovery evidence where specified.
 
 Status values: **pending**, **in progress**, **implemented / acceptance pending**, **verified**, **deferred**. A deferred requirement was taken out of PR #173 by the owner on 2026-10-09 and keeps its original wording for a later change; it is neither done nor dropped. When only part of a requirement is deferred, the row names that deferred remainder and its status judges the work kept in this PR. A passing narrow regression test does not establish a 10/10 product score.
