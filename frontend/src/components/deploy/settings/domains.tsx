@@ -122,8 +122,8 @@ import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_MAX_AGES,
   HSTS_PRELOAD_MAX_AGE,
-  HeaderListField,
-} from "@/components/proxy/site-form"
+} from "@/components/proxy/site-form/hsts"
+import { HeaderListField } from "@/components/proxy/site-form"
 import { ListField } from "@/components/list-field"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"

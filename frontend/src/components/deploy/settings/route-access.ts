@@ -9,7 +9,7 @@ import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_MAX_AGES,
   HSTS_PRELOAD_MAX_AGE,
-} from "@/components/proxy/site-form"
+} from "@/components/proxy/site-form/hsts"
 
 /** The auth server a route signs in through, as a sentence names it. */
 export function signInThrough(gate: DeploymentForwardAuth) {
