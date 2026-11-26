@@ -365,8 +365,8 @@ export const KNOWN: Record<string, Record<string, Record<string, number>>> = {
   proxy__sites__name: {
     "label-content-name-mismatch": {
       'a "app.example.com"': 1,
-      'a "just-dashboard-shop"': 1,
       'a "legacy.example.com"': 1,
+      'a "shop.example.com"': 1,
     },
   },
   security__intrusion__jails__jail: {
