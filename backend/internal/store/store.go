@@ -2037,6 +2037,10 @@ var addedColumns = []struct{ table, column, spec string }{
 	// keeps each package's path and whether the application runs it. A scan
 	// read before is 0, and its live release is due again.
 	{"deploy_image_scans", "reading", "INTEGER NOT NULL DEFAULT 0"},
+	// The lines a smart stack's step logged in its last pass. A table that a
+	// build of the stacks made before the column existed gains it, rather
+	// than failing every read of the stack's steps.
+	{"deploy_stack_steps", "log_json", "TEXT NOT NULL DEFAULT '[]'"},
 }
 
 // applyAddedColumns adds any column the running binary expects and the file on
