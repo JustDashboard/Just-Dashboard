@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -80,8 +81,10 @@ type NetworkedBuilderSpec struct {
 // container itself. Removing the environment's network removes it first
 // (RemoveNetworkedBuilderState), as before; the next build that starts on it
 // matches its networks to what that build may reach, so a database unlinked
-// meanwhile is not reachable from it. One a stopped dashboard left running is
-// not trusted: the next build removes and creates it again.
+// meanwhile is not reachable from it. A dashboard that stops removes the
+// builders it left waiting (RemoveWaitingNetworkedBuilders), since only its
+// timers would; one a dashboard that did not stop cleanly left running is not
+// trusted: the next build removes and creates it again.
 type NetworkedBuilder struct {
 	Name     string
 	Networks []string
@@ -98,19 +101,25 @@ type NetworkedBuilder struct {
 // its build is done.
 var NetworkedBuilderIdle = 15 * time.Minute
 
-// waitingBuilder is a builder this process left running after a build, with
-// what that build had it join and the timer that removes it.
+// waitingBuilder is a builder this process left running after a build: the
+// client that started it, what that build had it join, the timer that
+// removes it and how.
 type waitingBuilder struct {
+	client   *Client
 	networks []string
 	timer    *time.Timer
+	remove   func(context.Context)
 }
 
 // waitingBuilders are the builders this process left running, by name. Only
 // these are started on again; any other running under the name is removed.
+// drained are the clients whose waiting builders were removed because the
+// dashboard is stopping: a builder they close after that is removed at once.
 var waitingBuilders = struct {
 	sync.Mutex
-	byName map[string]*waitingBuilder
-}{byName: map[string]*waitingBuilder{}}
+	byName  map[string]*waitingBuilder
+	drained map[*Client]bool
+}{byName: map[string]*waitingBuilder{}, drained: map[*Client]bool{}}
 
 // takeWaitingBuilder claims the builder waiting under name, if any, and
 // stops its removal. The caller holds the builder's lock.
@@ -302,15 +311,60 @@ func (b *NetworkedBuilder) Close(ctx context.Context) {
 	}
 	b.once.Do(func() {
 		client, name := b.client, b.Name
-		waiting := &waitingBuilder{networks: append([]string(nil), b.Networks...)}
+		waiting := &waitingBuilder{
+			client: client, networks: append([]string(nil), b.Networks...),
+			remove: func(ctx context.Context) { client.removeNetworkedBuilder(ctx, name) },
+		}
 		waitingBuilders.Lock()
-		waiting.timer = time.AfterFunc(idle, func() { client.removeWaitingBuilder(name, waiting) })
-		waitingBuilders.byName[name] = waiting
+		drained := waitingBuilders.drained[client]
+		if !drained {
+			waiting.timer = time.AfterFunc(idle, func() { removeWaitingBuilder(name, waiting) })
+			waitingBuilders.byName[name] = waiting
+		}
 		waitingBuilders.Unlock()
+		if drained {
+			// The dashboard is stopping, and nothing would remove a builder
+			// left waiting now.
+			waiting.remove(ctx)
+		}
 		if b.release != nil {
 			b.release()
 		}
 	})
+}
+
+// RemoveWaitingNetworkedBuilders removes the builders this client left
+// waiting for their environment's next build, keeping their caches, and has
+// any it closes after this removed at once. The timers that would remove
+// them live only in this process, so a dashboard that stopped with one
+// waiting would leave it on its environment's networks until that
+// environment built again, or for good. The dashboard calls it as it stops,
+// before it closes the client.
+func (c *Client) RemoveWaitingNetworkedBuilders(ctx context.Context) {
+	if c == nil {
+		return
+	}
+	waitingBuilders.Lock()
+	waitingBuilders.drained[c] = true
+	drained := map[string]*waitingBuilder{}
+	for name, waiting := range waitingBuilders.byName {
+		if waiting.client == c {
+			waiting.timer.Stop()
+			delete(waitingBuilders.byName, name)
+			drained[name] = waiting
+		}
+	}
+	waitingBuilders.Unlock()
+	for _, name := range slices.Sorted(maps.Keys(drained)) {
+		// A removal its timer started, or the environment's own removal,
+		// finishes first.
+		release, err := networkedBuilderLock(ctx, name)
+		if err != nil {
+			return
+		}
+		drained[name].remove(ctx)
+		release()
+	}
 }
 
 // discard removes the builder's container now and keeps its cache.
@@ -332,7 +386,7 @@ func (b *NetworkedBuilder) discard(ctx context.Context) {
 // has claimed it since. One whose lock is held — the Close that left it
 // waiting has not let go yet, or the environment's networks are being
 // removed — is looked at again a minute later.
-func (c *Client) removeWaitingBuilder(name string, waiting *waitingBuilder) {
+func removeWaitingBuilder(name string, waiting *waitingBuilder) {
 	release, ok := networkedBuilderTryLock(name)
 	if !ok {
 		waitingBuilders.Lock()
@@ -352,7 +406,7 @@ func (c *Client) removeWaitingBuilder(name string, waiting *waitingBuilder) {
 	if current != waiting {
 		return
 	}
-	c.removeNetworkedBuilder(context.Background(), name)
+	waiting.remove(context.Background())
 }
 
 // removeNetworkedBuilder removes the builder and its container, keeping the

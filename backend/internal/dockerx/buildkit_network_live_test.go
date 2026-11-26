@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -74,6 +75,79 @@ func TestLiveNetworkedBuilderWaitsForTheNextBuild(t *testing.T) {
 	}
 	if _, err := client.Inspect(ctx, networkedBuilderContainer(name)); err == nil {
 		t.Fatal("the removed builder's container is still there")
+	}
+}
+
+// A build on the networked builder, then the dashboard stopping: the builder
+// the build left waiting is removed, off its network, with its cache kept,
+// and one a build closes after that is removed at once, since no timer of a
+// stopped dashboard's would remove it.
+func TestLiveStoppingRemovesTheWaitingNetworkedBuilder(t *testing.T) {
+	if os.Getenv("JD_DEPLOY_LIVE") != "1" {
+		t.Skip("set JD_DEPLOY_LIVE=1 to start a BuildKit builder on a network of the test's own")
+	}
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Minute)
+	defer cancel()
+	client := New("unix:///var/run/docker.sock")
+	t.Cleanup(func() { client.Close() })
+	var nonce [6]byte
+	if _, err := rand.Read(nonce[:]); err != nil {
+		t.Fatal(err)
+	}
+	network := "jd-e900000078-db-" + hex.EncodeToString(nonce[:])
+	if output, err := exec.CommandContext(ctx, "docker", "network", "create", network).CombinedOutput(); err != nil {
+		t.Fatalf("create %s: %v %s", network, err, output)
+	}
+	name := NetworkedBuilderName(network)
+	t.Cleanup(func() {
+		_ = client.RemoveNetworkedBuilderState(context.Background(), name)
+		_ = exec.Command("docker", "network", "rm", network).Run()
+	})
+	spec := NetworkedBuilderSpec{Name: name, Networks: []string{network}, ConfigDir: t.TempDir()}
+	builder, err := client.StartNetworkedBuilder(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source := t.TempDir()
+	for file, content := range map[string]string{"Dockerfile": "FROM scratch\nCOPY marker /marker\n", "marker": "built\n"} {
+		if err := os.WriteFile(filepath.Join(source, file), []byte(content), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	lines := make(chan LogLine, 64)
+	go func() {
+		for range lines {
+		}
+	}()
+	err = client.RunCacheOnly(ctx, ImmutableBuildOptions{Dir: source, Builder: name}, lines)
+	close(lines)
+	if err != nil {
+		t.Fatalf("the build on the networked builder: %v", err)
+	}
+	builder.Close(ctx)
+	if got := liveNetworkContainers(t, ctx, network); !slices.Contains(got, networkedBuilderContainer(name)) {
+		t.Fatalf("the closed builder is not waiting on %s: %v", network, got)
+	}
+	client.RemoveWaitingNetworkedBuilders(ctx)
+	if _, err := client.Inspect(ctx, networkedBuilderContainer(name)); err == nil {
+		t.Fatal("the waiting builder's container outlived the stop")
+	}
+	if got := liveNetworkContainers(t, ctx, network); len(got) != 0 {
+		t.Fatalf("the network still holds %v after the stop", got)
+	}
+	if output, err := exec.CommandContext(ctx, "docker", "volume", "inspect", NetworkedBuilderStateVolume(name)).CombinedOutput(); err != nil {
+		t.Fatalf("the builder's cache did not outlive the stop: %v %s", err, output)
+	}
+	again, err := client.StartNetworkedBuilder(ctx, spec)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if again.Reused {
+		t.Fatal("a build after the stop started on a builder the stop removed")
+	}
+	again.Close(ctx)
+	if _, err := client.Inspect(ctx, networkedBuilderContainer(name)); err == nil {
+		t.Fatal("a builder closed after the stop was left waiting")
 	}
 }
 

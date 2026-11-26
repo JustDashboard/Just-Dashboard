@@ -154,6 +154,97 @@ func TestNextBuildKeepsItsOwnTypeCheck(t *testing.T) {
 	}
 }
 
+// typeCheckScripts is typeCheckApp's package.json with these scripts.
+func typeCheckScripts(scripts string) string {
+	return `{"name":"web","version":"0.1.0","scripts":` + scripts + `,"dependencies":{"next":"16.4.6"},"devDependencies":{"typescript":"^5"}}`
+}
+
+// A repository that generates the types its pages import before it
+// compiles — in the build script, in a prebuild hook, or in the build
+// command — keeps next build's own check: the check beside the build starts
+// from the source, which has no generated file, and would fail with TS2307
+// where next build passes.
+func TestABuildThatGeneratesTypesFirstKeepsNextBuildsCheck(t *testing.T) {
+	t.Parallel()
+	generated := map[string]string{
+		"scripts/generate-types.mjs": "import { writeFileSync } from 'node:fs'\nwriteFileSync('generated/types.ts', 'export type Post = { slug: string }\\n')\n",
+		"app/page.tsx":               "import type { Post } from '../generated/types'\nexport default function Page() { const post: Post = { slug: 'a' }; return post.slug }\n",
+	}
+	for _, test := range []struct {
+		name    string
+		scripts string
+		command string
+	}{
+		{name: "the build script generates first", scripts: `{"generate-types":"node scripts/generate-types.mjs","build":"bun run generate-types && next build","start":"next start"}`},
+		{name: "a prebuild hook generates first", scripts: `{"prebuild":"node scripts/generate-types.mjs","build":"next build","start":"next start"}`},
+		{name: "a script it runs has a pre-script", scripts: `{"prebuild:next":"node scripts/generate-types.mjs","build":"bun run build:next","build:next":"next build","start":"next start"}`},
+		{name: "the build command generates first", scripts: `{"build":"next build","start":"next start"}`, command: "node scripts/generate-types.mjs && bun run build"},
+		{name: "the build runs through a task runner", scripts: `{"build":"turbo run build","start":"next start"}`},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			extra := map[string]string{"package.json": typeCheckScripts(test.scripts)}
+			for name, content := range generated {
+				extra[name] = content
+			}
+			dockerfile := prepareTypeCheckApp(t, typeCheckApp(t, "16.4.6", extra), true, BuildPlanConfig{BuildCommand: test.command})
+			assertDockerfile(t, dockerfile, nil, []string{"typecheck", "next typegen", "next-adapter.mjs", "ignoreBuildErrors"})
+		})
+	}
+}
+
+// A build that is next build and nothing before it keeps the check beside
+// it, through whichever runner and script names it.
+func TestAPlainNextBuildTypeChecksBesideIt(t *testing.T) {
+	t.Parallel()
+	for _, test := range []struct {
+		name    string
+		scripts string
+		command string
+	}{
+		{name: "next build through a script", scripts: `{"build":"next build","start":"next start","postbuild":"next-sitemap"}`},
+		{name: "options and a value for its environment", scripts: `{"build":"NODE_OPTIONS='--max-old-space-size=4096' next build --turbopack","start":"next start"}`},
+		{name: "a script that runs another", scripts: `{"build":"bun run build:next","build:next":"next build","start":"next start"}`},
+		{name: "next build as the command", scripts: `{"build":"bun run generate && next build","start":"next start"}`, command: "bunx next build"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			dockerfile := prepareTypeCheckApp(t, typeCheckApp(t, "16.4.6", map[string]string{"package.json": typeCheckScripts(test.scripts)}), true,
+				BuildPlanConfig{BuildCommand: test.command})
+			assertDockerfile(t, dockerfile, []string{"FROM source AS typecheck\n", "next typegen", "next-adapter.mjs"}, nil)
+		})
+	}
+}
+
+func TestNextBuildIsPlainOnlyWhenNothingRunsBeforeIt(t *testing.T) {
+	t.Parallel()
+	scripts := map[string]string{
+		"build": "next build", "build:turbo": "next build --turbopack", "build:gen": "prisma generate && next build",
+		"prebuild:hooked": "node gen.mjs", "build:hooked": "next build", "build:chain": "npm run build:turbo",
+		"loop": "npm run loop", "build:dir": "next build apps/web", "build:env": `NEXT_TELEMETRY_DISABLED=1 ANALYZE="" next build`,
+		"build:subst": "NODE_OPTIONS=$(node opts.js) next build",
+	}
+	for command, want := range map[string]bool{
+		"next build": true, "next build --turbopack --debug": true, "npx next build": true, "bunx next build": true,
+		"bun x next build": true, "pnpm exec next build": true, "yarn exec next build": true, "npm exec -- next build": true,
+		"npm run build": true, "npm run-script build": true, "pnpm build": true, "pnpm run build": true, "yarn build": true,
+		"yarn run build": true, "bun run build": true, "bun --bun run build": true, "bun run --bun build": true,
+		"bun run build:chain": true, "bun run build:env": true,
+		"": false, "bun run build:gen": false, "bun run build:hooked": false, "bun run loop": false, "bun run missing": false,
+		"bun run build:dir": false, "bun run build:subst": false, "bun build": false, "next build; rm -rf /": false,
+		"next build && next export": false, "bun run build -- --turbopack": false, "next dev": false,
+		"NODE_OPTIONS=`id` next build": false,
+	} {
+		if got := nextBuildIsPlain(scripts, command); got != want {
+			t.Errorf("nextBuildIsPlain(%q) = %v, want %v", command, got, want)
+		}
+	}
+	// A prebuild hook makes bun run build run it first.
+	if nextBuildIsPlain(map[string]string{"prebuild": "node gen.mjs", "build": "next build"}, "bun run build") {
+		t.Error("a prebuild hook was left out")
+	}
+}
+
 func TestNextAdapterReleaseReadsWhereARangeStarts(t *testing.T) {
 	t.Parallel()
 	for spec, want := range map[string]bool{
@@ -212,17 +303,29 @@ const (
 		`getParsedCommandLineOfConfigFile: () => ({ fileNames: ["/app/app/page.tsx"], options: { strict: true }, errors: [] }), ` +
 		`createIncrementalProgram: (program) => { fs.appendFileSync("calls.jsonl", JSON.stringify(["api", program.options.tsBuildInfoFile, program.options.noEmit]) + "\n"); return { emit: () => ({ diagnostics: [] }) } }, ` +
 		`getPreEmitDiagnostics: () => failing, formatDiagnostics: (found) => found.map((d) => d.file.fileName + "(1,7): error TS" + d.code + ": " + d.messageText + "\n").join("") }`
+	// nextConfigLoader stands in for next/dist/server/config: the
+	// configuration next build loads, with experimental.useTypeScriptCli as
+	// the project leaves it (Next.js 16.4's default, true) or sets it.
+	nextConfigLoader = `exports.default = async (phase, dir) => { if (phase !== "phase-production-build" || dir !== process.cwd()) { throw new Error("loaded at " + phase + " in " + dir) } ` +
+		`return { experimental: { useTypeScriptCli: process.env.JD_FAKE_USE_TYPESCRIPT_CLI !== "false" } } }`
+	// nextConfigBroken stands in for a next.config that does not load.
+	nextConfigBroken = `exports.default = async () => { throw new Error("next.config.ts: Unexpected token") }`
 )
 
 // runTypeCheckScript runs the check as the stage does, under Node.js, in an
-// application whose node_modules/typescript holds the given files, and
+// application whose node_modules/typescript holds the given files and whose
+// Next.js loads its configuration with loader (none when it is empty), and
 // returns what it printed, whether it passed and the calls it made.
-func runTypeCheckScript(t *testing.T, node string, typescript map[string]string, env ...string) (string, bool, [][]any) {
+func runTypeCheckScript(t *testing.T, node string, typescript map[string]string, loader string, env ...string) (string, bool, [][]any) {
 	t.Helper()
 	root := t.TempDir()
 	writeBuildFixture(t, root, "tsconfig.json", `{"compilerOptions":{"strict":true}}`)
 	for name, content := range typescript {
 		writeBuildFixture(t, root, filepath.Join("node_modules", "typescript", name), content)
+	}
+	if loader != "" {
+		writeBuildFixture(t, root, "node_modules/next/package.json", `{"name":"next","version":"16.4.6"}`)
+		writeBuildFixture(t, root, "node_modules/next/dist/server/config.js", loader)
 	}
 	script := filepath.Join(t.TempDir(), "typecheck.cjs")
 	if err := os.WriteFile(script, []byte(nextTypeCheckSource+"\n"), 0o644); err != nil {
@@ -262,10 +365,8 @@ func TestNextTypeCheckScriptUsesWhatTypeScriptHas(t *testing.T) {
 		"bin/tsc": `throw new Error("the extensionless bin ran")`, "lib/tsc.js": `import { createRequire } from "node:module"; createRequire(import.meta.url)("./fake.cjs")`,
 		"lib/fake.cjs": typeCheckCommand,
 	}
-	api := map[string]string{
-		"package.json": typeCheckAPIManifest, "lib/typescript.js": typeCheckAPI,
-		"bin/tsc": `require("fs").appendFileSync("calls.jsonl", JSON.stringify(["the command ran"]) + "\n")`,
-	}
+	api := map[string]string{"package.json": typeCheckAPIManifest, "lib/typescript.js": typeCheckAPI, "bin/tsc": typeCheckCommand}
+	optOut := "JD_FAKE_USE_TYPESCRIPT_CLI=false"
 	// What next build's own run of the command passes
 	// (runTypeCheckCli.js), and --pretty false.
 	check := []any{"--noEmit", "--declarationMap", "false", "--emitDeclarationOnly", "false", "--pretty", "false"}
@@ -273,10 +374,13 @@ func TestNextTypeCheckScriptUsesWhatTypeScriptHas(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		typescript map[string]string
-		env        []string
-		passes     bool
-		prints     []string
-		calls      [][]any
+		// loader is Next.js's configuration loader, nextConfigLoader when
+		// empty and none at all when "-".
+		loader string
+		env    []string
+		passes bool
+		prints []string
+		calls  [][]any
 	}{
 		{name: "the command, types fine", typescript: command, env: []string{`JD_FAKE_CONFIG={"compilerOptions":{"incremental":true}}`}, passes: true,
 			calls: [][]any{{"--showConfig", "--pretty", "false"}, incremental}},
@@ -293,16 +397,35 @@ func TestNextTypeCheckScriptUsesWhatTypeScriptHas(t *testing.T) {
 			env: []string{`JD_FAKE_CONFIG={"compilerOptions":{}}`}, passes: true, calls: [][]any{{"--showConfig", "--pretty", "false"}, check}},
 		{name: "neither an API nor a command", typescript: map[string]string{"package.json": `{"name":"typescript","version":"7.9.0"}`},
 			prints: []string{"TypeScript 7.9.0 has neither the compiler API nor a tsc command"}},
-		{name: "the API, types fine", typescript: api, passes: true, calls: [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
-		{name: "the API, a type error", typescript: api, env: []string{"JD_FAKE_ERROR=Type 'string' is not assignable to type 'number'.", "JD_FAKE_ERROR_FILE=/app/app/page.tsx"},
+		// Next.js 16.4 checks on the command unless the project opts out,
+		// whatever TypeScript it has, and the command checks test files too.
+		{name: "the default, a package with an API, on the command", typescript: api, env: []string{`JD_FAKE_CONFIG={"compilerOptions":{}}`}, passes: true,
+			calls: [][]any{{"--showConfig", "--pretty", "false"}, check}},
+		{name: "the default, a type error in a test file", typescript: api, env: []string{`JD_FAKE_CONFIG={"compilerOptions":{}}`,
+			"JD_FAKE_ERROR=app/page.test.tsx(1,7): error TS2322: Type 'string' is not assignable to type 'number'."},
+			prints: []string{"app/page.test.tsx(1,7): error TS2322", "Failed to type check."}, calls: [][]any{{"--showConfig", "--pretty", "false"}, check}},
+		{name: "a Next.js with no configuration loader, on the command", typescript: api, loader: "-", env: []string{`JD_FAKE_CONFIG={"compilerOptions":{}}`}, passes: true,
+			calls: [][]any{{"--showConfig", "--pretty", "false"}, check}},
+		{name: "a next.config that does not load", typescript: api, loader: nextConfigBroken, prints: []string{"next.config.ts: Unexpected token"}},
+		{name: "an opt-out, on the API, types fine", typescript: api, env: []string{optOut}, passes: true, calls: [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
+		{name: "an opt-out, on the API, a type error", typescript: api, env: []string{optOut, "JD_FAKE_ERROR=Type 'string' is not assignable to type 'number'.", "JD_FAKE_ERROR_FILE=/app/app/page.tsx"},
 			prints: []string{"/app/app/page.tsx(1,7): error TS2322: Type 'string' is not assignable to type 'number'."},
 			calls:  [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
-		{name: "the API, a type error in a test file", typescript: api, env: []string{"JD_FAKE_ERROR=Type 'string' is not assignable to type 'number'.", "JD_FAKE_ERROR_FILE=/app/app/page.test.tsx"},
+		{name: "an opt-out, on the API, a type error in a test file", typescript: api, env: []string{optOut, "JD_FAKE_ERROR=Type 'string' is not assignable to type 'number'.", "JD_FAKE_ERROR_FILE=/app/app/page.test.tsx"},
 			passes: true, calls: [][]any{{"api", nextTypeCheckState + "/tsbuildinfo", true}}},
+		{name: "an opt-out with a package that has no API", typescript: command, env: []string{optOut},
+			prints: []string{"TypeScript 7.0.2 does not provide the compiler API required by Next.js. Set experimental.useTypeScriptCli back to true"}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			output, passed, calls := runTypeCheckScript(t, node, test.typescript, test.env...)
+			loader := test.loader
+			switch loader {
+			case "":
+				loader = nextConfigLoader
+			case "-":
+				loader = ""
+			}
+			output, passed, calls := runTypeCheckScript(t, node, test.typescript, loader, test.env...)
 			if passed != test.passes {
 				t.Fatalf("passed = %v, want %v:\n%s", passed, test.passes, output)
 			}
