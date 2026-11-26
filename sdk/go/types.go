@@ -2478,21 +2478,22 @@ type Facet struct {
 
 // Finding is imagescan.Finding in the dashboard's source.
 type Finding struct {
-	Action     string `json:"action,omitempty"`
-	Class      string `json:"class,omitempty"`
-	Dependency string `json:"dependency,omitempty"`
-	Fixed      string `json:"fixed,omitempty"`
-	FromBase   bool   `json:"fromBase,omitempty"`
-	ID         string `json:"id,omitempty"`
-	Installed  string `json:"installed,omitempty"`
-	Origin     string `json:"origin,omitempty"`
-	Package    string `json:"package,omitempty"`
-	Path       string `json:"path,omitempty"`
-	Severity   string `json:"severity,omitempty"`
-	Target     string `json:"target,omitempty"`
-	Title      string `json:"title,omitempty"`
-	URL        string `json:"url,omitempty"`
-	Via        string `json:"via,omitempty"`
+	Action      string   `json:"action,omitempty"`
+	BaseDigests []string `json:"baseDigests"`
+	Class       string   `json:"class,omitempty"`
+	Dependency  string   `json:"dependency,omitempty"`
+	Fixed       string   `json:"fixed,omitempty"`
+	FromBase    bool     `json:"fromBase,omitempty"`
+	ID          string   `json:"id,omitempty"`
+	Installed   string   `json:"installed,omitempty"`
+	Origin      string   `json:"origin,omitempty"`
+	Package     string   `json:"package,omitempty"`
+	Path        string   `json:"path,omitempty"`
+	Severity    string   `json:"severity,omitempty"`
+	Target      string   `json:"target,omitempty"`
+	Title       string   `json:"title,omitempty"`
+	URL         string   `json:"url,omitempty"`
+	Via         string   `json:"via,omitempty"`
 }
 
 // Fixture is blueprint.Fixture in the dashboard's source.

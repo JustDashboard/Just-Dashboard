@@ -570,6 +570,68 @@ func TestTheWatchScansTheReleaseAndItsBasesAndCarriesTheBasesForwardDaily(t *tes
 	}
 }
 
+// A finding keeps which base carries it, and only a newer image of that
+// base makes it a rebuild's to fix: in a release on node and alpine, a moved
+// alpine is no fix for what node carries, and is not the alert.
+func TestANewerImageOfOneBaseIsNoFixForWhatAnotherCarries(t *testing.T) {
+	t.Parallel()
+	f := newReleaseStoreFixture(t)
+	ctx := context.Background()
+	release := seedScanRelease(t, f, 8, true)
+	openssl := imagescan.Finding{ID: "CVE-1", Package: "openssl", Installed: "3.0.1", Fixed: "3.0.2", Severity: imagescan.SeverityHigh,
+		Class: "os-pkgs", Target: "alpine 3.20.1"}
+	scanner := &fakeImageScanner{findings: map[string][]imagescan.Finding{
+		scanReleaseImageID:         {openssl},
+		"node@" + scanNodeBase:     {openssl},
+		"alpine@" + scanAlpineBase: {},
+	}, fail: map[string]error{}}
+	alpineNow := "sha256:" + strings.Repeat("f", 64)
+	scan := func(resolver digestResolver) *ImageScan {
+		t.Helper()
+		if err := NewImageScanWatcher(f.runs, scanner, resolver, nil).ScanRelease(ctx, release, ImageScanTriggerManual); err != nil {
+			t.Fatal(err)
+		}
+		read, err := f.runs.ImageScan(ctx, release)
+		if err != nil || read == nil || len(read.Summary.Fixable) != 1 {
+			t.Fatalf("scan = %+v, %v", read, err)
+		}
+		return read
+	}
+
+	alpineMoved := scan(digestResolver{"node:22-alpine": scanNodeBase, "alpine:3.22": alpineNow})
+	finding := alpineMoved.Summary.Fixable[0]
+	if !finding.FromBase || !slices.Equal(finding.BaseDigests, []string{scanNodeBase}) {
+		t.Fatalf("openssl = %+v, want it marked as node's", finding)
+	}
+	if !alpineMoved.NewerBase || finding.Action != "" || alpineMoved.Vulnerable() || alpineMoved.Actionable.Total() != 0 {
+		t.Fatalf("a moved alpine made node's openssl a rebuild's: action %q, vulnerable %v", finding.Action, alpineMoved.Vulnerable())
+	}
+	if len(alpineMoved.BaseFixable()) != 1 || len(alpineMoved.NewerBaseFixes()) != 0 {
+		t.Fatalf("base fixable %d, newer base fixes %d", len(alpineMoved.BaseFixable()), len(alpineMoved.NewerBaseFixes()))
+	}
+
+	nodeMoved := scan(digestResolver{"node:22-alpine": scanNodeBaseNow, "alpine:3.22": scanAlpineBase})
+	if nodeMoved.Summary.Fixable[0].Action != ImageScanActionRebuild || !nodeMoved.Vulnerable() {
+		t.Fatalf("a moved node is a rebuild for its openssl: %+v", nodeMoved.Summary.Fixable[0])
+	}
+
+	// A finding marked before the bases' digests were kept says only that a
+	// base carries it: any base that moved still reads as its fix.
+	if err := f.runs.FinishImageScan(ctx, release, ImageScanResult{
+		State: ImageScanScanned, Findings: []imagescan.Finding{{ID: "CVE-1", Package: "openssl", Installed: "3.0.1", Fixed: "3.0.2",
+			Severity: imagescan.SeverityHigh, Class: "os-pkgs", Target: "alpine 3.20.1", FromBase: true}},
+		BaseUpdates: []ReleaseBaseUpdate{
+			{Reference: "node:22-alpine", Pinned: scanNodeBase, Current: scanNodeBase, State: "current"},
+			{Reference: "alpine:3.22", Pinned: scanAlpineBase, Current: alpineNow, State: "outdated"},
+		},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if legacy, _ := f.runs.ImageScan(ctx, release); legacy.Summary.Fixable[0].Action != ImageScanActionRebuild || !legacy.Vulnerable() {
+		t.Fatalf("an unmarked base finding = %+v", legacy.Summary.Fixable[0])
+	}
+}
+
 func TestABuildsReleaseIsQueuedOnceWhenItsRunSucceeds(t *testing.T) {
 	t.Parallel()
 	f := newReleaseStoreFixture(t)

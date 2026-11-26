@@ -157,6 +157,30 @@ func TestImageAlertReadingFiresOnAFixableFindingAndANewerBase(t *testing.T) {
 			t.Fatalf("%s is not kept where it was: %+v", subject, reading)
 		}
 	}
+
+	// A Node and Bun build: zlib is node's, and only oven/bun moved, so a
+	// rebuild would not fix it and nothing fires; once node moves, it does,
+	// and the message names node.
+	bunNow := "sha256:" + strings.Repeat("9", 64)
+	nodeZlib := zlibFinding
+	nodeZlib.BaseDigests = []string{scanTestBase}
+	twoBases := func(node string) *deploy.ImageScan {
+		read := deploy.ImageScan{
+			ReleaseNumber: 5, State: deploy.ImageScanScanned, Floor: imagescan.SeverityHigh, NewerBase: true, Rebuildable: true,
+			BaseUpdates: []deploy.ReleaseBaseUpdate{
+				{Reference: "oven/bun:1", Pinned: scanTestNewer, Current: bunNow, State: "outdated"},
+				{Reference: "node:22-alpine", Pinned: scanTestBase, Current: node, State: map[bool]string{true: "current", false: "outdated"}[node == scanTestBase]},
+			},
+		}.WithFindings([]imagescan.Finding{nodeZlib})
+		return &read
+	}
+	mixed := imageAlertReading([]deploy.LiveImageScan{live(8, twoBases(scanTestBase)), live(9, twoBases(scanTestNewer))})
+	if len(mixed.Firing) != 1 || mixed.Firing[0].Subject != "env:7:9" || !strings.Contains(mixed.Firing[0].Detail, "node:22-alpine now names a newer image") {
+		t.Fatalf("firing = %+v", mixed.Firing)
+	}
+	if !strings.Contains(mixed.Now["env:7:8"], "each base with a fixable finding names now") {
+		t.Fatalf("only bun moved = %q", mixed.Now["env:7:8"])
+	}
 }
 
 // Through the server's own observer and the store: told once when the live

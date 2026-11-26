@@ -122,6 +122,15 @@ describe("vulnerabilities", () => {
     }
     expect(vulnerable(scan({ summary: { ...scan().summary, fixable: [tooling] } }))).toBe(false)
     expect(vulnerable(scan({ state: "scanning" }))).toBe(false)
+    // Another base moved, not the one that carries these: the server gives
+    // them no rebuild, and a newer Bun is no fix for what Node carries.
+    const otherBaseMoved = scan({
+      summary: {
+        ...scan().summary,
+        fixable: scan().summary.fixable.map((finding) => ({ ...finding, action: undefined })),
+      },
+    })
+    expect(vulnerable(otherBaseMoved)).toBe(false)
     expect(
       vulnerable(
         scan({

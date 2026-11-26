@@ -136,7 +136,8 @@ export function originParts(scan: ImageScan) {
   )
 }
 
-function joinAnd(parts: string[]) {
+/** "a, b and c". */
+export function joinAnd(parts: string[]) {
   if (parts.length <= 1) return parts.join("")
   return `${parts.slice(0, -1).join(", ")} and ${parts[parts.length - 1]}`
 }
@@ -237,12 +238,17 @@ export function ageWords(hours: number | undefined) {
 
 /**
  * The alert's condition, as the page reads it: a fixable finding at or above
- * the floor that a base carries, and a base whose tag names a newer image.
+ * the floor that a base carries, and a newer image under that base's tag,
+ * which the server marks as the finding's rebuild. Another base moving is
+ * not it: a newer Bun does not fix what Node carries.
  */
 export function vulnerable(scan: ImageScan | null | undefined) {
   if (!scan || scan.state !== "scanned" || !scan.newerBase) return false
   return scan.summary.fixable.some(
-    (finding) => originOf(finding) === "base" && atLeast(finding.severity, scan.floor),
+    (finding) =>
+      originOf(finding) === "base" &&
+      finding.action === "rebuild" &&
+      atLeast(finding.severity, scan.floor),
   )
 }
 

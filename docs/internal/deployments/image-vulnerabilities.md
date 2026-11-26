@@ -126,8 +126,9 @@ read against moves. Previews are never scanned: a preview is production's code a
 and lives for an afternoon.
 
 A release's own findings that a base carries too (the same vulnerability, package and installed
-version, at the same path for a language package) are marked `fromBase`: a newer base may fix those;
-the rest came with the application. A base read before paths were kept matches on the package alone.
+version, at the same path for a language package) are marked `fromBase`, with the pinned digest of each
+base that carries it (`baseDigests`): a newer image of that base may fix those; the rest came with the
+application. A base read before paths were kept matches on the package alone.
 
 ## Whose a finding is, and what can be done
 
@@ -136,7 +137,7 @@ the rest came with the application. A base read before paths were kept matches o
 
 | Origin | What it is | Action |
 | --- | --- | --- |
-| `base` | `fromBase` | `rebuild` while a base's tag names a newer image; nothing otherwise — it is fixed when the base's maintainers publish one |
+| `base` | `fromBase` | `rebuild` while the tag of a base that carries it names a newer image; nothing otherwise — it is fixed when that base's maintainers publish one. In a Node and Bun build, a newer Bun is no rebuild for what Node carries. A finding marked before `baseDigests` were kept reads any base that moved as its own until the next scan marks it |
 | `development` | `dependency: development` | nothing: a development tool's fix is its makers' (esbuild's Go), and nothing the application runs needs it |
 | `app` | everything else: what the application runs, and packages its build installed | `upgrade` for a language package; `rebuild` for a distribution package the build installed, when the build is one the dashboard runs (`Rebuildable`), since a build without the cache installs the fixed one |
 
@@ -186,9 +187,10 @@ turning it back on asks for the live release at once. Set in Build settings → 
 
 `image_vulnerable`, a host alert kind with nothing to set ([host alerts](../backend/observability-security.md)),
 reads `LiveImageScans`: for each scanning environment's live release, firing when its scan found a
-fixable vulnerability at or above the floor **that a base carries** **and** a base now names a newer
-image (`ImageScan.Vulnerable`, over `ImageScan.BaseFixable`). A development tool's finding, or the
-application's own, is never the alert: a newer base fixes neither.
+fixable vulnerability at or above the floor **that a base carries** **and** the tag of that base now
+names a newer image (`ImageScan.Vulnerable`, over `ImageScan.NewerBaseFixes`, the part of
+`ImageScan.BaseFixable` whose own base moved). A development tool's finding, or the application's own,
+is never the alert: a newer base fixes neither. Nor is a base's finding when only another base moved.
 It is told once when it starts and once when it ends, as every host alert is, through the deployments'
 notification channels: "Release 12 has 1 critical and 2 high findings with a fix (CVE-… in zlib
 1.2.12-r0, fixed in 1.2.12-r2), and node:22-alpine now names a newer image than the one it was built
@@ -236,8 +238,8 @@ API's description, `docs/api/deploy-openapi.json`.
 - The **report** (`/deploy/[id]/vulnerabilities`, `deploy/vulnerability-report.tsx`): how many were
   found and whose they are, when and against how old a database, each base with whether it is the newest,
   and one section per origin — *Your app's packages*, *Development tools shipped with it* (naming the
-  devDependencies that brought them), *The node:22-alpine base image* (whether a rebuild picks up a newer
-  one) — each with its counts by severity, a sentence on what can be done about it, and its findings at
+  devDependencies that brought them), *The node:22-alpine base image* (which of its bases names a newer
+  image that a rebuild picks up, with the fixed version shown only on a finding whose own base moved) — each with its counts by severity, a sentence on what can be done about it, and its findings at
   the floor as one row per package copy (`groupFindings`), on the mark of its distribution or ecosystem
   (Go's for a binary's standard library), each advisory under it. The version that fixes a package is
   shown where the fix is the reader's to take — their own packages, and a base's once a newer image is
@@ -257,8 +259,9 @@ API's description, `docs/api/deploy-openapi.json`.
   registry flow against a fake registry (bearer token, digest check, a tampered layer, a layer with
   other entries, the retry interval, a stale database still read) and the scanner's confinement.
 - `deploy/image_scan_test.go`: the terms, the queue and the daily schedule, previews, the floor at
-  read time, a failed scan keeping its findings, whose each finding is and what can be done, an older
-  reading due again, the base comparison, the watch's base carry-over and the run observer.
+  read time, a failed scan keeping its findings, whose each finding is and what can be done, the
+  verdicts read before a full list is cut, a newer image of one base read only for what it carries, an
+  older reading due again, the base comparison, the watch's base carry-over and the run observer.
 - `api/handlers_deploy_image_scans_test.go`: the alert's reading, once on the way in and once on the way
   out through the server's own observer, and the routes; `deploy_keys_test.go` holds the deploy key's
   answers.

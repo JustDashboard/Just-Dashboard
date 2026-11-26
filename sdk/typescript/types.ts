@@ -2507,6 +2507,7 @@ export interface Facet {
 /** imagescan.Finding in the dashboard's source. */
 export interface Finding {
   action?: string
+  baseDigests?: string[] | null
   class?: string
   dependency?: string
   fixed?: string

@@ -224,11 +224,40 @@ type ImageScan struct {
 }
 
 // Vulnerable reports the alert's condition: a fixable finding at or above
-// the floor that a base carries, and a newer digest of a base the release
-// was pinned on. A development tool's finding is never the alert, and nor is
-// the application's own: a newer base fixes neither.
+// the floor that a base carries, and a newer digest under the tag of that
+// base. A development tool's finding is never the alert, and nor is the
+// application's own: a newer base fixes neither. Nor is a base's finding
+// when another base moved: a newer Bun does not fix what Node carries.
 func (scan ImageScan) Vulnerable() bool {
-	return scan.State == ImageScanScanned && scan.NewerBase && len(scan.BaseFixable()) > 0
+	return scan.State == ImageScanScanned && len(scan.NewerBaseFixes()) > 0
+}
+
+// NewerBaseFixes is BaseFixable narrowed to the findings a base carries
+// whose tag names a newer image now: what a rebuild may fix.
+func (scan ImageScan) NewerBaseFixes() []imagescan.Finding {
+	out := []imagescan.Finding{}
+	for _, finding := range scan.baseFixable {
+		if finding.Action == ImageScanActionRebuild {
+			out = append(out, finding)
+		}
+	}
+	return out
+}
+
+// baseMoved says a base that carries the finding has a newer image under
+// its tag. A finding marked before the bases' digests were kept says only
+// that some base carries it, so any base that moved counts, until the next
+// scan marks it again.
+func (scan ImageScan) baseMoved(finding imagescan.Finding) bool {
+	if len(finding.BaseDigests) == 0 {
+		return scan.NewerBase
+	}
+	for _, update := range scan.BaseUpdates {
+		if update.State == "outdated" && slices.Contains(finding.BaseDigests, update.Pinned) {
+			return true
+		}
+	}
+	return false
 }
 
 // BaseFixable is the fixable findings at or above the floor that a base
@@ -276,7 +305,7 @@ func (scan ImageScan) actionOf(finding imagescan.Finding) string {
 		}
 		return ImageScanActionUpgrade
 	case imagescan.OriginBase:
-		if scan.NewerBase {
+		if scan.baseMoved(finding) {
 			return ImageScanActionRebuild
 		}
 	}
