@@ -1,15 +1,6 @@
 "use client"
 
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useEffectEvent,
-  useMemo,
-  useRef,
-  useState,
-} from "react"
+import { useCallback, useEffect, useEffectEvent, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 import { useSessionState } from "@/lib/view-state"
 import Link from "next/link"
@@ -77,12 +68,9 @@ import { CodeEditor } from "@/components/code-editor"
 import { DiffView } from "@/components/diff-view"
 import {
   Disclosure,
-  Field as FormField,
   FieldRow,
   FormNote,
-  FormSection,
   FormSections,
-  InfoTip,
   OptionList,
   OptionRow,
 } from "@/components/form"
@@ -95,7 +83,6 @@ import { EmptyNote, Notice } from "@/components/state"
 import { LoadingRows } from "@/components/loading"
 import { StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
-import { ListField as SharedListField } from "@/components/list-field"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -158,11 +145,7 @@ import {
 } from "@/components/proxy/site-presets"
 import { saveOutcome, saveRequest, sendableSpec } from "@/components/proxy/site-save"
 import { SiteCertificate } from "@/components/proxy/site-certificate"
-import {
-  nothingListening,
-  upstreamOptions,
-  type UpstreamOption,
-} from "@/components/proxy/upstream-options"
+import { nothingListening, upstreamOptions } from "@/components/proxy/upstream-options"
 import { UpstreamPicker } from "@/components/proxy/upstream-picker"
 import { PAGE_LABEL, PageEditor } from "@/components/proxy/page-editor"
 import {
@@ -177,6 +160,14 @@ import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_PRELOAD_MAX_AGE,
 } from "@/components/proxy/site-form/hsts"
+import {
+  PageLayout,
+  Field,
+  Part,
+  ListField,
+  type Picker,
+  OnOffField,
+} from "@/components/proxy/site-form/fields"
 
 // What other files import from the form, kept importable from here.
 export {
@@ -184,6 +175,7 @@ export {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_PRELOAD_MAX_AGE,
 } from "@/components/proxy/site-form/hsts"
+export { ListField } from "@/components/proxy/site-form/fields"
 
 /**
  * Putting a domain in front of a port, without writing nginx.
@@ -213,52 +205,6 @@ export {
  * `SiteFormBody`, so a field, a check and the request a save sends are
  * written once.
  */
-
-/**
- * Whether the form is the Settings view of a site's page rather than the
- * sheet. A part opens as a page's section there, and the line under a field
- * that only explains it goes behind the ⓘ beside its label.
- */
-const PageLayout = createContext(false)
-
-/**
- * A field of the form. `tip` is what the field is for, in a sentence: the
- * line under it in the sheet, where a first site is being made, and the ⓘ
- * beside its label in Settings, where it is read once. `hint` stays under
- * the field in both: it is what the field currently says — where the file is
- * saved, that nothing listens behind an address.
- */
-function Field({ tip, ...props }: React.ComponentProps<typeof FormField> & { tip?: string }) {
-  const page = useContext(PageLayout)
-  if (page) return <FormField {...props} info={props.info ?? tip} />
-  return <FormField {...props} hint={props.hint ?? tip} />
-}
-
-/** A titled part of the form: a section of the page in Settings, of the sheet otherwise. */
-function Part({
-  title,
-  hint,
-  children,
-}: {
-  title: string
-  /** What the part is for; behind an ⓘ in Settings, where no sentence stands under a title. */
-  hint?: string
-  children: React.ReactNode
-}) {
-  const page = useContext(PageLayout)
-  // What the part is for is a sentence nobody needs before acting, so it is
-  // behind an ⓘ beside the title in both, never a line under it (PRM-16).
-  const named = hint ? (
-    <span className="inline-flex items-center gap-1.5">
-      {title}
-      <InfoTip label={`About ${title.toLowerCase()}`}>{hint}</InfoTip>
-    </span>
-  ) : (
-    title
-  )
-  if (page) return <SettingSection title={named}>{children}</SettingSection>
-  return <FormSection title={named}>{children}</FormSection>
-}
 
 /**
  * Asks before a site's unsaved Settings are left. The page that holds the
@@ -2243,19 +2189,6 @@ function DomainChecks({ checks }: { checks: SitePreflightCheck[] }) {
 }
 
 /**
- * Single values, added one at a time: the shared `ListField`, with the
- * form's rule for the sentence that says what it is for (`Field`'s `tip`):
- * under it in the sheet, behind the ⓘ in Settings.
- *
- * @deprecated outside this form, import `ListField` from `@/components/list-field`.
- */
-export function ListField({ hint, ...props }: React.ComponentProps<typeof SharedListField>) {
-  const page = useContext(PageLayout)
-  if (page) return <SharedListField {...props} info={props.info ?? hint} />
-  return <SharedListField {...props} hint={hint} />
-}
-
-/**
  * Extra paths, each sent somewhere other than the site's default.
  *
  * The commonest reverse-proxy layout after "one app on one domain" is two:
@@ -2266,15 +2199,6 @@ export function ListField({ hint, ...props }: React.ComponentProps<typeof Shared
  * nginx matches the longest prefix regardless of order, so these are rendered
  * before the catch-all purely because that is the order a reader expects.
  */
-/** What the upstream pickers offer, read once for the whole form. */
-type Picker = {
-  options: UpstreamOption[]
-  listeners: Listener[] | undefined
-  containers: Container[] | undefined
-  loading: boolean
-  failed: boolean
-  onRetry: () => void
-}
 
 function LocationsField({
   locations,
@@ -2595,8 +2519,6 @@ function LocationCard({
   )
 }
 
-/** The site's setting, or on or off, for this path. */
-
 /**
  * The HSTS policy's lifetime, whether it covers subdomains, and preload.
  * Preload is behind a confirmation because it outlives the header:
@@ -2678,36 +2600,6 @@ function HSTSOptions({
       </OptionList>
       {dialog}
     </div>
-  )
-}
-
-function OnOffField({
-  id,
-  label,
-  value,
-  onChange,
-}: {
-  id: string
-  label: string
-  value: "on" | "off" | undefined
-  onChange: (value: "on" | "off" | undefined) => void
-}) {
-  return (
-    <Field label={label} htmlFor={id}>
-      <Select
-        value={value ?? "site"}
-        onValueChange={(v) => onChange(v === "on" || v === "off" ? v : undefined)}
-      >
-        <SelectTrigger id={id} className="w-full">
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value="site">The site&apos;s</SelectItem>
-          <SelectItem value="on">On</SelectItem>
-          <SelectItem value="off">Off</SelectItem>
-        </SelectContent>
-      </Select>
-    </Field>
   )
 }
 
