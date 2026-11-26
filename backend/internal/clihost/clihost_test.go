@@ -19,7 +19,7 @@ func TestRefreshReplacesOnlyAnOlderJD(t *testing.T) {
 	}
 	target := filepath.Join(host, Path)
 
-	if replaced, err := Refresh(host, built); err != nil || replaced {
+	if replaced, err := Refresh(target, built); err != nil || replaced {
 		t.Fatalf("no jd on the server: replaced=%v %v", replaced, err)
 	}
 	if _, err := os.Stat(target); !os.IsNotExist(err) {
@@ -29,14 +29,14 @@ func TestRefreshReplacesOnlyAnOlderJD(t *testing.T) {
 	if err := os.WriteFile(target, []byte("#!/bin/sh\necho someone else's jd\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if replaced, err := Refresh(host, built); err != nil || replaced {
+	if replaced, err := Refresh(target, built); err != nil || replaced {
 		t.Fatalf("another program called jd: replaced=%v %v", replaced, err)
 	}
 
 	if err := os.WriteFile(target, []byte("old build\n"+Marker+"\n"), 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if replaced, err := Refresh(host, built); err != nil || !replaced {
+	if replaced, err := Refresh(target, built); err != nil || !replaced {
 		t.Fatalf("an older jd: replaced=%v %v", replaced, err)
 	}
 	got, err := os.ReadFile(target)
@@ -46,14 +46,14 @@ func TestRefreshReplacesOnlyAnOlderJD(t *testing.T) {
 	if info, _ := os.Stat(target); info.Mode().Perm() != 0o755 {
 		t.Fatalf("mode %v", info.Mode())
 	}
-	if replaced, err := Refresh(host, built); err != nil || replaced {
+	if replaced, err := Refresh(target, built); err != nil || replaced {
 		t.Fatalf("the current jd: replaced=%v %v", replaced, err)
 	}
 	if leftovers, _ := filepath.Glob(filepath.Join(filepath.Dir(target), ".jd-*")); len(leftovers) != 0 {
 		t.Fatalf("temporary files left behind: %v", leftovers)
 	}
 
-	if replaced, err := Refresh(host, filepath.Join(t.TempDir(), "missing")); err != nil || replaced {
+	if replaced, err := Refresh(target, filepath.Join(t.TempDir(), "missing")); err != nil || replaced {
 		t.Fatalf("a dashboard built without jd: replaced=%v %v", replaced, err)
 	}
 }
