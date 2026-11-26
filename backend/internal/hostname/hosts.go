@@ -70,11 +70,47 @@ func (s *Service) rewrite(path string, data []byte, name string) error {
 
 // replace writes data to the server's file at path, as the server names it.
 func (s *Service) replace(path string, data []byte) error {
-	write := func(at string) error { return writeKeeping(at, data) }
-	if s.onServer == nil {
-		return write(filepath.Join(s.root, path))
+	_, _, err := s.swap(path, data)
+	return err
+}
+
+// swap is replace that also returns what the file held before, and whether
+// there was a file, for a change that may have to be undone. The old bytes are
+// read by the same path, in the same view, as the write.
+func (s *Service) swap(path string, data []byte) (before []byte, existed bool, err error) {
+	err = s.onServerFile(path, func(at string) error {
+		old, err := os.ReadFile(at)
+		switch {
+		case err == nil:
+			before, existed = old, true
+		case !errors.Is(err, fs.ErrNotExist):
+			return err
+		}
+		return writeKeeping(at, data)
+	})
+	return before, existed, err
+}
+
+// restore undoes a swap: the old bytes go back, or the file it created goes.
+func (s *Service) restore(path string, before []byte, existed bool) error {
+	if existed {
+		return s.replace(path, before)
 	}
-	return s.onServer(path, filepath.Join(s.root, path), write)
+	return s.onServerFile(path, func(at string) error {
+		if err := os.Remove(at); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			return err
+		}
+		return nil
+	})
+}
+
+// onServerFile runs fn against the server's file at path, by a path that can
+// replace it.
+func (s *Service) onServerFile(path string, fn func(at string) error) error {
+	if s.onServer == nil {
+		return fn(filepath.Join(s.root, path))
+	}
+	return s.onServer(path, filepath.Join(s.root, path), fn)
 }
 
 // withServerName returns a hosts file in which name resolves to this machine.

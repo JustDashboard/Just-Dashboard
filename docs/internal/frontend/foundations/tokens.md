@@ -204,6 +204,18 @@ A pending change, a pull request's state; aliased onto the tag ramp. Rules: [`co
 | `--pull-closed` | `var(--tag-red)` | `text-pull-closed` |  |
 | `--pull-draft` | `oklch(0.66 0.018 250.9)` | `text-pull-draft` |  |
 
+### Contributions
+
+A day on a contribution calendar, from none to GitHub's busiest quartile. Rules: [`colour.md`](colour.md).
+
+| Token | Value | Utility | Note |
+| --- | --- | --- | --- |
+| `--contribution-0` | `oklch(1 0 0 / 0.06)` | `bg-contribution-0` |  |
+| `--contribution-1` | `color-mix(in oklab, var(--tag-green) 26%, var(--card))` | `bg-contribution-1` |  |
+| `--contribution-2` | `color-mix(in oklab, var(--tag-green) 48%, var(--card))` | `bg-contribution-2` |  |
+| `--contribution-3` | `color-mix(in oklab, var(--tag-green) 74%, var(--card))` | `bg-contribution-3` |  |
+| `--contribution-4` | `var(--tag-green)` | `bg-contribution-4` |  |
+
 ### Languages
 
 A checkout's language, at one lightness so no language shouts. Rules: [`colour.md`](colour.md).

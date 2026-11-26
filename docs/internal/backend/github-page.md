@@ -2,17 +2,20 @@
 
 The GitHub page (`/github`) connects GitHub accounts and manages the repositories they reach through
 GitHub's REST API. This document is its core: the App every connection signs in through, the two
-sign-in flows, the connections and their tokens, the repository list, a repository's settings,
-archive, visibility and deletion, and "Clone to server". What is inside one repository (branches,
-commits, pull requests, issues, workflows, collaborators) is in
+sign-in flows, the connections and their tokens, the connected account's own profile, pull requests,
+issues and activity, the repository list, a repository's settings, archive, visibility and deletion,
+and "Clone to server". What is inside one repository (branches, commits, pull requests, issues,
+workflows, collaborators, its README and languages) is in
 [github-page-repository.md](github-page-repository.md).
 
 Code: `backend/internal/githubrepos/` (`client.go` and `types.go` are the shared client and policy;
-`store.go`, `app.go`, `oauth.go`, `connections.go`, `repositories.go`, `clone.go`, `service.go` are this
-document), `backend/internal/api/handlers_githubrepos.go` (route skeleton and error mapper) and
-`handlers_githubrepos_core.go` (these routes), `backend/internal/gitx/ops.go` (`PrepareClone`,
-`CloneStreaming`), schema in `backend/internal/store/schema_github_page.go`. Tests run against a
-stand-in GitHub, `backend/internal/githubrepos/githubfake`.
+`store.go`, `app.go`, `oauth.go`, `connections.go`, `repositories.go`, `clone.go`, `service.go` and, for
+the account itself, `profile.go`, `inbox.go`, `events.go` are this document),
+`backend/internal/api/handlers_githubrepos.go` (route skeleton and error mapper),
+`handlers_githubrepos_core.go` (these routes) and `handlers_githubrepos_account.go` (the account's
+own reads), `backend/internal/gitx/ops.go` (`PrepareClone`, `CloneStreaming`), schema in
+`backend/internal/store/schema_github_page.go`. Tests run against a stand-in GitHub,
+`backend/internal/githubrepos/githubfake`.
 
 ## Why a second App
 
@@ -71,8 +74,10 @@ how one App serves a dashboard reached at several addresses (a LAN address and a
 the admin adds the address on GitHub, then records it here from that address. The dashboard keeps its
 own copy only to refuse a sign-in GitHub would refuse with a page the person cannot get back from.
 
-`DELETE /github/app` (`system.admin`, `s.destructive`) revokes every connection's grant best effort,
-deletes every connection and forgets the App. The App stays on GitHub until its owner deletes it.
+`DELETE /github/app` (`system.admin`, `s.destructive`) revokes every GitHub account's grant best
+effort, deletes every connection and forgets the App. A grant is one per account, so it is revoked
+through the account's connections in turn, each token refreshed first as a disconnect does, until GitHub
+accepts one: an older connection's token can be dead while a newer one works. The App stays on GitHub until its owner deletes it.
 
 Settings links: a user-owned App's settings are at `https://github.com/settings/apps/<slug>`, an
 organisation's at `https://github.com/organizations/<org>/settings/apps/<slug>`; it is installed from
@@ -181,6 +186,10 @@ D = `s.destructive` (ordinary confirmation), D+phrase = `s.destructive` plus the
 | `GET /connections/device/{flow}` | SC, hub | `GitHubDeviceState` |
 | `POST /connections/{connection}/refresh` | R | `GitHubConnection` |
 | `DELETE /connections/{connection}` | SC | 204 |
+| `GET /connections/{connection}/profile?refresh=1` | R | `GitHubProfile` |
+| `GET /connections/{connection}/pulls?filter=&state=&page=&refresh=1` | R | `GitHubInboxPage` |
+| `GET /connections/{connection}/issues?filter=&state=&page=&refresh=1` | R | `GitHubInboxPage` |
+| `GET /connections/{connection}/events?refresh=1` | R | `GitHubEventList` |
 | `GET /connections/{connection}/repositories?refresh=1` | R | `GitHubRepositoryList` |
 | `GET /connections/{connection}/create-options` | R | `GitHubCreateOptions` |
 | `POST /connections/{connection}/repositories` | SC | 201 `GitHubCreateResult` |
@@ -197,10 +206,89 @@ The JSON shapes are `frontend/src/lib/github-types.ts`. Audit actions: `github.a
 `httpx.AuditRead`, since it is a GET), `github.connection.refresh`, `github.connection.disconnect`,
 `github.repository.create`, `.update` (the names of the fields changed, never their values),
 `.archive`, `.visibility`, `.delete`, `.clone` (with the target path). Targets are logins or
-`<owner>/<name>`, never a token or code.
+`<owner>/<name>`, never a token or code. Reads are not audited, the account's own included.
 
 Errors go through `githubPageErr` (`handlers_githubrepos.go`, with its code table): this lane adds
 400 `github_state`, 409 `github_callback_unregistered` and 409 `github_device_flow_disabled`.
+
+## The account itself: profile, pull requests, issues, activity
+
+Four reads about the connected account rather than about one repository (`profile.go`, `inbox.go`,
+`events.go`; `handlers_githubrepos_account.go`). Each needs only a session, starts from
+`Service.active` like the repository list (another account's connection is 404 `github_connection`, a
+connection GitHub no longer accepts 409 `github_reconnect`, **before** anything kept in memory is
+looked at), acts with the person's own user access token, and maps its errors through
+`githubPageErr`.
+
+| Read | GitHub | Needs | When GitHub will not answer |
+| --- | --- | --- | --- |
+| Profile | `GET /user` | a user token; no App permission | an error |
+| Contribution calendar | `POST /graphql`, `viewer.contributionsCollection.contributionCalendar` | a user token; GitHub decides what it counts | the profile still answers, without `contributions`, with `contributionsMessage` |
+| Pull requests, issues | `GET /search/issues?q=…&sort=updated&order=desc&per_page=30&page=N` | metadata: read; pull_requests / issues: read for private repositories | an error; a spent search budget is 429 `github_rate_limited` |
+| Activity | `GET /user` when no profile was read lately, then `GET /users/{login}/events?per_page=30` | a user token; **Events: read** (an account permission) for private events | an error |
+
+- **Profile.** Login, name, bio, company, location, blog, page address, followers, following, public
+  repositories and creation date from `GET /user`. What GitHub holds as null or empty is **absent**
+  from the answer, never an empty string. `blog` is as GitHub holds it and may have no scheme.
+- **The calendar is GraphQL**, the one GraphQL call the page makes (`Client.GraphQL`). Its address is
+  derived from the REST root by `GraphQLURL`: `https://api.github.com` → `…/graphql`, a GitHub
+  Enterprise root `https://host/api/v3` → `https://host/api/graphql`. It carries the same token and
+  headers as a REST call. `contributionLevel` NONE and the four quartiles become `level` 0 to 4; a
+  day whose date is not `YYYY-MM-DD` is left out. **A calendar GitHub will not give does not fail the
+  profile**: an answer with `errors` (GitHub sends those with status 200: `GraphQLError`), a 403 or
+  404, a 5xx, an unreadable answer or no calendar in `data` all answer 200 with the profile,
+  `contributions` absent and `contributionsMessage` saying so. A 401, a rate limit, a connection that
+  needs reconnecting and a request that ran out of time are still the whole answer, as for every
+  read.
+- **Pull requests and issues** are GitHub's issue search across every repository, never one walk per
+  repository. The query is `is:pr` or `is:issue`, `is:open` or `is:closed`, `archived:false` and one
+  qualifier naming **`@me`**, which GitHub reads as whoever the token belongs to: `filter=created` →
+  `author:@me`, `assigned` → `assignee:@me`, `mentioned` → `mentions:@me`, `review` →
+  `review-requested:@me` (pull requests only). No login is ever spelled into a query, neither a
+  request's nor the one stored at connection time: an account renamed on GitHub since, whose old login
+  somebody else then took, would otherwise list that person's work as its own. `filter` (default
+  `created`), `state` (default `open`) and `page` (default 1, at most 34: search stops at 1,000
+  results) are checked by `ParseInboxQuery` before the connection is looked up; anything else,
+  `review` on `/issues` included, is 400 `bad_request` with no request to GitHub. The query string is
+  built with `url.Values`.
+  Each item's `repository` is read from `repository_url`; an item without one is left out. A pull
+  request whose `pull_request.merged_at` is set is `merged`; `stateReason` is an issue's only;
+  `draft` is false for an issue. `total` is GitHub's `total_count`, `incomplete` its
+  `incomplete_results`, and `hasMore` its Link header naming a next page (never past page 34).
+- **Activity** is read by the account's login **as GitHub has it now** (`currentLogin`): the profile's
+  when one was read in the last five minutes, and otherwise `GET /user`'s, never the login stored at
+  connection time. A login outside GitHub's alphabet (letters, digits, hyphen, the underscore of a
+  managed account) never reaches the path.
+- **A renamed account is followed.** When the profile or `currentLogin` reads a login that is not the
+  stored one, the connection is stored under the new login, name and page (`followLogin`, best
+  effort) and its repository list and activity are dropped, so everything that names the account by
+  login (which repositories are its own, the identity line) follows it without a reconnect.
+- **Activity** is the account's last thirty events folded into one flat shape per kind
+  (`rawEvent.event`): `PushEvent` → `push`, `PullRequestEvent` → `pull`, `IssuesEvent` → `issue`,
+  `IssueCommentEvent` → `comment`, `PullRequestReviewEvent` → `review` (its action is the review's
+  state: `approved`, `changes_requested`, `commented`), `CreateEvent` → `create`, `DeleteEvent` →
+  `delete`, `WatchEvent` → `star`, `ForkEvent` → `fork`, `ReleaseEvent` → `release`, `PublicEvent` →
+  `public`, `MemberEvent` → `member`. Every other type is dropped, as is an event with no id or whose
+  repository is not `owner/name`. A field its kind does not have, or GitHub did not send, is absent.
+  An address is GitHub's own when it sent one a browser opens as a page (`webURL`), and otherwise
+  built from the repository: `/compare/<before>...<head>` for a push to a branch that existed,
+  `/tree/<ref>` for a first push or a tag, `/pull/<n>` and `/issues/<n>`.
+
+What these cannot show, on a real App:
+
+- **Private activity needs a permission the manifest does not ask for.** GitHub lists a person's
+  private events only to a token with the account permission *Events: read*; the App's manifest
+  grants repository permissions only, so the feed is the account's **public** events. Adding the
+  permission is a change to the manifest and to every App already created (its owner accepts it on
+  GitHub), which is a decision, not part of these reads.
+- **GitHub's event payloads are thinner than they were.** Its documented push payload has `ref`,
+  `head` and `before` and no commit count, and the pull request inside an event is a minimal one
+  without a title or page address. `commits` and `title` are present when GitHub sends them and
+  absent otherwise; the address is built from the number. The feed itself is at most 300 events of
+  the last 30 days and may lag by minutes to hours.
+- **Search answers for what the token reaches**: public repositories and the private ones the App's
+  installations cover. A pull request in a private repository the App is not installed on is not
+  listed, and `total` counts only what was searched.
 
 ## Abilities
 
@@ -233,9 +321,19 @@ full name. The answer carries the rate limit GitHub last stated.
 | One repository's access (GitHub's answer, role, installation) | 30 s | every change to it (`forgetGitHubRepo`) |
 | A connection's installations (stored on the row) | read again after 60 s by what depends on them | `refresh`, every listing |
 | `.gitignore` templates and licences | 24 h | — |
+| A connection's profile with its calendar | 5 min; 60 s when the calendar is missing | `refresh=1`, connect, refresh, disconnect, a revocation or expiry |
+| One page of the account's pull requests or issues, by listing, filter, state and page | 60 s | the same, and every change made here to any repository (`Forget`) |
+| A connection's activity | 60 s | the same, and a rename followed (`followLogin`) |
 
-Each map is bounded. A rate limit is 429 `github_rate_limited` with `Retry-After` from GitHub's reset
-or retry-after; the page shows when it lifts.
+Each map is bounded (`maxCached`, 512 entries: what has expired goes first, then anything). The last
+three are `answers` in `service.go`, dropped with everything else of the connection by
+`forgetConnection`. A change made here to a repository (`Forget`, through `forgetGitHubRepo`) also
+drops the connection's inbox pages, all of them, since a page that did not list the repository yet may
+now (an issue just opened), and its activity; it keeps the profile. A rate limit is 429
+`github_rate_limited` with `Retry-After` from GitHub's reset or retry-after; the page shows when it
+lifts. **Search has its own budget of thirty requests a minute**, apart from the 5,000 an hour of
+everything else, which is why an inbox page is kept a minute and why the page should not ask for
+every filter at once.
 
 ## Creating a repository
 
@@ -313,6 +411,8 @@ never names); nothing is cloned automatically and no clone is assumed to exist.
   the browser back after an install or permission change, and `POST …/refresh` reads again).
 - **Pending states and device flows are in memory**; a restart forgets them.
 - **The device flow** needs Enable Device Flow ticked on GitHub by the App's owner.
+- **The account's own reads** have their limits listed with them above: public activity only,
+  thinner event payloads, search only where the token reaches, and a calendar that may be withheld.
 - **Nothing here was verified against the real github.com.** Every test runs against
   `githubrepos/githubfake` and, for cloning, `git http-backend` served locally. The shapes follow
   GitHub's REST documentation (API version 2022-11-28); a difference found on a real App is a bug to

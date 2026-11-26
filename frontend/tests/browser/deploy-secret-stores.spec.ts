@@ -195,6 +195,30 @@ test("an empty page offers the six stores, and one is added with sealed AppRole 
   expect(storage).not.toContain("fixture-secret-id")
 })
 
+test("a first read that fails settles the page on the failure, with Try again", async ({
+  page,
+}) => {
+  // The list said it had failed while the picture over it kept loading, and a
+  // plain network failure offered no way to ask again.
+  await mockProject(page)
+  let refuse = true
+  await page.route("**/api/v1/deploy/secret-stores**", (route) =>
+    refuse ? route.abort("connectionrefused") : json(route, [bao]),
+  )
+  await page.goto("/deploy/secret-stores")
+  const failure = page.locator("[data-slot=error-state]")
+  await expect(failure).toContainText("Could not read the secret stores")
+  await expect(page.locator("[data-slot=wire-flow]")).toHaveCount(0)
+
+  refuse = false
+  await failure.getByRole("button", { name: "Try again", exact: true }).click()
+  await expect(storeRow(page, "bao-prod")).toBeVisible()
+  await expect(failure).toHaveCount(0)
+  const picture = page.locator("[data-slot=wire-flow]")
+  await expect(picture).toBeVisible()
+  await expect(picture).not.toHaveAttribute("data-loading")
+})
+
 test("Secrets Manager asks for a region and a key pair, and the endpoint is derived", async ({
   page,
 }) => {

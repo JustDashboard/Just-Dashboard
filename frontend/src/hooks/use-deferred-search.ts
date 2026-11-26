@@ -32,8 +32,17 @@ export function receiveApplied(
  * draft, applies it `ms` after the last key, at once on `apply()` (Enter), and
  * empties it on `clear()`. An `applied` that changes from outside replaces the
  * draft; the echo of what the box itself sent does not.
+ *
+ * `held` stops the pause from applying anything: an input method composing a
+ * word holds text the reader has not chosen yet, and a pause while picking a
+ * candidate scanned for it. Let go, the pause starts again from then.
  */
-export function useDeferredSearch(applied: string, onApply: (value: string) => void, ms = 400) {
+export function useDeferredSearch(
+  applied: string,
+  onApply: (value: string) => void,
+  ms = 400,
+  held = false,
+) {
   const [draft, setDraft] = useState(applied)
   const [seen, setSeen] = useState(applied)
   // What was sent and has not come back as `applied` yet.
@@ -58,10 +67,10 @@ export function useDeferredSearch(applied: string, onApply: (value: string) => v
 
   useEffect(() => {
     const typed = draft.trim()
-    if (typed === latest) return
+    if (held || typed === latest) return
     const timer = setTimeout(() => send(typed), ms)
     return () => clearTimeout(timer)
-  }, [draft, latest, ms, send])
+  }, [draft, latest, ms, send, held])
 
   return {
     draft,

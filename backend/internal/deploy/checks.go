@@ -331,10 +331,12 @@ func (r *CheckRunner) candidateGone(ctx context.Context, target CheckTarget, sta
 		return state, false
 	}
 	switch {
-	case state.Running:
-		return state, false
+	// Restarting comes first: while its restart policy backs off, Docker
+	// reports a dying container as running and restarting at once.
 	case state.Restarting:
 		return state, state.RestartCount >= crashLoopRestarts && r.now().Sub(started) >= crashLoopGrace
+	case state.Running:
+		return state, false
 	case state.Status == "exited" || state.Status == "dead":
 		// Docker marks a container restarting the moment it exits when its
 		// policy starts it again, so exited means nothing will.

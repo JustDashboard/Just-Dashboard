@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"sync"
 	"testing"
@@ -33,6 +34,13 @@ type fakeLink struct {
 	// refusal every PUT meets.
 	offer   string
 	putFail error
+	// held, when set, keeps each GET's answer after the site has made it,
+	// as a slow network does, until the test closes it; asked hears of
+	// each answer made.
+	held, asked chan struct{}
+	// answered, when set, runs once after the site has made a PUT's answer
+	// and before it arrives, as something committing meanwhile does.
+	answered func()
 }
 
 func (f *fakeLink) Enabled() bool   { return true }
@@ -57,6 +65,19 @@ func (f *fakeLink) call(name string) error {
 }
 
 func (f *fakeLink) GetDomain(context.Context) (accountlink.DomainInfo, error) {
+	info, err := f.answerGet()
+	f.mu.Lock()
+	held, asked := f.held, f.asked
+	f.mu.Unlock()
+	if held != nil {
+		asked <- struct{}{}
+		<-held
+	}
+	return info, err
+}
+
+// answerGet is the site's answer to a GET at the moment it is asked.
+func (f *fakeLink) answerGet() (accountlink.DomainInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("GET"); err != nil {
@@ -93,6 +114,10 @@ func (f *fakeLink) PutDomain(_ context.Context, handle, address string) (account
 	// The site clears the offer once the server's domain is active.
 	f.offer = ""
 	f.domain = &accountlink.Domain{Handle: handle, Hostname: handle + ".just-dashboard.com", Address: address, Status: "active", CreatedAt: 1, UpdatedAt: 2}
+	if answered := f.answered; answered != nil {
+		f.answered = nil
+		answered()
+	}
 	return *f.domain, nil
 }
 
@@ -441,6 +466,178 @@ func TestTheStateFollowsTheSite(t *testing.T) {
 	}
 }
 
+// heldRefresh starts a refresh whose GET the site answers at once and whose
+// answer arrives only when deliver is called; deliver then waits for that
+// refresh to finish. Later GETs are answered as usual.
+func (e *env) heldRefresh() (deliver func()) {
+	e.t.Helper()
+	held, asked := make(chan struct{}), make(chan struct{}, 1)
+	e.link.mu.Lock()
+	e.link.held, e.link.asked = held, asked
+	e.link.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.svc.refresh(e.t.Context())
+	}()
+	<-asked
+	e.link.mu.Lock()
+	e.link.held, e.link.asked = nil, nil
+	e.link.mu.Unlock()
+	return func() {
+		close(held)
+		<-done
+	}
+}
+
+// A GET /domain that is out while a claim commits answers for a server that
+// held nothing. Its answer is dropped rather than detach the handle claimed a
+// moment ago, which the wildcard's issuance would then find not held.
+func TestAnAnswerThatCrossesAClaimIsDropped(t *testing.T) {
+	e := newEnv(t, true)
+	deliver := e.heldRefresh()
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	deliver()
+	if st, _ := e.svc.state(t.Context()); st.Handle != "acme" || st.Status != StatusActive {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+	if base, _, ok := e.svc.Active(t.Context()); !ok || base != "acme.just-dashboard.com" {
+		t.Fatalf("active = %q %v", base, ok)
+	}
+	// The next answer is the site's word as before.
+	e.svc.refresh(t.Context())
+	if st, _ := e.svc.state(t.Context()); st.Status != StatusActive || st.LastCheckedAt == 0 {
+		t.Fatalf("after a fresh answer = %+v", st)
+	}
+}
+
+// One out while a release commits still lists the handle: it does not bring
+// the released handle back.
+func TestAnAnswerThatCrossesAReleaseDoesNotBringTheHandleBack(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	deliver := e.heldRefresh()
+	if err := e.svc.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	deliver()
+	if st, _ := e.svc.state(t.Context()); st.Handle != "" || st.Status != "" {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+	if _, _, ok := e.svc.Active(t.Context()); ok {
+		t.Fatal("the released handle is active again")
+	}
+}
+
+// One out while the link is replaced answers for the old link: the address
+// its account chose is not claimed through the new one.
+func TestAnAnswerThatCrossesALinkChangeIsDropped(t *testing.T) {
+	e := newEnv(t, true)
+	e.link.offer = "acme"
+	deliver := e.heldRefresh()
+	// The OnClear hook, in the transaction that replaces the link.
+	tx, err := e.st.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DetachInTx(t.Context(), tx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	deliver()
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("the old link's offer was claimed: %v", got)
+	}
+	if st, _ := e.svc.state(t.Context()); st.Offer != "" || st.Handle != "" {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+}
+
+// linkChanged is the account link's OnClear hook, committed in the
+// transaction that ends or replaces the link.
+func (e *env) linkChanged() {
+	e.t.Helper()
+	tx, err := e.st.DB.BeginTx(e.t.Context(), nil)
+	if err != nil {
+		e.t.Fatal(err)
+	}
+	if err := DetachInTx(e.t.Context(), tx, e.svc.now().Unix()); err != nil {
+		e.t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		e.t.Fatal(err)
+	}
+}
+
+// The address follow-up's PUT is out when the link ends. The site answered
+// it before it heard of the unlink, but the records are gone now: the
+// answer is dropped, rather than make the detached handle active again.
+func TestAnAddressAnswerThatCrossesAnUnlinkIsDropped(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	e.setAddress("198.51.100.20")
+	e.link.mu.Lock()
+	e.link.answered = e.linkChanged
+	e.link.mu.Unlock()
+	e.svc.followAddress(t.Context())
+	if calls := e.link.callLog(); calls[len(calls)-1] != "PUT acme 198.51.100.20" {
+		t.Fatalf("calls = %v", calls)
+	}
+	if st, _ := e.svc.state(t.Context()); st.Status != StatusDetached || st.Address != "203.0.113.10" {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+	if _, _, ok := e.svc.Active(t.Context()); ok {
+		t.Fatal("the detached handle is active again")
+	}
+}
+
+// An offer stored under one link is not claimed once the link has changed:
+// the change clears it, and a claim already on its way with it stops.
+func TestAnOfferReadBeforeALinkChangeIsNotClaimed(t *testing.T) {
+	e := newEnv(t, true)
+	e.link.offer = "acme"
+	// The check stores the offer; its claim has not gone out yet.
+	e.svc.claimMu.Lock()
+	e.svc.refresh(t.Context())
+	e.svc.claimMu.Unlock()
+	read, _ := e.svc.state(t.Context())
+	if read.Offer != "acme" {
+		t.Fatalf("offer not stored: %+v", read)
+	}
+	if v, _ := e.svc.View(t.Context()); v.Offer == nil {
+		t.Fatal("the offer is not shown")
+	}
+
+	e.linkChanged()
+	if st, _ := e.svc.state(t.Context()); st.Offer != "" || st.OfferTried != "" {
+		t.Fatalf("the old link's offer is kept: %+v", st)
+	}
+	if v, _ := e.svc.View(t.Context()); v.Offer != nil {
+		t.Fatalf("the old link's offer is shown: %+v", v.Offer)
+	}
+	e.svc.autoClaim(t.Context(), read)
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("the old link's offer was claimed: %v", got)
+	}
+
+	// The new link's own check claims what its account chose.
+	e.svc.refresh(t.Context())
+	if got := e.puts(); len(got) != 1 || got[0] != "PUT acme 203.0.113.10" {
+		t.Fatalf("puts = %v", got)
+	}
+}
+
 func TestUnlinkingDetachesTheHandle(t *testing.T) {
 	e := newEnv(t, true)
 	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
@@ -541,6 +738,74 @@ func TestNamesAreClassifiedAgainstTheHandleHeldNow(t *testing.T) {
 	}
 	if v, _ := e.svc.View(t.Context()); len(v.Detached) != 1 || v.Detached[0].Hostname != "shop.acme.just-dashboard.com" {
 		t.Fatalf("detached = %+v", v.Detached)
+	}
+}
+
+// A handle this server held before keeps its names detached once the handle
+// changes or is released. A change or a release needs no current deployment
+// to use the old names, but a saved release can: a rollback to it leaves
+// them out instead of ordering a certificate for a name the site no longer
+// points here, under a handle another server may hold now. The zone's other
+// names stay ordinary.
+func TestAHandleHeldBeforeKeepsItsNamesDetached(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	if _, err := e.svc.Claim(t.Context(), "other", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	// The fake store calls the wildcard valid for any handle.
+	e.waitIssued(1)
+	ordinary := map[string]NameState{
+		"just-dashboard.com": NotAppDomain, "www.just-dashboard.com": NotAppDomain,
+		"shop.never.just-dashboard.com": NotAppDomain, "a.b.acme.just-dashboard.com": NotAppDomain,
+	}
+	check := func(when string, want map[string]NameState) {
+		t.Helper()
+		for name, state := range ordinary {
+			want[name] = state
+		}
+		for name, state := range want {
+			if got := e.svc.Classify(t.Context(), name); got != state {
+				t.Errorf("%s, %s = %v, want %v", when, name, got, state)
+			}
+		}
+	}
+	check("after a change", map[string]NameState{
+		"shop.acme.just-dashboard.com": Detached, "acme.just-dashboard.com": Detached,
+		"shop.other.just-dashboard.com": Held,
+	})
+	// A rollback's names are read the same way the deployment step reads
+	// them; one a person types under the old handle is listed as detached.
+	e.deployment("shop", "production", "shop.acme.just-dashboard.com")
+	e.deployment("site", "production", "www.just-dashboard.com")
+	if v, _ := e.svc.View(t.Context()); len(v.Detached) != 1 || v.Detached[0].Hostname != "shop.acme.just-dashboard.com" {
+		t.Fatalf("detached after a change = %+v", v.Detached)
+	}
+
+	if _, err := e.st.DB.Exec(`DELETE FROM deploy_dependencies WHERE resource_id = 'shop.acme.just-dashboard.com'`); err != nil {
+		t.Fatal(err)
+	}
+	if err := e.svc.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	check("after a release", map[string]NameState{
+		"shop.acme.just-dashboard.com": Detached, "shop.other.just-dashboard.com": Detached,
+		"other.just-dashboard.com": Detached,
+	})
+
+	// Claimed again, the old handle's names are held once more.
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	check("claimed again", map[string]NameState{
+		"shop.acme.just-dashboard.com": Held, "shop.other.just-dashboard.com": Detached,
+	})
+	if st, _ := e.svc.state(t.Context()); len(st.Previous) != 1 || st.Previous[0] != "other.just-dashboard.com" {
+		t.Fatalf("previous = %v", st.Previous)
 	}
 }
 
@@ -836,6 +1101,140 @@ func TestAHeldAddressIssuesItsWildcardWithoutAButton(t *testing.T) {
 	e.svc.refresh(t.Context())
 	if got := len(e.certs.orders()); got != 2 {
 		t.Fatalf("a valid wildcard was ordered again: %d orders", got)
+	}
+}
+
+// The retry is an hour after the failure, not at the first hourly check
+// after that. The 10:00 check starts an issuance that fails at 10:02; the
+// 11:00 check is two minutes early for it, and without its own wait the
+// next try would be the noon check, 118 minutes after the failure.
+func TestAFailedWildcardIsTriedAgainAnHourAfterTheFailure(t *testing.T) {
+	e := newEnv(t, true)
+	clock := time.Date(2026, 11, 26, 8, 59, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return clock }
+	advance := func(d time.Duration) { e.mu.Lock(); clock = clock.Add(d); e.mu.Unlock() }
+	type wait struct {
+		d    time.Duration
+		fire chan time.Time
+	}
+	waits := make(chan wait, 4)
+	e.svc.after = func(d time.Duration) <-chan time.Time {
+		w := wait{d, make(chan time.Time, 1)}
+		waits <- w
+		return w.fire
+	}
+	// The hourly ticks are the test's: it calls refresh for them.
+	e.svc.refreshEvery, e.svc.addressEvery, e.svc.linkEvery = 24*time.Hour, 24*time.Hour, 24*time.Hour
+
+	// A first failure, before the loop starts: the start-up check retries it.
+	e.certs.fail = errors.New("the zone's nameservers did not answer")
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+
+	// 10:00: the check starts an issuance, which takes two minutes and fails.
+	advance(61 * time.Minute)
+	e.certs.gate = make(chan struct{})
+	e.svc.Start(t.Context())
+	advance(2 * time.Minute)
+	close(e.certs.gate)
+	e.waitIssued(2)
+	var retry wait
+	select {
+	case retry = <-waits:
+	case <-time.After(5 * time.Second):
+		t.Fatal("no retry was scheduled after the failure")
+	}
+	if retry.d != time.Hour {
+		t.Fatalf("the retry waits %v from the failure, want an hour", retry.d)
+	}
+
+	// 11:00: the hourly check is two minutes early and leaves it.
+	advance(58 * time.Minute)
+	e.svc.refresh(t.Context())
+	if got := len(e.certs.orders()); got != 2 {
+		t.Fatalf("ordered within the hour of the failure: %d orders", got)
+	}
+
+	// 11:02: the failure's hour is over and the retry orders it.
+	advance(2 * time.Minute)
+	e.certs.mu.Lock()
+	e.certs.fail = nil
+	e.certs.mu.Unlock()
+	retry.fire <- clock
+	e.waitIssued(3)
+	if v, _ := e.svc.View(t.Context()); v.Certificate == nil || v.Certificate.State != "valid" {
+		t.Fatalf("after the retry = %+v", v.Certificate)
+	}
+	select {
+	case w := <-waits:
+		t.Fatalf("a retry was scheduled after a success: %v", w.d)
+	default:
+	}
+}
+
+// The dashboard restarts within a failure's hour, as an update minutes after
+// it does. The retry is still an hour after the failure: the loop starts
+// with the rest of the wait, read from the failure on record, since the
+// start-up check leaves it and the next hourly check would come later.
+func TestARestartWithinTheHourKeepsTheRetry(t *testing.T) {
+	e := newEnv(t, true)
+	clock := time.Date(2026, 11, 26, 10, 2, 0, 0, time.UTC)
+	e.svc.now = func() time.Time { e.mu.Lock(); defer e.mu.Unlock(); return clock }
+	advance := func(d time.Duration) { e.mu.Lock(); clock = clock.Add(d); e.mu.Unlock() }
+	type wait struct {
+		d    time.Duration
+		fire chan time.Time
+	}
+	waits := make(chan wait, 4)
+	e.svc.after = func(d time.Duration) <-chan time.Time {
+		w := wait{d, make(chan time.Time, 1)}
+		waits <- w
+		return w.fire
+	}
+	e.svc.refreshEvery, e.svc.addressEvery, e.svc.linkEvery = 24*time.Hour, 24*time.Hour, 24*time.Hour
+
+	// 10:02: the issuance fails, in the process the update replaces.
+	e.certs.fail = errors.New("the zone's nameservers did not answer")
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+
+	// 10:30: the new process starts.
+	advance(28 * time.Minute)
+	e.svc.Start(t.Context())
+	var retry wait
+	select {
+	case retry = <-waits:
+	case <-time.After(5 * time.Second):
+		t.Fatal("the restart lost the retry")
+	}
+	if retry.d != 32*time.Minute {
+		t.Fatalf("the retry waits %v, want the 32 minutes left of the hour", retry.d)
+	}
+	// The start-up check asks the site and leaves the wildcard to its wait.
+	deadline := time.Now().Add(5 * time.Second)
+	for !slices.Contains(e.link.callLog(), "GET") {
+		if time.Now().After(deadline) {
+			t.Fatal("the start-up check did not run")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if got := len(e.certs.orders()); got != 1 {
+		t.Fatalf("ordered within the hour of the failure: %d orders", got)
+	}
+
+	// 11:02: the wait is over and the retry orders it.
+	advance(32 * time.Minute)
+	e.certs.mu.Lock()
+	e.certs.fail = nil
+	e.certs.mu.Unlock()
+	retry.fire <- clock
+	e.waitIssued(2)
+	if v, _ := e.svc.View(t.Context()); v.Certificate == nil || v.Certificate.State != "valid" {
+		t.Fatalf("after the retry = %+v", v.Certificate)
 	}
 }
 

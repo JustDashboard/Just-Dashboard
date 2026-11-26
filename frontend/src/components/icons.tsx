@@ -146,6 +146,7 @@ import {
   XCircleIcon,
   XMarkIcon,
   BookOpenIcon,
+  BuildingOffice2Icon,
   RocketLaunchIcon,
 } from "@heroicons/react/24/solid"
 import { cn } from "@/lib/utils"
@@ -548,6 +549,8 @@ export const Image: Icon = adapt(PhotoIcon, "Image")
 export const Video: Icon = adapt(FilmIcon, "Video")
 export const Music: Icon = adapt(MusicalNoteIcon, "Music")
 export const Location: Icon = adapt(MapPinIcon, "Location")
+/** An organisation a person works at, as a profile names it. */
+export const Building: Icon = adapt(BuildingOffice2Icon, "Building")
 export const AcronymCsv: Icon = adapt(TableCellsIcon, "AcronymCsv")
 export const AcronymJson: Icon = adapt(CodeBracketIcon, "AcronymJson")
 export const AcronymMarkdown: Icon = adapt(DocumentTextIcon, "AcronymMarkdown")

@@ -1,39 +1,22 @@
 "use client"
 
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   ChevronDown,
   Clock,
-  CloudDownload,
-  Copy,
   External,
-  GitBranch,
   GitHubMark,
   Link as LinkGlyph,
-  LockClosed,
   Plus,
   RefreshClockwise,
-  Servers,
   SettingsGear,
   SignIn,
   Slash,
-  Star,
   Trash,
 } from "@/components/icons"
-import { SourceFork } from "@/components/git/glyphs"
 import { ApiError, del, get, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
 import { notify } from "@/lib/toast"
-import { relativeTime } from "@/lib/format"
 import { useSessionState } from "@/lib/view-state"
 import { useAuth } from "@/hooks/use-auth"
 import { usePoll } from "@/hooks/use-poll"
@@ -50,16 +33,12 @@ import {
   type GitHubListSort,
   type GitHubListState,
 } from "@/lib/github-list"
-import {
-  githubCallbackRegistered,
-  githubCallbackUrl,
-  githubRepoHref,
-  localCheckoutsOf,
-  localGitHref,
-} from "@/lib/github"
+import { githubCallbackRegistered, githubCallbackUrl, localCheckoutsOf } from "@/lib/github"
 import type {
   GitHubConnection,
-  GitHubInstallation,
+  GitHubEventList,
+  GitHubInboxFilter,
+  GitHubProfile,
   GitHubRepository,
   GitHubRepositoryList,
   GitHubSetup,
@@ -71,17 +50,19 @@ import { Fact } from "@/components/fact-line"
 import { ListToolbar } from "@/components/toolbar"
 import { SearchInput } from "@/components/search-input"
 import { ChipCount, ChipStrip, FilterChip } from "@/components/chips"
-import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
-import { DimActions, IconAction } from "@/components/icon-action"
+import { IconAction } from "@/components/icon-action"
 import { EmptyNote, EmptyState, ErrorState, Notice } from "@/components/state"
-import { Tag } from "@/components/tag"
-import { LanguageMark } from "@/components/language-icon"
 import { ForgeFace } from "@/components/git/marks"
 import { VerbMenu, type VerbSpec } from "@/components/verbs"
 import { useConfirm } from "@/components/confirm-dialog"
 import { Modal } from "@/components/modal"
+import { Section } from "@/components/section"
+import { ViewTabList, type TabView } from "@/components/tabs"
+import { useDetailTab } from "@/components/detail-page"
 import { Workspace, WorkspaceHelp } from "@/components/workspace/workspace"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
+import { Tabs, TabsContent } from "@/components/ui/tabs"
 import {
   Select,
   SelectContent,
@@ -99,8 +80,18 @@ import {
   clockTime,
   listFailure,
   pickConnection,
-  rowTags,
 } from "@/components/github/list-model"
+import { ActivityFeed } from "@/components/github/home/activity"
+import { ContributionCalendar } from "@/components/github/home/contributions"
+import { InboxPreview, InboxView } from "@/components/github/home/inbox"
+import {
+  HOME_TABS,
+  HOME_TAB_LABEL,
+  recentRepositories,
+  type HomeTab,
+} from "@/components/github/home/model"
+import { AccessList, ProfileColumn } from "@/components/github/home/profile"
+import { REPO_CARD_GRID, RepoCard, RepoCardSkeleton } from "@/components/github/home/repo-card"
 
 const STATES: { key: GitHubListState; label: string }[] = [
   { key: "all", label: "All" },
@@ -116,9 +107,11 @@ const ANY = "__any"
  * rather than the server's minute-long cache: set by Refresh, taken by the
  * read it starts. Module state, read only inside the fetcher.
  */
-const fresh = new Set<number>()
-const askFresh = (id: number | undefined) => id !== undefined && fresh.add(id)
-const takeBypass = (id: number | undefined) => id !== undefined && fresh.delete(id)
+const fresh = new Set<string>()
+const askFresh = (what: string, id: number | undefined) =>
+  id !== undefined && fresh.add(`${what}:${id}`)
+const takeBypass = (what: string, id: number | undefined) =>
+  id !== undefined && fresh.delete(`${what}:${id}`)
 
 const noSubscription = () => () => {}
 const browserOrigin = () => window.location.origin
@@ -126,10 +119,20 @@ const serverOrigin = () => ""
 
 /**
  * The GitHub page: the GitHub accounts this dashboard account connected,
- * and the repositories they reach through the dashboard's repository App.
+ * and what they reach through the dashboard's repository App — drawn as
+ * GitHub draws a person's own home, because that is the picture of it the
+ * reader already has.
  *
- * It is a list page (`recipes/list-page.md`) and apart from Local Git on
- * purpose: Local Git is the checkouts on this server and the server's own
+ * Once an account is connected the page has four views in the address
+ * (`?tab=`). **Overview** is the account's profile: its face, name and bio
+ * and what the App reaches beside its year of contributions (the page's
+ * picture, D2), then the repositories it pushed to last as cards, the pull
+ * requests it opened and is asked to review, the issues assigned to it, and
+ * what it did lately. **Repositories** is every repository as a card, with
+ * the list's search, filters and order. **Pull requests** and **Issues** are
+ * GitHub's own lists of the account's, across every repository it reaches.
+ *
+ * It is apart from Local Git on purpose: Local Git is the checkouts on this server and the server's own
  * git; this is GitHub, read and changed through GitHub's API as the person
  * who connected the account. Neither needs the other. A clone from here
  * lands in Local Git, and a row says when a checkout of it is on the server.
@@ -167,7 +170,7 @@ export function GitHubListPage() {
 
   const list = usePoll(
     (signal) => {
-      const fresh = takeBypass(current?.id)
+      const fresh = takeBypass("list", current?.id)
       return get<GitHubRepositoryList>(
         `/github/connections/${current?.id}/repositories`,
         fresh ? { refresh: 1 } : undefined,
@@ -178,10 +181,55 @@ export function GitHubListPage() {
     [current?.id],
     { enabled: Boolean(current && active) },
   )
+  const [tab, setTab] = useDetailTab(HOME_TABS)
+
+  // The account's profile and year, once per account, and again on Refresh.
+  const profile = usePoll(
+    (signal) => {
+      const fresh = takeBypass("profile", current?.id)
+      return get<GitHubProfile>(
+        `/github/connections/${current?.id}/profile`,
+        fresh ? { refresh: 1 } : undefined,
+        signal,
+      )
+    },
+    0,
+    [current?.id],
+    { enabled: Boolean(current && active) },
+  )
+  // What it did lately, read when the Overview is first shown.
+  const events = usePoll(
+    (signal) => {
+      const fresh = takeBypass("events", current?.id)
+      return get<GitHubEventList>(
+        `/github/connections/${current?.id}/events`,
+        fresh ? { refresh: 1 } : undefined,
+        signal,
+      )
+    },
+    0,
+    [current?.id],
+    { enabled: Boolean(current && active && tab === "overview") },
+  )
+
+  // Bumped by Refresh: the pull request and issue lists on screen (the
+  // Overview's previews, or a whole view) read again from GitHub.
+  const [inboxRound, setInboxRound] = useState(0)
+
   const refreshList = useCallback(() => {
-    askFresh(current?.id)
+    askFresh("list", current?.id)
     list.refresh()
   }, [list, current?.id])
+  const refreshAll = useCallback(() => {
+    refreshList()
+    askFresh("profile", current?.id)
+    profile.refresh()
+    if (tab === "overview") {
+      askFresh("events", current?.id)
+      events.refresh()
+    }
+    setInboxRound((n) => n + 1)
+  }, [refreshList, profile, events, tab, current?.id])
 
   // Local Git's checkouts, once, for the "On this server" mark and Open in
   // Local Git. A server without git answers nothing, and the marks stay off.
@@ -213,9 +261,11 @@ export function GitHubListPage() {
 
   const registered = !origin || githubCallbackRegistered(setup.data, origin)
 
+  // Another account opens on the view the page is on. The address says which:
+  // one without `?tab=` is the Overview, and the mounted page follows it.
   const goToAccount = useCallback(
-    (id: number | undefined) => router.replace(id ? `/github?account=${id}` : "/github"),
-    [router],
+    (id: number | undefined) => router.replace(id ? viewHref(id, tab) : "/github"),
+    [router, tab],
   )
 
   const connect = async () => {
@@ -318,6 +368,9 @@ export function GitHubListPage() {
     })
 
   const repos = useMemo(() => list.data?.repositories ?? [], [list.data])
+  // Every repository the page lists, by its lower-cased full name: a pull
+  // request or event in one of them opens here, anywhere else on GitHub.
+  const listed = useMemo(() => new Set(repos.map((repo) => repo.fullName.toLowerCase())), [repos])
   const counts = useMemo(
     () => (list.data ? repositoryCounts(repos) : undefined),
     [list.data, repos],
@@ -349,7 +402,7 @@ export function GitHubListPage() {
       )
     }
     if (active)
-      menu.push({ key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refreshList })
+      menu.push({ key: "refresh", label: "Refresh", icon: RefreshClockwise, run: refreshAll })
     if (app) {
       menu.push({
         key: "install",
@@ -452,7 +505,9 @@ export function GitHubListPage() {
       command={command}
       menu={
         <>
-          {menu.length > 0 && <VerbMenu verbs={menu} label="More actions for GitHub" />}
+          {menu.length > 0 && (
+            <VerbMenu verbs={menu} glyphs={false} label="More actions for GitHub" />
+          )}
           <span className="max-sm:hidden">
             <WorkspaceHelp compact />
           </span>
@@ -478,7 +533,7 @@ export function GitHubListPage() {
   if (setup.error && !setup.data) {
     body = <ErrorState error={setup.error} what="the GitHub setup" onRetry={setup.refresh} />
   } else if (!setup.data) {
-    body = <ChoiceListSkeleton rows={6} lines={2} />
+    body = <HomeSkeleton />
   } else if (!configured) {
     body = (
       <EmptyState
@@ -508,7 +563,7 @@ export function GitHubListPage() {
       />
     )
   } else if (!connections.data) {
-    body = <ChoiceListSkeleton rows={6} lines={2} />
+    body = <HomeSkeleton />
   } else if (!current) {
     body = (
       <EmptyState
@@ -556,14 +611,6 @@ export function GitHubListPage() {
             )}
           </Notice>
         )}
-        {active && !reconnect && (
-          <AccessStrip
-            connection={current}
-            installUrl={app?.installUrl}
-            refreshing={refreshingAccess}
-            onRefresh={() => void refreshAccess(current)}
-          />
-        )}
         {list.data?.partial.map((part) => (
           <Notice
             key={part.installationId}
@@ -580,28 +627,66 @@ export function GitHubListPage() {
           </Notice>
         )}
         {active && !reconnect && (
-          <RepositoryList
-            list={list.data}
-            failure={failure}
-            error={list.error}
-            onRetry={refreshList}
-            filters={filters}
-            set={set}
-            clear={clear}
-            counts={counts}
-            owners={owners}
-            languages={languages}
-            shown={shown}
-            shownRows={shownRows}
-            onMore={() => setRows({ key: filterKey, count: shownRows + GITHUB_PAGE_ROWS })}
-            narrowed={narrowed}
+          <HomeViews
+            tab={tab}
+            setTab={setTab}
             connection={current}
-            local={local.data?.repos}
-            control={control}
-            onNew={() => setCreateOpen(true)}
-            onClone={setCloning}
-            onRefresh={refreshList}
-            refreshing={list.loading}
+            counts={counts}
+            overview={
+              <Overview
+                connection={current}
+                profile={profile.data}
+                profileLoading={!profile.data && !profile.error}
+                repos={repos}
+                listLoading={!list.data && !list.error}
+                listError={
+                  list.error && !list.data ? (
+                    <ListError error={list.error} failure={failure} onRetry={refreshList} />
+                  ) : undefined
+                }
+                listed={listed}
+                inboxRound={inboxRound}
+                events={events.data?.events}
+                eventsLoading={!events.data && !events.error}
+                local={local.data?.repos}
+                control={control}
+                onClone={setCloning}
+                installUrl={app?.installUrl}
+                refreshingAccess={refreshingAccess}
+                onRefreshAccess={() => void refreshAccess(current)}
+              />
+            }
+            repositories={
+              <RepositoryList
+                list={list.data}
+                failure={failure}
+                error={list.error}
+                onRetry={refreshList}
+                filters={filters}
+                set={set}
+                clear={clear}
+                counts={counts}
+                owners={owners}
+                languages={languages}
+                shown={shown}
+                shownRows={shownRows}
+                onMore={() => setRows({ key: filterKey, count: shownRows + GITHUB_PAGE_ROWS })}
+                narrowed={narrowed}
+                connection={current}
+                local={local.data?.repos}
+                control={control}
+                onNew={() => setCreateOpen(true)}
+                onClone={setCloning}
+                onRefresh={refreshList}
+                refreshing={list.loading}
+              />
+            }
+            pulls={
+              <InboxView kind="pull" connection={current.id} listed={listed} round={inboxRound} />
+            }
+            issues={
+              <InboxView kind="issue" connection={current.id} listed={listed} round={inboxRound} />
+            }
           />
         )}
       </div>
@@ -612,7 +697,7 @@ export function GitHubListPage() {
     <Workspace
       name="GitHub"
       stateKey="github.list"
-      refresh={refreshList}
+      refresh={refreshAll}
       escape={() => {
         if (!narrowed) return false
         clear()
@@ -676,7 +761,7 @@ export function GitHubListSkeleton() {
         command
         menu={false}
       />
-      <ChoiceListSkeleton rows={6} lines={2} />
+      <HomeSkeleton />
     </Page>
   )
 }
@@ -763,80 +848,35 @@ function ConnectHelp({
 }
 
 /**
- * What the App can reach for this account: one entry per installation, the
- * account it is on, all or selected repositories, and where that is changed
- * on GitHub. One line on a wide screen; it wraps entry by entry, never inside
- * one.
+ * The repository list's first read failed: a spent rate limit says when it
+ * lifts (the Overview's recent repositories and the Repositories view say
+ * it alike), anything else is the ordinary failed read.
  */
-function AccessStrip({
-  connection,
-  installUrl,
-  refreshing,
-  onRefresh,
+function ListError({
+  error,
+  failure,
+  onRetry,
 }: {
-  connection: GitHubConnection
-  installUrl?: string
-  refreshing: boolean
-  onRefresh: () => void
+  error: Error
+  failure?: ReturnType<typeof listFailure>
+  onRetry: () => void
 }) {
-  return (
-    <div
-      role="group"
-      aria-label="What the App can reach"
-      data-slot="github-access"
-      className="flex min-w-0 flex-wrap items-center gap-x-5 gap-y-2 text-xs"
-    >
-      {connection.installations.length === 0 ? (
-        <span className="text-muted-foreground">Not installed on any account yet</span>
-      ) : (
-        connection.installations.map((installation) => (
-          <AccessEntry key={installation.id} installation={installation} />
-        ))
-      )}
-      <span className="ml-auto flex items-center gap-1">
-        {installUrl && (
-          <Button size="xs" variant="ghost" asChild>
-            <a href={installUrl} target="_blank" rel="noreferrer">
-              <Plus className="size-3.5" />
-              Install
-            </a>
+  if (failure?.kind === "rate") {
+    return (
+      <EmptyState
+        data-slot="github-rate-limited"
+        icon={Clock}
+        title="GitHub asks to wait"
+        description={`${failure.message}${failure.until ? ` Try again after ${clockTime(failure.until)}.` : ""}`}
+        action={
+          <Button size="sm" variant="outline" onClick={onRetry}>
+            Try again
           </Button>
-        )}
-        <Button size="xs" variant="ghost" onClick={onRefresh} pending={refreshing}>
-          <RefreshClockwise className="size-3.5" />
-          Refresh access
-        </Button>
-      </span>
-    </div>
-  )
-}
-
-function AccessEntry({ installation }: { installation: GitHubInstallation }) {
-  const all = installation.repositorySelection === "all"
-  return (
-    <span data-slot="github-installation" className="inline-flex min-w-0 items-center gap-1.5">
-      <ForgeFace login={installation.account.login} provider="github" size="xs" />
-      <span className="font-mono text-foreground">{installation.account.login}</span>
-      <span className="text-muted-foreground">
-        {installation.suspended ? (
-          <span className="text-warning">Suspended</span>
-        ) : all ? (
-          "All repositories"
-        ) : (
-          "Selected repositories"
-        )}
-      </span>
-      <a
-        href={installation.settingsUrl}
-        target="_blank"
-        rel="noreferrer"
-        aria-label={`Change what ${installation.account.login} grants`}
-        className="rounded-sm text-muted-foreground underline-offset-2 focus-ring hover:text-foreground hover:underline"
-      >
-        Change
-      </a>
-    </span>
-  )
+        }
+      />
+    )
+  }
+  return <ErrorState error={error} what="the repositories" onRetry={onRetry} />
 }
 
 function RepositoryList({
@@ -884,24 +924,7 @@ function RepositoryList({
   onRefresh: () => void
   refreshing: boolean
 }) {
-  if (error && !list) {
-    if (failure?.kind === "rate") {
-      return (
-        <EmptyState
-          data-slot="github-rate-limited"
-          icon={Clock}
-          title="GitHub asks to wait"
-          description={`${failure.message}${failure.until ? ` Try again after ${clockTime(failure.until)}.` : ""}`}
-          action={
-            <Button size="sm" variant="outline" onClick={onRetry}>
-              Try again
-            </Button>
-          }
-        />
-      )
-    }
-    return <ErrorState error={error} what="the repositories" onRetry={onRetry} />
-  }
+  if (error && !list) return <ListError error={error} failure={failure} onRetry={onRetry} />
   if (!list) {
     return (
       <>
@@ -914,7 +937,7 @@ function RepositoryList({
             />
           }
         />
-        <ChoiceListSkeleton rows={8} lines={2} />
+        <RepoCardSkeleton />
       </>
     )
   }
@@ -1037,9 +1060,9 @@ function RepositoryList({
         </EmptyNote>
       ) : (
         <div className="flex min-w-0 flex-col gap-3">
-          <ChoiceList aria-label={`Repositories of @${connection.login}`}>
-            {page.map((repo) => (
-              <RepositoryRow
+          <ul aria-label={`Repositories of @${connection.login}`} className={REPO_CARD_GRID}>
+            {page.map((repo, index) => (
+              <RepoCard
                 // The full name, which one account's list holds once.
                 key={repo.fullName}
                 repo={repo}
@@ -1047,9 +1070,10 @@ function RepositoryList({
                 checkouts={localCheckoutsOf(local, repo.fullName)}
                 control={control}
                 onClone={onClone}
+                index={index}
               />
             ))}
-          </ChoiceList>
+          </ul>
           {shown.length > page.length && (
             <div className="flex items-center justify-center gap-3">
               <Button size="sm" variant="outline" onClick={onMore}>
@@ -1066,135 +1090,235 @@ function RepositoryList({
   )
 }
 
-/**
- * One repository: its owner's face, its name over its full name, branch and
- * description, then aligned columns — kind and role tags, whether a
- * checkout is on this server, visibility, language, stars, forks and when
- * it last moved. On a phone the columns go and the row keeps its height.
- */
-function RepositoryRow({
-  repo,
+/** The views' strip and the one view on screen; the strip holds the page's place while it is read. */
+function HomeViews({
+  tab,
+  setTab,
   connection,
-  checkouts,
+  counts,
+  overview,
+  repositories,
+  pulls,
+  issues,
+}: {
+  tab: HomeTab
+  setTab: (next: string) => void
+  connection: GitHubConnection
+  counts?: Record<GitHubListState, number>
+  overview: React.ReactNode
+  repositories: React.ReactNode
+  pulls: React.ReactNode
+  issues: React.ReactNode
+}) {
+  const views: TabView<HomeTab>[] = HOME_TABS.map((key) => ({
+    key,
+    label: HOME_TAB_LABEL[key],
+    count: key === "repositories" ? counts?.all : undefined,
+  }))
+  // The pull request and issue views keep their filter in the address; the
+  // next view starts on its own defaults rather than the last one's.
+  const choose = (next: string) => {
+    const url = new URL(window.location.href)
+    url.searchParams.delete("filter")
+    url.searchParams.delete("state")
+    if (url.href !== window.location.href) {
+      window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`)
+    }
+    setTab(next)
+  }
+  return (
+    <Tabs value={tab} onValueChange={choose} className="gap-0">
+      <ViewTabList label={`Views of @${connection.login}`} views={views} value={tab} sticky />
+      <TabsContent value="overview" className="pt-6">
+        {tab === "overview" && overview}
+      </TabsContent>
+      <TabsContent value="repositories" className="flex flex-col gap-4 pt-6">
+        {tab === "repositories" && repositories}
+      </TabsContent>
+      <TabsContent value="pulls" className="pt-6">
+        {tab === "pulls" && pulls}
+      </TabsContent>
+      <TabsContent value="issues" className="pt-6">
+        {tab === "issues" && issues}
+      </TabsContent>
+    </Tabs>
+  )
+}
+
+/**
+ * The address of one of the page's views, on the account it is on, and for
+ * the pull request and issue views on one of their filters.
+ */
+function viewHref(connection: number, tab: HomeTab, filter?: GitHubInboxFilter) {
+  const query = new URLSearchParams({ account: String(connection) })
+  if (tab !== "overview") query.set("tab", tab)
+  if (filter && filter !== "created") query.set("filter", filter)
+  return `/github?${query}`
+}
+
+/**
+ * The profile column and the main column, at their widths, from a laptop up:
+ * the profile and what the App reaches stand one over the other in the left
+ * column, and the main column runs down beside both. On a phone it is one
+ * column, the profile first and what the App reaches last.
+ */
+const HOME_GRID =
+  "grid min-w-0 gap-8 lg:grid-cols-[16.5rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:gap-x-12"
+
+/**
+ * The account's home: its profile in the left column, and in the main one
+ * its year, the repositories it pushed to last, the pull requests and issues
+ * that are its to look at, and what it did lately. On a phone the columns
+ * become one, the profile a compact block at the top.
+ */
+function Overview({
+  connection,
+  profile,
+  profileLoading,
+  repos,
+  listLoading,
+  listError,
+  listed,
+  inboxRound,
+  events,
+  eventsLoading,
+  local,
   control,
   onClone,
+  installUrl,
+  refreshingAccess,
+  onRefreshAccess,
 }: {
-  repo: GitHubRepository
-  connection: number
-  checkouts: GitRepo[]
+  connection: GitHubConnection
+  profile?: GitHubProfile
+  profileLoading: boolean
+  repos: GitHubRepository[]
+  listLoading: boolean
+  /** The list's failed first read, said where the recent repositories would stand. */
+  listError?: React.ReactNode
+  listed: Set<string>
+  inboxRound: number
+  events?: GitHubEventList["events"]
+  eventsLoading: boolean
+  local?: GitRepo[]
   control: boolean
   onClone: (repo: GitHubRepository) => void
+  installUrl?: string
+  refreshingAccess: boolean
+  onRefreshAccess: () => void
 }) {
-  const tags = rowTags(repo)
-  const checkout = checkouts[0]
-  const updated = repo.pushedAt ?? repo.updatedAt
-  const verbs: VerbSpec[] = [
-    {
-      key: "github",
-      label: "Open on GitHub",
-      icon: External,
-      run: () => window.open(repo.htmlUrl, "_blank", "noopener"),
-    },
-    ...(control
-      ? [{ key: "clone", label: "Clone to server…", icon: CloudDownload, run: () => onClone(repo) }]
-      : []),
-    ...(checkout
-      ? [
-          {
-            key: "local",
-            label: "Open in Local Git",
-            icon: GitBranch,
-            href: localGitHref(checkout.path),
-            internal: true,
-          },
-        ]
-      : []),
-    {
-      key: "copy",
-      label: "Copy clone URL",
-      icon: Copy,
-      run: () => void copyText(repo.cloneUrl, "Clone URL copied"),
-    },
-  ]
+  const recent = recentRepositories(repos)
   return (
-    <ChoiceRow
-      href={githubRepoHref(repo.fullName, { account: connection })}
-      verb={`Open ${repo.fullName}`}
-      workspaceItem={{ id: repo.fullName, name: repo.fullName }}
-      leading={<ForgeFace login={repo.owner.login} provider="github" size="sm" />}
-      title={repo.name}
-      description={
-        <span title={repo.description}>
-          <span className="font-mono">{repo.fullName}</span>
-          <span className="max-sm:hidden">
-            {" · "}
-            <span className="font-mono">{repo.defaultBranch}</span>
-          </span>
-          {repo.description && ` · ${repo.description}`}
-        </span>
-      }
-      trailing={
-        <span className="flex items-center gap-3 text-xs text-muted-foreground">
-          {/* A tag is a bare word, so two side by side read as one phrase
-              ("Shared with you Write") without the dot between them. */}
-          <span className="hidden w-44 items-center justify-end gap-1 overflow-hidden lg:flex">
-            {tags.map((tag, index) => (
-              <Fragment key={tag}>
-                {index > 0 && (
-                  <span aria-hidden className="text-faint">
-                    ·
-                  </span>
-                )}
-                <Tag tone={tag === "Archived" ? "warning" : "default"}>{tag}</Tag>
-              </Fragment>
-            ))}
-          </span>
-          <span className="hidden w-4 justify-center sm:flex">
-            {checkout && (
-              <span
-                role="img"
-                data-slot="on-server"
-                aria-label={`On this server at ${checkout.path}`}
-                title={`On this server: ${checkout.path}`}
-              >
-                <Servers aria-hidden className="size-3.5 text-foreground" />
-              </span>
-            )}
-          </span>
-          <span className="flex w-16 justify-end max-sm:w-auto">
-            {repo.visibility === "public" ? (
-              <Tag className="max-sm:hidden">Public</Tag>
-            ) : (
-              <Tag icon={LockClosed}>{repo.visibility === "internal" ? "Internal" : "Private"}</Tag>
-            )}
-          </span>
-          <span className="hidden w-24 xl:flex">
-            {repo.language && (
-              <Tag>
-                <LanguageMark language={repo.language} />
-              </Tag>
-            )}
-          </span>
-          <span className="numeric hidden w-12 items-center justify-end gap-1 lg:flex">
-            <Star aria-hidden className="size-3" />
-            {repo.stars}
-            <span className="sr-only">stars</span>
-          </span>
-          <span className="numeric hidden w-10 items-center justify-end gap-1 lg:flex">
-            <SourceFork aria-hidden className="size-3" />
-            {repo.forks}
-            <span className="sr-only">forks</span>
-          </span>
-          <span className="hidden w-16 justify-end md:flex" title={updated}>
-            {updated ? relativeTime(updated) : ""}
-          </span>
-        </span>
-      }
-      actions={
-        <DimActions>
-          <VerbMenu verbs={verbs} label={`Actions for ${repo.fullName}`} />
-        </DimActions>
-      }
-    />
+    <div className={HOME_GRID} data-slot="github-overview">
+      <ProfileColumn connection={connection} profile={profile} className="lg:col-start-1" />
+      <AccessList
+        connection={connection}
+        installUrl={installUrl}
+        refreshing={refreshingAccess}
+        onRefresh={onRefreshAccess}
+        className="order-last self-start lg:order-none lg:col-start-1 lg:row-start-2"
+      />
+      <div
+        data-slot="github-overview-main"
+        className="flex min-w-0 flex-col gap-10 lg:col-start-2 lg:row-span-2 lg:row-start-1"
+      >
+        <ContributionCalendar
+          contributions={profile?.contributions}
+          message={profile?.contributionsMessage}
+          loading={profileLoading}
+        />
+        <Section
+          title="Recently pushed"
+          link={
+            repos.length > recent.length
+              ? { href: viewHref(connection.id, "repositories"), label: "All repositories" }
+              : undefined
+          }
+        >
+          {listError ? (
+            listError
+          ) : listLoading ? (
+            <RepoCardSkeleton count={4} />
+          ) : recent.length === 0 ? (
+            <EmptyNote>Nothing pushed yet.</EmptyNote>
+          ) : (
+            <ul aria-label="Recently pushed" className={REPO_CARD_GRID}>
+              {recent.map((repo, index) => (
+                <RepoCard
+                  key={repo.fullName}
+                  repo={repo}
+                  connection={connection.id}
+                  checkouts={localCheckoutsOf(local, repo.fullName)}
+                  control={control}
+                  onClone={onClone}
+                  index={index}
+                />
+              ))}
+            </ul>
+          )}
+        </Section>
+        <InboxPreview
+          title="Your pull requests"
+          kind="pull"
+          filter="created"
+          connection={connection.id}
+          listed={listed}
+          href={viewHref(connection.id, "pulls")}
+          round={inboxRound}
+        />
+        <InboxPreview
+          title="Review requests"
+          kind="pull"
+          filter="review"
+          connection={connection.id}
+          listed={listed}
+          href={viewHref(connection.id, "pulls", "review")}
+          round={inboxRound}
+        />
+        <InboxPreview
+          title="Assigned issues"
+          kind="issue"
+          filter="assigned"
+          connection={connection.id}
+          listed={listed}
+          href={viewHref(connection.id, "issues", "assigned")}
+          round={inboxRound}
+        />
+        <Section title="Public activity">
+          <ActivityFeed
+            events={events}
+            loading={eventsLoading}
+            listed={listed}
+            connection={connection.id}
+          />
+        </Section>
+      </div>
+    </div>
+  )
+}
+
+/**
+ * The connected page before its reads land, in the Overview's shape: the
+ * views' strip, the profile column and the calendar's height, so the page
+ * does not jump when they arrive (§11).
+ */
+function HomeSkeleton() {
+  return (
+    <div aria-hidden className="flex min-w-0 flex-col gap-6">
+      <Skeleton className="h-10 w-full max-w-md rounded-md" />
+      <div className={HOME_GRID}>
+        <div className="flex items-center gap-4 lg:flex-col lg:items-start">
+          <Skeleton className="size-16 rounded-full sm:size-20 lg:size-28" />
+          <div className="space-y-2">
+            <Skeleton className="h-6 w-36" />
+            <Skeleton className="h-5 w-24" />
+          </div>
+        </div>
+        <div className="flex min-w-0 flex-col gap-10">
+          <Skeleton className="h-36 w-full rounded-lg" />
+          <RepoCardSkeleton count={4} />
+        </div>
+      </div>
+    </div>
   )
 }

@@ -189,7 +189,11 @@ its rows and how it is read, and its housekeeping and maintenance. A session
 its timing and who it waits on or holds up, and its stop verbs; one that ends while open is said to
 have ended and stays as last seen. The address is one path segment with no percent sign
 (`ops/performance-address.ts`, unit-tested): what would be escaped is written with `~`, and a dot
-inside a name is escaped so the dot left is the one between schema and name. The addresses that
+inside a name is escaped so the dot left is the one between schema and name. A statement's key is
+the engine's id with the row's `variant` after a `~` where the engine gives one
+(`statementKeys` in `ops/performance-figures.ts`), so a page keeps its row whatever order a read
+lists them in; the id alone (History's links) is that id's statement, its rows summed where it has
+several. The addresses that
 opened the sheets these were (`?statement=`, `?object=`, `?session=`) are sent on to the pages. No
 list of Performance draws a bar per row: a share is a figure in its own column, and what a view's
 footnote said is a fact on its title line (`ops/performance-words.tsx`);
@@ -199,7 +203,8 @@ Data, Query, Schema and Diagram are four workbenches under one head
 (`components/database/workbench/chrome.tsx`) — with one rail kit (`workbench/rail.tsx`: `RailHead`,
 `RailFind`, `RailGroupHead`, `RailRow`, `RailSkeleton`, `RailNoMatch`), one side column
 (`WorkbenchSide`, 256px opening width on every workbench), one open-object strip (`ObjectHead`),
-and one container picker and mark (`kit/container-picker.tsx`, `kit/marks.tsx`): the database's identity and the open thing's verbs in
+and one container picker and mark (`kit/container-picker.tsx`, `kit/marks.tsx`; a menu, and past a
+dozen containers a combobox whose find box has the keyboard as it opens): the database's identity and the open thing's verbs in
 the frame's own bar, the glyph-only controls as words in its one menu, and on a phone one pane with
 a bar at the foot — Tables, Rows and Details on Data, where a row is a card and its full row the
 Details pane (`data/row-cards.tsx`); Editor, Results and Saved on Query, where Run's menu holds the

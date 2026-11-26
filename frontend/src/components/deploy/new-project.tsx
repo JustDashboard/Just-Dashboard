@@ -41,6 +41,7 @@ import { SourceTemplate } from "@/components/deploy/new-project/source-template"
 import { SourceDatabase } from "@/components/deploy/new-project/source-database"
 import { Configure } from "@/components/deploy/new-project/configure"
 import { AssistSwitch } from "@/components/deploy/new-project/assist-switch"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 // The mark is wayfinding, not decoration: four words set in one line are four
 // words to read, and the reader is choosing between four *kinds* of thing.
@@ -254,12 +255,7 @@ export function NewProject({
         heading.tabIndex = -1
         heading.focus({ preventScroll: true })
       }
-      header?.scrollIntoView({
-        block: "start",
-        behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches
-          ? "instant"
-          : "smooth",
-      })
+      scrollIntoViewRespectingMotion(header)
     })
   }
   const changeSource = () => {

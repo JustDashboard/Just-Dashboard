@@ -124,6 +124,36 @@ describe("alertCover", () => {
     expect(own.missing).toEqual(WATCHED_KINDS)
   })
 
+  test("one of the usual rules made, and the rest not, keeps the press to make the rest", () => {
+    // The first rule of a Turn on that stopped half-way watches every database.
+    const half = alertCover(FLEET, [rule(1, { kind: "down" })], [], [])
+    expect(half.unwatched).toEqual([])
+    expect(half.partial).toBe(true)
+    expect(half.missing).toEqual(["disk", "connections", "backup_failed", "backup_missed"])
+    expect(half.offered).toBe(true)
+
+    const whole = alertCover(
+      FLEET,
+      WATCHED_KINDS.map((kind, i) => rule(i + 1, { kind })),
+      [],
+      [],
+    )
+    expect(whole.partial).toBe(false)
+    expect(whole.offered).toBe(false)
+  })
+
+  test("nothing watched offers the press; every database watched by its own rules does not", () => {
+    expect(alertCover(FLEET, [], [], []).offered).toBe(true)
+    const own = FLEET.map((entry, i) => rule(i + 1, { connectionId: entry.id, kind: "down" }))
+    const byHand = alertCover(FLEET, own, [], [])
+    expect(byHand.unwatched).toEqual([])
+    expect(byHand.partial).toBe(false)
+    expect(byHand.offered).toBe(false)
+    // Paused over every database: nothing to add, so nothing offered.
+    const paused = WATCHED_KINDS.map((kind, i) => rule(i + 1, { kind, enabled: false }))
+    expect(alertCover(FLEET, paused, [], []).offered).toBe(false)
+  })
+
   test("a paused rule watches nothing, but is not added again", () => {
     const cover = alertCover(FLEET, [rule(1, { enabled: false })], [], [])
     expect(cover.unwatched).toHaveLength(3)

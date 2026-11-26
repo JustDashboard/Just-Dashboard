@@ -627,7 +627,7 @@ export function AddForeignKeyDialog({ detail, onClose, onDone }: TableFormProps)
         </Field>
       </FieldRow>
 
-      <Field label="Columns">
+      <Field label="Columns" group>
         <div className="space-y-2">
           {draft.columns.map((column, index) => (
             <div key={index} className="flex min-w-0 items-center gap-2">

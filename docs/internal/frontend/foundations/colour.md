@@ -96,6 +96,11 @@ same hues (`CHANGE_TONE` and `ChangeTag` in `deploy/vocabulary.tsx`) — a green
 face, not destructive red, because it moves traffic between immutable releases and destroys
 nothing.
 
+A contribution calendar (the GitHub page's Overview) is the one place a quantity is drawn in steps
+of one hue: `--contribution-0` is an empty day, a faint well, and `--contribution-1` to `-4` are
+GitHub's four quartiles, the pull request's open green (`--tag-green`) mixed into the card at rising
+strength. It is not `--success`: a busy day is not a healthy one.
+
 **Selection is `bg-accent`, everywhere** — a neutral fill, deliberately not a hue. The active session
 in the terminal rail, a pressed `ToggleGroupItem`, an applied `FilterChip`, a highlighted command row,
 a selected table row and the current file in the tree all take it. A filter that borrowed the brand or

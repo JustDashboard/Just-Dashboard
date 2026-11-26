@@ -1,5 +1,29 @@
-import { expect, test } from "bun:test"
-import { exportBlob, exportName, streamExport } from "./stream-export"
+import { afterEach, expect, test } from "bun:test"
+import { exportBlob, exportName, saveExport, settledExport, streamExport } from "./stream-export"
+
+const originalFetch = globalThis.fetch
+afterEach(() => {
+  globalThis.fetch = originalFetch
+})
+
+/** A fetch that answers only once it is let go, and fails as the browser's does when aborted. */
+function heldFetch(answer) {
+  const asked = []
+  let release = () => {}
+  const until = new Promise((resolve) => {
+    release = resolve
+  })
+  globalThis.fetch = (url, init = {}) => {
+    asked.push(String(url))
+    return new Promise((resolve, reject) => {
+      const signal = init.signal
+      if (signal?.aborted) return reject(signal.reason)
+      signal?.addEventListener("abort", () => reject(signal.reason), { once: true })
+      void until.then(() => resolve(Response.json(answer())))
+    })
+  }
+  return { asked, release }
+}
 
 const MIB = 1 << 20
 
@@ -62,4 +86,47 @@ test("the file takes the server's name, and its type", async () => {
   expect(exportName(new Response(""), "fallback.csv")).toBe("fallback.csv")
   expect(exportBlob(["a"], named).type).toStartWith("text/csv")
   expect(exportBlob(["a"], new Response(null)).type).toBe("application/octet-stream")
+})
+
+test("Cancel pressed while the export's ending is being asked throws, rather than answering", async () => {
+  const held = heldFetch(() => ({ status: "complete", rows: 1, format: "csv" }))
+  const controller = new AbortController()
+  const settled = settledExport(1, "e-1", controller.signal)
+  await Bun.sleep(0)
+  expect(held.asked).toHaveLength(1)
+  controller.abort()
+  held.release()
+  await expect(settled).rejects.toMatchObject({ name: "AbortError" })
+})
+
+test("Cancel pressed between two asks of a running export throws at once", async () => {
+  const held = heldFetch(() => ({ status: "running", rows: 0, format: "csv" }))
+  held.release()
+  const controller = new AbortController()
+  const settled = settledExport(1, "e-2", controller.signal)
+  await Bun.sleep(20)
+  controller.abort()
+  const started = Date.now()
+  await expect(settled).rejects.toMatchObject({ name: "AbortError" })
+  // Not after the half-second wait between asks.
+  expect(Date.now() - started).toBeLessThan(200)
+  expect(held.asked).toHaveLength(1)
+})
+
+test("a status read that fails on its own is no record, not a cancel", async () => {
+  globalThis.fetch = async () => new Response("", { status: 502 })
+  expect(await settledExport(1, "e-3", new AbortController().signal)).toBeNull()
+})
+
+test("a cancelled export saves nothing", () => {
+  const controller = new AbortController()
+  controller.abort()
+  let thrown
+  try {
+    saveExport(new Blob(["a"]), new Response(""), "items.csv", controller.signal)
+  } catch (err) {
+    thrown = err
+  }
+  // The cancel itself, before the browser is touched: not a save that failed.
+  expect(thrown?.name).toBe("AbortError")
 })

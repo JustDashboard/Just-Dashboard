@@ -270,6 +270,8 @@ type WorkMock = DatabaseMock & {
   slowHeld?: Promise<unknown>
   /** `GET /search` answers only once this settles. */
   searchHeld?: Promise<unknown>
+  /** `GET /export/status` answers only once this settles. */
+  statusHeld?: Promise<unknown>
   /** What `GET /history` holds to begin with. */
   history?: Record<string, unknown>[]
   saved?: { id: number; name: string; sql: string }[]
@@ -285,6 +287,7 @@ async function mockWork(page: Page, options: WorkMock = {}) {
     cancel: [] as Record<string, unknown>[],
     explain: [] as Record<string, unknown>[],
     exports: [] as Record<string, unknown>[],
+    status: [] as URL[],
     search: [] as URL[],
     browse: [] as URL[],
     outline: [] as URL[],
@@ -578,12 +581,15 @@ async function mockWork(page: Page, options: WorkMock = {}) {
       })
     }
     if (rest === "/export/status") {
+      sent.status.push(url)
+      await options.statusHeld
+      // A read the page gave up on while it was held has nothing to answer.
       return json(route, {
         status: "complete",
         rows: 20000,
         format: "csv",
         startedAt: "2026-10-01T09:00:00Z",
-      })
+      }).catch(() => {})
     }
     if (rest === "/search") {
       sent.search.push(url)
@@ -941,6 +947,31 @@ test("a result the server cut says so, fetches more on request and exports every
     limit: 100_000,
   })
   expect(String(sent.exports[0].exportId)).toMatch(/^[0-9a-f-]{36}$/)
+})
+
+test("Cancel pressed while the result export's ending is still being asked saves no file", async ({
+  page,
+}) => {
+  const status = hold()
+  const { sent } = await mockWork(page, { statusHeld: status.until })
+  const downloads: string[] = []
+  page.on("download", (download) => downloads.push(download.suggestedFilename()))
+  await openEditor(page)
+  await write(page, "select many from customers")
+  await page.keyboard.press("ControlOrMeta+Enter")
+
+  await results(page).getByRole("button", { name: "Export" }).click()
+  await page.getByRole("menuitem", { name: /CSV/ }).click()
+  // The whole file has come; the server's record of how it ended has not.
+  await expect.poll(() => sent.status.length).toBe(1)
+  await page.getByRole("button", { name: "Cancel", exact: true }).click()
+  await expect(page.getByText("The export was cancelled")).toBeVisible()
+  status.release()
+
+  // The record landing after Cancel hands nothing to the browser.
+  await page.waitForTimeout(600)
+  expect(downloads).toEqual([])
+  await expect(page.getByText(/^Exported /)).toHaveCount(0)
 })
 
 test("a statement that changes data is not run again to fetch more of what it returned", async ({

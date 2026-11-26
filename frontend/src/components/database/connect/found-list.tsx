@@ -60,7 +60,9 @@ const FILE_ROWS = 6
  * under a Docker that did not answer is not a server with no containers. It
  * is said as the product says any missing thing (`MissingThing`): Docker as
  * itself, which of its faults this is and the step that fixes it, with the
- * daemon's own sentence folded away. It was that sentence, printed. And
+ * daemon's own sentence folded away. It was that sentence, printed. A
+ * Docker that answers while its listing failed is that collector's failure,
+ * with its reason and a retry, until the inventory reads it. And
  * when the whole reading failed, the servers the fleet itself reported as
  * waiting for a password are still listed under the failure, so the one thing
  * the reader came to do is not lost with it.
@@ -134,18 +136,18 @@ export function FoundList({
         <div key={silence.what} data-slot="found-silence" className="min-w-0">
           <GroupRule label={`Not looked at: ${silence.what}`} />
           {silence.docker ? (
-            // It asks the daemon itself, and reads the list again once it answers.
-            <DockerMissing size="block" onAnswer={inventory.refresh} />
-          ) : (
-            <MissingThing
+            // It asks the daemon itself, and reads the list again once it
+            // answers. A daemon that answers its ping can still fail the
+            // listing (a timeout, a refused list), and that is said as the
+            // collector's own failure: an answering ping drew nothing there,
+            // which left the heading with neither the reason nor a way to ask.
+            <DockerMissing
               size="block"
-              icon={Slash}
-              title={`The ${silence.what} could not be read`}
-              raw={silence.reason}
-            >
-              A server known only from there is not in this list. The rest of it is what the other
-              readings found.
-            </MissingThing>
+              onAnswer={inventory.refresh}
+              answering={<Silence silence={silence} inventory={inventory} docker />}
+            />
+          ) : (
+            <Silence silence={silence} inventory={inventory} />
           )}
         </div>
       ))}
@@ -190,6 +192,52 @@ export function FoundList({
 
       <SetAside shelves={shelves} found={found} row={row} />
     </div>
+  )
+}
+
+/**
+ * A collector that could not read, said with what it answered and a way to
+ * read the list again. It stands until the inventory itself reports that
+ * collector read: a silence is the scan's, so nothing but a reading that
+ * succeeded takes it away.
+ */
+function Silence({
+  silence,
+  inventory,
+  docker = false,
+}: {
+  silence: { what: string; reason: string }
+  inventory: InventoryData
+  /** Docker answered its ping, so the fault is the listing's, not the daemon's. */
+  docker?: boolean
+}) {
+  // Pending from the press until the read it asked for lands, either way.
+  const [asked, setAsked] = useState<{ data: unknown; error: unknown }>()
+  const pending =
+    asked !== undefined && asked.data === inventory.data && asked.error === inventory.error
+  return (
+    <MissingThing
+      size="block"
+      icon={Slash}
+      title={`The ${silence.what} could not be read`}
+      raw={silence.reason}
+      step={
+        <Button
+          size="sm"
+          variant="outline"
+          pending={pending}
+          onClick={() => {
+            setAsked({ data: inventory.data, error: inventory.error })
+            inventory.refresh()
+          }}
+        >
+          Try again
+        </Button>
+      }
+    >
+      {docker ? "Docker answers, but listing them failed. " : ""}A server known only from there is
+      not in this list. The rest of it is what the other readings found.
+    </MissingThing>
   )
 }
 
@@ -604,6 +652,9 @@ function VerbFace({ word }: { word: string }) {
  * A connect that failed just now, as the row's state: "Failed" in the danger
  * ink where the state word stands, and what the server said in a popover off
  * it. The row keeps its height; pressing the row tries again.
+ *
+ * Its name begins with the word it shows (WCAG 2.5.3): someone who says
+ * "click Failed" reaches it, and the server and what it opens follow.
  */
 function Failed({ name, message }: { name: string; message: string }) {
   return (
@@ -612,7 +663,7 @@ function Failed({ name, message }: { name: string; message: string }) {
         <Button
           size="xs"
           variant="ghost"
-          aria-label={`Why ${name} did not connect`}
+          aria-label={`Failed: show why ${name} did not connect`}
           className="-mx-1.5"
         >
           <Status tone="danger" label="Failed" />

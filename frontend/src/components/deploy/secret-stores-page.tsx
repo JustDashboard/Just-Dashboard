@@ -262,13 +262,16 @@ export function SecretStoresPage() {
   }
 
   const editing = draft?.id ? list?.find((store) => store.id === draft.id) : undefined
+  // A first read that failed is settled, not still on its way: the list says
+  // so with a way to try again, and the picture is not left waiting on it.
+  const failed = Boolean(stores.error && !list)
 
   return (
     <Page>
       <PageContext back={{ href: "/deploy", label: "Deployments" }} title="Secret stores" />
       {/* Nothing is wired before the first store, and a picture of two
           empty rings says less than the cards under it: no picture then. */}
-      {(!list || list.length > 0) && (
+      {!failed && (!list || list.length > 0) && (
         <div className="mx-auto w-full max-w-5xl lg:py-2">
           <StoresPicture
             stores={list}
@@ -292,8 +295,9 @@ export function SecretStoresPage() {
           }
         />
         <PanelBody>
-          {stores.error && !list ? (
-            <ErrorState error={stores.error} onRetry={stores.refresh} />
+          {failed && stores.error ? (
+            // Named, so a plain network failure offers Try again too.
+            <ErrorState error={stores.error} what="the secret stores" onRetry={stores.refresh} />
           ) : !list ? (
             <ChoiceListSkeleton rows={2} />
           ) : list.length === 0 ? (

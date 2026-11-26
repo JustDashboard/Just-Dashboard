@@ -1,4 +1,5 @@
 "use client"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 /**
  * Arriving where a shortcut sent you: the section it named is scrolled to and lit
@@ -27,8 +28,7 @@ function look(left: number) {
     return
   }
   wanted = null
-  const reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches
-  section.scrollIntoView({ block: "start", behavior: reduced ? "instant" : "smooth" })
+  scrollIntoViewRespectingMotion(section)
   section.setAttribute("data-arrived", "true")
   window.setTimeout(() => section.removeAttribute("data-arrived"), 2400)
 }

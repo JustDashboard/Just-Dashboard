@@ -1,16 +1,44 @@
 # GitHub page: what is inside a repository
 
 The repository detail view of the GitHub page (`/github/[owner]/[repo]`) reads and changes a
-repository's branches, commits, pull requests, issues, workflows and collaborators through GitHub's
-REST API, always as the person who connected the account (their user access token, never the App's
+repository's branches, commits, pull requests, issues, workflows and collaborators, and reads its
+README and languages, through GitHub's REST API, always as the person who connected the account (their user access token, never the App's
 own identity). The App, the connections, the token lifecycle, the repository list and the
 repository's own settings are in [github-page.md](github-page.md); this document is the part under
 `/api/v1/github/connections/{connection}/repos/{owner}/{repo}/…`.
 
-Code: `backend/internal/githubrepos/{branches,commits,pulls,issues,actions,collaborators}.go`
+Code: `backend/internal/githubrepos/{branches,commits,pulls,issues,actions,collaborators,readme}.go`
 (methods on `RepoAccess`, shared helpers in `resources.go`) and
 `backend/internal/api/handlers_githubrepos_resources.go` (routes). The JSON shapes are
-`frontend/src/lib/github-types.ts` (`GitHubBranch` to `GitHubCollaboratorResult`).
+`frontend/src/lib/github-types.ts` (`GitHubBranch` to `GitHubCollaboratorResult`, and `GitHubReadme`,
+`GitHubLanguages`).
+
+## Routes
+
+All under `/api/v1/github/connections/{connection}/repos/{owner}/{repo}`, capabilities as in
+[github-page.md](github-page.md#routes) (R = any session, SC = `service.control`, D =
+`s.destructive`); the ability in brackets is checked before GitHub is asked.
+
+| Route | Capability | Answer |
+| --- | --- | --- |
+| `GET /branches?page=` | R | `GitHubBranchPage` |
+| `GET /branches/protection?name=` | R | `GitHubBranchProtection` |
+| `POST /branches` | SC (`push`) | 201 `GitHubBranch` |
+| `DELETE /branches?name=` | D (`push`) | 204 |
+| `GET /commits?sha=&page=` | R | `GitHubCommitPage` |
+| `GET /pulls?state=&page=`, `GET /pulls/{number}` | R | `GitHubPullPage`, `GitHubPullDetail` |
+| `POST /pulls/{number}/merge` | SC (`merge`) | `GitHubMergeResult` |
+| `POST /pulls/{number}/state` | SC (`pulls`) | `GitHubPull` |
+| `GET /issues?state=&labels=&page=`, `GET /issues/{number}` | R | `GitHubIssuePage`, `GitHubIssue` |
+| `POST /issues`, `PATCH /issues/{number}` | SC (`createIssues`, `issues`) | 201 `GitHubIssue`, `GitHubIssue` |
+| `GET /labels` | R | `GitHubLabel[]` |
+| `GET /actions/workflows`, `GET /actions/runs?workflow=&branch=&page=` | R | `GitHubWorkflowList`, `GitHubRunPage` |
+| `POST /actions/workflows/{workflow}/dispatch`, `POST /actions/runs/{run}/rerun`, `POST /actions/runs/{run}/cancel` | SC (`actions`) | `GitHubDispatchResult`, 204 |
+| `GET /collaborators` | R | `GitHubCollaborators` |
+| `PUT /collaborators/{username}` | SC (`administer`) | `GitHubCollaboratorResult` |
+| `DELETE /collaborators/{username}`, `DELETE /invitations/{invitation}` | D (`administer`) | 204 |
+| `GET /readme` | R | `GitHubReadme` |
+| `GET /languages` | R | `GitHubLanguages` |
 
 ## The order of every request
 
@@ -63,6 +91,8 @@ the repository role GitHub requires of the person.
 | Collaborators | `GET /collaborators?affiliation=all` (walk) | metadata: read | write (GitHub's rule) | `readable: false` + sentence; invitations then not asked |
 | Invitations | `GET /invitations` (walk) | administration: read | admin | `invitationsReadable: false` |
 | Set / remove / withdraw | `PUT`/`DELETE /collaborators/{u}`, `DELETE /invitations/{id}` | administration: write | admin (`administer`) | — |
+| README | `GET /readme` (JSON form, base64) | contents: read | read | none (404, or an empty repository's 409) is `found: false`; a 403 is an error |
+| Languages | `GET /languages` | metadata: read | read | an error |
 
 Paths above are relative to `/repos/{owner}/{repo}`. "Walk" follows the Link header up to
 `MaxPages` (30); a page view uses one page and its `hasMore` from the Link header.
@@ -91,6 +121,21 @@ Notes per area:
   pull request's title too). Title is required and at most 256 characters, body at most 65,536,
   labels at most 100 of at most 50 characters; a label filter cannot contain a comma (GitHub's list
   syntax). `labels: []` clears labels; leaving `labels` out leaves them.
+
+- **README.** `GET /readme` answers the README GitHub itself prefers for the default branch
+  (`README.md`, `docs/README.md`, `.github/README.md`, any case and extension). It is asked for in the
+  JSON form, not the raw one, because that also says where the file is (`path`, `htmlUrl`); `content`
+  is the decoded Markdown source and is not rendered or sanitised here, which is the page's job. No
+  README, and an empty repository, answer 200 `{"found": false}`. The content is cut at **512 KiB on
+  a UTF-8 boundary** with `truncated: true`. GitHub sends a file inline only up to 1 MiB, so a
+  larger README arrives with no content (`encoding: "none"`): that one, and any GitHub states as
+  over 4 MiB whatever it came with, answers `found: true, truncated: true` with `path` and `htmlUrl`
+  and **no `content`**, rather than `found: false`, so the page can say a README exists and where to
+  read it. Nothing is fetched a second time in the raw form to fill it in.
+- **Languages.** GitHub's object of name to bytes becomes an array, largest first, then by name; a
+  repository with no detected language is `{"languages": []}`.
+- **Neither is cached** beyond the thirty seconds the repository's access is; each is one request to
+  GitHub per view.
 
 ## Dispatch detection and its limits
 

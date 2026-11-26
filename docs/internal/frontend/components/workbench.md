@@ -82,7 +82,11 @@ keeps its own state for which pane is shown, and holds its frame to the window b
 
 **Accessibility.** The bar is a `nav` named by `label` holding a button for each stop, the shown
 one `aria-current="page"` and its count as a description; `PaneBack` is named "Back to the list"
-unless told otherwise.
+unless told otherwise. A row that opens a page in its place, and `PaneBack` that closes it, each
+hide the control that has the keyboard, so the page moves the keyboard with the switch: onto the
+opened page's heading (`tabIndex={-1}`), and back onto the row it came from. A backup job's runs
+are the reference (`components/backups/job-detail.tsx`, spec `backups-ui.spec.ts`, *on a phone
+the keyboard goes with a run*).
 
 **Example.** The pages on it are listed in
 [`../patterns/keyboard-and-place.md`](../patterns/keyboard-and-place.md): the Git workspace, the

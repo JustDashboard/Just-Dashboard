@@ -65,9 +65,10 @@ func TestReadinessStopsWaitingForACandidateThatKeepsDying(t *testing.T) {
 	}{
 		{
 			// The failure this was found with: drizzle-kit exited 1 every two seconds
-			// and the gate read "could not connect" two minutes later.
+			// and the gate read "could not connect" two minutes later. Docker's
+			// inspect says running and restarting at once while it backs off.
 			name:    "a start command failing before the server listens",
-			state:   dockerx.ContainerLiveness{Status: "restarting", Restarting: true, ExitCode: 1, RestartCount: 6},
+			state:   dockerx.ContainerLiveness{Status: "restarting", Running: true, Restarting: true, ExitCode: 1, RestartCount: 6},
 			stopped: true, reason: "the application kept exiting (code 1, restarted 6 time(s)) instead of answering at 127.0.0.1:",
 		},
 		{
@@ -84,11 +85,11 @@ func TestReadinessStopsWaitingForACandidateThatKeepsDying(t *testing.T) {
 			// its restarts, and its first thirty seconds, before it reads as
 			// a loop.
 			name:  "a few restarts while a database comes up",
-			state: dockerx.ContainerLiveness{Status: "restarting", Restarting: true, ExitCode: 1, RestartCount: 2},
+			state: dockerx.ContainerLiveness{Status: "restarting", Running: true, Restarting: true, ExitCode: 1, RestartCount: 2},
 		},
 		{
 			name:   "many quick restarts inside the first thirty seconds",
-			state:  dockerx.ContainerLiveness{Status: "restarting", Restarting: true, ExitCode: 1, RestartCount: 6},
+			state:  dockerx.ContainerLiveness{Status: "restarting", Running: true, Restarting: true, ExitCode: 1, RestartCount: 6},
 			frozen: true,
 		},
 	} {

@@ -44,7 +44,13 @@ Hub's ring, and a scroller cannot clip it, which an outside ring on a scrolling 
 face takes the control's corner (`--radius-md`), so the tab's corner is that plus the border. The tab's
 padding is `px-2`, so the label sits 12px from the tab's edge, where the underline left it, and a
 strip is as wide as it was.
-Under forced colours the transparent border would be painted, so it comes off there. On a raised
+Under forced colours (Windows High Contrast) the transparent border would be painted in the text's
+colour, so there it is `Canvas`, the page's own: the gap stays a gap. Forced colours also repaint
+every fill as the page and every ink as the text, which took the chosen face away, so there the
+chosen tab (`ViewTabs` and `tabClasses` alike) is the system's selection: Highlight under
+HighlightText, kept from that repaint with `forced-color-adjust: none`. The ring stays an outline
+in the `Canvas` gap, in Highlight, so selection is still a face and focus a line round it; normal
+colours are untouched and keep the face with no outline. On a raised
 sheet (the command palette's scopes) the chosen tab takes `--control-hover`, one step up, as the
 Hub's palette does: on `--popover` the control face sat a shade off the hover face.
 
@@ -101,7 +107,7 @@ const [view, setView] = useViewTab(VIEWS)
 | `mono` | The labels are names a machine wrote: units, keys, files. |
 | `sticky` | Holds the strip at the top of its scroller, on the panel's ground. |
 | `trailing` | Controls at the right end, outside the tab list. |
-| `hideWhenSingle` | Draws nothing with one view: one tab is a title, not a choice. |
+| `hideWhenSingle` | With `onValueChange` only. Draws no strip with one view or none: one tab is a title, not a choice. The panel then has no tab to be labelled by, so it is a plain box, not a tab panel pointing at a trigger that is not there and not a tab stop. What the view holds names itself (an account's view is a region named for it); a second region of the same name round it would be one landmark twice. A `Tabs` inside that panel is tabs again. |
 | `className`, `rootClassName` | The strip's box; the `Tabs` it holds. |
 
 **States.** Chosen: the foreground ink on the `--control` face, a count in the label's ink. At rest:
@@ -244,14 +250,17 @@ name.
 ## What enforces it
 
 - `components/tabs.test.js`: the chosen quiet tab is a control face with no underline, the face sits
-  inside a tab that keeps its height and an inset ring, a segmented control is one track with the
+  inside a tab that keeps its height and an inset ring, every panel is labelled by a tab that is
+  there and a lone view's panel is no tab panel, under forced colours the chosen tab is the
+  system's selection and only there, a segmented control is one track with the
   chosen fill and no outline (24px at `inline`, separate controls with `spacing`), and a chosen chip
   trades its line for the same fill.
 - `hooks/use-view-tab.test.js`: the address parameter, the remembered view, the fallback to the first.
 - `components/phone-panes.test.js`: no page draws a foot bar by hand; the bar is a nav of buttons
   with the shown stop current and its words at the hint size.
 - Browser specs that drive these controls: `phone-panes`, `logs-views`, `database-performance`,
-  `proxy-site-page`, `network-device-page`, `deploy-settings-a`.
+  `proxy-site-page`, `network-device-page`, `deploy-settings-a`. `proxy-site-page` also holds the forced-colours
+  selection and ring apart.
 - Planned (WP-39): a lint ban on `TabsPrimitive.List` and `tabClasses` outside `ui/tabs` and
   `ViewTabs`, and on a raw `type="single"` `ToggleGroup` outside `Segments`.
 

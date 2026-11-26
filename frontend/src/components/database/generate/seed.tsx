@@ -61,6 +61,7 @@ import {
   chooseGenerator,
   choiceGroups,
   newSeed,
+  nextSetAsideNote,
   planLine,
   pruneChoices,
   readSeedPlan,
@@ -72,6 +73,7 @@ import {
   seedKey,
   seedRequest,
   seedTargets,
+  setAsideWarnings,
   tableLabel,
   type SeedChoices,
   type SeedColumn,
@@ -80,6 +82,7 @@ import {
   type SeedRows,
   type SeedTable,
   type SeedTarget,
+  type SetAsideNote,
 } from "@/components/database/generate/seed-model"
 
 const NO_NAMES: string[] = []
@@ -189,7 +192,12 @@ export function SeedPanel({
       const plan = readSeedPlan(
         await post<unknown>(`/databases/${id}/seed/plan`, JSON.parse(asked.key), { signal }),
       )
-      return { plan, asked: requestedChoices(asked.key), after: afterSetAside(asked.key, plan) }
+      return {
+        plan,
+        key: asked.key,
+        asked: requestedChoices(asked.key),
+        after: afterSetAside(asked.key, plan),
+      }
     },
     0,
     [id, asked.key, asked.nonce],
@@ -201,17 +209,17 @@ export function SeedPanel({
   }, [answered, setChoices])
   // A plan that set a choice aside is followed within half a second by one
   // asked without it, which has nothing to say of it: what it said stays
-  // under that plan, until the reader changes something.
-  const [said, setSaid] = useState<{ key: string; warnings: string[] }>()
-  if (answered?.after && said?.key !== answered.after) {
-    setSaid({ key: answered.after, warnings: answered.plan.warnings })
-  }
+  // under that plan, until the reader changes something. Then it is gone,
+  // and a count changed and changed back does not bring it back.
+  const [said, setSaid] = useState<SetAsideNote>()
+  const note = nextSetAsideNote(said, answered, wanted)
+  if (note !== said) setSaid(note)
   // The plan on screen stays while the next one is read.
   const [kept, setKept] = useState<SeedPlan>()
   if (answered && answered.plan !== kept) setKept(answered.plan)
   const plan = answered?.plan ?? (planning.error ? undefined : kept)
   const warnings = plan
-    ? [...new Set([...(said?.key === wanted ? said.warnings : []), ...plan.warnings])]
+    ? [...new Set([...setAsideWarnings(note, wanted), ...plan.warnings])]
     : NO_NAMES
   const reading = planning.loading || (armed && wanted !== "" && wanted !== asked.key)
   // What a write sends is what the preview on screen shows, and nothing newer.

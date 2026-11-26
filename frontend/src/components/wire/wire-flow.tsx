@@ -1,7 +1,16 @@
 "use client"
 
 import Link from "next/link"
-import { createRef, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react"
+import {
+  createRef,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Ref,
+  type RefObject,
+} from "react"
 import { cn } from "@/lib/utils"
 import { WireNode } from "@/components/wire/wire"
 import { WireLaneTitle } from "@/components/wire/wire-lane"
@@ -245,8 +254,18 @@ export function WireFlow({
   const hubCell = useRef<HTMLDivElement>(null)
   const startGap = useRef<HTMLDivElement>(null)
   const endGap = useRef<HTMLDivElement>(null)
-  // Both sides are one width, so one of them is measured.
-  const sideWidth = useWidth(startSide)
+  // Both sides are one width, so one of them is measured. The side is handed
+  // over as it mounts, not read once: a `marks` picture opened on a phone has
+  // no side until the window crosses `lg`, and one that crosses back and on
+  // again is a new side.
+  const [sideWidth, measureSide] = useWidth()
+  const startSideRef = useCallback(
+    (node: HTMLDivElement | null) => {
+      startSide.current = node
+      measureSide(node)
+    },
+    [measureSide],
+  )
   const form = flowForm(sideWidth, { start: left.length, end: right.length }, size)
   const rows = form === "rows"
   const per = {
@@ -402,7 +421,7 @@ export function WireFlow({
             column={start}
             side="start"
             bare={left.length === 0}
-            sideRef={startSide}
+            sideRef={startSideRef}
             rows={rows}
             per={per.start}
             drop={drops.start}
@@ -529,22 +548,25 @@ function useHubRoom(root: RefObject<HTMLDivElement | null>, hub: RefObject<HTMLD
 }
 
 /**
- * An element's width, read before the browser paints and again when it
- * changes. Until it is read a side is taken to hold three nodes to a row,
- * which is what it holds beside the shell on a laptop.
+ * The width of the element handed to the returned ref, read before the
+ * browser paints and again when it changes. Until it is read a side is taken
+ * to hold three nodes to a row, which is what it holds beside the shell on a
+ * laptop. Keyed on the element itself rather than a ref object, whose
+ * identity outlives what it points at: an element that mounts after the first
+ * render, or replaces another, is measured and watched in its turn.
  */
-function useWidth(target: RefObject<HTMLElement | null>) {
+function useWidth(): [number, (node: HTMLElement | null) => void] {
+  const [element, setElement] = useState<HTMLElement | null>(null)
   const [width, setWidth] = useState(CELL.md * 3 + CELL.gap * 2)
   useLayoutEffect(() => {
-    const el = target.current
-    if (!el) return
-    const read = () => setWidth(el.getBoundingClientRect().width)
+    if (!element) return
+    const read = () => setWidth(element.getBoundingClientRect().width)
     read()
     const observer = new ResizeObserver(read)
-    observer.observe(el)
+    observer.observe(element)
     return () => observer.disconnect()
-  }, [target])
-  return width
+  }, [element])
+  return [width, setElement]
 }
 
 type Part = {
@@ -666,7 +688,7 @@ function Column({
   side: "start" | "end"
   /** Nothing to draw: the column says `empty` instead. */
   bare: boolean
-  sideRef: RefObject<HTMLDivElement | null>
+  sideRef: Ref<HTMLDivElement>
   /** The wide picture is rows on level lines, not a column a side. */
   rows: boolean
   /** Nodes to a row, wide. */

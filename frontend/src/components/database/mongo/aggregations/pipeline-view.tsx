@@ -86,6 +86,7 @@ import type { MongoAggregateResult, MongoDoc } from "@/components/database/mongo
 import type { Workbench } from "@/components/database/mongo/workbench"
 import { OBJECT_HEAD } from "@/components/database/workbench/chrome"
 import { saveText } from "@/lib/download"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 const LIMITS = ["100", "500", "1000"] as const
 type Limit = (typeof LIMITS)[number]
@@ -196,7 +197,7 @@ export function PipelineView({
     } finally {
       setRunning(false)
       requestAnimationFrame(() =>
-        resultRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" }),
+        scrollIntoViewRespectingMotion(resultRef.current, { block: "nearest" }),
       )
     }
   }

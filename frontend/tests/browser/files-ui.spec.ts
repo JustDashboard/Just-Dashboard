@@ -644,6 +644,61 @@ test.describe("native Files interactions", () => {
   })
 })
 
+test("Pause animations reaches a page already open: the selection bar arrives still", async ({
+  page,
+}) => {
+  // The page's motion read the pause once, when it mounted, so turning it on
+  // from the account menu left the bar gliding in until a reload.
+  await mockFiles(page)
+  await openFiles(page)
+  const actions = page.locator("[data-file-actions]")
+  // Every frame of a glide inside the bar's corner: a style the motion
+  // library writes on its way (a slide, a fade), or an animation it hands the
+  // browser. Recorded as they start, so a busy machine cannot miss one.
+  await actions.evaluate((corner) => {
+    const seen: string[] = []
+    const animate = Element.prototype.animate
+    Element.prototype.animate = function (this: Element, keyframes, options) {
+      const ms = typeof options === "number" ? options : Number(options?.duration ?? 0)
+      if (corner.contains(this) && ms > 16) seen.push(`animation of ${ms}ms`)
+      return animate.call(this, keyframes, options)
+    }
+    new MutationObserver((records) => {
+      for (const record of records) {
+        const { transform, opacity } = (record.target as HTMLElement).style
+        if ((transform && transform !== "none") || (opacity && opacity !== "1"))
+          seen.push(`style ${transform} ${opacity}`)
+      }
+    }).observe(corner, { subtree: true, attributes: true, attributeFilter: ["style"] })
+    ;(window as unknown as { glides: string[] }).glides = seen
+  })
+  const glides = () => page.evaluate(() => (window as unknown as { glides: string[] }).glides)
+  const bar = page.getByRole("toolbar", { name: "Selection actions" })
+  const select = page.locator(`[data-entry-path='${home}/notes.md']`).getByRole("checkbox")
+
+  // Moving, the bar glides in, and the record sees it.
+  await select.click()
+  await expect(bar).toBeVisible()
+  await expect.poll(glides).not.toEqual([])
+  await page.getByRole("button", { name: "Clear the selection", exact: true }).click()
+  await expect(bar).toHaveCount(0)
+
+  // Paused from the account menu, with the page as it was: no reload.
+  await page.getByRole("button", { name: /account menu/ }).click()
+  const item = page.getByRole("menuitemcheckbox", { name: "Pause animations", exact: true })
+  await item.click()
+  await expect(item).toHaveAttribute("aria-checked", "true")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("menu")).toHaveCount(0)
+  await page.evaluate(() => ((window as unknown as { glides: string[] }).glides.length = 0))
+
+  await select.click()
+  await expect(bar).toBeVisible()
+  // Long enough for the 160ms glide it used to take, and then some.
+  await page.waitForTimeout(400)
+  expect(await glides()).toEqual([])
+})
+
 test("large listings retain find, selection and keyboard menu focus", async ({ page }) => {
   test.setTimeout(90_000)
   await mockFiles(page)

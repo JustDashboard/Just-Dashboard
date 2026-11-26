@@ -61,10 +61,11 @@ export function useResultExport(id: number) {
         const blob = exportBlob(read.parts, response)
         const tail = await blob.slice(Math.max(0, blob.size - MARK_TAIL)).text()
         // A broken connection is a failed export whatever else is known.
-        const end = exportEnd(await settledExport(id, exportId), format, tail)
+        const end = exportEnd(await settledExport(id, exportId, controller.signal), format, tail)
         const ended = read.cut ? { ...end, status: "failed" as const } : end
         const report = exportReport(ended, "the result", limit)
-        if (ended.status !== "failed") saveExport(blob, response, `query.${format}`)
+        if (ended.status !== "failed")
+          saveExport(blob, response, `query.${format}`, controller.signal)
         notify.dismiss(toast)
         if (report.tone === "success") notify.success(report.title)
         else if (report.tone === "danger") {

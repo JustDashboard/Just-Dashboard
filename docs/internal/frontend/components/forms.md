@@ -31,6 +31,11 @@ and a screen reader hears its hint and its error wherever it is.
   control through a context (`useFieldControl`); `Input`, `Textarea`, `SelectTrigger`,
   `InputGroupInput`, `Switch` and `Checkbox` read it, and `ToggleGroup` takes the label's id as its
   name (`useField()?.labelId`), since a group is not a control a `for` can point at.
+- **`Field group`**: a field of several controls, each named by its own words (a foreign key's
+  column pairs, a role's settings as a name and a value, a stream's rules). The field is a
+  `role="group"` named by its label (`aria-labelledby`) and described by its hint and error, and its
+  controls take neither its id nor its description; the error still marks each one invalid. Without
+  it every control took the field's one id and the label's `for` named the first.
 - **`SettingsColumn`**: `mx-auto max-w-3xl`, the pending strip first, then the sections in a
   `FormSections` (a hairline between each), and 80px at the foot for the save bar.
 - **`SettingSection`**: a `FormSection aside`: an h2, under it what the section currently is as data
@@ -80,8 +85,10 @@ clause is the ⓘ's.
   error until the reader types again) or null (nothing added); without it an entry is trimmed and
   one already listed is skipped. `disabled` draws the values without their controls.
 - `OneTimeCodeInput({ id?, value, onChange, size? = "reading", autoFocus?, required? })`: always
-  `inputMode="numeric"`, `autoComplete="one-time-code"`, `maxLength={6}`; anything but a digit is
-  dropped, so "123 456" pasted from a message arrives as the code.
+  `inputMode="numeric"`, `autoComplete="one-time-code"`; anything but a digit is dropped and then
+  the first six are kept (`codeDigits`), so "123 456" pasted from a message arrives as the code. It
+  has no `maxLength`: the browser applies one to the pasted text, before the space goes, and
+  "123 456" became "12345".
 - `RecoveryCodes({ codes, onDone, framed?, busy? })`.
 - `SettingsColumn({ strip?, sectioned? = true, className?, children })`. `sectioned={false}` when
   the children already hold the strip and the sections, because one wrapper has to hold both (a
@@ -169,8 +176,10 @@ A `Field` wires itself to its control: it makes the ids of its label, hint, erro
 hands them, with `aria-invalid` while there is an error, through a context that `Input`,
 `Textarea` and `SelectTrigger` read (`useFieldControl`), so tabbing back to a field reads its hint
 or its error and the red edge follows the error without the caller setting `aria-invalid`. Give
-`htmlFor` only when the control has an id of its own; one control per `Field`. The error line
-carries a warning glyph, so it is not told by colour alone.
+`htmlFor` only when the control has an id of its own; one control per `Field`, or `group` for a
+field of several, which the `design-system/primitives` lint (`field-group`) asks for when two
+controls could take the field's id at once. The error line carries a warning glyph, so it is not
+told by colour alone.
 The databases section's dialogs had assembled their own forms out of `Label`, `Input` and a
 `space-y-1.5` div and arrived at three label sizes, two input heights and no way to write an error
 beside the field that caused it. They are built from these now, and the statement in one is the

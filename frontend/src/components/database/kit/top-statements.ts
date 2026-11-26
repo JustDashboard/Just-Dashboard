@@ -43,8 +43,9 @@ export function useTopStatements(
 
 /** The rows of a list of statements by total time: pure, so the words are held by a unit test. */
 export function topStatementItems(id: number, statements: readonly DbStatement[]): RankItem[] {
-  // A row's key is its place in the address: one digest listed twice is two
-  // statements, and one with no digest still has a page.
+  // A row's key is its address: one digest listed twice is two statements,
+  // told apart by what the engine says each is, and one with no digest still
+  // has a page.
   const keys = statementKeys(statements)
   return statements.map((statement, index) => {
     const line = oneLine(statement.query)

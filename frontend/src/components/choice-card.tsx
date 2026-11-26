@@ -230,6 +230,19 @@ const NEXT_KEYS: Record<string, 1 | -1 | "first" | "last"> = {
 }
 
 /**
+ * Where a key moves the pick in a single-choice grid, or undefined when the
+ * key is not the grid's. Only a bare key is: Alt+← is the browser's Back,
+ * Ctrl/⌘+Home a page's top, Shift+an arrow a selection, and a radio group
+ * that took them pressed a card the reader never meant to choose.
+ */
+export function choiceStep(
+  event: Pick<KeyboardEvent, "key" | "altKey" | "ctrlKey" | "metaKey" | "shiftKey">,
+): 1 | -1 | "first" | "last" | undefined {
+  if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return undefined
+  return NEXT_KEYS[event.key]
+}
+
+/**
  * A run of choices. Layout lives beside the card it lays out.
  *
  * `mode="single"` is for a set where picking one unpicks the rest — a kind, a
@@ -289,7 +302,7 @@ export function ChoiceGrid({
         aria-label={single ? label : undefined}
         onKeyDown={(event) => {
           onKeyDown?.(event)
-          const step = NEXT_KEYS[event.key]
+          const step = choiceStep(event)
           if (!single || step === undefined || event.defaultPrevented) return
           const all = controls()
           const at = all.indexOf(document.activeElement as HTMLElement)

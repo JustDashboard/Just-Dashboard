@@ -73,25 +73,36 @@ func runComposeJobs(ctx context.Context, jobs []composeJob, limit int, emit func
 	slots := make(chan struct{}, max(limit, 1))
 	var mu sync.Mutex
 	failed := -1
+	// record keeps a job's first error; the first failure cancels the rest.
+	// It returns the job whose failure that was.
+	record := func(index int, err error) int {
+		mu.Lock()
+		defer mu.Unlock()
+		if errs[index] == nil {
+			errs[index] = err
+		}
+		if err != nil && failed < 0 && ctx.Err() == nil {
+			failed = index
+			cancel()
+		}
+		return failed
+	}
 	// end records how a job ended; a job stopped by another's failure says
 	// so in the transcript, after its own lines.
 	end := func(index int, err error) {
 		if err == nil {
 			err = output.failure()
 		}
-		mu.Lock()
-		if err != nil && failed < 0 && ctx.Err() == nil {
-			failed = index
-			cancel()
-		}
-		stoppedBy := failed
-		mu.Unlock()
-		errs[index] = err
+		stoppedBy := record(index, err)
 		if err != nil && stoppedBy >= 0 && stoppedBy != index {
 			_ = output.writer(index)(BuildLog{Stream: "status", Text: fmt.Sprintf(
 				"Stopped Compose service %s: service %s failed", jobs[index].service, jobs[stoppedBy].service)})
 		}
-		output.finish(index)
+		// The jobs this one held up are written out now, after they recorded
+		// their own success: a line the transcript refuses there is theirs.
+		if refused, err := output.finish(index); err != nil {
+			record(refused, err)
+		}
 	}
 	var wg sync.WaitGroup
 	for index, job := range jobs {
@@ -181,16 +192,29 @@ func (o *orderedBuildOutput) failure() error {
 
 // finish marks a job done; when it was the head, the jobs after it that
 // are done too are written out, and the next unfinished one takes over.
-func (o *orderedBuildOutput) finish(index int) {
+// When the transcript refuses a line of a job that had already finished,
+// it returns that job and the error: nothing else would tell the job it
+// failed. A job still running reads the refusal from its next write or
+// from failure.
+func (o *orderedBuildOutput) finish(index int) (int, error) {
 	o.mu.Lock()
 	defer o.mu.Unlock()
 	o.jobs[index].done = true
+	refused := -1
 	for o.head < len(o.jobs) && o.jobs[o.head].done {
 		o.head++
 		if o.head < len(o.jobs) {
+			before := o.err
 			o.release(o.head)
+			if before == nil && o.err != nil && o.jobs[o.head].done {
+				refused = o.head
+			}
 		}
 	}
+	if refused < 0 {
+		return -1, nil
+	}
+	return refused, o.err
 }
 
 // close writes whatever is still held, in order, and removes the files.

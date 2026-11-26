@@ -45,6 +45,7 @@ import { cn } from "@/lib/utils"
 import { RoleChoice } from "@/components/account/role-choice"
 import { AvatarRun, UserAvatar, displayNameOf } from "@/components/user-avatar"
 import { useBreakpoint } from "@/lib/breakpoints"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 export function useDashboardUsers(enabled = true) {
   return usePoll(
@@ -326,7 +327,7 @@ export function DashboardUsersView({ users }: { users: ReturnType<typeof useDash
   // it does on the System users page.
   const narrow = (next: UserScope) => {
     setScope(next)
-    list.current?.scrollIntoView({ behavior: "smooth", block: "start" })
+    scrollIntoViewRespectingMotion(list.current)
   }
 
   const update = async (user: DashboardUser, body: Record<string, unknown>) => {

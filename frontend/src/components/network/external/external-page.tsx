@@ -37,6 +37,7 @@ import {
   type CheckDraft,
 } from "@/components/network/external/external-sheets"
 import { checkTarget, newestFirst, reachVerdict } from "@/components/network/external/reading"
+import { scrollIntoViewRespectingMotion } from "@/lib/motion"
 
 type Sheet = "check" | "enroll" | "compare" | null
 
@@ -270,9 +271,9 @@ export function ExternalChecksPage() {
             onSelect={(id) => {
               setSelectedId(id)
               // On a phone the list is as long as the week; the reading is under it.
-              document
-                .getElementById("external-check")
-                ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+              scrollIntoViewRespectingMotion(document.getElementById("external-check"), {
+                block: "nearest",
+              })
             }}
             canAct={admin}
             busy={busy}

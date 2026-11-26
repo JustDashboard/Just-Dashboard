@@ -452,6 +452,11 @@ test("a choice for a column the table has since lost is said once and not sent a
   await expect.poll(() => sent.plans.at(-1)?.tables.map((t) => t.rows)).toEqual([13, 13, 13])
   expect(sent.plans.at(-1)?.tables[0].columns).toBeUndefined()
   await expect(note).toBeHidden()
+  // Back to 12: the request is the one the note was kept for, and the note stays gone.
+  await page.getByLabel("Rows per table").fill("12")
+  await expect.poll(() => sent.plans.at(-1)?.tables.map((t) => t.rows)).toEqual([12, 12, 12])
+  await expect(page.getByRole("button", { name: /^Insert \d+ rows?$/ })).toBeEnabled()
+  await expect(note).toBeHidden()
 })
 
 test("writing shows the statements, sends the plan on screen, and says what went in", async ({

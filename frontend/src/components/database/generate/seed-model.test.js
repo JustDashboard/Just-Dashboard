@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test"
 import {
   afterSetAside,
+  nextSetAsideNote,
+  setAsideWarnings,
   chooseGenerator,
   choiceGroups,
   newSeed,
@@ -202,6 +204,40 @@ describe("the request", () => {
     expect(afterSetAside(alone, read)).toBe(JSON.stringify(request({})))
     // Every choice kept: nothing follows.
     expect(afterSetAside(JSON.stringify(request({ email: "word" })), read)).toBeUndefined()
+  })
+
+  test("what a plan said of a choice it set aside lasts until the reader changes something", () => {
+    const warned = { warnings: ["users has no column gone now"] }
+    const answer = { key: "A", after: "B", plan: warned }
+    // Said of the request it answered, and kept through the page's own ask without the choice.
+    let note = nextSetAsideNote(undefined, answer, "A")
+    expect(setAsideWarnings(note, "A")).toEqual([])
+    expect(nextSetAsideNote(note, answer, "A")).toBe(note)
+    note = nextSetAsideNote(note, { key: "B", plan: { warnings: [] } }, "B")
+    expect(setAsideWarnings(note, "B")).toEqual(warned.warnings)
+
+    // The count is changed from 10 to 20 and back: the request is B again, the note is not.
+    note = nextSetAsideNote(note, { key: "B", plan: { warnings: [] } }, "C")
+    expect(note.gone).toBe(true)
+    expect(setAsideWarnings(note, "C")).toEqual([])
+    expect(nextSetAsideNote(note, { key: "C", plan: { warnings: [] } }, "B")).toBe(note)
+    expect(setAsideWarnings(note, "B")).toEqual([])
+
+    // A choice set aside again is said again.
+    const again = { key: "A", after: "B", plan: warned }
+    note = nextSetAsideNote(note, again, "A")
+    expect(note.gone).toBe(false)
+    note = nextSetAsideNote(note, { key: "B", plan: { warnings: [] } }, "B")
+    expect(setAsideWarnings(note, "B")).toEqual(warned.warnings)
+  })
+
+  test("a note whose request was changed before it was answered is never said", () => {
+    const answer = { key: "A", after: "B", plan: { warnings: ["set aside"] } }
+    const note = nextSetAsideNote(undefined, answer, "D")
+    expect(note.gone).toBe(true)
+    // And it is not made again from the same answer on the next draw.
+    expect(nextSetAsideNote(note, answer, "D")).toBe(note)
+    expect(setAsideWarnings(note, "B")).toEqual([])
   })
 
   test("every table, or the ones ticked", () => {

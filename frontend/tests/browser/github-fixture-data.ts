@@ -3,7 +3,13 @@ import type {
   GitHubAbilities,
   GitHubAbility,
   GitHubConnection,
+  GitHubContributions,
+  GitHubEvent,
+  GitHubInboxItem,
   GitHubInstallation,
+  GitHubLanguages,
+  GitHubProfile,
+  GitHubReadme,
   GitHubRepository,
   GitHubRepositoryDetail,
   GitHubRepositoryList,
@@ -399,6 +405,329 @@ export const localRepos = [
   },
 ]
 
+/**
+ * A year of contributions ending today, as GitHub's calendar answers it:
+ * fifty-three week columns from a Sunday, a busy weekday rhythm with quiet
+ * weekends, a fortnight's holiday in the spring and a streak running into
+ * today. Seeded, so every run draws the same year.
+ */
+export function contributionYear(end = now): GitHubContributions {
+  const today = new Date(end)
+  const day = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())
+  const start = day - (52 * 7 + today.getUTCDay()) * 86_400_000
+  let seed = 7
+  const random = () => {
+    seed = (seed * 16807) % 2147483647
+    return seed / 2147483647
+  }
+  const weeks: GitHubContributions["weeks"] = []
+  let total = 0
+  for (let at = start, index = 0; at <= day; at += 86_400_000, index++) {
+    const date = new Date(at)
+    const weekday = date.getUTCDay()
+    const weekend = weekday === 0 || weekday === 6
+    const holiday = index >= 120 && index < 134
+    const streak = day - at < 9 * 86_400_000
+    let count = 0
+    if (streak) count = 2 + Math.floor(random() * 9)
+    else if (!holiday && random() < (weekend ? 0.18 : 0.78))
+      count = Math.floor(random() ** 2 * (weekend ? 5 : 18)) + 1
+    const level = (count === 0 ? 0 : count < 3 ? 1 : count < 6 ? 2 : count < 10 ? 3 : 4) as
+      0 | 1 | 2 | 3 | 4
+    if (weekday === 0 || weeks.length === 0) weeks.push({ days: [] })
+    weeks.at(-1)!.days.push({ date: date.toISOString().slice(0, 10), count, level, weekday })
+    total += count
+  }
+  return { total, weeks }
+}
+
+export const profile: GitHubProfile = {
+  login: "mira-dev",
+  name: "Mira Okafor",
+  bio: "Backend and platform work. Go, TypeScript, and too many dotfiles.",
+  company: "@northwind",
+  location: "Lisbon",
+  blog: "mira.example.net",
+  htmlUrl: "https://github.com/mira-dev",
+  followers: 184,
+  following: 31,
+  publicRepos: 27,
+  createdAt: days(2400),
+  contributions: contributionYear(),
+}
+
+const hours = (n: number) => iso(now - n * 3_600_000)
+
+function inbox(
+  over: Partial<GitHubInboxItem> & Pick<GitHubInboxItem, "repository" | "number" | "title">,
+): GitHubInboxItem {
+  return {
+    state: "open",
+    draft: false,
+    author: "mira-dev",
+    labels: [],
+    comments: 0,
+    createdAt: hours(30),
+    updatedAt: hours(2),
+    htmlUrl: `https://github.com/${over.repository}/pull/${over.number}`,
+    ...over,
+  }
+}
+
+/** The account's pull requests and issues, by `kind:filter:state`, as GitHub's search answers them. */
+export const inboxItems: Record<string, GitHubInboxItem[]> = {
+  "pull:created:open": [
+    inbox({
+      repository: "northwind/api",
+      number: 412,
+      title: "Retry webhook deliveries with backoff",
+      labels: [
+        { name: "billing", color: "0e8a16" },
+        { name: "ready", color: "1d76db" },
+      ],
+      comments: 6,
+      createdAt: hours(20),
+    }),
+    inbox({
+      repository: "northwind/storefront",
+      number: 88,
+      title: "Move checkout to the new payment sheet",
+      draft: true,
+      comments: 2,
+      createdAt: hours(50),
+    }),
+    inbox({
+      repository: "torvalds/subsurface",
+      number: 3021,
+      title: "Fix a typo in the dive log importer",
+      labels: [{ name: "documentation", color: "0075ca" }],
+      createdAt: hours(140),
+    }),
+  ],
+  "pull:created:closed": [
+    inbox({
+      repository: "northwind/api",
+      number: 401,
+      title: "Split the invoices worker out of the API process",
+      state: "merged",
+      comments: 11,
+      closedAt: hours(70),
+    }),
+    inbox({
+      repository: "mira-dev/dotfiles",
+      number: 14,
+      title: "Try a tmux status line in Lua",
+      state: "closed",
+      closedAt: hours(300),
+    }),
+  ],
+  "pull:review:open": [
+    inbox({
+      repository: "northwind/storefront",
+      number: 91,
+      title: "Lazy-load the product gallery",
+      author: "sam-k",
+      labels: [{ name: "performance", color: "fbca04" }],
+      comments: 3,
+      createdAt: hours(5),
+    }),
+    inbox({
+      repository: "acme-labs/design-system",
+      number: 1207,
+      title: "Tokens: a calmer chosen state for segmented controls",
+      author: "lee-acme",
+      labels: [
+        { name: "tokens", color: "5319e7" },
+        { name: "needs review", color: "d93f0b" },
+      ],
+      comments: 9,
+      createdAt: hours(26),
+    }),
+  ],
+  "issue:assigned:open": [
+    inbox({
+      repository: "northwind/api",
+      number: 398,
+      title: "Invoices for January show the wrong tax line",
+      author: "sam-k",
+      labels: [{ name: "bug", color: "d73a4a" }],
+      comments: 4,
+      htmlUrl: "https://github.com/northwind/api/issues/398",
+      createdAt: hours(80),
+    }),
+    inbox({
+      repository: "northwind/storefront",
+      number: 77,
+      title: "Search results flicker on slow connections",
+      author: "lee-acme",
+      labels: [{ name: "ux", color: "c5def5" }],
+      htmlUrl: "https://github.com/northwind/storefront/issues/77",
+      createdAt: hours(200),
+    }),
+  ],
+  "issue:created:open": [
+    inbox({
+      repository: "acme-labs/design-system",
+      number: 1180,
+      title: "Document the focus ring on dark surfaces",
+      htmlUrl: "https://github.com/acme-labs/design-system/issues/1180",
+      comments: 1,
+    }),
+  ],
+  "issue:assigned:closed": [
+    inbox({
+      repository: "northwind/api",
+      number: 377,
+      title: "Rate limit the export endpoint",
+      state: "closed",
+      stateReason: "completed",
+      closedAt: hours(400),
+      htmlUrl: "https://github.com/northwind/api/issues/377",
+    }),
+    inbox({
+      repository: "northwind/storefront",
+      number: 51,
+      title: "Support Internet Explorer 11",
+      state: "closed",
+      stateReason: "not_planned",
+      closedAt: hours(900),
+      htmlUrl: "https://github.com/northwind/storefront/issues/51",
+    }),
+  ],
+}
+
+export const events: GitHubEvent[] = [
+  {
+    id: "e1",
+    kind: "push",
+    repository: "northwind/api",
+    createdAt: hours(1),
+    ref: "retry-webhooks",
+    commits: 3,
+    htmlUrl: "https://github.com/northwind/api/compare/a...b",
+  },
+  {
+    id: "e2",
+    kind: "review",
+    repository: "northwind/storefront",
+    createdAt: hours(3),
+    action: "approved",
+    number: 90,
+    title: "Cache the category tree",
+    htmlUrl: "https://github.com/northwind/storefront/pull/90",
+  },
+  {
+    id: "e3",
+    kind: "pull",
+    repository: "northwind/api",
+    createdAt: hours(20),
+    action: "opened",
+    number: 412,
+    title: "Retry webhook deliveries with backoff",
+    htmlUrl: "https://github.com/northwind/api/pull/412",
+  },
+  {
+    id: "e4",
+    kind: "comment",
+    repository: "acme-labs/design-system",
+    createdAt: hours(28),
+    number: 1207,
+    title: "Tokens: a calmer chosen state",
+    htmlUrl: "https://github.com/acme-labs/design-system/pull/1207#issuecomment-1",
+  },
+  {
+    id: "e5",
+    kind: "create",
+    repository: "mira-dev/dotfiles",
+    createdAt: hours(30),
+    refType: "branch",
+    ref: "lua-statusline",
+  },
+  { id: "e6", kind: "star", repository: "astro-starters/blog", createdAt: hours(46) },
+  {
+    id: "e7",
+    kind: "pull",
+    repository: "northwind/api",
+    createdAt: hours(70),
+    action: "merged",
+    number: 401,
+    title: "Split the invoices worker out of the API process",
+    htmlUrl: "https://github.com/northwind/api/pull/401",
+  },
+  {
+    id: "e8",
+    kind: "release",
+    repository: "northwind/api",
+    createdAt: hours(72),
+    action: "published",
+    title: "v2.14.0",
+    ref: "v2.14.0",
+    htmlUrl: "https://github.com/northwind/api/releases/tag/v2.14.0",
+  },
+  {
+    id: "e9",
+    kind: "issue",
+    repository: "northwind/api",
+    createdAt: hours(80),
+    action: "closed",
+    number: 377,
+    title: "Rate limit the export endpoint",
+    htmlUrl: "https://github.com/northwind/api/issues/377",
+  },
+  {
+    id: "e10",
+    kind: "delete",
+    repository: "mira-dev/dotfiles",
+    createdAt: hours(96),
+    refType: "branch",
+    ref: "old-zsh",
+  },
+]
+
+/** Every repository's README is this one, with the repository's own name. */
+export function readmeFor(fullName: string): GitHubReadme {
+  const name = fullName.split("/")[1]
+  return {
+    found: true,
+    path: "README.md",
+    htmlUrl: `https://github.com/${fullName}/blob/main/README.md`,
+    truncated: false,
+    content: [
+      `# ${name}`,
+      "",
+      "Orders, invoices and billing for every Northwind shop, behind one gRPC API.",
+      "",
+      "## Getting started",
+      "",
+      "```sh",
+      "make dev        # Postgres and the API on :8080",
+      "make test       # unit and contract tests",
+      "```",
+      "",
+      "## What lives here",
+      "",
+      "- `cmd/api` — the HTTP and gRPC server",
+      "- `internal/invoices` — the invoices worker, retried with backoff",
+      "- `migrations/` — schema changes, applied at start",
+      "",
+      "> Webhook deliveries are retried for 24 hours before they are dropped.",
+      "",
+      "See [CONTRIBUTING.md](CONTRIBUTING.md) before opening a pull request.",
+    ].join("\n"),
+  }
+}
+
+export const languagesOf: Record<string, GitHubLanguages> = {
+  "northwind/api": {
+    languages: [
+      { name: "Go", bytes: 812_000 },
+      { name: "TypeScript", bytes: 96_000 },
+      { name: "Shell", bytes: 21_000 },
+      { name: "Dockerfile", bytes: 4_200 },
+    ],
+  },
+}
+
 export async function json(route: Route, body: unknown, status = 200) {
   await route.fulfill({ status, contentType: "application/json", body: JSON.stringify(body) })
 }
@@ -439,6 +768,27 @@ export async function mockGitHub(page: Page, options: GitHubMockOptions = {}) {
     if (path === "/git/roots") return json(route, { roots: ["/srv", "/home/mira"] })
     if (path === "/github/app" && method === "GET") return json(route, options.setup ?? setup)
     if (path === "/github/connections" && method === "GET") return json(route, conns)
+    const own = path.match(/^\/github\/connections\/(\d+)\/(profile|events|pulls|issues)$/)
+    if (own && method === "GET") {
+      const connection = conns.find((c) => c.id === Number(own[1]))
+      if (!connection) return apiError(route, 404, "github_connection", "not connected")
+      if (own[2] === "profile")
+        return json(route, { ...profile, login: connection.login, name: connection.name })
+      if (own[2] === "events") return json(route, { events })
+      const kind = own[2] === "pulls" ? "pull" : "issue"
+      const filter = url.searchParams.get("filter") ?? "created"
+      const state = url.searchParams.get("state") ?? "open"
+      const items = inboxItems[`${kind}:${filter}:${state}`] ?? []
+      return json(route, { items, total: items.length, hasMore: false, incomplete: false })
+    }
+    const inside = path.match(
+      /^\/github\/connections\/(\d+)\/repos\/([^/]+)\/([^/]+)\/(readme|languages)$/,
+    )
+    if (inside && method === "GET") {
+      const fullName = `${decodeURIComponent(inside[2])}/${decodeURIComponent(inside[3])}`
+      if (inside[4] === "readme") return json(route, readmeFor(fullName))
+      return json(route, languagesOf[fullName.toLowerCase()] ?? { languages: [] })
+    }
     const list = path.match(/^\/github\/connections\/(\d+)\/repositories$/)
     if (list && method === "GET") {
       const connection = conns.find((c) => c.id === Number(list[1]))

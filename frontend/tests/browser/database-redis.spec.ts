@@ -837,11 +837,44 @@ test.describe("keys", () => {
 
     // Database 0 can be reached, and is asked for by its number.
     await page.getByRole("button", { name: "database: db3" }).click()
-    await expect(page.getByRole("menuitem", { name: /^db3/ })).toContainText("connects here")
-    await expect(page.getByRole("menuitem", { name: /^db7/ })).toContainText("41 keys")
-    await page.getByRole("menuitem", { name: /^db0/ }).click()
+    await expect(page.getByRole("option", { name: /^db3/ })).toContainText("connects here")
+    await expect(page.getByRole("option", { name: /^db7/ })).toContainText("41 keys")
+    await page.getByRole("option", { name: /^db0/ }).click()
     await expect(page).toHaveURL(/[?&]db=0(&|$)/)
     await expect.poll(() => redis.asked("/keys/tree").at(-1)?.query.get("db")).toBe("0")
+  })
+
+  test("sixteen databases are found by keyboard: the box has the keys as it opens, the arrows choose from it", async ({
+    page,
+  }) => {
+    const redis = await mockRedis(page, { db: 3 })
+    await page.goto(KEYS)
+    const picker = page.getByRole("button", { name: "database: db3" })
+    await picker.focus()
+    await page.keyboard.press("Enter")
+
+    // Past a dozen the list is searched, and the search is where the keys land.
+    const find = page.getByRole("combobox", { name: "Find a database" })
+    await expect(find).toBeFocused()
+    await page.keyboard.type("1")
+    const options = page.getByRole("listbox").getByRole("option")
+    await expect(options).toHaveText([
+      /^db1(?!\d)/,
+      /^db10/,
+      /^db11/,
+      /^db12/,
+      /^db13/,
+      /^db14/,
+      /^db15/,
+    ])
+    await page.keyboard.press("ArrowDown")
+    await expect(find).toBeFocused()
+    await expect(options.nth(1)).toHaveAttribute("aria-selected", "true")
+    await page.keyboard.press("Enter")
+    await expect(page).toHaveURL(/[?&]db=10(&|$)/)
+    await expect.poll(() => redis.asked("/keys/tree").at(-1)?.query.get("db")).toBe("10")
+    // Closed, the keys are back on the control that opened it.
+    await expect(page.getByRole("button", { name: "database: db10" })).toBeFocused()
   })
 
   test("the tree is the server's namespaces, read a level at a time, and a walk that stopped says how far it got", async ({
@@ -1490,6 +1523,48 @@ test.describe("keys", () => {
     // Refresh is the reader asking for the rows again, and gets them.
     await pane(page).getByRole("button", { name: "Refresh", exact: true }).click()
     await expect(count).toHaveText("200 of 450 fields")
+  })
+
+  test("a pattern spelled through an input method is applied once it is chosen, and its keys are the input method's", async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== "chromium", "composition is driven through Chromium's DevTools")
+    await mockRedis(page)
+    const scans: string[] = []
+    page.on("request", (request) => {
+      const url = new URL(request.url())
+      // The flat list and the tree both scan by the pattern.
+      if (/^\/api\/v1\/databases\/4\/keys(?:\/tree)?$/.test(url.pathname)) {
+        scans.push(url.searchParams.get("pattern") ?? "")
+      }
+    })
+    await page.goto(KEYS)
+    await expect(rail(page).getByRole("button", { name: /^user/ })).toBeVisible()
+    const box = rail(page).getByLabel("Key pattern")
+    await box.click()
+    const before = scans.length
+    const ime = await page.context().newCDPSession(page)
+
+    // Mid-word, with the candidates open: a pause longer than the box's does
+    // not scan for what has not been chosen, and the Enter and Escape that
+    // pick and dismiss a candidate neither apply it nor empty the box.
+    await ime.send("Input.imeSetComposition", { text: "sess", selectionStart: 4, selectionEnd: 4 })
+    await expect(box).toHaveValue("sess")
+    await page.waitForTimeout(900)
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Escape")
+    await expect(box).toHaveValue("sess")
+    expect(scans.slice(before)).not.toContain("sess")
+    await expect(page).not.toHaveURL(/pattern=/)
+
+    // Chosen, the word is the draft and the pause starts from then.
+    await ime.send("Input.insertText", { text: "session:*" })
+    await expect(box).toHaveValue("session:*")
+    await expect(page).toHaveURL(/pattern=session%3A\*/)
+    await expect.poll(() => scans.slice(before)).toContain("session:*")
+    expect(scans.slice(before)).not.toContain("sess")
+    await ime.detach()
   })
 
   test("the tree opens to the key in the address, and a pattern that is one namespace opens it", async ({

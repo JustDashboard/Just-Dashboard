@@ -66,7 +66,8 @@ eyebrow, a tag and a count are not headings. A card's name in a list is not a he
   reads visible text and ignores `aria-hidden`, so caps inside a button become part of its name.
 - **A field has a label.** `Field` gives its control the id, the label, the hint and the error
   (`aria-describedby`, `aria-invalid`). A group of controls is named by `aria-labelledby`, because
-  a `<label for>` cannot name a group.
+  a `<label for>` cannot name a group: a field of several controls is `Field group`, a
+  `role="group"` its label names and its hint describes, each control in it named by its own words.
 - **A link says where it goes.** The way on is "All metrics →", not "More". A link inside a
   sentence is underlined at rest (`TextLink`), never told apart by colour alone (1.4.1).
 - **A thing drawn as itself still has words.** A product's logo carries the product's name; a mark
@@ -112,7 +113,7 @@ One mark, one model. The strips that looked like tabs once had four.
 | A dialog or a sheet | `dialog`; `alertdialog` for a question | focus trapped inside, Escape closes, focus returns to what opened it | `Modal`, `SidePanel`, `ConfirmDialog` |
 | An explanation | a button; `tooltip` on hover or focus, `dialog` when pinned | focus opens it, Enter or Space pins it, Escape closes | `Explain` |
 | A side column's edge | `separator` with a value | arrows nudge, Home resets | `ResizeHandle` |
-| A canvas | the library's own, plus the page's keys | arrows slide it; Enter picks the box or frame the focus ring is on, and the arrows then move it (T10); zoom is buttons too | `CanvasZoom`, `CANVAS_MOVE` |
+| A canvas | the library's own, plus the page's keys | arrows slide it; Enter picks the box or frame the focus ring is on, and the arrows then move it (T10); zoom is buttons too; on the map, the inspector's Move buttons carry the chosen box or the system it reads | `CanvasZoom`, `CANVAS_MOVE`, `MapInspector` |
 | A terminal, an editor | theirs | they own their keys; Escape leaves where the page says so; a terminal has a screen reader mode | `XtermPane`, `CodeEditor` |
 
 - **Single keys can be turned off** (2.1.4). One-character shortcuts (`?`, `n`, a name's first
@@ -125,12 +126,23 @@ One mark, one model. The strips that looked like tabs once had four.
   so a keyboard reader sees what Enter would pick. Selection never borrows the
   ring's colour, and hover, selection and focus are three different marks
   ([`../foundations/states.md`](../foundations/states.md)).
+- **What the eye cannot see is not a Tab stop.** A fact the phone's identity line clips is `inert`
+  until the line has room for it ([`../components/page-header.md`](../components/page-header.md)),
+  and a detail page's own scroller stops a focused field short of the save bar
+  (`data-detail-scroll`).
 - **Focus goes somewhere on purpose.** A dialog returns it to its opener; a removed row hands it to
   its neighbour (`useFocusTrail`); a view strip keeps it on the tab.
 - **A hover reveal is also a focus reveal**, and on touch the controls are simply drawn
   (`RowActions`, `rowReveal`).
-- **Dragging has another way** (2.5.7): a handle answers arrows, a canvas pans with the keys, an
-  order changes from a menu.
+- **What a drag does has two other ways, and they are two criteria.** Keys are the keyboard's
+  way (2.1.1): a handle answers arrows, a canvas slides and moves what is picked with them. They
+  do not meet 2.5.7, which asks for a way with one pointer and no drag: a click or a tap at a
+  time. That is an order changed from a menu, a canvas slid by its zoom buttons, Fit and (on the
+  map) a system picked from the rail, and a box or a system on the server map or the databases
+  map moved by the inspector's four Move buttons, one longer step a press (`MoveBar` in
+  `components/map/inspector.tsx`, spec `server-map.spec.ts`, *a single pointer moves a box and a
+  system*). Still keys or a drag only: a table on a database's Diagram, a shape in a drawing, and
+  a side column's edge beyond its double-click reset.
 
 ## Tooltips and toggletips
 
@@ -167,6 +179,7 @@ stays while the pointer moves onto it (1.4.13), and Escape closes it.
 | Check | Holds |
 | --- | --- |
 | `eslint.config.mjs`, `jsx-a11y` recommended, as errors | a field has a label, what a pointer presses a keyboard reaches, no positive `tabindex` |
+| `design-system/primitives` (`field-group`) | a `Field` of several controls is a `group`, so no two of them share its id |
 | `tests/browser/shell-phone.spec.ts` | the landmarks, the skip link, the current page, label in name in the shell, Pause animations, the phone strip's sizes |
 | `tests/browser/field-a11y.spec.ts` | a field's label, hint and error reach its control |
 | `tests/browser/touch-targets.spec.ts`, `touch-targets-pages.spec.ts` | press boxes, and that none is cut or leaves its scroller |

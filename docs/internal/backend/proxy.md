@@ -394,7 +394,9 @@
     nginx directory that http includes by a glob its name matches (Alpine's `http.d`), never in the site
     directories; where there is none it is marked lines at the top of nginx.conf's http block,
     `server_names_hash_bucket_size 128; # server names: added by Just Dashboard`, replaced in place by
-    the next raise. A directive the operator set anywhere in http is theirs: nothing is written (nginx
+    the next raise. They go straight after the block's opening brace: a comment after the brace stays on
+    its line above them, and anything else (`http { include sites-enabled/*; }`) moves onto a line of its
+    own below them, since after the whole line would be past a block that closes on it. A directive the operator set anywhere in http is theirs: nothing is written (nginx
     refuses a second one), and when its value is too small the test's first diagnostic is the
     dashboard's, placed at that file and line, "server_names_hash_bucket_size is 64, too small for the
     server name … (53 characters); set it to 128", so `FailureHeadline` names it. A raise a passing test

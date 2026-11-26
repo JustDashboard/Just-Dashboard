@@ -5,6 +5,7 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { ChipCount } from "@/components/chips"
 import { StatusDot, type DotTone } from "@/components/status-dot"
+import { LoneView } from "@/components/ui/tabs"
 
 /**
  * One interaction language for every switcher in the product.
@@ -38,12 +39,28 @@ import { StatusDot, type DotTone } from "@/components/status-dot"
 // in a pane) as its press box, so no strip moved, and the inset ring lands in
 // that border, 2px clear of the face. That is the Hub's ring, and a scroller
 // cannot clip it. The face takes the control's corner, so the box's corner is
-// that plus the border. Forced colours paint a transparent border, so it comes
-// off there.
+// that plus the border. Forced colours would paint the transparent border in
+// the text's colour, so there it is the page's own colour (Canvas): the gap
+// stays a gap, and the ring still lands in it.
 const TAB_BASE = cn(
   "inline-flex shrink-0 items-center gap-1.5 px-2 text-body font-medium whitespace-nowrap focus-ring-inset transition-colors",
-  "rounded-[calc(var(--radius-md)+4px)] border-4 border-transparent bg-clip-padding forced-colors:border-0 forced-colors:px-3",
+  "rounded-[calc(var(--radius-md)+4px)] border-4 border-transparent bg-clip-padding forced-colors:border-[Canvas]",
 )
+
+// Forced colours (Windows High Contrast) repaint every fill as the page behind
+// it and every ink as the text's, so the chosen face vanished and the chosen
+// tab read as any other. There it takes the system's own selection, Highlight
+// under HighlightText, kept from that repaint (`forced-color-adjust`, which
+// would otherwise also lay a Canvas plate behind the HighlightText). Kept from
+// the repaint, the ring would be the product's blue, so it is Highlight as
+// every focused control's is there (`--ring`, which `focus-ring-inset` draws
+// in). It stays an outline in the Canvas gap, so selection is a face and focus
+// a line round it: two marks, as in normal colours. Only under forced colours: normal colours keep the face
+// with no outline. Whole class names, twice: Tailwind reads the source.
+const CHOSEN_FORCED =
+  "forced-colors:bg-[Highlight] forced-colors:text-[HighlightText] forced-colors:forced-color-adjust-none forced-colors:[--ring:Highlight]"
+const ACTIVE_FORCED =
+  "data-[state=active]:forced-colors:bg-[Highlight] data-[state=active]:forced-colors:text-[HighlightText] data-[state=active]:forced-colors:forced-color-adjust-none data-[state=active]:forced-colors:[--ring:Highlight]"
 
 /**
  * The quiet-tab look, for a switcher between views of the page you are
@@ -58,7 +75,7 @@ export function tabClasses(selected: boolean | undefined, height: string) {
     height,
     selected
       ? // A count inside the chosen tab takes the label's ink, not the faint one.
-        "bg-control text-foreground [--count-ink:currentColor]"
+        cn("bg-control text-foreground [--count-ink:currentColor]", CHOSEN_FORCED)
       : "text-muted-foreground hover:bg-accent hover:text-foreground",
   )
 }
@@ -68,6 +85,7 @@ export function tabClasses(selected: boolean | undefined, height: string) {
 const TRIGGER = cn(
   TAB_BASE,
   "data-[state=active]:bg-control data-[state=active]:text-foreground data-[state=active]:[--count-ink:currentColor]",
+  ACTIVE_FORCED,
   "data-[state=inactive]:text-muted-foreground data-[state=inactive]:hover:bg-accent data-[state=inactive]:hover:text-foreground",
   "disabled:pointer-events-none disabled:text-faint",
 )
@@ -130,8 +148,6 @@ type StripProps<T extends string> = {
   sticky?: boolean
   /** Controls at the strip's right end, outside the tab list: a search, a verb. */
   trailing?: React.ReactNode
-  /** Draw nothing when there is one view or none: one tab is a title, not a choice. */
-  hideWhenSingle?: boolean
   className?: string
 }
 
@@ -148,7 +164,6 @@ export function ViewTabList<T extends string>({
   mono,
   sticky,
   trailing,
-  hideWhenSingle,
   className,
 }: StripProps<T>) {
   const list = useRef<HTMLDivElement>(null)
@@ -181,8 +196,6 @@ export function ViewTabList<T extends string>({
       setFade(fadeOf(node))
     }
   }, [value, views.length])
-
-  if (hideWhenSingle && views.length < 2) return null
 
   return (
     <div
@@ -241,25 +254,38 @@ export function ViewTabList<T extends string>({
  */
 export function ViewTabs<T extends string>({
   onValueChange,
+  hideWhenSingle,
   children,
   rootClassName,
   ...strip
 }: StripProps<T> & {
-  onValueChange?: (value: T) => void
   /** The panels, when the strip holds the `Tabs`. */
   children?: React.ReactNode
   /** The `Tabs` it holds: its place in the page's layout. */
   rootClassName?: string
-}) {
+} & (
+    | {
+        onValueChange: (value: T) => void
+        /**
+         * Draw no strip when there is one view or none: one tab is a title, not
+         * a choice. The panel is then a plain box rather than a tab panel with
+         * no tab, so it needs the panels in hand, which only the `Tabs` this
+         * holds has.
+         */
+        hideWhenSingle?: boolean
+      }
+    | { onValueChange?: undefined; hideWhenSingle?: never }
+  )) {
   if (!onValueChange) return <ViewTabList {...strip} />
+  const lone = Boolean(hideWhenSingle) && strip.views.length < 2
   return (
     <TabsPrimitive.Root
       value={strip.value}
       onValueChange={(next) => onValueChange(next as T)}
       className={cn("flex min-w-0 flex-col", rootClassName)}
     >
-      <ViewTabList {...strip} />
-      {children}
+      {!lone && <ViewTabList {...strip} />}
+      <LoneView.Provider value={lone}>{children}</LoneView.Provider>
     </TabsPrimitive.Root>
   )
 }
