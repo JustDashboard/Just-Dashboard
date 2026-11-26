@@ -6,6 +6,7 @@ import { tabClasses, ViewTabs } from "./tabs"
 import { Segments } from "./segments"
 import { FilterChip } from "./chips"
 import { ToggleGroup, ToggleGroupItem } from "./ui/toggle-group"
+import { Tabs, TabsContent } from "./ui/tabs"
 
 // Just Hub's tabs (components/tabs-chips-segments.md, "The look, from Just
 // Hub"): the chosen tab is a face, never an underline, and a segmented control
@@ -51,6 +52,69 @@ describe("a quiet tab", () => {
     expect(html).toContain("data-[state=active]:bg-control")
     expect(html).toContain("data-[state=inactive]:hover:bg-accent")
     expect(html).not.toMatch(/border-b-2|border-brand/)
+  })
+})
+
+describe("a strip's tab semantics", () => {
+  const strip = (views, extra) =>
+    renderToStaticMarkup(
+      h(
+        ViewTabs,
+        { label: "Views of api", views, value: views[0].key, onValueChange: () => {}, ...extra },
+        h(TabsContent, { value: views[0].key }, "the view"),
+      ),
+    )
+  const attr = (html, name) =>
+    [...html.matchAll(new RegExp(`${name}="([^"]*)"`, "g"))].map((m) => m[1])
+
+  test("every panel is labelled by a tab that is there", () => {
+    const html = strip(VIEWS)
+    expect(html).toContain('role="tablist"')
+    expect(html).toContain('role="tabpanel"')
+    const labelledBy = attr(html, "aria-labelledby")
+    expect(labelledBy).toHaveLength(1)
+    expect(attr(html, "id")).toContain(labelledBy[0])
+  })
+
+  test("one view draws no strip, and its panel is a plain box labelled by nothing missing", () => {
+    const html = strip([{ key: "grants", label: "Roles" }], { hideWhenSingle: true })
+    expect(html).not.toContain('role="tablist"')
+    expect(html).not.toContain('role="tab"')
+    expect(html).not.toContain('role="tabpanel"')
+    // Not a second landmark round what the view holds, which names itself.
+    expect(html).not.toContain("role=")
+    expect(html).not.toContain("aria-label")
+    expect(html).not.toContain("tabindex")
+    expect(html).toContain("the view")
+  })
+
+  test("one view without hideWhenSingle keeps its tab, which labels the panel", () => {
+    const html = strip([{ key: "grants", label: "Roles" }])
+    expect(html).toContain('role="tab"')
+    expect(attr(html, "id")).toContain(attr(html, "aria-labelledby")[0])
+  })
+
+  test("a strip of its own inside a lone view's panel is tabs again", () => {
+    const html = renderToStaticMarkup(
+      h(
+        ViewTabs,
+        {
+          label: "Views of api",
+          views: [{ key: "grants", label: "Roles" }],
+          value: "grants",
+          onValueChange: () => {},
+          hideWhenSingle: true,
+        },
+        h(
+          TabsContent,
+          { value: "grants" },
+          h(Tabs, { value: "inner" }, h(TabsContent, { value: "inner" }, "inner")),
+        ),
+      ),
+    )
+    // The inner one is a tab panel again; the lone one round it is not.
+    expect(html.match(/role="tabpanel"/g)).toHaveLength(1)
+    expect(html.match(/aria-labelledby="[^"]*"/g)).toHaveLength(1)
   })
 })
 

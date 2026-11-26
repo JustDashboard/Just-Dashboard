@@ -5,6 +5,7 @@ import { Tabs as TabsPrimitive } from "radix-ui"
 import { cn } from "@/lib/utils"
 import { ChipCount } from "@/components/chips"
 import { StatusDot, type DotTone } from "@/components/status-dot"
+import { LoneView } from "@/components/ui/tabs"
 
 /**
  * One interaction language for every switcher in the product.
@@ -130,8 +131,6 @@ type StripProps<T extends string> = {
   sticky?: boolean
   /** Controls at the strip's right end, outside the tab list: a search, a verb. */
   trailing?: React.ReactNode
-  /** Draw nothing when there is one view or none: one tab is a title, not a choice. */
-  hideWhenSingle?: boolean
   className?: string
 }
 
@@ -148,7 +147,6 @@ export function ViewTabList<T extends string>({
   mono,
   sticky,
   trailing,
-  hideWhenSingle,
   className,
 }: StripProps<T>) {
   const list = useRef<HTMLDivElement>(null)
@@ -181,8 +179,6 @@ export function ViewTabList<T extends string>({
       setFade(fadeOf(node))
     }
   }, [value, views.length])
-
-  if (hideWhenSingle && views.length < 2) return null
 
   return (
     <div
@@ -241,25 +237,38 @@ export function ViewTabList<T extends string>({
  */
 export function ViewTabs<T extends string>({
   onValueChange,
+  hideWhenSingle,
   children,
   rootClassName,
   ...strip
 }: StripProps<T> & {
-  onValueChange?: (value: T) => void
   /** The panels, when the strip holds the `Tabs`. */
   children?: React.ReactNode
   /** The `Tabs` it holds: its place in the page's layout. */
   rootClassName?: string
-}) {
+} & (
+    | {
+        onValueChange: (value: T) => void
+        /**
+         * Draw no strip when there is one view or none: one tab is a title, not
+         * a choice. The panel is then a plain box rather than a tab panel with
+         * no tab, so it needs the panels in hand, which only the `Tabs` this
+         * holds has.
+         */
+        hideWhenSingle?: boolean
+      }
+    | { onValueChange?: undefined; hideWhenSingle?: never }
+  )) {
   if (!onValueChange) return <ViewTabList {...strip} />
+  const lone = Boolean(hideWhenSingle) && strip.views.length < 2
   return (
     <TabsPrimitive.Root
       value={strip.value}
       onValueChange={(next) => onValueChange(next as T)}
       className={cn("flex min-w-0 flex-col", rootClassName)}
     >
-      <ViewTabList {...strip} />
-      {children}
+      {!lone && <ViewTabList {...strip} />}
+      <LoneView.Provider value={lone}>{children}</LoneView.Provider>
     </TabsPrimitive.Root>
   )
 }

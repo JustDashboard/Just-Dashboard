@@ -101,7 +101,7 @@ const [view, setView] = useViewTab(VIEWS)
 | `mono` | The labels are names a machine wrote: units, keys, files. |
 | `sticky` | Holds the strip at the top of its scroller, on the panel's ground. |
 | `trailing` | Controls at the right end, outside the tab list. |
-| `hideWhenSingle` | Draws nothing with one view: one tab is a title, not a choice. |
+| `hideWhenSingle` | With `onValueChange` only. Draws no strip with one view or none: one tab is a title, not a choice. The panel then has no tab to be labelled by, so it is a plain box, not a tab panel pointing at a trigger that is not there and not a tab stop. What the view holds names itself (an account's view is a region named for it); a second region of the same name round it would be one landmark twice. A `Tabs` inside that panel is tabs again. |
 | `className`, `rootClassName` | The strip's box; the `Tabs` it holds. |
 
 **States.** Chosen: the foreground ink on the `--control` face, a count in the label's ink. At rest:
@@ -244,7 +244,8 @@ name.
 ## What enforces it
 
 - `components/tabs.test.js`: the chosen quiet tab is a control face with no underline, the face sits
-  inside a tab that keeps its height and an inset ring, a segmented control is one track with the
+  inside a tab that keeps its height and an inset ring, every panel is labelled by a tab that is
+  there and a lone view's panel is no tab panel, a segmented control is one track with the
   chosen fill and no outline (24px at `inline`, separate controls with `spacing`), and a chosen chip
   trades its line for the same fill.
 - `hooks/use-view-tab.test.js`: the address parameter, the remembered view, the fallback to the first.
