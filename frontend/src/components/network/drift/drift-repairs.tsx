@@ -10,9 +10,14 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { DiffCount } from "@/components/diff-count"
 import { DiffView } from "@/components/diff-view"
-import { diffCounts, lineDiff, unifiedBody } from "@/lib/line-diff"
+import { diffCounts, unifiedBody } from "@/lib/line-diff"
 import { plural } from "@/lib/format"
-import type { DriftReport, DriftRow, OwnedRepair } from "@/lib/network/drift"
+import {
+  driftRepairDiff,
+  type DriftReport,
+  type DriftRow,
+  type OwnedRepair,
+} from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 import { DriftMark, ShortDigest } from "@/components/network/drift/marks"
 
@@ -140,7 +145,7 @@ function RepairRow({
   onChange: (checked: boolean) => void
 }) {
   const id = `repair-${item.id}`
-  const changes = item.after ? diffCounts(lineDiff(item.before ?? "", item.after)) : undefined
+  const changes = item.after ? diffCounts(driftRepairDiff(item)) : undefined
   // A route or a rule is saved under a number; it is named by where it goes.
   const named = row && (row.kind === "route" || row.kind === "rule")
   const name = named ? row.label : item.resource
@@ -305,7 +310,7 @@ export function DriftReview({
 }
 
 function ReviewedRepair({ item }: { item: OwnedRepair }) {
-  const lines = item.after ? lineDiff(item.before ?? "", item.after) : []
+  const lines = item.after ? driftRepairDiff(item) : []
   return (
     <section className="min-w-0 space-y-3">
       <header className="flex min-w-0 items-start justify-between gap-3">

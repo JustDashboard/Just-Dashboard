@@ -5,7 +5,7 @@ import Link from "next/link"
 import { useParams, useRouter } from "next/navigation"
 import { Clock, Copy, Stopwatch } from "@/components/icons"
 import { copyText } from "@/lib/clipboard"
-import { replaceJob } from "@/lib/crontab"
+import { replaceJobAt } from "@/lib/crontab"
 import { countdown, deferredToSystemd, timerFor, type ScheduleLane } from "@/lib/schedule"
 import type { CronJob, SystemdTimer } from "@/lib/types"
 import { decodeSegment } from "@/lib/route-params"
@@ -34,6 +34,7 @@ import {
 import { useSchedules } from "@/components/procs/schedule-data"
 import {
   SCHEDULE_TABS,
+  cronJobHref,
   laneHref,
   parseCronJobId,
   type ScheduleTab,
@@ -307,12 +308,12 @@ export function CronJobPage() {
           }}
           onSave={async (edit, baseline) => {
             if (!editing) return
-            await save(
-              replaceJob(baseline.raw, editing, edit),
-              "Cron job updated",
-              undefined,
-              baseline.revision,
-            )
+            const saved = replaceJobAt(baseline.raw, editing, edit)
+            await save(saved.raw, "Cron job updated", undefined, baseline.revision)
+            // The address names the line; a comment added or removed moves the job.
+            if (saved.line !== editing.line) {
+              router.replace(cronJobHref(`${data.user}:${saved.line}`, tab))
+            }
           }}
         />
       )}

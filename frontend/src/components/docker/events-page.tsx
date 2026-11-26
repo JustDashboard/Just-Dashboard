@@ -8,8 +8,10 @@ import {
   comebacks,
   containerActivity,
   dedupeEvents,
+  failureCount,
   foldBursts,
   foldRestarts,
+  isFailure,
   outcomeOf,
   settleAskedExits,
   spanWords,
@@ -65,11 +67,6 @@ const RECENTLY_STARTED_MS = HOUR
 
 function isExternal(event: DockerEvent) {
   return event.source === "docker" && !event.trigger
-}
-
-function isFailure(event: DockerEvent) {
-  const outcome = outcomeOf(event)
-  return outcome === "failed" || outcome === "unhealthy"
 }
 
 /**
@@ -172,8 +169,10 @@ export function EventsPage() {
   const tally = useMemo(() => {
     const failed = activity.filter((row) => row.failures > 0)
     return {
-      failures: activity.reduce((sum, row) => sum + row.failures, 0),
+      // The reading's count is what its filter shows, unhealthy checks with it.
+      failures: failureCount(activity),
       failed,
+      flagged: activity.filter((row) => row.failures > 0 || row.unhealthy > 0),
       restarts: back.size,
       looping: activity.filter((row) => row.looping),
       changes: inWindow.filter((e) => outcomeOf(e) === "changed"),
@@ -368,10 +367,16 @@ export function EventsPage() {
               }}
               hints={{
                 failures:
-                  tally.failed.length > 0
-                    ? tally.failed
+                  tally.flagged.length > 0
+                    ? tally.flagged
                         .slice(0, 3)
-                        .map((row) => (row.oom ? `${row.name} out of memory` : row.name))
+                        .map((row) =>
+                          row.oom
+                            ? `${row.name} out of memory`
+                            : row.failures > 0
+                              ? row.name
+                              : `${row.name} unhealthy`,
+                        )
                         .join(" · ")
                     : "every exit was clean",
                 restarts: restartHint(tally.looping, activity),

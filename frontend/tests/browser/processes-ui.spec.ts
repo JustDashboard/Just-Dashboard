@@ -2400,6 +2400,84 @@ for (const surface of ["pm2", "services"] as const) {
   })
 }
 
+// A cron line's page is addressed by its line, and a note is a comment line
+// above the job: adding one moves the job down a line, and removing one moves
+// it up. The page follows the job it saved rather than staying on the number.
+test("a cron job's page follows its job when an edit adds or removes its note", async ({
+  page,
+}) => {
+  await mockHost(page)
+  let raw = "0 3 * * * /usr/local/bin/backup\n# weekly prune\n0 4 * * 0 /usr/local/bin/prune\n"
+  const parse = (text: string) => {
+    const lines = text.replace(/\n$/, "").split("\n")
+    return lines.flatMap((line, index) => {
+      if (line.startsWith("#")) return []
+      const fields = line.split(" ")
+      const previous = lines[index - 1]
+      return [
+        {
+          line: index + 1,
+          schedule: fields.slice(0, 5).join(" "),
+          command: fields.slice(5).join(" "),
+          comment: previous?.startsWith("# ") ? previous.slice(2) : undefined,
+          raw: line,
+          disabled: false,
+        },
+      ]
+    })
+  }
+  await page.route("**/api/v1/cron/user/root", (route) => {
+    if (route.request().method() === "PUT") {
+      raw = route.request().postDataJSON().content
+      return json(route, { exitCode: 0 })
+    }
+    return json(route, {
+      ...guardedCrontab,
+      raw,
+      revision: createHash("sha256").update(raw).digest("hex"),
+      jobs: parse(raw),
+      comments: [],
+      env: [],
+    })
+  })
+  const line = page.locator("[data-slot='host-identity']")
+  const form = page.getByRole("dialog", { name: "Edit cron job" })
+  // Edit is in the line's menu at this width, beside Disable.
+  const edit = async () => {
+    await line.getByRole("button", { name: /^More actions for / }).click()
+    await page.getByRole("menuitem", { name: "Edit", exact: true }).click()
+    await expect(form).toBeVisible()
+  }
+
+  // Adding a note to the job on line 1 puts the note there and the job on 2.
+  await page.goto("/processes/scheduled/cron/root:1")
+  await expect(line).toContainText("backup")
+  await expect(line).not.toContainText("nightly backup")
+  await edit()
+  await form.getByLabel("Note", { exact: true }).fill("nightly backup")
+  await form.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(form).toBeHidden()
+  await expect(page).toHaveURL(/\/processes\/scheduled\/cron\/root(%3A|:)2$/)
+  await expect(line).toContainText("nightly backup")
+  await expect(page.getByText("No cron line by that name on this host")).toHaveCount(0)
+
+  // Removing the prune job's note (now lines 3 and 4) moves the job up to 3,
+  // which is where its page goes, rather than on to whatever line 4 holds.
+  await page.goto("/processes/scheduled/cron/root:4")
+  await expect(line).toContainText("weekly prune")
+  await edit()
+  await form.getByLabel("Note", { exact: true }).fill("")
+  await form.getByRole("button", { name: "Save", exact: true }).click()
+  await expect(form).toBeHidden()
+  await expect(page).toHaveURL(/\/processes\/scheduled\/cron\/root(%3A|:)3$/)
+  await expect(line).toContainText("prune")
+  await expect(line).not.toContainText("weekly prune")
+  await expect(page.getByText("No cron line by that name on this host")).toHaveCount(0)
+  expect(raw).toBe(
+    "# nightly backup\n0 3 * * * /usr/local/bin/backup\n0 4 * * 0 /usr/local/bin/prune\n",
+  )
+})
+
 test("cron edits preserve a nonzero hourly minute and keep a conflicted draft", async ({
   page,
 }) => {

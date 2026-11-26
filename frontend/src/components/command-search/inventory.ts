@@ -21,7 +21,9 @@ import {
 import { projectProduct } from "@/components/deploy/vocabulary"
 import { plural, relativeTime } from "@/lib/format"
 import { addressIdentity, type SearchItem, type SearchKind } from "./model"
-import { pm2AppHref } from "@/components/procs/pm2-facts"
+import { pm2AppHref, pm2AppState, pm2Lead, pm2ModeWords } from "@/components/procs/pm2-facts"
+import { pm2Apps } from "@/components/procs/pm2-shared"
+import type { DotTone } from "@/components/tone"
 
 export type InventorySource = {
   kind: SearchKind
@@ -44,6 +46,8 @@ export type InventoryItem = SearchItem & {
   projectId?: number
   /** A running state in Docker's, systemd's or PM2's own word, for `Status`. */
   state?: string
+  /** The state's tone, where `state` is a phrase `toneFor` does not read ("2 of 3 online"). */
+  tone?: DotTone
   /**
    * What the preview lists under the name, from the same explicitly chosen
    * fields as the rest of the row — never a payload's secrets, environment,
@@ -311,29 +315,39 @@ export const INVENTORY_SOURCES: InventorySource[] = [
     label: "PM2 apps",
     read: async (signal) => {
       const inventory = await get<PM2Inventory>("/pm2/", undefined, signal)
-      const processes = inventory.processes ?? []
-      return processes.map((app) => ({
-        ...resource(
-          "app",
-          `${app.daemonId}:${app.id}`,
-          app.name,
-          // The application's own page, with its account only where another
-          // account runs one of the same name.
-          pm2AppHref(app, {
-            account: processes.some((p) => p.name === app.name && p.daemonId !== app.daemonId),
-          }),
-          `${app.user} · ${app.namespace}`,
-          [app.daemonId, String(app.id), app.status],
-        ),
-        product: pm2Product(app.interpreter) ?? "pm2",
-        state: app.status,
-        facts: facts(
-          { label: "Runs as", value: app.user },
-          { label: "Namespace", value: app.namespace },
-          { label: "Mode", value: app.execMode },
-          { label: "Restarts", value: app.restarts ? String(app.restarts) : "" },
-        ),
-      }))
+      // One result per application, as its page is one: a cluster's workers
+      // all open the same address, so a result per worker was three entries
+      // for one place, each claiming its own worker's state and restarts.
+      const apps = pm2Apps(inventory.processes ?? [])
+      return apps.map((app) => {
+        const lead = pm2Lead(app)
+        const state = pm2AppState(app)
+        const restarts = app.instances.reduce((n, p) => n + p.restarts, 0)
+        return {
+          ...resource(
+            "app",
+            app.key,
+            app.name,
+            // The application's own page, with its account only where another
+            // account runs one of the same name.
+            pm2AppHref(app, {
+              account: apps.some((o) => o.name === app.name && o.daemonId !== app.daemonId),
+            }),
+            `${lead.user} · ${lead.namespace}`,
+            [app.daemonId, ...app.instances.map((p) => String(p.id)), state.status],
+          ),
+          product: pm2Product(app.interpreter) ?? "pm2",
+          state: state.word,
+          // Some of a cluster's workers down is the rail's warning, not the dead ones' red.
+          tone: state.partial ? ("warning" as const) : undefined,
+          facts: facts(
+            { label: "Runs as", value: lead.user },
+            { label: "Namespace", value: lead.namespace },
+            { label: "Mode", value: pm2ModeWords(app) },
+            { label: "Restarts", value: restarts ? String(restarts) : "" },
+          ),
+        }
+      })
     },
   },
   {
