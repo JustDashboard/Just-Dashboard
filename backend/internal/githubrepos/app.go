@@ -407,12 +407,22 @@ func (s *Service) ForgetApp(ctx context.Context) error {
 	revoked := map[int64]bool{}
 	for _, c := range connections {
 		// One grant per GitHub account: revoking it once ends every token
-		// issued to that account through this App.
+		// issued to that account through this App. It is revoked once GitHub
+		// accepts a token for it, not once a token was tried: an older
+		// connection's can be dead while another connection to the same
+		// account holds one that works.
 		if revoked[c.GitHubID] {
 			continue
 		}
-		revoked[c.GitHubID] = true
-		s.revokeGrant(ctx, app, c.tokens.Access)
+		access := c.tokens.Access
+		if c.Status == StatusActive {
+			// As in Disconnect: an access token past its expiry is refused
+			// by the revocation endpoint too, so it is refreshed first.
+			if fresh, err := s.token(ctx, c.OwnerUserID, c.ID); err == nil {
+				access = fresh
+			}
+		}
+		revoked[c.GitHubID] = s.revokeGrant(ctx, app, access)
 	}
 	if err := s.store.DeleteApp(ctx); err != nil {
 		return err

@@ -241,6 +241,24 @@ func (f *Fake) RevokeAll() {
 	f.refresh = map[string]token{}
 }
 
+// Authorized reports whether a token GitHub issued to the user still works,
+// which stops once the user's grant is revoked.
+func (f *Fake) Authorized(userID int64) bool {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	for _, t := range f.access {
+		if t.userID == userID {
+			return true
+		}
+	}
+	for _, t := range f.refresh {
+		if t.userID == userID {
+			return true
+		}
+	}
+	return false
+}
+
 func randomHex(n int) string {
 	b := make([]byte, n)
 	_, _ = rand.Read(b)

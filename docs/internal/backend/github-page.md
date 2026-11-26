@@ -74,8 +74,10 @@ how one App serves a dashboard reached at several addresses (a LAN address and a
 the admin adds the address on GitHub, then records it here from that address. The dashboard keeps its
 own copy only to refuse a sign-in GitHub would refuse with a page the person cannot get back from.
 
-`DELETE /github/app` (`system.admin`, `s.destructive`) revokes every connection's grant best effort,
-deletes every connection and forgets the App. The App stays on GitHub until its owner deletes it.
+`DELETE /github/app` (`system.admin`, `s.destructive`) revokes every GitHub account's grant best
+effort, deletes every connection and forgets the App. A grant is one per account, so it is revoked
+through the account's connections in turn, each token refreshed first as a disconnect does, until GitHub
+accepts one: an older connection's token can be dead while a newer one works. The App stays on GitHub until its owner deletes it.
 
 Settings links: a user-owned App's settings are at `https://github.com/settings/apps/<slug>`, an
 organisation's at `https://github.com/organizations/<org>/settings/apps/<slug>`; it is installed from
