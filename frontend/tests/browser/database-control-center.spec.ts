@@ -1130,6 +1130,43 @@ test.describe("found on this server", () => {
       .toBeGreaterThan(before)
   })
 
+  test("a Docker that answers its ping but fails the listing keeps the reason and a retry until the listing reads", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    const failed = dockerlessInventory()
+    let listing = false
+    server.answer("GET /docker/ping", () => ({ body: { available: true } }))
+    server.answer("GET /databases/inventory", () => ({
+      body: listing ? server.inventory : failed,
+    }))
+    await page.goto("/databases")
+
+    const silence = page.locator("[data-slot=found-silence]")
+    await expect(silence).toContainText("Not looked at: containers and compose services")
+    // The ping answering is not the listing reading: the collector's own
+    // failure stays said, with what Docker answered folded under it.
+    await expect(silence).toContainText("The containers and compose services could not be read")
+    await expect(silence).toContainText("Docker answers, but listing them failed.")
+    await silence.getByText("What the server said").click()
+    await expect(silence.locator("pre")).toHaveText(
+      "Docker did not answer: Cannot connect to the Docker daemon",
+    )
+
+    // A retry that fails again keeps it; one that reads takes it away.
+    const asked = () => server.asked.filter((call) => call === "GET /databases/inventory").length
+    const before = asked()
+    await silence.getByRole("button", { name: "Try again" }).click()
+    await expect.poll(asked).toBeGreaterThan(before)
+    await expect(silence).toContainText("The containers and compose services could not be read")
+    await expect(silence.getByRole("button", { name: "Try again" })).toBeEnabled()
+
+    listing = true
+    await silence.getByRole("button", { name: "Try again" }).click()
+    await expect(silence).toHaveCount(0)
+    await expect(page.getByRole("button", { name: "Connect orders-db" })).toBeVisible()
+  })
+
   test("with nothing connected and Docker silent, the page says neither that all is connected", async ({
     page,
   }) => {
