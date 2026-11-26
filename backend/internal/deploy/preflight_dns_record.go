@@ -89,6 +89,6 @@ func dnsRecordFinding(planned PlannedDomain, record *DNSRecordObservation, field
 	item := finding("dns_record_missing", PreflightWarning, title, measured, record.Detail,
 		"Create the record where the zone is kept, or save that provider's API token under Certificates so it can be created from here; then retry preflight.",
 		"proxy", field)
-	item.DeepLink = "/proxy/certificates"
+	item.DeepLink = "/proxy/certificates?tab=dns"
 	return item, true
 }

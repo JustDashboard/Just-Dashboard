@@ -23,7 +23,7 @@ import * as tunnel from "./fixtures/proxy/tunnel"
 
 export { json, user } from "./fixtures/proxy/shared"
 export { now, inThirtyDays, yesterday } from "./fixtures/proxy/shared"
-export { availability } from "./fixtures/proxy/engine"
+export { availability, ingressOnly } from "./fixtures/proxy/engine"
 export { vhosts } from "./fixtures/proxy/sites"
 export { snippet } from "./fixtures/proxy/streams"
 export { ports } from "./fixtures/proxy/ports"

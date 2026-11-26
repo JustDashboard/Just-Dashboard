@@ -375,7 +375,9 @@ only renderer/executor/validation authority for their feature.
   the names, method, DNS provider and lineage, never a credential); a reuse or a refusal before
   ordering changes nothing and is not. Preflight asks the same question for an uncovered wildcard on
   either proxy: `certificate_automatic` naming the provider, or `certificate_wildcard_unavailable`,
-  blocked with the refusal and a deep link to `/proxy/certificates`; a covered one is
+  blocked with the refusal and a deep link to `/proxy/certificates?tab=dns`, where a provider's
+  credentials are saved (the DNS-challenge `certificate_automatic` and `dns_record_missing` link there
+  too, and `domain_link_missing` to `/proxy/sites?q=<hostname>`); a covered one is
   `certificate_available`.
   **The work starts while the build runs** (`certificate_prewarm.go`). The domains are in the stored
   plan before `build_artifact`, so that step starts the same `EnsureDeploymentCertificate` in the

@@ -1,6 +1,7 @@
 "use client"
 
 import { useId, useState } from "react"
+import Link from "next/link"
 import { ArrowLeftRight, Copy, Globe, MagnifyingGlass } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -11,6 +12,8 @@ import { IconAction } from "@/components/icon-action"
 import type { Socket } from "@/components/proxy/ports"
 import { formatEndpoint } from "@/components/proxy/ports-list"
 import { unreadSources } from "@/components/proxy/ports-reachability"
+import { siteHref } from "@/components/proxy/site-tabs"
+import { streamHref } from "@/components/proxy/stream-facts"
 import type { Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -35,6 +38,38 @@ export function proxyWords(socket: Socket): string | null {
   return null
 }
 
+/**
+ * `proxyWords` with what it names as a link: the first site's page, or the
+ * stream's. "Routed by shop.example.test" named a site and went nowhere, so
+ * finding it meant reading the Sites list for the name.
+ */
+export function ProxyWords({ socket }: { socket: Socket }) {
+  const link = "rounded-sm text-foreground focus-ring hover:underline"
+  if (socket.stream) {
+    return (
+      <>
+        Stream{" "}
+        <Link href={streamHref(socket.stream)} className={link}>
+          {socket.stream}
+        </Link>{" "}
+        listens here
+      </>
+    )
+  }
+  const [first, ...rest] = socket.routes ?? []
+  if (!first) return proxyWords(socket)
+  return (
+    <>
+      Routed by{" "}
+      <Link href={siteHref(first.site)} className={link}>
+        {first.serverName || first.site}
+      </Link>
+      {first.tls && " (TLS)"}
+      {rest.length > 0 && ` and ${plural(rest.length, "more site")}`}
+    </>
+  )
+}
+
 export function ProxyLine({ socket }: { socket: Socket }) {
   const words = proxyWords(socket)
   if (!words) return null
@@ -51,8 +86,13 @@ export function ProxyLine({ socket }: { socket: Socket }) {
  * app port nothing routes to yet, and a stream for any port. Only loopback,
  * because a port already on the network needs no proxy to be reached, and
  * never the dashboard's own or the proxy's.
+ *
+ * Both forms are nginx's. On a server without it (deployments behind the
+ * Caddy ingress) the new-site and new-stream addresses open no form, so a
+ * domain is offered where one is added there, on a project, and a stream is
+ * not offered at all.
  */
-export function proxyVerbs(socket: Socket, push: (href: string) => void): Verb[] {
+export function proxyVerbs(socket: Socket, push: (href: string) => void, nginx = true): Verb[] {
   if (socket.scope !== "loopback" || socket.self || socket.stream || socket.servedSites) return []
   if (socket.process === "nginx" || socket.process === "caddy") return []
   // The IPv4 twin first: 127.0.0.1 is what a proxy config is usually written with.
@@ -66,14 +106,25 @@ export function proxyVerbs(socket: Socket, push: (href: string) => void): Verb[]
   const app = socket.protocol === "tcp" && socket.port >= 1024 && !socket.danger
   if (app && (socket.routes ?? []).length === 0) {
     const query = new URLSearchParams({ new: "1", upstream: `http://${endpoint}` })
-    verbs.push({
-      key: "publish",
-      label: "Publish through proxy…",
-      icon: Globe,
-      group: "Proxy",
-      run: () => push(`/proxy/sites?${query}`),
-    })
+    verbs.push(
+      nginx
+        ? {
+            key: "publish",
+            label: "Publish through proxy…",
+            icon: Globe,
+            group: "Proxy",
+            run: () => push(`/proxy/sites?${query}`),
+          }
+        : {
+            key: "domain",
+            label: "Add a domain to a project",
+            icon: Globe,
+            group: "Proxy",
+            run: () => push("/deploy"),
+          },
+    )
   }
+  if (!nginx) return verbs
   const query = new URLSearchParams({
     new: "1",
     listen: "",

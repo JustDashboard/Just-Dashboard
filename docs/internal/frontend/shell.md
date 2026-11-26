@@ -461,6 +461,19 @@ server is linked, or while you are on it, and the palette lists it once a word i
 preview in the palette lists its neighbours as the rail does, so an unlinked server's Settings pages do not name
 Hub beside Connect, except in Hub's own preview.
 
+Proxy & TLS's Streams and Configuration are `needs: "nginx"` entries: the pages read nginx's stream
+module and nginx's directory, so on a server whose sites the Docker Caddy ingress serves they open on an
+absence screen. `shownFor` (its sixth argument, `nginx`) leaves them out of the rail once the proxy's
+status says `nginx: false`, and draws the row while you are on the page, so the address still opens it and
+the rail says where you are. A status not read yet hides nothing. The answer is one keyed read,
+`useProxyStatusRead` in `proxy/proxy-context.tsx` (`usePoll` key `/proxy/status`), shared by the section's
+layout (every minute), the palette (once, administrators, for *Reload nginx*) and the rail, which asks
+only while the panel on show holds such a page, so no other page reads the status for it. The rail keeps
+the last answer for the tab (`shell.proxy.nginx`) so a reload inside the section draws the list it settles
+on. The palette lists both pages once a word is typed, as it does Hub, and leaves them out of a
+neighbour's preview. Nothing moved to another section. `nav.test.js` holds the rule and
+`navigation.spec.ts` the rail on both kinds of server.
+
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
 and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on

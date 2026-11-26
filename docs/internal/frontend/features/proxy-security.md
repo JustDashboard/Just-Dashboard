@@ -37,7 +37,25 @@ fires and leads there, and its menu has Alerts. Ports (`/proxy/ports`) opens on 
 networks reach which listening programs and the list of sockets; each listening port has its own page
 (`/proxy/ports/[port]`, keyed `tcp-443` or `udp-53-127.0.0.53` where two rows share a port) with its
 reach, owner, clients and history, and the list as a rail; the old `?socket=` sheet address opens
-it. Site/stream configuration, certificate issuance/renewal,
+it. A port's "Routed by" names the site as a link to its page, and the stream that listens on it
+likewise (`ProxyWords` in `ports-proxy.tsx`); *Publish through proxy…* and *Forward as stream…* are
+nginx's forms, so without nginx a loopback app is offered *Add a domain to a project* (`/deploy`) and no
+stream, and Traffic's empty hour offers the same in place of *New site*.
+
+On a server whose sites the Docker Caddy ingress serves (`ingressContainer` set, no nginx), the pages that
+read nginx say so in one sentence and offer no install, since Caddy holds ports 80 and 443: Streams reads
+"Streams need nginx" with a link to Sites, and Configuration, which asks `ingressContainer` before `caddy`
+(the backend sets `caddy` for a running ingress, which has no Caddyfile on the server), reads "Deployments
+write the Caddy ingress's routes" with Sites and Deployments. The rail leaves both pages out there
+([`shell.md`](../shell.md)). Alerts draws a rule kind that judges nothing on the server as "not on this
+server" (`absent` on `GET /proxy/alerts`): its area in the picture is not offered, the add cards and the
+form's choice are disabled with those words, its rule's row says it in place of *Watching*, and it is not
+counted in "N rules on" or in the all-clear (`presentKinds`, `judging` in `alerts/kinds.ts`).
+
+A finding's link on a deploy check and in the new-project review is named for where it goes
+(`findingLinkLabel` in `lib/finding-destinations.ts`: *Open site*, *Open sites*, *Open certificate*,
+*Open certificates*, *Open port*, *Open stream*, *Open domains*), and reads "Open owning page" only for an
+address that table does not name. Site/stream configuration, certificate issuance/renewal,
 requested TLS scans, nginx tests/lint and traffic diagnostics keep their own controls and
 authorization. The overview has no automatic attention list or domain suggestions. Certificate
 hygiene and finding snoozes are removed; nginx Settings exposes current values and edit constraints

@@ -54,7 +54,7 @@ func TestDiagnoseIssuanceReadsEachDomainsStageAndOwner(t *testing.T) {
 	}{
 		{"app.example.com", StageConnect, "A firewall in front of port 80: this host's or the provider's", "/network/firewall", ptr(true)},
 		{"www.example.com", StageDNS, "The DNS provider or registrar", "/network/tools?tool=dns&target=www.example.com", nil},
-		{"shop.example.com", StageChallenge, "The web server answering the name on port 80", "/proxy/sites", ptr(true)},
+		{"shop.example.com", StageChallenge, "The web server answering the name on port 80", "/proxy/sites?q=shop.example.com", ptr(true)},
 		{"old.example.com", StageConnect, "Whoever holds 198.51.100.7: the name's record points there, or a provider maps it to this host", "/network/tools?tool=dns&target=old.example.com", ptr(false)},
 		{"blocked.example.com", StageCAA, "The domain's DNS zone (its CAA records)", "/proxy/tls?domain=blocked.example.com", nil},
 	}
