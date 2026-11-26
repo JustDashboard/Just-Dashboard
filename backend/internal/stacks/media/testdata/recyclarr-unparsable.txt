@@ -1,0 +1,3 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[ERR] Config parsing failed in badyaml.yml: YAML error at line 3: Property 'nonsense' not found on type 'Recyclarr.Config.Parsing.RadarrConfigYaml'.: YAML error at line 3: Property 'nonsense' not found on type 'Recyclarr.Config.Parsing.RadarrConfigYaml'.

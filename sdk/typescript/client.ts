@@ -173,6 +173,10 @@ import type {
   SitePage,
   SitePageWrite,
   SleepStatus,
+  StackCatalogueEntry,
+  StackConfigureAnswer,
+  StackCredentialReveal,
+  StackState,
   StagingCopy,
   StagingCreateRequest,
   StagingRemoveRequest,
@@ -4906,6 +4910,97 @@ export function sharedVariables(
     {
       method: "GET",
       path: `/deploy/shared-variables`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackCatalogue is GET /deploy/stacks: list the smart stacks: each preset with the template it
+ * deploys, its memory and disk estimate and what it cannot do, and the services.
+ *
+ * A deploy key: allowed.
+ */
+export function stackCatalogue(
+  client: Client,
+  options?: RequestOptions,
+): Promise<StackCatalogueEntry[] | null> {
+  return client.request<StackCatalogueEntry[] | null>(
+    {
+      method: "GET",
+      path: `/deploy/stacks`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackConfigure is POST /deploy/{id}/stack/configure: run the stack's configuration again now;
+ * every step converges, so nothing already set up is done twice; audited.
+ *
+ * 409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs,
+ * 409 stack_not_preset when the live release is not one of the stack's presets.
+ *
+ * A deploy key: allowed.
+ */
+export function stackConfigure(
+  client: Client,
+  id: number,
+  options?: RequestOptions,
+): Promise<StackConfigureAnswer> {
+  return client.request<StackConfigureAnswer>(
+    {
+      method: "POST",
+      path: `/deploy/${pathParam(id)}/stack/configure`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal an account the
+ * stack created; audited without its value.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function stackCredentialReveal(
+  client: Client,
+  id: number,
+  name: string,
+  options?: RequestOptions,
+): Promise<StackCredentialReveal> {
+  return client.request<StackCredentialReveal>(
+    {
+      method: "GET",
+      path: `/deploy/${pathParam(id)}/stack/credentials/${pathParam(name)}/reveal`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackState is GET /deploy/{id}/stack: read a stack deployment's state: whether it is installed,
+ * healthy, connected and able to play and to acquire, each service's container and private
+ * address, each configuration step, the actions only a person can take, and the accounts it
+ * created.
+ *
+ * 404 stack_not_found when the deployment is not a stack.
+ *
+ * A deploy key: allowed.
+ */
+export function stackState(
+  client: Client,
+  id: number,
+  options?: RequestOptions,
+): Promise<StackState> {
+  return client.request<StackState>(
+    {
+      method: "GET",
+      path: `/deploy/${pathParam(id)}/stack`,
       accept: "json",
     },
     options,

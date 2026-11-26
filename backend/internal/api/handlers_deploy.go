@@ -41,6 +41,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/app-domain", s.handle(s.handleAppDomainNames))
 		// Static, and registered before /{id} for the reason /hostname is.
 		s.mountTemplateReads(r)
+		r.Method(http.MethodGet, "/stacks", s.handle(s.handleStackCatalogue))
 		// The OpenAPI description of this API (deploy_openapi.go): static,
 		// for any signed-in account and any key, and registered before /{id}
 		// for the reason /hostname is.
@@ -78,6 +79,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/lifecycle", s.handle(s.handleDeploymentLifecycle))
 		r.Method(http.MethodGet, "/{id}/lifecycle/stream", s.handle(s.handleDeploymentLifecycleStream))
 		r.Method(http.MethodGet, "/{id}/availability", s.handle(s.handleDeploymentAvailability))
+		r.Method(http.MethodGet, "/{id}/stack", s.handle(s.handleStackState))
 		r.Method(http.MethodGet, "/{id}/alerts", s.handle(s.handleTrafficAlertList))
 		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
@@ -128,6 +130,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			r.Method(http.MethodPost, "/{id}/environments/{env}/promote", s.handle(s.handleDeploymentPromote))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/cancel", s.handle(s.handleDeploymentRunCancel))
 			r.Method(http.MethodPost, "/{id}/runs/{run}/retry", s.handle(s.handleDeploymentRunRetry))
+			// Configuring a stack again is the control a deploy is: it changes
+			// the applications the deployment runs, never what it is built from.
+			r.Method(http.MethodPost, "/{id}/stack/configure", s.handle(s.handleStackConfigure))
 			// Keeping the new release only removes a container nothing routes
 			// to; it is the same control a deploy is.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/keep", s.handle(s.handleDeploymentKeepRelease))
@@ -180,6 +185,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// a secret the deployment holds; a session opened through Just
 				// Hub may not read one out or make a new one (section 9.9).
 				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/environments/{env}/variables/{name}/reveal", s.handle(s.handleDeploymentVariableReveal))
+				// An account a stack created is revealed on the terms a
+				// variable is.
+				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/stack/credentials/{name}/reveal", s.handle(s.handleStackCredentialReveal))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariableDelete))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/import", s.handle(s.handleDeploymentDotenvImport))

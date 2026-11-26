@@ -2748,6 +2748,61 @@ func (c *Client) SharedVariables(ctx context.Context, opts ...RequestOption) ([]
 	return out, nil
 }
 
+// StackCatalogue is GET /deploy/stacks: list the smart stacks: each preset with the template it
+// deploys, its memory and disk estimate and what it cannot do, and the services.
+//
+// A deploy key: allowed.
+func (c *Client) StackCatalogue(ctx context.Context, opts ...RequestOption) ([]StackCatalogueEntry, error) {
+	var out []StackCatalogueEntry
+	if err := c.do(ctx, "GET", "/deploy/stacks", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+// StackConfigure is POST /deploy/{id}/stack/configure: run the stack's configuration again now;
+// every step converges, so nothing already set up is done twice; audited.
+//
+// 409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs,
+// 409 stack_not_preset when the live release is not one of the stack's presets.
+//
+// A deploy key: allowed.
+func (c *Client) StackConfigure(ctx context.Context, id int64, opts ...RequestOption) (*StackConfigureAnswer, error) {
+	var out StackConfigureAnswer
+	if err := c.do(ctx, "POST", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/configure", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal an account the
+// stack created; audited without its value.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) StackCredentialReveal(ctx context.Context, id int64, name string, opts ...RequestOption) (*StackCredentialReveal, error) {
+	var out StackCredentialReveal
+	if err := c.do(ctx, "GET", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/credentials/"+url.PathEscape(name)+"/reveal", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StackState is GET /deploy/{id}/stack: read a stack deployment's state: whether it is installed,
+// healthy, connected and able to play and to acquire, each service's container and private
+// address, each configuration step, the actions only a person can take, and the accounts it
+// created.
+//
+// 404 stack_not_found when the deployment is not a stack.
+//
+// A deploy key: allowed.
+func (c *Client) StackState(ctx context.Context, id int64, opts ...RequestOption) (*StackState, error) {
+	var out StackState
+	if err := c.do(ctx, "GET", "/deploy/"+strconv.FormatInt(id, 10)+"/stack", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // TemplateCreate is POST /deploy/templates: add a template from a pasted Compose file and the
 // inputs declared for the variables it reads.
 //

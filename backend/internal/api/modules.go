@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -167,6 +168,10 @@ type moduleSet struct {
 	// rollbackWatcher reads every open warm-release window and rolls a
 	// release back, or removes the warm one, when the window says so.
 	rollbackWatcher *deploy.RollbackWatcher
+	// stackStore and stacks are the smart stacks: deployments made from a
+	// stack's preset, configured by the dashboard once their release is live.
+	stackStore *stacks.Store
+	stacks     *stacks.Service
 	// releaseImages removes release images retention no longer keeps.
 	releaseImages *deploy.ReleaseImageSweeper
 	// sleeper stops environments that sleep once nobody visits and wakes
@@ -463,6 +468,8 @@ func (s *Server) initModules() {
 	s.modules.deployPlanning = deploy.NewPlanningStore(s.Store, s.Sealer, s.Cfg.DeployRoots).
 		WithDatabaseURLResolver(s.modules.deployDatabases.ResolveVariable).
 		WithSecretStores(s.modules.secretStores)
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	s.modules.stacks = s.newStackService()
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.githubRepos = githubrepos.New(s.Store.DB, s.Sealer)

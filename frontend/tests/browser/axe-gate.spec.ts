@@ -15,6 +15,7 @@ import {
   project,
 } from "./deploy-fixture"
 import { mockSections } from "./deploy-section-fixture"
+import { mockNewStack, mockStackProject } from "./deploy-stack-fixture"
 import { mockEvents } from "./docker-events-fixture"
 import { mockDockerHost } from "./docker-fixture"
 import { mockImages } from "./docker-images-fixture"
@@ -314,10 +315,12 @@ const ROUTES: [name: string, url: string, mock: Mock][] = [
     `/deploy/7/settings/${tab}`,
     SHOWCASE,
   ]),
+  ["deploy__id__stack", "/deploy/7/stack", (page) => mockStackProject(page)],
   ["deploy__credentials", "/deploy/credentials", SHOWCASE],
   ["deploy__drains", "/deploy/drains", (page) => mockSections(page)],
   ["deploy__new", "/deploy/new", (page) => mockNewProject(page)],
   ["deploy__new--template", "/deploy/new?source=template", (page) => mockNewProject(page)],
+  ["deploy__new--stack", "/deploy/new?source=stack", (page) => mockNewStack(page)],
   ["deploy__notifications", "/deploy/notifications", SHOWCASE],
   ["deploy__secret-stores", "/deploy/secret-stores", (page) => mockSections(page)],
   ["deploy__templates", "/deploy/templates", (page) => mockSections(page)],

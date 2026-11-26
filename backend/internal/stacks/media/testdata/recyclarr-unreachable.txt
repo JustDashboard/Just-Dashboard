@@ -1,0 +1,4 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[INF] just-dashboard-movies: Processing Radarr server just-dashboard-movies
+[ERR] Exiting due to fatal error: Connection refused 

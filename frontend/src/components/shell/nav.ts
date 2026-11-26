@@ -34,6 +34,7 @@ import {
   LockClosed,
   Logs,
   Monitoring,
+  Monorepo,
   NetworkDevice,
   Notes,
   Puzzle,
@@ -510,7 +511,10 @@ export const ACCOUNT_SECTION = {
  *
  * `game` entries belong to a game server and nothing else; the rail learns the
  * profile only once the project's own read lands, so it draws the rest of the
- * list immediately and these two when they are earned.
+ * list immediately and these two when they are earned. The `stack` entry is
+ * the same for a project that is a smart stack, which the server says
+ * (`GET /deploy/{id}/stack`); it stands with them at the end of the list, so
+ * earning it moves no other row.
  */
 export type ProjectNavEntry = {
   title: string
@@ -519,6 +523,8 @@ export type ProjectNavEntry = {
   icon: React.ComponentType<{ className?: string }>
   /** Only for a game server. */
   game?: boolean
+  /** Only for a project the server says is a stack. */
+  stack?: boolean
 }
 
 export const PROJECT_NAV: ProjectNavEntry[] = [
@@ -530,6 +536,7 @@ export const PROJECT_NAV: ProjectNavEntry[] = [
   { title: "Console", path: "/console", icon: Terminal },
   { title: "Players", path: "/players", icon: Users, game: true },
   { title: "Server settings", path: "/game-settings", icon: SettingsSliders, game: true },
+  { title: "Stack", path: "/stack", icon: Monorepo, stack: true },
 ]
 
 /**
