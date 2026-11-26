@@ -2316,7 +2316,9 @@ the detail of each classifier is below, with the surface it guards.
   is not complete ends with an object whose only key is `__export`; a SQL file always ends with a
   comment. And a caller that names its export (`exportId`) can ask `GET /{id}/export/status` afterwards,
   which is the only way a browser saving a CSV learns it was cut at the limit: browsers show trailers
-  to nothing, and a CSV has nowhere to say it. The registry is memory, keyed by account, connection and
+  to nothing, and a CSV has nowhere to say it. The page asks it with the export's own abort signal
+  (`settledExport` in `lib/stream-export.ts`), and saves nothing once Cancel was pressed, however
+  late. The registry is memory, keyed by account, connection and
   name. A **failure** is never a response that ends: the first 64 KiB are held so that a statement
   refused before then is an ordinary error response, and past that the response is flushed and the
   connection aborted (`http.ErrAbortHandler`), which a browser reports as a failed download and every
