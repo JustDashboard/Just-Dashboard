@@ -142,7 +142,11 @@ export function TLSDNSPanel({ domain, openAtFirst }: { domain: string; openAtFir
                 )}
               </Section>
 
-              <Section level={3} title={<span className="font-mono text-body">_acme-challenge.{dns.domain}</span>} className="gap-3">
+              <Section
+                level={3}
+                title={<span className="font-mono text-body">_acme-challenge.{dns.domain}</span>}
+                className="gap-3"
+              >
                 {dns.acmeError ? (
                   <p className="text-hint break-words text-muted-foreground">
                     The lookup failed: {dns.acmeError}

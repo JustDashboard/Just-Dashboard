@@ -7,7 +7,11 @@ import { Panel } from "@/components/panel"
  * block, so the edge says "careful" once instead of a red card per act.
  */
 export function DangerRows({ children }: { children: React.ReactNode }) {
-  return <Panel framed className="divide-y divide-hairline border-rule-danger">{children}</Panel>
+  return (
+    <Panel framed className="divide-y divide-hairline border-rule-danger">
+      {children}
+    </Panel>
+  )
 }
 
 /**

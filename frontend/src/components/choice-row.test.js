@@ -8,8 +8,7 @@ import { CHOICE_ROW_BOX, CONTROL, ChoiceListSkeleton, choicePress } from "./choi
 function element(name, { inside = [], contained = true } = {}) {
   return {
     name,
-    closest: (selector) =>
-      selector === CONTROL && inside.length > 0 ? { name: inside[0] } : null,
+    closest: (selector) => (selector === CONTROL && inside.length > 0 ? { name: inside[0] } : null),
     contains: () => contained,
   }
 }
