@@ -1,4 +1,4 @@
-import { certificateTone, certificateWords } from "@/lib/certificates"
+import { certificateTone, certificateWords, type CertificateFacts } from "@/lib/certificates"
 import type { Certificate } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { Meter } from "@/components/meter"
@@ -12,7 +12,7 @@ import type { Tone } from "@/components/tone"
  * certificate says so before anything about its days, and the last day is
  * counted in hours ("10h left"), not "0d left".
  */
-export function ExpiryStatus({ cert, now }: { cert?: Certificate; now?: number }) {
+export function ExpiryStatus({ cert, now }: { cert?: CertificateFacts; now?: number }) {
   if (!cert) return <Status state="created" label="Unchecked" />
   return (
     <Status

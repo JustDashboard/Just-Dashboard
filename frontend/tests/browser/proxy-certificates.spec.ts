@@ -768,6 +768,26 @@ test("lineages that cannot be read say so, and the renewal reading still stands"
   await expect(renewalFact(page)).toHaveText("renewal scheduled")
 })
 
+test("a certificate in its last day reads in hours in the inventory and in its lineage alike", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  const end = new Date(Date.now() + 10.5 * 3_600_000).toISOString()
+  await page.route("**/api/v1/certificates/", (route) =>
+    json(route, [{ ...certs[0], notAfter: end, daysLeft: 0 }]),
+  )
+  await page.route("**/api/v1/certificates/certbot", (route) =>
+    json(route, certbotState({ certs: [certbotLineage({ expiry: end, daysLeft: 0 })] })),
+  )
+  await page.goto("/proxy/certificates")
+  await expect(certRow(page, "app.example.com").getByText("10h left")).toBeVisible()
+
+  await page.goto("/proxy/certificates?tab=renewal")
+  const lineages = page.getByRole("list", { name: "certbot lineages" })
+  await expect(lineages.getByText("10h left")).toBeVisible()
+  await expect(lineages.getByText("0d left")).toHaveCount(0)
+})
+
 test("importing under a name in use asks to replace it, keeps the old pair, and offers the reload", async ({
   page,
 }) => {
