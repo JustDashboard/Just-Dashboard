@@ -593,7 +593,7 @@ test("a single pointer moves a box and a system from the inspector, one press at
   await expect.poll(offset).toEqual({ x: before.x + 40, y: before.y + 40 })
   expect(await view(page)).toEqual(camera)
   await expect
-    .poll(() => Object.keys((mock.saved.layout as { positions: object }).positions))
+    .poll(() => Object.keys((mock.saved.layout as { positions?: object } | null)?.positions ?? {}))
     .toEqual([id])
 
   // A press on the system's head reads the system, and the buttons carry its
