@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,9 @@ type DomainClaim struct {
 	// went on holding the domain and every later deployment of that domain
 	// was refused as a conflict with nothing to say why.
 	Leftover bool `json:"leftover,omitempty"`
+	// Names are every name a leftover answers. The release removes the whole
+	// route, so the ones it does not claim stop answering with it.
+	Names []string `json:"names,omitempty"`
 }
 
 var leftoverRouteRe = regexp.MustCompile(`^just-dashboard-env-([1-9][0-9]{0,17})\.conf$`)
@@ -61,6 +65,13 @@ func claimOf(vhost proxysvc.VHost, marked bool) DomainClaim {
 	}
 	if vhost.Owner == nil || vhost.Owner.Archived {
 		claim.Leftover = true
+		for _, name := range vhost.ServerNames {
+			name = strings.TrimSpace(name)
+			said := slices.ContainsFunc(claim.Names, func(have string) bool { return strings.EqualFold(have, name) })
+			if name != "" && name != "_" && !said {
+				claim.Names = append(claim.Names, name)
+			}
+		}
 		return claim
 	}
 	claim.Project, claim.ProjectID = vhost.Owner.Project, vhost.Owner.ProjectID
@@ -102,7 +113,7 @@ func domainClaimFinding(planned PlannedDomain, claims []DomainClaim, field strin
 	if onlyLeftovers(claims) {
 		item := finding("domain_takeover", PreflightPass,
 			"Domain is taken over from a leftover route", planned.Hostname+" · "+claimSites(claims),
-			"A deleted or archived deployment left this route answering the domain. The release removes it just before it writes this deployment's route, and keeps the certificate.",
+			leftoverTakeoverMeans(planned.Hostname, claims),
 			"", "proxy", field)
 		item.DeepLink = siteLink(claims[0].Site)
 		return item
@@ -132,6 +143,48 @@ func domainClaimFinding(planned PlannedDomain, claims []DomainClaim, field strin
 		"Remove or rename that site, or choose another domain.", "proxy", field)
 	item.DeepLink = link
 	return item
+}
+
+// leftoverTakeoverMeans says what taking the leftovers over does, naming
+// every name they answer: the release removes each whole route, so a name
+// this deployment does not claim stops answering too, and the reader sees
+// which before deploying.
+func leftoverTakeoverMeans(hostname string, claims []DomainClaim) string {
+	names := []string{}
+	others := []string{}
+	for _, claim := range claims {
+		for _, name := range claim.Names {
+			lower := strings.ToLower(name)
+			if slices.Contains(names, lower) {
+				continue
+			}
+			names = append(names, lower)
+			if lower != strings.ToLower(hostname) {
+				others = append(others, lower)
+			}
+		}
+	}
+	if len(names) == 0 {
+		names = []string{strings.ToLower(hostname)}
+	}
+	means := "A deleted or archived deployment left a route answering " + sayNames(names) +
+		". The release removes it just before it writes this deployment's route, and keeps the certificate."
+	switch len(others) {
+	case 0:
+	case 1:
+		means += " " + others[0] + " stops answering with it."
+	default:
+		means += " " + sayNames(others) + " stop answering with it."
+	}
+	return means
+}
+
+// sayNames joins names as a sentence says them: "a", "a and b", "a, b and c".
+func sayNames(names []string) string {
+	if len(names) < 2 {
+		return strings.Join(names, "")
+	}
+	return strings.Join(names[:len(names)-1], ", ") + " and " + names[len(names)-1]
 }
 
 // leftoverRouteProxy is what taking a leftover route over needs of the proxy

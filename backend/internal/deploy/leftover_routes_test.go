@@ -100,6 +100,40 @@ func TestDomainClaimFindingSaysWhoHoldsTheDomain(t *testing.T) {
 	}
 }
 
+// The route a takeover removes goes with every name it answers, not only the
+// one claimed: the finding names them all, so the reader sees what else stops
+// answering.
+func TestTakeoverFindingNamesEverythingTheLeftoverAnswers(t *testing.T) {
+	t.Parallel()
+	planned := PlannedDomain{Hostname: "jellyfin.example.test", HTTPS: true, Ownership: OwnershipManaged}
+	leftover := proxysvc.VHost{Name: "just-dashboard-env-450.conf",
+		ServerNames: []string{"Jellyfin.example.test", "media.example.test", "_", "media.example.test"}}
+	claim := claimOf(leftover, true)
+	if strings.Join(claim.Names, ",") != "Jellyfin.example.test,media.example.test" {
+		t.Fatalf("names = %v", claim.Names)
+	}
+	item := domainClaimFinding(planned, []DomainClaim{claim}, "domains.jellyfin.example.test")
+	if item.Code != "domain_takeover" {
+		t.Fatalf("code = %s", item.Code)
+	}
+	if !strings.Contains(item.Means, "jellyfin.example.test and media.example.test") ||
+		!strings.Contains(item.Means, "media.example.test stops answering") {
+		t.Fatalf("detail = %q", item.Means)
+	}
+	// A leftover that answers only the claimed name says nothing more goes.
+	alone := domainClaimFinding(planned, []DomainClaim{claimOf(proxysvc.VHost{
+		Name: "just-dashboard-env-451.conf", ServerNames: []string{"jellyfin.example.test"},
+	}, true)}, "domains.jellyfin.example.test")
+	if strings.Contains(alone.Means, "stops answering") || strings.Contains(alone.Means, "stop answering") {
+		t.Fatalf("detail = %q", alone.Means)
+	}
+	// A live route's claim carries no names: it is not removed.
+	if live := claimOf(proxysvc.VHost{Name: "just-dashboard-env-7.conf", ServerNames: []string{"a.test"},
+		Owner: &proxysvc.VHostOwner{Project: "media"}}, true); len(live.Names) != 0 {
+		t.Fatalf("live names = %v", live.Names)
+	}
+}
+
 func TestClaimOfTakesNothingForALeftoverWithoutItsOwners(t *testing.T) {
 	t.Parallel()
 	gone := proxysvc.VHost{Name: "just-dashboard-env-450.conf"}

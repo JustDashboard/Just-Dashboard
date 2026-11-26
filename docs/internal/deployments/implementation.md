@@ -1665,7 +1665,9 @@ only renderer/executor/validation authority for their feature.
   (`DomainObservation.claims`, `deploy/leftover_routes.go`) and asks the API layer which deployment
   writes each route (`RouteOwners`, the same `markDeploymentRoutes` the Sites list uses). A domain held
   only by **leftover** routes — `just-dashboard-env-<id>.conf` whose environment is gone or archived —
-  passes as `domain_takeover`, and activation removes those routes (`SnapshotDeploymentRoute`, then
+  passes as `domain_takeover`, whose words name every name those routes answer (`DomainClaim.names`),
+  since each whole route goes and a name this deployment does not claim stops answering with it; and
+  activation removes those routes (`SnapshotDeploymentRoute`, then
   `RemoveDeploymentRoute`) just before `ApplyDeploymentRoute` writes its own, keeping the certificate
   since the new route serves the same name, and puts them back if the release does not go live — a
   refused cutover, a failed public-route check or route verification, the tailnet step or the commit —
