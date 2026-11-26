@@ -38,7 +38,9 @@ in one framed block of two single lines what protects the databases. **Backups**
 dashboard can dump is in a backup job that runs by itself (switched on, on a schedule, this
 server's own: a paused job, one run by hand and one imported from a destination protect nothing),
 and says when — "All 6 backed up every day at 03:00", the last run's age and size and the next —
-or how many are not, naming them. **Alerts** reads whether a switched-on rule watches every
+or how many are not, naming them. A last run that failed is the reading itself ("The last run of
+Databases failed 2h ago", the schedule after it), since the names and the schedule give way on a
+phone and the schedule alone read as a backup that exists. **Alerts** reads whether a switched-on rule watches every
 database, and whether a notification channel would hear it: "All 6 watched" with the rules and the
 channels told, "Alerts have nowhere to go" (a way to Notification channels) when none is on, and
 what is firing before anything else, as the database and the kind ("blog: disk filling up"), a way

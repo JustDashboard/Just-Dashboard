@@ -168,12 +168,18 @@ test.describe("what protects the databases", () => {
       ],
     }))
     await page.reload()
-    await expect(backups).toContainText("The last run of Databases failed just now")
-    // The line takes the warning's tone: its dot and its words.
+    // The failure is the reading, in the warning's tone, and the schedule is its detail.
     await expect(backups).toHaveAttribute("data-tone", "warning")
-    await expect(backups.getByText("All 5 backed up every day at 03:00")).toHaveClass(
+    await expect(backups.getByText("The last run of Databases failed just now")).toHaveClass(
       /text-warning/,
     )
+    await expect(backups).toContainText("All 5 scheduled every day at 03:00")
+    await expect(backups).not.toContainText("backed up")
+
+    // On a phone the detail gives way: what is left still says the run failed.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(backups.getByText("The last run of Databases failed just now")).toBeVisible()
+    await expect(backups.getByText("All 5 scheduled every day at 03:00")).toBeHidden()
   })
 
   test("Turn on adds the usual rules over every database, and none beside one somebody paused", async ({

@@ -445,16 +445,26 @@ function BackupsLine({
       : `All ${total} on a backup schedule`
   const only = cover.jobs.length === 1 ? cover.jobs[0] : undefined
   if (cover.failed) {
+    // The failure is the reading and the schedule its detail: the detail
+    // gives way on a phone, and "All 2 backed up every day" left alone there
+    // made a first run that failed read as a backup that exists.
     const run = cover.failed.lastRun
+    const scheduled = every
+      ? total === 1
+        ? `Scheduled ${every}`
+        : `All ${total} scheduled ${every}`
+      : total === 1
+        ? "On a backup schedule"
+        : `All ${total} on a backup schedule`
     return (
       <CheckLine
         name="Backups"
         tone="warning"
         href={`/backups/${cover.failed.id}`}
         label={`Backup job ${cover.failed.name}`}
-        detail={`The last run of ${cover.failed.name} failed ${relativeTime(run?.endedAt ?? run?.startedAt)}`}
+        detail={scheduled}
       >
-        {reading}
+        {`The last run of ${cover.failed.name} failed ${relativeTime(run?.endedAt ?? run?.startedAt)}`}
       </CheckLine>
     )
   }
