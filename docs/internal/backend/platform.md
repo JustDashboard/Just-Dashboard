@@ -165,6 +165,11 @@ announcement and the tag only decorated the Releases page: 0.8.5 was offered to 
 with a failed Verify run and no tag. Now a failed run means nothing is tagged and nothing is offered. The version
 comes from the changelog, never from the branch name, so a merge whose version is already released
 publishes nothing.
+A version merged whose run failed, and which the next release overtook before anyone tagged it, stays
+in the history as what it is: 0.8.7 was never published, and its entry's title and summary say so and
+name the release that carries its changes (0.9.0). That is said in the entry's text, not with a new
+field: installs on 0.8.5 and older read the published changelog with `ParseManifest`, which refuses a
+field it does not know, so a field added to any entry would stop their update check altogether.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
 
 ### Which build this is
