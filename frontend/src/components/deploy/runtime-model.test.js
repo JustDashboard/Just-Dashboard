@@ -229,7 +229,7 @@ describe("newestReadings", () => {
     ...values,
   })
 
-  test("each figure is the newest row that has it, and the moment is the newest row with any", () => {
+  test("each figure is the newest row that has it, at that row's moment", () => {
     const newest = newestReadings([
       row(1, { cpu: 10, mem: 100, netRx: 5, netTx: 6, blockRead: 1, blockWrite: 2 }),
       row(2, { cpu: 12, pids: 4 }),
@@ -237,15 +237,27 @@ describe("newestReadings", () => {
       row(4, {}),
     ])
     expect(newest).toEqual({
-      cpu: 15.5,
-      pids: 4,
-      mem: 100,
-      netRx: 5,
-      netTx: 6,
-      blockRead: 1,
-      blockWrite: 2,
-      ts: 3,
+      cpu: { value: 15.5, ts: 3 },
+      pids: { value: 4, ts: 2 },
+      mem: { value: 100, ts: 1 },
+      netRx: { value: 5, ts: 1 },
+      netTx: { value: 6, ts: 1 },
+      blockRead: { value: 1, ts: 1 },
+      blockWrite: { value: 2, ts: 1 },
     })
+  })
+
+  test("a newest row with only some figures does not lend its moment to the others", () => {
+    // A fresh memory sample at minute 9; the processor and the network were
+    // last read at minute 2.
+    const newest = newestReadings([
+      row(2 * 60_000, { cpu: 40, mem: 90, netRx: 7, netTx: 8 }),
+      row(9 * 60_000, { mem: 120 }),
+    ])
+    expect(newest.mem).toEqual({ value: 120, ts: 9 * 60_000 })
+    expect(newest.cpu).toEqual({ value: 40, ts: 2 * 60_000 })
+    expect(newest.netRx?.ts).toBe(2 * 60_000)
+    expect(newest.pids).toBeUndefined()
   })
 
   test("an empty history has nothing to fall back to", () => {
