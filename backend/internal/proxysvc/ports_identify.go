@@ -210,7 +210,7 @@ func tlsDial(ctx context.Context, dialer *net.Dialer, target, serverName string,
 		NextProtos: alpn,
 		// The socket's own certificate is what is being read; verifying it
 		// would hide exactly the self-signed or mismatched one worth seeing.
-		InsecureSkipVerify: true, //nolint:gosec
+		InsecureSkipVerify: true,
 	})
 	if err := conn.HandshakeContext(ctx); err != nil {
 		raw.Close()

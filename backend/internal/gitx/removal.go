@@ -182,7 +182,7 @@ func nestedCheckouts(root string) []string {
 	rootDepth := strings.Count(root, string(os.PathSeparator))
 	_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 		if err != nil || len(found) >= 20 {
-			return nil //nolint:nilerr // an unreadable subtree is skipped
+			return nil // an unreadable subtree is skipped
 		}
 		if !d.IsDir() {
 			return nil

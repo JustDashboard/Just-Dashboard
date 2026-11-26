@@ -239,7 +239,7 @@ func (r *wgRecord) observe(ctx context.Context, now time.Time, live map[string]*
 	if err != nil {
 		return err
 	}
-	defer tx.Rollback() //nolint:errcheck // a committed transaction makes this a no-op
+	defer tx.Rollback() // a committed transaction makes this a no-op
 	type transition struct {
 		ref    wgPeerRef
 		kind   string
