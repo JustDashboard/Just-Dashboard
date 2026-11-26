@@ -275,7 +275,12 @@ A change that weakens any of these has to say so explicitly.
    major-version upgrade runs the servers' own clients inside their own containers through
    `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
    (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
-   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is.
+   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is. The one
+   statement that is fed to `psql` or `mysql` on standard input is the host account route's
+   (`POST /databases/host/grant`, `handlers_db_host.go`), because it carries a password an argument would
+   show every account on the machine: the dashboard writes it, on one line, with the password only inside a
+   quoted literal (a dollar quote for `psql`), where neither client reads a command, and a password with a
+   control character is refused.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
