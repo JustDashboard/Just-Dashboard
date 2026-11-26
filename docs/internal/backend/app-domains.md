@@ -55,6 +55,13 @@ domains, and the last issuance error. Every write is a read-modify-write in one 
 `revision` (`update`). A state with no handle holds nothing and keeps `autoAssign` (default on) for the next
 claim. `settings['app.domain.hook']` holds the SHA-256 of the hook's token.
 
+`generation` is raised by every change to which handle the server holds and how: a claim (a repair of the same
+handle too), a release, a detach, a link started or ended (`DetachInTx`, even with no handle), and a site record
+mirrored with another handle, status or address. `refresh` reads it before it sends `GET /domain` and drops an
+answer that finds it moved: the answer describes the moment the site was asked, so one with no domain would
+detach a handle claimed while it was out, one with the old domain would bring back a handle just released, and
+an old link's offer would be claimed through the new one. The next check asks again.
+
 ## Background work (`appdomain/service.go`)
 
 One loop, through `safego`, started with the account link and only when the feature is on:
@@ -198,6 +205,7 @@ did not answer" rather than as Let's Encrypt's vague error.
 | Server not linked | The card says why; suggestions stay sslip.io | `TestTheViewSaysWhyNothingIsOffered`, `TestAClaimIsRefusedWithoutWhatItNeeds` |
 | Unlinking a server whose address is in use | `GET /dashboard/link/domain`'s `usedBy` is what the unlink confirmation lists; the link's end detaches the handle | `TestUnlinkingDetachesTheHandle` |
 | Released, suspended or detached while in use | The card shows it; the next release leaves the name out (warning) or fails (`app_domain_detached`) | `TestTheStateFollowsTheSite`, `TestEveryStepReadsAReleaseWithoutItsDetachedNames`, `TestTheCertificateStepNamesTheDetachedNamesItLeftOut` |
+| A check out while a claim, a release or a link change commits | Its answer is dropped; the claim stays held, the release stays released, the old link's offer is not claimed | `TestAnAnswerThatCrossesAClaimIsDropped`, `TestAnAnswerThatCrossesAReleaseDoesNotBringTheHandleBack`, `TestAnAnswerThatCrossesALinkChangeIsDropped` |
 | Changing the handle | Refused while any deployment uses it; the error lists them | `TestAHandleInUseCannotBeChangedOrReleased` |
 | Server IP changes | Updated within 15 minutes | `TestTheAddressFollowsTheServer` |
 | Site unreachable | Existing apps keep working; claiming, releasing and issuing fail with a message; renewal retries on certbot's schedule | `TestTheStateFollowsTheSite` (state unchanged); the rest is a live run |

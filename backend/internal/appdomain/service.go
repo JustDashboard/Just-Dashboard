@@ -301,6 +301,7 @@ func (s *Service) followAddress(ctx context.Context) {
 		}
 		s.mirror(cur, domain)
 		cur.LastError = ""
+		cur.Generation++
 		return true, nil
 	})
 	s.record(ctx, "app.domain.address", st.Hostname, true, map[string]any{"from": st.Address, "to": domain.Address})
@@ -308,22 +309,39 @@ func (s *Service) followAddress(ctx context.Context) {
 
 // refresh asks the site what it holds for this server, and records what
 // changed there: a suspension, a release on the site, an unlink.
+//
+// The answer describes the moment the site was asked. A claim, a release or
+// a link change that commits while the GET is out is newer, so an answer
+// that crosses one is dropped (State.Generation): one with no domain would
+// detach a handle claimed a moment ago, one with the old domain would bring
+// back a handle just released, and an old link's offer would be claimed
+// through the new one. The next check asks again.
 func (s *Service) refresh(ctx context.Context) {
+	asked, err := readState(ctx, s.st.DB)
+	if err != nil {
+		return
+	}
 	if !s.linked(ctx) {
-		s.detachIfHeld(ctx, "The account link is not active, so the site no longer publishes this server's records.")
+		s.detachIfHeld(ctx, asked.Generation, "The account link is not active, so the site no longer publishes this server's records.")
 		return
 	}
 	info, err := s.link.GetDomain(ctx)
 	if errors.Is(err, accountlink.ErrNotLinked) {
-		s.detachIfHeld(ctx, "The server was removed from its just-dashboard.com account, so the site released its handle.")
+		s.detachIfHeld(ctx, asked.Generation, "The server was removed from its just-dashboard.com account, so the site released its handle.")
 		return
 	}
 	if err != nil {
 		s.noteError(ctx, err)
 		return
 	}
-	before, _ := readState(ctx, s.st.DB)
+	var before State
+	stale := false
 	after, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
+		if cur.Generation != asked.Generation {
+			stale = true
+			return false, nil
+		}
+		before = *cur
 		cur.LastCheckedAt, cur.LastError = s.now().Unix(), ""
 		cur.Available = ptr(info.Available)
 		cur.AvailableReason = ""
@@ -347,15 +365,21 @@ func (s *Service) refresh(ctx context.Context) {
 			cur.Status, cur.UpdatedAt = StatusDetached, s.now().Unix()
 			cur.Reason = "The site no longer lists this handle for this server: it was released on the site, or by an administrator there."
 		}
+		if cur.owner() != before.owner() {
+			// An answer to a GET that was out meanwhile (the loop's and a
+			// page's) describes the state this one replaced.
+			cur.Generation++
+		}
 		return true, nil
 	})
-	if err == nil && before.Status != after.Status && after.Handle != "" {
+	if err != nil || stale {
+		return
+	}
+	if before.Status != after.Status && after.Handle != "" {
 		s.record(ctx, "app.domain."+after.Status, after.Hostname, true, map[string]any{"reason": after.Reason})
 	}
-	if err == nil {
-		s.autoClaim(ctx, after)
-		s.autoIssue(ctx, after)
-	}
+	s.autoClaim(ctx, after)
+	s.autoIssue(ctx, after)
 }
 
 // autoRetry is how long a handle whose automatic claim failed is left
@@ -448,12 +472,16 @@ func (s *Service) mirror(cur *State, d accountlink.Domain) {
 	cur.UpdatedAt = d.UpdatedAt
 }
 
-func (s *Service) detachIfHeld(ctx context.Context, why string) {
+// detachIfHeld detaches a held handle, unless the state's Generation is no
+// longer generation: a claim or a new link since then is newer than what
+// found the link gone.
+func (s *Service) detachIfHeld(ctx context.Context, generation int64, why string) {
 	st, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
-		if cur.Handle == "" || cur.Status == StatusDetached {
+		if cur.Generation != generation || cur.Handle == "" || cur.Status == StatusDetached {
 			return false, nil
 		}
 		cur.Status, cur.Reason, cur.UpdatedAt = StatusDetached, why, s.now().Unix()
+		cur.Generation++
 		return true, nil
 	})
 	if err == nil && st.Status == StatusDetached && st.Reason == why {
@@ -532,6 +560,9 @@ func (s *Service) Claim(ctx context.Context, handle, by string) (View, error) {
 		cur.LastError, cur.CertificateError = "", ""
 		// The site clears an offer once the server's domain is active.
 		cur.Offer, cur.OfferError = "", ""
+		// Raised even for a repair of the same handle: a GET out meanwhile
+		// may have been answered before the site had it again.
+		cur.Generation++
 		return true, nil
 	})
 	if err != nil {
@@ -576,7 +607,10 @@ func (s *Service) Release(ctx context.Context) error {
 		}
 	}
 	if _, err := update(ctx, s.st.DB, func(cur *State) (bool, error) {
-		*cur = State{Revision: cur.Revision, AutoAssign: cur.AutoAssign, Zone: cur.Zone, Available: cur.Available, AvailableReason: cur.AvailableReason}
+		*cur = State{
+			Revision: cur.Revision, Generation: cur.Generation + 1,
+			AutoAssign: cur.AutoAssign, Zone: cur.Zone, Available: cur.Available, AvailableReason: cur.AvailableReason,
+		}
 		return true, nil
 	}); err != nil {
 		return err

@@ -33,6 +33,10 @@ type fakeLink struct {
 	// refusal every PUT meets.
 	offer   string
 	putFail error
+	// held, when set, keeps each GET's answer after the site has made it,
+	// as a slow network does, until the test closes it; asked hears of
+	// each answer made.
+	held, asked chan struct{}
 }
 
 func (f *fakeLink) Enabled() bool   { return true }
@@ -57,6 +61,19 @@ func (f *fakeLink) call(name string) error {
 }
 
 func (f *fakeLink) GetDomain(context.Context) (accountlink.DomainInfo, error) {
+	info, err := f.answerGet()
+	f.mu.Lock()
+	held, asked := f.held, f.asked
+	f.mu.Unlock()
+	if held != nil {
+		asked <- struct{}{}
+		<-held
+	}
+	return info, err
+}
+
+// answerGet is the site's answer to a GET at the moment it is asked.
+func (f *fakeLink) answerGet() (accountlink.DomainInfo, error) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	if err := f.call("GET"); err != nil {
@@ -438,6 +455,101 @@ func TestTheStateFollowsTheSite(t *testing.T) {
 	e.svc.refresh(t.Context())
 	if st, _ = e.svc.state(t.Context()); st.Status != StatusDetached || !strings.Contains(st.Reason, "released") {
 		t.Fatalf("released = %+v", st)
+	}
+}
+
+// heldRefresh starts a refresh whose GET the site answers at once and whose
+// answer arrives only when deliver is called; deliver then waits for that
+// refresh to finish. Later GETs are answered as usual.
+func (e *env) heldRefresh() (deliver func()) {
+	e.t.Helper()
+	held, asked := make(chan struct{}), make(chan struct{}, 1)
+	e.link.mu.Lock()
+	e.link.held, e.link.asked = held, asked
+	e.link.mu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		e.svc.refresh(e.t.Context())
+	}()
+	<-asked
+	e.link.mu.Lock()
+	e.link.held, e.link.asked = nil, nil
+	e.link.mu.Unlock()
+	return func() {
+		close(held)
+		<-done
+	}
+}
+
+// A GET /domain that is out while a claim commits answers for a server that
+// held nothing. Its answer is dropped rather than detach the handle claimed a
+// moment ago, which the wildcard's issuance would then find not held.
+func TestAnAnswerThatCrossesAClaimIsDropped(t *testing.T) {
+	e := newEnv(t, true)
+	deliver := e.heldRefresh()
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	deliver()
+	if st, _ := e.svc.state(t.Context()); st.Handle != "acme" || st.Status != StatusActive {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+	if base, _, ok := e.svc.Active(t.Context()); !ok || base != "acme.just-dashboard.com" {
+		t.Fatalf("active = %q %v", base, ok)
+	}
+	// The next answer is the site's word as before.
+	e.svc.refresh(t.Context())
+	if st, _ := e.svc.state(t.Context()); st.Status != StatusActive || st.LastCheckedAt == 0 {
+		t.Fatalf("after a fresh answer = %+v", st)
+	}
+}
+
+// One out while a release commits still lists the handle: it does not bring
+// the released handle back.
+func TestAnAnswerThatCrossesAReleaseDoesNotBringTheHandleBack(t *testing.T) {
+	e := newEnv(t, true)
+	if _, err := e.svc.Claim(t.Context(), "acme", "admin"); err != nil {
+		t.Fatal(err)
+	}
+	e.waitIssued(1)
+	deliver := e.heldRefresh()
+	if err := e.svc.Release(t.Context()); err != nil {
+		t.Fatal(err)
+	}
+	deliver()
+	if st, _ := e.svc.state(t.Context()); st.Handle != "" || st.Status != "" {
+		t.Fatalf("after a stale answer = %+v", st)
+	}
+	if _, _, ok := e.svc.Active(t.Context()); ok {
+		t.Fatal("the released handle is active again")
+	}
+}
+
+// One out while the link is replaced answers for the old link: the address
+// its account chose is not claimed through the new one.
+func TestAnAnswerThatCrossesALinkChangeIsDropped(t *testing.T) {
+	e := newEnv(t, true)
+	e.link.offer = "acme"
+	deliver := e.heldRefresh()
+	// The OnClear hook, in the transaction that replaces the link.
+	tx, err := e.st.DB.BeginTx(t.Context(), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := DetachInTx(t.Context(), tx, 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatal(err)
+	}
+	deliver()
+	if got := e.puts(); len(got) != 0 {
+		t.Fatalf("the old link's offer was claimed: %v", got)
+	}
+	if st, _ := e.svc.state(t.Context()); st.Offer != "" || st.Handle != "" {
+		t.Fatalf("after a stale answer = %+v", st)
 	}
 }
 

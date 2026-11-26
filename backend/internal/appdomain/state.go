@@ -37,12 +37,18 @@ const (
 type State struct {
 	// Revision is raised by every write, so a write that read an older copy
 	// is never the one stored (update).
-	Revision int64  `json:"revision"`
-	Handle   string `json:"handle,omitempty"`
-	Zone     string `json:"zone,omitempty"`
-	Hostname string `json:"hostname,omitempty"`
-	Address  string `json:"address,omitempty"`
-	Status   string `json:"status,omitempty"`
+	Revision int64 `json:"revision"`
+	// Generation is raised by every change to which handle this server
+	// holds and how: a claim, a release, a detach, a link started or ended,
+	// the site's record mirrored with another handle, status or address. A
+	// GET /domain asked before one describes a state that is gone, and its
+	// answer is dropped (refresh).
+	Generation int64  `json:"generation,omitempty"`
+	Handle     string `json:"handle,omitempty"`
+	Zone       string `json:"zone,omitempty"`
+	Hostname   string `json:"hostname,omitempty"`
+	Address    string `json:"address,omitempty"`
+	Status     string `json:"status,omitempty"`
 	// Reason is why the domain is suspended or detached, for the page.
 	Reason string `json:"reason,omitempty"`
 	// AutoAssign gives new deployments the address by default.
@@ -146,16 +152,24 @@ func update(ctx context.Context, db *sql.DB, change func(*State) (bool, error)) 
 	return st, tx.Commit()
 }
 
+// owner is what Generation counts changes of.
+func (s State) owner() [4]string { return [4]string{s.Handle, s.Hostname, s.Address, s.Status} }
+
 // DetachInTx marks a held handle detached, inside a transaction that ends
-// the account link. The site deletes a server's records when it is unlinked
-// or removed, so the handle is no longer this server's to use. It is the
-// account link's OnClear hook (and the terminal unlink's).
+// or starts an account link. The site deletes a server's records when it is
+// unlinked or removed, so the handle is no longer this server's to use. It is
+// the account link's OnClear hook (and the terminal's link and unlink). It
+// raises Generation even with no handle held: an answer the old link was
+// given, an offer for instance, is not the new one's.
 func DetachInTx(ctx context.Context, tx *sql.Tx, now int64) error {
 	st, err := readState(ctx, tx)
-	if err != nil || st.Handle == "" || st.Status == StatusDetached {
+	if err != nil {
 		return err
 	}
-	st.Status, st.Reason, st.UpdatedAt = StatusDetached, "The account link was cleared, so the site released this server's handle and deleted its records.", now
+	if st.Handle != "" && st.Status != StatusDetached {
+		st.Status, st.Reason, st.UpdatedAt = StatusDetached, "The account link was cleared, so the site released this server's handle and deleted its records.", now
+	}
+	st.Generation++
 	st.Revision++
 	return writeState(ctx, tx, st)
 }
