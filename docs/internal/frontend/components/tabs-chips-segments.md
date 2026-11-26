@@ -70,6 +70,15 @@ accent ground under the same line. The bright line round the answer was louder t
 the Hub took it off the day before. A segment keeps the lit top edge; a chip has none, since the chip
 at rest is a line and no face.
 
+**Under forced colours the chosen one is the system's selection.** Forced colours (Windows High
+Contrast) repaint every fill as the page and every ink as the text, so a chosen chip, segment or tab of
+the shared kit (`ui/tabs`) read as any other. There each takes Highlight under HighlightText, kept from
+that repaint with `forced-color-adjust: none`: the chip's face, a segment's own face and the face that
+slides under the segments, and a `TabsTrigger` in either look. A chip's ring is drawn outside it, on
+the page, so it is Highlight; a segment's and a kit tab's ring is inset, inside the Highlight face, so
+it is HighlightText. Normal colours are untouched. `components/chosen-forced.test.js` and
+`forced-colours.spec.ts` hold it.
+
 ## ViewTabs
 
 The strip of a page's views, on Radix Tabs: the arrow keys move along it, Home and End reach its
