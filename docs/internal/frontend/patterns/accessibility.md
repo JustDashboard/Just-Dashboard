@@ -185,7 +185,7 @@ stays while the pointer moves onto it (1.4.13), and Escape closes it.
 | `tests/browser/touch-targets.spec.ts`, `touch-targets-pages.spec.ts` | press boxes, and that none is cut or leaves its scroller |
 | `tests/browser/design-system.spec.ts` | the inks' contrast, hover, selection and focus as three marks, row actions without a pointer, reduced motion, one register a page, a settings page's heading levels |
 | unit tests of the components | `SortHead`'s `aria-sort`, `PaneBar`'s roles, the single-key guard (`lib/keys`) |
-| `tests/browser/axe-gate.spec.ts` | no serious or critical axe violation on every fixture route, at 1440 and on a touch phone, less the routes its `KNOWN` lists with their finding. Its rule set is axe's defaults with AAA contrast and 2.5.8 target size off: target size is held as the 44px press box by the touch-target specs. A route fixed while still in `KNOWN` fails until its line comes out. |
+| `tests/browser/axe-gate.spec.ts` | no serious or critical axe violation on every fixture route, at 1440 and on a touch phone, less the elements `axe-known.ts` lists by route and rule, each named by its tag and `aria-label` with how many of it there are, and each rule with its finding. Its rule set is axe's defaults with AAA contrast and 2.5.8 target size off: target size is held as the 44px press box by the touch-target specs. Every node axe reports is compared, so a new element failing a rule a route already has in the list fails the gate, and an element fixed while still listed fails it until its line comes out or its count comes down. |
 
 What no check sees is review: whether a name says what the control does, whether a change is worth
 announcing, and whether the order a keyboard meets things in is the order they are read in.

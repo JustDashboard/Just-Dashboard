@@ -35,6 +35,7 @@ import {
 import { cn } from "@/lib/utils"
 import { usePoll } from "@/hooks/use-poll"
 import { useAuth } from "@/hooks/use-auth"
+import { useShortcuts } from "@/hooks/use-shortcuts"
 import { useConfirm } from "@/components/confirm-dialog"
 import { ChoiceList, ChoiceRow } from "@/components/choice-row"
 import { Fact } from "@/components/fact-line"
@@ -105,7 +106,6 @@ export function StreamsPage() {
   const [raw, setRaw] = useState<StreamEntry | null>(null)
   const [chip, setChip] = useSessionState<StreamFilter>("proxy.streams.filter", "all")
   const [query, setQuery] = useSessionState("proxy.streams.query", "")
-  const searchRef = useRef<HTMLInputElement>(null)
   const params = useSearchParams()
   const { data, error, refresh } = useProxyRead("streams")
   // A re-check reads the listing again; it is over when the reading it was
@@ -186,34 +186,13 @@ export function StreamsPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [data])
 
-  // "/" searches and "n" starts a new stream, as on the other lists, while
-  // no form or editor is open and nothing is being typed.
+  // "n" starts a new stream, as on the other lists. `/` is the section's (the
+  // proxy layout's), which finds this page's filter by `data-page-search`.
+  // `useShortcuts` holds both while the reader types, while a dialog or menu
+  // owns the keyboard, and when single-key shortcuts are off; n also waits
+  // while a form or the raw config is open.
   const formOpen = form.open || raw !== null
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (formOpen || e.metaKey || e.ctrlKey || e.altKey) return
-      const target = e.target as HTMLElement | null
-      if (
-        target?.tagName === "INPUT" ||
-        target?.tagName === "TEXTAREA" ||
-        target?.tagName === "SELECT" ||
-        target?.isContentEditable
-      ) {
-        return
-      }
-      if (e.key === "/") {
-        e.preventDefault()
-        searchRef.current?.focus()
-        searchRef.current?.select()
-      } else if (e.key === "n" && canCreate) {
-        e.preventDefault()
-        openNew()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [formOpen, canCreate])
+  useShortcuts({ n: canCreate && (() => openNew()) }, { enabled: !formOpen })
 
   const verbs = useStreamVerbs({
     status: data,
@@ -489,7 +468,6 @@ export function StreamsPage() {
             <ListToolbar
               search={
                 <SearchInput
-                  ref={searchRef}
                   value={query}
                   onChange={(e) => setQuery(e.target.value)}
                   placeholder="Name, port, upstream or source"

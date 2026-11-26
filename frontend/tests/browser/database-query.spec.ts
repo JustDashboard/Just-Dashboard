@@ -1180,7 +1180,7 @@ test("a statement is saved under a name, saved again, renamed and deleted", asyn
   const { sent } = await mockWork(page)
   await openEditor(page)
   await write(page, "select * from customers where tier = 'pro'")
-  await headMenu(page, "Save as…")
+  await headMenu(page, "Save as…", { opens: "dialog" })
   await page.locator("#saved-query-name").fill("Pro customers")
   await page.getByRole("dialog").getByRole("button", { name: "Save", exact: true }).click()
 

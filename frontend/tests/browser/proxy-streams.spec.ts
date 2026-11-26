@@ -2254,6 +2254,85 @@ test("from xl the list stands beside the stream, with the one on screen filled",
   await expect(rail.getByRole("link")).toHaveCount(1)
 })
 
+test("Settings opens only when asked: the rail, the arrows and a bare address open the next stream on its Overview", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  const tab = (name: string) => page.getByRole("tab", { name, exact: true })
+  await page.goto("/proxy/streams/postgres-replica")
+  await tab("Settings").click()
+  await expect(page).toHaveURL(/\/proxy\/streams\/postgres-replica\?tab=settings$/)
+  const rail = page.getByRole("navigation", { name: "Streams" })
+  // The rail's links lead to each stream's Overview, not into its form.
+  await expect(rail.getByRole("link", { name: "resolver" })).toHaveAttribute(
+    "href",
+    "/proxy/streams/resolver",
+  )
+  await rail.getByRole("link", { name: "resolver" }).click()
+  await expect(page).toHaveURL(/\/proxy\/streams\/resolver$/)
+  await expect(tab("Overview")).toHaveAttribute("aria-selected", "true")
+
+  // Nor do the arrows walk into the next one's form.
+  await page.goto("/proxy/streams/minecraft?tab=settings")
+  await expect(tab("Settings")).toHaveAttribute("aria-selected", "true")
+  await page.locator("body").press("Alt+ArrowDown")
+  await expect(page).toHaveURL(/\/proxy\/streams\/postgres-replica$/)
+  await expect(tab("Overview")).toHaveAttribute("aria-selected", "true")
+
+  // A view that only reads is still remembered into the next stream opened.
+  await tab("Clients").click()
+  await expect(page).toHaveURL(/\?tab=clients$/)
+  await page.goto("/proxy/streams/resolver")
+  await expect(tab("Clients")).toHaveAttribute("aria-selected", "true")
+})
+
+test("n starts a stream and / finds the filter only while single-key shortcuts are on and nothing else owns the keyboard", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await mockCarrying(page)
+  await page.goto("/proxy/streams")
+  const search = page.getByRole("textbox", { name: "Search streams" })
+  const sheet = page.getByRole("dialog")
+  // A key that did nothing is only proven once the page has had the frames a
+  // render it started would have taken.
+  const painted = () =>
+    page.evaluate(
+      () => new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done))),
+    )
+  await expect(search).toBeVisible()
+
+  await page.locator("body").press("/")
+  await expect(search).toBeFocused()
+  await search.blur()
+  await page.locator("body").press("n")
+  await expect(sheet.getByRole("textbox", { name: "Name", exact: true })).toBeVisible()
+  await sheet.getByRole("button", { name: "Close" }).click()
+  await expect(sheet).toHaveCount(0)
+
+  // A menu that owns the keyboard keeps its letters.
+  await page.getByRole("button", { name: "More actions for minecraft" }).click()
+  await expect(page.getByRole("menu")).toBeVisible()
+  await page.keyboard.press("n")
+  await painted()
+  await expect(sheet).toHaveCount(0)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("menu")).toHaveCount(0)
+
+  // With single-key shortcuts off, both are letters again.
+  await page.evaluate(() => localStorage.setItem("jd.view.state.entry.keys.single", "false"))
+  await page.reload()
+  await expect(search).toBeVisible()
+  await page.locator("body").press("/")
+  await painted()
+  await expect(search).not.toBeFocused()
+  await page.locator("body").press("n")
+  await painted()
+  await expect(sheet).toHaveCount(0)
+})
+
 test("a stream that is not there says so, with the way back", async ({ page }) => {
   await mockProxy(page, { included: true })
   await mockCarrying(page)

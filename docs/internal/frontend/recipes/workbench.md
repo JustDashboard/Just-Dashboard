@@ -108,7 +108,8 @@ with one finger and pinches to zoom. The pages on the bar and their stops are li
 - [ ] No frame of its own: the surface runs to the sheet's edges, hairlines between panes, strips
       of one height. No framed panes with gutters, no border round the whole.
 - [ ] The page is in `HELD_TO_THE_WINDOW` in `design-system.spec.ts` with a fixture that draws it
-      loaded, so the sheet rule is checked on it.
+      loaded and the element it draws once its reads have landed, so the sheet rule is checked on
+      the workbench rather than on its loading or error state.
 - [ ] The top strip is `WorkbenchHeader` (or the database head), not a strip drawn by hand: an
       arrow back, one command, the rest behind `⋯`. One `h1`.
 - [ ] The side column resizes with a `ResizeHandle`, and its width is kept.
@@ -123,8 +124,8 @@ with one finger and pinches to zoom. The pages on the bar and their stops are li
 ## The spec to add
 
 1. At 1440 the shell does not scroll (`scrollHeight` equals `clientHeight`), and each pane does.
-   Add the page to `HELD_TO_THE_WINDOW` in `design-system.spec.ts`, which holds it to the sheet
-   rule (*nothing on … draws a frame inside the sheet*).
+   Add the page to `HELD_TO_THE_WINDOW` in `design-system.spec.ts`, with its ready element, which
+   holds it to the sheet rule (*nothing on … draws a frame inside the sheet*).
 2. The strip is found by its name, its back control leads to the list, and its command is there.
 3. A drag on the handle changes the column's width, arrows nudge it, and a reload keeps it.
 4. A failed read in one pane shows its error or its strip while the others still answer.
