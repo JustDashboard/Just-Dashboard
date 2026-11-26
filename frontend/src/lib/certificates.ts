@@ -419,6 +419,25 @@ export type CertificateFacts = Pick<
 >
 
 /**
+ * A certbot lineage as the facts a certificate's words and meter are made
+ * from: its `expiry` is the certificate's `notAfter`, so its last day is said
+ * in hours as the inventory says it, never "0d left".
+ */
+export function lineageFacts(
+  cert: Pick<CertbotCert, "notBefore" | "expiry" | "daysLeft" | "valid" | "error" | "staging">,
+): CertificateFacts & Pick<Certificate, "notBefore"> {
+  return {
+    notBefore: cert.notBefore,
+    notAfter: cert.expiry,
+    daysLeft: cert.daysLeft,
+    expired: !cert.valid,
+    expiring: cert.valid && cert.daysLeft <= 30,
+    error: cert.error,
+    staging: cert.staging,
+  }
+}
+
+/**
  * How long a certificate has left, in the unit that reads true: days while
  * there are two or more, hours in its last day and a half, which "1d" and "0d"
  * hid ("0d left" on a certificate with ten hours to run). Short is the width

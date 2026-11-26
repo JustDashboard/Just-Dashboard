@@ -24,6 +24,7 @@ import {
   authorityName,
   certbotRunning,
   lineageActivity,
+  lineageFacts,
   parseDomains,
   renewalMethod,
 } from "@/lib/certificates"
@@ -50,7 +51,7 @@ import { Panel, PanelBody, PanelHeader, Well } from "@/components/panel"
 import { ProductLogo, ProductLogos } from "@/components/product-logo"
 import { Meter } from "@/components/meter"
 import { ROW_BLEED } from "@/components/row-list"
-import { CertLife } from "@/components/proxy/expiry-status"
+import { CertLife, ExpiryStatus } from "@/components/proxy/expiry-status"
 import { dnsProviderProduct } from "@/components/proxy/marks"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Hold } from "@/components/loading"
@@ -340,19 +341,12 @@ export function CertbotLineages({
                 </p>
               )}
               <div className="flex flex-wrap items-center justify-between gap-2">
+                {/* The inventory's own words for the same certificate: its
+                    last day in hours, not "0d left". */}
                 {activity ? (
                   <Status state="activating" label={activity} />
-                ) : cert.error ? (
-                  <Status verdict="critical" label="unreadable" />
-                ) : cert.staging ? (
-                  <Status verdict="critical" label="test certificate" />
-                ) : !cert.valid ? (
-                  <Status verdict="critical" label="expired" />
                 ) : (
-                  <Status
-                    verdict={cert.daysLeft <= 30 ? "warning" : "ok"}
-                    label={`${cert.daysLeft}d left`}
-                  />
+                  <ExpiryStatus cert={lineageFacts(cert)} />
                 )}
                 {admin && (
                   <VerbBar verbs={verbsFor(cert)} menuLabel={`More actions for ${cert.name}`} />
@@ -395,19 +389,7 @@ function RenewalMethod({ cert }: { cert: CertbotCert }) {
  * the term: a ninety-day guess drew any other one wrong.
  */
 function LineageLife({ cert }: { cert: CertbotCert }) {
-  return (
-    <CertLife
-      className="w-full"
-      cert={{
-        notBefore: cert.notBefore,
-        notAfter: cert.expiry,
-        daysLeft: cert.daysLeft,
-        expired: !cert.valid,
-        expiring: cert.valid && cert.daysLeft <= 30,
-        staging: cert.staging,
-      }}
-    />
-  )
+  return <CertLife className="w-full" cert={lineageFacts(cert)} />
 }
 
 /**

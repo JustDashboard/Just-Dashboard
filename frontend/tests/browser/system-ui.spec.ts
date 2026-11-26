@@ -17,7 +17,11 @@ test.use({ video: recordWorkspace ? "on" : "off" })
  * a row, the entry it opens, the export) are audit-ui.spec.ts's.
  */
 
-const now = Date.now()
+// The trail and the page's clock both stand at this afternoon (mockHost holds
+// the clock there). Read from Date.now(), the newest entry is six minutes
+// old, so from 00:00 to 00:06 UTC nothing in it was today and the table had
+// no Today to shelve it under.
+const now = Date.parse(`${new Date().toISOString().slice(0, 10)}T15:00:00Z`)
 const ago = (ms: number) => new Date(now - ms).toISOString()
 const HOUR = 3_600_000
 
@@ -182,6 +186,7 @@ function audit(url: URL) {
 }
 
 async function mockHost(page: Page) {
+  await page.clock.setFixedTime(now)
   await page.route("**/api/v1/**", async (route) => {
     const url = new URL(route.request().url())
     const path = url.pathname.replace(/^\/api\/v1/, "")

@@ -177,6 +177,82 @@ test.describe("on a phone", () => {
     await expect(page.getByLabel("Log sources").getByText("auth.log")).toBeVisible()
   })
 
+  // A page's log card names its source the way that page knows it: Proxy's
+  // engine card the ingress container by its name, Interfaces the kernel
+  // ring. The inventory lists the container by its id, and the rail leaves
+  // the kernel ring out where kern.log holds its lines, so Logs asks about
+  // such a source on its own before calling it unavailable.
+  test("a log card's source that the rail lists another way still opens on Logs", async ({
+    page,
+  }) => {
+    await mockHost(page)
+    await page.route("**/api/v1/logs/sources", (route) =>
+      json(route, {
+        ...sources,
+        sources: [
+          { id: "journal:", label: "systemd journal", kind: "journal", rotated: false },
+          {
+            id: "file:/var/log/kern.log",
+            label: "kern.log",
+            kind: "system",
+            path: "/var/log/kern.log",
+            lens: "kernel",
+            size: 512,
+            rotated: false,
+          },
+          { id: "docker:0f3c9a1b2c3d", label: "jd-ingress", kind: "docker", status: "running" },
+        ],
+      }),
+    )
+    await page.route("**/api/v1/logs/retention**", (route) => json(route, {}))
+    await page.route(
+      (url) => url.pathname === "/api/v1/logs/source",
+      (route) => {
+        const source = new URL(route.request().url()).searchParams.get("source") ?? ""
+        if (source === "docker:jd-ingress") {
+          return json(route, {
+            id: source,
+            label: "jd-ingress",
+            kind: "docker",
+            status: "running",
+            lens: "caddy",
+            rotated: false,
+          })
+        }
+        if (source === "kernel:") {
+          return json(route, { id: source, label: "kernel", kind: "kernel", rotated: false })
+        }
+        return route.fulfill({
+          status: 404,
+          contentType: "application/json",
+          body: JSON.stringify({ error: { code: "not_found", message: "No such container" } }),
+        })
+      },
+    )
+    const streamed: string[] = []
+    await page.routeWebSocket("**/api/v1/logs/stream**", (socket) => {
+      const source = new URL(socket.url()).searchParams.get("source") ?? ""
+      streamed.push(source)
+      const line = { text: `read from ${source}`, timestamp: "2026-09-23T05:11:01Z", level: "info" }
+      socket.send(JSON.stringify({ type: "logs", data: [line], ts: Date.now() }))
+    })
+
+    // The two cards' links, as `logsPageHref` writes them.
+    for (const source of ["docker:jd-ingress", "kernel:"]) {
+      await page.goto(`/logs?${new URLSearchParams({ source })}`)
+      await expect(page.getByText(`read from ${source}`).first()).toBeVisible()
+      await expect(page.getByText("Requested log source unavailable")).toHaveCount(0)
+      expect(streamed.at(-1)).toBe(source)
+    }
+
+    // A source the server cannot describe either is still gone, and nothing
+    // else is read in its place.
+    const before = streamed.length
+    await page.goto(`/logs?${new URLSearchParams({ source: "docker:removed" })}`)
+    await expect(page.getByText("Requested log source unavailable", { exact: true })).toBeVisible()
+    expect(streamed).toHaveLength(before)
+  })
+
   test("the network tools open on the tool, with the catalogue on the bar", async ({
     page,
   }, testInfo) => {

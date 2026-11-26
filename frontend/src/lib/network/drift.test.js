@@ -4,6 +4,7 @@ import {
   driftFileProduct,
   driftMoves,
   driftReading,
+  driftRepairDiff,
   driftRepairOutcome,
   driftReviewKey,
   driftRows,
@@ -316,4 +317,23 @@ test("repair outcomes require independent phase evidence and retain boot executi
     expect(driftRepairOutcome({ ...render, ...changed }).tone).toBe("warning")
   }
   expect(driftRepairOutcome({ ...pending, watchdog: "failed_to_arm" }).tone).toBe("warning")
+})
+
+test("a file repair's diff is exact and the runtime repair's description is plain text", () => {
+  const created = driftRepairDiff({ effect: "boot_files", after: "one\ntwo\n" })
+  expect(created.map((line) => line.kind)).toEqual(["added", "added"])
+  const unterminated = driftRepairDiff({ effect: "boot_files", before: "one\n", after: "one" })
+  expect(unterminated.some((line) => line.noNewline)).toBe(true)
+
+  // The kernel rules' before and after are sentences, not a file: no line
+  // of them may claim a missing final newline.
+  const runtime = driftRepairDiff({
+    effect: "runtime",
+    before:
+      "Owned rule count: 2\nOwned positions: 1,3\nObserved chain SHA-256: abc\nTwo owned rules",
+    after: "Exactly one owned rule at position 1: -j ACCEPT",
+  })
+  expect(runtime.filter((line) => line.kind === "removed")).toHaveLength(4)
+  expect(runtime.filter((line) => line.kind === "added")).toHaveLength(1)
+  expect(runtime.some((line) => line.noNewline)).toBe(false)
 })

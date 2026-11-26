@@ -70,12 +70,16 @@ sessions, the verdict (a press narrows the list to what it counts) and New strea
 picture of the host's ports through nginx to where they go (`stream-picture.tsx`, a `WireFlow`),
 the module and
 include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
-each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`),
+except behind the Caddy ingress: there it says "Streams need nginx" (`MissingThing`), that the sites
+are served by the ingress, and links to Sites, with no install offered.
 A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
 `stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
 what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
 Connected now, and Settings (the form as a settings column with one save bar, administrators only),
-`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`?tab=` in the address. The view is remembered for the visit and carried to the next stream by the
+rail and Alt+↑/↓, except Settings, which opens only from an address that names it, as a site's
+does. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
 `stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
 the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
 

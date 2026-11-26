@@ -257,7 +257,9 @@ What the Docker daemon did and who did it, over a 1h / 6h / 24h / All window: Do
 (the one every Docker section page opens on) with the verdict beside its name (a restart loop named,
 the containers that failed, or nothing) and the socket's state; then the band every Docker page
 opens on (`event-band.tsx`): what happened as one bar of four kinds (failures, restarts, created or
-removed, external), each a press that narrows the page, and Recent, the newest of those on the
+removed, external), each a press that narrows the page (Failures counts what its filter shows:
+failed exits, OOM kills and health checks that turned unhealthy, an OOM kill and its exit once,
+`isFailure` and `failureCount` in `lib/docker-events.ts`), and Recent, the newest of those on the
 window's axis, with the 1h / 6h / 24h / All window on the band's line; the containers the record
 names as a table, worst first, each with its state now from Docker's listing, its window as a lane
 of outcome-coloured marks (a loop a red band), its failures, comebacks and who last acted on it, a
@@ -616,7 +618,9 @@ be "left to systemd" with the timer that does its work; and a **Cron log** (the 
 cron daemon's unit journal, else a cron file, else the journal's `CRON` lines, through the cron lens
 with its sessions hidden as a chip and its runs and lost output counted on its chips). Every
 schedule opens a page of its own (`procs/schedule-page.tsx`): `/processes/scheduled/cron/[id]`
-for a cron line (the id is the account and the line, or "system", the file and the line), and
+for a cron line (the id is the account and the line, or "system", the file and the line; an edit
+that adds or removes the note above a job moves its line, and the page replaces its address with the
+saved job's, `replaceJobAt` in `lib/crontab.ts`), and
 `/processes/scheduled/timers/[unit]` for a timer. Each page sits on the shared
 detail frame with every schedule as a rail, soonest first (`schedule-rail.tsx`). Its Overview is
 built from one set of parts (`procs/schedule-sheet.tsx`): the schedule in a sentence over its

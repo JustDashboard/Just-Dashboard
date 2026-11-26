@@ -9,6 +9,7 @@ import {
   expiredAgo,
   hookFailureText,
   lineageActivity,
+  lineageFacts,
   parseDomains,
   renewIfDueLabel,
   renewalMethod,
@@ -484,6 +485,22 @@ describe("a certificate's words", () => {
     expect(certificateWords(cert({ expired: true, daysLeft: 0 }), { form: "long", now })).toBe(
       "Expired",
     )
+  })
+
+  test("a certbot lineage's last day reads in hours, as the inventory reads the same certificate", () => {
+    const lineage = {
+      notBefore: "2026-06-30T10:30:00Z",
+      expiry: "2026-09-28T10:30:00Z",
+      daysLeft: 0,
+      valid: true,
+    }
+    const inventory = cert({ daysLeft: 0, expiring: true, notAfter: lineage.expiry })
+    expect(certificateWords(lineageFacts(lineage), { form: "short", now })).toBe("10h left")
+    expect(certificateWords(inventory, { form: "short", now })).toBe("10h left")
+    expect(certificateTone(lineageFacts(lineage))).toBe("warning")
+    expect(
+      certificateWords(lineageFacts({ ...lineage, valid: false }), { form: "short", now }),
+    ).toBe("Expired")
   })
 
   test("the tone is critical once refused and a warning in the renewal window", () => {

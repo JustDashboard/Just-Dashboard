@@ -12,12 +12,13 @@ import { cn } from "@/lib/utils"
 /**
  * An address in CIDR form with its prefix in the muted ink, as the
  * Configuration page's allowlist draws a network: the address is read first,
- * the size of the network second, and a mask is no reading to colour. A host route's /32 or /128 is left off,
- * since an address alone already means one address.
+ * the size of the network second, and a mask is no reading to colour. A host route's prefix — /32 for
+ * IPv4, /128 for IPv6 — is left off, since an address alone already means one address. An IPv6 /32 is a
+ * network, and keeps its prefix.
  */
 export function Cidr({ cidr, className }: { cidr: string; className?: string }) {
   const [address, bits] = cidr.split("/")
-  const host = bits !== undefined && ((address.includes(":") && bits === "128") || bits === "32")
+  const host = bits !== undefined && bits === (address.includes(":") ? "128" : "32")
   return (
     <span className={cn("font-mono", className)}>
       {address}

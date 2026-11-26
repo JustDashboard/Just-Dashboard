@@ -1375,8 +1375,11 @@ History and remain exact through search and reload, including during a repeated 
 The controls display browser-local time without replacing the original instants. Invalid/reversed link
 bounds require choosing a new window before any search. Field predicates and levels a link carries that
 the server would refuse are dropped in the browser rather than sent. An explicitly requested source
-missing from discovery stays unavailable; only an unselected visit defaults. Rescan or choosing a source
-provides recovery. The old `components/log-viewer.tsx` and `lib/log-format.ts` are gone with their last
+that discovery does not list under that id is asked about on its own through `GET /logs/source`, which
+parses it and applies the administrator gate exactly as reading it does: a page's log card can name a
+container by its name where `/logs/sources` lists its id, or the kernel ring that the rail leaves out
+beside a `kern.log`. Only a source that answer cannot describe stays unavailable, never swapped for
+another; only an unselected visit defaults. Rescan or choosing a source provides recovery. The old `components/log-viewer.tsx` and `lib/log-format.ts` are gone with their last
 callers.
 
 Published port conflicts during container creation and Compose startup trigger bounded retries with

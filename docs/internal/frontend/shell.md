@@ -594,7 +594,8 @@ phone keeps the whole width for the list.
 Each resource result uses its existing detail address. Sites open `/proxy/sites/<name>` for
 inspection rather than the legacy `?site=` editing link. Containers and stacks open their dedicated
 pages, and a PM2 application opens its own (`/processes/pm2/<name>`, with `?account=` where two
-accounts run one of that name); Git and systemd retain query-selection links. Nothing in the product
+accounts run one of that name), as one result per application (`pm2Apps`), never one per cluster
+worker; Git and systemd retain query-selection links. Nothing in the product
 writes an address that opened a sheet any more (the server map, the palette, a project's deep links,
 the investigator's evidence and the pictures all name the item's page); every such address still
 redirects, for the links already out there.

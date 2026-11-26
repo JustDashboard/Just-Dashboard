@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Locator, type Page, type Route } from "@playwright/test"
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { answerSystemUsers, mockSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
@@ -1782,12 +1782,14 @@ for (const [label, viewport] of [
  * Git, a board, the network tools, a database's Data, Query, Schema and
  * Diagram on every engine, and a database's Logs 12px over the sheet's foot.
  *
- * Each page held to the window is opened with the fixture that draws it
- * loaded, since an empty one may draw no workbench at all. A page that joins
- * them (`Page fill`, `fill="workspace"`, or a section's workbench) joins this
- * list.
+ * Each page held to the window is opened with a fixture that draws it
+ * loaded, since an empty one may draw no workbench at all, and is measured
+ * only once an element that page draws when its reads have landed is on
+ * screen: no bone and nothing busy is also true of an error state, and of a
+ * page whose editor is still loading. A page that joins them (`Page fill`,
+ * `fill="workspace"`, or a section's workbench) joins this list with that
+ * element.
  */
-const DATABASE_WORKBENCH = (page: Page) => mockDatabases(page)
 async function mockBoard(page: Page) {
   await page.route("**/api/v1/**", async (route) => {
     const path = new URL(route.request().url()).pathname.replace(/^\/api\/v1/, "")
@@ -1814,36 +1816,360 @@ async function mockTrash(page: Page) {
     json(route, { items: [], bytes: 0, partial: false, keepDays: 30 }),
   )
 }
-const HELD_TO_THE_WINDOW: [path: string, mock: (page: Page) => Promise<unknown>][] = [
-  ["/map", (page) => mockServerMap(page)],
-  ["/databases/map", (page) => mockFleet(page)],
-  ["/terminal", (page) => mockWorkbench(page)],
-  ["/files?path=%2Fsrv%2Ffixture", (page) => mockContextFiles(page)],
-  ["/files/editor?path=%2Fsrv%2Ffixture%2Fcompose.yaml", (page) => mockContextFiles(page)],
-  ["/files/trash", mockTrash],
-  ["/git?repo=%2Fsrv%2Fjust-dashboard", (page) => mockPanel(page)],
-  ["/excalidraw/1", mockBoard],
-  ["/network/tools?tool=ping&target=192.0.2.9", (page) => mockNetwork(page)],
-  [`/logs?source=${encodeURIComponent(PG)}`, (page) => mockLensLogs(page)],
-  [`/remote-desktop/${OFFICE}`, (page) => mockRemoteDesktop(page)],
-  ["/deploy/7/logs", (page) => mockProject(page, { showcase: true })],
-  ["/databases/1/data?schema=public&table=orders", DATABASE_WORKBENCH],
-  ["/databases/1/query", DATABASE_WORKBENCH],
-  ["/databases/1/schema?schema=public&table=orders", DATABASE_WORKBENCH],
-  ["/databases/1/diagram?schema=public", DATABASE_WORKBENCH],
-  ["/databases/1/logs?view=queries", DATABASE_WORKBENCH],
-  ["/databases/4/data", DATABASE_WORKBENCH],
-  ["/databases/4/query", DATABASE_WORKBENCH],
-  ["/databases/5/data", DATABASE_WORKBENCH],
-  ["/databases/5/schema", DATABASE_WORKBENCH],
+/** The Files fixture, with the file the editor opens read as a file. */
+async function mockEditorFile(page: Page) {
+  await mockContextFiles(page)
+  await page.route("**/api/v1/files/read**", (route) =>
+    json(route, {
+      path: "/srv/fixture/compose.yaml",
+      content: "services:\n  shop:\n    image: nginx:1.27\n",
+      size: 40,
+      language: "yaml",
+      binary: false,
+      modeOctal: "0644",
+    }),
+  )
+}
+
+/**
+ * The database fixture with each workbench's own reads answered, where the
+ * fixture answers them with nothing: a PostgreSQL schema with two tables and
+ * the key between them, a Redis keyspace with its command reference, and a
+ * MongoDB database with a collection. Without them the Redis and MongoDB
+ * pages drew their error state, and the diagram an empty schema.
+ */
+async function mockLoadedDatabases(page: Page) {
+  await mockDatabases(page)
+  const column = (name: string, over: Record<string, unknown> = {}) => ({
+    name,
+    type: "bigint",
+    nullable: false,
+    primaryKey: false,
+    ...over,
+  })
+  const ordersColumns = [
+    column("id", { primaryKey: true }),
+    column("customer_id", { foreignKey: "customers", foreignKeyId: "public.customers" }),
+  ]
+  const graph = {
+    schema: "public",
+    tables: [
+      {
+        id: "public.orders",
+        schema: "public",
+        name: "orders",
+        type: "table",
+        rows: 2,
+        columns: ordersColumns,
+      },
+      {
+        id: "public.customers",
+        schema: "public",
+        name: "customers",
+        type: "table",
+        rows: 1,
+        columns: [column("id", { primaryKey: true })],
+      },
+    ],
+    edges: [
+      {
+        name: "orders_customer_id_fkey",
+        from: "public.orders",
+        to: "public.customers",
+        fromSchema: "public",
+        fromTable: "orders",
+        fromColumn: "customer_id",
+        toSchema: "public",
+        toTable: "customers",
+        toColumn: "id",
+        onDelete: "CASCADE",
+        cardinality: "many-to-one",
+      },
+    ],
+    truncated: false,
+    total: 2,
+    limit: 120,
+  }
+  await page.route("**/api/v1/databases/1/**", async (route) => {
+    const url = new URL(route.request().url())
+    const rest = url.pathname.replace(/^\/api\/v1\/databases\/1/, "")
+    if (rest === "/catalog")
+      return json(route, {
+        schema: "public",
+        defaultSchema: "public",
+        schemas: [{ name: "public", default: true, tables: 2 }],
+        objects: {
+          tables: [
+            { kind: "table", schema: "public", name: "customers", estimatedRows: 1 },
+            { kind: "table", schema: "public", name: "orders", estimatedRows: 2 },
+          ],
+          views: [],
+          materializedViews: [],
+        },
+        truncated: [],
+        limit: 5000,
+      })
+    if (rest === "/table")
+      return json(route, {
+        schema: "public",
+        name: url.searchParams.get("table") ?? "orders",
+        type: "table",
+        owner: "app",
+        columns: [
+          { name: "id", type: "bigint", nullable: false, position: 1 },
+          { name: "customer_id", type: "bigint", nullable: false, position: 2 },
+        ],
+        primaryKey: ["id"],
+        indexes: [],
+        foreignKeys: [],
+      })
+    if (rest === "/browse")
+      return json(route, {
+        columns: ["id", "customer_id"],
+        types: ["INT8", "INT8"],
+        kinds: ["integer", "integer"],
+        rows: [
+          ["1", "7"],
+          ["2", "7"],
+        ],
+        rowCount: 2,
+        rowsAffected: 0,
+        duration: "1ms",
+        truncated: false,
+        statement: 'SELECT * FROM "public"."orders" ORDER BY "id" ASC LIMIT $1 OFFSET $2',
+        primaryKey: ["id"],
+        estimatedRows: 2,
+        sort: [{ column: "id", desc: false }],
+        limit: 100,
+        offset: 0,
+      })
+    if (rest === "/graph") return json(route, graph)
+    return route.fallback()
+  })
+  await page.route("**/api/v1/databases/4/**", async (route) => {
+    const rest = new URL(route.request().url()).pathname.replace(/^\/api\/v1\/databases\/4/, "")
+    if (rest === "/redis/server")
+      return json(route, {
+        flavor: "redis",
+        version: "7.4.1",
+        redisVersion: "7.4.1",
+        mode: "standalone",
+        features: { databases: true, scanType: true, commandDocs: true },
+        modules: [],
+        role: "primary",
+        db: 0,
+        databases: 16,
+        uptimeSeconds: 86_400,
+        sampledAtMs: Date.now(),
+        keyspace: [{ db: 0, keys: 2, expires: 0, avgTtlMs: 0 }],
+        memory: { used: 8_000_000, rss: 12_000_000, peak: 9_000_000, max: 0, policy: "noeviction" },
+        replication: { role: "primary", offset: 0, replicas: [] },
+        sections: [],
+      })
+    if (rest === "/keys/tree")
+      return json(route, {
+        db: 0,
+        delimiter: ":",
+        prefix: "",
+        folders: [
+          {
+            name: "session",
+            prefix: "session:",
+            pattern: "session:*",
+            count: 1,
+            keyCount: 1,
+            folders: 0,
+            types: { hash: 1 },
+          },
+        ],
+        keys: [{ key: "greeting", type: "string", ttl: -1, size: 5 }],
+        keyCount: 1,
+        count: 2,
+        types: { string: 1, hash: 1 },
+        scanned: 2,
+        cursor: "0",
+        complete: true,
+        total: 2,
+        elapsedMs: 2,
+      })
+    if (rest === "/redis/commands")
+      return json(route, {
+        flavor: "redis",
+        version: "7.4.1",
+        documented: true,
+        commands: [
+          {
+            name: "GET",
+            group: "string",
+            summary: "Returns the string value of a key.",
+            syntax: "key",
+            since: "1.0.0",
+            arity: 2,
+            flags: [],
+            categories: [],
+            class: "read",
+            admin: false,
+          },
+        ],
+      })
+    return route.fallback()
+  })
+  await page.route("**/api/v1/databases/5/**", async (route) => {
+    const rest = new URL(route.request().url()).pathname.replace(/^\/api\/v1\/databases\/5/, "")
+    if (rest === "/mongo/databases")
+      return json(route, {
+        databases: [
+          {
+            name: "app_main",
+            collections: 1,
+            views: 0,
+            objects: 2,
+            avgObjSize: 100,
+            dataSize: 200,
+            storageSize: 4096,
+            indexes: 1,
+            indexSize: 4096,
+            sizeOnDisk: 8192,
+            empty: false,
+            statsKnown: true,
+          },
+        ],
+      })
+    if (rest === "/mongo/collections")
+      return json(route, {
+        database: "app_main",
+        collections: [
+          {
+            name: "orders",
+            type: "collection",
+            system: false,
+            readOnly: false,
+            statsKnown: true,
+            count: 2,
+            size: 200,
+            avgObjSize: 100,
+            storageSize: 4096,
+            indexCount: 1,
+            indexSize: 4096,
+            capped: false,
+            clustered: false,
+          },
+        ],
+        statsTruncated: false,
+      })
+    return route.fallback()
+  })
+}
+
+type HeldToTheWindow = [
+  path: string,
+  mock: (page: Page) => Promise<unknown>,
+  /** What the page draws once its reads have landed, and not before or instead. */
+  ready: (page: Page) => Locator,
+]
+const flowNode = (page: Page) => page.locator(".react-flow__node").first()
+const editor = (page: Page) => page.locator(".monaco-editor").first()
+const HELD_TO_THE_WINDOW: HeldToTheWindow[] = [
+  ["/map", (page) => mockServerMap(page), flowNode],
+  ["/databases/map", (page) => mockFleet(page), flowNode],
+  [
+    "/terminal",
+    (page) => mockWorkbench(page),
+    (page) => page.locator("[data-terminal-renderer]:visible"),
+  ],
+  [
+    "/files?path=%2Fsrv%2Ffixture",
+    (page) => mockContextFiles(page),
+    (page) => page.getByRole("row").filter({ hasText: "compose.yaml" }),
+  ],
+  [
+    "/files/editor?path=%2Fsrv%2Ffixture%2Fcompose.yaml",
+    mockEditorFile,
+    (page) => editor(page).filter({ hasText: "image: nginx:1.27" }),
+  ],
+  ["/files/trash", mockTrash, (page) => page.getByText("The Trash is empty")],
+  [
+    "/git?repo=%2Fsrv%2Fjust-dashboard",
+    (page) => mockPanel(page),
+    (page) => page.locator("[data-slot=changes-panel]").getByText("history-panel.tsx"),
+  ],
+  ["/excalidraw/1", mockBoard, (page) => page.getByLabel("Rollout drawing canvas")],
+  [
+    "/network/tools?tool=ping&target=192.0.2.9",
+    (page) => mockNetwork(page),
+    (page) => page.getByRole("heading", { name: "Ping", exact: true }),
+  ],
+  [
+    `/logs?source=${encodeURIComponent(PG)}`,
+    (page) => mockLensLogs(page),
+    (page) => page.locator("[data-slot=host-identity]").getByText("postgresql-16-main.log"),
+  ],
+  [
+    `/remote-desktop/${OFFICE}`,
+    (page) => mockRemoteDesktop(page),
+    // The computer's session as read; the screen itself waits on guacd's
+    // socket, which this fixture does not open.
+    (page) => page.getByRole("complementary", { name: "Session" }).getByText("office-pc"),
+  ],
+  [
+    "/deploy/7/logs",
+    (page) => mockProject(page, { showcase: true }),
+    (page) => page.locator("[data-slot=request-chart]"),
+  ],
+  [
+    "/databases/1/data?schema=public&table=orders",
+    mockLoadedDatabases,
+    (page) => page.locator("[data-slot=data-grid] [data-row='1']").first(),
+  ],
+  ["/databases/1/query", mockLoadedDatabases, editor],
+  [
+    "/databases/1/schema?schema=public&table=orders",
+    mockLoadedDatabases,
+    (page) => page.locator("[data-slot=columns-table]").getByText("customer_id"),
+  ],
+  [
+    "/databases/1/diagram?schema=public",
+    mockLoadedDatabases,
+    (page) => page.locator('.react-flow__node[data-id="public.orders"]'),
+  ],
+  [
+    "/databases/1/logs?view=queries",
+    mockLoadedDatabases,
+    (page) => page.getByText("No slow statements in the last 24h"),
+  ],
+  [
+    "/databases/4/data",
+    mockLoadedDatabases,
+    (page) => page.locator("[data-slot=redis-key-rail]").getByText("greeting"),
+  ],
+  [
+    "/databases/4/query",
+    mockLoadedDatabases,
+    (page) =>
+      page.locator("[data-slot=redis-command-helper]").getByRole("button", { name: "string 1" }),
+  ],
+  [
+    "/databases/5/data",
+    mockLoadedDatabases,
+    (page) => page.locator("[data-slot=collection-rail]").getByText("orders"),
+  ],
+  [
+    "/databases/5/schema",
+    mockLoadedDatabases,
+    (page) => page.locator("[data-slot=collection-rail]").getByText("orders"),
+  ],
 ]
 
-for (const [path, mock] of HELD_TO_THE_WINDOW) {
+for (const [path, mock, ready] of HELD_TO_THE_WINDOW) {
   test(`nothing on ${path} draws a frame inside the sheet`, async ({ page }) => {
     await page.setViewportSize({ width: 1440, height: 900 })
     await mock(page)
     await page.goto(path)
-    await expect(page.locator("[data-slot=page]").first()).toBeVisible({ timeout: 15_000 })
+    // The page with its reads landed, not its error or its loading state.
+    await expect(ready(page).first()).toBeVisible({ timeout: 20_000 })
+    await expect(
+      page.locator("[role=alert]").filter({ hasText: "Something went wrong" }),
+    ).toHaveCount(0)
     // At rest: a frame drawn only once the reads land is the one to find.
     await expect
       .poll(
@@ -1855,7 +2181,6 @@ for (const [path, mock] of HELD_TO_THE_WINDOW) {
         { timeout: 10_000 },
       )
       .toBe(0)
-      .catch(() => undefined)
     await page.waitForLoadState("networkidle", { timeout: 2_500 }).catch(() => undefined)
     await risen(page)
     expect(await framesAlongTheSheet(page), `frames along the sheet's edge on ${path}`).toEqual([])
