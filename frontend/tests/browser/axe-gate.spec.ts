@@ -44,6 +44,7 @@ import { mockStackDetail } from "./stack-detail-fixture"
 import { mockStacks } from "./stacks-fixture"
 import { mockSystemUsers } from "./system-users-fixture"
 import { mockWorkbench } from "./workbench-fixture"
+import { KNOWN } from "./axe-known"
 
 /**
  * The accessibility gate: axe on every page the fixtures reach, failing on a
@@ -494,85 +495,106 @@ async function settle(page: Page) {
 }
 
 /**
- * What axe finds today that the pages' owners fix, by route and rule, each
- * with the analysis finding that holds it. Nothing outside this list may
- * fail, and an entry that no longer fails fails the gate too, so the list
- * only ever shrinks: a fix lands with its line taken out.
+ * The finding in the UI-system analysis that holds each rule `KNOWN` lists.
  *
  * A11Y-05, label in name (WCAG 2.5.3): a control whose `aria-label` does not
  * begin with the words it shows, so a person who speaks the words they see
  * is not understood. The shell's were fixed in 0.9.0 (the account card, the
- * search); these are the pages' own, most of them from three shared rows: a
- * rail's row (`components/rail.tsx`, named by `label` over its title), a
+ * search); the pages' own are most of them from three shared rows: a rail's
+ * row (`components/rail.tsx`, named by `label` over its title), a
  * `ChoiceRow`'s link (named by its `verb`, "Open ens3", over a title with
  * more words in it) and the process and service tables' row links.
  */
-const LABEL_IN_NAME = "label-content-name-mismatch"
-const KNOWN: Record<string, { rule: string; finding: string }[]> = Object.fromEntries(
-  [
-    "overview",
-    "backups__job",
-    "logs--insights",
-    "metrics",
-    "databases__id",
-    "databases__4",
-    "deploy__id",
-    "deploy__id__deployments",
-    "docker__containers",
-    "docker__containers__id",
-    "docker__events",
-    "docker__images",
-    "docker__images__id",
-    "docker__networks__name",
-    "docker__stacks",
-    "docker__volumes",
-    "docker__volumes__name",
-    "network__connections",
-    "network__connections__address",
-    "network__dns__services",
-    "network__dns__services__id",
-    "network__gateway",
-    "network__interfaces",
-    "network__interfaces__name",
-    "network__traffic--ebpf",
-    "network__traffic__containers__name",
-    "network__traffic__ebpf__id",
-    "network__vpn__tunnel",
-    "packages__name",
-    "processes__pm2__app",
-    "processes__services__unit",
-    "proxy__certificates__name",
-    "proxy__ports",
-    "proxy__ports__port",
-    "proxy__sites",
-    "proxy__sites__name",
-    "security__intrusion__jails__jail",
-    "system-users__groups",
-    "system-users__groups__name",
-    "system-users__user__name",
-    "deploy__id at 390",
-    "processes__pm2__app at 390",
-  ].map((name) => [name, [{ rule: LABEL_IN_NAME, finding: "A11Y-05" }]]),
-)
+const FINDING: Record<string, string> = {
+  "label-content-name-mismatch": "A11Y-05",
+}
 
-async function serious(page: Page) {
-  const result = await new AxeBuilder({ page }).analyze()
-  return result.violations
-    .filter((violation) => violation.impact === "serious" || violation.impact === "critical")
-    .map((violation) => ({
-      rule: violation.id,
-      impact: violation.impact,
-      help: violation.help,
-      nodes: violation.nodes.slice(0, 5).map((node) => ({
-        target: node.target.join(" "),
-        html: node.html.slice(0, 160),
-        why: node.failureSummary?.split("\n").slice(1, 3).join(" ").trim(),
-      })),
-    }))
+type Violation = {
+  rule: string
+  impact: string | null | undefined
+  help: string
+  nodes: { element: string; target: string; html: string; why: string | undefined }[]
 }
 
 /**
- * Reads the page with axe and holds it to the gate, less what `KNOWN` names for it.
+ * An element's name with what the fixtures' clocks move taken out: a date, a
+ * time of day and an age. A fixture reads the clock when it loads, so a
+ * backup run named "Run 100, success, Nov 25, 2026 11:55" today is another
+ * name tomorrow.
+ */
+function steady(name: string): string {
+  return name
+    .replace(/\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) \d{1,2}(?:, \d{4})?/g, "<date>")
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2})?\b/g, "<time>")
+    .replace(
+      /\b\d+(?:\.\d+)? ?(?:s|m|h|d|w|sec|secs|seconds?|min|mins|minutes?|hours?|days?|weeks?|months?|years?) ago\b/g,
+      "<age>",
+    )
+}
+
+/**
+ * Every serious or critical violation axe finds, with every node it names.
+ * Each node is named as the element it is, its tag and its `aria-label`
+ * (`button "Where this event came from"`), which is what `KNOWN` holds it by:
+ * axe's own target is a CSS path, and for one node in five it is made of
+ * Tailwind classes, child positions or React's generated ids, which a restyle
+ * or another render order changes. A node with no label of its own keeps
+ * axe's target.
+ */
+async function serious(page: Page): Promise<Violation[]> {
+  const result = await new AxeBuilder({ page }).analyze()
+  const violations = result.violations.filter(
+    (violation) => violation.impact === "serious" || violation.impact === "critical",
+  )
+  const targets = violations.flatMap((violation) =>
+    violation.nodes.map((node) => node.target.join(" ")),
+  )
+  const elements = await page.evaluate(
+    (targets) =>
+      targets.map((target) => {
+        let found: Element | null = null
+        try {
+          found = document.querySelector(target)
+        } catch {
+          // A target in a frame or a shadow root is not a selector of this document.
+        }
+        const label = found?.getAttribute("aria-label")?.replace(/\s+/g, " ").trim()
+        return found && label ? `${found.tagName.toLowerCase()} "${label}"` : target
+      }),
+    targets,
+  )
+  const named = elements.map(steady)
+  let at = 0
+  return violations.map((violation) => ({
+    rule: violation.id,
+    impact: violation.impact,
+    help: violation.help,
+    nodes: violation.nodes.map((node) => ({
+      element: named[at++],
+      target: node.target.join(" "),
+      html: node.html.slice(0, 160),
+      why: node.failureSummary?.split("\n").slice(1, 3).join(" ").trim(),
+    })),
+  }))
+}
+
+/** How many of each element fail each rule. */
+function tally(found: Violation[]) {
+  const counts = new Map<string, Map<string, number>>()
+  for (const violation of found) {
+    const rule = counts.get(violation.rule) ?? new Map<string, number>()
+    for (const node of violation.nodes) rule.set(node.element, (rule.get(node.element) ?? 0) + 1)
+    counts.set(violation.rule, rule)
+  }
+  return counts
+}
+
+/**
+ * Reads the page with axe and holds it to the gate, less the elements `KNOWN`
+ * names for it. Every node axe reports is compared, element by element: a
+ * second control failing a rule the route already has in the list fails the
+ * gate, and so does one fixed among several until its count comes down, so
+ * the list only ever shrinks.
  *
  * A known violation is often in something a later read draws with no bone
  * standing for it (the ad-blocker's row on DNS services), so on a busy
@@ -583,9 +605,19 @@ async function serious(page: Page) {
  */
 async function gate(page: Page, key: string, url: string) {
   let found = await serious(page)
-  const known = KNOWN[key] ?? []
-  const gone = () =>
-    known.filter((entry) => !found.some((violation) => violation.rule === entry.rule))
+  const known = KNOWN[key] ?? {}
+  const gone = () => {
+    const counts = tally(found)
+    return Object.entries(known).flatMap(([rule, elements]) =>
+      Object.entries(elements)
+        .map(([element, count]) => ({
+          rule,
+          element,
+          fixed: count - (counts.get(rule)?.get(element) ?? 0),
+        }))
+        .filter((entry) => entry.fixed > 0),
+    )
+  }
   if (gone().length > 0) {
     await expect
       .poll(
@@ -598,12 +630,31 @@ async function gate(page: Page, key: string, url: string) {
       .toBe(0)
       .catch(() => undefined)
   }
-  const fresh = found.filter((violation) => !known.some((entry) => entry.rule === violation.rule))
+  const counts = tally(found)
+  // The elements past what the list allows, each with its nodes; at most five
+  // of them are printed, which is all a report needs to say where.
+  const fresh = found.flatMap((violation) => {
+    const elements = [...new Set(violation.nodes.map((node) => node.element))]
+    return elements
+      .map((element) => ({
+        rule: violation.rule,
+        impact: violation.impact,
+        help: violation.help,
+        element,
+        found: counts.get(violation.rule)?.get(element) ?? 0,
+        known: known[violation.rule]?.[element] ?? 0,
+        nodes: violation.nodes.filter((node) => node.element === element).slice(0, 5),
+      }))
+      .filter((entry) => entry.found > entry.known)
+  })
   expect(fresh, `serious or critical axe violations on ${url}`).toEqual([])
   const fixed = gone()
   expect(
-    fixed.map((entry) => `${entry.rule} (${entry.finding})`),
-    `fixed on ${key}: take these out of KNOWN in axe-gate.spec.ts`,
+    fixed.map(
+      ({ rule, element, fixed }) =>
+        `${rule} (${FINDING[rule] ?? "no finding"}): ${element}${fixed > 1 ? ` ×${fixed}` : ""}`,
+    ),
+    `fixed on ${key}: take these out of KNOWN in axe-known.ts, or lower their count`,
   ).toEqual([])
 }
 
