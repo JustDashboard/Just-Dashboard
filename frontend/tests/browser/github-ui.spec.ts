@@ -298,6 +298,24 @@ test.describe("connected", () => {
     await expect(page.locator("[data-slot=github-profile]")).toContainText("Mira")
   })
 
+  test("the picker keeps the view the page is on", async ({ page }) => {
+    await page.setViewportSize({ width: 1440, height: 900 })
+    await mockGitHubPage(page)
+    await page.goto("/github?account=2&tab=pulls")
+    await identity(page)
+      .getByRole("button", { name: /Account @mira-work/ })
+      .click()
+    await page.getByRole("menuitemcheckbox", { name: /@mira-dev/ }).click()
+    // The address names the view as well as the account: one that names only
+    // the account is the Overview, which a mounted page now follows.
+    await expect(page).toHaveURL(/\/github\?account=1&tab=pulls$/)
+    await expect(page.getByRole("tab", { name: /^Pull requests/ })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    await expect(page.locator("[data-slot=github-inbox-pull]")).toBeVisible()
+  })
+
   test("a spent rate limit says when it lifts", async ({ page }) => {
     await mockGitHubPage(page, {
       list: async (route) => {

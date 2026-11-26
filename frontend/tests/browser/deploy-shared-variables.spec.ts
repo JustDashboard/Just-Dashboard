@@ -314,6 +314,51 @@ test("a project's variables page holds its shared ones and picks a shared refere
   expect(await overflow(page)).toBeLessThanOrEqual(1)
 })
 
+test("a picture opened on a phone and widened past lg lays its rows by the room it has then", async ({
+  page,
+}) => {
+  // Three page loads and four resizes, each waited out: on a busy machine that is a minute.
+  test.setTimeout(120_000)
+  await page.emulateMedia({ reducedMotion: "reduce" })
+  await mockProject(page, { showcase: true })
+  await mockShared(page)
+  const picture = page.locator("[data-slot=wire-flow]").first()
+  const laid = async () => {
+    await risen(page)
+    return picture.evaluate((root) => ({
+      form: root.getAttribute("data-form"),
+      nodes: [...root.querySelectorAll("li")].map((node) => {
+        const box = node.getBoundingClientRect()
+        return [Math.round(box.left), Math.round(box.top)]
+      }),
+    }))
+  }
+  const size = (width: number) => ({ width, height: width < 1024 ? 844 : 1000 })
+
+  // Each wide width as a page opened at it lays the picture.
+  const fresh = new Map<number, Awaited<ReturnType<typeof laid>>>()
+  for (const width of [1720, 1100]) {
+    await page.setViewportSize(size(width))
+    await page.goto("/deploy/variables")
+    await expect(picture).toBeVisible()
+    fresh.set(width, await laid())
+  }
+  // The two differ, or the walk below would prove nothing.
+  expect(fresh.get(1720)).not.toEqual(fresh.get(1100))
+
+  // Opened on a phone, where the picture is marks and has no side to measure,
+  // then taken across lg and back without the page being opened again.
+  await page.setViewportSize(size(390))
+  await page.goto("/deploy/variables")
+  await expect(picture).toBeVisible()
+  await page.evaluate(() => Object.assign(window, { stayed: true }))
+  for (const width of [1720, 1100, 390, 1720]) {
+    await page.setViewportSize(size(width))
+    if (width >= 1024) await expect.poll(laid).toEqual(fresh.get(width))
+  }
+  expect(await page.evaluate(() => "stayed" in window)).toBe(true)
+})
+
 test("shared variables at 1280 and 390 @shots", async ({ page }) => {
   test.skip(!process.env.JD_SHOTS, "JD_SHOTS names the directory the pictures go in")
   const shot = (name: string) =>

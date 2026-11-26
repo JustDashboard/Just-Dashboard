@@ -11,9 +11,9 @@ import { DetailPage, siblingSteps } from "@/components/detail-page"
 import { FormFact, FormFacts } from "@/components/form"
 import { Modal } from "@/components/modal"
 import { EmptyState } from "@/components/state"
-import { ViewTabList } from "@/components/tabs"
+import { ViewTabs } from "@/components/tabs"
 import { Button } from "@/components/ui/button"
-import { Tabs, TabsContent } from "@/components/ui/tabs"
+import { TabsContent } from "@/components/ui/tabs"
 import { useLinkGuard, useUnloadGuard } from "@/components/database/data/guard"
 import {
   accessHref,
@@ -166,20 +166,21 @@ export function AccountFrame({
         title={`${conn.name} · ${page} · ${label}`}
         identity={identity}
       >
-        <Tabs value={tab} onValueChange={setTab} className="min-h-0 flex-1 gap-0">
-          <ViewTabList
-            label={`Views of ${label}`}
-            value={tab}
-            hideWhenSingle
-            views={views.map((view) => ({
-              key: view.key,
-              label: view.label,
-              count: view.count,
-              dot: view.unsaved ? { tone: "warning", label: "unsaved changes" } : undefined,
-            }))}
-          />
+        <ViewTabs
+          label={`Views of ${label}`}
+          value={tab}
+          onValueChange={setTab}
+          hideWhenSingle
+          rootClassName="min-h-0 flex-1"
+          views={views.map((view) => ({
+            key: view.key,
+            label: view.label,
+            count: view.count,
+            dot: view.unsaved ? { tone: "warning", label: "unsaved changes" } : undefined,
+          }))}
+        >
           {children(tab)}
-        </Tabs>
+        </ViewTabs>
       </DetailPage>
       <Modal
         open={leaving !== undefined}
@@ -246,6 +247,9 @@ export function AccountPane({
     <TabsContent
       value={view}
       forceMount={keep || undefined}
+      // The scroller from `xl`, inside the detail page's: a field reached by
+      // Tab stops short of the save bar here too (globals.css).
+      data-detail-scroll
       className={cn(
         "min-h-0 flex-1 pt-6 data-[state=inactive]:hidden xl:overflow-y-auto",
         // Room at the sides for what reaches past the column's edge — a

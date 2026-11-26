@@ -39,7 +39,11 @@ left, so the picture is as wide as its page. A node is a mark, an eyebrow, a nam
 detail. The hub's words hang under its mark out of the flow, and the picture holds the room they
 need under itself (`useHubRoom`).
 
-The wide picture takes one of two forms, chosen from the room a side has (`flowForm`):
+The wide picture takes one of two forms, chosen from the room a side has (`flowForm`). That room
+is the start side's width, measured as the side mounts and followed as it resizes (`useWidth`,
+handed the side through a callback ref): a `phone="marks"` picture opened below `lg` has no side
+until the window crosses `lg`, and one that crosses back and on again is a new side, so a width
+read once from a ref object kept the three-across guess.
 
 - **Rows**, wherever a side holds its nodes in one row or has room for three across. Each side is
   rows of nodes, as many to a row as fit (`perRow`, evened out: five are three and two), a node's

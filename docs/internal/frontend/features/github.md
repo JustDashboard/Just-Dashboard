@@ -31,7 +31,8 @@ reader already has. It opens on its identity line in every state: the GitHub mar
 facts. Connected, the facts are `@login · 9 repositories · 4 private · 1 archived` (`accountFacts`,
 from `repositoryCounts`), a warning "Sign-in ended" first when the account's sign-in is over; with
 several connections the login is the account picker (a menu of every connection with its state,
-written to `?account=`; the default is the first active one, `pickConnection`). The command is
+written to `?account=` with the view the page is on, `viewHref`; the default is the first active
+one, `pickConnection`). The command is
 **New** (a repository; `service.control`), its icon alone on a phone. `⋯` holds Connect another
 account, Sign in with a code, Refresh, Install on another account, App settings (administrator),
 Disconnect @login (ordinary confirmation) and Remove GitHub setup (administrator, ordinary
@@ -220,9 +221,10 @@ and as read-only, Connect posting the origin, the code sign-in through to the ne
 device flow off, the callback posting once and a cancel explained, the identity line's counts,
 search, chips, owner, language and sort, Show more holding still, every card one height at 1440 and
 390, the server mark on exactly the two cloned repositories and a menu of words, the expired
-account's Reconnect and the account picker, the rate limit's time, a partial installation, the
-access list and `?installed=1`, Disconnect; the Overview's profile, calendar (53 weeks on a desk,
-fewer at one height on a phone, the day under the pointer), recent cards, previews and activity, and
+account's Reconnect and the account picker (which keeps the view), the rate limit's time, a
+partial installation, the access list and `?installed=1`, Disconnect; the Overview's profile,
+calendar (53 weeks on a desk, fewer at one height on a phone, the day under the pointer), recent
+cards, previews and activity, and
 the main column holding still while the profile lands; the pull requests' and issues' filters,
 states, glyphs, where a row opens, and rows of one height, the filter and state kept in the address,
 the list's refresh button and the page's Refresh both reading past the server's minute of memory,

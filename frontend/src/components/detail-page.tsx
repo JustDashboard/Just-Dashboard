@@ -91,7 +91,7 @@ export function stepCommands(
  * rather than pushed: a view is not a place Back steps through, and a write
  * held back by a debounce would cancel a navigation the router has pending.
  * An address that changes under the page (a link to another view of the same
- * thing) is followed.
+ * thing, or to the bare page) is followed, by the same rules it opens on.
  *
  * With `remember`, the last view is kept under that key and a page opened
  * without `?tab=` opens on it. With `keepMounted`, the third value is the
@@ -104,12 +104,16 @@ export function useDetailTab<T extends string>(
   const search = useSearchParams()
   const first = tabs[0]
   const [remembered, keep] = useViewState<string>(remember ?? "detail-page.tab", first)
-  const requested = search.get(param) ?? (remember ? remembered : first)
-  const [chosen, setChosen] = useState<string>(requested)
-  const [seen, setSeen] = useState(search.get(param))
-  if (search.get(param) !== seen) {
-    setSeen(search.get(param))
-    if (search.get(param) !== null) setChosen(search.get(param) as string)
+  const asked = search.get(param)
+  // A bare address opens on the remembered view, or the first.
+  const bare = remember ? remembered : first
+  const [chosen, setChosen] = useState<string>(asked ?? bare)
+  const [seen, setSeen] = useState(asked)
+  if (asked !== seen) {
+    setSeen(asked)
+    // The bare address is followed too, by the rule it opens on: a page
+    // left mounted on `?tab=ports` and handed its bare address showed Ports.
+    setChosen(asked ?? bare)
   }
   const tab = (tabs as readonly string[]).includes(chosen) ? (chosen as T) : first
   const [visited, setVisited] = useState<ReadonlySet<T>>(() => new Set([tab]))
@@ -238,7 +242,12 @@ export function DetailPage({
               )}
               {identity}
             </div>
-            <div className="flex min-w-0 flex-col gap-8 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1">
+            {/* The scroller from `xl`, so it keeps a focused field clear of
+                the bottom stack's bars (globals.css). */}
+            <div
+              data-detail-scroll
+              className="flex min-w-0 flex-col gap-8 xl:min-h-0 xl:flex-1 xl:overflow-y-auto xl:pr-1"
+            >
               {children}
             </div>
           </div>

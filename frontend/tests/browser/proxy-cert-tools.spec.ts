@@ -57,6 +57,47 @@ async function openMenu(page: Page) {
   await page.getByRole("button", { name: "Other ways to get a certificate" }).click()
 }
 
+test("on a phone each half of the Issue command says its own name, over itself", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/certificates")
+  const line = page.locator("[data-slot=host-identity], [data-layout=project]").first()
+  const issue = line.getByRole("button", { name: "Issue certificate", exact: true })
+  const others = line.getByRole("button", { name: "Other ways to get a certificate" })
+  await expect(issue).toBeVisible()
+  const tip = page.getByRole("tooltip")
+  const says = async (half: typeof issue, words: string) => {
+    await expect(tip).toHaveText(words)
+    // The tip is anchored on the half it names, not on the pair, and stands
+    // over it (shifted along only as far as the screen's edge asks).
+    const at = (await half.boundingBox())!
+    const anchor = (await line.locator("[data-slot=command-tip-anchor]").boundingBox())!
+    for (const key of ["x", "y", "width", "height"] as const)
+      expect(Math.abs(anchor[key] - at[key])).toBeLessThan(1)
+    const box = (await page.locator("[data-slot=tooltip-content]").boundingBox())!
+    expect(box.x).toBeLessThan(at.x + at.width)
+    expect(box.x + box.width).toBeGreaterThan(at.x)
+  }
+
+  await issue.hover()
+  await says(issue, "Issue certificate")
+  await others.hover()
+  await says(others, "Other ways to get a certificate")
+  await page.mouse.move(0, 0)
+  await expect(tip).toHaveCount(0)
+
+  // The keyboard, landing on each half in turn.
+  await issue.focus()
+  await page.keyboard.press("Tab")
+  await expect(others).toBeFocused()
+  await says(others, "Other ways to get a certificate")
+  await page.keyboard.press("Shift+Tab")
+  await expect(issue).toBeFocused()
+  await says(issue, "Issue certificate")
+})
+
 test("the Issue command keeps Let's Encrypt on its face and every other way behind it", async ({
   page,
 }) => {

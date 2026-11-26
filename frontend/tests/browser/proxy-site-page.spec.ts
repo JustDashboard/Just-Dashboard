@@ -75,6 +75,58 @@ test("a site opens on its Overview, and each view has an address", async ({ page
   )
 })
 
+test("under forced colours the chosen tab and log view are the system's selection, apart from the ring", async ({
+  page,
+}) => {
+  await page.emulateMedia({ forcedColors: "active" })
+  await mockProxy(page, { included: true })
+  await page.goto("/proxy/sites/app.example.com?tab=logs")
+  const paint = (locator: ReturnType<Page["locator"]>) =>
+    locator.evaluate((node) => {
+      const style = getComputedStyle(node)
+      return {
+        fill: style.backgroundColor,
+        ink: style.color,
+        ring: style.outlineColor,
+        offset: style.outlineOffset,
+        gap: style.borderTopWidth,
+      }
+    })
+  const ground = await page
+    .locator("body")
+    .evaluate((node) => getComputedStyle(node).backgroundColor)
+  const views = page.getByRole("tablist", { name: "Views of app.example.com" })
+  const logView = page.getByRole("navigation", { name: "Log view" })
+  await expect(logView.getByRole("button", { pressed: true })).toBeVisible()
+  for (const [chosen, other] of [
+    [views.getByRole("tab", { name: "Logs" }), views.getByRole("tab", { name: "Overview" })],
+    [
+      logView.getByRole("button", { pressed: true }),
+      logView.getByRole("button", { pressed: false }).first(),
+    ],
+  ]) {
+    const on = await paint(chosen)
+    const off = await paint(other)
+    // Forced colours had painted both the same: the page's fill, the text's ink.
+    expect(on.fill).not.toBe(off.fill)
+    expect(on.fill).not.toBe(ground)
+    expect(on.ink).not.toBe(off.ink)
+    // The selection is a face, not a line: no ring until the keyboard comes.
+    expect(on.ring).toBe("rgba(0, 0, 0, 0)")
+  }
+
+  // Focus on the chosen tab is a ring in the gap round the face, 2px clear of it.
+  const logs = views.getByRole("tab", { name: "Logs" })
+  await logs.focus()
+  await page.keyboard.press("Tab")
+  await page.keyboard.press("Shift+Tab")
+  await expect(logs).toBeFocused()
+  const focused = await paint(logs)
+  expect(focused.ring).not.toBe("rgba(0, 0, 0, 0)")
+  expect(focused.offset).toBe("-2px")
+  expect(focused.gap).toBe("4px")
+})
+
 test("the line a site opens on carries its state, one command and the rest in a menu", async ({
   page,
 }) => {
@@ -411,6 +463,48 @@ test("a site that keeps no log of its own says so in one line, with the way to t
   await note.getByRole("link", { name: "Turn it on" }).click()
   await expect(page).toHaveURL(/tab=settings&view=hardening$/)
   await expect(page.getByRole("switch", { name: "Access log" })).toBeVisible()
+})
+
+test("from xl a field reached by Tab stops short of the save bar over the page's own scroller", async ({
+  page,
+}) => {
+  // A Tab and a read for each stop of the form: on a busy machine that is a minute.
+  test.setTimeout(120_000)
+  await page.setViewportSize({ width: 1440, height: 760 })
+  await mockProxy(page, { included: true })
+  await inStep(page)
+  await page.goto("/proxy/sites/app.example.com?tab=settings")
+  const first = page.getByLabel("Send it to")
+  await first.fill("http://127.0.0.1:4000")
+  await expect(bar(page)).toContainText("1 unsaved change")
+  // From xl the head holds still and the detail page's body is what scrolls,
+  // with the bar portalled over it: the shell's own inset never reaches it.
+  const body = page.locator("[data-detail-scroll]")
+  expect(await body.evaluate((node) => node.scrollHeight > node.clientHeight + 100)).toBe(true)
+  const barTop = (await bar(page).boundingBox())!.y
+
+  await first.focus()
+  let reached = 0
+  for (let step = 0; step < 80; step++) {
+    await page.keyboard.press("Tab")
+    const at = await page.evaluate(() => {
+      const node = document.activeElement
+      // The bar comes after the form: the whole form has been walked.
+      if (node?.closest('[role="region"][aria-label="Save changes"]')) return "bar"
+      if (!node?.closest('[data-slot="site-settings"]')) return null
+      const box = node.getBoundingClientRect()
+      if (box.height === 0) return null
+      const name = node.getAttribute("aria-label") ?? node.id ?? ""
+      return { name: `${node.tagName} ${name} ${node.textContent?.slice(0, 30) ?? ""}`, box }
+    })
+    if (at === "bar") break
+    if (!at) continue
+    reached += 1
+    expect(at.box.bottom, `${at.name} is under the bar`).toBeLessThanOrEqual(barTop)
+  }
+  // Far enough down the form that the body had to scroll.
+  expect(reached).toBeGreaterThan(5)
+  expect(await body.evaluate((node) => node.scrollTop)).toBeGreaterThan(0)
 })
 
 test("a site's Settings and its save bar fit a phone", async ({ page }) => {

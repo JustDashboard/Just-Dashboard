@@ -261,9 +261,11 @@ export function GitHubListPage() {
 
   const registered = !origin || githubCallbackRegistered(setup.data, origin)
 
+  // Another account opens on the view the page is on. The address says which:
+  // one without `?tab=` is the Overview, and the mounted page follows it.
   const goToAccount = useCallback(
-    (id: number | undefined) => router.replace(id ? `/github?account=${id}` : "/github"),
-    [router],
+    (id: number | undefined) => router.replace(id ? viewHref(id, tab) : "/github"),
+    [router, tab],
   )
 
   const connect = async () => {
