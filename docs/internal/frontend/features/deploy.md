@@ -184,7 +184,9 @@ alone, its stages a select at every width (the rail of stages beside it went in 
 `--mount` flags are drawn faint, BuildKit's per-instruction clock gives way to the console's
 elapsed column, and a thrown error's kind (`TypeError:`) is an error line the Errors filter finds
 (`build-console.tsx`, `transcript-line.tsx`, `lib/transcript.ts`). Details lists only the steps that ran:
-the ones the plan skipped are a list under them, each beside its reason, the ones the run did not
+the ones the plan skipped are a list under them, each beside its reason (a skip that did something
+first, such as preview cleanup removing the route and address of a preview with no live release, is a
+row with its record instead, `run-step-rows.ts`), the ones the run did not
 reach — or has not reached yet — one line of names, a stage with no step that ran is not drawn, and
 before any step starts Details is not drawn at all. A step's record shows a failed step's excerpt, a
 running step's newest lines and a short step's whole output, and leaves a long passing output to the
