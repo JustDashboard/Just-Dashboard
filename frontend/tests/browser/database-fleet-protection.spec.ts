@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
-import { backupJob, mockFleet } from "./database-fleet-fixture"
+import { backupJob, mockFleet, refusal } from "./database-fleet-fixture"
 import { risen } from "./risen"
 
 /**
@@ -168,12 +168,18 @@ test.describe("what protects the databases", () => {
       ],
     }))
     await page.reload()
-    await expect(backups).toContainText("The last run of Databases failed just now")
-    // The line takes the warning's tone: its dot and its words.
+    // The failure is the reading, in the warning's tone, and the schedule is its detail.
     await expect(backups).toHaveAttribute("data-tone", "warning")
-    await expect(backups.getByText("All 5 backed up every day at 03:00")).toHaveClass(
+    await expect(backups.getByText("The last run of Databases failed just now")).toHaveClass(
       /text-warning/,
     )
+    await expect(backups).toContainText("All 5 scheduled every day at 03:00")
+    await expect(backups).not.toContainText("backed up")
+
+    // On a phone the detail gives way: what is left still says the run failed.
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(backups.getByText("The last run of Databases failed just now")).toBeVisible()
+    await expect(backups.getByText("All 5 scheduled every day at 03:00")).toBeHidden()
   })
 
   test("Turn on adds the usual rules over every database, and none beside one somebody paused", async ({
@@ -225,6 +231,47 @@ test.describe("what protects the databases", () => {
     )
   })
 
+  test("a Turn on that stops after its first rule keeps the press, and the next makes only the rest", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    let tried = 0
+    server.answer("POST /databases/alerts/rules", () => {
+      tried += 1
+      if (tried === 2) return refusal(500, "internal", "the store could not be written")
+    })
+    await page.goto("/databases")
+    await line(page, "Alerts").getByRole("button", { name: "Turn on" }).click()
+    await dialog(page).getByRole("button", { name: "Turn on" }).click()
+    await expect(page.getByText("Turn on alerts for every database failed")).toBeVisible()
+    await dialog(page).getByRole("button", { name: "Cancel" }).click()
+
+    // The one rule made watches every database; the line does not call that done.
+    const alerts = line(page, "Alerts")
+    await expect(alerts).toContainText("1 of the 5 usual alerts on")
+    await expect(alerts).toContainText(
+      "Not on: disk filling up, connections near the limit and 2 more",
+    )
+    await expect(alerts).toHaveAttribute("data-tone", "warning")
+    await alerts.getByRole("button", { name: "Turn on alerts" }).click()
+    await expect(dialog(page)).not.toContainText("stops answering")
+    await expect(dialog(page)).toContainText("fills its disk past 90%")
+    await dialog(page).getByRole("button", { name: "Turn on" }).click()
+    await expect(dialog(page)).toHaveCount(0)
+
+    // Read again before it made anything: the rule that was there is not made twice.
+    expect(server.bodies("POST /databases/alerts/rules").map((one) => one.kind)).toEqual([
+      "down",
+      "disk",
+      "disk",
+      "connections",
+      "backup_failed",
+      "backup_missed",
+    ])
+    await expect(alerts).toContainText("Alerts have nowhere to go")
+    await expect(alerts.getByRole("button")).toHaveCount(0)
+  })
+
   test("watched and told: the line names the channels, and what is firing comes first", async ({
     page,
   }) => {
@@ -241,8 +288,12 @@ test.describe("what protects the databases", () => {
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     })
+    // Every usual kind over every database: fewer is a Turn on still to finish.
+    const usual = ["down", "disk", "connections", "backup_failed", "backup_missed"].map((kind, i) =>
+      rule(i + 1, kind),
+    )
     const server = await mockFleet(page, {
-      alerts: { rules: [rule(1, "down"), rule(2, "disk")] },
+      alerts: { rules: usual },
       channels: [
         { id: 1, name: "Ops Slack", kind: "slack", enabled: true },
         { id: 2, name: "Old pager", kind: "webhook", enabled: false },
@@ -251,12 +302,12 @@ test.describe("what protects the databases", () => {
     await page.goto("/databases")
     const alerts = line(page, "Alerts")
     await expect(alerts).toContainText("All 5 watched")
-    await expect(alerts).toContainText("2 rules · told to Ops Slack")
+    await expect(alerts).toContainText("5 rules · told to Ops Slack")
     await expect(alerts.getByRole("button")).toHaveCount(0)
 
     server.answer("GET /databases/alerts", () => ({
       body: {
-        rules: [rule(1, "down"), rule(2, "disk")],
+        rules: usual,
         subjects: [
           {
             ruleId: 2,

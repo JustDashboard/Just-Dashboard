@@ -51,6 +51,8 @@ import {
   millis,
   rowsPerCall,
   shareWords,
+  statementAt,
+  statementIdOf,
   statementKeys,
   statementSorts,
 } from "@/components/database/ops/performance-figures"
@@ -115,13 +117,17 @@ function Statement({ address }: { address: string | null }) {
   )
   const data = statements.data
   // A row is addressed by a key no other row has: the engine's digest names
-  // a statement twice when it ran in two schemas.
+  // a statement twice when it ran in two schemas or for two roles, and the
+  // engine says which of them a row is.
   const keyed = useMemo(() => {
     const list = data?.statements ?? []
     const keys = statementKeys(list)
     return list.map((statement, index) => ({ key: keys[index], statement }))
   }, [data])
-  const found = address === null ? undefined : keyed.find((row) => row.key === address)?.statement
+  const at = useMemo(() => statementAt(keyed, address), [keyed, address])
+  const found = at?.statement
+  // The rail's row for it: an id-alone address names a row by another key.
+  const current = at?.key ?? address
   // Held as last seen: a statement that drops out of the top of the list
   // while its page is open is still the one being read.
   const [kept, setKept] = useState<DbStatement | null>(null)
@@ -130,8 +136,8 @@ function Statement({ address }: { address: string | null }) {
 
   const recorder = engine.can("statementHistory")
   // The recorder knows a statement by the engine's own id, which a key holds
-  // with its place after it where two rows share one.
-  const engineId = listed?.id ?? (address ?? "").replace(/~\d+$/, "")
+  // with the row's variant after it where two rows share one.
+  const engineId = listed?.id ?? statementIdOf(address ?? "")
   const views = useMemo<DetailView<Tab>[]>(
     () => [
       { key: "figures", label: "Figures" },
@@ -182,7 +188,7 @@ function Statement({ address }: { address: string | null }) {
     title: `${conn.name} · Statement`,
     back,
     noun: "statement",
-    step: stepOf(rows, address),
+    step: stepOf(rows, current),
   }
   const rail = (
     <DetailRail
@@ -192,7 +198,7 @@ function Statement({ address }: { address: string | null }) {
       onQuery={setFilter}
       caption={caption}
       rows={rows}
-      current={address}
+      current={current}
       pinned={pinned}
       loading={!data && !statements.error}
       error={statements.data ? undefined : statements.error}

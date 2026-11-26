@@ -325,6 +325,53 @@ export function afterSetAside(body: string, plan: SeedPlan): string | undefined 
   return JSON.stringify(request)
 }
 
+/**
+ * What a plan said of a choice it set aside, kept for the plan that follows
+ * it: said of the request it answered (`from`) and of the one asked next
+ * without that choice (`key`).
+ */
+export type SetAsideNote = {
+  /** The answer that said it: a later answer saying it again is said again. */
+  answer: object
+  from: string
+  key: string
+  warnings: string[]
+  /** The reader changed something since: it is not said again, whatever they change back. */
+  gone: boolean
+}
+
+/**
+ * The note as the request moves on. The page's own refresh, which drops the
+ * choice, keeps it (`from` to `key`); the first change the reader makes
+ * anywhere else ends it, so a request that comes back to `key` — a count
+ * changed and changed back — does not bring it back with it. Returns the
+ * note it was given when nothing changed.
+ */
+export function nextSetAsideNote(
+  note: SetAsideNote | undefined,
+  answer: { key: string; after?: string; plan: SeedPlan } | undefined,
+  wanted: string,
+): SetAsideNote | undefined {
+  if (answer?.after && note?.answer !== answer) {
+    return {
+      answer,
+      from: answer.key,
+      key: answer.after,
+      warnings: answer.plan.warnings,
+      gone: wanted !== answer.key && wanted !== answer.after,
+    }
+  }
+  if (note && !note.gone && wanted !== note.key && wanted !== note.from) {
+    return { ...note, gone: true }
+  }
+  return note
+}
+
+/** What the note adds to the plan on screen: its warnings, under the request it was kept for. */
+export function setAsideWarnings(note: SetAsideNote | undefined, wanted: string): string[] {
+  return note && !note.gone && note.key === wanted ? note.warnings : []
+}
+
 /** What a request asked each table's columns to be filled with. */
 export function requestedChoices(body: string): SeedChoices {
   const parsed = JSON.parse(body) as {

@@ -38,7 +38,9 @@ in one framed block of two single lines what protects the databases. **Backups**
 dashboard can dump is in a backup job that runs by itself (switched on, on a schedule, this
 server's own: a paused job, one run by hand and one imported from a destination protect nothing),
 and says when — "All 6 backed up every day at 03:00", the last run's age and size and the next —
-or how many are not, naming them. **Alerts** reads whether a switched-on rule watches every
+or how many are not, naming them. A last run that failed is the reading itself ("The last run of
+Databases failed 2h ago", the schedule after it), since the names and the schedule give way on a
+phone and the schedule alone read as a backup that exists. **Alerts** reads whether a switched-on rule watches every
 database, and whether a notification channel would hear it: "All 6 watched" with the rules and the
 channels told, "Alerts have nowhere to go" (a way to Notification channels) when none is on, and
 what is firing before anything else, as the database and the kind ("blog: disk filling up"), a way
@@ -54,7 +56,10 @@ backup form's own defaults — and starts its run at once, so "never backed up" 
 than tonight; a job that also archives files is never added to. *Turn on alerts* creates rules over every
 database (`connectionId: null`) for down, disk, connections and a failed or missed backup, with
 each kind's defaults and every switched-on channel, skipping a kind that already has such a rule,
-paused or not, and its question says when no channel is on yet. Both ask first, naming what they
+paused or not, and its question says when no channel is on yet. It reads the rules again before it
+makes any, and stays offered while one of those kinds has no such rule: a Turn on that stopped after
+its first rule had every database read as watched, so the line says "1 of the 5 usual alerts on"
+with the rest named, and the next press makes only those. Both ask first, naming what they
 will make. Anyone else reads the same lines as ways to Backups and the Alerts page. Both lines are
 one height in every state, the press shorter than the line, so the cards under them hold still as
 the jobs, the rules and the channels are read. They took the place, in 0.9.1 at the operator's
@@ -129,7 +134,9 @@ had no scale and read as noise. A card with no size known says nothing of it, an
 stands as tall as the rest. A collector that could not read
 (*Found on this server*) is drawn as the product draws any missing thing: Docker's own unavailable
 state with the step that fixes it (`DockerMissing`), the daemon's sentence folded away, and no
-claim that everything found is connected. A database home starts with its
+claim that everything found is connected. A Docker that answers its ping while its listing failed
+is that collector's own failure instead, with what it answered and *Try again*, until the inventory
+reports it read. A database home starts with its
 header, then a picture of how it is used with one line each for what it runs as, where it is reachable
 from and its dumps, its recorded activity as lines, its server log, its rankings and the server's
 other databases (below). Activity is recorded by the backend every 30 seconds

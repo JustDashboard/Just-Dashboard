@@ -68,22 +68,49 @@ export function exportProgress(name: string, toastId: string | number) {
     notify.raw.loading(`Exporting ${name}… ${bytes(received)}`, { id: toastId })
 }
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+/** A wait that ends at once, by throwing, when `signal` is aborted. */
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    signal?.throwIfAborted()
+    const timer = setTimeout(() => {
+      signal?.removeEventListener("abort", stop)
+      resolve()
+    }, ms)
+    function stop() {
+      clearTimeout(timer)
+      reject(signal?.reason)
+    }
+    signal?.addEventListener("abort", stop, { once: true })
+  })
+}
 
 /**
  * The server's record of how an export went, once it has stopped running.
  * `null` when it has none (it restarted, or has forgotten): the file's own
  * end mark then answers.
+ *
+ * Throws when `signal` is aborted, as `streamExport` does: the loading toast
+ * still offers Cancel while this asks, and a reader who pressed it then is
+ * not handed the file once the record lands.
  */
-export async function settledExport(dbId: number, exportId: string): Promise<DbExportState | null> {
+export async function settledExport(
+  dbId: number,
+  exportId: string,
+  signal?: AbortSignal,
+): Promise<DbExportState | null> {
   for (let attempt = 0; attempt < 10; attempt++) {
     try {
-      const state = await get<DbExportState>(`/databases/${dbId}/export/status`, { exportId })
+      const state = await get<DbExportState>(
+        `/databases/${dbId}/export/status`,
+        { exportId },
+        signal,
+      )
       if (state.status !== "running") return state
-    } catch {
+    } catch (err) {
+      if (signal?.aborted) throw err
       return null
     }
-    await sleep(500)
+    await sleep(500, signal)
   }
   return null
 }
@@ -101,7 +128,17 @@ export function exportName(response: Response, fallback: string): string {
   return /filename="?([^";]+)"?/.exec(disposition)?.[1] ?? fallback
 }
 
-/** Hands the browser the finished file, under the server's name for it. */
-export function saveExport(blob: Blob, response: Response, fallbackName: string): void {
+/**
+ * Hands the browser the finished file, under the server's name for it. A
+ * `signal` that was aborted saves nothing and throws: Cancel pressed at any
+ * point before the save is a cancelled export, never a file.
+ */
+export function saveExport(
+  blob: Blob,
+  response: Response,
+  fallbackName: string,
+  signal?: AbortSignal,
+): void {
+  signal?.throwIfAborted()
   saveBlob(exportName(response, fallbackName), blob)
 }
