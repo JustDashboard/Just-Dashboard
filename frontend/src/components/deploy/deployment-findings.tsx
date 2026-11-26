@@ -8,6 +8,7 @@ import type { DeploymentPreflightFinding } from "@/lib/types"
 import { humanize } from "@/components/deploy/vocabulary"
 import { Status, type Verdict } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
+import { findingLinkLabel } from "@/lib/finding-destinations"
 
 /** A preflight finding's severity as the app's own four-value verdict scale. */
 export function findingVerdict(severity: DeploymentPreflightFinding["severity"]): Verdict {
@@ -125,7 +126,7 @@ export function FindingRow({
                 href={finding.deepLink}
                 className="rounded-sm underline underline-offset-2 focus-ring"
               >
-                Open owning page
+                {findingLinkLabel(finding.deepLink)}
               </Link>
             </>
           )}

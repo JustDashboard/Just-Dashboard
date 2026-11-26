@@ -18,7 +18,8 @@ import {
   type Socket,
 } from "@/components/proxy/ports"
 import { FirewallVerdict } from "@/components/proxy/ports-firewall"
-import { proxyWords } from "@/components/proxy/ports-proxy"
+import { ProxyWords, proxyWords } from "@/components/proxy/ports-proxy"
+import { siteHref } from "@/components/proxy/site-tabs"
 import { DockerPath, ExternalProof } from "@/components/proxy/port-reachability"
 import { reachNotes, ReachWord } from "@/components/proxy/port-marks"
 import { Notice } from "@/components/state"
@@ -75,7 +76,9 @@ export function PortReach({ socket, admin }: { socket: Socket; admin: boolean })
             <Detail label="Firewall">
               <FirewallVerdict socket={socket} />
             </Detail>
-            <Detail label="Proxy">{proxy ?? "Nothing in the proxy routes to it"}</Detail>
+            <Detail label="Proxy">
+              {proxy ? <ProxyWords socket={socket} /> : "Nothing in the proxy routes to it"}
+            </Detail>
             {/* Every grade above is the host's own reading. What stands in
               front of the host is not visible from it, and a port graded
               open here can still be closed upstream, or the reverse. */}
@@ -92,7 +95,12 @@ export function PortReach({ socket, admin }: { socket: Socket; admin: boolean })
             <ul aria-label="Sites routing to it" className="space-y-1 text-xs">
               {(socket.routes ?? []).map((route) => (
                 <li key={route.site} className="flex items-center gap-2">
-                  <span className="font-mono">{route.serverName || route.site}</span>
+                  <Link
+                    href={siteHref(route.site)}
+                    className="rounded-sm font-mono focus-ring hover:underline"
+                  >
+                    {route.serverName || route.site}
+                  </Link>
                   {route.tls && <Tag>TLS</Tag>}
                 </li>
               ))}

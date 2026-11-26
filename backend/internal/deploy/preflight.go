@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -974,7 +975,9 @@ func preflightFindings(
 				"Linked proxy site was not found", planned.Hostname,
 				"Linked ownership requires an existing proxy route.",
 				"Create/select the route or change ownership to managed.", "proxy", field)
-			item.DeepLink = "/proxy/sites"
+			// The list filtered to the name, where a site that should have
+			// answered it would be: the bare list left it to be found by eye.
+			item.DeepLink = "/proxy/sites?q=" + url.QueryEscape(planned.Hostname)
 			findings = append(findings, item)
 		} else {
 			findings = append(findings, finding("domain_ownership", PreflightPass,
@@ -1013,7 +1016,8 @@ func preflightFindings(
 				"Wildcard certificate cannot be issued here", planned.Hostname,
 				"A wildcard is proved only over a DNS challenge, and this host has nothing that can answer one for this name.",
 				observed.CertificateRefusal, "certificates", field)
-			item.DeepLink = "/proxy/certificates"
+			// Where a DNS provider's credentials are saved, which is the fix.
+			item.DeepLink = "/proxy/certificates?tab=dns"
 			findings = append(findings, item)
 		} else if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateDNSProvider != "" {
 			item := finding("certificate_automatic", PreflightPass,
@@ -1022,7 +1026,7 @@ func preflightFindings(
 				"No certificate covers this wildcard yet; the release proves it over a DNS challenge with the "+
 					observed.CertificateDNSProvider+" credentials saved under Certificates before it starts the candidate, and certbot renews it with them.",
 				"", "certificates", field)
-			item.DeepLink = "/proxy/certificates"
+			item.DeepLink = "/proxy/certificates?tab=dns"
 			findings = append(findings, item)
 		} else if planned.HTTPS && !observed.CertificateAvailable && observed.CertificateAutomation {
 			// Not a blocker any more, because the release itself closes it:

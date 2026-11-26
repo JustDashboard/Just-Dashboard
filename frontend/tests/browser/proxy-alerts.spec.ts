@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test"
-import { json, mockProxy, user } from "./proxy-fixtures"
+import { ingressOnly, json, mockProxy, user } from "./proxy-fixtures"
 import { risen } from "./risen"
 
 test("an administrator can add renewal failure and served certificate alerts", async ({ page }) => {
@@ -308,4 +308,79 @@ test("an account that only reads is told the rules are an administrator's, and t
   await expect(page.getByText("Not allowed")).toHaveCount(0)
   await expect(page.getByRole("button", { name: /Add rule|Check now|Try again/ })).toHaveCount(0)
   expect(asked).toEqual([])
+})
+
+test("behind the Caddy ingress a rule that reads nothing here is not counted as watching", async ({
+  page,
+}) => {
+  await mockProxy(page, { included: true })
+  await page.route("**/api/v1/proxy/status", (route) => json(route, ingressOnly))
+  const now = new Date().toISOString()
+  const rule = (id: number, kind: string) => ({
+    id,
+    kind,
+    params: {},
+    channels: [],
+    enabled: true,
+    createdAt: now,
+    updatedAt: now,
+  })
+  await page.route("**/api/v1/proxy/alerts", (route) =>
+    json(route, {
+      intervalSeconds: 300,
+      lastPass: now,
+      rules: [rule(1, "engine_down"), rule(2, "watch_unreachable")],
+      subjects: [],
+      history: [],
+      // As the server answers with no nginx, no systemd unit, no certbot and no certificate file.
+      absent: [
+        "cert_expiring",
+        "cert_expired",
+        "renewal_failed",
+        "served_drift",
+        "engine_down",
+        "upstream_down",
+        "site_errors",
+      ],
+    }),
+  )
+  await page.route("**/api/v1/deploy/notifications", (route) => json(route, []))
+  await page.goto("/proxy/alerts")
+
+  // One rule judges something; the engine's is on and can never fire.
+  const identity = page.locator("[data-slot='host-identity']")
+  await expect(identity.getByText("1 rule on", { exact: true })).toBeVisible()
+  await expect(identity.getByText("1 not on this server", { exact: true })).toBeVisible()
+  await expect(page.getByRole("region", { name: "Firing" })).toContainText("1 rule checked")
+
+  const rules = page.getByRole("list", { name: "Alert rules" })
+  const engine = rules.getByRole("listitem").filter({ hasText: "Engine not running" })
+  await expect(engine).toContainText("Not on this server")
+  await expect(engine).not.toContainText("Watching")
+  const watched = rules.getByRole("listitem").filter({ hasText: "Watched endpoint unreachable" })
+  await expect(watched).toContainText("Watching")
+  // A row is one height whichever it says.
+  const heights = await rules
+    .getByRole("listitem")
+    .evaluateAll((rows) => rows.map((row) => Math.round(row.getBoundingClientRect().height)))
+  expect(new Set(heights).size).toBe(1)
+
+  // The picture says the same of each area, and offers no rule for it.
+  const picture = page.getByRole("region", { name: "What the rules watch" })
+  await expect(picture).toContainText("not on this server")
+  await expect(page.getByRole("button", { name: "Watch the engine" })).toHaveCount(0)
+  await expect(page.getByRole("button", { name: "Watch sites" })).toHaveCount(0)
+
+  // The form names them and lets none be chosen; it opens on a kind that judges.
+  await page.getByRole("button", { name: "Add rule" }).click()
+  const form = page.getByRole("dialog", { name: "Add alert" })
+  await expect(form.getByRole("radio", { name: /Site failing/ })).toBeDisabled()
+  await expect(form.getByRole("radio", { name: /Site failing/ })).toContainText(
+    "not on this server",
+  )
+  await expect(form.getByRole("radio", { name: /Watched endpoint unreachable/ })).toBeEnabled()
+  await expect(form.getByRole("radio", { name: /Watched endpoint unreachable/ })).toHaveAttribute(
+    "aria-checked",
+    "true",
+  )
 })

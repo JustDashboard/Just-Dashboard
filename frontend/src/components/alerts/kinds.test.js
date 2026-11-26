@@ -1,5 +1,13 @@
 import { describe, expect, test } from "bun:test"
-import { alertCounts, areaOf, isAlertKind, kindProduct, reaches } from "./kinds"
+import {
+  alertCounts,
+  areaOf,
+  isAlertKind,
+  judging,
+  kindProduct,
+  presentKinds,
+  reaches,
+} from "./kinds"
 
 // Two tables in the shapes the two pages give the kit: the proxy's, whose
 // engine area is drawn as whichever engine serves, and the host's, whose
@@ -99,4 +107,24 @@ test("a muted subject is neither firing nor holding", () => {
       { state: "quiet", muted: false },
     ]),
   ).toEqual({ firing: 1, holding: 1 })
+})
+
+describe("a kind that judges nothing on this server", () => {
+  const area = { key: "certificates", kinds: ["cert_expiring", "renewal_failed"] }
+  test("leaves its area the kinds that do", () => {
+    expect(presentKinds(area)).toEqual(["cert_expiring", "renewal_failed"])
+    expect(presentKinds(area, new Set(["renewal_failed"]))).toEqual(["cert_expiring"])
+    expect(presentKinds(area, new Set(area.kinds))).toEqual([])
+  })
+  test("is not a rule that is on, and neither is a paused one", () => {
+    const rules = [
+      { kind: "engine_down", enabled: true, channels: [] },
+      { kind: "watch_unreachable", enabled: true, channels: [] },
+      { kind: "watch_untrusted", enabled: false, channels: [] },
+    ]
+    expect(judging(rules).map((rule) => rule.kind)).toEqual(["engine_down", "watch_unreachable"])
+    expect(judging(rules, new Set(["engine_down"])).map((rule) => rule.kind)).toEqual([
+      "watch_unreachable",
+    ])
+  })
 })

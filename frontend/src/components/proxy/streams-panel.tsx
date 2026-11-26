@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { useRouter, useSearchParams } from "next/navigation"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
 import { Connection, Plus, Slash, Warning } from "@/components/icons"
@@ -51,6 +52,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { VerbMenu, type Verb } from "@/components/verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
+import { MissingThing } from "@/components/missing-thing"
 import { EngineSetup } from "@/components/proxy/engine-setup"
 import { StreamSetup } from "@/components/proxy/stream-setup"
 import { BLANK, StreamForm } from "@/components/proxy/stream-form"
@@ -123,6 +125,9 @@ export function StreamsPage() {
   )
   const admin = can("system.admin")
   const noNginx = !proxy.loading && !proxy.hasNginx
+  // Caddy in a container holds ports 80 and 443 here, so the page must not
+  // offer an nginx that would be installed to answer on them.
+  const ingress = noNginx && Boolean(proxy.status?.ingressContainer)
 
   const openNew = (start: StreamSpec | null = null) => {
     // A starting point replaces whatever a closed-by-reload new form left
@@ -322,7 +327,7 @@ export function StreamsPage() {
               onPress={() => verdict.chip && setChip(chip === verdict.chip ? "all" : verdict.chip)}
             />
           ) : noNginx ? (
-            <Status tone="stopped" label="Not installed" />
+            <Status tone="stopped" label={ingress ? "Needs nginx" : "Not installed"} />
           ) : !data ? (
             error ? (
               <Status tone="danger" label="Not read" />
@@ -345,7 +350,11 @@ export function StreamsPage() {
       // anyone) come first, so a phone's one line of facts never clips them.
       facts={
         noNginx ? (
-          <Fact>nginx is not installed on this host</Fact>
+          ingress ? (
+            <Fact product="caddy">the Caddy ingress serves this server</Fact>
+          ) : (
+            <Fact>nginx is not installed on this host</Fact>
+          )
         ) : !data ? (
           <Fact>{error ? "couldn't read the streams" : "Reading the streams…"}</Fact>
         ) : (
@@ -379,15 +388,30 @@ export function StreamsPage() {
         {identity}
         {/* The section's own install screen: the module and the forwards
             come once nginx does, and the overview draws the same one. */}
-        {proxy.status && (
-          <EngineSetup
-            status={proxy.status}
-            admin={admin}
-            onInstalled={() => {
-              proxy.refresh()
-              refresh()
-            }}
-          />
+        {ingress ? (
+          <MissingThing
+            thing="nginx"
+            title="Streams need nginx"
+            step={
+              <Button asChild size="sm" variant="outline">
+                <Link href="/proxy/sites">Sites</Link>
+              </Button>
+            }
+          >
+            Streams forward TCP and UDP through nginx&apos;s stream module; this server&apos;s sites
+            are served by the Caddy ingress.
+          </MissingThing>
+        ) : (
+          proxy.status && (
+            <EngineSetup
+              status={proxy.status}
+              admin={admin}
+              onInstalled={() => {
+                proxy.refresh()
+                refresh()
+              }}
+            />
+          )
         )}
       </Page>
     )

@@ -2483,7 +2483,14 @@
   rules are read and edited on their own page, `/proxy/alerts` (`components/proxy/alerts-page.tsx`,
   with the parts that do not know its kinds in the alerts kit (`components/alerts/kit.tsx`,
   `kinds.ts`, `alert-parts.tsx`), which the host's Alerts page shares), and the overview's identity bar links there with the firing count from the same
-  `GET /proxy/alerts`.
+  `GET /proxy/alerts`. The view also carries `absent`, the kinds that judge nothing on this server
+  (`proxyAlertKindsAbsent` over `proxyAlertHost`): `engine_down` where `Engine()` finds no systemd unit
+  (the Docker Caddy ingress is a container), `upstream_down`, `served_drift` and `site_errors` without
+  nginx (each reads nginx's configuration or logs and nothing else), `renewal_failed` without certbot,
+  and the two expiry kinds where there is no nginx and `ListCertificates` finds no file (the ingress
+  renews its own inside its container, where no rule looks). The watched-endpoint kinds dial out and are
+  never absent. A rule of an absent kind may still be stored; the page draws it as "not on this server"
+  instead of counting it as watching (`TestProxyAlertKindsAbsentNamesWhatAnIngressOnlyServerCannotJudge`).
   `TestProxyAlertsRequireAdminAndTellEachTransitionOnce` covers the API gate, audit, firing, unreadable
   source, and recovery; `TestProxyAlertReadingsForRenewalAndServedCertificates` covers the two additional
   readings; `TestProxyAlertsCheckCurrentPinnedWatchEndpoints` and

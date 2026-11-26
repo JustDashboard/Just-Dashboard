@@ -13,10 +13,8 @@ export function findingNavigation(href: string): { href: string; label: string }
     url.searchParams.delete("job")
   }
   const exact: Record<string, string> = {
-    "/proxy/sites": url.searchParams.has("site") ? "Open site" : "Review sites",
-    "/proxy/certificates": url.searchParams.has("cert")
-      ? "Open certificate"
-      : "Review certificates",
+    "/proxy/sites": url.searchParams.has("site") ? "Open site" : "Open sites",
+    "/proxy/certificates": url.searchParams.has("cert") ? "Open certificate" : "Open certificates",
     "/proxy/tls": "Inspect TLS report",
     "/proxy/streams": url.searchParams.has("stream") ? "Open stream" : "Review streams",
     "/proxy/ports": "Inspect listening ports",
@@ -67,7 +65,12 @@ export function findingNavigation(href: string): { href: string; label: string }
     )
   )
     label = "Review project settings"
+  // The one settings view a domain finding sends to is named for what is there.
+  if (/^\/deploy\/\d+\/settings\/domains$/.test(url.pathname)) label = "Open domains"
   if (/^\/proxy\/sites\/[^/]+$/.test(url.pathname)) label = "Open site"
+  if (/^\/proxy\/certificates\/[^/]+$/.test(url.pathname)) label = "Open certificate"
+  if (/^\/proxy\/ports\/[^/]+$/.test(url.pathname)) label = "Open port"
+  if (/^\/proxy\/streams\/[^/]+$/.test(url.pathname)) label = "Open stream"
   if (
     /^\/databases\/\d+(\/(data|query|search|schema|diagram|generate|performance|logs|access|backups|settings))?$/.test(
       url.pathname,
@@ -75,4 +78,14 @@ export function findingNavigation(href: string): { href: string; label: string }
   )
     label = "Inspect database"
   return label ? { href: url.pathname + url.search + url.hash, label } : undefined
+}
+
+/**
+ * What a finding's link says: where it goes, in the destination's own word. A
+ * check that said "Open owning page" for a site, a certificate and a project's
+ * domains alike left the reader to find out by pressing it. The old words
+ * stand only for an address this table does not name.
+ */
+export function findingLinkLabel(href: string): string {
+  return findingNavigation(href)?.label ?? "Open owning page"
 }

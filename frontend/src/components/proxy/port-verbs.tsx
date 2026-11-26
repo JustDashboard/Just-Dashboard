@@ -31,6 +31,7 @@ import {
 import { firewallHandoffs } from "@/components/proxy/ports-firewall"
 import { formatEndpoint } from "@/components/proxy/ports-list"
 import { proxyVerbs } from "@/components/proxy/ports-proxy"
+import { useProxy } from "@/components/proxy/proxy-context"
 import { processHref } from "@/components/procs/process-facts"
 
 const OWNER_ACTION_ICON: Record<OwnerAction["key"], Verb["icon"]> = {
@@ -69,6 +70,8 @@ export function useSocketVerbs({
   const router = useRouter()
   const { can } = useAuth()
   const admin = can("system.admin")
+  // Unread is not absent: the proxy's forms are offered until the status says nginx is missing.
+  const nginx = useProxy().status?.nginx !== false
   return (l: Socket): Verb[] => {
     const endpoint = formatEndpoint(l.address, l.port)
     const verbs: Verb[] = ownerLinks(l).map((link, i) => ({
@@ -113,7 +116,7 @@ export function useSocketVerbs({
       })
     }
     if (admin) verbs.push(...firewallHandoffs(l, firewall, (href) => router.push(href)))
-    if (admin) verbs.push(...proxyVerbs(l, (href) => router.push(href)))
+    if (admin) verbs.push(...proxyVerbs(l, (href) => router.push(href), nginx))
     for (const action of ownerActions(l, can)) {
       verbs.push({
         key: `owner-${action.key}`,

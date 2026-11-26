@@ -194,7 +194,7 @@ export function diagnosisLinks(scan: TLSScan): { label: string; href: string }[]
     links.push({ label: "Firewall", href: "/network/firewall" })
   // A STARTTLS service is not one of nginx's sites.
   if (failure.stage === "handshake" && !scan.starttls)
-    links.push({ label: "Sites", href: "/proxy/sites" })
+    links.push({ label: "Sites", href: `/proxy/sites?q=${encodeURIComponent(scan.domain)}` })
   return links
 }
 
