@@ -422,11 +422,21 @@ func (t databaseTarget) sameDatabase(other databaseTarget) bool {
 }
 
 // seedDatabaseSchemes are the URL schemes of the engines a seed's rows go
-// to, so a value naming one elsewhere is a database the seed could write to.
-// A cache is not where they go.
+// to, so a value naming one is a database the seed could write to: every
+// engine but a cache that a database of this server's can be linked as
+// (dbx's drivers), and the usual spellings of the same elsewhere. A cache is
+// not where they go, whether this server's or one elsewhere.
 var seedDatabaseSchemes = []string{
 	"postgres", "postgresql", "postgis", "mysql", "mysql2", "mariadb", "mongodb", "sqlserver", "mssql",
-	"cockroachdb", "libsql", "prisma",
+	"cockroachdb", "libsql", "prisma", "clickhouse", "oracle",
+}
+
+// seedDatabaseScheme reports whether a URL scheme ("postgresql+asyncpg")
+// names an engine a seed's rows go to.
+func seedDatabaseScheme(scheme string) bool {
+	return slices.ContainsFunc(strings.Split(strings.ToLower(scheme), "+"), func(part string) bool {
+		return slices.Contains(seedDatabaseSchemes, part)
+	})
 }
 
 // databaseTargets are the databases values name, by variable.
@@ -455,12 +465,13 @@ func databaseTargets(values map[string]string) []databaseTarget {
 			continue
 		}
 		host := strings.ToLower(parsed.Hostname())
+		if host == "" || !seedDatabaseScheme(parsed.Scheme) {
+			// A cache linked from this server is no more a seed's target
+			// than a hosted one.
+			continue
+		}
 		if !strings.HasSuffix(host, ".jd.internal") {
-			if host != "" && slices.ContainsFunc(strings.Split(strings.ToLower(parsed.Scheme), "+"), func(part string) bool {
-				return slices.Contains(seedDatabaseSchemes, part)
-			}) {
-				targets = append(targets, databaseTarget{variable: name})
-			}
+			targets = append(targets, databaseTarget{variable: name})
 			continue
 		}
 		target := databaseTarget{variable: name, database: strings.Trim(parsed.Path, "/")}

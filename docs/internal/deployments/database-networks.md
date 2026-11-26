@@ -136,7 +136,11 @@ rows were counted, compared by connection and by the database the URL's path nam
 `uncountedSeedTargets`): a runtime value naming another linked database, a hosted one, a preview's
 branch, another database on the same server (`${{database.5.url.app_shadow}}`, which `DatabaseHasRows`
 does not count), or a connection string that is no URL (ADO.NET's) keeps the seed from running, as do
-runtime values that name no database at all. The step is then handed the very values that were judged.
+runtime values that name no database at all. A cache is never a target, linked from this server
+(`redis://…@db-9.jd.internal`) or hosted: only a URL whose scheme names an engine a seed's rows go to
+(`seedDatabaseSchemes`: PostgreSQL, MySQL/MariaDB, MongoDB, SQL Server, ClickHouse, Oracle and their usual
+spellings) counts, on the build's side and on the seed's. The step is then handed the very values that
+were judged.
 The step's log says each of these as it
 happens, and build_artifact's evidence lists them (`databaseSteps`). A step that fails ends the build as
 `build_schema_step_failed` or `build_seed_step_failed` with the command's last line; a refusal to join
@@ -250,7 +254,8 @@ No hosted-provider account or live provider credentials are required by the loca
   the new signatures from each driver and Next.js, and remedies that follow Cache Components;
   `build_database_executor_test.go` runs build_artifact through a first deploy (network, schema, seed,
   build), a database with rows never seeded, a seed whose runtime values name a database other than the
-  build's counted one never run (and one reading the same database through its pooler run), a build off
+  build's counted one never run (and one reading the same database through its pooler, or beside a linked
+  cache, run), a build off
   the network, and each failure.
   `buildkit_network_test.go` covers the builder's arguments and configuration, the networks a waiting
   builder joins and leaves, that one is claimed once, and that a stopping dashboard removes the builders

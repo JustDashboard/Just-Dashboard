@@ -459,6 +459,16 @@ func TestTheSeedRunsOnlyAgainstTheDatabaseWhoseRowsWereCounted(t *testing.T) {
 			seeded:  true, asked: "8/app",
 		},
 		{
+			// A cache is not where a seed's rows go, linked from this server
+			// or hosted elsewhere.
+			name: "the runtime also reads a cache linked from this server",
+			runtime: []databaseBuildVariable{
+				{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-8.jd.internal:5432/app"},
+				{"REDIS_URL", "runtime", "secret", "redis://default:hunter2@db-9.jd.internal:6379/0"},
+			},
+			seeded: true, asked: "8/app",
+		},
+		{
 			name:    "the runtime reads another linked database that holds rows",
 			runtime: []databaseBuildVariable{{"POSTGRES_URL", "runtime", "secret", "postgres://app:hunter2@db-9.jd.internal:5432/app"}},
 			reason:  "where POSTGRES_URL names a database other than the one the build reads",
@@ -547,6 +557,8 @@ func TestDatabaseTargetsNameEachDatabaseAValueReaches(t *testing.T) {
 		"HOSTED_URL":   "postgresql+asyncpg://app:secret@ep-cool.neon.tech/app",
 		"ADO":          "Host=db-8.jd.internal;Database=app",
 		"REDIS_URL":    "redis://cache.example:6379",
+		"VALKEY_URL":   "valkeys://default:secret@db-9.jd.internal:6379/0",
+		"EVENTS_URL":   "clickhouse://default:secret@db-10.jd.internal:9000/events",
 		"SITE_URL":     "https://shop.example",
 		"PORT":         "3000",
 	})
@@ -554,7 +566,7 @@ func TestDatabaseTargetsNameEachDatabaseAValueReaches(t *testing.T) {
 	for _, target := range targets {
 		got = append(got, fmt.Sprintf("%s=%d/%s", target.variable, target.connectionID, target.database))
 	}
-	want := "ADO=0/,BRANCH_URL=0/app,DATABASE_URL=8/app,HOSTED_URL=0/,JDBC_URL=8/app_cache,POOLED_URL=8/app"
+	want := "ADO=0/,BRANCH_URL=0/app,DATABASE_URL=8/app,EVENTS_URL=10/events,HOSTED_URL=0/,JDBC_URL=8/app_cache,POOLED_URL=8/app"
 	if strings.Join(got, ",") != want {
 		t.Fatalf("targets = %v\nwant      %s", got, want)
 	}
