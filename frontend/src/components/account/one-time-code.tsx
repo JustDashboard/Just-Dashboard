@@ -12,6 +12,16 @@ import { Input } from "@/components/ui/input"
 export const CODE_LENGTH = 6
 
 /**
+ * What was typed or pasted, as the code: its digits, then the first six.
+ * The length is cut after the separators go, never before: a browser's
+ * `maxLength` cut "123 456" to "123 45" and the space then left five digits
+ * of a code that needs six.
+ */
+export function codeDigits(text: string): string {
+  return text.replace(/\D/g, "").slice(0, CODE_LENGTH)
+}
+
+/**
  * The size of a code field in each register (§16). On the sign-in flow the
  * code is the whole step, so it is set large across the card; in a settings
  * column it is one field among others, at a field's height. One letter
@@ -37,7 +47,9 @@ const SIZE = {
  * any `Input` is.
  *
  * Anything but a digit is dropped as it is typed or pasted, so "123 456" from
- * a message arrives as the code.
+ * a message arrives as the code (`codeDigits`). The field has no `maxLength`
+ * for that reason: the browser would cut the pasted text before the space
+ * was dropped.
  */
 export function OneTimeCodeInput({
   id,
@@ -65,12 +77,11 @@ export function OneTimeCodeInput({
       inputMode="numeric"
       autoComplete="one-time-code"
       pattern="[0-9]*"
-      maxLength={CODE_LENGTH}
       placeholder="000000"
       spellCheck={false}
       className={cn("text-center indent-[0.4em] font-mono tracking-[0.4em]", SIZE[size], className)}
       value={value}
-      onChange={(event) => onChange(event.target.value.replace(/\D/g, ""))}
+      onChange={(event) => onChange(codeDigits(event.target.value))}
     />
   )
 }

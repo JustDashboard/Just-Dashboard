@@ -83,7 +83,8 @@ copy.
 
 Try again stays pending until the read it started settles. A 404 is calm ("It may have been removed
 or renamed since this link was made."). A 429 is calm, says when it asks again, and does so by
-itself past the server's `Retry-After`. Anything else is the danger wash with `role="alert"`. Other
+itself past the server's `Retry-After`; Try again pressed before then is pending until that same
+moment, so a press never shortens the pause or adds a request the limiter counts. Anything else is the danger wash with `role="alert"`. Other
 props reach the root (`data-slot="error-state"`, `data-kind` missing, throttled or failed).
 
 ## Stale and StaleNotice

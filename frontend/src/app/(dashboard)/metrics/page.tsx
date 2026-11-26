@@ -925,6 +925,9 @@ function Readings({
             Disk I/O
           </>
         }
+        // The figure is a rate; the bar under it, while there is no trend to
+        // draw, is how busy the disks are, and is named for that.
+        meterLabel="Disk busy"
         value={<LiveBytes value={disk.rate} suffix="/s" />}
         tone={utilisationTone(disk.busy)}
         trend={diskTrend}

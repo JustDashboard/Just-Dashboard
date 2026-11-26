@@ -99,6 +99,17 @@ export function shortcutSteps(spec: string): string[] {
 type KeyEventLike = Pick<KeyboardEvent, "key" | "ctrlKey" | "metaKey" | "altKey" | "shiftKey">
 
 /**
+ * Whether a key belongs to an input method that is composing text: the Enter
+ * that picks a candidate, the Escape that dismisses the list. A field acts on
+ * neither, or it applies text the reader has not committed yet and clears
+ * what they are spelling. Safari ends the composition before the key that
+ * ended it arrives, and marks that key only by its 229 key code.
+ */
+export function isComposingKey(event: Pick<KeyboardEvent, "isComposing" | "keyCode">): boolean {
+  return event.isComposing || event.keyCode === 229
+}
+
+/**
  * The names a key press answers to: its exact chord, and the `Mod` spelling
  * when one of Ctrl or ⌘ is held, so `Ctrl/⌘+K` is Ctrl+K on Linux and ⌘K on
  * a Mac without the page asking which it is on.

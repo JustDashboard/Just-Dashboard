@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useRef } from "react"
+import { useCallback, useRef, useState } from "react"
+import { isComposingKey } from "@/lib/keys"
 import { cn } from "@/lib/utils"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
@@ -33,6 +34,11 @@ const FIELD_DENSE = "h-7 pointer-coarse:h-11"
  * pause (`debounceMs`), at once on Enter, and empty on Escape or the clear
  * button (`useDeferredSearch`). Without `onApply` it is a plain controlled
  * field, and `clearable` empties it through its own `onChange`.
+ *
+ * While an input method composes (a candidate list for Japanese, Chinese,
+ * Korean), nothing is applied: the pause waits for the composition to end,
+ * and the Enter and Escape that choose and dismiss a candidate are the input
+ * method's, not the box's.
  */
 export function SearchInput({
   dense,
@@ -113,9 +119,14 @@ function DeferredSearchInput({
   debounceMs,
   onChange,
   onKeyDown,
+  onCompositionStart,
+  onCompositionEnd,
   ...props
 }: BoxProps & { onApply: (value: string) => void; debounceMs: number }) {
-  const search = useDeferredSearch(String(value ?? ""), onApply, debounceMs)
+  // The draft still follows the composition, so the box shows it; only the
+  // applying waits, and starts its pause again when the word is chosen.
+  const [composing, setComposing] = useState(false)
+  const search = useDeferredSearch(String(value ?? ""), onApply, debounceMs, composing)
   return (
     <SearchBox
       {...props}
@@ -124,9 +135,19 @@ function DeferredSearchInput({
         onChange?.(event)
         search.setDraft(event.target.value)
       }}
+      onCompositionStart={(event) => {
+        onCompositionStart?.(event)
+        setComposing(true)
+      }}
+      onCompositionEnd={(event) => {
+        onCompositionEnd?.(event)
+        setComposing(false)
+        search.setDraft(event.currentTarget.value)
+      }}
       onKeyDown={(event) => {
         onKeyDown?.(event)
-        if (!event.defaultPrevented && event.key === "Enter") search.apply()
+        if (event.defaultPrevented || event.key !== "Enter") return
+        if (!isComposingKey(event.nativeEvent)) search.apply()
       }}
       onClear={search.clear}
     />
@@ -184,6 +205,8 @@ function SearchBox({
         onKeyDown={(event) => {
           onKeyDown?.(event)
           if (event.defaultPrevented || event.key !== "Escape") return
+          // Escape while composing dismisses the input method's candidates.
+          if (isComposingKey(event.nativeEvent)) return
           if ((clearable || onClear) && filled) {
             if (stopEscape) event.stopPropagation()
             clear()

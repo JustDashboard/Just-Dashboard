@@ -308,6 +308,44 @@ test.describe("an answer that is not a failure", () => {
     await expect(page.locator('[data-slot="project-header"]')).toBeVisible({ timeout: 15_000 })
     await expect(box).toHaveCount(0)
   })
+
+  test("Try again pressed during the pause waits for it, rather than asking at once", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    let paused = true
+    // When each read of the project was made, and when the last pause was asked for.
+    const reads: number[] = []
+    let pausedAt = 0
+    await page.route("**/api/v1/deploy/7", (route) => {
+      reads.push(Date.now())
+      if (!paused) return route.fallback()
+      pausedAt = Date.now()
+      return route.fulfill({
+        status: 429,
+        // Long enough that the press lands inside the pause on a busy machine.
+        headers: { "Retry-After": "6" },
+        contentType: "application/json",
+        body: refusal("rate_limited", "too many requests, slow down"),
+      })
+    })
+    await page.goto("/deploy/7")
+    const box = page.locator('[data-slot="error-state"]')
+    await expect(box).toHaveAttribute("data-kind", "throttled")
+    const asked = reads.length
+    paused = false
+
+    // Pressed at once, it is pending, and the read waits for the pause to end:
+    // it asked straight away, cut the poller's wait short, and was the request
+    // the limiter counted against the page.
+    const again = box.getByRole("button", { name: "Try again" })
+    await again.click()
+    await expect(again).toHaveAttribute("aria-busy", "true")
+    await expect(page.locator('[data-slot="project-header"]')).toBeVisible({ timeout: 25_000 })
+    const next = reads.slice(asked)
+    expect(next.length).toBeGreaterThan(0)
+    expect(next[0] - pausedAt).toBeGreaterThanOrEqual(6_000)
+  })
 })
 
 test.describe("a saved domain's password", () => {

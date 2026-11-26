@@ -66,7 +66,8 @@ eyebrow, a tag and a count are not headings. A card's name in a list is not a he
   reads visible text and ignores `aria-hidden`, so caps inside a button become part of its name.
 - **A field has a label.** `Field` gives its control the id, the label, the hint and the error
   (`aria-describedby`, `aria-invalid`). A group of controls is named by `aria-labelledby`, because
-  a `<label for>` cannot name a group.
+  a `<label for>` cannot name a group: a field of several controls is `Field group`, a
+  `role="group"` its label names and its hint describes, each control in it named by its own words.
 - **A link says where it goes.** The way on is "All metrics →", not "More". A link inside a
   sentence is underlined at rest (`TextLink`), never told apart by colour alone (1.4.1).
 - **A thing drawn as itself still has words.** A product's logo carries the product's name; a mark
@@ -167,6 +168,7 @@ stays while the pointer moves onto it (1.4.13), and Escape closes it.
 | Check | Holds |
 | --- | --- |
 | `eslint.config.mjs`, `jsx-a11y` recommended, as errors | a field has a label, what a pointer presses a keyboard reaches, no positive `tabindex` |
+| `design-system/primitives` (`field-group`) | a `Field` of several controls is a `group`, so no two of them share its id |
 | `tests/browser/shell-phone.spec.ts` | the landmarks, the skip link, the current page, label in name in the shell, Pause animations, the phone strip's sizes |
 | `tests/browser/field-a11y.spec.ts` | a field's label, hint and error reach its control |
 | `tests/browser/touch-targets.spec.ts`, `touch-targets-pages.spec.ts` | press boxes, and that none is cut or leaves its scroller |

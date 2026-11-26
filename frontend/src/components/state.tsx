@@ -202,7 +202,8 @@ const THROTTLE_GRACE_MS = 1_500
  * a job or a drawing that was since removed used to open on a red box reading
  * "not found". And a server that asked for a pause (429), which is the most
  * retryable answer there is: the box says so, offers Try again, and asks again
- * by itself when the wait the server named is over.
+ * by itself when the wait the server named is over. Try again pressed before
+ * then is pending until that same moment rather than asking at once.
  *
  * The API words its messages to sit inside other text, lower case and without
  * a full stop. Here they stand alone, so the headline gets its capital and a
@@ -246,8 +247,11 @@ export function ErrorState({
   useEffect(() => {
     retry.current = onRetry
   })
+  // When the pause ends: the one deadline the timer and Try again both keep.
+  const due = useRef(0)
   useEffect(() => {
     if (!throttled) return
+    due.current = Date.now() + wait
     const timer = setTimeout(() => retry.current?.(), wait)
     return () => clearTimeout(timer)
   }, [throttled, wait, error])
@@ -263,6 +267,10 @@ export function ErrorState({
       pending={asked === error}
       onClick={() => {
         setAsked(error)
+        // Pressed during the pause, it waits for the timer's read: asking now
+        // cut short the wait the server named (a poller's `refresh` cancels
+        // its own), and the request it made was one more the limiter counted.
+        if (throttled && Date.now() < due.current) return
         onRetry()
       }}
     >

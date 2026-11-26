@@ -1492,6 +1492,48 @@ test.describe("keys", () => {
     await expect(count).toHaveText("200 of 450 fields")
   })
 
+  test("a pattern spelled through an input method is applied once it is chosen, and its keys are the input method's", async ({
+    page,
+    browserName,
+  }) => {
+    test.skip(browserName !== "chromium", "composition is driven through Chromium's DevTools")
+    await mockRedis(page)
+    const scans: string[] = []
+    page.on("request", (request) => {
+      const url = new URL(request.url())
+      // The flat list and the tree both scan by the pattern.
+      if (/^\/api\/v1\/databases\/4\/keys(?:\/tree)?$/.test(url.pathname)) {
+        scans.push(url.searchParams.get("pattern") ?? "")
+      }
+    })
+    await page.goto(KEYS)
+    await expect(rail(page).getByRole("button", { name: /^user/ })).toBeVisible()
+    const box = rail(page).getByLabel("Key pattern")
+    await box.click()
+    const before = scans.length
+    const ime = await page.context().newCDPSession(page)
+
+    // Mid-word, with the candidates open: a pause longer than the box's does
+    // not scan for what has not been chosen, and the Enter and Escape that
+    // pick and dismiss a candidate neither apply it nor empty the box.
+    await ime.send("Input.imeSetComposition", { text: "sess", selectionStart: 4, selectionEnd: 4 })
+    await expect(box).toHaveValue("sess")
+    await page.waitForTimeout(900)
+    await page.keyboard.press("Enter")
+    await page.keyboard.press("Escape")
+    await expect(box).toHaveValue("sess")
+    expect(scans.slice(before)).not.toContain("sess")
+    await expect(page).not.toHaveURL(/pattern=/)
+
+    // Chosen, the word is the draft and the pause starts from then.
+    await ime.send("Input.insertText", { text: "session:*" })
+    await expect(box).toHaveValue("session:*")
+    await expect(page).toHaveURL(/pattern=session%3A\*/)
+    await expect.poll(() => scans.slice(before)).toContain("session:*")
+    expect(scans.slice(before)).not.toContain("sess")
+    await ime.detach()
+  })
+
   test("the tree opens to the key in the address, and a pattern that is one namespace opens it", async ({
     page,
   }) => {
