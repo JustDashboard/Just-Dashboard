@@ -70,7 +70,9 @@ sessions, the verdict (a press narrows the list to what it counts) and New strea
 picture of the host's ports through nginx to where they go (`stream-picture.tsx`, a `WireFlow`),
 the module and
 include steps where they are still to do (`stream-setup.tsx`), and the forwards as one-line rows,
-each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`).
+each a way to its own page. Without nginx it is the overview's install screen (`engine-setup.tsx`),
+except behind the Caddy ingress: there it says "Streams need nginx" (`MissingThing`), that the sites
+are served by the ingress, and links to Sites, with no install offered.
 A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a rail from `xl`,
 `stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
 what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
