@@ -66,7 +66,9 @@ JD_HSTS_DIRECTIVE=""
 if [ "$JD_SCHEME" = https ]; then
 	# localhost, *.localhost and IPv6 literals first; then anything that is
 	# not only digits and dots is a name, and what is left is an IPv4 literal.
-	case "${JD_SITE:-localhost}" in
+	# A host name has no case, so LOCALHOST is localhost to the browser too.
+	hsts_site=$(printf '%s' "${JD_SITE:-localhost}" | tr 'A-Z' 'a-z')
+	case "$hsts_site" in
 	localhost | *.localhost | *:*) ;;
 	*[!0-9.]*) JD_HSTS_DIRECTIVE="header Strict-Transport-Security max-age=31536000" ;;
 	esac

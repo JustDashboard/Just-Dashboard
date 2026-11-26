@@ -2753,9 +2753,9 @@ directive from `JD_TLS` — `tailscale` (a real certificate from `JD_DATA_DIR/ce
 renewed by the backend), `internal` (Caddy's CA, the source of the browser warning) or `off` (plain HTTP,
 loopback only, which browsers treat as a secure context and therefore do not warn about). It also
 decides `Strict-Transport-Security` (`JD_HSTS_DIRECTIVE`): sent over HTTPS for a `JD_SITE` that is a
-name, never for `localhost`, `*.localhost` or an IP literal, because a browser keeps the policy per host
-and not per port, so a year's pin on `localhost` would hold every local port on the operator's machine
-to HTTPS. A Caddyfile
+name, never for `localhost`, `*.localhost` or an IP literal, whatever the name's letter case
+(`LOCALHOST` is the same host to a browser), because a browser keeps the policy per host and not per
+port, so a year's pin on `localhost` would hold every local port on the operator's machine to HTTPS. A Caddyfile
 cannot branch, and generating one would put a tracked file in the way of every `git pull`. One origin for UI and API is
 load-bearing: `SameSite=Strict` cookies, the mutation CSRF header and the WebSocket origin check all
 depend on it. The frontend's `src/proxy.ts` creates a fresh CSP nonce per document and passes the policy
