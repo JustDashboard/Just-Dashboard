@@ -51,6 +51,7 @@ type DockerEnv struct {
 	clientOnce sync.Once
 	client     *http.Client
 	mu         sync.Mutex
+	secrets    map[string]bool
 }
 
 var _ Env = (*DockerEnv)(nil)
@@ -135,6 +136,9 @@ func (e *DockerEnv) Variable(ctx context.Context, name string) (string, error) {
 	if value == "" {
 		return "", fmt.Errorf("the deployment has no value for %s", name)
 	}
+	e.mu.Lock()
+	e.remember(value)
+	e.mu.Unlock()
 	return value, nil
 }
 
@@ -145,6 +149,7 @@ func (e *DockerEnv) Credential(ctx context.Context, name string) (string, error)
 	defer e.mu.Unlock()
 	value, found, err := e.Credentials.Get(ctx, name)
 	if err != nil || found {
+		e.remember(value)
 		return value, err
 	}
 	length := e.Lengths[name]
@@ -158,19 +163,47 @@ func (e *DockerEnv) Credential(ctx context.Context, name string) (string, error)
 	if err := e.Credentials.Put(ctx, name, value); err != nil {
 		return "", err
 	}
+	e.remember(value)
 	return value, nil
 }
 
 func (e *DockerEnv) SetCredential(ctx context.Context, name, value string) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
+	e.remember(value)
 	return e.Credentials.Put(ctx, name, value)
 }
 
 func (e *DockerEnv) LookupCredential(ctx context.Context, name string) (string, bool, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return e.Credentials.Get(ctx, name)
+	value, found, err := e.Credentials.Get(ctx, name)
+	e.remember(value)
+	return value, found, err
+}
+
+// remember keeps a secret this env handed out, so Redact can take it out of
+// anything recorded. Callers hold e.mu.
+func (e *DockerEnv) remember(value string) {
+	if len(value) < 6 {
+		return
+	}
+	if e.secrets == nil {
+		e.secrets = map[string]bool{}
+	}
+	e.secrets[value] = true
+}
+
+// Redact replaces every secret this env handed out with a mask: an
+// application that echoes a request back in its error must not put an API key
+// into the step's record.
+func (e *DockerEnv) Redact(text string) string {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	for secret := range e.secrets {
+		text = strings.ReplaceAll(text, secret, "••••••")
+	}
+	return text
 }
 
 func (e *DockerEnv) Exec(ctx context.Context, service, user string, argv []string) (ExecResult, error) {

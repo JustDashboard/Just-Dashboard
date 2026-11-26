@@ -34,6 +34,9 @@ type Preset struct {
 	// Limitations are said before the press and again on the stack's page:
 	// what this preset cannot do by itself.
 	Limitations []string `json:"limitations,omitempty"`
+	// DiskGB is roughly what the applications' own data comes to after a
+	// while — databases, metadata, artwork — and not the media itself.
+	DiskGB int `json:"diskGb"`
 }
 
 // Access is who can open a service.

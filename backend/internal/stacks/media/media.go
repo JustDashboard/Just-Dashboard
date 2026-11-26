@@ -112,6 +112,7 @@ func Manifest() *stacks.Manifest {
 				Template:    TemplateComplete,
 				Services:    []string{"jellyfin", "seerr", "radarr", "sonarr", "prowlarr", "qbittorrent", "bazarr", "recyclarr"},
 				Recommended: true,
+				DiskGB:      8,
 				Limitations: []string{
 					"Nothing can be downloaded until you add a source you are allowed to use in Prowlarr. None is included, and no films or series come with the stack.",
 					"Media goes into the stack's own volume. An existing library elsewhere on this server is not mounted.",
@@ -123,6 +124,7 @@ func Manifest() *stacks.Manifest {
 				Description: "Jellyfin and Seerr for a library you already have. People can browse and ask " +
 					"for titles, but nothing fetches what they ask for.",
 				Template: TemplateEssential,
+				DiskGB:   3,
 				Services: []string{"jellyfin", "seerr"},
 				Limitations: []string{
 					"A request cannot be fulfilled automatically: there is no manager or download client. Requests wait for you to add the title to the library yourself.",

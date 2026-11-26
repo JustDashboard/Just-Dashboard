@@ -58,7 +58,7 @@ type Fake struct {
 	writtenMode map[string]int64
 }
 
-var _ stacks.Env = (*Fake)(nil)
+var _ stacks.RunnerEnv = (*Fake)(nil)
 
 func (f *Fake) Preset() string { return f.PresetID }
 
@@ -159,6 +159,24 @@ func (f *Fake) SetOutputs(step string, outputs map[string]string) {
 		f.Outputs = map[string]map[string]string{}
 	}
 	f.Outputs[step] = outputs
+}
+
+// Redact masks every credential the fake holds and every variable it was
+// given, as DockerEnv masks what it handed out.
+func (f *Fake) Redact(text string) string {
+	f.Creds.mu.Lock()
+	defer f.Creds.mu.Unlock()
+	for _, value := range f.Creds.Values {
+		if len(value) >= 6 {
+			text = strings.ReplaceAll(text, value, "••••••")
+		}
+	}
+	for _, value := range f.Vars {
+		if len(value) >= 6 {
+			text = strings.ReplaceAll(text, value, "••••••")
+		}
+	}
+	return text
 }
 
 func (f *Fake) Logf(format string, args ...any) {

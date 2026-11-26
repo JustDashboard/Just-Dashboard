@@ -412,6 +412,9 @@ func (s *Server) Start(ctx context.Context) error {
 	// After the engine, so a window a restart interrupted is settled by a
 	// watcher that can already ask the engine for its rollback.
 	s.modules.rollbackWatcher.Start(ctx)
+	// After the engine: a stack is configured once its release is live, and
+	// a pass a restart cut short runs again.
+	s.modules.stacks.Start(ctx)
 	// Release retention's first pass waits a minute after start-up, then
 	// runs daily and after each finished run.
 	s.modules.releaseImages.Start(ctx)

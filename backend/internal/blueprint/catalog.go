@@ -189,6 +189,10 @@ type Summary struct {
 	// Origin is "builtin" for a definition shipped with the dashboard and
 	// "user" for one added on it (user.go), which is read from the id.
 	Origin string `json:"origin"`
+	// Stack is the smart stack this template is a preset of. The Template
+	// tab leaves such a template out: it is offered on the Stacks tab with
+	// the stack's own questions.
+	Stack string `json:"stack,omitempty"`
 }
 
 // ServiceSummary is one service of a Compose template as the picker lists it.
@@ -219,6 +223,7 @@ func Summarize(blueprint *Blueprint) Summary {
 	}
 	summary.SourceKind = "blueprint"
 	summary.Origin = OriginBuiltIn
+	summary.Stack = blueprint.Stack
 	if IsUserID(blueprint.ID) {
 		summary.Origin = OriginUser
 	}

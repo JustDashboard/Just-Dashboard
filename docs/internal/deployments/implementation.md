@@ -2151,8 +2151,10 @@ only renderer/executor/validation authority for their feature.
   next to a routed primary (Gitea's SSH, Syncthing's sync protocol) becomes an additional
   `runtime.ports[]` publication on its own number (see published ports below) instead of silently
   replacing the routed port; the primary always stays the one the proxy and the checks reach. The
-  catalogue ships 162 reviewed definitions, 157 of them offered (see "how the first sign-in works"
-  below for the five that are retired; 56 are the multi-service templates of the next item). The
+  catalogue ships 164 reviewed definitions, 159 of them offered (see "how the first sign-in works"
+  below for the five that are retired; 58 are the multi-service templates of the next item, two of
+  them the media stack's presets, which the Stacks tab offers instead of the template catalogue —
+  [smart stacks](smart-stacks.md)). The
   three counts the competitive report quotes — built in, deployable, Compose — are constants in
   `blueprint/catalogue_counts.go`, and `catalogue_counts_test.go` fails when the shipped
   definitions disagree, so they are bumped deliberately in the change that adds a template. Every
@@ -2228,6 +2230,9 @@ only renderer/executor/validation authority for their feature.
   states before the press what the stack does by itself: only the public service is reachable, the
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
+  A template marked `stack` is a smart stack's preset: it may publish private web interfaces on
+  loopback (`exposure: loopback`), a data volume another of its services writes may be mounted
+  read-only, and once its release is live the dashboard configures it ([smart stacks](smart-stacks.md)).
   A template is not a Git source, so it is never offered a pull-request preview, though a Compose
   stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
   through the real build step and runtime owner and requires every check to pass, every service's
