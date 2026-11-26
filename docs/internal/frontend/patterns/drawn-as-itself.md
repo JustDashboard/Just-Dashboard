@@ -137,7 +137,7 @@ live, so `github-actions` is GitHub's, and `backup-cron`, whose name says nothin
 (`keyProduct`). An account is its picture, and without one its initials take a hue by the username
 from `LANES` — `AuthorMark`'s argument: a users list of eight brand-blue squares was a texture, and
 the same person now keeps one colour in the rail, the list and their own profile. The profile opens on
-`HostIdentity` with that picture where the tile would be, which makes it the fourth page that
+`IdentityHeader` with that picture where the tile would be, which makes it the fourth page that
 describes a thing the same way; a project's header is the fifth, and a deployment's run page
 opens on that same header saying what the run is (`run-header.tsx`) — it had its own identity line,
 a 48px tile and the duration as a 24px figure, until the operator asked for the project's compact

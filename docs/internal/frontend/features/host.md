@@ -139,7 +139,7 @@ changes. Configure retains the administrator-reviewed replacement specification 
 containers and opens the owning Compose file for Compose containers. Automatic overview findings,
 issue badges, failure/anomaly suggestions and recommendation cards were removed in 0.7.5
 
-The overview, Containers, Events and Stacks open on one line (`docker-identity.tsx`, `HostIdentity`
+The overview, Containers, Events and Stacks open on one line (`docker-identity.tsx`, `IdentityHeader`
 laid out as a project's header): Docker's mark, "Docker" and its version, the page's verdict beside
 the name, the server as the first fact, and the page's one command at the far end (Open Deployments,
 Create stack, Events' window). The overview (`app/(dashboard)/docker/page.tsx`) reads: that line; the
@@ -800,7 +800,7 @@ tester run on the page and draw no working bar.
   as 100%), and Docker's runtime state. The security finding underneath that state was removed.
 - `docker-identity.tsx` is the line the overview, Containers, Events and Stacks open on: Docker's
   mark, "Docker" and its version, the page's verdict beside the name, the server as the first fact
-  and the page's one command, in `HostIdentity`'s project layout.
+  and the page's one command, in `IdentityHeader`'s project layout.
 - `container-band.tsx`, `engine-picture.tsx`, `engine-picture-model.ts` and `overview.ts` are the
   overview's. The band reads the containers socket, so its figures move with every frame.
   `engine-picture.tsx` draws what the engine holds on `components/wire/wire-flow.tsx`: compose projects and

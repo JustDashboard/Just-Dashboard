@@ -1169,7 +1169,7 @@ log first, with a bar at the foot to reach the sources (`components/phone-panes.
 the rail stacks over the lines and the page scrolls. A request record's Requests view leaves its chart to
 Insights on a phone, where the pane is the window's height and the rows are what it is for. Over the frame the page reads as a deployment's Logs page
 does: the chosen source as an identity line (`SourceIdentity` in `source-facts.tsx`, the Overview's
-`HostIdentity` shape: the source drawn as its product, its name, and its kind, state, path, size and
+`IdentityHeader` shape: the source drawn as its product, its name, and its kind, state, path, size and
 rotated set as facts), with Export and the shortcuts key at its end — a request record takes the same
 line (`RecordIdentity`). No readings stand over the frame: the lens's readings are the counts on the
 lens row's chips at every width, so the console keeps the height. The workspace is one pane, and its chrome is at most three

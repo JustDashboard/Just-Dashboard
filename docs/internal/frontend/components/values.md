@@ -211,13 +211,11 @@ rather than `grouped`.
 
 ## Still to move
 
-The deprecated names keep their callers working until those have moved; WP-39 deletes them:
-`compact` and `ago` (`database/home/readings`), `grouped` and `compactCount`
-(`database/data/view`), `compactCount` (`proxy/site-traffic`), `compact`
-(`network/gateway/reading`), `updatedLabel`, `testedLabel`, `readLabel`, `sinceWords` (proxy),
-`certificateLeft` (`lib/tls/report`), `shortIdentity` and `formatDuration` (`deploy/vocabulary`),
-`RatePair`, `RX`, `TX` (`network/rate-pair`), `CopyButton` (`account-link/link-panel`) and
-`downloadBlob` (`database/diagram/export`).
+The deprecated names keep their callers working until those have moved, and each is deleted with
+its last caller: `compact` and `ago` (`database/home/readings`), `compact`
+(`network/gateway/reading`), `updatedLabel` and `testedLabel` (proxy), `shortIdentity` and
+`formatDuration` (`deploy/vocabulary`), `RatePair`, `RX`, `TX` (`network/rate-pair`) and
+`CopyButton` (`account-link/link-panel`).
 
 ## Related
 

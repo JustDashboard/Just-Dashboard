@@ -6,8 +6,8 @@ import { ProductGlyph } from "@/components/product-logo"
  * The one line of facts under a name: "3 sites · 2 on TLS · via tailscale0".
  *
  * Facts on one line that wraps, with a dot between neighbours and none where
- * the line breaks. A dot drawn as an item of its own (`FactDot`) is left at
- * the end of a line when the next fact wraps, where it reads as a stray mark.
+ * the line breaks. A dot drawn as an item of its own is left at the end of a
+ * line when the next fact wraps, where it reads as a stray mark.
  * Here each fact carries its dot in front of it, in the gap, and the line is
  * drawn one gap to the left of a frame that clips it: the dot before a line's
  * first fact falls outside the frame, whichever fact the wrap makes first.
@@ -20,10 +20,8 @@ import { ProductGlyph } from "@/components/product-logo"
  * `nowrap` is for a row that holds one line whatever its width: the facts
  * truncate instead of wrapping.
  *
- * A `FactDot` among the children is read as the old way of saying "a new fact
- * starts here": it is dropped, and what stood between two of them becomes one
- * fact, so a line still written with dots draws through this one unchanged in
- * its words.
+ * Children that are not `Fact`s are drawn as one fact for each run of them
+ * between two that are, so their words are not split by a dot.
  */
 export function FactLine({
   nowrap,
@@ -113,18 +111,6 @@ export function facts(list: readonly React.ReactNode[]) {
     .map((fact, index) => <Fact key={index}>{fact}</Fact>)
 }
 
-/**
- * The old separator, a dot drawn as an item of its own. Inside a `FactLine`
- * (and so in an identity header's facts) it only marks where one fact ends
- * and the next begins; on its own it still draws, in `--faint`, for the rows
- * the page passes have not moved yet.
- *
- * @deprecated use `FactLine` and `Fact`; WP-39 bans this.
- */
-export function FactDot() {
-  return <span className="text-faint">·</span>
-}
-
 /** Children with fragments opened and nothing-renders (`false`, `null`) left out. */
 function flatten(children: React.ReactNode, prefix = ""): React.ReactNode[] {
   const out: React.ReactNode[] = []
@@ -142,17 +128,15 @@ function flatten(children: React.ReactNode, prefix = ""): React.ReactNode[] {
   return out
 }
 
-/** Whether a run of children is written as facts: with `Fact`s or with `FactDot`s between them. */
+/** Whether a run of children is written as facts: with a `Fact` among them. */
 export function hasFacts(children: React.ReactNode) {
-  return flatten(children).some(
-    (child) => isValidElement(child) && (child.type === Fact || child.type === FactDot),
-  )
+  return flatten(children).some((child) => isValidElement(child) && child.type === Fact)
 }
 
 /**
  * The line's items: every `Fact` as itself, and every run of other nodes
- * between two `FactDot`s (or a `Fact`) as one fact whose parts keep the gap
- * they had in the old flex line. The first item is marked as the lead.
+ * between two of them as one fact whose parts keep the gap they had in the
+ * old flex line. The first item is marked as the lead.
  */
 function factItems(children: React.ReactNode) {
   const items: React.ReactElement[] = []
@@ -170,9 +154,7 @@ function factItems(children: React.ReactNode) {
     )
   }
   for (const child of flatten(children)) {
-    if (isValidElement(child) && child.type === FactDot) {
-      flush()
-    } else if (isValidElement(child) && child.type === Fact) {
+    if (isValidElement(child) && child.type === Fact) {
       flush()
       items.push(child as React.ReactElement)
     } else {

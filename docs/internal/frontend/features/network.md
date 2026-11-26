@@ -125,7 +125,7 @@ limits
 
 **The three evidence pages share one layout (0.8.7).** External checks, Address planning and Socket
 history each opened on four tiles over a paragraph, a form and a framed table, with their forms folded
-into disclosures. Each now opens on an identity line (`HostIdentity` in its project layout, its facts
+into disclosures. Each now opens on an identity line (`IdentityHeader` in its project layout, its facts
 through `IdentityFacts`) whose state is the page's verdict and whose one command is its main verb, and
 none has a `StatGrid`:
 

@@ -19,6 +19,7 @@ folder, because that is when they existed.
 | `AccountCard` (removed) | System users' account card | 0.8.2, when the list became a table again and an account a page |
 | `TopBar` (removed), `components/top-bar.tsx` (removed) | a top bar nothing rendered | 0.9.0, with the file moves |
 | `StatLink` (removed) | a stat tile that was also a link | 0.9.0, with no caller left; a `Link` around a `StatTile` |
+| `HostIdentity` (removed), `HostFact` (removed), `FactDot` (removed) | the identity line's old name, a fact with its product's glyph, and the dot between facts drawn as an item of its own | 0.9.1, with no caller left; `IdentityHeader`, `Fact` with `product`, and `FactLine` |
 | `ShareBar` (removed) | a bar with the rows it shared out under it | after 0.8.5, for `BarReading` (§10) |
 | `StandingBar` (removed) | a bar of standings with rows under it | after 0.8.5, for `BarReading` |
 | `container-table.tsx` (removed) | the Docker overview's table of every container | 0.8.7 |

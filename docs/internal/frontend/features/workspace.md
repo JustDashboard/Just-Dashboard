@@ -366,7 +366,7 @@ speaks the deployment pages' and Configuration's wiring vocabulary (`components/
 a wire pulses while what it joins is in use, goes amber where something should be looked at, and is
 dashed where it has never carried anything. The reads behind every wire, chip and verdict are
 `components/account/access.ts` (unit-tested). Profile: the display name in the account's identity
-line (`HostIdentity` with the picture as its mark — the sign-in name and role, member since, last
+line (`IdentityHeader` with the picture as its mark — the sign-in name and role, member since, last
 sign-in, the browser and network this session came in through drawn as themselves, for
 `system.admin` the accounts as their faces linking to Users, and the two-factor verdict beside the
 name); *Signed in as you* (`access-picture.tsx`): every session on the left as its browser or program with its system

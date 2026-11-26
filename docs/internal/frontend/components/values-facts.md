@@ -5,10 +5,9 @@ How a page says a few facts about a thing: in a line of words under its name, in
 
 **Members:** `FactLine`, `Fact`, `facts` (`components/fact-line.tsx`); `DetailList`, `Detail`
 (`components/detail-list.tsx`); `FormFacts`, `FormFact` (`components/form.tsx`, the forms family).
-**Deprecated, kept until WP-39 bans them:** `FactDot` and `HostFact` (in `components/fact-line.tsx`
-and `components/identity-header.tsx`), `FactsLine` (`database/workbench/facts-line.tsx`, now drawn
-through `FactLine`), the re-export in `deploy/fact-line.tsx`, and `Metric`/`MetricStrip`, which now
-draw as `FormFact`/`FormFacts`.
+**Deprecated, kept until their callers move:** `FactsLine` (`database/workbench/facts-line.tsx`,
+now drawn through `FactLine`), the re-export in `deploy/fact-line.tsx`, and `Metric`/`MetricStrip`,
+which now draw as `FormFact`/`FormFacts`.
 
 ## Which one
 
@@ -34,9 +33,9 @@ tile without its border, so it now reads inline. `StatTile` is the readings fami
 
 **Anatomy.** Each fact carries its separating dot in front of it, in the gap, and the line is drawn
 one gap to the left of a frame that clips it. The dot before a line's first fact falls outside the
-frame, whichever fact the wrap makes first. So a wrapped line never ends on a dot. `FactDot` was a
-dot drawn as an item of its own, which was left at the end of a line whenever the next fact wrapped
-("Cloudflare credentials saved ·", PGP-01).
+frame, whichever fact the wrap makes first. So a wrapped line never ends on a dot. A dot drawn as an
+item of its own was left at the end of a line whenever the next fact wrapped ("Cloudflare
+credentials saved ·", PGP-01).
 
 - The dot is `--faint`, never a faded `muted/40` (no text ink takes an opacity).
 - The dot is real text, `" · "`, so `textContent` reads "3 sites · 2 on TLS". Specs that read a
@@ -56,11 +55,10 @@ dot drawn as an item of its own, which was left at the end of a line whenever th
   `<FactLine>{facts([count && \`${count} sites\`, tls])}</FactLine>`.
 
 **In an identity header.** `IdentityHeader`'s `facts` written as `Fact`s are drawn through a
-`FactLine`, and so are facts still written with `FactDot`s between them. The dots are dropped and
-what stood between two of them becomes one fact, with its parts 8px apart as before. Facts written
-with neither are drawn as given. Facts that a component of the page's own returns cannot be seen
-from outside it, so that component returns `Fact`s, or the page calls it as a function
-(`hubFacts(status)` on the Hub page).
+`FactLine`. Whatever stands between two `Fact`s and is not one becomes one fact, with its parts 8px
+apart. Facts written without a `Fact` are drawn as given. Facts that a component of the page's own
+returns cannot be seen from outside it, so that component returns `Fact`s, or the page calls it as
+a function (`hubFacts(status)` on the Hub page).
 
 **The phone.** The line wraps between facts and never inside one, unless a single fact is wider than
 the line. A row that must hold one line passes `nowrap`.
@@ -102,7 +100,9 @@ is `DetailList ruled`.
 - `tests/browser/database-data.spec.ts` and `database-schema.spec.ts` read `FactsLine`;
   `deploy-history.spec.ts` and `deploy-deployments-page.spec.ts` read a `FactLine` by its facts'
   titles.
-- WP-39 bans `FactDot`, `HostFact`, `Metric` and `MetricStrip`.
+- `eslint-rules/retired-apis.mjs` (`fact-dot`) refuses an import of the old separate dot and of the
+  old product fact. `Metric` and `MetricStrip` are not linted; they go when their one caller
+  (`network/tools/probe-evidence.tsx`) moves.
 
 ## Related
 

@@ -10,7 +10,6 @@ import {
   type ReachGroup,
   type Socket,
 } from "@/components/proxy/ports"
-import { ago } from "@/lib/format"
 
 /**
  * How the ports page narrows, orders and hands over its rows: the search
@@ -415,15 +414,6 @@ export function groupPorts(group: SocketGroup, shown = 3): string {
 /** Every process behind a group, for its line: one PID or several. */
 export function groupPids(group: SocketGroup): number[] {
   return [...new Set(group.sockets.flatMap(socketPids))].sort((a, b) => a - b)
-}
-
-/**
- * "8s ago", "3m ago": how old a reading is, given its age in milliseconds.
- *
- * @deprecated use `ago(at, now)` from lib/format, or `<Ago>` (components/ago).
- */
-export function sinceWords(ms: number): string {
-  return ago(0, ms)
 }
 
 /** The sockets behind rows, each folded pair as the two sockets the host lists. */

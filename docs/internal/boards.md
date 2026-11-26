@@ -157,7 +157,7 @@ its revision or `updated_at`, so the backfill never puts an open editor into a c
 
 `/excalidraw` (`components/boards/drawing-list.tsx`) is a reading page. It opens on Excalidraw's own
 logo and a line of facts — drawings, shapes, linked server items, the last edit — in the identity shape
-the Overview gives the machine (`HostIdentity`), where a row of stat tiles would have counted what the
+the Overview gives the machine (`IdentityHeader`), where a row of stat tiles would have counted what the
 cards below already show. Each drawing is a lit card (`SpotlightBorder`) whose picture is the drawing:
 `components/boards/drawing-preview.tsx` draws the preview's shapes in the scene's own colours and its
 words in Excalidraw's Virgil (served from the synced fonts as `--font-drawing`), inverted with the
