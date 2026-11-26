@@ -35,7 +35,9 @@ A stream's page (`/proxy/streams/<name>`, `stream-page.tsx`, with the list as a 
 `stream-rail.tsx`) holds what the traffic sheet and the edit form did: Overview (the forward drawn,
 what it carried as reading lines and its sessions and outcomes), Clients (with Deny or Allow),
 Connected now, and Settings (the form as a settings column with one save bar, administrators only),
-`?tab=` in the address. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
+`?tab=` in the address. The view is remembered for the visit and carried to the next stream by the
+rail and Alt+↑/↓, except Settings, which opens only from an address that names it, as a site's
+does. New stream stays a sheet (`stream-form.tsx`); the verbs both places share are
 `stream-verbs.tsx`, and what they say is `stream-facts.ts` (unit-tested). `?stream=<name>` lands on
 the stream's page; checked by `tests/browser/proxy-streams.spec.ts`
 

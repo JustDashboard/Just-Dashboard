@@ -38,7 +38,7 @@ export function StreamRail({
 }: {
   streams: StreamEntry[]
   current: string
-  /** The view on screen, carried to the next stream. */
+  /** The view carried to the next stream: the one on screen, except Settings. */
   tab: StreamTab
   loading: boolean
   /** The list could not be read: said in place of the rows. */

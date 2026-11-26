@@ -2,7 +2,7 @@
 
 import { useCallback, useMemo, useState } from "react"
 import Link from "next/link"
-import { useParams, useRouter } from "next/navigation"
+import { useParams, useRouter, useSearchParams } from "next/navigation"
 import { Connection, Warning } from "@/components/icons"
 import { errorMessage, get } from "@/lib/api"
 import { forgetSessionState, useSessionState } from "@/lib/view-state"
@@ -107,20 +107,27 @@ function dotTone(stream: StreamEntry): DotTone {
  *
  * The list stays beside it from `xl` (`StreamRail`), with the list's own
  * search and chip, so the next stream is one press away; Alt+↑ and Alt+↓ walk
- * it, and the view on screen goes with you. On a phone the page is the one
- * pane, and scrolls as a whole.
+ * it, and the view on screen goes with you, except Settings. On a phone the
+ * page is the one pane, and scrolls as a whole.
  */
 export function StreamPage() {
   const params = useParams<{ name: string }>()
+  const search = useSearchParams()
   const router = useRouter()
   const name = decodeSegment(params.name)
   const { can } = useAuth()
   const admin = can("system.admin")
   // The view is kept in the address and remembered for the visit, as a
-  // site's, a port's and a certificate's are.
-  const [asked, choose] = useDetailTab(STREAM_TABS, { remember: "proxy.stream.tab" })
+  // site's, a port's and a certificate's are. Settings is never what a stream
+  // opens on unasked, as a site's is not: a form is gone to on purpose, not
+  // walked through or remembered into.
+  const [chosen, choose] = useDetailTab(STREAM_TABS, { remember: "proxy.stream.tab" })
+  const asked: StreamTab =
+    chosen === "settings" && search.get("tab") !== "settings" ? "overview" : chosen
   // Settings is the form, which only an administrator can use.
   const tab: StreamTab = asked === "settings" && !admin ? "overview" : asked
+  // The view the next stream opens on, by the arrows or the rail.
+  const walked: StreamTab = tab === "settings" ? "overview" : tab
   const setTab = useCallback((next: string) => choose(streamTab(next)), [choose])
 
   const streams = useProxyRead("streams")
@@ -140,7 +147,7 @@ export function StreamPage() {
   const steps = siblingSteps(
     railed.map((stream) => stream.name),
     name,
-    (key) => router.push(streamHref(key, tab)),
+    (key) => router.push(streamHref(key, walked)),
   )
   const filterLabel = STREAM_FILTERS.find((f) => f.key === chip)?.label
   const caption = streams.data
@@ -162,7 +169,7 @@ export function StreamPage() {
         <StreamRail
           streams={railed}
           current={name}
-          tab={tab}
+          tab={walked}
           loading={streams.loading}
           error={streams.data ? undefined : streams.error}
           onRetry={streams.refresh}
