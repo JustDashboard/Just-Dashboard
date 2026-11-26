@@ -46,6 +46,7 @@ import { PARTICIPLE, engineRun } from "@/components/proxy/engine-lifecycle"
 import { LiveTraffic } from "@/components/proxy/live-metrics"
 import { engineProduct } from "@/components/proxy/marks"
 import { HourWords, RouteMark, ServingStatus, SiteTLS } from "@/components/proxy/site-marks"
+import { siteTitle } from "@/components/proxy/site-details"
 import { isParked } from "@/components/proxy/site-order"
 import {
   noAnswerLabel,
@@ -449,7 +450,10 @@ export default function ProxyOverviewPage() {
     : []
   // A route's file name is the dashboard's; the name its visitors type is
   // what the Traffic and Errors rows lead with.
-  const labelOf = (site: string) => hosts.find((v) => v.name === site)?.serverNames[0] ?? site
+  const labelOf = (site: string) => {
+    const host = hosts.find((v) => v.name === site)
+    return host ? siteTitle(host) : site
+  }
 
   return (
     <Page rise>
@@ -637,7 +641,9 @@ export default function ProxyOverviewPage() {
                       // The names are said once: where they are the route's own
                       // name, the title already says them.
                       const names = routeNames(vhost)
-                      const sayNames = names !== vhost.name
+                      const title = siteTitle(vhost)
+                      const kind = routeKind(vhost)
+                      const sayNames = names !== title
                       const destination =
                         vhost.upstreams.join(", ") ||
                         (backend.kind === "files" ? backend.address : "served by configuration")
@@ -647,7 +653,7 @@ export default function ProxyOverviewPage() {
                           href={target.href}
                           verb={target.verb}
                           leading={<RouteMark vhost={vhost} backend={backend} />}
-                          title={vhost.name}
+                          title={title}
                           description={
                             // One line: what serves it, then the way a request
                             // goes. The route sat on a second line of its own
@@ -657,9 +663,12 @@ export default function ProxyOverviewPage() {
                               <span className="shrink-0">
                                 {/* The application by name, where it has one the
                                     address after it does not already say. */}
-                                {backend.kind === "app" && !destination.includes(backend.name)
-                                  ? `${routeKind(vhost)} → ${backend.name}`
-                                  : routeKind(vhost)}
+                                {backend.kind === "app" &&
+                                !destination.includes(backend.name) &&
+                                // A deployment's route already says its project.
+                                !kind.includes(backend.name)
+                                  ? `${kind} → ${backend.name}`
+                                  : kind}
                               </span>
                               <span aria-hidden className="shrink-0">
                                 ·

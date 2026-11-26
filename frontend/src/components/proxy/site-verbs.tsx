@@ -19,11 +19,12 @@ import {
   Warning,
   Wrench,
 } from "@/components/icons"
-import { del, downloadUrl } from "@/lib/api"
+import { del, downloadUrl, errorMessage } from "@/lib/api"
+import { plural } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import type { RetiredRoute, VHost } from "@/lib/types"
 import type { Verb } from "@/components/verbs"
-import { activeOwner } from "@/components/proxy/site-details"
+import { activeOwner, isLeftover, siteOrigin, siteTitle } from "@/components/proxy/site-details"
 import { siteHref } from "@/components/proxy/site-tabs"
 
 /**
@@ -124,18 +125,14 @@ export function siteDeletable(vhost: VHost): boolean {
  * gives every route, as the server checks it.
  */
 export function siteRetirable(vhost: VHost): boolean {
-  return (
-    /^just-dashboard-env-[1-9][0-9]{0,17}\.conf$/.test(vhost.name) &&
-    !activeOwner(vhost) &&
-    !siteDeletable(vhost)
-  )
+  return isLeftover(vhost) && !siteDeletable(vhost)
 }
 
 /** What Remove route asks before it runs. */
 export function routeRetirement(vhost: VHost) {
   const names = vhost.serverNames.filter((n) => n && n !== "_")
   return {
-    title: `Remove ${vhost.name}`,
+    title: `Remove ${siteTitle(vhost)}`,
     confirmLabel: "Remove route",
     description: (
       <p>
@@ -156,19 +153,82 @@ export function routeRetirement(vhost: VHost) {
 /**
  * Removes the route the way a deployment would, with Caddy's certificates
  * for the names only it served. The server refuses one a deployment still
- * writes. The outcome is announced here, so a confirmation's own "completed"
- * is not added to it.
+ * writes.
+ */
+export function retireQuietly(vhost: VHost): Promise<RetiredRoute> {
+  return del<RetiredRoute>(`/proxy/vhosts/${encodeURIComponent(vhost.name)}/deployment-route`)
+}
+
+/**
+ * Removes one route and says how it went. The outcome is announced here, so
+ * a confirmation's own "completed" is not added to it.
  */
 export async function retireRoute(vhost: VHost): Promise<"reported"> {
-  const res = await del<RetiredRoute>(
-    `/proxy/vhosts/${encodeURIComponent(vhost.name)}/deployment-route`,
-  )
+  const res = await retireQuietly(vhost)
+  const title = siteTitle(vhost)
   if (res.certificateError) {
-    notify.warning(`${vhost.name} removed, but not its certificate`, {
+    notify.warning(`${title} removed, but not its certificate`, {
       description: res.certificateError,
     })
   } else {
-    notify.success(`${vhost.name} removed`)
+    notify.success(`${title} removed`)
+  }
+  return "reported"
+}
+
+/** What Remove all asks before it runs: the domains that stop answering. */
+export function leftoverRetirement(leftovers: VHost[]) {
+  return {
+    title: `Remove ${plural(leftovers.length, "leftover route")}`,
+    confirmLabel: leftovers.length === 1 ? "Remove route" : "Remove all",
+    description: (
+      <>
+        <p>
+          The deployments that wrote {leftovers.length === 1 ? "this route" : "these routes"} are
+          deleted or archived. {leftovers.length === 1 ? "Its domain stops" : "Their domains stop"}{" "}
+          answering once the engine reloads, and the certificates kept only for them are removed.
+        </p>
+        <p className="font-mono text-hint break-words">{leftovers.map(siteTitle).join(", ")}</p>
+      </>
+    ),
+  }
+}
+
+/**
+ * Removes every leftover, one after another since each reloads the engine,
+ * and says the whole of how it went once: how many are gone, and each one
+ * that is not with the server's reason. One refusal does not stop the rest;
+ * they are separate routes.
+ */
+export async function retireLeftovers(leftovers: VHost[]): Promise<"reported"> {
+  const failed: string[] = []
+  const uncleaned: string[] = []
+  let removed = 0
+  for (const vhost of leftovers) {
+    try {
+      const res = await retireQuietly(vhost)
+      removed += 1
+      if (res.certificateError) uncleaned.push(`${siteTitle(vhost)}: ${res.certificateError}`)
+    } catch (err) {
+      failed.push(`${siteTitle(vhost)}: ${errorMessage(err)}`)
+    }
+  }
+  const done = `${plural(removed, "route")} removed`
+  if (failed.length > 0) {
+    notify.error(
+      removed > 0
+        ? `${done}, ${failed.length} could not be`
+        : `Could not remove ${plural(failed.length, "route")}`,
+      undefined,
+      { description: failed.join("\n") },
+    )
+  } else if (uncleaned.length > 0) {
+    notify.warning(`${done}, but not every certificate`, {
+      description: uncleaned.join("\n"),
+      duration: 12_000,
+    })
+  } else {
+    notify.success(done)
   }
   return "reported"
 }
@@ -188,6 +248,9 @@ export function siteRenamable(vhost: VHost): boolean {
     (vhost.layout === "sites-available" || vhost.layout === "conf.d")
   )
 }
+
+/** The verbs that take a site, or its link, off the host. */
+const REMOVALS = ["delete", "retire", "unlink"]
 
 export function useSiteVerbs({
   vhost,
@@ -487,6 +550,19 @@ export function useSiteVerbs({
       progressive: "Removing",
       disabled: Boolean(busy),
       run: () => onRetire(vhost),
+    })
+  }
+  // A site with no way to remove it from here says why, where the way would
+  // be: a menu without Delete read as a page that cannot remove sites.
+  const origin = siteOrigin(vhost)
+  if (admin && origin && !verbs.some((verb) => REMOVALS.includes(verb.key))) {
+    verbs.push({
+      key: "held",
+      label: "Remove",
+      icon: Trash,
+      disabled: true,
+      reason: origin.link ? `${origin.text} ${origin.link.label}.` : `${origin.text}.`,
+      run: () => {},
     })
   }
   return verbs

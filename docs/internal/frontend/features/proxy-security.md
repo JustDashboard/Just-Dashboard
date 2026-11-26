@@ -48,9 +48,10 @@ hostname → Cloudflare's edge → connector → this server, and the hostnames 
 connected, the dashed picture, a choice of token or API and one form (administrators only).
 
 Sites (`/proxy/sites`, 0.8.7) lists every site as a one-line row (`SiteRow` in `vhosts-panel.tsx`):
-what it fronts with its engine in the tile's corner, its name over where its requests go, then its
-hour in words (`HourWords`: requests an hour and the 5xx share), ports, TLS, certificate and state
-in aligned columns, every verb in its menu. New site is the line's command, Import and Export all
+what it fronts with its engine in the tile's corner, its title over who writes it and where its
+requests go, then its hour in words (`HourWords`: requests an hour and the 5xx share; read wherever
+nginx or the ingress container is, since `/proxy/traffic` covers both), ports, TLS, certificate and
+state in aligned columns, every verb in its menu. New site is the line's command, Import and Export all
 are behind its menu, and under the list a line saying what an unknown host gets
 (`UnknownHostsFact`, leading to Configuration → Settings, where the catch-all is a section saved
 by the page's bar), then Password files (`auth-files-panel.tsx`), Access lists (`access-lists-panel.tsx`), the URL resolver
@@ -64,10 +65,45 @@ parts (`&view=` general, https, access, hardening, headers, paths, file), with a
 parts that hold unsaved changes (`site-sections.ts`, unit-tested) and one floating bar holding the
 form's saves (`site-settings.tsx`); leaving it with unsaved changes asks first. A new site, or a copy
 of one, is still made in a sheet over the list (`SiteForm`, the same fields). `?site=<name>` lands on
-the site's Settings for an administrator and a file the form owns, and opens the config viewer
-otherwise. On Settings the identity line does not offer Edit, as its command or in its menu: the
+the site's Settings for an administrator and a file the form owns, opens the config viewer for
+another file, and lands on the site's page where there is no file. On Settings the identity line does not offer Edit, as its command or in its menu: the
 form is what is on screen. Checked by `tests/browser/proxy-site-page.spec.ts`, `proxy-site-builder.spec.ts`,
 `proxy-sites-list.spec.ts` and `proxy-sites-tools.spec.ts`.
+
+A site is called by its domain, not its file (0.9.1). `siteTitle` (`site-details.ts`) is the first
+real server name (not `_`, not empty) and falls back to the file name; the Sites row, the Overview's
+routes, the rail, the site page's heading and every confirmation and toast say it. The file name
+stays in the address (`/proxy/sites/<name>`), on the row's mono line where it differs from the
+title, as a mono fact on the page's identity line, and in search. Under the title, `siteKind` (the
+Overview's `routeKind` is the same function) says who writes the site: `<project> · <environment>`
+for a live deployment's route, `Leftover · its deployment was deleted` or `Leftover · <project> is
+archived`, `Caddyfile`, `Ingress Caddyfile` for a `docker-caddy:` row, `Caddy route`, or `nginx
+site`. It never names the engine, which is the tile's corner mark. Search (`matchesSearch`) also
+finds a site by its owner's project and environment, and `/proxy/sites?q=<text>` fills the search
+(the chip is let go and `q` is taken off the address once read).
+
+A **leftover** is a route with a deployment's name (`just-dashboard-env-<id>.conf`) whose owner is
+gone or archived (`isLeftover`). Its state word is a warning `leftover` in place of `serving`
+(`ServingStatus`, the rail too), it sorts straight after broken links (`byUrgency`), it has a
+Leftover chip, and a notice over the list counts them with one button, Remove all
+(`leftoverRetirement`, `retireLeftovers` in `site-verbs.tsx`): the confirmation names the domains,
+each route is retired in turn through `DELETE /proxy/vhosts/{name}/deployment-route`, and one toast
+says how many went and which did not, with the server's reason. A reader sees the notice without
+the button.
+
+A site that cannot be removed from here says why in one line (`siteOrigin`, drawn by
+`SiteOriginLine` on the site's Overview and as a held Remove item with the reason in the row's
+menu): a live deployment's route is "Written by <project> on every deploy" with a link to
+`/deploy/<projectId>/settings/domains`, a Caddyfile site says to edit the Caddyfile, a
+`docker-caddy:` row that it is defined in the ingress container's own Caddyfile. A leftover's line
+("Left by a deleted deployment") comes before the picture with a plain Remove button: Remove route
+is a destructive verb, so it stays behind `⋯` on the identity line and the button is in the body.
+
+The list's switch, rename, delete and route removal live in `useSiteChanges` (`site-changes.tsx`),
+which the list and the site's page both call; the list passes its per-row busy word and reload
+tracking, and the page goes back to the list after a delete or a removal and to the new address
+after a rename. The page's menu offers Enable or Disable, Rename and Delete for the same sites the
+list does. `?site=<name>` for a route with no file on the host is replaced by the route's page.
 
 Every page of the section opens on an identity line laid out as a project's header (0.8.7): the
 name with its state beside it, the facts under them, one command at the end and the rest behind

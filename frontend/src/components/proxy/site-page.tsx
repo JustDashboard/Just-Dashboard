@@ -38,9 +38,21 @@ import { siteLogPlan } from "@/components/proxy/site-log-plan"
 import { SiteLogs, siteLogViews, type SiteLogView } from "@/components/proxy/site-logs"
 import { SiteRouteMap } from "@/components/proxy/site-route-map"
 import { siteVerdict, type SiteVerdict } from "@/components/proxy/site-overview"
-import { activeOwner, matchesSearch } from "@/components/proxy/site-details"
+import {
+  activeOwner,
+  isLeftover,
+  matchesSearch,
+  siteKind,
+  siteOrigin,
+  siteTitle,
+  type SiteOrigin,
+} from "@/components/proxy/site-details"
+import { useSiteChanges } from "@/components/proxy/site-changes"
+import { sharedNames } from "@/components/proxy/site-order"
+import { SiteRenameDialog } from "@/components/proxy/site-rename"
+import { TextLink } from "@/components/inline-link"
 import { SiteSettings, type LeaveGuard } from "@/components/proxy/site-form"
-import { retireRoute, routeRetirement, useSiteVerbs } from "@/components/proxy/site-verbs"
+import { useSiteVerbs } from "@/components/proxy/site-verbs"
 import { ConfigEditor } from "@/components/proxy/config-editor"
 import { SiteFileVerbs } from "@/components/proxy/vhosts-panel"
 import { SiteBalancing } from "@/components/proxy/site-balancing"
@@ -57,14 +69,17 @@ import {
 } from "@/components/proxy/site-tabs"
 import { poolsOfSite } from "@/components/proxy/upstream-pools"
 import { decodeSegment } from "@/lib/route-params"
+import { cn } from "@/lib/utils"
 
 /** The site's file read back: the form's fields, and where it logs. */
 type SiteRead = { spec: SiteSpec; managed: boolean; warnings: string[] }
 
 /**
- * The site's verbs its page draws. The way here is the page itself, and the
- * ones that change what nginx serves — the switch, a rename, a delete — are
- * the list's, which follows a reload through to what nginx then has loaded.
+ * The site's verbs its page draws. The way here is the page itself. The ones
+ * that change what the host serves — the switch, a rename, a delete, a
+ * leftover route's removal — are here as they are in the list
+ * (`useSiteChanges`): they were the list's alone, and an operator who opened
+ * a site to remove it found nothing to remove it with.
  */
 const PAGE_VERBS = [
   "deployment",
@@ -74,7 +89,11 @@ const PAGE_VERBS = [
   "scan",
   "access-log",
   "errors",
+  "enable",
+  "disable",
+  "rename",
   "download",
+  "delete",
   "retire",
 ]
 
@@ -308,30 +327,42 @@ function SiteMain({
     hour.refresh()
   }
 
+  // The change in flight, as the word the state says while it is.
+  const [busy, setBusy] = useState<string>()
+  const [renaming, setRenaming] = useState<VHost | null>(null)
+  const hosts = useMemo(() => vhosts.data ?? [], [vhosts.data])
+  const changes = useSiteChanges({
+    confirm,
+    hosts,
+    begin: (_name, verb) => setBusy(verb),
+    settle: () => {
+      setBusy(undefined)
+      refresh()
+    },
+    // The page is the site's own, so once it is gone the list is where to be.
+    onDeleted: () => router.push("/proxy/sites"),
+    // Replaced: the old name's address is a page of nothing now.
+    onRenamed: (_vhost, res) => router.replace(siteHref(res.name, tab)),
+  })
   const verbs = useSiteVerbs({
     vhost: vhost ?? PLACEHOLDER,
     admin,
+    busy,
+    // Another entry has this name: a verb that acts by name could act on it.
+    ambiguous: sharedNames(hosts).has(name),
     onEdit: () => setTab("settings"),
     onRaw: () => setRaw(true),
     onServed: () => {},
     onDuplicate: () => {},
-    onToggle: () => {},
-    onDelete: () => {},
+    onToggle: changes.toggle,
+    onDelete: changes.remove,
     onUnlink: () => {},
     onOverride: () => {},
-    onRename: () => {},
-    // The page is the route's own, so once it is gone the list is where to be.
-    onRetire: (v) =>
-      confirm({
-        ...routeRetirement(v),
-        action: async () => {
-          const reported = await retireRoute(v)
-          vhosts.refresh()
-          router.push("/proxy/sites")
-          return reported
-        },
-      }),
+    onRename: setRenaming,
+    onRetire: changes.retire,
   }).filter((verb) => PAGE_VERBS.includes(verb.key))
+  // What the page calls the site: its domain once the listing has it.
+  const title = vhost ? siteTitle(vhost) : name
 
   // The frame every detail page has (D9): the way back with the arrows, the
   // rail from `xl`, and the identity line held still over the views.
@@ -344,7 +375,7 @@ function SiteMain({
       steps={steps}
       rail={rail}
       back={BACK}
-      title={name}
+      title={title}
       identity={identity}
     >
       {body}
@@ -367,7 +398,7 @@ function SiteMain({
         className="border-b-0 pb-0"
         mark={vhost ? siteProduct(vhost) : undefined}
         fallback={Globe}
-        title={<TextShimmer>{`Reading ${name}…`}</TextShimmer>}
+        title={<TextShimmer>{`Reading ${title}…`}</TextShimmer>}
         state
         command
         menu={false}
@@ -398,6 +429,7 @@ function SiteMain({
   const summary = hour.data?.status === "available" ? hour.data.summary : undefined
   const verdict = siteVerdict({ vhost, summary, pools, cert })
   const owner = activeOwner(vhost)
+  const origin = siteOrigin(vhost)
 
   const logViews = siteLogViews(plan)
   const logView = asked && logViews.includes(asked) ? asked : logViews[0]
@@ -432,10 +464,10 @@ function SiteMain({
   // The identity line's verbs by the one rule (`IdentityVerbs`): the command
   // first, the rest behind `⋯`. On Settings there is no command, only the menu.
   const lineVerbs = primary
-    ? IdentityVerbs({ verbs: [{ ...primary, inline: true }, ...rest], name })
+    ? IdentityVerbs({ verbs: [{ ...primary, inline: true }, ...rest], name: title })
     : {
         command: undefined,
-        menu: rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />,
+        menu: rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${title}`} />,
       }
 
   // Plain HTTP in front of an application is the one fact here that wants action.
@@ -459,11 +491,11 @@ function SiteMain({
       className="animate-rise border-b-0 pb-0"
       mark={siteProduct(vhost)}
       fallback={Globe}
-      label={`About ${name}`}
-      title={<span className="truncate">{name}</span>}
+      label={`About ${title}`}
+      title={<span className="truncate">{title}</span>}
       state={
         <>
-          <ServingStatus vhost={vhost} />
+          <ServingStatus vhost={vhost} busy={busy} />
           {verdict && <Verdict verdict={verdict} pressed={failedOnly} onPress={narrowToFailed} />}
         </>
       }
@@ -471,6 +503,13 @@ function SiteMain({
         <>
           {plainWarned && tlsFact}
           <Fact>{kindWord(vhost, spec)}</Fact>
+          {/* The file, where the title is the domain: what the address and
+              the host's own tools call the site. */}
+          {title !== vhost.name && (
+            <Fact mono title="The site's file">
+              {vhost.name}
+            </Fact>
+          )}
           {read.data && !read.data.managed && <Fact>written by hand</Fact>}
           {!plainWarned && tlsFact}
           {vhost.modified && <Fact>edited {relativeTime(vhost.modified)}</Fact>}
@@ -485,12 +524,18 @@ function SiteMain({
     identity,
     <>
       {dialog}
+      {changes.outputDialog}
+      <SiteRenameDialog
+        vhost={renaming}
+        onOpenChange={(open) => !open && setRenaming(null)}
+        onRename={changes.rename}
+      />
       {/* Chosen by a press, not by focus: Settings ask before they are
           left, and the focus that question hands back to the tab it came
           from would choose that tab again and ask again. */}
       <Tabs value={tab} onValueChange={setTab} activationMode="manual" className="gap-0">
         <ViewTabList
-          label={`Views of ${name}`}
+          label={`Views of ${title}`}
           value={tab}
           views={tabs.map((key) => ({ key, label: SITE_TAB_LABEL[key] }))}
           sticky
@@ -499,6 +544,15 @@ function SiteMain({
         <TabsContent value="overview" className="pt-6">
           {tab === "overview" && (
             <div className="flex min-w-0 flex-col gap-8 pb-2">
+              {/* A leftover's line comes before the picture: removing the
+                  route is the one thing to do on this page. */}
+              {origin?.kind === "leftover" && (
+                <SiteOriginLine
+                  origin={origin}
+                  onRemove={admin ? () => changes.retire(vhost) : undefined}
+                  busy={Boolean(busy)}
+                />
+              )}
               <SiteRouteMap
                 vhost={vhost}
                 spec={spec}
@@ -509,7 +563,7 @@ function SiteMain({
                 pools={pools}
                 listeners={ports.data}
               />
-              <SiteAbout vhost={vhost} />
+              <SiteAbout vhost={vhost} origin={origin?.kind === "leftover" ? undefined : origin} />
               {nginx && upstreams.data && (
                 <SiteBalancing pools={pools} evidence={upstreams.data.evidence} />
               )}
@@ -627,11 +681,12 @@ function SiteMain({
  * the lines the Sites card carried under its route — and what it does
  * besides naming and listening, one word each.
  */
-function SiteAbout({ vhost }: { vhost: VHost }) {
+function SiteAbout({ vhost, origin }: { vhost: VHost; origin?: SiteOrigin }) {
   const notes = <SiteNotes vhost={vhost} />
   const tagged = Boolean(vhost.features?.length)
   return (
     <div data-slot="site-about" className="flex min-w-0 flex-col gap-2 empty:hidden">
+      {origin && <SiteOriginLine origin={origin} />}
       {notes}
       {tagged && (
         <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -639,6 +694,42 @@ function SiteAbout({ vhost }: { vhost: VHost }) {
         </div>
       )}
     </div>
+  )
+}
+
+/**
+ * Who writes the site and where it is removed, in one line: the deployment
+ * and its Domains settings, the Caddyfile, the ingress container's own. A
+ * leftover says what it is beside the button that removes it, since no
+ * destructive verb takes the identity line's command.
+ */
+function SiteOriginLine({
+  origin,
+  onRemove,
+  busy,
+}: {
+  origin: SiteOrigin
+  onRemove?: () => void
+  busy?: boolean
+}) {
+  const leftover = origin.kind === "leftover"
+  return (
+    <p
+      data-slot="site-origin"
+      className={cn(
+        "flex min-w-0 flex-wrap items-center gap-x-3 gap-y-1",
+        leftover ? "text-body" : "text-hint text-muted-foreground",
+      )}
+    >
+      {leftover && <Warning aria-hidden className="size-4 shrink-0 text-warning" />}
+      <span className="min-w-0">{origin.text}</span>
+      {origin.link && <TextLink href={origin.link.href}>{origin.link.label}</TextLink>}
+      {onRemove && (
+        <Button size="xs" variant="outline" disabled={busy} onClick={onRemove}>
+          Remove
+        </Button>
+      )}
+    </p>
   )
 }
 
@@ -703,12 +794,12 @@ function Verdict({
   )
 }
 
-/** What the site does, in the form's words, or where a Caddy site lives. */
+/**
+ * Who writes the site, as its row says it, where that is a deployment, a
+ * leftover or Caddy; otherwise what an nginx site does, in the form's words.
+ */
 function kindWord(vhost: VHost, spec: SiteSpec | undefined) {
-  if (vhost.kind === "caddy") {
-    if (vhost.path) return "a site in the Caddyfile"
-    return vhost.name.startsWith("docker-caddy:") ? "a route on the ingress" : "a deployment route"
-  }
+  if (vhost.kind === "caddy" || vhost.owner || isLeftover(vhost)) return siteKind(vhost)
   switch (spec?.kind) {
     case "static":
       return "static files"

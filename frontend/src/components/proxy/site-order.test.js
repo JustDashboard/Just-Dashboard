@@ -7,7 +7,9 @@ const vhost = (overrides) => ({
   path: "/etc/nginx/sites-available/app.example.com",
   enabledPath: "/etc/nginx/sites-enabled/app.example.com",
   enabled: true,
-  serverNames: ["app.example.com"],
+  // Each answers to its own name: the order is by what a row is titled
+  // with, and sites that all shared one domain would tie on it.
+  serverNames: [overrides?.name ?? "app.example.com"],
   listen: ["443 ssl"],
   upstreams: ["http://127.0.0.1:3000"],
   tls: true,
@@ -42,7 +44,7 @@ describe("site order", () => {
     expect(disabled).toEqual(["plainOff", "off"])
   })
 
-  test("worst first, then by name", () => {
+  test("worst first, then by title", () => {
     const ordered = Object.values(sites)
       .sort(byUrgency)
       .map((v) => v.name)
@@ -112,5 +114,39 @@ describe("the stock default site", () => {
       "aa-serving",
       "default",
     ])
+  })
+})
+
+describe("a route its deployment left", () => {
+  const leftover = vhost({
+    name: "just-dashboard-env-450.conf",
+    kind: "caddy",
+    path: "",
+    enabledPath: undefined,
+    serverNames: ["zz.example.com"],
+  })
+  const live = {
+    ...leftover,
+    name: "just-dashboard-env-451.conf",
+    serverNames: ["aa.example.com"],
+    owner: { projectId: 1, environmentId: 451, project: "shop", environment: "production" },
+  }
+
+  test("leads everything but a broken link", () => {
+    const dangling = vhost({ name: "gone", broken: "dangling" })
+    const order = [sites.tls, sites.plain, live, leftover, dangling].sort(byUrgency)
+    expect(order.map((v) => v.name)).toEqual([
+      "gone",
+      "just-dashboard-env-450.conf",
+      "plain",
+      "just-dashboard-env-451.conf",
+      "tls",
+    ])
+  })
+
+  test("ties are settled by the domain the row is titled with, not the file", () => {
+    const a = vhost({ name: "zz-file", serverNames: ["alpha.example.com"] })
+    const b = vhost({ name: "aa-file", serverNames: ["beta.example.com"] })
+    expect([b, a].sort(byUrgency).map((v) => v.name)).toEqual(["zz-file", "aa-file"])
   })
 })
