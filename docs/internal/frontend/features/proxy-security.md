@@ -26,8 +26,10 @@ with its source, the expired ones and Caddy's ticked; "N leftover certificate co
 Where the Docker Caddy ingress runs and certbot is not installed (`caddyOnly` in the work context,
 from `/proxy/status`'s `ingressContainer` and certbot's `certbot_unavailable`), the header says
 "renewed by Caddy" rather than "no certbot", the ACME accounts view is not drawn and Signing requests
-only while one waits, Renewal opens on the certificates Caddy renews (`CaddyRenewals`) with Install
-certbot second, and an empty list's next step is "Add a domain to a project" (`/deploy`). Alerts (`/proxy/alerts`, administrators) is its own
+only while one waits, Renewal puts Install certbot second, for an nginx site or a wildcard, and an
+empty list's next step is "Add a domain to a project" (`/deploy`). Wherever the ingress runs,
+certbot or not, Renewal opens on the certificates Caddy renews (`CaddyRenewals`), so its place does
+not wait on certbot's read. Alerts (`/proxy/alerts`, administrators) is its own
 page: what the rules watch wired to the channels told, what fires with its mute, the rules edited in
 a sheet, and a test per channel (the parts that do not know the proxy's kinds are the alerts kit,
 `components/alerts/kit.tsx`, `kinds.ts` and `alert-parts.tsx`, shared with `/metrics/alerts`); the overview's line says what

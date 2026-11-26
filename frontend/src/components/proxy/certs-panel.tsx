@@ -573,12 +573,13 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
     }
   }
   const lineages = certbot.data?.certs ?? []
-  const caddy = work.caddyRenews && <CaddyRenewals />
   return (
     <>
-      {/* Where Caddy is all that renews, what it renews leads, and certbot
-          is the second thing: wanted for an nginx site or a wildcard. */}
-      {caddyOnly && caddy}
+      {/* What Caddy renews leads wherever the ingress runs, and certbot is
+          the second thing: wanted for an nginx site or a wildcard. Its place
+          does not wait on whether certbot is here, so nothing moves when
+          that read lands. */}
+      {work.caddyRenews && <CaddyRenewals />}
       <Panel plain aria-label="Renewal schedule" className={COLUMN}>
         <PanelHeader
           title={caddyOnly ? "certbot" : "Schedule"}
@@ -661,8 +662,6 @@ function RenewalView({ onShowLog }: { onShowLog: () => void }) {
           </PanelBody>
         </Panel>
       )}
-
-      {!caddyOnly && caddy}
 
       {admin && !certbotGone && <RenewalRuns id={RUNS_ID} />}
 
