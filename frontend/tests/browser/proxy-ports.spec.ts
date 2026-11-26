@@ -1172,6 +1172,47 @@ test("the old sheet addresses, the page's and the host diagnostic's, open the po
   await expect(page.locator("section#changes")).toBeVisible()
 })
 
+test("a port's page whose first read failed says so on a phone, with the way to try again", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 390, height: 844 })
+  await mockProxy(page, { included: true })
+  let failing = true
+  await page.route("**/api/v1/ports", async (route) => {
+    if (!failing) return json(route, hostPorts)
+    await route.fulfill({
+      status: 504,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "timeout",
+          message: "Listing the host's sockets took longer than 10 seconds.",
+          retryable: true,
+        },
+      }),
+    })
+  })
+  await page.route("**/api/v1/ports/external", (route) =>
+    json(route, { checkedAt: new Date().toISOString(), evidence: [], scopes: [] }),
+  )
+  await page.goto("/proxy/ports/tcp-22-0.0.0.0")
+  // The rail and its retry are hidden on a phone: the page itself says what
+  // happened, in place of a skeleton that would never end.
+  await expect(page.getByRole("navigation", { name: "Ports" })).toBeHidden()
+  const line = page.locator("[data-slot='host-identity']")
+  await expect(line.getByText("couldn't read the sockets")).toBeVisible()
+  await expect(
+    page
+      .getByText("Listing the host's sockets took longer than 10 seconds.")
+      .filter({ visible: true }),
+  ).toHaveCount(1)
+  await expect(line.locator("[data-slot='skeleton']")).toHaveCount(0)
+
+  failing = false
+  await page.getByRole("button", { name: "Try again" }).filter({ visible: true }).click()
+  await expect(line.getByText("sshd")).toBeVisible()
+})
+
 test("a port's page: its views in the address, the list beside it, and the next port a key away", async ({
   page,
 }) => {

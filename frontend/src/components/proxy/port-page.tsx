@@ -102,14 +102,18 @@ export function PortPage() {
   const rail = useRail(all)
   const hrefFor = useCallback((next: Socket) => portHref(next, all, tab), [all, tab])
   const steps = siblingSteps(rail.rows, socket, (next) => router.push(hrefFor(next)))
+  // A first read that failed is an error, not a read still under way: below
+  // `xl` the rail and its retry are hidden, and the page is all there is.
+  const error = reading ? undefined : shared.error
+  const loading = !reading && !error
 
   return (
     <PortMain
       key={key ? `${key.protocol}-${key.port}-${key.address ?? ""}` : "none"}
       portKey={key}
       socket={socket}
-      loading={!reading}
-      error={reading ? undefined : shared.error}
+      loading={loading}
+      error={error}
       listedAt={reading?.at ?? 0}
       onRetry={shared.refresh}
       tab={tab}
@@ -120,8 +124,8 @@ export function PortPage() {
           rows={rail.rows}
           all={all}
           current={socket}
-          loading={!reading}
-          error={reading ? undefined : shared.error}
+          loading={loading}
+          error={error}
           onRetry={shared.refresh}
           query={rail.query}
           onQuery={rail.setQuery}
