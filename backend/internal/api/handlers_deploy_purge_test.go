@@ -1,7 +1,9 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
@@ -128,5 +130,47 @@ func TestDeploymentPermanentDeletionCanFreeItsDomains(t *testing.T) {
 	entry := lastAudit(t, s, "deploy.project.purge")
 	if !entry.Success || !strings.Contains(string(entry.Detail), route) {
 		t.Errorf("audit = %+v", entry)
+	}
+}
+
+// unreachableIngress is a Docker that does not answer the ingress lookup.
+type unreachableIngress struct{}
+
+func (unreachableIngress) InspectRunning(context.Context) ([]byte, error) {
+	return nil, errors.New("Cannot connect to the Docker daemon")
+}
+
+func (unreachableIngress) InspectOne(context.Context, string) ([]byte, error) {
+	return nil, errors.New("Cannot connect to the Docker daemon")
+}
+
+// A deletion asked to free its domains that cannot read which routes there
+// are says so for each of the project's routes: answering that it removed
+// none, with nothing failed, told the operator the domains were free while
+// the ingress went on serving them.
+func TestDeploymentPermanentDeletionSaysWhenItCouldNotReadItsRoutes(t *testing.T) {
+	c, s, _ := vhostServer(t, func(string) string { return "exit 0" })
+	s.modules.proxy = proxysvc.NewWithDockerIngress(t.TempDir(), filepath.Join(t.TempDir(), "Caddyfile")).
+		WithContainerReader(unreachableIngress{})
+	projectID, environmentID := seedDeployment(t, s, "jellyfin")
+	route := deploy.RouteNameFor(environmentID)
+	if _, err := s.modules.deployStore.Archive(t.Context(), projectID); err != nil {
+		t.Fatal(err)
+	}
+	path := fmt.Sprintf("/api/v1/deploy/%d/permanent?routes=remove", projectID)
+	res := c.do(http.MethodDelete, path, "", map[string]string{"X-Confirm": "jellyfin"})
+	if res.Code != http.StatusOK {
+		t.Fatalf("purge: %d %s", res.Code, res.Body.String())
+	}
+	var out purgedRoutes
+	if err := json.Unmarshal(res.Body.Bytes(), &out); err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Removed) != 0 || out.Errors[route] == "" {
+		t.Fatalf("out = %+v, want %s among the routes not removed", out, route)
+	}
+	entry := lastAudit(t, s, "deploy.project.purge")
+	if !strings.Contains(string(entry.Detail), "routeErrors") {
+		t.Errorf("audit = %s", entry.Detail)
 	}
 }

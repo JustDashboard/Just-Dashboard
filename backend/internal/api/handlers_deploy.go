@@ -1731,11 +1731,19 @@ func (s *Server) retireProjectRoutes(r *http.Request, names []string) purgedRout
 	}
 	ctx, cancel := timeoutCtx(r, 60*time.Second)
 	defer cancel()
-	present := map[string]bool{}
-	if hosts, err := s.modules.proxy.ListVHosts(ctx); err == nil {
-		for _, host := range hosts {
-			present[host.Name] = true
+	hosts, err := s.modules.proxy.ListVHosts(ctx)
+	if err != nil {
+		// Not knowing which routes there are is not "none": each stays a
+		// leftover until it can be removed, and the answer says so.
+		out.Errors = map[string]string{}
+		for _, name := range names {
+			out.Errors[name] = "the routes could not be read: " + err.Error()
 		}
+		return out
+	}
+	present := map[string]bool{}
+	for _, host := range hosts {
+		present[host.Name] = true
 	}
 	for _, name := range names {
 		if !present[name] {

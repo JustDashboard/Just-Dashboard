@@ -28,7 +28,9 @@ database networks, persistent storage, checkouts, and on-disk artifacts remain. 
 unless the request asks for them: `?routes=remove` (the dialog's **Remove its routes too**, ticked by
 default) retires each route the project's environments wrote, after the records are deleted, through
 `proxysvc.RetireDeploymentRoute` — the route and the certificates Caddy kept only for it — and answers
-200 with `routesRemoved` and any `routeErrors`, which the audit entry also carries. A route kept after
+200 with `routesRemoved` and any `routeErrors`, which the audit entry also carries (a proxy whose
+routes cannot be listed puts every one of the project's routes in `routeErrors`, never an empty
+success). A route kept after
 its project went on answering the domain with nothing left to own it, and the next deployment of that
 domain was refused as a conflict (it is now taken over; see [`implementation.md`](implementation.md)).
 Without the parameter the answer stays 204. Release
