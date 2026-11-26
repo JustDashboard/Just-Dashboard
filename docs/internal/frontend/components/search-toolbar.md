@@ -38,7 +38,7 @@ not.
 | `trailing` | Controls inside the box's end: a regex toggle, an info mark. The caller pads the text for them. |
 | `clearable` | A clear button (`Cross`, a 24px hit area) while the box holds text. Escape empties a box that holds text, too. Without `onApply`, the box empties through the caller's own `onChange`, as if the reader had deleted the text. |
 | `stopEscape` | Escape that empties the box goes no further, so the sheet or dialog around it stays open. Escape on an empty box still closes it. |
-| `onApply` | The box runs a scan per value (a keyspace, a key's members). `value` is then the value in force. The box keeps what is typed and applies it `debounceMs` after the last key, at once on Enter, and empty on Escape or clear. Clearable by default. |
+| `onApply` | The box runs a scan per value (a keyspace, a key's members). `value` is then the value in force. The box keeps what is typed and applies it `debounceMs` after the last key, at once on Enter, and empty on Escape or clear. Clearable by default. While an input method composes, nothing applies: the pause starts again at `compositionend`, and the Enter and Escape that pick and dismiss a candidate are the input method's (`isComposingKey`). |
 | `debounceMs` | The pause before a typed value applies. 400 by default. |
 | `clearLabel` | The clear button's name. "Clear the search" by default; say what is cleared ("Clear the pattern"). |
 | `containerClassName` | The box's wrapper: its width in a toolbar. |
@@ -56,8 +56,11 @@ not.
 
 ## useDeferredSearch
 
-`useDeferredSearch(applied, onApply, ms = 400)` returns `{ draft, setDraft, apply, clear }`.
-`SearchInput` uses it with `onApply`; a box that draws its own field can use it directly.
+`useDeferredSearch(applied, onApply, ms = 400, held = false)` returns
+`{ draft, setDraft, apply, clear }`. `SearchInput` uses it with `onApply`; a box that draws its own
+field can use it directly. `held` stops the pause from applying, and its release starts the pause
+again: `SearchInput` holds it while an input method composes, because a pause while choosing a
+candidate scanned for text the reader had not committed.
 
 The echo guard is the part that matters. When the box applies "user", the address catches up a
 moment later and hands `applied = "user"` back. By then the reader may have typed "user:se". That
@@ -122,10 +125,14 @@ toolbar of a workbench (the query editor, the grid) is that workbench's own bar
   field after it.
 - Escape inside a sheet empties the box first and closes the sheet on the next press only where
   `stopEscape` is set. Set it in sheets and dialogs.
+- A key an input method is composing with is never the box's: Escape while composing does not
+  empty it, and Enter does not apply it.
 
 ## What enforces it
 
-- `src/hooks/use-deferred-search.test.js` holds the echo guard.
+- `src/hooks/use-deferred-search.test.js` holds the echo guard, and `src/lib/keys.test.js` the
+  composing key; `tests/browser/database-redis.spec.ts` composes a key pattern through Chromium's
+  input method protocol and finds no scan until the word is chosen.
 - The phone sizes come from `Input`'s `max-sm:` and `pointer-coarse:` variants, which no caller
   class removes, and from the size constants the box and its skeleton share.
 - Planned for WP-39: a lint rule against `dense` on a page-level search and against hand-typed
