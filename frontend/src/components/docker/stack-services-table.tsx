@@ -16,6 +16,7 @@ import { VerbActions, type Verb } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -140,7 +141,7 @@ function ServiceName({ reading, onOpen }: { reading: ServiceReading; onOpen: Row
   return (
     <span className="flex min-w-0 items-center gap-2">
       {reading.containerId ? (
-        <RowLink title={name} onClick={() => onOpen(reading)}>
+        <RowLink {...ROW_NAME} title={name} onClick={() => onOpen(reading)}>
           {name}
         </RowLink>
       ) : (

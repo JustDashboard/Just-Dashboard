@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 import { recordProgress } from "./progress-recording"
 import { risen } from "./risen"
+import { expectRowIsOneStop } from "./row-name-stop"
 import { CONTAINERS, DETAIL, statsFrame, user } from "./stack-detail-fixture"
 import { mockStackDetail } from "./stack-rail-fixture"
 
@@ -157,6 +158,19 @@ test("a service's compose verbs run for that service", async ({ page }) => {
     .getByRole("button", { name: "Create it" })
     .click()
   await expect.poll(() => mocks.runs).toEqual(["restart:api", "recreate:api", "up:search"])
+})
+
+test("a service's row is one Tab stop, its name, and Tab goes straight on to its next control", async ({
+  page,
+}) => {
+  // RowLink dropped the ROW_NAME the table never gave it either, so the row
+  // stayed a stop of its own beside the name: two presses of Tab a service.
+  await mockStackDetail(page)
+  await page.setViewportSize({ width: 1900, height: 1000 })
+  await page.goto("/docker/stacks/shop")
+  const row = page.locator("tr[data-workspace-item='api']")
+  await expect(row).toBeVisible()
+  await expectRowIsOneStop(page, row)
 })
 
 test("a row opens its container", async ({ page }) => {

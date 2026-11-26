@@ -27,6 +27,7 @@ import { VerbActions } from "@/components/verbs"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import {
+  ROW_NAME,
   stickyTableHeader,
   Table,
   TableBody,
@@ -558,7 +559,7 @@ function UnitTableRow({
         <div className="flex w-full min-w-0 items-center gap-3">
           <UnitMark unit={unit} />
           <div className="min-w-0">
-            <RowLink title={unit.name} onClick={() => onOpen(unit)}>
+            <RowLink {...ROW_NAME} title={unit.name} onClick={() => onOpen(unit)}>
               {unit.name}
             </RowLink>
             <p className="truncate text-hint text-muted-foreground" title={unit.description}>

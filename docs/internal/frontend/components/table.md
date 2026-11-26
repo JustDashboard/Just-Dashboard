@@ -150,6 +150,10 @@ A table has one phone answer, chosen by what its rows are (MOB-11):
 - The axe probe in the captures (`empty-table-header`), and the browser specs of the pages that
   draw these tables (`audit-ui`, `container-page`, `processes-ui`, `packages-ui`,
   `database-performance`, `files-ui`).
+- `tests/browser/row-name-stop.ts` (`expectRowIsOneStop`): a row whose name is its control is one
+  Tab stop, and Tab goes from the name straight to the row's next control. The Processes, PM2,
+  Services and stack services tables run it (`processes-ui`, `services-ui`, `stack-detail`); each
+  marks its `RowLink` with `ROW_NAME`.
 
 ## Related
 

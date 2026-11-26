@@ -2,6 +2,7 @@ import { createHash } from "node:crypto"
 import { expect, test, type Page, type Route, type WebSocketRoute } from "@playwright/test"
 import { answerLogs, mockLogSockets, type LogMocks } from "./processes-logs-fixture"
 import { risen } from "./risen"
+import { expectRowIsOneStop } from "./row-name-stop"
 
 /**
  * The Processes section, checked in a browser against a mocked host.
@@ -2057,10 +2058,11 @@ test("workspace: process focus holds row order and paused searches remain usable
   await page.goto("/processes")
   const rows = page.locator("[data-workspace-item]")
   await expect(rows.first()).toBeVisible()
-  await rows.first().focus()
+  // A row's place is its name (ROW_NAME), which is what the keyboard moves between.
+  await rows.first().locator("[data-workspace-primary]").focus()
   await expect(page.getByText("Row order held while inspecting")).toBeVisible()
   await page.keyboard.press("ArrowDown")
-  await expect(rows.nth(1)).toBeFocused()
+  await expect(rows.nth(1).locator("[data-workspace-primary]")).toBeFocused()
   const second = await rows.nth(1).getAttribute("data-workspace-item")
   await page.keyboard.press("Enter")
   await expect(page).toHaveURL(new RegExp(`/processes/${second?.split("-")[0]}$`))
@@ -2075,6 +2077,24 @@ test("workspace: process focus holds row order and paused searches remain usable
   await page.getByRole("button", { name: "Resume updates", exact: true }).click()
   await expect(page.getByText("Updates paused", { exact: true })).toHaveCount(0)
 })
+
+for (const [table, path] of [
+  ["process", "/processes"],
+  ["PM2 application", "/processes/pm2"],
+] as const) {
+  test(`a ${table}'s row is one Tab stop, its name, and Tab goes straight on to its next control`, async ({
+    page,
+  }) => {
+    // RowLink dropped the ROW_NAME the table never gave it either, so the row
+    // stayed a stop of its own beside the name: two presses of Tab a row.
+    await mockHost(page)
+    await page.setViewportSize({ width: 1720, height: 1000 })
+    await page.goto(path)
+    const row = page.locator("tr[data-workspace-item]").first()
+    await expect(row).toBeVisible()
+    await expectRowIsOneStop(page, row)
+  })
+}
 
 test("workspace: changing process rankings keep focused rows steady and Pause stops polling", async ({
   page,
@@ -2096,7 +2116,7 @@ test("workspace: changing process rankings keep focused rows steady and Pause st
   const before = await rows.evaluateAll((rows) =>
     rows.map((row) => row.getAttribute("data-workspace-item")),
   )
-  await rows.first().focus()
+  await rows.first().locator("[data-workspace-primary]").focus()
   reordered = true
   const initialReads = reads
   await page.clock.fastForward(5000)
