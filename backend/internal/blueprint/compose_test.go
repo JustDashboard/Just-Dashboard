@@ -97,6 +97,10 @@ func TestComposeValidationRejectsEachUnsafeShape(t *testing.T) {
 		}, "only an application is routed"},
 		{"a port published on every interface", func(b *Blueprint) { db(b).Ports[0].Exposure = "direct" }, "proxy, internal or loopback"},
 		{"a loopback port outside a stack", func(b *Blueprint) { db(b).Ports[0].Exposure = "loopback" }, "only a stack's private services"},
+		{"a loopback port with no route to publish it through", func(b *Blueprint) {
+			b.Stack = "media"
+			db(b).Ports[0].Exposure = "loopback"
+		}, "declares no egress"},
 		{"a data volume nothing writes, mounted read-only", func(b *Blueprint) {
 			db(b).Volumes[0].ReadOnly = true
 		}, "holds data and is mounted read-only"},

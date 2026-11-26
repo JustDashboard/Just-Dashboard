@@ -40,7 +40,9 @@ configuration steps against the live release's containers and records each step'
   template may declare: published on `127.0.0.1` at a preference derived from the template, service
   and port (`blueprint.LoopbackHostPort`), moved by the Compose port recovery every published port
   already has (`dockerx/compose_ports.go`) when taken, so two stacks on one server do not collide.
-  Nothing but Caddy binds a routable address (invariant 1). To reach one from elsewhere the person
+  Nothing but Caddy binds a routable address (invariant 1). A service with a loopback port must
+  declare `egress`: Docker publishes no port of a container that is only on an internal network.
+  To reach one from elsewhere the person
   uses an SSH tunnel or publishes it through a site of their own.
 - **One shared volume, `media`, at `/data`**: downloads and the library on one filesystem so a
   finished download is renamed into the library, not copied. Writers (qBittorrent, Radarr, Sonarr,
@@ -164,15 +166,64 @@ another name is the person's and is not read past its name.
   sync deletes no profile). `reset_unmatched_scores` is off, so a score the person gives a custom
   format of their own in the stack's profile stays. The API keys are not in the file: Recyclarr
   reads them from its environment (`!env_var`).
-- `DockerEnv.Exec` gives one command a minute. The sync is therefore run for Radarr and Sonarr
-  separately, and an attempt first waits for any sync already running in the container (the image's
-  daily one, or an earlier attempt that outlived its minute) rather than starting a second.
+- `DockerEnv.Exec` gives a command what is left of its step's attempt. The sync is still run for
+  Radarr and Sonarr separately, and an attempt first waits for any sync already running in the
+  container (the image's daily one, or an earlier attempt cut short) rather than starting a second.
 - `downloads.verify` has Radarr and Sonarr run their health checks now (the `CheckHealth` command)
   before reading them, since `GET health` otherwise answers from the last scheduled run. It fails on
   an error about the download client or its folders, names anything else, and leaves the checks
   about indexers to `prowlarr.sources`.
 - `prowlarr.sources` counts the sources that are switched on. None is the blocking action
   `media-source`; the step never adds one.
+
+## What Jellyfin, qBittorrent and Seerr steps make
+
+- **Folders** (`storage.folders`): the four library and download folders and their two parents are
+  made as root in qBittorrent's container (Jellyfin's in Essential) and given to 1000:1000 only when
+  missing or root-owned, never recursively; every writer then proves it can create a file there as
+  the account it runs as, and Jellyfin in Complete that it can read the library.
+- **Jellyfin**: the first-run wizard is finished through its Startup API with `admin` and the stack's
+  password, and an API key named "Just Dashboard" is made once and kept. Libraries are matched by
+  path, since Jellyfin 12.4 makes "Movies2" rather than refusing a taken name. A Jellyfin whose
+  wizard someone else finished, and which does not let the stack's account in, is the blocking action
+  `jellyfin-owner`; nothing is reset.
+- **qBittorrent**: the temporary password the linuxserver.io image prints on first start is read
+  from its log once and replaced with the stack's; the stored one is then checked offline against
+  the PBKDF2 value in its settings file before a single sign-in, because five refused sign-ins lock
+  the address out for an hour. A password that is not the stack's is the action
+  `qbittorrent-password`, tried no further. Categories `movies` and `tv` with their folders need
+  automatic torrent management, which is turned on with the save path.
+- **Seerr** is signed in to the stack's Jellyfin as `admin`, which makes that account Seerr's owner,
+  and its Movies and Shows libraries are turned on by Jellyfin's ids. The stack's password is sent
+  only to a Seerr the stack set up itself: it records that it began Seerr's setup before the request
+  that does it, and a Seerr already set up by anyone else is the action `seerr-owner` with no
+  sign-in, since which Jellyfin that Seerr would pass the password to cannot be read without it.
+  Radarr and Sonarr are added as "Radarr (Just Dashboard)" and "Sonarr (Just Dashboard)" with the
+  quality profile Recyclarr reported and the library folder; an update carries the rest of the entry
+  as the person left it. The request policy changes only the auto-approve bits of the default
+  permissions, for accounts made from then on.
+
+## Verified end to end
+
+On 26 Nov 2026 both presets were deployed through the API exactly as the Stacks tab does (draft,
+source, detect, configuration, preflight, commit, run) on a dashboard running inside its own Docker
+daemon (Docker-in-Docker, the backend in its network namespace), with nothing touching the host's
+containers:
+
+- Essential: the run went live and the pass finished `ready`, 6 of 6 steps on the first attempt;
+  the revealed Jellyfin account signed in to Jellyfin 12.4.0 directly as an administrator.
+- Complete: all eight containers healthy, every private interface published on loopback (each
+  service is also on the `egress` network, which the validator requires of a loopback port: Docker
+  publishes nothing from a network declared internal, checked on Docker 29.9), 21 of 22 steps done
+  on the first attempt and `action_required: Add a media source`. Read directly from the
+  applications afterwards: one "qBittorrent (Just Dashboard)" client on host `qbittorrent` with the
+  `movies` category, the library root accessible, the synced profile, Prowlarr's two applications on
+  full sync, and Radarr refusing an unauthenticated request.
+- Retry on the configured Complete stack: a second pass changed nothing and made no second entry;
+  a second press during it answered `stack_busy`.
+
+Not exercised end to end: a request fetched through a real source, imported and played. That needs a
+source the tester is allowed to use; none ships, by design.
 
 ## Not done yet
 
@@ -182,7 +233,10 @@ Said here so nobody builds on it by mistake:
   installs only.
 - Mounting an existing library folder from the host; media goes into the stack's own volume.
 - Hardware transcoding, the Ultimate preset's optional modules, and a guided form for adding a media
-  source (it is added in Prowlarr itself).
+  source (it is added in Prowlarr itself, and subtitle providers in Bazarr).
+- Jellyfin is reachable at the deployment's domain from the moment the release is live, and its
+  wizard is finished by the stack within seconds of that, as the single Jellyfin template has always
+  left it to the first visitor. A deployment without a domain has no such window.
 - Stack-level backup and restore beyond the deployment's own volume coverage, and update actions of
   the stack's own: an update is a source change to a newer preset version and a redeploy, after
   which the pass checks every link again.

@@ -153,6 +153,14 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 		if err != nil {
 			return fail("%v", err)
 		}
+		// Docker publishes no port of a container that is only on a network
+		// declared internal, so a private interface published on loopback
+		// needs the egress network to be published through at all.
+		for _, port := range service.Ports {
+			if port.Exposure == "loopback" && !service.Egress {
+				return fail("publishes port %q on loopback but declares no egress, and Docker publishes nothing from an internal-only network", port.Name)
+			}
+		}
 		if serviceIsPublic {
 			public++
 			if service.Role != RoleApp {
