@@ -1,0 +1,38 @@
+[
+  {
+    "name": "English",
+    "code2": "en",
+    "code3": "eng",
+    "enabled": false
+  },
+  {
+    "name": "French",
+    "code2": "fr",
+    "code3": "fra",
+    "enabled": false
+  },
+  {
+    "name": "German",
+    "code2": "de",
+    "code3": "deu",
+    "enabled": false
+  },
+  {
+    "name": "Portuguese (Brazil)",
+    "code2": "pb",
+    "code3": "pob",
+    "enabled": false
+  },
+  {
+    "name": "Romanian",
+    "code2": "ro",
+    "code3": "ron",
+    "enabled": false
+  },
+  {
+    "name": "Spanish",
+    "code2": "es",
+    "code3": "spa",
+    "enabled": false
+  }
+]

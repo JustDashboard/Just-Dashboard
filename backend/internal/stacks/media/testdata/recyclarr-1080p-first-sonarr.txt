@@ -1,0 +1,9 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[INF] just-dashboard-series: Processing Sonarr server just-dashboard-series
+[INF] just-dashboard-series: Created 37 New Custom Formats
+[INF] just-dashboard-series: Total of 37 custom formats were synced
+[INF] just-dashboard-series: All sizes for quality definition series are already up to date!
+[INF] just-dashboard-series: Created 1 Profiles: ["WEB-1080p (Just Dashboard)"]
+[INF] just-dashboard-series: A total of 1 profiles were synced. 0 contain quality changes and 0 contain updated scores
+[INF] just-dashboard-series: Completed at 11/26/2026 03:37:45

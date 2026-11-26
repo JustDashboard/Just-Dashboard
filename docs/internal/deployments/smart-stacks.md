@@ -126,6 +126,54 @@ libraries) and able to acquire (Complete, connected, the download link verified 
 source in Prowlarr). A Complete stack with no source is `action_required: Add a media source` — never
 "set up" — and still plays what is in its library.
 
+## What the manager, subtitle and quality steps make
+
+What these steps own in each application, by the name they find it again with. Anything under
+another name is the person's and is not read past its name.
+
+| Application | The stack's own | Left alone |
+|---|---|---|
+| Radarr, Sonarr, Prowlarr | the sign-in: a form on every address, user `admin`, the stack's password (`config/host`; the whole resource goes back with four fields changed) | every other host setting |
+| Radarr, Sonarr | the root folder `/data/media/movies` or `/data/media/tv` | other root folders |
+| Radarr, Sonarr | the download client **qBittorrent (Just Dashboard)**: host `qbittorrent`, port, user, password, category `movies` or `tv`, enabled | other clients; every other setting of the stack's own client (priority, removal, tags) |
+| Prowlarr | the applications **Radarr (Just Dashboard)** and **Sonarr (Just Dashboard)**: URLs, key, full sync | other applications; the sync categories, which come from Prowlarr's own schema |
+| Bazarr | its sign-in; Radarr and Sonarr switched on with host, port and key; the languages profile **Just Dashboard** | other profiles and enabled languages (saving either replaces the list, so the person's go back with the stack's); a default profile the person chose; subtitle providers, which need the person's own account and are never added |
+| Recyclarr | `/config/recyclarr.yml`, written again on every pass | files under `/config/configs/` |
+
+- A new download client or application starts from the application's own schema, so a setting the
+  stack does not name keeps the application's default. The application's own test runs before every
+  save. A secret is never read back (the applications answer `********`), so the only way to know a
+  stored one is still right is that same test, run on the entry as stored.
+- An account whose password was changed in the application is given the stack's password back: it is
+  the one the dashboard reveals for that application.
+- **Quality profiles.** Recyclarr creates the TRaSH Guides' profile for the chosen quality under a
+  name that carries the stack's mark, because Recyclarr 8 takes over any profile or custom format
+  that already has the name it is about to use and has no setting to stop it. A person's own profile
+  never has the marked name; a person's own custom format that has exactly a guide format's name
+  would be taken over.
+
+  | `MEDIA_QUALITY` | Radarr | Sonarr |
+  |---|---|---|
+  | `1080p` | HD Bluray + WEB (Just Dashboard) | WEB-1080p (Just Dashboard) |
+  | `2160p` | UHD Bluray + WEB (Just Dashboard) | WEB-2160p (Just Dashboard) |
+  | `720p` | the built-in HD-720p | the built-in HD-720p |
+
+  The guides have no 720p profile. For 720p Recyclarr keeps only the quality sizes and the
+  applications' own HD-720p profile is used as it is; the step says so. Changing the quality leaves
+  the earlier profile and its custom formats in place (`delete_old_custom_formats` is off, and a
+  sync deletes no profile). `reset_unmatched_scores` is off, so a score the person gives a custom
+  format of their own in the stack's profile stays. The API keys are not in the file: Recyclarr
+  reads them from its environment (`!env_var`).
+- `DockerEnv.Exec` gives one command a minute. The sync is therefore run for Radarr and Sonarr
+  separately, and an attempt first waits for any sync already running in the container (the image's
+  daily one, or an earlier attempt that outlived its minute) rather than starting a second.
+- `downloads.verify` has Radarr and Sonarr run their health checks now (the `CheckHealth` command)
+  before reading them, since `GET health` otherwise answers from the last scheduled run. It fails on
+  an error about the download client or its folders, names anything else, and leaves the checks
+  about indexers to `prowlarr.sources`.
+- `prowlarr.sources` counts the sources that are switched on. None is the blocking action
+  `media-source`; the step never adds one.
+
 ## Not done yet
 
 Said here so nobody builds on it by mistake:

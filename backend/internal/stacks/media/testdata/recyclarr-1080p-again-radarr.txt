@@ -1,0 +1,8 @@
+[INF] Initializing provider: official (type: trash-guides)
+[INF] Initializing provider: official (type: config-templates)
+[INF] just-dashboard-movies: Processing Radarr server just-dashboard-movies
+[INF] just-dashboard-movies: Skipped 41 Custom Formats that did not change
+[INF] just-dashboard-movies: All custom formats are already up to date!
+[INF] just-dashboard-movies: All sizes for quality definition movie are already up to date!
+[INF] just-dashboard-movies: All quality profiles are up to date!
+[INF] just-dashboard-movies: Completed at 11/26/2026 03:37:51
