@@ -69,7 +69,8 @@ templates and either the release is not the one last configured, the manifest ve
 a pass was requested. At most two stacks are configured at once, one pass per stack. A pass for a
 release that stopped being live is cancelled, and so is one for a deployment that was removed; one a
 restart cut short is queued again (`ResetInterrupted`). Changing the source to the other preset's template moves the stack to that
-preset. A deployment whose source is no longer a preset is left alone.
+preset. A deployment whose source is no longer a preset is left alone, and Retry on it is refused
+(`stack_not_preset`) rather than recorded for a pass that would never run.
 
 The stack is registered in the commit request (`registerStack`, after the blueprint schedules), keyed
 by project; its rows cascade with the project's.
@@ -114,7 +115,7 @@ value. Nothing in a response, a step record or a log carries a value otherwise.
 |---|---|---|
 | `GET /deploy/stacks` | any signed-in account, any key | the catalogue: presets with their template, memory and disk estimate, limitations, services |
 | `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, a private one's loopback address and, once live, the public one's URL (the deployment's endpoint), steps, actions, accounts; `404 stack_not_found` otherwise |
-| `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass; audited |
+| `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass, `409 stack_not_preset` when the live release is not one of the stack's presets (no pass would ever run); audited |
 | `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | one account's password; audited |
 
 Blueprint summaries and details carry `stack`; the Template tab leaves those templates out.

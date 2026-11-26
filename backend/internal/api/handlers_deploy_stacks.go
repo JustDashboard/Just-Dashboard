@@ -455,6 +455,8 @@ func (s *Server) handleStackConfigure(w http.ResponseWriter, r *http.Request) er
 		return httpx.Err(http.StatusConflict, "stack_busy", "the stack is already being configured; this pass covers every step")
 	case errors.Is(err, stacks.ErrWaiting):
 		return httpx.Err(http.StatusConflict, "stack_waiting", "the stack has no live release yet; it is configured as soon as its deployment finishes")
+	case errors.Is(err, stacks.ErrNotAPreset):
+		return httpx.Err(http.StatusConflict, "stack_not_preset", "the deployment's live release is not one of the stack's presets, so there is nothing of the stack's to configure; it is configured again once a release of a preset is live")
 	case err != nil:
 		return err
 	}

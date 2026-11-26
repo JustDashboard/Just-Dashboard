@@ -30,6 +30,10 @@ var ErrNoLiveRelease = errors.New("no live release")
 var (
 	ErrBusy    = errors.New("a configuration pass is already running")
 	ErrWaiting = errors.New("the stack has no live release to configure yet")
+	// ErrNotAPreset is a live release that is not one of the stack's
+	// presets: its source was changed to something else, which Tick leaves
+	// alone, so a pass asked for would never run.
+	ErrNotAPreset = errors.New("the live release is not one of the stack's presets")
 )
 
 // ServiceDeps is what the service reads from the rest of the dashboard.
@@ -119,11 +123,21 @@ func (s *Service) Request(ctx context.Context, projectID int64) error {
 	if s.Running(projectID) {
 		return ErrBusy
 	}
-	if _, err := s.deps.LiveRelease(ctx, record.EnvironmentID); err != nil {
+	live, err := s.deps.LiveRelease(ctx, record.EnvironmentID)
+	if err != nil {
 		if errors.Is(err, ErrNoLiveRelease) {
 			return ErrWaiting
 		}
 		return err
+	}
+	// Only what Tick would start a pass for is asked for: anything else would
+	// be answered and then wait for ever.
+	manifest, found := s.deps.Manifest(record.StackID)
+	if !found || live.Kind != "compose" {
+		return ErrNotAPreset
+	}
+	if _, found := manifest.PresetForTemplate(live.TemplateID); !found {
+		return ErrNotAPreset
 	}
 	if err := s.deps.Store.RequestPass(ctx, projectID); err != nil {
 		return err

@@ -174,20 +174,8 @@ func TestStackStateGivesThePublicServiceTheDeploymentsAddress(t *testing.T) {
 	s := testServer(t)
 	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
 	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
-	project, err := s.Store.DB.Exec(`INSERT INTO deploy_projects (name, repo_path, hook_secret, hook_id, created_at) VALUES ('media', '', 'x', 'hook-media', 1)`)
-	if err != nil {
-		t.Fatal(err)
-	}
-	projectID, _ := project.LastInsertId()
-	environment, err := s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id, name, slug, kind, created_at, updated_at) VALUES(?, 'production', 'production', 'production', 1, 1)`, projectID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	environmentID, _ := environment.LastInsertId()
+	projectID, environmentID := seedStackProject(t, s)
 	if _, err := s.Store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id, kind, ownership, resource_kind, resource_id, created_at) VALUES(?, 'domain', 'managed', 'proxy_site', 'media.example.test', 1)`, environmentID); err != nil {
-		t.Fatal(err)
-	}
-	if err := s.modules.stackStore.Register(context.Background(), projectID, environmentID, media.ID, "essential", "tester"); err != nil {
 		t.Fatal(err)
 	}
 	read := func() map[string]stackServiceState {
@@ -219,5 +207,56 @@ func TestStackStateGivesThePublicServiceTheDeploymentsAddress(t *testing.T) {
 	}
 	if live["seerr"].URL != "" {
 		t.Fatalf("a private service is offered at %q", live["seerr"].URL)
+	}
+}
+
+// seedStackProject is a project with a production environment that serves
+// nothing yet, registered as an Essential media stack.
+func seedStackProject(t *testing.T, s *Server) (projectID, environmentID int64) {
+	t.Helper()
+	project, err := s.Store.DB.Exec(`INSERT INTO deploy_projects (name, repo_path, hook_secret, hook_id, created_at) VALUES ('media', '', 'x', 'hook-media', 1)`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	projectID, _ = project.LastInsertId()
+	environment, err := s.Store.DB.Exec(`INSERT INTO deploy_environments(project_id, name, slug, kind, created_at, updated_at) VALUES(?, 'production', 'production', 'production', 1, 1)`, projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	environmentID, _ = environment.LastInsertId()
+	if err := s.modules.stackStore.Register(context.Background(), projectID, environmentID, media.ID, "essential", "tester"); err != nil {
+		t.Fatal(err)
+	}
+	return projectID, environmentID
+}
+
+// Retry on a stack whose deployment now serves something that is not one of
+// its presets is refused with the reason, not accepted for a pass that would
+// never run.
+func TestStackConfigureRefusesALiveReleaseThatIsNotAPreset(t *testing.T) {
+	s := testServer(t)
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	s.modules.stacks = s.newStackService()
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	projectID, environmentID := seedStackProject(t, s)
+	// A live Compose release of another template.
+	release, err := s.Store.DB.Exec(`INSERT INTO deploy_releases(project_id, environment_id, release_number, source_identity_json, created_at) VALUES(?, ?, 1, '{"template":"whoami@1.0.0"}', 1)`, projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseID, _ := release.LastInsertId()
+	if _, err := s.Store.DB.Exec(`INSERT INTO deploy_release_runtimes(release_id, environment_id, kind, runtime_id, created_at, updated_at) VALUES(?, ?, 'compose', 'jd-media', 1, 1)`, releaseID, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_environments SET live_release_id = ? WHERE id = ?`, releaseID, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	refused := c.do(http.MethodPost, fmt.Sprintf("/api/v1/deploy/%d/stack/configure", projectID), "{}", nil)
+	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "stack_not_preset") {
+		t.Fatalf("configure on a release that is not a preset = %d %s", refused.Code, refused.Body.String())
+	}
+	var requested int64
+	if err := s.Store.DB.QueryRow(`SELECT requested_at FROM deploy_stacks WHERE project_id = ?`, projectID).Scan(&requested); err != nil || requested != 0 {
+		t.Fatalf("requested_at = %d %v", requested, err)
 	}
 }

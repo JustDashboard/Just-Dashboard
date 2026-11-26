@@ -28815,7 +28815,7 @@
         }
       ],
       "post": {
-        "description": "409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs.",
+        "description": "409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs, 409 stack_not_preset when the live release is not one of the stack's presets.",
         "operationId": "stackConfigure",
         "responses": {
           "202": {

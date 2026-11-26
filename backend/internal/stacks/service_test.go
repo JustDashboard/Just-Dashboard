@@ -227,3 +227,26 @@ func TestServiceStopsThePassOfADeploymentThatWasRemoved(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 }
+
+// Retry on a deployment whose source left the stack is refused in words:
+// Tick never starts a pass for a release that is not a preset, so a request
+// would be answered and never run.
+func TestServiceRefusesAPassForAReleaseThatIsNotAPreset(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	f.goLive(41, "whoami")
+	if err := f.service.Request(ctx, f.project); !errors.Is(err, stacks.ErrNotAPreset) {
+		t.Fatalf("Retry on a release that is not a preset = %v", err)
+	}
+	record, err := f.store.Get(ctx, f.project)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !record.RequestedAt.IsZero() {
+		t.Fatalf("a pass that will never run was recorded as asked for: %+v", record)
+	}
+	f.goLive(42, "test-small")
+	if err := f.service.Request(ctx, f.project); err != nil {
+		t.Fatalf("Retry on a preset's release = %v", err)
+	}
+}

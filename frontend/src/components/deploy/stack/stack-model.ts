@@ -281,8 +281,10 @@ export function splitCredentials(credentials: SmartStackCredential[]) {
 }
 
 /**
- * A refusal to start a pass, in words. The server's codes are `stack_busy`
- * and `stack_waiting`; anything else is the caller's to report as an error.
+ * A refusal to start a pass, in words: `stack_busy` and `stack_waiting`.
+ * Anything else is the caller's to report as an error, `stack_not_preset`
+ * included, which the page never meets: a project whose source left the
+ * stack's presets is not drawn as a stack.
  */
 export function configureRefusal(code: string | undefined): string | undefined {
   if (code === "stack_busy") return "A setup pass is already running. This page follows it."

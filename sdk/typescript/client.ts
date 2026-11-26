@@ -4938,7 +4938,8 @@ export function stackCatalogue(
  * stackConfigure is POST /deploy/{id}/stack/configure: run the stack's configuration again now;
  * every step converges, so nothing already set up is done twice; audited.
  *
- * 409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs.
+ * 409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs,
+ * 409 stack_not_preset when the live release is not one of the stack's presets.
  *
  * A deploy key: allowed.
  */
