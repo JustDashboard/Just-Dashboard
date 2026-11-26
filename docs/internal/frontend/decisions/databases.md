@@ -54,7 +54,10 @@ backup form's own defaults — and starts its run at once, so "never backed up" 
 than tonight; a job that also archives files is never added to. *Turn on alerts* creates rules over every
 database (`connectionId: null`) for down, disk, connections and a failed or missed backup, with
 each kind's defaults and every switched-on channel, skipping a kind that already has such a rule,
-paused or not, and its question says when no channel is on yet. Both ask first, naming what they
+paused or not, and its question says when no channel is on yet. It reads the rules again before it
+makes any, and stays offered while one of those kinds has no such rule: a Turn on that stopped after
+its first rule had every database read as watched, so the line says "1 of the 5 usual alerts on"
+with the rest named, and the next press makes only those. Both ask first, naming what they
 will make. Anyone else reads the same lines as ways to Backups and the Alerts page. Both lines are
 one height in every state, the press shorter than the line, so the cards under them hold still as
 the jobs, the rules and the channels are read. They took the place, in 0.9.1 at the operator's

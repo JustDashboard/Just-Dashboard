@@ -7,6 +7,7 @@ import {
   namesLine,
   NIGHTLY,
   nightlyJob,
+  WATCHED_KINDS,
   type AlertCover,
   type BackupCover,
 } from "@/components/database/fleet/protection"
@@ -70,7 +71,9 @@ function sayList(parts: readonly string[]) {
  *   form's defaults — and starts its first run, so "never backed up" ends now
  *   rather than tonight.
  * - **Turn on** adds the usual alert rules over every database, those added
- *   later too, told to every notification channel that is switched on.
+ *   later too, told to every notification channel that is switched on. It
+ *   stays offered while one of them is missing (one that stopped half-way),
+ *   and makes only those, by the rules as it reads them just before.
  *
  * Each press asks first, naming what it will make, in a dialog whose answer
  * wears the command's blue: `ConfirmDialog` is red on purpose, for acts that
@@ -190,10 +193,19 @@ export function FleetProtection({
       verb: "Turn on",
       working: "Turning on…",
       run: async () => {
-        for (const kind of cover.missing) {
-          await post("/databases/alerts/rules", { connectionId: null, kind, channels: [] })
+        try {
+          // Read again first: a press after one that stopped half-way, or
+          // after another tab's, makes only the kinds still missing, never a
+          // second rule beside one that is there.
+          const now = await get<DbAlerts>("/databases/alerts")
+          const missing = alertCover(entries, now.rules, now.subjects, channels.data).missing
+          for (const kind of missing) {
+            await post("/databases/alerts/rules", { connectionId: null, kind, channels: [] })
+          }
+        } finally {
+          // What was made before a failure is read, so the line says it.
+          alerts.refresh()
         }
-        alerts.refresh()
         notify.success(`Alerts are on for ${plural(cover.watchable.length, "database")}`)
       },
     })
@@ -218,7 +230,7 @@ export function FleetProtection({
         rules={alerts.data?.rules ?? []}
         error={alerts.error}
         action={
-          admin && watch && watch.unwatched.length > 0 && watch.missing.length > 0 ? (
+          admin && watch?.offered ? (
             <Press onClick={() => turnOn(watch)} verb="Turn on" rest="alerts" />
           ) : undefined
         }
@@ -553,6 +565,26 @@ function AlertsLine({
           : total === 1
             ? "Nothing tells you when it goes down"
             : "Nothing tells you when one goes down"}
+      </CheckLine>
+    )
+  }
+
+  if (cover.partial) {
+    // The usual rules were only partly made: the first alone watches every
+    // database, and would read as all of them watched.
+    return (
+      <CheckLine
+        name="Alerts"
+        tone="warning"
+        href={action ? undefined : page}
+        label={action ? undefined : "Alerts"}
+        action={action}
+        detail={`Not on: ${namesLine(
+          cover.missing.map((kind) => ALERT_KINDS[kind].label.toLowerCase()),
+          2,
+        )}`}
+      >
+        {`${WATCHED_KINDS.length - cover.missing.length} of the ${WATCHED_KINDS.length} usual alerts on`}
       </CheckLine>
     )
   }

@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
 import { hold } from "./database-fixture"
-import { backupJob, mockFleet } from "./database-fleet-fixture"
+import { backupJob, mockFleet, refusal } from "./database-fleet-fixture"
 import { risen } from "./risen"
 
 /**
@@ -223,6 +223,47 @@ test.describe("what protects the databases", () => {
       "href",
       "/deploy/notifications",
     )
+  })
+
+  test("a Turn on that stops after its first rule keeps the press, and the next makes only the rest", async ({
+    page,
+  }) => {
+    const server = await mockFleet(page)
+    let tried = 0
+    server.answer("POST /databases/alerts/rules", () => {
+      tried += 1
+      if (tried === 2) return refusal(500, "internal", "the store could not be written")
+    })
+    await page.goto("/databases")
+    await line(page, "Alerts").getByRole("button", { name: "Turn on" }).click()
+    await dialog(page).getByRole("button", { name: "Turn on" }).click()
+    await expect(page.getByText("Turn on alerts for every database failed")).toBeVisible()
+    await dialog(page).getByRole("button", { name: "Cancel" }).click()
+
+    // The one rule made watches every database; the line does not call that done.
+    const alerts = line(page, "Alerts")
+    await expect(alerts).toContainText("1 of the 5 usual alerts on")
+    await expect(alerts).toContainText(
+      "Not on: disk filling up, connections near the limit and 2 more",
+    )
+    await expect(alerts).toHaveAttribute("data-tone", "warning")
+    await alerts.getByRole("button", { name: "Turn on alerts" }).click()
+    await expect(dialog(page)).not.toContainText("stops answering")
+    await expect(dialog(page)).toContainText("fills its disk past 90%")
+    await dialog(page).getByRole("button", { name: "Turn on" }).click()
+    await expect(dialog(page)).toHaveCount(0)
+
+    // Read again before it made anything: the rule that was there is not made twice.
+    expect(server.bodies("POST /databases/alerts/rules").map((one) => one.kind)).toEqual([
+      "down",
+      "disk",
+      "disk",
+      "connections",
+      "backup_failed",
+      "backup_missed",
+    ])
+    await expect(alerts).toContainText("Alerts have nowhere to go")
+    await expect(alerts.getByRole("button")).toHaveCount(0)
   })
 
   test("watched and told: the line names the channels, and what is firing comes first", async ({

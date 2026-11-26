@@ -1967,7 +1967,7 @@ and the backup kinds on the same pass from `backup_jobs` and `backup_runs`.
 The control center's *Alerts* line (`components/database/fleet/fleet-protection.tsx`) reads every
 rule and the channels, and its *Turn on* creates the usual kinds as rules over every database
 (`connectionId: null`, no channels, each kind's defaults), skipping a kind that already has such a
-rule, paused or not.
+rule, paused or not, by the rules it reads again just before it makes any.
 
 - **Six kinds, stated per engine.** `alertKinds` (`dbx/alert_capabilities.go`, a list flag) is what a
   database of an engine can be watched for, and the create route refuses a rule for one database
