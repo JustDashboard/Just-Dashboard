@@ -91,6 +91,11 @@ without this override, the existing Playwright configuration controls concurrenc
 
 `bun test src` is the fast layer over the pure logic in `src/lib` and `src/components`, usually in well
 under a second. Anything expressible there belongs there rather than in a browser spec.
+`bun test scripts` (and so `bun run test`, which CI and `scripts/test-changed.sh` run as
+`bun test src scripts`) holds every function in `frontend/src` to 500 lines and the longer ones recorded in
+`frontend/scripts/function-sizes.json` to their length: split a long component rather than raise the
+record, and lower it with `bun scripts/function-sizes.ts --write` when one shrinks
+([CONTRIBUTING.md](CONTRIBUTING.md#before-you-open-a-pull-request)).
 
 **Browser specs run against a server you already have up**, built from the tree under test:
 

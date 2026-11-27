@@ -13,3 +13,15 @@ export function isTypingTarget(target: EventTarget | null): boolean {
     !!target.closest("input, textarea, select, [contenteditable]:not([contenteditable='false'])")
   )
 }
+
+/**
+ * A control that keeps its own Space, Enter and arrows. File name buttons are not among them:
+ * they belong to the listing.
+ */
+export function keepsOwnKeys(target: EventTarget | null): boolean {
+  const element = target as HTMLElement | null
+  return !!(
+    !element?.closest("[data-file-name]") &&
+    element?.closest("button, a, input, select, textarea, [role='checkbox'], [role='menuitem']")
+  )
+}

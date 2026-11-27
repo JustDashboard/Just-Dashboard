@@ -714,7 +714,9 @@ State is saved as interaction happens; a stable history listener restores listin
 without stealing focus from a toolbar control. Removed entries cannot remain selected or inspected.
 
 `keyboard.ts` scopes the page and path-bar shortcuts to Files, leaving text fields, composition,
-open dialogs/menus/listboxes and the dashboard rail in charge of their own keys. F5/Ctrl/Cmd+R
+open dialogs/menus/listboxes and the dashboard rail in charge of their own keys. What each key does
+on the page is decided in `keymap.ts` (`filesKey`, unit-tested in `keymap.test.js`) from the press
+and the page's state, and the page's listener only carries the answer out. F5/Ctrl/Cmd+R
 refreshes only the folder; a modified hard refresh keeps the browser's behavior. Ctrl/Cmd+F opens
 name search; Ctrl/Cmd+Shift+N creates a folder, Ctrl/Cmd+Shift+. toggles hidden files and Ctrl/Cmd+Space
 toggles the active item. Name typing jumps through entries, repeated letters cycle matches, and

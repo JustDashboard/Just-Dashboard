@@ -92,6 +92,16 @@ never into `docs/audits/`.
   an explicitly managed frontend on another port when worktrees run alongside one another.
   Set `JD_BROWSER_WORKERS=1` to limit the selected browser run on a memory-constrained host; omit
   it to use the existing Playwright worker setting.
+- No function in `frontend/src` may cross 500 lines, and the ones already over it may only get
+  shorter. `frontend/scripts/function-sizes.json` records each of them with its length (51 in
+  November 2026, `FilesPage` the longest), and `frontend/scripts/function-sizes.test.js`, part of
+  the `bun test src scripts` that `scripts/test-changed.sh` runs, fails when a function not in the
+  record crosses the limit or a recorded one grows. Split the component, pulling its decisions into
+  a pure, unit-tested module the way `components/files/keymap.ts` holds the Files page's keys,
+  rather than raise the record. When one shrinks the test says so and still passes; lower the
+  record in the same pull request with `cd frontend && bun scripts/function-sizes.ts --write`. A
+  rename or a move of a recorded function also needs the rewrite, and the pull request says why
+  the record changed.
 - A change to a deployment route, to a type a deployment handler decodes or encodes, or to the
   tables in `api/deploy_openapi.go` also regenerates the committed OpenAPI description, which a test
   holds to the build: `cd backend && JD_UPDATE_OPENAPI=1 go test ./internal/api -run TestTheCommittedDeployOpenAPIDescriptionIsCurrent`,

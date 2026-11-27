@@ -1,0 +1,155 @@
+{
+  "about": "Functions in frontend/src over 500 lines, which may only get shorter. Checked by scripts/function-sizes.test.js; rewrite with bun scripts/function-sizes.ts --write.",
+  "limit": 500,
+  "functions": {
+    "src/app/(dashboard)/dashboard/configuration/page.tsx": {
+      "Configuration": 718
+    },
+    "src/app/(dashboard)/files/page.tsx": {
+      "FilesPage": 1977
+    },
+    "src/app/(dashboard)/logs/page.tsx": {
+      "LogsScreen": 613
+    },
+    "src/app/(dashboard)/packages/page.tsx": {
+      "PackagesPage": 651
+    },
+    "src/app/(dashboard)/proxy/page.tsx": {
+      "ProxyOverviewPage": 620
+    },
+    "src/app/(dashboard)/terminal/page.tsx": {
+      "TerminalPage": 1160
+    },
+    "src/components/backups/job-form.tsx": {
+      "JobDialog": 815
+    },
+    "src/components/boards/board-workspace.tsx": {
+      "LoadedBoard": 653
+    },
+    "src/components/database/connect/start.tsx": {
+      "DatabaseCreation": 629
+    },
+    "src/components/database/data/import-dialog.tsx": {
+      "ImportDialog": 720
+    },
+    "src/components/database/data/workbench.tsx": {
+      "TableWorkbench": 942
+    },
+    "src/components/database/diagram/er-diagram.tsx": {
+      "Canvas": 1063
+    },
+    "src/components/database/grid/data-grid.tsx": {
+      "DataGrid": 1527
+    },
+    "src/components/database/mongo/documents/index.tsx": {
+      "Documents": 729
+    },
+    "src/components/database/ops/access-grants.tsx": {
+      "GrantsMatrix": 676
+    },
+    "src/components/database/query/index.tsx": {
+      "SqlQuery": 882
+    },
+    "src/components/database/schema/table-view.tsx": {
+      "TableView": 662
+    },
+    "src/components/deploy/new-project/configure.tsx": {
+      "Configure": 1045
+    },
+    "src/components/deploy/new-project/source-git.tsx": {
+      "SourceGit": 586
+    },
+    "src/components/deploy/new-project/source-template.tsx": {
+      "SourceTemplate": 533
+    },
+    "src/components/deploy/new-project/step-project.tsx": {
+      "StepProject": 1045
+    },
+    "src/components/deploy/project-deployments.tsx": {
+      "ProjectDeployments": 591
+    },
+    "src/components/deploy/project-runtime.tsx": {
+      "ProjectRuntime": 525
+    },
+    "src/components/deploy/run-page.tsx": {
+      "RunPage": 805
+    },
+    "src/components/deploy/settings/build.tsx": {
+      "BuildForm": 1145
+    },
+    "src/components/deploy/settings/databases.tsx": {
+      "DatabasesBody": 939
+    },
+    "src/components/deploy/settings/domains.tsx": {
+      "DomainRow": 566
+    },
+    "src/components/deploy/settings/runtime.tsx": {
+      "RuntimeForm": 1154
+    },
+    "src/components/deploy/settings/variables.tsx": {
+      "VariablesBody": 874
+    },
+    "src/components/docker/networks-page.tsx": {
+      "Networks": 502
+    },
+    "src/components/docker/stack-detail.tsx": {
+      "StackBody": 594
+    },
+    "src/components/files/file-editor.tsx": {
+      "FileEditorPanel": 520
+    },
+    "src/components/files/image-editor.tsx": {
+      "ImageEditor": 736
+    },
+    "src/components/git/branches-panel.tsx": {
+      "BranchesPanel": 625
+    },
+    "src/components/git/github-panel.tsx": {
+      "GitHubPanel": 638
+    },
+    "src/components/git/repo-workspace.tsx": {
+      "RepoWorkspace": 1027
+    },
+    "src/components/github/list-page.tsx": {
+      "GitHubListPage": 600
+    },
+    "src/components/logs/log-workspace.tsx": {
+      "LogWorkspace": 576
+    },
+    "src/components/map/canvas.tsx": {
+      "MapCanvas": 909
+    },
+    "src/components/metrics/alerts-page.tsx": {
+      "HostAlertsPage": 560
+    },
+    "src/components/network/firewall-panel.tsx": {
+      "FirewallWorkspace": 684
+    },
+    "src/components/proxy/certbot-panel.tsx": {
+      "IssueDialogBody": 773
+    },
+    "src/components/proxy/config-editor.tsx": {
+      "ConfigEditorBody": 541
+    },
+    "src/components/proxy/site-form.tsx": {
+      "SiteFormBody": 1807
+    },
+    "src/components/proxy/tls-report.tsx": {
+      "TLSReport": 745
+    },
+    "src/components/proxy/vhosts-panel.tsx": {
+      "SitesPage": 1208
+    },
+    "src/components/remote-desktop/session.tsx": {
+      "RemoteSession": 771
+    },
+    "src/components/shell/command-palette.tsx": {
+      "Palette": 626
+    },
+    "src/components/xterm-pane.tsx": {
+      "XtermPane": 1445,
+      "XtermPane › useEffect(…)": 612,
+      "XtermPane › useEffect(…) › (async () => { const [ { Terminal }, { F(…)": 596
+    }
+  }
+}
