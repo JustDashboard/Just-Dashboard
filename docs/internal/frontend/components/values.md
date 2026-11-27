@@ -136,6 +136,11 @@ The components stay adapters, because they take different inputs and draw differ
 `ExpiryStatus` (`proxy/expiry-status.tsx`) is the short word on a `Status`; deploy's
 `CertificateReading` (`deploy/vocabulary.tsx`) keeps the issuer's logo and the domain-level state
 word ("Certificate valid") and adds the long form beside it, through `domainCertificate`.
+`CertificatesReading` (the same file) says a project's three or more names in one line under the
+Overview's lead name: the state that most needs a look with its count, the long form of the soonest
+one's days, then the other states counted short ("7 certificates valid 85 days left", "Certificate
+expiring 9 days left · 6 valid"), with the issuer and "Renewed by Caddy" only when every name shares
+them. Its groups and words are `wiring-model.ts`.
 
 ## In and out
 
