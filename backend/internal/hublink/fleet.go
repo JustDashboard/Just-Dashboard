@@ -356,10 +356,13 @@ const (
 // A success is a completed sign-in. auth.login is written as soon as the
 // password is right, even while a second factor is still owed, so a password
 // or passkey sign-in counts only when its detail says nothing was owed; the
-// code that completes the others is its own auth.2fa.verify. A hub sign-in
-// (hub.signin) completes on its own. A failure is a refused password, code or
-// passkey: auth.login, auth.2fa.verify or auth.passkey.login with success 0.
-// A refused hub sign-in is the hub's own to count, and is not one here.
+// code that completes one that owed a code is its own auth.2fa.verify. One
+// that had to enrol an authenticator completes with auth.2fa.enable, which is
+// not counted: Settings writes the same entry when a signed-in person adds
+// one. A hub sign-in (hub.signin) completes on its own. A failure is a
+// refused password, code or passkey: auth.login, auth.2fa.verify or
+// auth.passkey.login with success 0. A refused hub sign-in is the hub's own
+// to count, and is not one here.
 func AuditSignIns(db *sql.DB) func(ctx context.Context, now time.Time) (SignInCounts, error) {
 	return func(ctx context.Context, now time.Time) (SignInCounts, error) {
 		var c SignInCounts

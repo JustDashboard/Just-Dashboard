@@ -916,8 +916,10 @@ tried again after 2 minutes. An empty list says "none".
 
 **Sign-in counts.** A success is a completed sign-in. `auth.login` is written as soon as the password is right, even
 while a code is still owed, so `auth.login` and `auth.passkey.login` count only when their entry says nothing was
-owed (`needsTotp` and `needsEnrollment` false or absent); the code that completes the others counts as its own
-successful `auth.2fa.verify`. A successful `hub.signin` counts. A failure is an `auth.login`, `auth.2fa.verify` or
+owed (`needsTotp` and `needsEnrollment` false or absent); the code that completes one that owed a code counts as its
+own successful `auth.2fa.verify`. One that had to enrol an authenticator first completes with `auth.2fa.enable`, which
+is not counted: the same entry is written when a signed-in person adds an authenticator in Settings. A successful
+`hub.signin` counts. A failure is an `auth.login`, `auth.2fa.verify` or
 `auth.passkey.login` that was refused, a locked account included. A refused `hub.signin` is not counted: the hub
 refused it, or knows of it from the ticket it signed. `lastFailureAt` is the newest failure of the last 30 days, which
 can be outside the 24 hours the counts cover. No account, address or device is ever sent (Decision D6 of the hub's
