@@ -16,10 +16,10 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -1036,7 +1036,7 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 		if err == nil {
 			break
 		}
-		if !errdefs.IsConflict(err) {
+		if !cerrdefs.IsConflict(err) {
 			return nil, fmt.Errorf("could not set %s aside: %w", name, err)
 		}
 	}
@@ -1049,7 +1049,7 @@ func (c *Client) Recreate(ctx context.Context, id string, opts RecreateOptions, 
 		cleanupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		if candidate != nil && candidate.ID != "" && candidate.ID != id {
-			if err := cli.ContainerRemove(cleanupCtx, candidate.ID, container.RemoveOptions{Force: true}); err != nil && !errdefs.IsNotFound(err) {
+			if err := cli.ContainerRemove(cleanupCtx, candidate.ID, container.RemoveOptions{Force: true}); err != nil && !cerrdefs.IsNotFound(err) {
 				return fmt.Errorf("replacement failed: %v; original is parked as %s and candidate cleanup failed: %w", cause, parked, err)
 			}
 		}

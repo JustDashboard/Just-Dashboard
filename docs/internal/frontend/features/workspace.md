@@ -287,7 +287,9 @@ nothing), a notice that the address came from a link, under the field whose mach
 while the check refuses the address — a look-alike name off this tailnet — Connect stays disabled
 and the terminal's command is not offered), the three scope cards with `maintain` chosen when the
 address is typed and none chosen after a `?connect=` link (Connect stays disabled until one is, and
-**What this server will send** appears once it is), **Connect** and `sudo ./scripts/manage.sh hub
+**What this server will send** appears once it is, with what only a hub is sent after Connect's own items:
+package updates and sign-in counts at every scope, certificate names and fixable image-scan findings from
+`operate` up, `sharedItems(scope, "hub")`, [protocol](../../backend/hub-link-protocol.md) §5.4), **Connect** and `sudo ./scripts/manage.sh hub
 connect <url>` beside it, and one line on turning key expiry off with its link to the Tailscale
 admin console; nothing is sent to the hub until Connect is pressed. No sentence stands under the
 field or the cards: what the address has to be, that no scope gives the hub a shell, files or
@@ -534,8 +536,8 @@ a strip, swipe and a slideshow; audio plays as a queue whose player is one line 
 foot and keeps playing across folders (`audio-queue.tsx`); a video the browser cannot play says so
 and offers Download (`playable-video.tsx`). Checked by `tests/browser/files-viewing.spec.ts`
 
-**Implementation:** files page and `components/files/`; checked by `tests/browser/files-ui.spec.ts`
-and `tests/browser/files-transfer.spec.ts`;
+**Implementation:** files page and `components/files/`, the page's keys decided in the unit-tested
+`keymap.ts`; checked by `tests/browser/files-ui.spec.ts` and `tests/browser/files-transfer.spec.ts`;
 backend contract in [`../backend/docker-files-logs.md`](../../backend/docker-files-logs.md#files)
 
 A delete moves to the Trash (`delete-flow.tsx`): before the confirmation opens it asks

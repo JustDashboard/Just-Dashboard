@@ -22,7 +22,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // TLS for the databases this dashboard started.
@@ -612,7 +612,7 @@ func (s *Server) claimDBTLSVolume(ctx context.Context, container string, id int6
 				"a volume named %s already exists and was not made by this dashboard for this database; rename or remove it on the Docker page first", name))
 		}
 		return name, false, nil
-	case !errdefs.IsNotFound(err):
+	case !cerrdefs.IsNotFound(err):
 		return "", false, s.dockerErr(err)
 	}
 	if _, err := s.modules.docker.CreateVolume(ctx, dockerx.VolumeSpec{Name: name, Labels: map[string]string{dbTLSVolumeLabel: owner}}); err != nil {

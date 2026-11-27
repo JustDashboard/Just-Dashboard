@@ -513,26 +513,27 @@ func frameworkFindings(state environmentState) []PreflightFinding {
 			"Django answers 400 to every host it does not allow, the readiness check included.",
 			"Set "+note.Detail+" to the domain, localhost and 127.0.0.1, separated the way your settings split it.", "deploy", variableField(note.Detail)))
 	}
-	for _, note := range state.note(observeDotenvRequired) {
+	// One finding per code, as everywhere in a preflight, naming the first file
+	// that showed it: the image gets one .env and one build however many files
+	// ask for them.
+	if dotenv := state.note(observeDotenvRequired); len(dotenv) > 0 {
 		if state.method == BuildRecipe {
 			findings = append(findings, finding("dotenv_file_provided", PreflightPass,
-				"An empty .env is created in the image", note.Path+" refuses to start without the file",
+				"An empty .env is created in the image", dotenv[0].Path+" refuses to start without the file",
 				"The loader never overrides variables already set, so the dashboard's values still win.", "", "deploy", "configuration.build"))
 		} else {
 			findings = append(findings, finding("dotenv_file_required", PreflightWarning,
-				"The application exits when .env is missing", note.Path+" treats a missing .env as fatal",
+				"The application exits when .env is missing", dotenv[0].Path+" treats a missing .env as fatal",
 				"A repository Dockerfile has to create the file itself; the dashboard supplies variables, not the file.",
 				"Add `RUN touch .env` beside the binary in the Dockerfile, or ignore the load error.", "deploy", "configuration.build"))
 		}
-		break
 	}
 	if state.method == BuildRecipe {
-		for _, note := range append(state.note("build_fetches_localhost"), state.note(observeBuildLocalhost)...) {
+		if fetches := append(state.note("build_fetches_localhost"), state.note(observeBuildLocalhost)...); len(fetches) > 0 {
 			findings = append(findings, finding("build_fetches_localhost", PreflightWarning,
-				"The build fetches from localhost", note.Path+" "+note.Detail,
+				"The build fetches from localhost", fetches[0].Path+" "+fetches[0].Detail,
 				"Nothing listens on loopback while the image builds, so a code generator or script that downloads a schema there fails the build.",
 				"Commit the generated output, or point the script at an address reachable from the build.", "deploy", "configuration.build.buildCommand"))
-			break
 		}
 	}
 	// A Dockerfile reading that found the overlay made it the candidate's

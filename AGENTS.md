@@ -29,9 +29,14 @@ To find where a feature's files are, start from
   the design system as `§n`; [`design-system.md`](docs/internal/frontend/design-system.md) is the
   index from each number to its page. A shared component follows
   [`contributing-a-component.md`](docs/internal/frontend/contributing-a-component.md).
-- Do not add or change CI: no GitHub Actions workflows, no `.github/` automation, no hosted checks of
-  any kind, unless the operator asks for them by name. Verification happens locally with the commands
-  below; a red check on GitHub that nobody asked for is confusion, not safety.
+- CI is the two workflows in `.github/workflows/`, and it changes only when the operator asks for that
+  by name. `verify.yml` (Verify) runs on every pull request and every push to `main` or a `patch/*`
+  branch and checks what the change reaches; `release.yml` (Release) tags and publishes a version once
+  Verify passes on the push to `main` that carries it. The rest of `.github/` is the pull request
+  template, the issue forms (`ISSUE_TEMPLATE/`) and `TEMPLATE_LICENSE`. Do not add or change workflows,
+  other `.github/` automation or hosted checks of any kind unless the operator asks for them by name.
+  Verify a change locally with the commands below before its pull request: Verify on GitHub checks it
+  again rather than replacing them, and a red check that nobody asked for is confusion, not safety.
 - Inspect a live dashboard's store only read-only, with
   `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`; never write to it from outside the backend.
 - Use **Bun only** in `frontend/`. Keep `bun.lock`; never create `package-lock.json` or `yarn.lock`.
@@ -75,7 +80,9 @@ frontend's dependencies and build configuration, and `bash -n` with the `scripts
 the file for `install.sh`, `scripts/`, `docker-compose.yml`, `deploy/`, `.env.example` and the
 Dockerfiles. The header of the script says how each is
 picked, and `JD_TEST_CHANGED_PLAN=1` prints what it picked without running it. Use it while working
-and again before a pull request. There is no separate full gate.
+and again before a pull request. Nothing local runs more than this. On GitHub, Verify checks the pull
+request again with its own picking and follows the merge further, as [`CONTRIBUTING.md`](CONTRIBUTING.md)
+says.
 The type-check of a new worktree starts from what the last passing check in any worktree of this
 clone learnt (`tsconfig.tsbuildinfo`, kept in the shared git directory under `jd-cache/`), so it
 re-checks what differs rather than the whole program.
@@ -84,6 +91,11 @@ without this override, the existing Playwright configuration controls concurrenc
 
 `bun test src` is the fast layer over the pure logic in `src/lib` and `src/components`, usually in well
 under a second. Anything expressible there belongs there rather than in a browser spec.
+`bun test scripts` (and so `bun run test`, which CI and `scripts/test-changed.sh` run as
+`bun test src scripts`) holds every function in `frontend/src` to 500 lines and the longer ones recorded in
+`frontend/scripts/function-sizes.json` to their length: split a long component rather than raise the
+record, and lower it with `bun scripts/function-sizes.ts --write` when one shrinks
+([CONTRIBUTING.md](CONTRIBUTING.md#before-you-open-a-pull-request)).
 
 **Browser specs run against a server you already have up**, built from the tree under test:
 
@@ -104,7 +116,10 @@ race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod`
 This software controls the Docker socket, host services, firewall, accounts, files, and a real shell.
 These invariants must not regress:
 
-1. The network allowlist runs before authentication, and nothing but Caddy binds a routable address.
+1. The network allowlist runs before authentication, and in the shipped stack nothing but Caddy binds a
+   routable address. The backend itself binds one only when the operator sets `JD_ALLOWED_CIDRS` (one
+   that admits every address is refused); agent mode, which its hub must reach, is the named exception,
+   served over TLS with every feature route behind the enrolled hub's certificate.
 2. Two-factor is enforced per account, not per install: an enrolled account is always asked for a code,
    and a session owing a second factor reaches only the 2FA routes. `JD_REQUIRE_2FA` (default false)
    decides only whether an *unenrolled* account may sign in at all. The one documented exception is hub
@@ -128,6 +143,12 @@ explicitly rather than silently changing the contract.
 - Do not create Git tags or GitHub releases by hand. Once Verify passes on a push to `main` whose version
   has no release yet, `.github/workflows/release.yml` tags it `v<version>` and publishes the release.
   That tag is the release: installs are offered a version, and install it, only once it exists.
+  Release tags only the version `main`'s changelog names as latest, so a version whose run on `main`
+  failed or was cancelled is never published once a later one reaches `main`. `scripts/release.sh`
+  therefore refuses to cut a release while a version on `main` has no tag, unless
+  `scripts/release-tags.sh` lists it as known untagged with the reason; adding one there is the
+  operator's call. Until `main`'s run of a merge has finished, push that commit to no other branch: a
+  push run of the same commit, on a new `patch/*` branch too, cancels it.
 - Read the licence sections of [`CONTRIBUTING.md`](CONTRIBUTING.md) before adding dependencies. The
   project is AGPL-3.0 with an additional contributor grant to the owner, and its source files carry no
   licence headers.

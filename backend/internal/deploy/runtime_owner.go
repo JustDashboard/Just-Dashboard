@@ -18,7 +18,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 var ErrRuntimeUnavailable = errors.New("deployment runtime is unavailable")
@@ -777,7 +777,7 @@ func (o *DockerRuntimeOwner) StartExisting(
 	case "container":
 		// Every replica, so a release that comes back comes back whole.
 		for _, id := range runtimeContainerIDs(runtime) {
-			if err := o.client.Lifecycle(ctx, id, dockerx.ActionStart, nil); err != nil && !errdefs.IsNotModified(err) {
+			if err := o.client.Lifecycle(ctx, id, dockerx.ActionStart, nil); err != nil && !cerrdefs.IsNotModified(err) {
 				return err
 			}
 		}
@@ -874,7 +874,7 @@ type containerStop struct {
 // that crashed must not turn its own cleanup into an error.
 func (o *DockerRuntimeOwner) stopContainer(ctx context.Context, id string, grace int, remove bool) containerStop {
 	err := o.client.Lifecycle(ctx, id, dockerx.ActionStop, &grace)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return containerStop{removed: remove}
 	}
 	if err != nil {
@@ -886,7 +886,7 @@ func (o *DockerRuntimeOwner) stopContainer(ctx context.Context, id string, grace
 	}
 	if remove {
 		err = o.client.RemoveContainer(ctx, id, false, false)
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			err = nil
 		}
 		result.removed, result.err = err == nil, err

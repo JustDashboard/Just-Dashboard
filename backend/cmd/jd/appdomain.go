@@ -35,13 +35,6 @@ type hookCredential struct {
 	Token string `json:"token"`
 }
 
-func (a *app) appDomain(pre, rest []string) error {
-	if len(rest) == 0 || rest[0] != "challenge" {
-		return usagef("usage: jd app-domain challenge add|remove [--credentials FILE]")
-	}
-	return a.appDomainChallenge(append(append([]string{}, pre...), rest[1:]...))
-}
-
 func (a *app) appDomainChallenge(args []string) error {
 	fs := a.newFlags("app-domain challenge", "app-domain challenge add|remove [--credentials FILE]")
 	credentials := fs.String("credentials", defaultHookCredentials, "the hook credential the dashboard wrote")

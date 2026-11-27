@@ -11,7 +11,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 type serviceFixture struct {
@@ -28,7 +28,7 @@ type serviceFixture struct {
 
 func newServiceFixture(t *testing.T) *serviceFixture {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

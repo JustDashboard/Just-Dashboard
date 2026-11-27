@@ -18,7 +18,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // TestLiveUpgradePostgres16To17 moves a real PostgreSQL 16 server, started
@@ -245,7 +245,7 @@ func TestLiveUpgradePostgres16To17(t *testing.T) {
 	for _, c := range report.Checks {
 		t.Logf("check %s: %s — %s %v", c.ID, c.Verdict, c.Detail, c.Items)
 	}
-	if _, err := docker.Inspect(ctx, name+"-pg17-check"); !errdefs.IsNotFound(err) {
+	if _, err := docker.Inspect(ctx, name+"-pg17-check"); !cerrdefs.IsNotFound(err) {
 		t.Errorf("the release the check started is still there: %v", err)
 	}
 
@@ -366,7 +366,7 @@ func TestLiveUpgradePostgres16To17(t *testing.T) {
 	if exists, _ := docker.VolumeExists(ctx, name+"-pg17-data"); exists {
 		t.Error("the new server's volume outlived the revert")
 	}
-	if _, err := docker.Inspect(ctx, name+"-pg16"); !errdefs.IsNotFound(err) {
+	if _, err := docker.Inspect(ctx, name+"-pg16"); !cerrdefs.IsNotFound(err) {
 		t.Errorf("the old server is still set aside: %v", err)
 	}
 	if restored, err := docker.Inspect(ctx, name); err != nil || restored.RestartPol != "unless-stopped" {
@@ -403,7 +403,7 @@ func TestLiveUpgradePostgres16To17(t *testing.T) {
 		t.Fatal(err)
 	}
 	h.s.recoverDatabaseUpgrades(ctx)
-	if _, err := docker.Inspect(ctx, candidate.ID); !errdefs.IsNotFound(err) {
+	if _, err := docker.Inspect(ctx, candidate.ID); !cerrdefs.IsNotFound(err) {
 		t.Errorf("the interrupted upgrade's candidate is still there: %v", err)
 	}
 	if exists, _ := docker.VolumeExists(ctx, name+"-pg17-data"); exists {
@@ -425,7 +425,7 @@ func TestLiveUpgradePostgres16To17(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("finish = %d %s", rec.Code, rec.Body.String())
 	}
-	if _, err := docker.Inspect(ctx, name+"-pg16"); !errdefs.IsNotFound(err) {
+	if _, err := docker.Inspect(ctx, name+"-pg16"); !cerrdefs.IsNotFound(err) {
 		t.Errorf("the old server outlived the finish: %v", err)
 	}
 	if exists, _ := docker.VolumeExists(ctx, name+"-data"); exists {

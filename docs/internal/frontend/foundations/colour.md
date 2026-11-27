@@ -6,8 +6,8 @@
 | --- | --- |
 | Dark only. No light palette, no theme switch. | convention |
 | Text has three inks: `text-foreground`, `text-muted-foreground`, `text-faint`. Faint keeps 4.5:1 on every ground text is set on, the selection ground included. | spec `design-system.spec.ts` (*faded secondary text keeps 4.5:1*, the selection ground included); unit `lib/utils.test.js` (every ink on every ground) |
-| No `/NN` on a text ink. A fainter word is `text-faint`, never `text-muted-foreground/60`. | coming: lint `ink-opacity` (WP-39) |
-| Every colour is a token in `globals.css`. No Tailwind palette, no hand-mixed tint, no `[var(--…)]` for a registered colour. | lint `hardcoded-palette`, `tone-tint`; coming: lint `colour-var` (WP-39) |
+| No `/NN` on a text ink. A fainter word is `text-faint`, never `text-muted-foreground/60`. | lint `ink-opacity` |
+| Every colour is a token in `globals.css`. No Tailwind palette, no hand-mixed tint, no `[var(--…)]` for a registered colour. | lint `hardcoded-palette`, `tone-tint`, `colour-var` |
 | The brand blue does three jobs: a command's face, where you are, a location mark. | convention |
 | Status hues (`--success`, `--warning`, `--destructive`) arrive only attached to a reading: a figure's `tone`, a `Status` dot and word, a `Notice`. | convention |
 | Selection is `bg-accent`, a neutral ground, never a hue. | spec `design-system.spec.ts` (*hover, selection and focus are three different marks*) |

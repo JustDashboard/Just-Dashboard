@@ -228,7 +228,7 @@ export function SqlSchema() {
 
   return (
     <SectionFrame section="schema">
-      {/* One frame around the whole workbench (§7.2): the head that says
+      {/* One frame around the whole workbench (§7): the head that says
           which database, then the tree and the object as two columns of one
           surface, with a hairline between them. */}
       <WorkbenchFrame

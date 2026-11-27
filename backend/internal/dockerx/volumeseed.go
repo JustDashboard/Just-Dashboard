@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/errdefs"
 )
 
 // PathOwner is what a container path is, read through the Engine's archive
@@ -43,7 +43,7 @@ func (c *Client) PathOwnership(ctx context.Context, id, target string) (PathOwne
 	defer cancel()
 	stat, err := cli.ContainerStatPath(ctx, id, target)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return PathOwner{}, nil
 		}
 		return PathOwner{}, err

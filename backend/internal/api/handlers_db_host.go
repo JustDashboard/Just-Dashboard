@@ -41,8 +41,11 @@ import (
 // the host, through the Docker socket and /host. What it adds is an audited
 // route that spends it on purpose, with the account it made named in the
 // entry. The password is generated here unless the operator supplies one,
-// never shown, and reaches the engine as one argv element of a command that
-// runs without a shell.
+// never shown, and reaches the engine's client on its standard input (mongosh
+// reads it from its environment instead), never as an argument: every account
+// on the machine can read a running process's argv in /proc/<pid>/cmdline,
+// and the account made is a superuser unless asked otherwise. The client runs
+// without a shell.
 
 type hostGrantRequest struct {
 	Driver dbx.Driver `json:"driver"`
@@ -271,9 +274,22 @@ func validateRoleName(name string) error {
 }
 
 // sqlLiteral quotes a value the SQL way — doubled single quotes — for the
-// statements below, which run through a client program that takes the whole
-// statement as one argument and cannot bind.
+// statements below, which a client program reads whole and cannot bind.
 func sqlLiteral(v string) string { return "'" + strings.ReplaceAll(v, "'", "''") + "'" }
+
+// hostAccountPasswordUsable refuses a password the statements below cannot
+// carry on the one line a client reads them on. The route refuses a supplied
+// one already and a generated one has none, so this is the same rule kept
+// beside the statements it protects: a line break in the password would end
+// the line psql or mysql is reading and let what follows be read as a line of
+// its own, where a leading backslash is one of the client's own commands and
+// \! runs a shell.
+func hostAccountPasswordUsable(password string) error {
+	if strings.ContainsFunc(password, func(r rune) bool { return r < 0x20 || r == 0x7f }) {
+		return fmt.Errorf("the password contains a control character")
+	}
+	return nil
+}
 
 // hostAccount finds an operating-system account in the host's passwd, which
 // is mounted into this container at /etc. Looked up by hand rather than
@@ -332,20 +348,44 @@ func hostPostgresAccount(ctx context.Context, port int, account, password string
 	if err != nil {
 		return "", err
 	}
+	args, input, err := postgresAccountInvocation(port, account, password, superuser)
+	if err != nil {
+		return "", err
+	}
+	cmd, err := hostexec.CommandOnHostAsUser(ctx, pg, []string{"PGCONNECT_TIMEOUT=10"}, "psql", args...)
+	if err != nil {
+		return "", err
+	}
+	cmd.Stdin = strings.NewReader(input)
+	return runHostCmd(ctx, cmd)
+}
+
+// postgresAccountInvocation is psql's argv and the script it reads on its
+// standard input. The statement holds the password, so it is the input, not
+// a -c argument.
+//
+// psql reads its input as a script: an unquoted backslash starts one of
+// psql's own commands, \! among them, which runs a shell, and :name is a
+// variable it substitutes. It looks for neither inside a dollar quote, and
+// the password is only ever inside the DO block's, whose tag it cannot hold.
+// The script is that statement on one line, and a password that could break
+// the line is refused.
+func postgresAccountInvocation(port int, account, password string, superuser bool) ([]string, string, error) {
+	if err := validateRoleName(account); err != nil {
+		return nil, "", err
+	}
+	if err := hostAccountPasswordUsable(password); err != nil {
+		return nil, "", err
+	}
 	privileges := "LOGIN"
 	if superuser {
 		privileges += " SUPERUSER CREATEDB CREATEROLE"
 	}
 	stmt, err := postgresAccountStatement(account, password, privileges)
 	if err != nil {
-		return "", err
+		return nil, "", err
 	}
-	args := []string{"-X", "-q", "-v", "ON_ERROR_STOP=1", "-p", strconv.Itoa(port), "-d", "postgres", "-c", stmt}
-	cmd, err := hostexec.CommandOnHostAsUser(ctx, pg, []string{"PGCONNECT_TIMEOUT=10"}, "psql", args...)
-	if err != nil {
-		return "", err
-	}
-	return runHostCmd(ctx, cmd)
+	return []string{"-X", "-q", "-v", "ON_ERROR_STOP=1", "-p", strconv.Itoa(port), "-d", "postgres"}, stmt + "\n", nil
 }
 
 // postgresAccountStatement is the one statement that creates or resets a role.
@@ -360,13 +400,13 @@ func hostPostgresAccount(ctx context.Context, port int, account, password string
 // as the postgres superuser. The tag is now drawn at random and checked
 // against everything that goes inside it.
 func postgresAccountStatement(account, password, privileges string) (string, error) {
-	body := fmt.Sprintf(`BEGIN
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %[1]s) THEN
-    EXECUTE format('ALTER ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s);
-  ELSE
-    EXECUTE format('CREATE ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s);
-  END IF;
-END`, sqlLiteral(account), sqlLiteral(password), privileges)
+	body := fmt.Sprintf(`BEGIN `+
+		`IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %[1]s) THEN `+
+		`EXECUTE format('ALTER ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s); `+
+		`ELSE `+
+		`EXECUTE format('CREATE ROLE %%I WITH %[3]s PASSWORD %%L', %[1]s, %[2]s); `+
+		`END IF; `+
+		`END`, sqlLiteral(account), sqlLiteral(password), privileges)
 	for range 8 {
 		raw := make([]byte, 8)
 		if _, err := rand.Read(raw); err != nil {
@@ -396,6 +436,34 @@ func hostMySQLAccount(ctx context.Context, socket, account, password string, sup
 			return "", fmt.Errorf("neither mysql nor mariadb client is installed on this server; set a password from a shell instead")
 		}
 	}
+	args, input, err := mysqlAccountInvocation(socket, account, password, superuser)
+	if err != nil {
+		return "", err
+	}
+	cmd := hostexec.CommandOnHost(ctx, client, args...)
+	cmd.Stdin = strings.NewReader(input)
+	return runHostCmd(ctx, cmd)
+}
+
+// mysqlAccountInvocation is the client's argv and the statements it reads on
+// its standard input. They were its --execute argument, which put the
+// password in the argv: the client overwrites the value of --password there
+// once it has read it, and of no other option.
+//
+// The client reads its input a line at a time, and two things on a line are
+// its own commands rather than SQL: a backslash outside a quoted string
+// (\! runs a shell) and a line that starts with one of the long names
+// (system, source). The password is only ever inside a quoted literal, where
+// the client takes a backslash as part of the string, and the statements are
+// one line that starts with CREATE; a password that could break the line is
+// refused.
+func mysqlAccountInvocation(socket, account, password string, superuser bool) ([]string, string, error) {
+	if err := validateRoleName(account); err != nil {
+		return nil, "", err
+	}
+	if err := hostAccountPasswordUsable(password); err != nil {
+		return nil, "", err
+	}
 	var stmts []string
 	for _, host := range []string{"localhost", "127.0.0.1"} {
 		acct := "'" + account + "'@'" + host + "'"
@@ -411,9 +479,7 @@ func hostMySQLAccount(ctx context.Context, socket, account, password string, sup
 	if socket != "" {
 		args = append(args, "--socket="+socket)
 	}
-	args = append(args, "--execute", strings.Join(stmts, " "))
-	cmd := hostexec.CommandOnHost(ctx, client, args...)
-	return runHostCmd(ctx, cmd)
+	return args, strings.Join(stmts, " ") + "\n", nil
 }
 
 func mysqlLiteral(v string) string {
@@ -433,9 +499,31 @@ func hostMongoAccount(ctx context.Context, port int, account, password string, s
 			return "", fmt.Errorf("mongosh is not installed on this server; create a user from a shell instead")
 		}
 	}
+	args, env := mongoAccountInvocation(shell, port, account, password, superuser)
+	cmd := hostexec.CommandOnHost(ctx, shell, args...)
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), env...)
+	}
+	return runHostCmd(ctx, cmd)
+}
+
+// mongoAccountPasswordVariable carries the password to mongosh, whose script
+// reads it from process.env: a process's environment is readable by root and
+// its own account, its argv by every account on the machine.
+const mongoAccountPasswordVariable = "JD_ACCOUNT_PASSWORD"
+
+// mongoAccountInvocation is the shell's argv and what it adds to the
+// environment. The legacy mongo shell, which MongoDB 6.0 stopped shipping,
+// has no way to read its environment, so for it alone the password is still a
+// literal in the --eval script.
+func mongoAccountInvocation(shell string, port int, account, password string, superuser bool) ([]string, []string) {
 	roles := "[]"
 	if superuser {
 		roles = `[{role: "root", db: "admin"}]`
+	}
+	secret, env := "process.env."+mongoAccountPasswordVariable, []string{mongoAccountPasswordVariable + "=" + password}
+	if shell != "mongosh" {
+		secret, env = jsLiteral(password), nil
 	}
 	// An account that exists keeps the roles it has: updateUser with a role
 	// list replaces the list, which took every role away from an account that
@@ -444,10 +532,8 @@ func hostMongoAccount(ctx context.Context, port int, account, password string, s
 	script := fmt.Sprintf(`const a = db.getSiblingDB("admin");
 const u = %s; const p = %s; const r = %s;
 if (a.getUser(u)) { a.updateUser(u, {pwd: p}); if (r.length) { a.grantRolesToUser(u, r); } } else { a.createUser({user: u, pwd: p, roles: r}); }`,
-		jsLiteral(account), jsLiteral(password), roles)
-	args := []string{"--quiet", "--port", strconv.Itoa(port), "--eval", script}
-	cmd := hostexec.CommandOnHost(ctx, shell, args...)
-	return runHostCmd(ctx, cmd)
+		jsLiteral(account), secret, roles)
+	return []string{"--quiet", "--port", strconv.Itoa(port), "--eval", script}, env
 }
 
 func jsLiteral(v string) string {
@@ -461,6 +547,36 @@ func hostClickHouseAccount(ctx context.Context, port int, account, password stri
 	if !hostexec.Available("clickhouse-client") {
 		return "", fmt.Errorf("clickhouse-client is not installed on this server")
 	}
+	args, stmts, err := clickHouseAccountInvocation(port, account, password, superuser)
+	if err != nil {
+		return "", err
+	}
+	for _, stmt := range stmts {
+		cmd := hostexec.CommandOnHost(ctx, "clickhouse-client", args...)
+		cmd.Stdin = strings.NewReader(stmt)
+		if _, err := runHostCmd(ctx, cmd); err != nil {
+			return "", err
+		}
+	}
+	return "", nil
+}
+
+// clickHouseAccountInvocation is the client's argv and the queries that
+// create or reset the account, one per run of the client on its standard
+// input. Without --query the client reads its one query from there, which
+// keeps the password out of the argv.
+func clickHouseAccountInvocation(port int, account, password string, superuser bool) ([]string, []string, error) {
+	if err := validateRoleName(account); err != nil {
+		return nil, nil, err
+	}
+	// The port is the server's native one, which is the one the saved
+	// connection dials: a second server on this machine is another port.
+	return []string{"--port", strconv.Itoa(port)}, clickHouseAccountStatements(account, password, superuser), nil
+}
+
+// clickHouseAccountStatements are the queries that create or reset the
+// account, one per run of the client.
+func clickHouseAccountStatements(account, password string, superuser bool) []string {
 	// ClickHouse reads a backslash in a string literal as an escape, as MySQL
 	// does, so the literal has to double it as well as the quote.
 	stmts := []string{
@@ -470,15 +586,7 @@ func hostClickHouseAccount(ctx context.Context, port int, account, password stri
 	if superuser {
 		stmts = append(stmts, "GRANT ALL ON *.* TO "+quoteBacktickPlain(account)+" WITH GRANT OPTION")
 	}
-	for _, stmt := range stmts {
-		// The port is the server's native one, which is the one the saved
-		// connection dials: a second server on this machine is another port.
-		cmd := hostexec.CommandOnHost(ctx, "clickhouse-client", "--port", strconv.Itoa(port), "--query", stmt)
-		if _, err := runHostCmd(ctx, cmd); err != nil {
-			return "", err
-		}
-	}
-	return "", nil
+	return stmts
 }
 
 func quoteBacktickPlain(name string) string { return "`" + name + "`" }

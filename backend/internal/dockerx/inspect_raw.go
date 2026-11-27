@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/errdefs"
 )
 
 // InspectRunning is every running container as the daemon describes it, in
@@ -33,7 +33,7 @@ func (c *Client) InspectRunning(ctx context.Context) ([]byte, error) {
 	out.WriteByte('[')
 	for _, item := range items {
 		_, raw, err := cli.ContainerInspectWithRaw(ctx, item.ID, false)
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			continue
 		}
 		if err != nil {

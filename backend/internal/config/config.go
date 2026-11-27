@@ -1,14 +1,15 @@
 // Package config resolves the dashboard's settings from the environment once
 // at boot (Load): each JD_* variable with its default and bounds, the VPSD_*
 // name an older install still carries (Env), and the refusals to start (no
-// allowlist on an address that is not loopback, a malformed value). It only
-// reads: changing a setting from the page is selfcfg's. The settings are
-// listed in docs/guides/configuration.md.
+// allowlist, or one that admits every address, on an address that is not
+// loopback; a malformed value). It only reads: changing a setting from the
+// page is selfcfg's. The settings are listed in docs/guides/configuration.md.
 package config
 
 import (
 	"fmt"
 	"net"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -37,10 +38,10 @@ type Config struct {
 	IdleTTL        time.Duration
 	DockerHost     string
 	// Site and TLSMode describe how the proxy in front of this process is
-	// reached. This process never binds them — it is loopback-only in every
-	// configuration — but it is the half of the stack that can run `tailscale
-	// cert` on the host, and it is what the settings page reports the address
-	// from.
+	// reached. This process never binds them — the Compose stack keeps it on
+	// loopback (invariant 7) — but it is the half of the stack that can run
+	// `tailscale cert` on the host, and it is what the settings page reports
+	// the address from.
 	Site           string
 	TLSMode        string
 	TerminalEnable bool
@@ -233,6 +234,8 @@ func Load() (*Config, error) {
 	// open internet, so an explicit network allowlist is mandatory. Binding
 	// to loopback only is the one configuration that implies its own
 	// perimeter (reverse proxy / WireGuard terminates in front of us).
+	// Agent mode is held to the same rule: it binds JD_ADDR as well, and
+	// the hub's address is known.
 	raw := Env("JD_ALLOWED_CIDRS")
 	if raw == "" {
 		if !isLoopbackBind(c.Addr) {
@@ -244,6 +247,12 @@ func Load() (*Config, error) {
 	nets, err := parseCIDRs(raw)
 	if err != nil {
 		return nil, fmt.Errorf("JD_ALLOWED_CIDRS: %w", err)
+	}
+	// 0.0.0.0/0 on a routable bind is the open internet with a setting
+	// beside it, which the rule above exists to refuse.
+	if !isLoopbackBind(c.Addr) && admitsEveryAddress(nets) {
+		return nil, fmt.Errorf("JD_ALLOWED_CIDRS admits every address, so it is no allowlist for JD_ADDR (%s), which is not bound to loopback: "+
+			"name the WireGuard/VPN or tailnet ranges that may reach this dashboard", c.Addr)
 	}
 	c.AllowedCIDRs = nets
 
@@ -441,6 +450,9 @@ func parseCIDRs(raw string) ([]*net.IPNet, error) {
 	return out, nil
 }
 
+// isLoopbackBind is true only for a literal loopback address. A name, even
+// localhost, is resolved when the listener opens and can be anything the
+// host's resolver says, and an empty host is every address.
 func isLoopbackBind(addr string) bool {
 	host, _, err := net.SplitHostPort(addr)
 	if err != nil {
@@ -448,6 +460,65 @@ func isLoopbackBind(addr string) bool {
 	}
 	ip := net.ParseIP(host)
 	return ip != nil && ip.IsLoopback()
+}
+
+// admitsEveryAddress reports whether the allowlist lets in every IPv4 or
+// every IPv6 address, as the allowlist middleware matches them
+// (net.IPNet.Contains). No entry need be a /0 for that: 0.0.0.0/1 and
+// 128.0.0.0/1 together are as open, and an IPv4-mapped entry such as
+// ::ffff:0:0/96 is matched against an IPv4 client as 0.0.0.0/0.
+func admitsEveryAddress(nets []*net.IPNet) bool {
+	var v4, v6 []netip.Prefix
+	for _, n := range nets {
+		p, ok := matchedPrefix(n)
+		switch {
+		case !ok:
+		case p.Addr().Is4():
+			v4 = append(v4, p)
+		default:
+			v6 = append(v6, p)
+		}
+	}
+	return covers(v4, netip.PrefixFrom(netip.IPv4Unspecified(), 0)) ||
+		covers(v6, netip.PrefixFrom(netip.IPv6Unspecified(), 0))
+}
+
+// matchedPrefix is n as net.IPNet.Contains applies it, which reads an
+// IPv4-mapped network as IPv4 with the last 32 bits of its mask.
+func matchedPrefix(n *net.IPNet) (netip.Prefix, bool) {
+	ip, mask := n.IP.To4(), n.Mask
+	if ip == nil {
+		ip = n.IP
+	} else if len(mask) == net.IPv6len {
+		mask = mask[12:]
+	}
+	addr, ok := netip.AddrFromSlice(ip)
+	ones, bits := mask.Size()
+	if !ok || bits != addr.BitLen() {
+		return netip.Prefix{}, false
+	}
+	return netip.PrefixFrom(addr, ones).Masked(), true
+}
+
+// covers reports whether nets, all of p's family, hold every address in p.
+// It halves p only where an entry overlaps without holding it, so the walk
+// is bounded by the entries' lengths, not by the size of the space.
+func covers(nets []netip.Prefix, p netip.Prefix) bool {
+	overlaps := false
+	for _, n := range nets {
+		if n.Bits() <= p.Bits() && n.Contains(p.Addr()) {
+			return true
+		}
+		overlaps = overlaps || n.Overlaps(p)
+	}
+	if !overlaps || p.Bits() == p.Addr().BitLen() {
+		return false
+	}
+	high := p.Addr().AsSlice()
+	high[p.Bits()/8] |= 0x80 >> (p.Bits() % 8)
+	upper, _ := netip.AddrFromSlice(high)
+	return covers(nets, netip.PrefixFrom(p.Addr(), p.Bits()+1)) &&
+		covers(nets, netip.PrefixFrom(upper, p.Bits()+1))
 }
 
 // adoptLegacyData returns the pre-rename data directory when it holds the

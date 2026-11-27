@@ -8,10 +8,10 @@ item is one press away, Alt+↑ and Alt+↓ walk it, and the view on screen goes
 `components/rail.tsx`. The frame a rail stands in is `DetailPage`
 ([`../recipes/detail-with-rail.md`](../recipes/detail-with-rail.md)).
 
-**Deprecated, kept until WP-39:** `DockerRail` and `DockerRailRow` (`docker/item-rail.tsx`), and
-`DetailRail`, `RailRow` and `RailGhosts` in `network/traffic/detail-shell.tsx`. They are thin
-wrappers over the parts above. A new rail never uses them, and the network file's three have no
-caller left.
+**Retired (0.9.0):** the Docker pages' `DockerRail` and `DockerRailRow`, and the network detail
+pages' old frame, are gone. Each Docker item page draws its rail with `Rail` and `RailRow`
+(`docker/container-rail.tsx` and its siblings), and the network section's run and capture pages
+with `ItemRail` (`network/item-rail.tsx`), which is the same parts.
 
 ## Purpose
 

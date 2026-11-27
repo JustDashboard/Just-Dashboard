@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func rtReadHost(t *testing.T, routeGet string) *recorder {
@@ -250,7 +250,7 @@ func TestRouteSummaryIgnoresAnRARoutesCountdown(t *testing.T) {
 
 func historyService(t *testing.T) (*Service, *sql.DB) {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

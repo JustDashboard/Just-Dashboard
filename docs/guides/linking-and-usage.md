@@ -123,7 +123,12 @@ by typing its address yourself.
 
 The scope works as for just-dashboard.com, with the table above ("the hub" for "the site"), except that the
 default is `maintain`: a hub is yours and on your own network, and keeping servers updated is what it is for.
-Change it any time in Settings. Every command from the hub, run or refused, is written to the audit log as
+Change it any time in Settings. The hub also sees a few things just-dashboard.com never does, so it can say what
+each server needs. At every scope it sees how many package updates are waiting (and how many are security
+updates), whether the host wants a reboot, and how many sign-ins to this dashboard succeeded and failed in the
+last day, with the time of the latest failure: counts only, never who or from where. From `operate` up it also
+sees each certificate's name, days left and issuer, and for each deployment the critical and high findings of
+its latest image scan that you can fix. Every command from the hub, run or refused, is written to the audit log as
 `hub:<hub name>` (actions `hub.command.*`), and its destructive actions draw on their own budget. The hub never
 opens a connection to the dashboard, with one exception before you connect: it may ask
 `GET /api/v1/hub/hello` to find dashboards on the tailnet, which is behind your network allowlist and answers

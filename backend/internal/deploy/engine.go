@@ -809,9 +809,8 @@ func (e *Engine) failRun(ctx context.Context, lease QueueLease, code, reason str
 	}
 	if run.State == RunFailedActivation {
 		if recovered {
-			run, err = e.store.TransitionRun(ctx, lease.RunID, lease.Token,
-				RunRestoringPrevious, TransitionDetail{Code: code, Reason: reason})
-			if err != nil {
+			if _, err := e.store.TransitionRun(ctx, lease.RunID, lease.Token,
+				RunRestoringPrevious, TransitionDetail{Code: code, Reason: reason}); err != nil {
 				return err
 			}
 			_, err = e.store.TransitionRun(ctx, lease.RunID, lease.Token,

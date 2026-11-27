@@ -12,7 +12,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/go-chi/chi/v5"
 	"golang.org/x/crypto/ssh"
 )
@@ -220,7 +220,7 @@ func (p *backupVolumeProvisioner) VolumeAt(ctx context.Context, path string) (ba
 		return backups.LocalVolume{}, false, nil
 	}
 	volume, err := p.docker.InspectVolume(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return backups.LocalVolume{}, false, nil
 	}
 	if err != nil {
@@ -234,7 +234,7 @@ func (p *backupVolumeProvisioner) VolumeAt(ctx context.Context, path string) (ba
 
 func (p *backupVolumeProvisioner) VolumeMountpoint(ctx context.Context, name string) (string, bool, error) {
 	volume, err := p.docker.InspectVolume(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return "", false, nil
 	}
 	if err != nil {

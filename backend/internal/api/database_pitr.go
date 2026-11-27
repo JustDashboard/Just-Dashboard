@@ -18,7 +18,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // Point-in-time recovery for the PostgreSQL servers this dashboard runs.
@@ -554,12 +554,12 @@ func (s *Server) removeContainerAndVolumes(ctx context.Context, container string
 	cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), time.Minute)
 	defer cancel()
 	if container != "" {
-		if err := s.modules.docker.RemoveContainer(cleanup, container, true, false); err != nil && !errdefs.IsNotFound(err) {
+		if err := s.modules.docker.RemoveContainer(cleanup, container, true, false); err != nil && !cerrdefs.IsNotFound(err) {
 			s.Log.Warn("a recovered copy that did not finish could not be removed", "container", container, "err", err)
 		}
 	}
 	for _, v := range volumes {
-		if err := s.modules.docker.RemoveVolume(cleanup, v, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := s.modules.docker.RemoveVolume(cleanup, v, true); err != nil && !cerrdefs.IsNotFound(err) {
 			s.Log.Warn("a volume of a recovered copy that did not finish could not be removed", "volume", v, "err", err)
 		}
 	}

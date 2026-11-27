@@ -14,7 +14,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // NetworkedBuilderImage is the BuildKit daemon a build runs in when it has to
@@ -269,7 +269,7 @@ func (c *Client) matchWaitingBuilder(ctx context.Context, spec NetworkedBuilderS
 	}
 	add, remove := networkedBuilderNetworkChanges(detail.Networks, spec.Networks)
 	for _, network := range remove {
-		if err := c.DisconnectNetwork(ctx, network, container, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := c.DisconnectNetwork(ctx, network, container, true); err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		}
 	}
@@ -420,7 +420,7 @@ func (c *Client) removeNetworkedBuilder(ctx context.Context, name string) {
 	_ = cmd.Run()
 	// buildx forgets a builder whose container it cannot find, and a
 	// container whose builder it has forgotten would refuse the next create.
-	if err := c.RemoveContainer(removeCtx, networkedBuilderContainer(name), true, false); err != nil && !errdefs.IsNotFound(err) {
+	if err := c.RemoveContainer(removeCtx, networkedBuilderContainer(name), true, false); err != nil && !cerrdefs.IsNotFound(err) {
 		return
 	}
 }
@@ -445,10 +445,10 @@ func (c *Client) RemoveNetworkedBuilderState(ctx context.Context, name string) e
 	// builder has nothing for it to do.
 	if _, err := c.Inspect(ctx, networkedBuilderContainer(name)); err == nil {
 		c.removeNetworkedBuilder(ctx, name)
-	} else if !errdefs.IsNotFound(err) {
+	} else if !cerrdefs.IsNotFound(err) {
 		return err
 	}
-	if err := c.RemoveVolume(ctx, NetworkedBuilderStateVolume(name), true); err != nil && !errdefs.IsNotFound(err) {
+	if err := c.RemoveVolume(ctx, NetworkedBuilderStateVolume(name), true); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil

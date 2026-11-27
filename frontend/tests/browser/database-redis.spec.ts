@@ -903,6 +903,8 @@ test.describe("keys", () => {
     await expect(rail(page).getByRole("button", { name: /^Hash/ })).toContainText("2")
   })
 
+  // A defect that shipped once, before the rebuild: security-regressions.spec.ts
+  // points here rather than keeping a second copy of its own.
   test("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {
     const redis = await mockRedis(page, { pageSize: 4 })
     await page.goto(KEYS)

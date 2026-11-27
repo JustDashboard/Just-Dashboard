@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 type PreviewResourceOwner interface {
@@ -62,7 +62,7 @@ func (o *DockerRuntimeOwner) QuarantinePreview(ctx context.Context, target Previ
 		}
 		seen[id] = true
 		observed, err := o.client.Inspect(ctx, id)
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			continue
 		}
 		if err != nil {
@@ -113,7 +113,7 @@ func (o *DockerRuntimeOwner) ensurePreviewVolume(ctx context.Context, environmen
 	}
 	labels := previewLabels(environmentID)
 	volume, err := o.client.InspectVolume(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		if _, err = o.client.CreateVolume(ctx, dockerx.VolumeSpec{Name: name, Labels: labels}); err != nil {
 			return err
 		}
@@ -132,7 +132,7 @@ func (o *DockerRuntimeOwner) ensurePreviewNetwork(ctx context.Context, environme
 	labels := previewLabels(environmentID)
 	name := previewNetworkName(environmentID)
 	network, err := o.client.InspectNetwork(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		// A dedicated bridge preserves Docker's inter-network isolation while
 		// allowing loopback publication for the existing proxy owner. Docker
 		// does not publish ports on an internal-only container network.
@@ -164,7 +164,7 @@ func (o *DockerRuntimeOwner) RemovePreviewResources(ctx context.Context, environ
 		if !matchesPreviewLabels(item.Labels, environmentID) {
 			return ErrPreviewIsolation
 		}
-		if err := o.client.RemoveContainer(ctx, item.ID, true, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := o.client.RemoveContainer(ctx, item.ID, true, true); err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		}
 	}
@@ -177,7 +177,7 @@ func (o *DockerRuntimeOwner) RemovePreviewResources(ctx context.Context, environ
 		if !strings.HasPrefix(volume.Name, prefix) || !matchesPreviewLabels(volume.Labels, environmentID) {
 			continue
 		}
-		if err := o.client.RemoveVolume(ctx, volume.Name, false); err != nil && !errdefs.IsNotFound(err) {
+		if err := o.client.RemoveVolume(ctx, volume.Name, false); err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		}
 	}
@@ -188,7 +188,7 @@ func (o *DockerRuntimeOwner) RemovePreviewResources(ctx context.Context, environ
 	}
 	name := previewNetworkName(environmentID)
 	network, err := o.client.InspectNetwork(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {

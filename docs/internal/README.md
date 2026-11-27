@@ -1,7 +1,8 @@
 # Internal documentation
 
 This directory is the engineering reference for Just Dashboard. Its source coverage and factual
-inventories were reverified against the worktree on 2026-09-09. `AGENTS.md` is the short, canonical
+inventories were reverified against the worktree on 2026-09-09, and the package map and file-group
+counts again on 2026-11-26. `AGENTS.md` is the short, canonical
 operating guide; the documents here explain the implementation, rationale, security boundaries, test
 strategy, and feature ownership behind those rules.
 

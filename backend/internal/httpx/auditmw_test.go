@@ -8,7 +8,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // Every entry a hub session causes says so, whichever writer records it: the
@@ -18,7 +18,7 @@ import (
 // assistant acting in either, read apart from it (hub-link-protocol.md
 // section 9.10).
 func TestAHubSessionIsAuditedApartFromTheSameAccountsOwnSession(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

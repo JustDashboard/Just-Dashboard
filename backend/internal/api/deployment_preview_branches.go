@@ -13,7 +13,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // The Databases owner's side of a preview's database branches
@@ -477,7 +477,7 @@ func (o *deploymentDatabaseNetworks) previewBranchNetwork(ctx context.Context, e
 		return "", fmt.Errorf("the database branch of %s is not on the preview's database network", branch.Name)
 	}
 	if docker := o.server.modules.docker; docker != nil {
-		if _, err := docker.Inspect(ctx, branch.Container); errdefs.IsNotFound(err) {
+		if _, err := docker.Inspect(ctx, branch.Container); cerrdefs.IsNotFound(err) {
 			return "", fmt.Errorf("the database branch of %s is gone; refresh it from the preview", branch.Name)
 		}
 	}

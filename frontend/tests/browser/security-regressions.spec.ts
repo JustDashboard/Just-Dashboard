@@ -198,8 +198,12 @@ async function databaseFixture(page: Page) {
     ticks of one table stood over the next while its rows were still coming;
     a 64-bit key typed into the row editor was sent as a rounded number.
 
-  The Redis one further down is still `fixme`: it belongs to the key browser
-  (`components/database/redis`).
+  The third regression of that set, a Redis scan cursor past 2^53 sent back
+  rounded, is held in `database-redis.spec.ts` under the same name ("Redis
+  scan cursors retain all unsigned 64-bit digits in requests"). It was written
+  there against the rebuilt key browser (`components/database/redis`), whose
+  mock refuses any cursor it did not hand out, and the tree's walk is held to
+  the same thing beside it.
 */
 test("database selections cannot follow a different sort or a loading table", async ({ page }) => {
   const { mutations, held } = await databaseFixture(page)
@@ -486,48 +490,6 @@ test("same-name PM2 applications use trusted daemon and process identities", asy
   expect(reads.filter((read) => read.searchParams.get("source")?.startsWith("pm2:alice/"))).toEqual(
     [],
   )
-})
-
-// Held with the two database regressions above: the Redis key browser is being rebuilt.
-test.fixme("Redis scan cursors retain all unsigned 64-bit digits in requests", async ({ page }) => {
-  const cursors: string[] = []
-  const cursor = "18446744073709551615"
-  await page.route("**/api/v1/**", async (route) => {
-    const url = new URL(route.request().url()),
-      path = url.pathname.slice(7)
-    let body: unknown = []
-    if (path === "/auth/session") body = signedIn
-    if (path === "/databases/")
-      body = [
-        {
-          id: 1,
-          name: "Redis",
-          driver: "redis",
-          host: "localhost",
-          port: 6379,
-          database: "0",
-          username: "",
-          createdAt: new Date().toISOString(),
-        },
-      ]
-    if (path === "/databases/drivers") body = [{ id: "redis", name: "Redis", sql: false }]
-    if (path === "/databases/1/schemas") body = [{ name: "0", size: 2 }]
-    if (path === "/databases/1/keys") {
-      cursors.push(url.searchParams.get("cursor") ?? "")
-      body = {
-        keys: [{ key: "example", type: "string", ttl: -1, size: 1 }],
-        cursor,
-        done: url.searchParams.get("cursor") === cursor,
-      }
-    }
-    await fulfill(route, body)
-  })
-  await page.goto("/databases/browse?conn=1")
-  await expect(page.getByRole("button", { name: /example/ })).toBeVisible()
-  await page.getByRole("button", { name: "Next", exact: true }).click()
-  await expect.poll(() => cursors).toEqual(["0", cursor])
-  await page.getByRole("button", { name: "Previous", exact: true }).click()
-  await expect.poll(() => cursors).toEqual(["0", cursor, "0"])
 })
 
 test("resource filters keep focus while stale responses are discarded", async ({ page }) => {

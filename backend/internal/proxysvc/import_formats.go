@@ -253,7 +253,8 @@ func decryptKeyPEM(keyPEM, password string) (string, error) {
 			// exactly why the key is compared with the certificate next: a
 			// wrong password that happens to decrypt yields garbage, not a
 			// key that matches.
-			der, err := x509.DecryptPEMBlock(block, []byte(password)) //nolint:staticcheck
+			//lint:ignore SA1019 legacy encrypted PEM keys still arrive in imports, and the decrypted key is checked against the certificate
+			der, err := x509.DecryptPEMBlock(block, []byte(password))
 			if err != nil {
 				return "", fmt.Errorf("the private key could not be decrypted: %w", errWrongPassword)
 			}

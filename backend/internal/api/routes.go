@@ -44,8 +44,12 @@ func (s *Server) Routes() http.Handler {
 	r.Use(httpx.RequestLogger(s.Log))
 	r.Use(httpx.SecurityHeaders)
 
-	// Liveness is the only unauthenticated route, and it reveals nothing:
-	// a fixed body, no version, no hostname.
+	// Liveness is the only route outside the allowlist, and it reveals
+	// nothing: a fixed body, no version, no hostname. Under /api/v1, the
+	// routes that answer a caller who brings no credential at all are listed
+	// in routes_test.go (publicAPIRoutes, agentPreEnrolmentRoutes). One of
+	// them, an agent's /agent/info, does give the hostname and the version,
+	// to the hub about to enrol it (handlers_agent.go).
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))
@@ -120,14 +124,20 @@ func (s *Server) Routes() http.Handler {
 				r.Use(httpx.AuditMutations(s.Audit))
 				r.Use(httpx.RequireCSRF)
 				r.Method(http.MethodGet, "/auth/session", s.handle(s.handleSession))
-				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/setup", s.handle(s.handleTOTPSetup))
-				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
-				// A hub session never owes a code (it is made complete), and a code
-				// given from one would turn it into an ordinary session; refused
-				// here, before the handler spends a guess from the account's
-				// budget or audits a right code as a wrong one.
-				r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
 				r.Method(http.MethodPost, "/auth/logout", s.handle(s.handleLogout))
+				// The second factor's own routes. A session that has given its
+				// factors and owes a password change reaches none of them: from
+				// there it has status, sign-out and the change, nothing else.
+				r.Group(func(r chi.Router) {
+					r.Use(httpx.RefuseOwedPasswordChange)
+					r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/setup", s.handle(s.handleTOTPSetup))
+					r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/enable", s.handle(s.handleTOTPEnable))
+					// A hub session never owes a code (it is made complete), and a code
+					// given from one would turn it into an ordinary session; refused
+					// here, before the handler spends a guess from the account's
+					// budget or audits a right code as a wrong one.
+					r.With(httpx.RefuseHubSession).Method(http.MethodPost, "/auth/2fa/verify", s.handle(s.handleTOTPVerify))
+				})
 			})
 			r.Group(func(r chi.Router) {
 				r.Use(s.Authn.AuthenticatePasswordChange)
