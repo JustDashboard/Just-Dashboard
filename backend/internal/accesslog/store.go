@@ -3,6 +3,7 @@ package accesslog
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -98,6 +99,11 @@ type Coverage struct {
 	// the current one failed — served rather than refused, since the figures
 	// are still true of the moment they describe.
 	Stale bool `json:"stale,omitempty"`
+	// History is what the request history keeps of the route, where the
+	// store has one (history.go). With it, From is the earliest request the
+	// answer could draw on, in the history or in memory, and Complete says
+	// whether anything the window covers is known to be missing.
+	History *History `json:"history,omitempty"`
 }
 
 // Window is one answer: the rows and readings, what they cover, and where the
@@ -150,6 +156,11 @@ type Store struct {
 	mu      sync.Mutex
 	routes  map[string]*record
 	sweptAt time.Time
+
+	// archive, when set, answers the part of a window older than memory
+	// holds (history.go), and cache keeps the long windows that read it.
+	archive Archive
+	cache   windowCache
 }
 
 func NewStore(open Opener) *Store {
@@ -248,8 +259,9 @@ func (s *Store) enforceCap(serving string) {
 // the next time it is asked for anyway; this is for the caller that knows now.
 func (s *Store) Forget(route string) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	delete(s.routes, route)
+	s.mu.Unlock()
+	s.cache.forget(route)
 }
 
 // Window refreshes the route's record — at most once per refreshEvery — and
@@ -260,32 +272,110 @@ func (s *Store) Window(ctx context.Context, route string, filter Filter) (Window
 
 func (s *Store) window(ctx context.Context, route string, filter Filter, minGap time.Duration) (Window, error) {
 	now := s.now()
-	rec := s.record(route, now)
-	rec.mu.Lock()
-	if err := rec.refresh(ctx, s, now, minGap); err != nil && len(rec.entries) == 0 && !rec.seeded {
-		rec.mu.Unlock()
+	key := ""
+	if s.archive != nil {
+		key = cacheKey(route, filter, now)
+		if hit, ok := s.cache.get(key, now); key != "" && ok {
+			return hit, nil
+		}
+	}
+	snap, err := s.snapshot(ctx, route, now, minGap)
+	if err != nil {
 		return Window{}, err
 	}
 	s.enforceCap(route)
-	// Published entries are immutable: feed only appends and trim copies into
-	// a new backing array. Capturing this slice does not copy a 150k-entry
-	// record per reader, and releases the route before aggregation and sorting.
-	entries := rec.entries[rec.lowerBound(filter.Since):len(rec.entries):len(rec.entries)]
-	coverage, facts, complete := rec.coverage(), rec.facts, rec.complete
-	rec.mu.Unlock()
+	p := s.plan(ctx, route, filter, snap.span())
 
 	c := NewCollector(filter)
-	for _, entry := range entries {
+	if p.archive {
+		err := s.scanArchive(ctx, route, filter, p, func(e Entry) error {
+			c.Feed(e)
+			return ctx.Err()
+		})
+		if err != nil {
+			if ctx.Err() != nil {
+				return Window{}, ctx.Err()
+			}
+			// The history could not be read to the end: the answer is
+			// memory's alone, as it was before there was a history.
+			c, p = NewCollector(filter), answerPlan{complete: snap.complete, exists: snap.coverage.Exists, history: p.history}
+		}
+	}
+	for _, entry := range snap.from(filter.Since, p.cut) {
 		if err := ctx.Err(); err != nil {
 			return Window{}, err
 		}
-		c.Feed(entry)
+		if entry.at >= p.cut {
+			c.Feed(entry)
+		}
 	}
-	c.Format(facts.Format)
-	if !complete {
+	c.Format(snap.facts.Format)
+	if !p.complete {
 		c.Truncated()
 	}
-	return Window{Result: c.Result(), Coverage: coverage, Facts: facts}, nil
+	coverage := snap.coverage
+	coverage.Complete, coverage.Exists, coverage.History = p.complete, p.exists, p.history
+	if p.from != nil {
+		coverage.From = p.from
+	}
+	window := Window{Result: c.Result(), Coverage: coverage, Facts: snap.facts}
+	if key != "" && p.archive {
+		s.cache.put(key, window, now)
+	}
+	return window, nil
+}
+
+// heldSnapshot is a route's record as one answer reads it, taken under the
+// record's lock and read after it is released. Published entries are
+// immutable: feed only appends and trim copies into a new backing array, so
+// the slices do not copy a 150k-entry record per reader.
+type heldSnapshot struct {
+	entries  []Entry
+	ceil     []int64
+	coverage Coverage
+	facts    Facts
+	complete bool
+}
+
+// snapshot refreshes the route's record, at most once per minGap, and takes
+// what it holds.
+func (s *Store) snapshot(ctx context.Context, route string, now time.Time, minGap time.Duration) (heldSnapshot, error) {
+	rec := s.record(route, now)
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	if err := rec.refresh(ctx, s, now, minGap); err != nil && len(rec.entries) == 0 && !rec.seeded {
+		return heldSnapshot{}, err
+	}
+	n := len(rec.entries)
+	return heldSnapshot{
+		entries: rec.entries[:n:n], ceil: rec.ceil[:n:n],
+		coverage: rec.coverage(), facts: rec.facts, complete: rec.complete,
+	}, nil
+}
+
+func (h heldSnapshot) span() heldSpan {
+	out := heldSpan{has: len(h.entries) > 0, complete: h.complete, exists: h.coverage.Exists}
+	if out.has {
+		out.from = h.entries[0].at
+	}
+	return out
+}
+
+// from is the held entries that can fall in a window starting at since, and
+// at or after cut — the ones before either are older than the running
+// maximum says, and the caller drops the few after the index that are not.
+func (h heldSnapshot) from(since time.Time, cut int64) []Entry {
+	target := int64(math.MinInt64)
+	if !since.IsZero() {
+		target = since.UnixNano()
+	}
+	if cut > target {
+		target = cut
+	}
+	if target == math.MinInt64 {
+		return h.entries
+	}
+	return h.entries[sort.Search(len(h.ceil), func(i int) bool { return h.ceil[i] >= target }):]
 }
 
 // Export hands every request in the window that matches the filter to fn,
@@ -294,23 +384,37 @@ func (s *Store) window(ctx context.Context, route string, filter Filter, minGap 
 // it here.
 func (s *Store) Export(ctx context.Context, route string, filter Filter, limit int, fn func(Entry)) (int, error) {
 	now := s.now()
-	rec := s.record(route, now)
-	rec.mu.Lock()
-	if err := rec.refresh(ctx, s, now, refreshEvery); err != nil && len(rec.entries) == 0 && !rec.seeded {
-		rec.mu.Unlock()
+	snap, err := s.snapshot(ctx, route, now, refreshEvery)
+	if err != nil {
 		return 0, err
 	}
-	entries := rec.entries[rec.lowerBound(filter.Since):len(rec.entries):len(rec.entries)]
-	rec.mu.Unlock()
 	if limit <= 0 {
 		limit = 50_000
 	}
+	p := s.plan(ctx, route, filter, snap.span())
 	n := 0
+	if p.archive {
+		err := s.scanArchive(ctx, route, filter, p, func(e Entry) error {
+			if n >= limit {
+				return errEnough
+			}
+			if filter.Match(e) {
+				fn(e)
+				n++
+			}
+			return ctx.Err()
+		})
+		if err != nil && !errors.Is(err, errEnough) {
+			// Half a download is not passed off as the whole of one.
+			return n, err
+		}
+	}
+	entries := snap.from(filter.Since, p.cut)
 	for i := 0; i < len(entries) && n < limit; i++ {
 		if err := ctx.Err(); err != nil {
 			return n, err
 		}
-		if filter.Match(entries[i]) {
+		if entries[i].at >= p.cut && filter.Match(entries[i]) {
 			fn(entries[i])
 			n++
 		}
@@ -387,14 +491,6 @@ func (r *record) coverage() Coverage {
 		c.From, c.To = &from, &to
 	}
 	return c
-}
-
-func (r *record) lowerBound(since time.Time) int {
-	if since.IsZero() || len(r.ceil) == 0 {
-		return 0
-	}
-	target := since.UnixNano()
-	return sort.Search(len(r.ceil), func(i int) bool { return r.ceil[i] >= target })
 }
 
 // refresh brings the record up to date, once per refreshEvery. The caller

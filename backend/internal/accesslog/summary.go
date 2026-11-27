@@ -38,6 +38,9 @@ type Filter struct {
 	// click, and a log that shows all six is a log nobody can read for what
 	// people actually opened.
 	PagesOnly bool
+	// Who keeps one side of the audience: WhoPeople the requests a person's
+	// browser made (IsPerson), WhoBots everything else. Empty keeps both.
+	Who string
 	// Limit bounds the rows returned, newest first. The readings above the
 	// table are still computed over everything in the window: a page showing
 	// the last 200 requests must not report a p95 of only those 200.
@@ -110,6 +113,48 @@ func IsProbe(e Entry) bool {
 	return false
 }
 
+// The two sides of the audience Filter.Who narrows to.
+const (
+	WhoPeople = "people"
+	WhoBots   = "bots"
+)
+
+// IsPerson reports whether a request is one a person's browser made: an agent
+// that says it is a browser ("Mozilla/", which every browser still sends), is
+// not a program that says it is one (IsBot), on a request that is not a
+// scanner's probe. Everything else — a crawler, a script, a scanner wearing a
+// browser's agent, a client that sent no agent at all — is the other side.
+// This is stricter than Audience's request split, which counts an absent
+// agent as a person's so a format that records none is not read as all bots;
+// a filter has to put every request on one side, and the side a request with
+// nothing to say for itself goes on is not the people's.
+func IsPerson(e Entry) bool {
+	return hasFold(e.UserAgent, "mozilla/") && !IsBot(e.UserAgent) && !IsProbe(e)
+}
+
+// hasFold is a case-insensitive Contains for an ASCII needle, without the
+// lowercased copy of the haystack strings.ToLower makes: it runs on every
+// request a filter reads.
+func hasFold(s, lowerNeedle string) bool {
+	n := len(lowerNeedle)
+	for i := 0; i+n <= len(s); i++ {
+		j := 0
+		for ; j < n; j++ {
+			c := s[i+j]
+			if 'A' <= c && c <= 'Z' {
+				c += 'a' - 'A'
+			}
+			if c != lowerNeedle[j] {
+				break
+			}
+		}
+		if j == n {
+			return true
+		}
+	}
+	return false
+}
+
 // Match reports whether one request answers the question.
 func (f Filter) Match(e Entry) bool {
 	if !f.Since.IsZero() && e.at < f.Since.UnixNano() {
@@ -158,6 +203,9 @@ func (f Filter) Match(e Entry) bool {
 	// probe for one — a script asking for /wp-login.php on a site that has
 	// none is not a visit.
 	if f.PagesOnly && (!IsPage(e) || IsProbe(e)) {
+		return false
+	}
+	if f.Who != "" && (f.Who == WhoPeople) != IsPerson(e) {
 		return false
 	}
 	if f.MinMs > 0 || f.MaxMs > 0 {
@@ -297,7 +345,9 @@ const buckets = 60
 
 // latencyCap bounds what the percentile estimate remembers. Every sample is
 // eight bytes, and an unbounded window over a busy month would otherwise be
-// held in memory to answer one number.
+// held in memory to answer one number. Past it the sample is a uniform one of
+// the whole window (keepLatency), so a week's p95 is the week's and not its
+// first few days'.
 const latencyCap = 250_000
 
 // facetCap bounds the distinct values of a dimension. A path with a request id
@@ -333,9 +383,13 @@ type Collector struct {
 	audience      audienceTally
 
 	latencies []float64
-	sum       float64
-	max       float64
-	bytes     int64
+	// timed counts every timed request, of which latencies is a sample once
+	// there are more than latencyCap; sample is the generator that picks it.
+	timed  int
+	sample uint64
+	sum    float64
+	max    float64
+	bytes  int64
 	// slowRows is the running top-N by duration, ordered slowest first.
 	slowRows []Entry
 
@@ -438,11 +492,7 @@ func (c *Collector) Feed(e Entry) {
 			c.max = e.duration
 		}
 		c.keepSlowest(e)
-		if len(c.latencies) < latencyCap {
-			c.latencies = append(c.latencies, e.duration)
-		} else {
-			c.truncated = true
-		}
+		c.keepLatency(e.duration)
 	}
 
 	minute := e.at / int64(time.Minute)
@@ -465,6 +515,31 @@ func (c *Collector) Feed(e Entry) {
 	c.entries = append(c.entries, e)
 	if len(c.entries) > c.filter.Limit*2 {
 		c.entries = append(c.entries[:0], c.entries[len(c.entries)-c.filter.Limit:]...)
+	}
+}
+
+// keepLatency adds one duration to the percentile sample. Up to latencyCap
+// every one is kept; after that each replaces a kept one with the chance that
+// keeps the sample uniform over everything seen (reservoir sampling), so the
+// percentiles of a window too long to hold are estimates over all of it —
+// within a fraction of a percent at this size — rather than exact figures for
+// its oldest part. The generator is seeded the same for every collector, so
+// one window read twice gives one answer.
+func (c *Collector) keepLatency(ms float64) {
+	c.timed++
+	if len(c.latencies) < latencyCap {
+		c.latencies = append(c.latencies, ms)
+		return
+	}
+	// splitmix64: a generator of a few lines whose low bits are as good as
+	// its high ones, which a modulo needs.
+	c.sample += 0x9e3779b97f4a7c15
+	z := c.sample
+	z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9
+	z = (z ^ (z >> 27)) * 0x94d049bb133111eb
+	z ^= z >> 31
+	if j := z % uint64(c.timed); j < latencyCap {
+		c.latencies[j] = ms
 	}
 }
 
@@ -623,7 +698,8 @@ func (c *Collector) Result() *Result {
 			P50: percentile(c.latencies, 0.50), P75: percentile(c.latencies, 0.75),
 			P90: percentile(c.latencies, 0.90), P95: percentile(c.latencies, 0.95),
 			P99: percentile(c.latencies, 0.99), Max: c.max,
-			Mean: c.sum / float64(len(c.latencies)),
+			// Over every timed request: the sum is, where the sample may not be.
+			Mean: c.sum / float64(c.timed),
 		}
 	}
 
@@ -718,6 +794,18 @@ func (c *Collector) histogram() ([]Bucket, int) {
 	if width < time.Minute {
 		width = time.Minute
 	}
+	// Past an hour a column is a whole number of hours that divides a day —
+	// three for a week, a day for a month — and starts on such a boundary in
+	// UTC, so a week's columns begin at 00:00, 03:00, 06:00 rather than every
+	// 2 h 48 min from whenever the window happened to be asked. The width
+	// leaves room for the part-column the boundary adds before the window.
+	if width > time.Hour {
+		width = dayDivisor(span / (buckets - 1))
+		// The zero time is a UTC midnight, so a divisor of a day truncates to
+		// the same boundaries every day.
+		from = from.Truncate(width)
+		span = to.Sub(from)
+	}
 	count := int(span/width) + 1
 	// A window a whole number of columns long touches one more column than
 	// it has: "the last hour" asked at 12:00:40 runs from 11:00:40, so it
@@ -774,6 +862,18 @@ func (c *Collector) histogram() ([]Bucket, int) {
 		out[i].P95 = &p95
 	}
 	return out, int(width / time.Second)
+}
+
+// dayDivisor is the narrowest whole number of hours dividing a day that is at
+// least d wide, or whole days past one.
+func dayDivisor(d time.Duration) time.Duration {
+	for _, hours := range []time.Duration{1, 2, 3, 4, 6, 8, 12, 24} {
+		if hours*time.Hour >= d {
+			return hours * time.Hour
+		}
+	}
+	day := 24 * time.Hour
+	return (d + day - 1) / day * day
 }
 
 // Percentile is percentile's nearest-rank reading over values in any order,
