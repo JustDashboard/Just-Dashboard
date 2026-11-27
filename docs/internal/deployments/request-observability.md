@@ -607,27 +607,56 @@ of a host's logs.
 
 ## Frontend
 
-`ProjectLogs` is four `ReadingLine`s (`components/reading-line.tsx`, the project Overview's: Traffic
-as requests a minute with page views, Errors as the failing share, Response time as what 19 in 20 were
-inside, Served as bytes sent — the rate counts up on arrival through `NumberTicker`) and the
-alerts line over a `Pane` with the five views, the pane a definite height (`max(40rem, 100dvh − 6rem)`
-from `md`) with each view scrolling inside it — a 307-line live tail had stretched it to
-nearly seven thousand pixels. They were a `StatGrid` of four tiles until 0.8.7. Each line is one height
-with a reading and without one, and carries its last hour at its end, as
-the project Overview's do: the request rate, the slow tail and the bytes as lines from the buckets, the
-browsers, programs and crawlers that asked as their logos beside the line's name, the failing share
-as a strip of the hour's sixty minutes (`traffic-strip.tsx`, the Backups run strip's shape: green
-where a minute went fine, red where it had a 5xx, grey where nothing came in). Below `md` the page is
-one pane the height of the window under the project's header (`components/phone-panes.tsx`; the shell
-holds `/logs` to the window there), the five views the stops of a bar along its foot with the hour's
-disruptions counted on Events; the hour is one line at the pane's head on every view (rate, failing
-share, firing alerts) and opens the four readings and the alerts line as a page with a way back, the
-view behind it kept as it was. What the container did is the Events tab's: its count is the hour's disruptions — an exit
+`ProjectLogs` is a workbench (`docs/internal/frontend/recipes/workbench.md`) since 27 Nov 2026: the
+window's height and the sheet's edges, with no project header over it. The project shell draws no
+`IdentityHeader` on `/logs` (`project-shell.tsx`, `<Page fill="workspace">`); the page opens on one
+strip of its own (`logs-strip.tsx`, the shared `WorkbenchHeader`): the way back to the Overview, the
+project's mark, name, address and state, the four views as tabs (`ViewTabList` inside a Radix `Tabs`
+the page holds, whose one panel is the view on screen) with the hour's container disruptions as a dot
+on Events, and the environment switch where there is staging. The header's facts and verbs are the
+Overview's, one press back. The operator asked for this: the header, four reading tiles and an alerts
+line stood between the page and the first request, in a box of their own above the box of requests,
+and the tiles read the last hour whatever window was chosen below them.
+
+The views are **Requests**, **Insights**, **Output** and **Events**. **Builds** left the page on the
+same day: a build's transcript is its run's page, on Deployments, and an old `?view=builds` link
+opens the page's default view. On a phone the page is one pane the height of the window, the four
+views the stops of a bar along its foot (`components/phone-panes.tsx`), and the chart is Insights'
+reading only.
+
+Requests and Insights open on the window's controls (`RequestsWorkspace`'s filter bar: the path
+field with Pages only, **Everyone / People / Bots** as `Segments` over the API's `who`, the
+narrowings as chips, the window, Took, Live and Export), then **the window in one sentence**
+(`window-headline.tsx`): how many requests, from how many people and bots (the summary's
+`audience`), how many page views, how many failed with their share in the failure's colour, how long
+19 in 20 took and how much was sent — about the window on screen, never a fixed hour — and under it
+the stretch in words ("over the last 7 days", "between Nov 27, 18:34 and Nov 27, 19:06"), how far
+back the record reaches when that is less than the window ("Recorded since Nov 25, 08:00", from
+`coverage.history`; "Held since …, so the figures are a floor" where nothing is kept; the words are
+the unit-tested `window-headline-model.ts`), and at its end the alerts in a word with the channels
+they tell (the rules' sentences are the word's title). The sentence and its line are one height with
+a reading and without one. The ranges are 15 minutes to **30 days**; a window of a day or more is
+read again a minute apart, a shorter one every ten seconds. Under the sentence is the chart, then
+the rows.
+
+A pressed request opens in the **inspector** beside the rows (`request-inspector.tsx`, from `lg`; the
+pane itself below, with the way back), never under its row, which grew the row and moved the next
+one away from the pointer reaching for it (the shared console keeps the inline disclosure for the
+proxy site page, which has not been passed). The inspector reads in the order the questions come:
+the code and its word and the time it took against the window, the request line whole; **Who** — the
+client drawn as itself, Person, Crawler or Program as a tag (`senderOf`, the browser's side of the
+server's `who` rule), the address on its network, the site it came from and the agent string; then
+**Details**, **Follow it** (Container output at that second, Container events around it, every
+request to the path or from the address, Copy or block), and the lines written while it ran. ↑ and ↓
+walk the list while it is open and Escape closes it; a request the next read no longer lists stays
+open without its neighbours (`requestIdentity` in `lib/requests.ts`: the sequence where there is
+one, else what the request was, since a row from the kept history has no sequence).
+
+What the container did is the Events tab's: its count is the hour's disruptions — an exit
 that was not clean, an OOM kill, a restart. An exit with status 0 is not a disruption: it is a
 routine stop or the old container of a release swap, which the server already logs as a notice, and
 the Events tab does not count it. A kill is not counted either, because Docker reports the exit
-that follows it and one stop would read as two. (A fifth reading, Container, named the newest
-disruption over a rail of ticks until 2026-10-03; the Events tab already said the same thing.) The chart
+that follows it and one stop would read as two. The chart
 carries marks through the house chart's `events`: a release going live (`releases[].activatedAt`,
 the Metrics page's deploy colour), a container exit that was not clean or an OOM kill (danger), a
 restart or a start (warning) — a clean exit is the other half of a release going live or of somebody
@@ -638,7 +667,7 @@ drain exports this project's traces and names where its service opens one, a lin
 (`traceLinkFor` in `log-drains.ts`: the first enabled drain with the `traces` stream that reaches the
 project and has a trace link; the console reads the drains once). A request the ingress sent no
 trace with has none to name.
-A request opens in place on what was written while it was in flight (`request-lines.tsx`):
+An inspected request shows what was written while it was in flight (`request-lines.tsx`):
 **Lines from this request**, the container's lines from its arrival (the answer's time less its
 duration, less a second) to a second after it was answered, labelled *approximate* — the ingress
 records no request id for the application to log, so on a busy container they are other requests' too
@@ -668,11 +697,8 @@ the project's own before its neighbours, so the application leads its database �
 (`stack:<project>`) for a release of several, then older releases' containers, each read through the
 lens its image calls for, in Live and History only. The page has one Insights, the requests'; what the
 containers threw is read on Output, and a project with no request record shows the empty state on
-Insights. **Builds** (`project-builds.tsx`) is the recent runs down a rail —
-who started each, how it ended, how long, when — with the chosen one's transcript in the run page's own
-console beside it and a link to the run; below 900 px of the pane's own width the rail is the header's
-picker. `useRunStream` (`run-stream.ts`) is the one reader of a run's stream — resync, dedupe, cap,
-resume, close — for this view and the run page alike.
+Insights. `useRunStream` (`run-stream.ts`) is the one reader of a run's stream — resync, dedupe,
+cap, resume, close — for the run page.
 
 `LifecycleFeed` carries the toolbar the request views have — a search box, kind chips with counts,
 and a Live chip over the socket — because it was the only view that could be neither searched nor
@@ -707,14 +733,12 @@ its exit and a loop of clean exits said to be clean, and the row unfolds onto it
 "docker itself". An exit or an OOM kill has its **Last lines** — the minute before it, through the
 container's lens — folded under it while the container exists, open by default only on the newest
 failure; a removed container's newest failure says it was removed rather than searching. The Overview
-carries two of this page's readings among its own four (requests a minute with
-the hour's line, and the failing share), and each fleet card a sparkline with the rate, both from
-`/deploy/traffic`. (The run page's Metrics view, which led with requests/min, failing share and p95
-before → after activation, left the page on 2026-10-05.) The readings are
-the page's own, over a fixed last hour, so they hold still while the reader narrows the rows beneath
-them — which is what lets the error rate be the thing that sent them to Output in the first place.
-Each is a rate or a share rather than a count: a figure whose meaning depends on a control somewhere
-else is a figure people learn to ignore.
+carries the last hour's rate and failing share among its own four readings, and each fleet card a
+sparkline with the rate, both from `/deploy/traffic`. (The run page's Metrics view, which led with
+requests/min, failing share and p95 before → after activation, left the page on 2026-10-05.) This
+page's figures are its window's: until 27 Nov 2026 four readings above the views were taken over a
+fixed last hour whatever window was chosen under them, and a week's rows under "48.8 requests a
+minute" read as the page contradicting itself. The Overview is where the hour is read.
 
 `lib/requests.ts` holds the vocabulary. A request log is read by status **family**, not by code —
 nobody scans for 418, they scan for "is anything 5xx" — and the four families are the chips, the
@@ -731,15 +755,10 @@ a second.
 The socket opens with the window's cursor (`after=`), and rows are keyed by sequence, so a live
 prepend neither remounts the list nor shows a request twice.
 
-Insights opens on who the window's traffic was (`AudienceReadings` in `components/deploy/audience.tsx`),
-because the one number everybody asks of a website's log — how many real people came — was nowhere on
-it, and the lists under the charts named addresses: five figures over the window, each counting up as
-it lands — **Visitors** (the people, with their line across the window), **Page views** (a press
-narrows to them, as the field's switch does), **Bots and scripts** (the addresses, and their share of
-the requests as a meter), **Came from** (the busiest outside site drawn as itself) and **On** (the
-leading device's share over a bar of desktop, phone and tablet in their colours). Rates, failures and
-response times are the page's tiles above the pane and the chart under the band, so they are not said a
-third time. The Requests chart takes a green **Visitors** line on Insights, under the volume on its
+Insights opens on the same sentence as Requests — the window's people, page views, failures, time
+and bytes — where five audience tiles (`AudienceReadings`, Visitors, Page views, Bots and scripts,
+Came from, On) stood until 27 Nov 2026: the operator asked for no stat cards on this page, and the
+sentence already said each figure. The Requests chart takes a green **Visitors** line on Insights, under the volume on its
 scale: a spike of requests with the line flat under it is one client, not a crowd. The p95 chart is
 **Response time**, captioned in words ("19 in 20 of each point's requests answered faster than the
 line"), and the page's tile took the same name — "Slowest tenth" named a statistic, not what a visitor
@@ -760,7 +779,7 @@ it; a client row narrows to the client and, for an admin, blocks it. **Response 
 412ms, 99 in 100 inside 2.84s; the slowest took 3.12s."; four tiles until 0.8.7), each figure past a
 second, or past the line a latency alert watches, in amber, and each a button narrowing the rows to the
 requests at least that slow. What was served is a line under Pages (bytes sent, and each on average),
-and the heaviest of the busiest pages keep a list of their own. The five audience tiles keep one picture line each, so their hints share a baseline.
+and the heaviest of the busiest pages keep a list of their own.
 **Slowest** is a table with its own column heads. Every narrowing the page makes is one of the API's own
 filters — `host`, exact `status` codes, `minMs` — and the poll, the socket and the CSV export are asked
 the same query, so what is exported is what is on screen.

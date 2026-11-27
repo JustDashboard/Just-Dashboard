@@ -29,6 +29,7 @@ import {
   STATUS_CLASSES,
   latency,
   latencyTone,
+  requestIdentity,
   statusClass,
   type RequestRange,
   type StatusClass,
@@ -54,10 +55,13 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Field } from "@/components/form"
 import { TimeWindow } from "@/components/logs/time-window"
-import { AudienceReadings } from "@/components/deploy/audience"
+import { Segments } from "@/components/segments"
+import { useBelow } from "@/lib/breakpoints"
 import { useRequestBlocks } from "@/components/deploy/use-request-blocks"
 import { RequestChart, type ChartMarker } from "@/components/deploy/request-chart"
 import { RequestConsole } from "@/components/deploy/request-console"
+import { RequestInspector } from "@/components/deploy/request-inspector"
+import { WindowHeadline } from "@/components/deploy/window-headline"
 import { Address, LiveDot, socketReading } from "@/components/deploy/request-marks"
 import { TrafficFacets } from "@/components/deploy/traffic-facets"
 import {
@@ -65,6 +69,7 @@ import {
   requestNarrowing,
   requestParams,
   type RequestQuery,
+  type RequestWho,
 } from "@/components/deploy/logs-model"
 
 // Where a site's page reads them: the query is the workspace's question, and
@@ -113,6 +118,8 @@ export function RequestsWorkspace({
   traceLink,
   renderInline,
   scope,
+  inspect,
+  headlineAside,
 }: {
   /**
    * Where this record lives on the API — `/deploy/12` or `/proxy/sites/shop` —
@@ -158,8 +165,20 @@ export function RequestsWorkspace({
    * with the window it was read in — which names the proxy that answered.
    */
   renderInline?: (entry: RequestEntry, window: DeploymentRequests) => React.ReactNode
+  /**
+   * A pressed request opens in an inspector beside the rows (a pane of its
+   * own on a phone) rather than under its row. The deployment's Logs page,
+   * where the rows are the page's whole width and a row that grew pushed the
+   * next one away from the pointer reaching for it.
+   */
+  inspect?: boolean
+  /** The end of the window's second line: what watches this record. */
+  headlineAside?: React.ReactNode
 }) {
   const { can } = useAuth()
+  const [selected, setSelected] = useState<RequestEntry | null>(null)
+  // Below `lg` the inspector is the pane: the rows step aside for it.
+  const narrow = useBelow("lg")
   const [live, setLive] = useState(false)
   const narrowing = useMemo(() => requestNarrowing(query), [query])
 
@@ -175,7 +194,7 @@ export function RequestsWorkspace({
       const asked = { ...requestParams(query, Date.now()), ...scope }
       return { window: await get<DeploymentRequests>(`${base}/requests`, asked, signal), asked }
     },
-    live ? 0 : 10000,
+    live ? 0 : pollEvery(query.range),
     [base, JSON.stringify(query), JSON.stringify(scope)],
   )
   // A filter is a new question of the same record, and `usePoll` rightly forgets
@@ -209,6 +228,7 @@ export function RequestsWorkspace({
   )
 
   const onBlock = can("system.admin") ? (ip: string) => void blocks.block(ip) : undefined
+  const blockState = blocks.state
 
   // The export asks again what the rows on screen answered, so the file is
   // the window the reader is looking at rather than a newer one.
@@ -223,7 +243,7 @@ export function RequestsWorkspace({
   if (poll.error && !poll.data) {
     return (
       <div className="flex min-h-0 flex-1 items-center justify-center p-6">
-        <ErrorState error={poll.error} onRetry={poll.refresh} />
+        <ErrorState error={poll.error} onRetry={poll.refresh} what="the request record" />
       </div>
     )
   }
@@ -270,6 +290,7 @@ export function RequestsWorkspace({
     return (
       <>
         {bar}
+        <WindowHeadline range={query.range} since={query.since} until={query.until} />
         <div className="shrink-0 border-b border-hairline px-3 py-3">
           <Skeleton className="h-36 w-full" />
         </div>
@@ -282,6 +303,18 @@ export function RequestsWorkspace({
   const counts = data.summary.classes
   const threshold = alertLine(alerts)
   const narrowed = isNarrowed(query)
+  const askedFrom = answer?.asked.since ? Date.parse(answer.asked.since) : undefined
+  const headline = (
+    <WindowHeadline
+      data={data}
+      range={query.range}
+      since={query.since}
+      until={query.until}
+      asked={askedFrom}
+      aside={headlineAside}
+      dense={view === "requests"}
+    />
+  )
 
   // On Insights the readings and the charts scroll with the lists under them:
   // pinned above the lists they left a fixed-height pane a strip of the lists
@@ -297,6 +330,7 @@ export function RequestsWorkspace({
       total={data.summary.total}
       failed={counts["5xx"] ?? 0}
       custom={query.range === "custom"}
+      counted={false}
       onReset={onReset}
       onZoom={(from, to) =>
         onQueryChange({
@@ -309,11 +343,14 @@ export function RequestsWorkspace({
     />
   )
 
-  return (
-    <>
-      {bar}
+  const filterPath = (path: string) => onQueryChange({ ...query, path })
+  const filterClient = (client: string) => onQueryChange({ ...query, client })
+  const inline = renderInline && ((entry: RequestEntry) => renderInline(entry, data))
 
-      {view === "insights" ? (
+  if (view === "insights") {
+    return (
+      <>
+        {bar}
         <div
           aria-busy={settling}
           className={cn(
@@ -321,34 +358,74 @@ export function RequestsWorkspace({
             settling && "opacity-70",
           )}
         >
-          <AudienceReadings
-            summary={data.summary}
-            pages={query.pages}
-            onPages={() => onQueryChange({ ...query, pages: !query.pages })}
-          />
+          {headline}
           {chart}
           <TrafficFacets
             summary={data.summary}
             slowest={data.slowest}
             latencyKnown={data.latency}
             threshold={threshold}
-            onFilterPath={(path) => onQueryChange({ ...query, path })}
-            onFilterClient={(client) => onQueryChange({ ...query, client })}
+            onFilterPath={filterPath}
+            onFilterClient={filterClient}
             onFilterHost={(host) => onQueryChange({ ...query, host })}
             onFilterAgent={(agent) => onQueryChange({ ...query, agent })}
             onFilterReferer={(referer) => onQueryChange({ ...query, referer })}
             onFilterStatus={(code) => onQueryChange({ ...query, statuses: [code] })}
             onFilterSlow={(ms) => onQueryChange({ ...query, minMs: Math.floor(ms) })}
             onBlock={onBlock}
-            blockState={blocks.state}
+            blockState={blockState}
             blockUnavailable={blocks.unavailable}
             dockerIngress={data.driver === "docker-caddy"}
           />
           <WindowNotes data={data} className="border-t border-hairline px-3 py-2" />
         </div>
-      ) : (
-        <>
-          {chart}
+      </>
+    )
+  }
+
+  // The request the inspector reads, and its neighbours in the list it was
+  // picked from. A request that the next read no longer lists — a newer
+  // window, a narrowing — stays open as it was, without neighbours.
+  const shown = inspect && selected ? selected : null
+  const at = shown
+    ? rows.findIndex((entry) => requestIdentity(entry) === requestIdentity(shown))
+    : -1
+  const newer = at > 0 ? rows[at - 1] : undefined
+  const older = at >= 0 && at < rows.length - 1 ? rows[at + 1] : undefined
+  const inspector = shown && (
+    <InspectorKeys
+      onClose={() => setSelected(null)}
+      onNewer={newer ? () => setSelected(newer) : undefined}
+      onOlder={older ? () => setSelected(older) : undefined}
+    >
+      <RequestInspector
+        entry={shown}
+        summary={data.summary}
+        latencyKnown={data.latency}
+        phone={narrow}
+        onClose={() => setSelected(null)}
+        onNewer={newer ? () => setSelected(newer) : undefined}
+        onOlder={older ? () => setSelected(older) : undefined}
+        onFilterPath={filterPath}
+        onFilterClient={filterClient}
+        onBlock={onBlock}
+        blockState={blockState}
+        blockUnavailable={blocks.unavailable}
+        onEventsAround={onEventsAround}
+        onOutput={outputFor?.(shown)}
+        trace={traceLink?.(shown.traceId)}
+        inline={inline?.(shown)}
+      />
+    </InspectorKeys>
+  )
+
+  return (
+    <>
+      {bar}
+      {headline}
+      {chart}
+      <div className="flex min-h-0 flex-1">
+        <div className={cn("flex min-h-0 min-w-0 flex-1 flex-col", narrow && shown && "hidden")}>
           <RequestConsole
             entries={rows}
             summary={data.summary}
@@ -356,15 +433,24 @@ export function RequestsWorkspace({
             paused={live ? tail.paused : undefined}
             onPausedChange={live ? tail.setPaused : undefined}
             held={tail.held}
-            onFilterPath={(path) => onQueryChange({ ...query, path })}
-            onFilterClient={(client) => onQueryChange({ ...query, client })}
+            onFilterPath={filterPath}
+            onFilterClient={filterClient}
             onBlock={onBlock}
-            blockState={blocks.state}
+            blockState={blockState}
             blockUnavailable={blocks.unavailable}
             onEventsAround={onEventsAround}
             outputFor={outputFor}
             traceLink={traceLink}
-            renderInline={renderInline && ((entry) => renderInline(entry, data))}
+            renderInline={inline}
+            selected={inspect ? shown : undefined}
+            onSelect={
+              inspect
+                ? (entry) =>
+                    setSelected((current) =>
+                      current && requestIdentity(current) === requestIdentity(entry) ? null : entry,
+                    )
+                : undefined
+            }
             leading={
               <ClassChips
                 selected={query.classes}
@@ -372,7 +458,7 @@ export function RequestsWorkspace({
                 onChange={(classes) => onQueryChange({ ...query, classes })}
               />
             }
-            // The window's total is the chart's head and the chips' sum, so
+            // The window's total is the headline's and the chips' sum, so
             // the footer starts at what neither says: the stream's state, or
             // how many of the window were page views.
             status={
@@ -396,11 +482,72 @@ export function RequestsWorkspace({
               />
             }
           />
-        </>
-      )}
+        </div>
+        {inspector && (
+          <div
+            className={cn(
+              "flex min-h-0 flex-col",
+              narrow ? "min-w-0 flex-1" : "w-[min(26rem,42%)] shrink-0 border-l border-hairline",
+            )}
+          >
+            {inspector}
+          </div>
+        )}
+      </div>
     </>
   )
 }
+
+/**
+ * The inspector's keys while it is open: ↑ and ↓ walk the list, Escape
+ * closes it. Not while a field has the caret, where the arrows are the
+ * field's and Escape clears it.
+ */
+function InspectorKeys({
+  onClose,
+  onNewer,
+  onOlder,
+  children,
+}: {
+  onClose: () => void
+  onNewer?: () => void
+  onOlder?: () => void
+  children: React.ReactNode
+}) {
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.altKey || event.ctrlKey || event.metaKey) return
+      const target = event.target as HTMLElement | null
+      if (target?.closest("input, textarea, select, [contenteditable], [role=menu], [role=dialog]"))
+        return
+      if (event.key === "Escape") onClose()
+      else if (event.key === "ArrowUp" && onNewer) onNewer()
+      else if (event.key === "ArrowDown" && onOlder) onOlder()
+      else return
+      event.preventDefault()
+    }
+    window.addEventListener("keydown", onKey)
+    return () => window.removeEventListener("keydown", onKey)
+  }, [onClose, onNewer, onOlder])
+  return <>{children}</>
+}
+
+/**
+ * How often a window is read again. A short window is about now and moves
+ * by the second; a week moves by the hour, and is a read of the kept history
+ * rather than of what the proxy just wrote, so it is asked a minute apart.
+ */
+function pollEvery(range: RequestRange) {
+  if (range === "custom") return 30_000
+  if (range === "24h" || range === "7d" || range === "30d") return 60_000
+  return 10_000
+}
+
+const WHO_OPTIONS: { value: "all" | Exclude<RequestWho, "">; label: string }[] = [
+  { value: "all", label: "Everyone" },
+  { value: "people", label: "People" },
+  { value: "bots", label: "Bots" },
+]
 
 /** The line the tightest enabled latency alert watches, if any rule does. */
 function alertLine(alerts: TrafficAlert[] | undefined) {
@@ -723,7 +870,7 @@ function RequestFilterBar({
         <InputGroupInput
           value={query.path}
           onChange={(event) => onQueryChange({ ...query, path: event.target.value })}
-          placeholder="Filter by path — /api, /assets"
+          placeholder="Filter by path"
           aria-label="Filter requests by path"
           className="font-mono placeholder:font-sans sm:text-body"
         />
@@ -740,17 +887,38 @@ function RequestFilterBar({
         </InputGroupAddon>
       </InputGroup>
 
-      {/* One line from `sm` up, scrolling sideways under its own edge: three
-          narrowings wrapped the strip into a ragged block in the middle of
-          the bar, with the field and the window centred against it. Beside
-          the field it takes two shares to the field's one — the field is
-          usable at its floor, and the chips are what the reader is reading. */}
-      {chips.length + methodChips.length > 0 && (
-        <ChipStrip className="scroll-affordance flex-2 max-sm:-mx-2 max-sm:basis-full max-sm:px-2 sm:flex-nowrap sm:overflow-x-auto">
-          {chips}
-          {methodChips}
-        </ChipStrip>
-      )}
+      {/* Who sent them and the narrowings in force. At a desk both stand in
+          the bar's one row; on a phone they share one row of their own, the
+          chips scrolling sideways beside the segments, where they were two
+          rows and the rows of requests started half a screen down. */}
+      <div className="flex min-w-0 items-center gap-2 max-sm:basis-full sm:contents">
+        {/* Who sent them, as the server tells: a person's browser, or a
+            program — a crawler, a monitor, a script, a scanner. The record is
+            every request the proxy answered; this is the one press between it
+            and the people. */}
+        <Segments
+          label="Who sent them"
+          value={query.who || "all"}
+          options={WHO_OPTIONS}
+          onChange={(who) => onQueryChange({ ...query, who: who === "all" ? "" : who })}
+          className="shrink-0"
+        />
+
+        {/* One line from `sm` up, scrolling sideways under its own edge: three
+            narrowings wrapped the strip into a ragged block in the middle of
+            the bar, with the field and the window centred against it. Beside
+            the field it takes two shares to the field's one — the field is
+            usable at its floor, and the chips are what the reader is reading. */}
+        {chips.length + methodChips.length > 0 && (
+          <ChipStrip
+            bleed={false}
+            className="scroll-affordance flex-2 max-sm:flex-1 sm:flex-nowrap sm:overflow-x-auto"
+          >
+            {chips}
+            {methodChips}
+          </ChipStrip>
+        )}
+      </div>
 
       <div className="ml-auto flex items-center gap-1.5 max-sm:basis-full">
         <TimeWindow

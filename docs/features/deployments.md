@@ -99,7 +99,8 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 - Chats are saved: open one again later, from another browser or after a restart, and take over one still running in another tab
 - Hand a new deployment's settings to it: pick a repository, and it configures the rest while you press Deploy
 - Each release's image and the base images it was built on scanned for known vulnerabilities after the build and daily, offline; the overview says only what you can fix (an upgrade, or a rebuild on a newer base, in one click), and the report sorts the rest into your app's packages, development tools shipped with it and the base image
-- Request insights that count real visitors apart from bots, with their devices and pages
+- Request insights that count real visitors apart from bots, with their devices and pages, and every request read as people or bots in one press
+- Request history kept for 30 days whether or not anybody has the page open, so "last 7 days" is seven days
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
 - Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint, and every request as an OpenTelemetry span under the `traceparent` the ingress sends your app

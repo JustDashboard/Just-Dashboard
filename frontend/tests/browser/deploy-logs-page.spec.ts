@@ -3,15 +3,17 @@ import { risen } from "./risen"
 import { deploymentRequests, json, mockProject, user } from "./deploy-fixture"
 
 /**
- * A project's Logs after its pass to the deploy standard: no tile row opens
- * it, the hour is read in the Overview's lines, the page holds its place while
- * it loads, and on a phone it is one pane with its views on a bar.
+ * A project's Logs as a workbench (27 Nov 2026): no project header over it,
+ * one strip with the way back and the views, the window's figures as one
+ * sentence about the window on screen rather than tiles about the last hour,
+ * a request read in an inspector beside the rows, and on a phone one pane
+ * with its views on a bar.
  */
 
-// The readings count up on a spring; reduced motion draws the figure itself.
 test.use({ timezoneId: "UTC", contextOptions: { reducedMotion: "reduce" } })
 
 const PHONE = { width: 390, height: 844 }
+const DESK = { width: 1440, height: 900 }
 
 async function top(page: Page, selector: string) {
   await risen(page)
@@ -46,58 +48,189 @@ async function held(page: Page) {
   return () => release()
 }
 
-test("no tile opens the page, and the pane is in one place waiting and read", async ({ page }) => {
-  await mockProject(page)
-  const release = await held(page)
-  await page.goto("/deploy/7/logs")
-
-  const hour = page.getByRole("group", { name: "The last hour" })
-  const lines = hour.locator('[data-slot="reading-line"]')
-  await expect(lines).toHaveCount(4)
-  await expect(lines.first()).toContainText("No reading yet")
-  await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
-  const waiting = {
-    lines: await top(page, '[data-slot="reading-lines"]'),
-    pane: await top(page, '[data-slot="pane"]'),
-  }
-
-  release()
-  await expect(lines.first()).toContainText("21.4 requests a minute")
-  await expect(page.getByText("1 firing")).toBeVisible()
-  expect({
-    lines: await top(page, '[data-slot="reading-lines"]'),
-    pane: await top(page, '[data-slot="pane"]'),
-  }).toEqual(waiting)
-  await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
-  // A desk has no bar: the views are the strip at the pane's head, and the
-  // foot is free for a dock.
-  await expect(page.locator('[data-slot="pane-bar"]')).toBeHidden()
-  expect(await occupied(page)).toBe(0)
-  await expect(page.locator('[data-slot="hour-line"]')).toHaveCount(0)
-})
-
-test("a line with a reading and a line without one are the same height", async ({ page }) => {
-  await mockProject(page)
-  // A record with no timing: Response time has nothing to say, the rest do.
-  await page.route("**/api/v1/deploy/7/requests?*", (route) => {
-    const window = deploymentRequests(new URL(route.request().url()))
-    return json(route, {
-      ...window,
-      latency: false,
-      summary: { ...window.summary, latency: undefined },
-    })
+/**
+ * Every question the window asks of the request record, as the server
+ * receives it — not the page's own read of the last hour, which asks for one
+ * row to learn which proxy answers.
+ */
+async function asked(page: Page) {
+  const urls: URL[] = []
+  await page.route("**/api/v1/deploy/7/requests?*", async (route) => {
+    const url = new URL(route.request().url())
+    if (url.searchParams.get("limit") !== "1") urls.push(url)
+    await route.fallback()
   })
-  await page.goto("/deploy/7/logs")
-  const lines = page.locator('[data-slot="reading-line"]')
-  await expect(lines.filter({ hasText: "Response time" })).toContainText("No reading yet")
-  await expect(lines.filter({ hasText: "Response time" })).toContainText(
-    "This ingress records no timing",
-  )
-  await risen(page)
-  const heights = await lines.evaluateAll((all) =>
-    all.map((line) => Math.round(line.getBoundingClientRect().height)),
-  )
-  expect(new Set(heights).size).toBe(1)
+  return urls
+}
+
+const headline = (page: Page) => page.locator("[data-slot=window-headline]")
+
+test.describe("at a desk", () => {
+  test.use({ viewport: DESK })
+
+  test("the page is the logs: no project header, one strip, and the sheet's edges", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+
+    const strip = page.locator("[data-workbench-header]")
+    await expect(strip).toBeVisible()
+    await expect(page.locator('[data-slot="project-header"]')).toHaveCount(0)
+    // The way back is to the project, which says everything the header did.
+    await expect(strip.getByRole("link", { name: /^Back to / })).toHaveAttribute(
+      "href",
+      "/deploy/7",
+    )
+    // Four views, as tabs; the builds are the run pages', on Deployments.
+    const views = strip.getByRole("tablist", { name: "Log view" })
+    await expect(views.getByRole("tab")).toHaveText([/Requests/, /Insights/, /Output/, /Events/])
+    await expect(views.getByRole("tab", { name: "Requests" })).toHaveAttribute(
+      "aria-selected",
+      "true",
+    )
+    // No tile, no reading line, no box inside the sheet.
+    await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(0)
+    await expect(page.locator('[data-slot="reading-line"]')).toHaveCount(0)
+    await expect(page.locator('[data-slot="pane-bar"]')).toBeHidden()
+    expect(await occupied(page)).toBe(0)
+
+    // Held to the window: the page does not scroll, the rows do.
+    await expect(headline(page)).toContainText("1,284")
+    await risen(page)
+    expect(
+      await page.evaluate(() => {
+        const frame = document.querySelector('[data-slot="page"]')!
+        return frame.scrollHeight <= frame.clientHeight + 1
+      }),
+    ).toBe(true)
+  })
+
+  test("the window is one sentence, about the window chosen", async ({ page }) => {
+    await mockProject(page)
+    const urls = await asked(page)
+    await page.goto("/deploy/7/logs")
+
+    const words = headline(page)
+    await expect(words).toContainText("1,284 requests")
+    await expect(words).toContainText("402 page views")
+    await expect(words).toContainText("13 failed (1.0%)")
+    await expect(words).toContainText("19 in 20 inside 412ms")
+    await expect(words).toContainText("39.4 MB sent")
+    await expect(words).toContainText("Over the last hour")
+    // The alerts are its last words, with the way to the rules.
+    await expect(words.getByText("1 firing")).toBeVisible()
+    await expect(words.getByRole("link", { name: "Alerts" })).toHaveAttribute(
+      "href",
+      "/deploy/7/settings/automation#alerts",
+    )
+
+    // Seven days asks the server for seven days, and the sentence says so.
+    await page.getByRole("button", { name: /^Time window: / }).click()
+    await page
+      .getByRole("group", { name: "Presets" })
+      .getByRole("button", { name: "7 days" })
+      .click()
+    await expect(words).toContainText("Over the last 7 days")
+    await expect(page).toHaveURL(/range=7d/)
+    await expect
+      .poll(() => {
+        const week = urls.at(-1)
+        if (!week) return 0
+        return Math.round((Date.now() - Date.parse(week.searchParams.get("since")!)) / 3_600_000)
+      })
+      .toBe(7 * 24)
+  })
+
+  test("thirty days is offered, and a record younger than the window says where it starts", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    await page.route("**/api/v1/deploy/7/requests?*", (route) => {
+      const window = deploymentRequests(new URL(route.request().url()))
+      return json(route, {
+        ...window,
+        coverage: {
+          ...window.coverage,
+          history: {
+            from: new Date(Date.now() - 2 * 86_400_000).toISOString(),
+            days: 30,
+            recording: true,
+          },
+        },
+      })
+    })
+    await page.goto("/deploy/7/logs?range=30d")
+    await expect(headline(page)).toContainText("Over the last 30 days")
+    await expect(headline(page)).toContainText(/Recorded since \w+ \d+, \d\d:\d\d/)
+
+    await page.goto("/deploy/7/logs")
+    await expect(headline(page)).toContainText("Kept for 30 days")
+    await expect(headline(page)).not.toContainText("Recorded since")
+  })
+
+  test("everyone, people or bots is one press, asked of the server", async ({ page }) => {
+    await mockProject(page)
+    const urls = await asked(page)
+    await page.goto("/deploy/7/logs")
+    const who = page.getByRole("group", { name: "Who sent them" })
+    await expect(who.getByRole("radio", { name: "Everyone" })).toHaveAttribute(
+      "aria-checked",
+      "true",
+    )
+
+    await who.getByRole("radio", { name: "People" }).click()
+    await expect.poll(() => urls.at(-1)?.searchParams.get("who")).toBe("people")
+    await expect(page).toHaveURL(/who=people/)
+    await who.getByRole("radio", { name: "Bots" }).click()
+    await expect.poll(() => urls.at(-1)?.searchParams.get("who")).toBe("bots")
+    await who.getByRole("radio", { name: "Everyone" }).click()
+    await expect.poll(() => urls.at(-1)?.searchParams.has("who")).toBe(false)
+    await expect(page).not.toHaveURL(/who=/)
+  })
+
+  test("a request opens beside the rows, and no row moves", async ({ page }) => {
+    await mockProject(page)
+    await page.goto("/deploy/7/logs")
+    const row = (path: string) =>
+      page.getByRole("button", { pressed: false }).filter({ hasText: path }).first()
+    await expect(row("/api/items")).toBeVisible()
+    await risen(page)
+    const before = (await row("/api/items").boundingBox())!
+
+    await page.getByRole("button").filter({ hasText: "/api/checkout" }).first().click()
+    const inspector = page.locator("[data-slot=request-inspector]")
+    await expect(inspector).toBeVisible()
+    await expect(inspector).toContainText("500")
+    await expect(inspector).toContainText("Server error")
+    await expect(inspector).toContainText("2.84s")
+    await expect(inspector.getByText("Person", { exact: true })).toBeVisible()
+    await expect(
+      inspector.getByRole("button", { name: "Every request to this path" }),
+    ).toBeVisible()
+    // The next row is where it was, at the height it was.
+    const after = (await row("/api/items").boundingBox())!
+    expect(Math.round(after.y)).toBe(Math.round(before.y))
+    expect(Math.round(after.height)).toBe(Math.round(before.height))
+
+    // ↓ walks to the older request, Escape closes.
+    await page.keyboard.press("ArrowDown")
+    await expect(inspector).toContainText("/api/items")
+    await expect(inspector.getByText("Program", { exact: true })).toBeVisible()
+    await page.keyboard.press("Escape")
+    await expect(inspector).toHaveCount(0)
+  })
+
+  test("the page holds still while it reads", async ({ page }) => {
+    await mockProject(page)
+    const release = await held(page)
+    await page.goto("/deploy/7/logs")
+    await expect(headline(page)).toBeVisible()
+    const waiting = await top(page, "[data-slot=window-headline]")
+    release()
+    await expect(headline(page)).toContainText("1,284 requests")
+    expect(await top(page, "[data-slot=window-headline]")).toBe(waiting)
+  })
 })
 
 test.describe("on a phone", () => {
@@ -114,35 +247,24 @@ test.describe("on a phone", () => {
       .and(page.locator("[data-slot=pane-bar]"))
     await expect(bar).toBeVisible()
     await expect(bar.getByRole("button")).toHaveText(
-      ["Requests", "Insights", "Output", "Builds", "Events"].map((name) => new RegExp(name)),
+      ["Requests", "Insights", "Output", "Events"].map((name) => new RegExp(name)),
     )
     await expect(bar.getByRole("button", { name: "Requests" })).toHaveAttribute(
       "aria-current",
       "page",
     )
-    // The strip a desk picks the view on is not drawn twice: the one Insights
-    // button shown is the bar's own stop.
-    await expect(
-      page.getByRole("button", { name: "Insights", exact: true }).filter({ visible: true }),
-    ).toHaveCount(1)
-    await expect(bar.getByRole("button", { name: "Insights", exact: true })).toBeVisible()
-    await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
-    // The readings are behind the pane's first line, not stacked over it.
-    await expect(page.getByRole("group", { name: "The last hour" })).toHaveCount(0)
+    // The strip's tabs are not drawn twice: the bar is the views on a phone.
+    await expect(page.getByRole("tablist", { name: "Log view" })).toHaveCount(0)
+    await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(0)
 
-    // One pane: it ends where the window does, out to the screen's edges, and
-    // nothing scrolls but what is inside it.
     await risen(page)
-    const pane = (await page.locator('[data-slot="pane"]').boundingBox())!
-    expect(Math.round(pane.x)).toBe(0)
-    expect(Math.round(pane.width)).toBe(PHONE.width)
-    expect(Math.round(pane.y + pane.height)).toBe(PHONE.height)
+    const frame = (await page.locator('[data-slot="logs-workbench"]').boundingBox())!
+    expect(Math.round(frame.x)).toBe(0)
+    expect(Math.round(frame.width)).toBe(PHONE.width)
+    expect(Math.round(frame.y + frame.height)).toBe(PHONE.height)
     const barBox = (await bar.boundingBox())!
     expect(Math.round(barBox.y + barBox.height)).toBe(PHONE.height)
-    // The bar is in the bottom stack, so a dock opened over the page sits
-    // above its stops rather than on them.
     await expect.poll(() => occupied(page)).toBe(Math.round(barBox.height))
-    expect(pane.height).toBeGreaterThan(420)
     expect(
       await page.evaluate(() => {
         const frame = document.querySelector('[data-slot="page"]')!
@@ -153,104 +275,37 @@ test.describe("on a phone", () => {
       }),
     ).toBe(true)
 
-    // Every view is a stop, and the address says which.
     await bar.getByRole("button", { name: "Insights" }).click()
     await expect(page.getByText("Pages", { exact: true })).toBeVisible()
     await expect(page).toHaveURL(/view=insights/)
     await bar.getByRole("button", { name: "Output" }).click()
     await expect(page).toHaveURL(/view=output/)
-    await bar.getByRole("button", { name: "Builds" }).click()
-    await expect(page).toHaveURL(/view=builds/)
     await bar.getByRole("button", { name: "Events" }).click()
     await expect(page.getByLabel("Filter container events")).toBeVisible()
     await expect(page).toHaveURL(/view=events/)
-    // The exit the hour saw is counted on the stop, beside its word.
     await expect(bar.getByRole("button", { name: "Events" })).toHaveAttribute(
       "aria-description",
       "1",
     )
-    expect(Math.round((await bar.boundingBox())!.y + barBox.height)).toBe(PHONE.height)
   })
 
-  test("the hour is the pane's first line, and opens as a page with a way back", async ({
-    page,
-  }) => {
+  test("a request is the pane, with the way back to the rows", async ({ page }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
-
-    const line = page.getByRole("button", { name: "The last hour's readings and alerts" })
-    await expect(line).toContainText("1 firing")
-    await expect(line).toContainText("21.4 a minute")
-    await expect(line).toContainText("1.0% of requests failed")
-    // What the reader typed stays behind the page it opens.
-    await page.getByLabel("Filter requests by path").fill("/api")
-
-    await line.click()
-    const hour = page.getByRole("region", { name: "The last hour" })
-    await expect(hour.locator('[data-slot="reading-line"]')).toHaveCount(4)
-    await expect(hour).toContainText("21.4 requests a minute")
-    await expect(hour).toContainText("19 in 20 inside 412ms")
-    await expect(hour).toContainText("39.4 MB sent")
-    // The alerts are on it too: who is told, and the way to the rules.
-    await expect(hour.getByText("1 firing")).toBeVisible()
-    await expect(hour.getByRole("link", { name: "Alerts" })).toHaveAttribute(
-      "href",
-      "/deploy/7/settings/automation#alerts",
-    )
-    // A page a row opened has the bar out of its way, and out of the stack.
-    await expect(page.locator('[data-slot="pane-bar"]')).toHaveCount(0)
-    await expect.poll(() => occupied(page)).toBe(0)
+    await page.getByRole("button").filter({ hasText: "/api/checkout" }).first().click()
+    const inspector = page.locator("[data-slot=request-inspector]")
+    await expect(inspector).toBeVisible()
+    await expect(page.getByRole("button").filter({ hasText: "/api/items" })).toHaveCount(0)
     expect(
       await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
     ).toBe(true)
-
-    await hour.getByRole("button", { name: "Back to the logs" }).click()
-    await expect(hour).toHaveCount(0)
-    await expect(page.locator('[data-slot="pane-bar"]')).toBeVisible()
-    await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api")
-  })
-
-  test("the pane is in one place waiting and read", async ({ page }) => {
-    await mockProject(page)
-    const release = await held(page)
-    await page.goto("/deploy/7/logs")
-    const line = page.locator('[data-slot="hour-line"]')
-    await expect(line).toContainText("Reading the request record…")
-    const waiting = [
-      await top(page, '[data-slot="pane"]'),
-      await top(page, '[data-slot="pane-bar"]'),
-    ]
-    release()
-    await expect(line).toContainText("21.4 a minute")
-    expect([
-      await top(page, '[data-slot="pane"]'),
-      await top(page, '[data-slot="pane-bar"]'),
-    ]).toEqual(waiting)
-  })
-
-  test("the first rule is added from the hour's page", async ({ page }) => {
-    await mockProject(page)
-    await page.goto("/deploy/7/logs")
-    await expect(page.locator('[data-slot="hour-line"]')).toContainText("1 firing")
-    await page.evaluate(() => fetch("/api/v1/deploy/7/alerts/91", { method: "DELETE" }))
-    await page.reload()
-
-    const line = page.locator('[data-slot="hour-line"]')
-    await expect(line).toContainText("21.4 a minute")
-    await expect(line).not.toContainText("firing")
-    await line.click()
-    const hour = page.getByRole("region", { name: "The last hour" })
-    await expect(hour.getByText("No alerts", { exact: true })).toBeVisible()
-    await hour.getByRole("button", { name: "Add alert" }).click()
-    const sheet = page.getByRole("dialog", { name: "Add alert" })
-    await sheet.getByLabel("Alert limit").fill("2")
-    await sheet.getByRole("button", { name: "Add alert" }).click()
-    await expect(sheet).toHaveCount(0)
-    await expect(hour.getByText("All quiet", { exact: true })).toBeVisible()
+    await inspector.getByRole("button", { name: "Back to the requests" }).click()
+    await expect(inspector).toHaveCount(0)
+    await expect(page.getByRole("button").filter({ hasText: "/api/items" }).first()).toBeVisible()
   })
 })
 
-for (const viewport of [{ width: 1280, height: 900 }, PHONE]) {
+for (const viewport of [DESK, PHONE]) {
   test(`a read-only account is offered no rule to add, at ${viewport.width}`, async ({ page }) => {
     await page.setViewportSize(viewport)
     await mockProject(page)
@@ -258,47 +313,51 @@ for (const viewport of [{ width: 1280, height: 900 }, PHONE]) {
       json(route, { ...user, capabilities: ["read"], user: { ...user.user, role: "viewer" } }),
     )
     await page.route("**/api/v1/deploy/7/alerts", (route) => json(route, { alerts: [] }))
-    await page.goto("/deploy/7/logs")
-    if (viewport.width < 768) await page.locator('[data-slot="hour-line"]').click()
+    await page.goto(viewport.width < 768 ? "/deploy/7/logs?view=insights" : "/deploy/7/logs")
 
-    await expect(page.getByText("No alerts", { exact: true })).toBeVisible()
-    await expect(
-      page.getByText("Nobody is told when this deployment fails or slows."),
-    ).toBeVisible()
+    await expect(headline(page).getByText("No alerts", { exact: true })).toBeVisible()
     await expect(page.getByRole("button", { name: "Add alert" })).toHaveCount(0)
     // The rules are still a link away, to be read.
-    await expect(page.getByRole("link", { name: "Alerts" })).toBeVisible()
+    await expect(headline(page).getByRole("link", { name: "Alerts" })).toBeVisible()
     await expect(page.getByRole("button", { name: "Block" })).toHaveCount(0)
   })
 }
+
+test("the first rule is added from the window's line", async ({ page }) => {
+  await page.setViewportSize(DESK)
+  await mockProject(page)
+  await page.route("**/api/v1/deploy/7/alerts", async (route) =>
+    route.request().method() === "GET" ? json(route, { alerts: [] }) : route.fallback(),
+  )
+  await page.goto("/deploy/7/logs")
+  await headline(page).getByRole("button", { name: "Add alert" }).click()
+  const sheet = page.getByRole("dialog", { name: "Add alert" })
+  await expect(sheet).toBeVisible()
+  await expect(sheet.getByLabel("Alert limit")).toBeVisible()
+})
 
 test("Insights says how long things took in one sentence, and each figure still narrows", async ({
   page,
 }) => {
   await mockProject(page)
-  const asked: URL[] = []
-  await page.route("**/api/v1/deploy/7/requests*", async (route) => {
-    asked.push(new URL(route.request().url()))
-    await route.fallback()
-  })
+  const urls = await asked(page)
   await page.goto("/deploy/7/logs?view=insights")
 
   const times = page.locator('[data-slot="latency-readings"]')
   await expect(times).toHaveText(
     "Half inside 24ms, 19 in 20 inside 412ms, 99 in 100 inside 2.84s; the slowest took 3.12s.",
   )
-  // A sentence, not four tiles in a frame.
-  await expect(times.locator('[data-slot="stat-tile"]')).toHaveCount(0)
-  await expect(page.locator('[data-slot="stat-grid"]').filter({ hasText: "Half" })).toHaveCount(0)
+  // No tile anywhere on Insights: the window's figures are the sentence over the chart.
+  await expect(page.locator('[data-slot="stat-tile"]')).toHaveCount(0)
+  await expect(headline(page)).toContainText("1,284 requests")
   for (const name of ["Half: 24ms", "19 in 20: 412ms", "99 in 100: 2.84s", "Slowest: 3.12s"]) {
     await expect(times.getByRole("button", { name: new RegExp(`^${name}`) })).toBeVisible()
   }
-  // Past a second is amber, as the tile was.
   await expect(times.getByRole("button", { name: /^99 in 100/ })).toHaveClass(/text-warning/)
   await expect(times.getByRole("button", { name: /^Half/ })).not.toHaveClass(/text-warning/)
 
   await times.getByRole("button", { name: /^99 in 100/ }).click()
-  await expect.poll(() => asked.some((url) => url.searchParams.get("minMs") === "2840")).toBe(true)
+  await expect.poll(() => urls.some((url) => url.searchParams.get("minMs") === "2840")).toBe(true)
   await expect(page.getByRole("button", { name: "Clear the slow filter" })).toBeVisible()
 })
 
@@ -313,12 +372,10 @@ test("what was served is a line under Pages, and the heaviest pages keep their l
   })
   await expect(pages).toContainText("39.4 MB sent")
   await expect(pages).toContainText("each on average")
-  // The block of two figures under two captions is gone.
   await expect(page.getByRole("heading", { name: "Served", exact: true })).toHaveCount(0)
-  await expect(page.getByText("Each, on average")).toHaveCount(0)
 })
 
-for (const viewport of [{ width: 1280, height: 900 }, PHONE]) {
+for (const viewport of [DESK, PHONE]) {
   test(`a record that cannot be read is said as that, not as still reading, at ${viewport.width}`, async ({
     page,
   }) => {
@@ -334,13 +391,14 @@ for (const viewport of [{ width: 1280, height: 900 }, PHONE]) {
       }),
     )
     await page.goto("/deploy/7/logs")
-    const said =
-      viewport.width < 768
-        ? page.locator('[data-slot="hour-line"]')
-        : page.locator('[data-slot="reading-line"]').first()
-    await expect(said).toContainText("The request record could not be read")
-    await expect(page.getByText("Reading the request record…")).toHaveCount(0)
-    // The rules were read: who is told is still said.
-    if (viewport.width >= 768) await expect(page.getByText("1 firing")).toBeVisible()
+    await expect(page.getByText("Could not read the request record")).toBeVisible()
+    await expect(page.locator("[data-slot=skeleton]").filter({ visible: true })).toHaveCount(0)
   })
 }
+
+test("an old link to Builds opens the page's own view", async ({ page }) => {
+  await mockProject(page)
+  await page.goto("/deploy/7/logs?view=builds")
+  await expect(page.getByRole("tab", { name: "Requests" })).toHaveAttribute("aria-selected", "true")
+  await expect(page.getByRole("tab", { name: "Builds" })).toHaveCount(0)
+})

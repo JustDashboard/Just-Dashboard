@@ -126,7 +126,7 @@ to the window below the break so the pane has a height to be the whole of. These
 | `/network/tools` | `md` | Tool, Every tool | the tool, the one a link asked for |
 | `/files` | `lg` | Places, Folder, Details | the folder |
 | `/files/editor` | `lg` | Files, Editor | the editor |
-| `/deploy/[id]/logs` | `md` | Requests, Insights, Output, Builds, Events | the view the address or the project asks for |
+| `/deploy/[id]/logs` | `md` | Requests, Insights, Output, Events | the view the address or the project asks for |
 | `/terminal` | `lg` | Sessions, Terminal, Files, Git | the emulator |
 | A Remote Desktop session | `lg` | Screen, Tools, Computers | the screen |
 | The databases map | `lg` | Databases, Map, Inspector | the canvas |

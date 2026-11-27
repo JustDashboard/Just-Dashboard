@@ -6,7 +6,8 @@ database's Data, `/databases/[id]/data`, and `/terminal`.
 **Reference:** `components/database/workbench/chrome.tsx` (`WorkbenchFrame`, the head every
 database workbench shares) and `app/(dashboard)/terminal/page.tsx`. The shot is
 [`docs/readme/terminal.png`](../../../readme/terminal.png). Its siblings are a database's Query,
-Schema and Diagram, Files and its editor, a Git repository, Logs, a board, the two maps, a Remote
+Schema and Diagram, Files and its editor, a Git repository, Logs, a deployment's Logs
+(`components/deploy/project-logs.tsx`, its strip `logs-strip.tsx`), a board, the two maps, a Remote
 Desktop session and the assistant.
 
 **Components:** `Page fill="workspace"` (`components/page.tsx`); `WorkbenchHeader`; `Pane`,

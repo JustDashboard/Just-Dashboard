@@ -3969,6 +3969,10 @@ export type RequestEntry = {
   parentSpanId?: string
   /** The Tailscale login (or a tagged machine's tags) a tailnet gate admitted. */
   user?: string
+  /** The release that answered, on a route that records which (a canary's split). */
+  release?: string
+  /** The edge rule that decided this request instead of the application. */
+  edgeRule?: string
 }
 
 export type RequestFacet = {
@@ -4094,6 +4098,22 @@ export type RequestCoverage = {
   refreshedAt: string
   /** The last read failed; these figures are from the previous successful one. */
   stale?: boolean
+  /** What the dashboard has kept of this route's record, past what the proxy still holds. */
+  history?: RequestHistory
+}
+
+/**
+ * The request history the dashboard keeps for a route: recorded as the
+ * proxy writes it, whether or not anybody has the page open, and kept for
+ * `days` — so a window reaching before `from` is answered as far as that,
+ * and said to be.
+ */
+export type RequestHistory = {
+  /** The first request kept; absent while nothing has been recorded. */
+  from?: string
+  days: number
+  /** Whether the recorder follows this route now. */
+  recording: boolean
 }
 
 export type DeploymentRequests = {
@@ -4118,6 +4138,8 @@ export type DeploymentRequests = {
   slowest?: RequestEntry[]
   summary: RequestSummary
   coverage: RequestCoverage
+  /** The kept history, where the server reports it beside the coverage rather than in it. */
+  history?: RequestHistory
 }
 
 /** A project's last hour on a card: alive, failing, and a line to draw. */
