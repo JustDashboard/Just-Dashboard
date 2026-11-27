@@ -66,6 +66,14 @@ configuration steps against the live release's containers and records each step'
   (below). Blank means the dashboard generates it.
 - An added template may not claim `stack` (`validateUserRules`): the adapters trust the services to
   be the images they were written and tested against.
+- **Access is `managed`** (`blueprint.AccessManaged`): the pass finishes every application's
+  first-run setup before anyone reaches it, and the login is the stack's own credential (below), not
+  a variable, so the block names none. `validateAccess` requires it on every stack preset and refuses
+  it anywhere else. The presets first said `setup`, which told the person the first visitor claims
+  the account, and the Overview's First sign-in block stood under "Do this now: nobody owns this
+  yet" for a stack someone had long since signed in to. For `managed` that block has no warning and
+  links **See the login** to the Stack page; the Stacks tab says "The dashboard sets it up and keeps
+  the login".
 
 ## Addresses
 

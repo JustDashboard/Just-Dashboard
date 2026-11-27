@@ -9,7 +9,7 @@
   "iconId": "globe",
   "docsUrl": "https://jellyfin.org/docs/",
   "access": {
-    "kind": "setup",
+    "kind": "managed",
     "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and signs every one in with one login: admin and a password it keeps. Reveal it, or change it, on the stack's page."
   },
   "provenance": {

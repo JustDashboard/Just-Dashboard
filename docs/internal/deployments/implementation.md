@@ -2412,11 +2412,13 @@ only renderer/executor/validation authority for their feature.
   account), `credentials` (a name from an input plus a password from a generated secret, both
   injected as environment before the container starts), `token` (one generated secret is the whole
   credential), `client` (nothing signs in through a browser; a program connects with the named
-  secret), `open` (no authentication of its own) or `unavailable` — plus the sentence the operator
-  reads. `validateAccess` refuses a `credentials` or `token` kind that does not name a declared
-  generated secret, refuses a credential named on a `setup` or `open` kind, refuses a `client` kind
-  with nothing to hand over, and allows `unavailable` only on a definition that also carries
-  `retired`. That last pair is the whole point: an image whose first password exists only in its own
+  secret), `open` (no authentication of its own), `managed` (a [smart stack](smart-stacks.md)'s
+  configuration pass sets every application up before anyone reaches it and keeps the login) or
+  `unavailable` — plus the sentence the operator reads. `validateAccess` refuses a `credentials` or
+  `token` kind that does not name a declared generated secret, refuses a credential named on a
+  `setup`, `open` or `managed` kind, refuses a `client` kind with nothing to hand over, requires
+  `managed` on a stack's preset and refuses it anywhere else, and allows `unavailable` only on a
+  definition that also carries `retired`. That last pair is the whole point: an image whose first password exists only in its own
   container log cannot be offered. The block is catalogue metadata, not plan input — `Render` never
   reads it, so it carries no digest — and it reaches the picker on `Summary.access` (a word on every
   card, the full sentence beside the chosen one) and the project overview's First sign-in card, which

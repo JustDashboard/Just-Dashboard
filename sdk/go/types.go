@@ -24,6 +24,7 @@ const (
 	AccessKindToken       AccessKind = "token"
 	AccessKindClient      AccessKind = "client"
 	AccessKindOpen        AccessKind = "open"
+	AccessKindManaged     AccessKind = "managed"
 	AccessKindUnavailable AccessKind = "unavailable"
 )
 

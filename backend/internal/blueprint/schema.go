@@ -106,6 +106,14 @@ const (
 	AccessClient AccessKind = "client"
 	// AccessOpen: no authentication of its own.
 	AccessOpen AccessKind = "open"
+	// AccessManaged: the dashboard finishes the first-run setup itself, before
+	// anyone else can reach the address, and keeps the login. Only a stack's
+	// preset can say so, because only a stack's configuration pass does it,
+	// and every preset says so: "setup" there told the person that the first
+	// visitor claims an account the dashboard had already made. The login is
+	// the stack's own credential, revealed and changed on the stack's page,
+	// not a variable, so the block names none.
+	AccessManaged AccessKind = "managed"
 	// AccessUnavailable: the first credential is not something this dashboard
 	// can hand over — the image prints it into its own log, or ships the same
 	// one to everybody. It is the defect this field was added to find, so it is

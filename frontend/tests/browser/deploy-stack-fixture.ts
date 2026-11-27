@@ -162,8 +162,8 @@ export const stackCatalogue: SmartStackCatalogueEntry[] = [
 ]
 
 const ACCESS = {
-  kind: "setup",
-  note: "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and signs every app in with one login. Read it on the stack's page.",
+  kind: "managed",
+  note: "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and signs every one in with one login: admin and a password it keeps. Reveal it, or change it, on the stack's page.",
 } as const
 
 function summary(id: string, name: string, names: readonly string[]): BlueprintSummary {
