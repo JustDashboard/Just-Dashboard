@@ -107,7 +107,7 @@ export function AddressesStarted({
       <p>
         {started.domains.length > 0
           ? `${started.domains.join(", ")} ${started.domains.length === 1 ? "is" : "are"} added to the domains.`
-          : "A deployment started to publish the saved addresses."}{" "}
+          : "A deployment is publishing the saved addresses."}{" "}
         <Link href={`/deploy/${projectId}/runs/${started.runId}`} className={INLINE_LINK}>
           Watch the run
         </Link>

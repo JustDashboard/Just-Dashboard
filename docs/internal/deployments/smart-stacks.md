@@ -283,13 +283,18 @@ The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
 - **The Stack page** (`/deploy/[id]/stack`) is a launcher. It opens with the lead and the five facts,
   then the one next step when something is left, then the apps and the login.
   - Next steps come in this order: a blocking action, then "Give every app its address" when
-    `addresses.missing` is not empty, then the optional actions, then each failed step with its
-    error. The first one's command wears the brand.
+    `addresses.missing` or `addresses.unpublished` is not empty, then the optional actions, then
+    each failed step with its error. The first one's command wears the brand.
   - The `media-source` action links to the source picker.
   - "Give every app its address" names the apps and their hostnames, confirms in a dialog and posts
     `POST …/stack/addresses`. Without a primary domain the dialog asks for one, prefilled with the
     hostname suggestion, and makes the names from the catalogue's labels. It then links to the run
     it started.
+  - When every address is saved but the live release does not serve some of them
+    (`addresses.unpublished`: the release that was to publish them failed), the same place says so
+    and offers **Deploy again**, which posts the same route; with nothing missing, the server
+    deploys the saved configuration again. While a run of the deployment is under way it links
+    that run instead, since the run publishes them when it goes live.
   - Each app is one row: what it is for, its address (`services[].url`), its state and **Open** in
     a new tab. A worker says it runs in the background. An app with no address says so, with its
     loopback address only as the line's tooltip; there is no tunnel or SSH anywhere.

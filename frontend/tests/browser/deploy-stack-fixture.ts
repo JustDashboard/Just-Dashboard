@@ -810,6 +810,8 @@ export async function mockStackProject(
     login?: "accepted" | "password_weak"
     /** What `POST …/stack/addresses` answers. Default: 202 with run 91, and every app has its address. */
     addresses?: "accepted" | "stack_addresses_present" | "stack_no_domain"
+    /** A deployment run (84) is in flight whatever the stack's state; by default only while waiting. */
+    running?: boolean
   } = {},
 ) {
   const base = await mockProject(page, { showcase: options.showcase })
@@ -852,8 +854,9 @@ export async function mockStackProject(
               serviceCount: state?.services.length ?? 8,
               pendingChanges: false,
               liveReleaseId: state?.status === "waiting" ? undefined : 20,
-              // Only a stack still waiting for its release has a run in flight.
-              activeRun: state?.status === "waiting" ? run : undefined,
+              // Only a stack still waiting for its release has a run in flight,
+              // unless the spec puts one there.
+              activeRun: options.running || state?.status === "waiting" ? run : undefined,
               lastRun: { ...run, state: state?.status === "waiting" ? "starting" : "succeeded" },
               recentRuns: [],
             },

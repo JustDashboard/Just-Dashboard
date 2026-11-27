@@ -490,6 +490,86 @@ test("an address request refused for want of a domain is answered in the dialog"
   await expect(page.getByText("stack_no_domain")).toHaveCount(0)
 })
 
+/** A stack whose apps' addresses are saved but not served: the release that was to publish them failed. */
+function unpublishedState() {
+  const addressless = stackState("ready", { addressless: true })
+  return {
+    ...addressless,
+    addresses: {
+      primary: "media.example.test",
+      missing: [],
+      unpublished: addressless.addresses!.missing,
+    },
+  }
+}
+
+test("addresses saved but not live are offered Deploy again, which links its run", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, { state: unpublishedState() })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("Publish the apps' addresses")
+  await expect(step).toContainText(
+    "have their addresses saved, but the release that was to publish them did not finish. Deploying again publishes them.",
+  )
+  const again = step.getByRole("button", { name: "Deploy again" })
+  await expect(again).toHaveAttribute("data-variant", "default")
+  await again.click()
+  const dialog = page.getByRole("dialog", { name: "Publish the apps' addresses" })
+  const names = dialog.getByRole("list", { name: "The addresses the apps get" })
+  await expect(names.getByRole("listitem")).toHaveCount(6)
+  await expect(names).toContainText("media-requests.example.test")
+  await expect(dialog.getByRole("textbox")).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Deploy again" }).click()
+  await expect(dialog).toBeHidden()
+  expect(stack.addressRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is publishing the saved addresses.")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/91",
+  )
+  await expect(step.getByRole("button")).toHaveCount(0)
+})
+
+test("while a deployment is under way, saved addresses wait for it rather than offering another", async ({
+  page,
+}) => {
+  // Back on the page from "Watch the run": the run that publishes them is still going.
+  const stack = await mockStackProject(page, { state: unpublishedState(), running: true })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("A deployment is publishing the saved addresses.")
+  await expect(step).not.toContainText("did not finish")
+  await expect(step.getByRole("button", { name: "Deploy again" })).toHaveCount(0)
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/84",
+  )
+  expect(stack.addressRequests()).toEqual([])
+})
+
+test("an address request the server finds nothing missing for closes and reads the stack again", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, {
+    state: stackState("ready", { addressless: true }),
+    addresses: "stack_addresses_present",
+  })
+  await page.goto("/deploy/7/stack")
+  await page
+    .locator("[data-slot='stack-addresses']")
+    .getByRole("button", { name: "Give every app its address" })
+    .click()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  const before = stack.reads()
+  await dialog.getByRole("button", { name: "Add the addresses and deploy" }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.getByText("Every app already has its address.")).toBeVisible()
+  await expect.poll(() => stack.reads()).toBeGreaterThan(before)
+  await expect(page.getByText("stack_addresses_present")).toHaveCount(0)
+})
+
 test("a project that is not a stack has no Stack row and no stack page", async ({ page }) => {
   await mockProject(page)
   let asked = 0

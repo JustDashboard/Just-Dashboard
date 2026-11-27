@@ -31,6 +31,7 @@ import {
   failedSteps,
   isSourceAction,
   nextSteps,
+  onlyUnpublished,
   readinessLines,
   skippedLine,
   stackPollInterval,
@@ -116,6 +117,7 @@ export function StackPage() {
         projectId={project.projectId}
         projectName={project.detail.project.name}
         runHref={runHref(base, deployment.activeRun?.id)}
+        activeRunId={deployment.activeRun?.id}
         canChangeDomains={can("system.admin") && !project.archived}
         addressRun={addressRun}
         onAddressesStarted={(answer) => {
@@ -298,6 +300,7 @@ function NextSteps({
   projectId,
   projectName,
   runHref,
+  activeRunId,
   canChangeDomains,
   addressRun,
   onAddressesStarted,
@@ -307,6 +310,8 @@ function NextSteps({
   projectId: number
   projectName: string
   runHref: string
+  /** The deployment's run in flight, which publishes saved addresses when it goes live. */
+  activeRunId?: number
   canChangeDomains: boolean
   addressRun?: SmartStackAddressesStarted
   onAddressesStarted: (answer: SmartStackAddressesStarted) => void
@@ -333,6 +338,16 @@ function NextSteps({
       )}
       {addressRun && <AddressesStarted started={addressRun} projectId={projectId} />}
       {steps.map((step, index) => {
+        // Saved but not served yet, with a deployment under way: that run
+        // publishes them when it goes live, so it is the step, not another.
+        if (step.kind === "addresses" && activeRunId && onlyUnpublished(step.addresses))
+          return (
+            <AddressesStarted
+              key="addresses"
+              started={{ runId: activeRunId, domains: [] }}
+              projectId={projectId}
+            />
+          )
         if (step.kind === "addresses")
           return (
             <AddressesStep
