@@ -38,10 +38,10 @@ type Config struct {
 	IdleTTL        time.Duration
 	DockerHost     string
 	// Site and TLSMode describe how the proxy in front of this process is
-	// reached. This process never binds them — it is loopback-only in every
-	// configuration — but it is the half of the stack that can run `tailscale
-	// cert` on the host, and it is what the settings page reports the address
-	// from.
+	// reached. This process never binds them — the Compose stack keeps it on
+	// loopback (invariant 7) — but it is the half of the stack that can run
+	// `tailscale cert` on the host, and it is what the settings page reports
+	// the address from.
 	Site           string
 	TLSMode        string
 	TerminalEnable bool
