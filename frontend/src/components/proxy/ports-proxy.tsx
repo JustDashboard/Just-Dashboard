@@ -70,17 +70,6 @@ export function ProxyWords({ socket }: { socket: Socket }) {
   )
 }
 
-export function ProxyLine({ socket }: { socket: Socket }) {
-  const words = proxyWords(socket)
-  if (!words) return null
-  const names = (socket.routes ?? []).map((route) => route.serverName || route.site).join(", ")
-  return (
-    <p className="truncate text-hint text-muted-foreground" title={names || undefined}>
-      {words}
-    </p>
-  )
-}
-
 /**
  * The verbs that put a loopback socket behind the proxy: an HTTP site for an
  * app port nothing routes to yet, and a stream for any port. Only loopback,

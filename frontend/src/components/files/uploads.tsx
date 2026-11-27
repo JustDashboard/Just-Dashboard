@@ -20,8 +20,6 @@ import {
 } from "./upload-pieces"
 import { transferWords, type TransferReading } from "./transfer-words"
 
-export type UploadStatus = TransferReading["status"]
-
 export type UploadItem = TransferReading & {
   id: string
   name: string

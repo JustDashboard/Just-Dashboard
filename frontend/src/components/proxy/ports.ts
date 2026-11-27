@@ -187,31 +187,6 @@ export function socketClients(socket: Socket): ListenerClients | undefined {
   return { count: own.count + twin.count, peers }
 }
 
-/**
- * The `?socket=` a row's detail opens at: `tcp:0.0.0.0:443`, `tcp:::22`.
- * The protocol is before the first colon and the port after the last, so an
- * IPv6 address needs no brackets.
- */
-export function socketParam(socket: Pick<Listener, "protocol" | "address" | "port">): string {
-  return `${socket.protocol}:${socket.address}:${socket.port}`
-}
-
-/** The socket `?socket=` names, by either of a folded socket's addresses. */
-export function findSocket(sockets: Socket[], param: string): Socket | undefined {
-  const first = param.indexOf(":")
-  const last = param.lastIndexOf(":")
-  if (first < 0 || last <= first) return undefined
-  const protocol = param.slice(0, first)
-  const address = param.slice(first + 1, last)
-  const port = Number(param.slice(last + 1))
-  return sockets.find(
-    (s) =>
-      s.protocol === protocol &&
-      s.port === port &&
-      (s.address === address || s.twin?.address === address),
-  )
-}
-
 /** A folded socket's addresses, IPv4 first as the listing orders them. */
 export function socketAddresses(socket: Socket): string[] {
   return socket.twin ? [socket.address, socket.twin.address] : [socket.address]

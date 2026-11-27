@@ -45,7 +45,7 @@ describe("Rail", () => {
     expect(current[0]).toContain('data-workspace-item="bravo"')
     // Every row is a link, so it opens in a new tab and is announced as one.
     expect(html.match(/<a /g)).toHaveLength(2)
-    expect(html).not.toContain("<button type=\"button\" data-workspace-item")
+    expect(html).not.toContain('<button type="button" data-workspace-item')
     expect(html).toContain('data-slot="thing-rail"')
     expect(html).toContain('aria-label="Search the things"')
   })

@@ -1,5 +1,3 @@
-import type { DeploymentRequests, RequestEntry } from "../types"
-
 /*
  * The readings derived from the engine as a whole rather than from one site,
  * certificate or stream.
@@ -92,26 +90,6 @@ export type UpstreamReport = {
   pools?: UpstreamPool[]
   evidence?: PoolEvidence
 }
-
-/**
- * Where an nginx site writes, read from its own file. A log is empty when the
- * site names none the dashboard reads, and the note beside it says why.
- */
-export type SiteLogs = {
-  site: string
-  file: string
-  serverNames: string[]
-  access?: string
-  accessNote?: string
-  error?: string
-  errorNote?: string
-}
-
-/** GET /proxy/traffic/{name}: a deployment's request window, for a site. */
-export type SiteTraffic = DeploymentRequests & { logs: SiteLogs }
-
-/** GET /proxy/traffic/{name}/tail: what arrived after the cursor, oldest first. */
-export type SiteTrafficTail = { entries: RequestEntry[]; cursor: number }
 
 /** One site's last hour, as the overview reads it. */
 /** One minute of a site's hour, by what went wrong in it. */

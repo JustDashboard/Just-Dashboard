@@ -287,5 +287,4 @@ strip were removed in 0.7.5.
 - **Logins** (0.8.7) opens on this server's identity line and a picture of where sessions are held
   from, who is attacking and which accounts are in (`logins-picture.tsx`); then the open sessions as
   one-line cards, attackers as a `RankList` and the login record as the page's one framed table.
-  Addresses use `PeerIdentity` or the inline
-  `Address`; address block and lookup actions remain in `address-verbs.tsx`.
+  Addresses use the inline `Address`; address block and lookup actions remain in `address-verbs.tsx`.

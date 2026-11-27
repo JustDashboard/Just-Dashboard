@@ -438,9 +438,7 @@ function LockTable({
         </Table>
       )}
       {truncated && (
-        <FormNote>
-          The server listed more locks than these; the first 500 are shown.
-        </FormNote>
+        <FormNote>The server listed more locks than these; the first 500 are shown.</FormNote>
       )}
     </div>
   )

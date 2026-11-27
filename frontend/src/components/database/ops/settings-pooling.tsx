@@ -749,8 +749,7 @@ function PoolsSection({ stats }: { stats: DbPoolerStats }) {
       title="Pools"
       state={
         <span className="numeric">
-          {plural(stats.pools.length, "pool")}, each a database and
-          an account
+          {plural(stats.pools.length, "pool")}, each a database and an account
         </span>
       }
     >

@@ -40,28 +40,10 @@ import {
   type BuildLogEvent,
   type ConsoleRow,
   type TranscriptBuffer,
-  type TranscriptCounts,
 } from "./transcript-buffer"
 
 export { consoleRows }
 export type { BuildLogEvent, ConsoleRow }
-
-/**
- * The transcript in three numbers, for the console's own counts and the
- * readings outside it — the view strip's count and its error mark, and
- * Details' lines per step. Read once from the parsed rows, by the page.
- */
-export function transcriptSummary(rows: ConsoleRow[]): TranscriptCounts {
-  const perStep = new Map<number, number>()
-  let lines = 0
-  let errors = 0
-  for (const row of rows) {
-    lines += 1
-    if (row.line.kind === "error") errors += 1
-    perStep.set(row.stepId, (perStep.get(row.stepId) ?? 0) + 1)
-  }
-  return { lines, errors, perStep }
-}
 
 /** A console row's element id: its persisted sequence and its line in that chunk. */
 function lineAnchor(id: string) {

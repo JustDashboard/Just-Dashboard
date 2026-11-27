@@ -3,7 +3,7 @@
 import { LogoGlyph } from "@/components/logo"
 import { ProductLogo } from "@/components/product-logo"
 import { FileText } from "@/components/icons"
-import { driftReading, type DriftRow, type DriftStatus } from "@/lib/network/drift"
+import type { DriftRow, DriftStatus } from "@/lib/network/drift"
 import { cn } from "@/lib/utils"
 
 /** A comparison's status as a fill: the state hues, and the meter's track for nothing to compare. */
@@ -15,31 +15,6 @@ export const STATUS_FILL: Record<DriftStatus, string> = {
   unreadable: "bg-muted-foreground/45",
   unknown: "bg-muted-foreground/45",
   not_required: "bg-meter-track",
-}
-
-/**
- * Every comparison in a set as one block in its status's colour, worst
- * first, so a domain of ten matching files and one changed one is ten green
- * blocks and an amber one — the address pool's blocks on the Networks page,
- * drawn for readings instead of subnets.
- */
-export function DriftBlocks({ rows, className }: { rows: DriftRow[]; className?: string }) {
-  if (rows.length === 0) return null
-  return (
-    <span
-      role="img"
-      aria-label={rows.map((row) => `${row.label}: ${driftReading(row.status).label}`).join(", ")}
-      className={cn("flex flex-wrap gap-[3px]", className)}
-    >
-      {rows.map((row) => (
-        <span
-          key={row.id}
-          title={`${row.label} · ${driftReading(row.status).label}`}
-          className={cn("size-2.5 rounded-xs", STATUS_FILL[row.status] ?? STATUS_FILL.unknown)}
-        />
-      ))}
-    </span>
-  )
 }
 
 /**

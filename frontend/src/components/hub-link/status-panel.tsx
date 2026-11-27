@@ -2,13 +2,7 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import {
-  ArrowRight,
-  ArrowUpRight,
-  Heart,
-  RefreshClockwise,
-  Warning,
-} from "@/components/icons"
+import { ArrowRight, ArrowUpRight, Heart, RefreshClockwise, Warning } from "@/components/icons"
 import { commandWords } from "@/lib/account-link"
 import { errorMessage } from "@/lib/api"
 import { relativeTime, timestamp } from "@/lib/format"
@@ -38,9 +32,6 @@ import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
 type LinkState = NonNullable<NonNullable<HubLinkStatus["admin"]>["link"]>
-
-
-
 
 /** Who the hub says asked; "rollout" is a step of an update rollout, not a person. */
 function askedBy(issuedBy: string) {

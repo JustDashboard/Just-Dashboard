@@ -1,13 +1,5 @@
 import type { Capability, Role } from "@/lib/types"
-import {
-  Eye,
-  FolderOpen,
-  Play,
-  SettingsGear,
-  Terminal,
-  Trash,
-  type Icon,
-} from "@/components/icons"
+import { Eye, FolderOpen, Play, SettingsGear, Terminal, Trash, type Icon } from "@/components/icons"
 
 /**
  * What each capability lets an account do, in the words a person reading their
