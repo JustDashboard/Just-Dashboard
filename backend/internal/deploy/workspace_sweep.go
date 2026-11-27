@@ -27,10 +27,15 @@ import (
 // One finished run's workspace is read again: a Compose release runs from
 // it. Its runtime record names the workspace as the project's directory,
 // with the Compose files and the release's override in it
-// (runtime_owner.go), and stopping that release for the next one, starting
-// it again and rolling back to it all run Compose there. Such a workspace
-// is kept for as long as a runtime record that is not removed names it,
-// and goes at the first start-up after that.
+// (runtime_owner.go), and stopping that release for the next one and
+// starting it again (a restart, a wake, putting it back when its successor
+// fails) run Compose there. Such a workspace is kept while the record's
+// state says the release's containers may still be on the server: anything
+// but retired, failed or removed. Those three come only after the
+// containers were removed (the retire step, a failed candidate's recovery,
+// a closed rollback window), and a rollback is a release of its own,
+// materialized into its own run's workspace, so nothing reads the workspace
+// again. It goes at the next start-up.
 
 var runWorkspaceRE = regexp.MustCompile(`^run-([1-9][0-9]{0,18})$`)
 
@@ -117,11 +122,14 @@ func (e *NormalizedStepExecutor) SweepWorkspaces(ctx context.Context) (int, erro
 	return removed, errors.Join(failures...)
 }
 
-// workspaceHoldsARelease says whether a Compose release still runs from
-// the workspace: a runtime record that is not removed names it, or a folder
-// inside it, as its project's directory. The comparison is of the paths
-// as Materialize and the runtime owner both derive them from the trusted
-// root, never a pattern.
+// workspaceHoldsARelease says whether a Compose release may still run from
+// the workspace: a runtime record whose containers may still be on the
+// server (any state but retired, failed or removed) names it, or a folder
+// inside it, as its project's directory. Keeping the workspace of every
+// record not removed would keep every Compose run's for good, since a
+// retired record stays retired. The comparison is of the paths as
+// Materialize and the runtime owner both derive them from the trusted root,
+// never a pattern.
 func (e *NormalizedStepExecutor) workspaceHoldsARelease(ctx context.Context, workspace string) (bool, error) {
 	if e == nil || e.store == nil {
 		return false, nil
@@ -129,7 +137,7 @@ func (e *NormalizedStepExecutor) workspaceHoldsARelease(ctx context.Context, wor
 	var held int
 	err := e.store.db.QueryRowContext(ctx, `
 		SELECT COUNT(*) FROM deploy_release_runtimes
-		 WHERE kind = 'compose' AND state <> 'removed'
+		 WHERE kind = 'compose' AND state NOT IN ('retired', 'failed', 'removed')
 		   AND (working_directory = ? OR substr(working_directory, 1, length(?) + 1) = ? || '/')`,
 		workspace, workspace, workspace).Scan(&held)
 	return held > 0, err

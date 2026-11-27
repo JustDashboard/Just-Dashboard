@@ -1044,9 +1044,12 @@ only renderer/executor/validation authority for their feature.
   folder.
   - **A Compose release runs from its run's workspace**: the runtime record names it as the project's
     directory, with the Compose files and the release's override in it, and stopping that release for
-    the next one, starting it again and rolling back to it run Compose there. So a workspace that a
-    Compose runtime record names (state other than `removed`) is kept, whatever its run's state, and
-    goes at the first start-up after the record is removed (`workspaceHoldsARelease`).
+    the next one and starting it again (restart, wake, putting it back when its successor fails) run
+    Compose there. So a workspace that a Compose runtime record names is kept, whatever its run's
+    state, while the record says the release's containers may still be on the server: any state but
+    `retired`, `failed` or `removed` (`workspaceHoldsARelease`). Those three come only after the
+    containers were removed, and a rollback is a release of its own with its own run's workspace, so
+    the workspace goes at the next start-up after the release is retired.
   - A release made by a dashboard of 22 to 27 Nov 2026 can have lost its files to the sweep before
     that rule; every redeploy of it failed as `previous_stop_failed`. `composeFilesGone` notices a
     missing project directory, Compose file or override, and such a release is stopped, removed and

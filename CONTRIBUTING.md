@@ -444,6 +444,11 @@ never into `docs/audits/`.
   route makes and brings it up through the same harness (it uses `nginx:alpine` and `redis:7-alpine`,
   so a host that has them pulls nothing; the harness removes only what it added, digest references
   included).
+  Changes to how a Compose release is stopped or started (`deploy/runtime_owner.go`'s Compose paths,
+  `deploy/workspace_sweep.go`) also run, as root,
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveAComposeReleaseWithoutItsFilesIsStoppedAndStartedByItsContainers -count=1 -v`,
+  which starts an nginx-and-Redis release (`nginx:1.28-alpine`, `redis:7-alpine`), deletes its files and
+  requires it to stop, start again and be removed by its containers.
   A template's schema rules run at build time: every definition is parsed and validated when the
   catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
   same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions
