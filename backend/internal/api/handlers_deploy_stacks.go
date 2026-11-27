@@ -469,10 +469,11 @@ func (s *Server) stackDomains(ctx context.Context, environmentID int64) ([]deplo
 }
 
 // stackPrimaryDomain is the domain the primary service is served at: the
-// first that names no other service and sends nobody elsewhere.
+// first that names no other service, sends nobody elsewhere and is one name
+// rather than a wildcard, which no sibling can be made of.
 func stackPrimaryDomain(domains []deploy.PlannedDomain) (deploy.PlannedDomain, bool) {
 	for _, domain := range domains {
-		if domain.Service == "" && !domain.Redirects() {
+		if domain.Service == "" && !domain.Redirects() && !strings.HasPrefix(domain.Hostname, "*.") {
 			return domain, true
 		}
 	}
@@ -896,12 +897,13 @@ func (s *Server) stackServiceURLs(ctx context.Context, manifest *stacks.Manifest
 
 // stackURLsOf is each service's address among a release's domains: an HTTPS
 // one (or one through the tunnel, which Cloudflare serves over HTTPS) when it
-// has one, else the first; a domain with no service is the public one's.
+// has one, else the first; a domain with no service is the public one's. A
+// wildcard is no address to open or to give an application.
 func stackURLsOf(public string, domains []deploy.PlannedDomain) map[string]string {
 	urls := map[string]string{}
 	secure := map[string]bool{}
 	for _, domain := range domains {
-		if domain.Redirects() || domain.Hostname == "" {
+		if domain.Redirects() || domain.Hostname == "" || strings.HasPrefix(domain.Hostname, "*.") {
 			continue
 		}
 		service := domain.Service
@@ -923,8 +925,9 @@ func stackURLsOf(public string, domains []deploy.PlannedDomain) map[string]strin
 
 // stackPublicURL is the address the deployment's domain gives its public
 // service, read as the fleet reads a deployment's endpoint: the
-// environment's first domain that serves the primary service, else a
-// tailnet-only environment's address. "" when it has neither.
+// environment's first domain that serves the primary service and is not a
+// wildcard, else a tailnet-only environment's address. "" when it has
+// neither.
 func (s *Server) stackPublicURL(ctx context.Context, environmentID int64) string {
 	var endpoint string
 	if err := s.Store.DB.QueryRowContext(ctx, `
@@ -932,6 +935,7 @@ func (s *Server) stackPublicURL(ctx context.Context, environmentID int64) string
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = ? AND d.kind = 'domain'
 		            AND COALESCE(json_extract(d.config_json, '$.service'), '') = ''
+		            AND d.resource_id NOT LIKE '*.%'
 		          ORDER BY d.id LIMIT 1
 		       ), ''), (
 		         SELECT x.url FROM deploy_preview_addresses x

@@ -405,6 +405,8 @@ func TestStackLoginChangeKeepsThePreviousAndAsksForAPass(t *testing.T) {
 // the domain that names no service, and a redirect is nobody's address.
 func TestStackURLsComeFromTheReleasesDomains(t *testing.T) {
 	urls := stackURLsOf("jellyfin", []deploy.PlannedDomain{
+		// A wildcard is no address anybody opens.
+		{Hostname: "*.media.example.test", HTTPS: true},
 		{Hostname: "media-requests.example.test", Service: "seerr"},
 		{Hostname: "media-requests-secure.example.test", HTTPS: true, Service: "seerr"},
 		{Hostname: "media.example.test", HTTPS: true},
@@ -423,6 +425,23 @@ func TestStackURLsComeFromTheReleasesDomains(t *testing.T) {
 		if urls[service] != url {
 			t.Fatalf("%s = %q, want %q", service, urls[service], url)
 		}
+	}
+}
+
+// A wildcard domain is not one the apps' addresses can be put beside: the
+// primary is the first single name, and with none there is no primary, so the
+// press asks for one rather than saving *-requests.example.test.
+func TestStackAddressesAreNeverMadeBesideAWildcard(t *testing.T) {
+	manifest := media.Manifest()
+	preset, _ := manifest.PresetByID("essential")
+	wildcard := deploy.PlannedDomain{Hostname: "*.example.test", HTTPS: true}
+	alone := stackMissingAddresses(manifest, preset, []deploy.PlannedDomain{wildcard}, "")
+	if alone.Primary != "" || len(alone.Missing) != 1 || alone.Missing[0].Hostname != "" {
+		t.Fatalf("beside a wildcard alone, addresses = %+v", alone)
+	}
+	beside := stackMissingAddresses(manifest, preset, []deploy.PlannedDomain{wildcard, {Hostname: "media.example.test", HTTPS: true}}, "")
+	if beside.Primary != "media.example.test" || len(beside.Missing) != 1 || beside.Missing[0].Hostname != "media-requests.example.test" {
+		t.Fatalf("with a wildcard and a name, addresses = %+v", beside)
 	}
 }
 

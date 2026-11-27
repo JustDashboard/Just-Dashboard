@@ -185,8 +185,11 @@ func TestStackStateGivesThePublicServiceTheDeploymentsAddress(t *testing.T) {
 	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
 	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 	projectID, environmentID := seedStackProject(t, s)
-	if _, err := s.Store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id, kind, ownership, resource_kind, resource_id, created_at) VALUES(?, 'domain', 'managed', 'proxy_site', 'media.example.test', 1)`, environmentID); err != nil {
-		t.Fatal(err)
+	// A wildcard first, which is no address to open.
+	for _, hostname := range []string{"*.example.test", "media.example.test"} {
+		if _, err := s.Store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id, kind, ownership, resource_kind, resource_id, created_at) VALUES(?, 'domain', 'managed', 'proxy_site', ?, 1)`, environmentID, hostname); err != nil {
+			t.Fatal(err)
+		}
 	}
 	read := func() map[string]stackServiceState {
 		t.Helper()

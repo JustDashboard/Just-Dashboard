@@ -96,8 +96,10 @@ allowed only on a stack's service with a loopback port and unique in the templat
   another Compose service (`PlannedDomain.Service`, [deployments](implementation.md)).
 - **Give every app its address.** A stack made from the 1.0.0 templates has only Jellyfin's domain,
   though those templates already publish the other interfaces on loopback. The state's
-  `addresses` names the primary domain and, from the current configuration's domains and the
-  shipped template's labels, each service that has no domain yet with the hostname it would get.
+  `addresses` names the primary domain (the first that names no service, redirects nowhere and
+  is not a wildcard, which no sibling can be made of) and, from the current configuration's
+  domains and the shipped template's labels, each service that has no domain yet with the
+  hostname it would get. A wildcard is never a service's `url` either.
   `POST /deploy/{id}/stack/addresses` adds them through the configuration save the Domains settings
   make (`saveDeploymentConfiguration`: the same checks, a deploy key's guard, the
   `deploy.configuration.update` audit), each served over HTTPS and through the tunnel as the primary
