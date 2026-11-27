@@ -101,7 +101,7 @@ deployment is reached at, puts every name behind "N more" (a popover with each n
 certificate), and says the certificates in one line under it: the state that most needs a look
 and how many are in it, the soonest one's days left, then the other states counted short. Past
 four containers the Runtime node names three by their Compose service, one that is not running
-first, and counts the rest into the Runtime page (`wiring-model.ts`, held by
+or fails its health check first, and counts the rest into the Runtime page (`wiring-model.ts`, held by
 `wiring-model.test.js` and `deploy-stack-page.spec.ts`).
 
 The Stack page's Setup was a row per step with "Done" and a second sentence of what the step did:

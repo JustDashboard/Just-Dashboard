@@ -36,6 +36,14 @@ describe("the containers", () => {
     expect(shown.map((service) => service.name)).toEqual(["g", "a", "b"])
     expect(hidden).toBe(5)
   })
+
+  test("one whose health check fails is named first too, though it runs", () => {
+    const eight = ["a", "b", "c", "d", "e", "f", "g", "h"].map((name) => ({
+      ...container(name),
+      health: name === "h" ? "unhealthy" : "healthy",
+    }))
+    expect(listedServices(eight).shown.map((service) => service.name)).toEqual(["h", "a", "b"])
+  })
 })
 
 const domain = (hostname, overrides = {}) => ({

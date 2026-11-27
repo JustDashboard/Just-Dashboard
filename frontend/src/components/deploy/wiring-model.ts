@@ -29,16 +29,18 @@ export function serviceLabel(
 
 /**
  * The containers the node names and how many it counts instead: all of them
- * up to `LISTED_SERVICES`, else the first three, any that is not running
- * before those that are, so the one that needs a look is never in the count.
+ * up to `LISTED_SERVICES`, else the first three, any that is not running or
+ * whose health check fails before the rest, so the one that needs a look is
+ * never in the count.
  */
-export function listedServices<T extends Pick<DeploymentRuntimeService, "state">>(
+export function listedServices<T extends Pick<DeploymentRuntimeService, "state" | "health">>(
   services: T[],
 ): { shown: T[]; hidden: number } {
   if (services.length <= LISTED_SERVICES) return { shown: services, hidden: 0 }
+  const needsLook = (service: T) => service.state !== "running" || service.health === "unhealthy"
   const ordered = [
-    ...services.filter((service) => service.state !== "running"),
-    ...services.filter((service) => service.state === "running"),
+    ...services.filter((service) => needsLook(service)),
+    ...services.filter((service) => !needsLook(service)),
   ]
   const shown = ordered.slice(0, LISTED_SERVICES - 1)
   return { shown, hidden: services.length - shown.length }
