@@ -468,9 +468,11 @@ func TestTakingAChatOverStopsThePressRunningIt(t *testing.T) {
 	if busy.Code != http.StatusConflict || errCode(busy) != "chat_busy" {
 		t.Fatalf("a second press = %d %s", busy.Code, busy.Body.String())
 	}
-	if list := f.do(http.MethodGet, "/assistant/chats", ""); !strings.Contains(list.Body.String(), `"running":true`) {
-		t.Fatalf("the running chat is not listed as running: %s", list.Body.String())
-	}
+	// A new chat is saved just after its first line reaches the page, so the list
+	// can be a moment behind the line read above.
+	waitFor(t, "the running chat to be listed as running", func() bool {
+		return strings.Contains(f.do(http.MethodGet, "/assistant/chats", "").Body.String(), `"running":true`)
+	})
 	f.provider.queue(claudeAnswer("Carried on here."))
 	events := lines(t, f.do(http.MethodPost, fmt.Sprintf("/deploy/%d/assistant", f.projectID), `{"conversation":"`+id+`","question":"Hello?","takeOver":true}`))
 	if conversationOf(events) != id || doneOf(t, events)["kept"] != true {
@@ -490,8 +492,18 @@ func TestTakingAChatOverStopsThePressRunningIt(t *testing.T) {
 	if strings.Contains(read.Body.String(), "taken_over") || strings.Count(read.Body.String(), `"type":"question"`) != 2 {
 		t.Fatalf("lines = %s", read.Body.String())
 	}
-	if detail, _ := f.audit(t, "deploy.assistant.ask"); !strings.Contains(detail, `"takeOver":true`) {
-		t.Fatalf("audit = %s", detail)
+	// Both presses are audited, each as its request ends. The take-over goes on
+	// once the first press lets go of the chat, not once that press's request has
+	// ended, so either row can be the newer one: read them by what they say.
+	var tookOver, takenOver int
+	if err := f.s.Store.DB.QueryRow(`SELECT
+		COUNT(*) FILTER (WHERE detail LIKE '%"takeOver":true%'),
+		COUNT(*) FILTER (WHERE detail LIKE '%"outcome":"taken_over"%')
+		FROM audit_log WHERE action = ?`, "deploy.assistant.ask").Scan(&tookOver, &takenOver); err != nil {
+		t.Fatal(err)
+	}
+	if tookOver != 1 || takenOver != 1 {
+		t.Fatalf("audit: %d take-over, %d taken over; want one of each", tookOver, takenOver)
 	}
 }
 
