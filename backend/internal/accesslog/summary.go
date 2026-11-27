@@ -381,6 +381,12 @@ type Collector struct {
 	pathLatencies map[string][]float64
 	pages         int
 	audience      audienceTally
+	// agentsRead and referersRead remember what a user agent and a referer
+	// were read as: one browser's ten thousand requests in a week are one
+	// agent to recognise, and recognising it is most of what a request
+	// costs to count.
+	agentsRead   map[string]agentReading
+	referersRead map[visitorKey]string
 
 	latencies []float64
 	// timed counts every timed request, of which latencies is a sample once
@@ -423,7 +429,43 @@ func NewCollector(f Filter) *Collector {
 		pathLatencies: map[string][]float64{},
 		byMinute:      map[int64]*minuteBucket{},
 		audience:      newAudienceTally(),
+		agentsRead:    map[string]agentReading{},
+		referersRead:  map[visitorKey]string{},
 	}
+}
+
+// agentReading is what a user agent says about who sent it.
+type agentReading struct {
+	family string
+	bot    bool
+}
+
+// readAgent is AgentFamily and IsBot of agent, remembered for the window.
+func (c *Collector) readAgent(agent string) agentReading {
+	if got, ok := c.agentsRead[agent]; ok {
+		return got
+	}
+	got := agentReading{family: AgentFamily(agent), bot: IsBot(agent)}
+	if len(c.agentsRead) < facetCap {
+		c.agentsRead[agent] = got
+	}
+	return got
+}
+
+// readReferer is refererHost, remembered for the window.
+func (c *Collector) readReferer(referer, host string) string {
+	if referer == "" {
+		return ""
+	}
+	key := visitorKey{ip: referer, agent: host}
+	if got, ok := c.referersRead[key]; ok {
+		return got
+	}
+	got := refererHost(referer, host)
+	if len(c.referersRead) < facetCap {
+		c.referersRead[key] = got
+	}
+	return got
 }
 
 // Format records which spelling the file turned out to be in, so the page can
@@ -457,12 +499,13 @@ func (c *Collector) Feed(e Entry) {
 	if page {
 		c.pages++
 	}
-	source := refererHost(e.Referer, e.Host)
+	source := c.readReferer(e.Referer, e.Host)
+	agent := c.readAgent(e.UserAgent)
 	c.bump(c.methods, e.Method, e, failed, refused, probe)
 	c.bump(c.paths, e.Path, e, failed, refused, probe)
 	c.bump(c.hosts, e.Host, e, failed, refused, probe)
 	c.bump(c.clients, e.RemoteIP, e, failed, refused, probe)
-	c.bump(c.agents, AgentFamily(e.UserAgent), e, failed, refused, probe)
+	c.bump(c.agents, agent.family, e, failed, refused, probe)
 	c.bump(c.referers, source, e, failed, refused, probe)
 	if probe {
 		c.bump(c.probes, e.Path, e, failed, refused, probe)
@@ -507,7 +550,7 @@ func (c *Collector) Feed(e Entry) {
 	if e.timed && len(bucket.latencies) < 4096 {
 		bucket.latencies = append(bucket.latencies, e.duration)
 	}
-	c.feedAudience(e, page, failed, refused, source, bucket)
+	c.feedAudience(e, page, failed, refused, agent.bot, source, bucket)
 
 	// The rows are the newest N, so the window slides rather than filling up
 	// and then ignoring everything after it — a table that stopped at the
