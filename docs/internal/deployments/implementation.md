@@ -2532,8 +2532,11 @@ only renderer/executor/validation authority for their feature.
   the domain's dependency row only when set, and a service equal to the primary (and, with no service, a
   port equal to `runtime.internalPort`) is written as none (`normalizeServiceDomains`), so every other
   domain keeps its bytes and digest. `Validate` refuses them outside `build.method compose`, on a
-  redirecting name, on a wildcard (a service is sent the names it answers one by one) and beyond 16
-  services; a tailnet-only environment takes no domain at all. Against the plan's Compose analysis
+  redirecting name, on a wildcard (a service is sent the names it answers one by one), beside the
+  `canary` strategy (its route shares the requests between two releases, which `proxysvc` refuses beside a
+  service domain, so every release after the first would fail its canary step; skew protection and sleep
+  are refused for a Compose plan already) and beyond 16 services; a tailnet-only environment takes no
+  domain at all. Against the plan's Compose analysis
   (`validateServiceDomains`) the service has to exist and publish the port on `127.0.0.1`: a blueprint
   `loopback` port does, and so does a user Compose file's `127.0.0.1:H:C` or `127.0.0.1::C`, with no port
   named only when it publishes one. The draft's configuration step and commit hold a draft to its

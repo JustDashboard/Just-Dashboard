@@ -63,6 +63,12 @@ func validateServiceDomainShapes(c PlanConfiguration) error {
 			return invalidField(field, "%s redirects visitors, so it routes to no service; remove the redirect or the service", domain.Hostname)
 		case strings.HasPrefix(hostname, "*."):
 			return invalidField(field, "a wildcard name cannot route to a service: name each address the service answers")
+		case c.Runtime.Strategy == StrategyCanary:
+			// The canary's route shares the release's requests with the
+			// candidate's, and the proxy refuses a name another service
+			// answers beside it (proxysvc.validateHostUpstreams), so every
+			// release after the first would fail its canary step.
+			return invalidField(field, "%s is answered by another service, which a canary has no release to share; choose another release strategy or remove the domain's service", domain.Hostname)
 		}
 		targets[domain.Service+"\x00"+strconv.Itoa(domain.Port)] = true
 	}

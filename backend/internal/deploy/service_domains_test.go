@@ -71,6 +71,11 @@ func TestServiceDomainsValidateWithThePlan(t *testing.T) {
 			p.Domains[1].RedirectTo = "media.example.test"
 		}, "domains[1].service"},
 		{"a wildcard", func(p *PlanConfiguration) { p.Domains[1].Hostname = "*.requests.example.test" }, "domains[0].service"},
+		// A canary's route shares the release's requests, and the proxy
+		// refuses a service domain beside it.
+		{"a canary", func(p *PlanConfiguration) {
+			p.Runtime.Strategy, p.Runtime.Canary = StrategyCanary, &CanaryTerms{Percent: 10, DurationSeconds: MinCanarySeconds}
+		}, "domains[0].service"},
 		{"too many services", func(p *PlanConfiguration) {
 			for index := range 16 {
 				p.Domains = append(p.Domains, PlannedDomain{Hostname: "s" + strconv.Itoa(index) + ".example.test", Ownership: OwnershipManaged, Service: "s" + strconv.Itoa(index)})
