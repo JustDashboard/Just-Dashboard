@@ -196,6 +196,7 @@ var openapiWriteOnly = map[string]bool{
 	"logdrain.Header.Value":                  true,
 	"secretstore.Write.Credentials":          true,
 	"api.stackSourceAddRequest.Fields":       true,
+	"api.stackLoginRequest.Password":         true,
 }
 
 // openapiErrorFields says what each field of httpx.APIError, the envelope

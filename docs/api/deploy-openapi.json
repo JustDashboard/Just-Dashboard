@@ -3137,7 +3137,9 @@
       "api.stackLoginRequest": {
         "properties": {
           "password": {
-            "type": "string"
+            "description": "A secret: it is accepted here and never read back by any route.",
+            "type": "string",
+            "writeOnly": true
           }
         },
         "title": "api.stackLoginRequest",

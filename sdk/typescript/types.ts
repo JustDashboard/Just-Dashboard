@@ -5118,6 +5118,7 @@ export interface StackCredentialReveal {
 
 /** api.stackLoginRequest in the dashboard's source. */
 export interface StackLoginRequest {
+  /** A secret: it is accepted here and never read back by any route. */
   password?: string
 }
 

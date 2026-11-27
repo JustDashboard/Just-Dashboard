@@ -5116,6 +5116,7 @@ type StackCredentialReveal struct {
 
 // StackLoginRequest is api.stackLoginRequest in the dashboard's source.
 type StackLoginRequest struct {
+	// A secret: it is accepted here and never read back by any route.
 	Password string `json:"password,omitempty"`
 }
 
