@@ -89,3 +89,23 @@ is said at the strategy, Domains' warning about a public bind address sits in it
 Databases' cards say whether the gating job dumps each one. Logs is the one deployment page that
 keeps its row: four readings of the ingress's last hour that no row or chip says. Its fifth,
 Container, went — the Events tab already counts the hour's disruptions.
+
+## Many names, many steps (27 Nov 2026)
+
+A media stack is eight containers and seven names, and the Overview's wiring stacked all of them:
+the Runtime node named every container in full over two lines, and the Domains node listed seven
+names, each with "Certificate valid" and its days, the tallest thing on the page with its mark
+floating halfway down. The operator called it "awful". The node now lists up to two names as
+before, since folding two saves no height and hides one; from three it leads with the address the
+deployment is reached at, puts every name behind "N more" (a popover with each name and its own
+certificate), and says the certificates in one line under it: the state that most needs a look
+and how many are in it, the soonest one's days left, then the other states counted short. Past
+four containers the Runtime node names three by their Compose service, one that is not running
+or fails its health check first, and counts the rest into the Runtime page (`wiring-model.ts`, held by
+`wiring-model.test.js` and `deploy-stack-page.spec.ts`).
+
+The Stack page's Setup was a row per step with "Done" and a second sentence of what the step did:
+twenty-seven rows of grey text the operator called "useless". It is a checklist now, two columns
+from `md`, a tick for a done step and a word only for one that is not done; what a step did, its
+error and its report are behind the line in a popover. A failed step's whole error still leads the
+page among the next steps, so nothing that needs a look is behind a press.

@@ -2959,11 +2959,12 @@ ordinary project makes no request that is refused; the run page asks the same wa
 run is watched from there and the row is the way on to the page. That page
 (`components/deploy/stack/stack-page.tsx`, words and reads in `stack-model.ts`) leads with the server's
 sentence and state and says installed, healthy, connected, able to fetch and able to play each on its
-own, then what only the person can do (blocking first), each failed step's whole error, the services
-as cards of one height (a public one links to its address; a private one gives its loopback address
-with the SSH tunnel behind the mark beside it, and no button that would open nothing; a card opens its
-container in Docker), the setup by stage with every skipped step folded into one line by reason, and
-the accounts that exist, each revealed through the audited route where its mask was. It polls every
+own, then what only the person can do (blocking first), each failed step's whole error, the apps
+as rows of one height (each with its address and Open, an app with none saying so and offering no
+button that would open nothing, its container behind the row's menu), the one login every app signs
+in with, revealed through the audited route where its mask was, and the setup by stage as a
+checklist, each step's record behind its line in a popover and every skipped step folded into one
+line by reason ([`smart-stacks.md`](smart-stacks.md#the-stacks-tab-and-the-stack-page)). It polls every
 two seconds while the state is `waiting` or `configuring` and every fifteen otherwise; Retry or Repair
 is one button, and a `stack_busy` or `stack_waiting` refusal is answered in words on the page. Stop and Restart need the destructive capability, as the Docker container
 verbs do, and each asks first, since either is one press from a fleet card's menu; the menu hides

@@ -61,6 +61,13 @@ import type {
   WorkloadProfile,
 } from "@/lib/types"
 import { certificateTone, certificateWords, type CertificateFacts } from "@/lib/certificates"
+import {
+  certificateGroups,
+  groupLabel,
+  groupShort,
+  passwordWords,
+  shared,
+} from "@/components/deploy/wiring-model"
 
 /**
  * The words and marks every deployment screen shares.
@@ -1458,6 +1465,55 @@ export function CertificateReading({
       {domain.certificateRenewedBy === "caddy" && (
         <span className="shrink-0 text-hint text-muted-foreground">Renewed by Caddy</span>
       )}
+    </span>
+  )
+}
+
+/**
+ * Every certificate of a project's names as one reading: the state that most
+ * needs a look as a dot and its count, the days left on the soonest of them,
+ * then the other states counted short ("6 valid"). The issuer is drawn when
+ * every certificate has the same one, as `CertificateReading` draws it for one.
+ */
+export function CertificatesReading({ domains }: { domains: DeploymentDomainRoute[] }) {
+  const groups = certificateGroups(domains)
+  const [lead, ...rest] = groups
+  if (!lead) return null
+  const first = lead.domains[0]
+  const issuer = shared(domains.map((domain) => issuerProduct(domain.certificateIssuer)))
+  const facts = domainCertificate(first)
+  const left =
+    facts && !facts.expired && typeof first.certificateDaysLeft === "number" && facts.daysLeft > 0
+      ? certificateWords(facts, { form: "long" })
+      : undefined
+  const caddy = shared(domains.map((domain) => domain.certificateRenewedBy))
+  const password = passwordWords(domains)
+  return (
+    <span
+      data-slot="certificates-reading"
+      className="inline-flex max-w-full min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"
+    >
+      {issuer && <ProductGlyph id={issuer} />}
+      <Status tone={certificateDot(first)} label={groupLabel(lead.state, lead.domains.length)} />
+      {facts && left && (
+        <span
+          className={cn(
+            "numeric shrink-0",
+            certificateTone(facts) === "warning" ? "text-warning" : "text-muted-foreground",
+          )}
+        >
+          {left}
+        </span>
+      )}
+      {rest.length > 0 && (
+        <span className="numeric text-muted-foreground">
+          · {rest.map((group) => groupShort(group.state, group.domains.length)).join(", ")}
+        </span>
+      )}
+      {caddy === "caddy" && (
+        <span className="shrink-0 text-muted-foreground">Renewed by Caddy</span>
+      )}
+      {password && <Tag>{password}</Tag>}
     </span>
   )
 }

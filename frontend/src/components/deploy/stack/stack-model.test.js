@@ -27,6 +27,7 @@ import {
   stackPollInterval,
   stageGroups,
   stepDetail,
+  stepHasRecord,
 } from "./stack-model"
 
 const entry = {
@@ -240,6 +241,28 @@ test("a failed step says its error, and a retried one how often it has tried", (
   expect(stepDetail({ status: "done", attempts: 1, message: "Created 2 libraries" })).toBe(
     "Created 2 libraries",
   )
+})
+
+test("only a step with a record opens one from its line", () => {
+  // Not reached yet: its title and "Waiting" again would be all a press shows.
+  expect(stepHasRecord({ status: "pending", attempts: 0 })).toBe(false)
+  expect(stepHasRecord({ status: "pending", attempts: 1 })).toBe(false)
+  // Interrupted under a pass, it was started: when is on its record.
+  expect(stepHasRecord({ status: "pending", attempts: 1, startedAt: "2026-11-27T10:00:00Z" })).toBe(
+    true,
+  )
+  expect(stepHasRecord({ status: "done", attempts: 1, message: "Checked and unchanged" })).toBe(
+    true,
+  )
+  expect(stepHasRecord({ status: "done", attempts: 1, finishedAt: "2026-11-27T10:00:00Z" })).toBe(
+    true,
+  )
+  expect(stepHasRecord({ status: "running", attempts: 2 })).toBe(true)
+  expect(stepHasRecord({ status: "failed", attempts: 1 })).toBe(true)
+  expect(stepHasRecord({ status: "pending", attempts: 0, log: ["queued"] })).toBe(true)
+  expect(
+    stepHasRecord({ status: "pending", attempts: 1, error: "interrupted before it finished" }),
+  ).toBe(true)
 })
 
 test("a service's state is its setup's when that needs saying, else its container's", () => {
