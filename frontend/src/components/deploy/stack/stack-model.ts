@@ -262,6 +262,23 @@ export function stepDetail(step: SmartStackStep): string | undefined {
 }
 
 /**
+ * Whether a step has a record to open from its Setup line: what it did, its
+ * error, its report, a retry or when it ran. A step the pass has not reached
+ * has none, and a press onto its title and "Waiting" again would be a button
+ * onto an empty record, twenty-seven of them while the release comes up.
+ */
+export function stepHasRecord(step: SmartStackStep): boolean {
+  return Boolean(
+    stepDetail(step) ||
+    step.error ||
+    (step.log && step.log.length > 0) ||
+    step.attempts > 1 ||
+    step.startedAt ||
+    step.finishedAt,
+  )
+}
+
+/**
  * A service's state as one dot and word: what the stack's setup says of it
  * when that needs saying, else what Docker says of its container.
  */

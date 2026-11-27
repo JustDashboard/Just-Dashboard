@@ -39,6 +39,7 @@ import {
   stackPollInterval,
   stageGroups,
   stepDetail,
+  stepHasRecord,
 } from "@/components/deploy/stack/stack-model"
 import { useStackState } from "@/components/deploy/stack/use-stack"
 
@@ -480,6 +481,44 @@ function StepLine({ step }: { step: SmartStackStep }) {
       : step.status === "failed" || step.status === "action_required"
         ? reading.label
         : undefined
+  const line = (
+    <>
+      <StepMark state={STEP_MARK[step.status]} />
+      <span
+        className={cn(
+          "min-w-0 flex-1 truncate text-body",
+          step.status === "pending" && "text-muted-foreground",
+        )}
+      >
+        {step.title}
+      </span>
+      {word && (
+        <span
+          className={cn(
+            "shrink-0 text-hint",
+            step.status === "failed"
+              ? "text-destructive"
+              : step.status === "action_required"
+                ? "text-warning"
+                : "text-muted-foreground",
+          )}
+        >
+          {word}
+        </span>
+      )}
+      <span className="sr-only">, {reading.label}</span>
+    </>
+  )
+  // A step the pass has not reached has nothing behind its line: the same
+  // line, with no press onto an empty record.
+  if (!stepHasRecord(step))
+    return (
+      <li data-status={step.status} className="break-inside-avoid">
+        <div title={step.title} className="flex h-8 w-full min-w-0 items-center gap-2.5 px-2">
+          {line}
+        </div>
+      </li>
+    )
   return (
     <li data-status={step.status} className="break-inside-avoid">
       <Popover>
@@ -488,30 +527,7 @@ function StepLine({ step }: { step: SmartStackStep }) {
             type="button"
             className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left focus-ring transition-colors hover:bg-row-hover aria-expanded:bg-row-hover"
           >
-            <StepMark state={STEP_MARK[step.status]} />
-            <span
-              className={cn(
-                "min-w-0 flex-1 truncate text-body",
-                step.status === "pending" && "text-muted-foreground",
-              )}
-            >
-              {step.title}
-            </span>
-            {word && (
-              <span
-                className={cn(
-                  "shrink-0 text-hint",
-                  step.status === "failed"
-                    ? "text-destructive"
-                    : step.status === "action_required"
-                      ? "text-warning"
-                      : "text-muted-foreground",
-                )}
-              >
-                {word}
-              </span>
-            )}
-            <span className="sr-only">, {reading.label}</span>
+            {line}
           </button>
         </PopoverTrigger>
         <PopoverContent align="start" className="w-96 space-y-2">

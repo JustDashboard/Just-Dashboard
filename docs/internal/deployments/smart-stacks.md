@@ -309,7 +309,8 @@ The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
   - Under them, **Setup** is the pass as a checklist, by stage, in two columns from `md`: each
     step one line of its mark (a tick, a live dot, a ring) and its title, with a word only for a
     step that is not done ("Attempt 2", "Failed", "Needs you"). What a step did (`message`), its
-    error and its last report (`log`) are behind the line in a popover; a failed step's whole
+    error and its last report (`log`) are behind the line in a popover; a step the pass has not
+    reached has no record, so its line is no press (`stepHasRecord`). A failed step's whole
     error is also among the next steps. Skipped steps are one line at the foot, by reason.
 - **The Overview** of a stack draws its apps as any project of many parts: the Runtime node names
   three containers by their Compose service (`bazarr`, not `jd-e480-bazarr-1`) and counts the

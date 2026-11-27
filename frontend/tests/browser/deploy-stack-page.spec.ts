@@ -6,6 +6,7 @@ import {
   stackCatalogue,
   stackState,
 } from "./deploy-stack-fixture"
+import { risen } from "./risen"
 
 /**
  * A stack project's page, `/deploy/[id]/stack`, as a launcher: the server's
@@ -214,7 +215,33 @@ test("a stack being configured shows the pass moving and is never called ready",
   const pending = page.locator("li[data-status='pending']")
   await expect(pending).toHaveCount(14)
   await expect(pending.getByText("Waiting", { exact: true })).toHaveCount(0)
-  await expect(pending.first().getByRole("button")).toHaveAccessibleName(/, Waiting$/)
+  // Not reached yet, a step has no record to open: its line is no press onto
+  // its title and "Waiting" again, and a reader still hears its state.
+  await expect(pending.getByRole("button")).toHaveCount(0)
+  await expect(pending.first()).toContainText(", Waiting")
+  // A line with a record and one without stand one height, and opening a
+  // record leaves the line under it where it was.
+  const heights = await page
+    .locator("li[data-status]")
+    .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().height)))
+  expect(new Set(heights).size).toBe(1)
+  const done = page.locator("li[data-status='done']")
+  // Where the line stands on the page, not in the view the press scrolls.
+  const place = () =>
+    done.nth(1).evaluate((line) => {
+      const box = line.getBoundingClientRect()
+      let y = box.y + window.scrollY
+      for (let parent = line.parentElement; parent; parent = parent.parentElement)
+        y += parent.scrollTop
+      return { x: box.x, y, height: box.height }
+    })
+  await risen(page)
+  const under = await place()
+  await done.first().getByRole("button").click()
+  await expect(page.getByRole("dialog")).toBeVisible()
+  expect(await place()).toEqual(under)
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
   // A pass is running, so there is nothing to press.
   await expect(lead(page).getByRole("button", { name: /Repair|Retry/ })).toHaveCount(0)
   // The login exists from the first pass on.
