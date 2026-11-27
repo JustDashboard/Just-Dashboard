@@ -154,8 +154,8 @@ is the dashboard's.
 
 - **The catalogue** is Prowlarr's own `GET /api/v1/indexer/schema` (6.3 MB and 662 definitions at
   Prowlarr 3.1.0), read with a 32 MiB bound (a longer answer is an error, never a list cut short) and
-  kept ten minutes per project and live release (`media.SourceCache`; requests at once share one
-  read). Only torrent definitions are listed, since the stack downloads with qBittorrent, sorted by
+  kept ten minutes per project and live release (`media.SourceCache`, about 6 MB each in memory, for
+  at most four projects at once; requests at once share one read). Only torrent definitions are listed, since the stack downloads with qBittorrent, sorted by
   name, and what is kept of each is trimmed of its capabilities and presets, which an add does not
   send. Prowlarr downloads the sites' definitions from its own server when it starts; a Prowlarr with
   no way out has only those built into it (57 torrent ones).

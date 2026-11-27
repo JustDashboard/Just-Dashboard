@@ -198,7 +198,9 @@ type prowlarrSchemaEntry struct {
 	Privacy        MediaSourcePrivacy `json:"privacy"`
 	Protocol       string             `json:"protocol"`
 	IndexerURLs    []string           `json:"indexerUrls"`
-	Fields         []prowlarrField    `json:"fields"`
+	// Fields are read to list the entry, then dropped: the catalogue keeps
+	// them once, in resource, and schemaFields reads them from there.
+	Fields []prowlarrField `json:"fields"`
 	// resource is the entry as Prowlarr gave it, trimmed of what an add
 	// does not send: its capabilities (most of its size, recomputed by
 	// Prowlarr from the definition) and its presets.
@@ -279,6 +281,7 @@ func newSourceCatalogue(entries []*prowlarrSchemaEntry, fetched time.Time) *Medi
 			Definition: key, Name: entry.Name, Description: strings.TrimSpace(entry.Description),
 			Privacy: entry.Privacy, Language: entry.Language, NeedsInput: entry.needsInput(),
 		})
+		entry.Fields = nil
 	}
 	slices.SortStableFunc(catalogue.Definitions, func(a, b MediaSourceDefinition) int {
 		if order := strings.Compare(strings.ToLower(a.Name), strings.ToLower(b.Name)); order != 0 {
@@ -383,6 +386,18 @@ func (f prowlarrField) urlChoices() bool {
 	return f.SelectOptionsProviderAction == "getUrls"
 }
 
+// schemaFields are the entry's settings, read from what the catalogue keeps.
+func (e *prowlarrSchemaEntry) schemaFields() ([]prowlarrField, error) {
+	if e.Fields != nil {
+		return e.Fields, nil
+	}
+	var fields []prowlarrField
+	if err := json.Unmarshal(e.resource["fields"], &fields); err != nil {
+		return nil, fmt.Errorf("%s's settings could not be read: %w", e.Name, err)
+	}
+	return fields, nil
+}
+
 // Lookup is one definition of the catalogue by its name in the routes.
 func (c *MediaSourceCatalogue) Lookup(definition string) (MediaSourceDetail, bool) {
 	entry, found := c.entries[definition]
@@ -393,7 +408,9 @@ func (c *MediaSourceCatalogue) Lookup(definition string) (MediaSourceDetail, boo
 		Definition: entry.key, Name: entry.Name, Description: strings.TrimSpace(entry.Description),
 		Privacy: entry.Privacy, URLs: entry.urls(), Fields: []MediaSourceField{},
 	}
-	for _, field := range entry.Fields {
+	// The fields were read once already, when the catalogue was made.
+	fields, _ := entry.schemaFields()
+	for _, field := range fields {
 		if !field.shown() {
 			continue
 		}
@@ -476,8 +493,12 @@ func (c *MediaSourceCatalogue) Prepare(definition string, values map[string]any)
 	if !found {
 		return nil, ErrSourceDefinitionNotFound
 	}
+	schema, err := entry.schemaFields()
+	if err != nil {
+		return nil, err
+	}
 	byName := map[string]prowlarrField{}
-	for _, field := range entry.Fields {
+	for _, field := range schema {
 		byName[field.Name] = field
 	}
 	prepared := &PreparedSource{Definition: entry.key, Name: entry.Name, resource: entry.resource}
@@ -901,8 +922,9 @@ func (r *countingReader) Read(buffer []byte) (int, error) {
 // whole from Prowlarr, and only changes when Prowlarr is updated.
 const SourceCatalogueTTL = 10 * time.Minute
 
-// sourceCacheSize bounds how many projects' catalogues are kept at once.
-const sourceCacheSize = 8
+// sourceCacheSize bounds how many projects' catalogues are kept at once:
+// each is about 6 MB in memory at Prowlarr 3.1.0.
+const sourceCacheSize = 4
 
 // SourceCache keeps each project's catalogue for SourceCatalogueTTL. Two
 // requests for one that is not kept share one read of Prowlarr's schema.
