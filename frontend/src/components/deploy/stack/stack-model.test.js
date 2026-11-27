@@ -92,6 +92,10 @@ test("an app's address is a sibling of the domain's first label, as the server m
   expect(serviceHostname(`${"b".repeat(54)}.example.com`, "requests").split(".")[0]).toHaveLength(
     63,
   )
+  // A cut that ends on a hyphen leaves it out, as the server's rule does.
+  expect(serviceHostname(`${"a".repeat(53)}-${"b".repeat(10)}.example.com`, "requests")).toBe(
+    `${"a".repeat(53)}-requests.example.com`,
+  )
   expect(serviceHostname("", "requests")).toBe("")
   expect(serviceHostname("media.example.com", "")).toBe("")
 })

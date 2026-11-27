@@ -39,12 +39,17 @@ const LABEL_MAX = 63
  * service's label goes in front of it instead. A first label that would make
  * the joined one longer than a DNS label is cut from its end.
  */
-export function serviceHostname(domain: string, label: string): string {
+export function serviceHostname(domain: string, rawLabel: string): string {
   const name = domain.trim().toLowerCase().replace(/\.$/, "")
+  const label = rawLabel.trim().toLowerCase()
   const labels = name.split(".")
   if (!name || !label) return ""
   if (labels.length < 3) return `${label}.${name}`
-  const first = labels[0].slice(0, Math.max(LABEL_MAX - label.length - 1, 0))
+  // As the server's: a long first label gives way at its end, never ending
+  // in the hyphen a cut can leave.
+  const room = LABEL_MAX - label.length - 1
+  let first = labels[0]
+  if (first.length > room) first = first.slice(0, Math.max(room, 1)).replace(/-+$/, "")
   return [`${first}-${label}`, ...labels.slice(1)].join(".")
 }
 

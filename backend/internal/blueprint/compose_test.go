@@ -453,6 +453,9 @@ func TestServiceHostnameIsASiblingOfTheDomain(t *testing.T) {
 		{"media.203-0-113-7.sslip.io", "radarr", "media-radarr.203-0-113-7.sslip.io"},
 		{"example.com", "requests", "requests.example.com"},
 		{long + ".example.com", "requests", strings.Repeat("a", 54) + "-requests.example.com"},
+		// A cut that ends on a hyphen leaves it out; the Stacks tab's copy of
+		// the rule (stack-model.ts) holds the same case.
+		{strings.Repeat("a", 53) + "-" + strings.Repeat("b", 10) + ".example.com", "requests", strings.Repeat("a", 53) + "-requests.example.com"},
 		{"", "requests", ""},
 	} {
 		got := ServiceHostname(testCase.domain, testCase.label)

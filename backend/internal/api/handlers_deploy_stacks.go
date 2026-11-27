@@ -149,6 +149,10 @@ type stackLoginState struct {
 type stackAddresses struct {
 	Primary string         `json:"primary"`
 	Missing []stackAddress `json:"missing"`
+	// Unpublished are the services whose address is saved but that the
+	// live release does not serve yet: the release that was to publish
+	// them failed or has not run. Pressing the same button deploys again.
+	Unpublished []stackAddress `json:"unpublished"`
 }
 
 type stackAddress struct {
@@ -419,6 +423,9 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 	}
 	if domains, err := s.stackDomains(ctx, record.EnvironmentID); err == nil {
 		state.Addresses = stackMissingAddresses(manifest, preset, domains, "")
+		if state.LiveReleaseID != 0 {
+			state.Addresses.Unpublished = stackUnpublishedAddresses(manifest, domains, state.Services)
+		}
 	}
 	state.Summary = stackSummary(state)
 	return state, nil
@@ -478,7 +485,7 @@ func stackPrimaryDomain(domains []deploy.PlannedDomain) (deploy.PlannedDomain, b
 // already published those interfaces on loopback, where the route reaches
 // them. primary stands in for a deployment without a primary domain.
 func stackMissingAddresses(manifest *stacks.Manifest, preset stacks.Preset, domains []deploy.PlannedDomain, primary string) stackAddresses {
-	out := stackAddresses{Missing: []stackAddress{}}
+	out := stackAddresses{Missing: []stackAddress{}, Unpublished: []stackAddress{}}
 	if domain, found := stackPrimaryDomain(domains); found {
 		out.Primary = domain.Hostname
 	} else {
@@ -510,6 +517,31 @@ func stackMissingAddresses(manifest *stacks.Manifest, preset stacks.Preset, doma
 			hostname = blueprint.ServiceHostname(out.Primary, label)
 		}
 		out.Missing = append(out.Missing, stackAddress{Service: info.Name, Title: info.Title, Hostname: hostname})
+	}
+	return out
+}
+
+// stackUnpublishedAddresses are the services a saved domain names that the
+// live release gives no URL: saved by "Give every app its address" or on the
+// Domains settings, then not published because that release failed.
+func stackUnpublishedAddresses(manifest *stacks.Manifest, domains []deploy.PlannedDomain, services []stackServiceState) []stackAddress {
+	served := map[string]bool{}
+	for _, service := range services {
+		served[service.Name] = service.URL != ""
+	}
+	titles := map[string]string{}
+	for _, info := range manifest.Services {
+		titles[info.Name] = info.Title
+	}
+	out := []stackAddress{}
+	seen := map[string]bool{}
+	for _, domain := range domains {
+		live, inStack := served[domain.Service]
+		if domain.Service == "" || domain.Redirects() || !inStack || live || seen[domain.Service] {
+			continue
+		}
+		seen[domain.Service] = true
+		out = append(out, stackAddress{Service: domain.Service, Title: titles[domain.Service], Hostname: domain.Hostname})
 	}
 	return out
 }
@@ -728,8 +760,15 @@ func (s *Server) handleStackAddresses(w http.ResponseWriter, r *http.Request) er
 		added = append(added, hostname)
 	}
 	missing := stackMissingAddresses(manifest, preset, domains, "")
-	if len(missing.Missing) == 0 {
-		return httpx.Err(http.StatusConflict, "stack_addresses_present", "every app of the stack already has an address")
+	if len(missing.Missing) == 0 && hasPrimary {
+		// Every address is saved. One the live release does not serve yet
+		// is published by deploying again, which is what the button is
+		// for when the release that was to publish it failed.
+		state, stateErr := s.stackStateOf(r.Context(), record, manifest)
+		if stateErr != nil || len(state.Addresses.Unpublished) == 0 {
+			return httpx.Err(http.StatusConflict, "stack_addresses_present", "every app of the stack already has an address")
+		}
+		return s.deployStackAddresses(w, r, record, configuration.Revision, nil)
 	}
 	for _, address := range missing.Missing {
 		// Served as the primary is: over HTTPS when it is, and through the
@@ -749,6 +788,16 @@ func (s *Server) handleStackAddresses(w http.ResponseWriter, r *http.Request) er
 		return err
 	}
 	s.recordAudit(r, "deploy.configuration.update", strconv.FormatInt(record.EnvironmentID, 10), detail)
+	return s.deployStackAddresses(w, r, record, saved.Revision, added)
+}
+
+// deployStackAddresses starts the release that publishes the stack's
+// addresses at the configuration's revision, as "Deploy changes" starts
+// one, and answers with it.
+func (s *Server) deployStackAddresses(w http.ResponseWriter, r *http.Request, record *stacks.Record, revision int, added []string) error {
+	if added == nil {
+		added = []string{}
+	}
 	project, err := s.modules.deployStore.Get(r.Context(), record.ProjectID)
 	if err != nil {
 		return mapDeployError(err)
@@ -756,7 +805,7 @@ func (s *Server) handleStackAddresses(w http.ResponseWriter, r *http.Request) er
 	principal := httpx.MustPrincipal(r)
 	run, err := s.enqueueNormalizedDeploymentAtSource(r.Context(), project, record.EnvironmentID,
 		deploy.OperationDeploy, 0, deploy.TriggerManual, principal.Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")),
-		nil, "", "", saved.Revision)
+		nil, "", "", revision)
 	if err != nil {
 		return mapDeployError(err)
 	}

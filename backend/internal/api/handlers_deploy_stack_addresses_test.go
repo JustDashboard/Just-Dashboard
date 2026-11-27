@@ -48,14 +48,17 @@ func seedStackDeployment(t *testing.T, s *Server, name, template, preset string,
 	identityJSON, _ := json.Marshal(plan.Detection.Source)
 	buildJSON, _ := json.Marshal(configuration.Build)
 	runtimeJSON, _ := json.Marshal(configuration.Runtime)
+	// The Compose analysis travels in the build plan's evidence, as a
+	// commit leaves it: a service domain is held to it on every save.
+	evidenceJSON, _ := json.Marshal(deploy.StoredBuildEvidence{Compose: plan.Detection.Compose})
 	for _, statement := range []struct {
 		query string
 		args  []any
 	}{
 		{`INSERT INTO deploy_sources(environment_id, revision, kind, config_json, credential_id, identity_json, digest, created_at) VALUES(?, 1, 'compose', ?, 0, ?, 'sha256:seed', ?)`,
 			[]any{environmentID, string(sourceJSON), string(identityJSON), now}},
-		{`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at) VALUES(?, 1, 'compose', ?, '{}', '{}', 'sha256:build-seed', ?)`,
-			[]any{environmentID, string(buildJSON), now}},
+		{`INSERT INTO deploy_build_plans(environment_id, revision, method, config_json, evidence_json, preview, digest, created_at) VALUES(?, 1, 'compose', ?, ?, '{}', 'sha256:build-seed', ?)`,
+			[]any{environmentID, string(buildJSON), string(evidenceJSON), now}},
 		{`INSERT INTO deploy_runtime_plans(environment_id, revision, config_json, preview, digest, created_at) VALUES(?, 1, ?, '{}', 'sha256:runtime-seed', ?)`,
 			[]any{environmentID, string(runtimeJSON), now}},
 	} {
@@ -323,5 +326,33 @@ func TestStackURLsComeFromTheReleasesDomains(t *testing.T) {
 		if urls[service] != url {
 			t.Fatalf("%s = %q, want %q", service, urls[service], url)
 		}
+	}
+}
+
+// An address that is saved but that the live release gives no URL, because
+// the release that was to publish it failed, is unpublished: the button
+// deploys again rather than saying every app has one.
+func TestStackUnpublishedAddressesAreTheSavedOnesTheLiveReleaseDoesNotServe(t *testing.T) {
+	manifest := media.Manifest()
+	domains := []deploy.PlannedDomain{
+		{Hostname: "media.example.test"},
+		{Hostname: "media-requests.example.test", Service: "seerr"},
+		{Hostname: "media-radarr.example.test", Service: "radarr"},
+		{Hostname: "old-radarr.example.test", Service: "radarr"},
+		{Hostname: "www-requests.example.test", Service: "seerr", RedirectTo: "media-requests.example.test"},
+		{Hostname: "elsewhere.example.test", Service: "not-in-the-stack"},
+	}
+	services := []stackServiceState{
+		{Name: "jellyfin", URL: "https://media.example.test"},
+		{Name: "seerr", URL: "https://media-requests.example.test"},
+		{Name: "radarr"},
+		{Name: "sonarr"},
+	}
+	got := stackUnpublishedAddresses(manifest, domains, services)
+	if len(got) != 1 || got[0].Service != "radarr" || got[0].Hostname != "media-radarr.example.test" || got[0].Title != "Radarr" {
+		t.Fatalf("unpublished = %+v, want Radarr's saved address alone", got)
+	}
+	if got := stackUnpublishedAddresses(manifest, domains[:2], services[:2]); len(got) != 0 {
+		t.Fatalf("every saved address is served, yet unpublished = %+v", got)
 	}
 }

@@ -5037,6 +5037,7 @@ export interface StackAddress {
 export interface StackAddresses {
   missing?: StackAddress[] | null
   primary?: string
+  unpublished?: StackAddress[] | null
 }
 
 /** api.stackAddressesAnswer in the dashboard's source. */

@@ -5033,8 +5033,9 @@ type StackAddress struct {
 
 // StackAddresses is api.stackAddresses in the dashboard's source.
 type StackAddresses struct {
-	Missing []StackAddress `json:"missing"`
-	Primary string         `json:"primary,omitempty"`
+	Missing     []StackAddress `json:"missing"`
+	Primary     string         `json:"primary,omitempty"`
+	Unpublished []StackAddress `json:"unpublished"`
 }
 
 // StackAddressesAnswer is api.stackAddressesAnswer in the dashboard's source.

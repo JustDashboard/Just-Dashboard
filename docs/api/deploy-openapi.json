@@ -2898,6 +2898,15 @@
           },
           "primary": {
             "type": "string"
+          },
+          "unpublished": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
           }
         },
         "title": "api.stackAddresses",
