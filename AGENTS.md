@@ -104,7 +104,10 @@ race, and browser requirements in [`CONTRIBUTING.md`](CONTRIBUTING.md). `go.mod`
 This software controls the Docker socket, host services, firewall, accounts, files, and a real shell.
 These invariants must not regress:
 
-1. The network allowlist runs before authentication, and nothing but Caddy binds a routable address.
+1. The network allowlist runs before authentication, and in the shipped stack nothing but Caddy binds a
+   routable address. The backend itself binds one only when the operator sets `JD_ALLOWED_CIDRS` (one
+   that admits every address is refused); agent mode, which its hub must reach, is the named exception,
+   served over TLS with every feature route behind the enrolled hub's certificate.
 2. Two-factor is enforced per account, not per install: an enrolled account is always asked for a code,
    and a session owing a second factor reaches only the 2FA routes. `JD_REQUIRE_2FA` (default false)
    decides only whether an *unenrolled* account may sign in at all. The one documented exception is hub

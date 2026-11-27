@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/tls"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -10,9 +11,35 @@ import (
 
 	"golang.org/x/sys/unix"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/clihost"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/hostexec"
 )
+
+// Agent mode serves JD_ADDR over TLS because a hub on another machine must
+// reach it (invariant 7). The handshake asks every caller for a certificate
+// and requires none, since /agent/info and /agent/enrol answer before a hub
+// is pinned; httpx.HubOnly refuses every feature route without the pinned
+// one.
+func TestAgentModeServesTLSThatAsksEveryCallerForACertificate(t *testing.T) {
+	id, err := agent.Load(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := agentTLS(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.ClientAuth != tls.RequestClientCert {
+		t.Errorf("ClientAuth = %v, want RequestClientCert", cfg.ClientAuth)
+	}
+	if cfg.MinVersion < tls.VersionTLS12 {
+		t.Errorf("MinVersion = %#x, want TLS 1.2 or later", cfg.MinVersion)
+	}
+	if len(cfg.Certificates) != 1 || agent.Fingerprint(cfg.Certificates[0].Certificate[0]) != id.Fingerprint() {
+		t.Errorf("the listener does not serve the agent's own certificate, the one a hub pins")
+	}
+}
 
 // A goroutine that ends while locked takes its thread with it, and the one
 // thread that cannot go is parked forever in whatever namespace it was moved

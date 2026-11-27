@@ -84,12 +84,17 @@ handshake and `HubOnly` enforces per route. Both are behind the allowlist and sp
 address (`loginLim`, 10 a minute); the webhooks answer by their own signatures, as on any install. The
 enrolment token is printed once per boot while unclaimed. Feature routes are the same program either
 way, and the route walks in `api/routes_test.go` and `api/routes_gates_test.go` run over both routers
-(`testAgentServer`). Not useful standalone yet.
+(`testAgentServer`). Not useful standalone yet. It serves `JD_ADDR` itself, over TLS, so it is the named exception in
+[invariant 7](../security/invariants.md#invariants-that-must-not-regress) and held to the same bind rule as
+the ordinary listener: a routable address needs a `JD_ALLOWED_CIDRS` that names the hub. Under the Compose
+stack `JD_ADDR` is pinned to loopback and Caddy forwards plain HTTP, so no hub reaches an agent there.
 
 ## Configuration, version, release, self-update
 
 **`internal/config`** resolves `JD_*` at boot and **fails closed**: no `JD_ALLOWED_CIDRS` with a
-non-loopback bind is a startup error, a missing or malformed `JD_MASTER_KEY` is fatal. A `loader`
+non-loopback bind is a startup error, and so is one that admits every IPv4 or IPv6 address there
+(`admitsEveryAddress`, which reads the list as the allowlist middleware matches it); a missing or
+malformed `JD_MASTER_KEY` is fatal. A `loader`
 collects *every* malformed setting so `Load` refuses with the whole list rather than one error at a time.
 `config.Env` falls back to the legacy `VPSD_*` prefix and `adoptLegacyData` picks up pre-rename
 `/var/lib/vps-dashboard`. A handful of variables are **not** in `config.go`: `JD_LOG_LEVEL` and

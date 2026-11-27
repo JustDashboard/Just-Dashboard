@@ -29,7 +29,10 @@ and it goes back by itself when the new version does not answer; see
 machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enforced:
 
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
-  and the allowlist is checked **before** authentication.
+  or with one that admits every address (`0.0.0.0/0`, `::/0`, or ranges that add up to either), and
+  the allowlist is checked **before** authentication. The Docker Compose stack goes further: the
+  backend and the web app listen on `127.0.0.1` alone, and Caddy is the only thing it puts on an
+  address other machines can reach.
 - Two-factor is enforced for every account that has enrolled, except accounts that opted in to hub
   sign-in on a server whose operator turned it on (`JD_HUB_SIGNIN=true`, off by default; see below);
   `JD_REQUIRE_2FA` decides whether an account *must* enrol. A passkey replaces the password at
