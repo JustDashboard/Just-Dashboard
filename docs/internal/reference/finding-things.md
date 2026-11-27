@@ -231,10 +231,19 @@ Each is a checklist. The linked document owns the rule; this only says which fil
 2. Write the handler beside it: decode with `httpx.DecodeJSON`, name the audit action with
    `httpx.SetAudit`, return `httpx` errors. A GET records nothing through `SetAudit`; one worth a trail
    writes its own entry with `s.recordAudit`.
-3. Add the response type to `lib/types.ts` and call it through `lib/api.ts`.
-4. A route under `/deploy` also needs a line in `deployOperations` (`api/deploy_openapi.go`) and
+3. A mutating route (anything but `GET`, `HEAD` and `OPTIONS`) is held by
+   `TestEveryMutatingRouteIsAuditedAndGated` (`api/routes_gates_test.go`) on the normal and the agent
+   router: audited by `httpx.AuditMutations`, asking for a capability a read-only account lacks, and
+   behind `s.destructive` if it asks for `destructive`. The fix for a failure is nearly always the
+   group it is mounted in. Only a route every role may really call goes on `ungatedMutations`, in the
+   list for the reason that holds (self-service, sign-in, own secret, a read sent as POST, checked by
+   hand), and only a handler that writes its own entry because there is no principal to name goes on
+   `selfAuditedRoutes`. Both lists are reviewed like the routes themselves, and the test fails on an
+   entry the routers no longer mount.
+4. Add the response type to `lib/types.ts` and call it through `lib/api.ts`.
+5. A route under `/deploy` also needs a line in `deployOperations` (`api/deploy_openapi.go`) and
    the regenerated description and clients: [`../backend/deploy-api.md`](../backend/deploy-api.md).
-5. Document it in the feature's backend document.
+6. Document it in the feature's backend document.
 
 **Add a page.** [`../frontend/README.md`](../frontend/README.md) (build a page in five steps),
 [`../frontend/shell.md`](../frontend/shell.md)
@@ -272,7 +281,10 @@ Each is a checklist. The linked document owns the rule; this only says which fil
    schema file beside it), so a new install has it.
 2. Add an entry to `addedColumns` with a `DEFAULT`, so an existing install gains it. Never remove
    or edit a shipped entry: the list is the path from every released schema.
-3. Add a migration test beside the others in `backend/internal/store/`.
+3. Add its `table column` line to `backend/internal/store/testdata/added_columns.txt`, in sorted
+   order. `TestNoShippedAddedColumnIsRemoved` fails until it is there, and fails for good if an entry
+   is ever taken out of `addedColumns`; a line is never removed either.
+4. Add a migration test beside the others in `backend/internal/store/`.
 
 **Add a module** (a feature package the API calls).
 [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md)

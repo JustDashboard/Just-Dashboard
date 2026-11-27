@@ -226,7 +226,8 @@ unchosen after a `?connect=` link ([feature map](../frontend/features/README.md)
 first, under the API rate limit per address, `Cache-Control: no-store`, and nothing in it but
 `{"product":"just-dashboard","protocol":1,"hub":"available|pending|linked"}` (written by hand, byte for byte the
 vectors' bodies). It is not mounted with `JD_HUB_LINK=false` or in agent mode, so those answer `404` as an older
-dashboard does. It is the one route under `/api/v1` that answers without a credential: `publicAPIRoutes` in
+dashboard does. It is the one route under `/api/v1` of a normal install that answers without a credential (an
+agent's are its two pre-enrolment routes, [platform](platform.md)): `publicAPIRoutes` in
 `routes_test.go` lists it with its exact body, `TestNoAPIRouteAnswersWithoutAuthentication` checks that body, and
 the walks of what an API, deploy or MCP key may open read the same list.
 

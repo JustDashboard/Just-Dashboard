@@ -67,10 +67,15 @@ credential-shaped container env, because that is where deployments keep secrets 
 not a `system.admin` route.
 
 **Agent mode** (`JD_AGENT_MODE` / `-agent`) swaps the human login surface for mutual TLS: no password
-route, no session, no 2FA. `httpx.HubOnly` admits only the enrolled hub's certificate; `/agent/enrol` is
-the one route reachable before enrolment, which is why TLS *asks* every caller for a certificate without
-requiring one at the handshake and `HubOnly` enforces per route. The enrolment token is printed once per
-boot while unclaimed. Feature routes are the same program either way. Not useful standalone yet.
+route, no session, no 2FA. `httpx.HubOnly` admits only the enrolled hub's certificate. Two routes answer
+without one, before enrolment and after: `GET /agent/info`, which gives the agent's id, the hostname, the
+build version and the agent's public certificate, so a hub can see what it is enrolling, and
+`POST /agent/enrol`. That is why TLS *asks* every caller for a certificate without requiring one at the
+handshake and `HubOnly` enforces per route. Both are behind the allowlist and spend the login budget per
+address (`loginLim`, 10 a minute); the webhooks answer by their own signatures, as on any install. The
+enrolment token is printed once per boot while unclaimed. Feature routes are the same program either
+way, and the route walks in `api/routes_test.go` and `api/routes_gates_test.go` run over both routers
+(`testAgentServer`). Not useful standalone yet.
 
 ## Configuration, version, release, self-update
 
