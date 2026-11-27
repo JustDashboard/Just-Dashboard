@@ -445,6 +445,14 @@ for (const viewport of [DESK, PHONE]) {
   })
 }
 
+test("the page has one name, as every page does", async ({ page }) => {
+  await page.setViewportSize(DESK)
+  await mockProject(page)
+  await page.goto("/deploy/7/logs")
+  await expect(page.locator("[data-workbench-header]")).toBeVisible()
+  await expect(page.getByRole("main").getByRole("heading", { level: 1 })).toHaveCount(1)
+})
+
 test("an old link to Builds opens the page's own view", async ({ page }) => {
   await mockProject(page)
   await page.goto("/deploy/7/logs?view=builds")

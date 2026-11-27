@@ -184,9 +184,11 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   const domain = project.operations?.domains.domains.find((route) => route.hostname === hostOf(url))
 
   if (workbench) {
+    // No `PageContext` here: the page's strip (`WorkbenchHeader`) says the
+    // `h1`, the project's name as every page of the project says it, and a
+    // second one here named the page twice to a screen reader.
     return (
       <Page fill="workspace">
-        <PageContext title={`${record.name} logs`} />
         {children}
         {dialog}
       </Page>
