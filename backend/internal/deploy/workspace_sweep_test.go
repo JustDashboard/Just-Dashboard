@@ -105,3 +105,98 @@ func TestStartUpSweepRemovesOnlyFinishedRunsWorkspaces(t *testing.T) {
 		t.Fatalf("missing root = %d, %v", removed, err)
 	}
 }
+
+// A Compose release runs from its run's workspace: stopping it for the next
+// release and starting it again run Compose there. The workspace is kept
+// while the runtime record says the release's containers may still be on
+// the server, and goes once it is retired, failed or removed: those come
+// only after the containers were removed, and a rollback has a workspace of
+// its own.
+func TestAComposeReleasesWorkspaceIsKeptWhileItsContainersMayRun(t *testing.T) {
+	t.Parallel()
+	executor, ids, root := workspaceFixture(t, RunSucceeded, RunSucceeded, RunSucceeded, RunSucceeded, RunSucceeded, RunSucceeded)
+	db := executor.store.db
+	var projectID, environmentID int64
+	if err := db.QueryRow(`SELECT project_id, environment_id FROM deploy_runs WHERE id = ?`, ids[0]).Scan(&projectID, &environmentID); err != nil {
+		t.Fatal(err)
+	}
+	runtime := func(runID int64, number int, kind, state, directory string) {
+		t.Helper()
+		result, err := db.Exec(`INSERT INTO deploy_releases(project_id, environment_id, release_number, run_id, state, created_at) VALUES(?, ?, ?, ?, 'live', 1)`,
+			projectID, environmentID, number, runID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		releaseID, _ := result.LastInsertId()
+		if _, err := db.Exec(`INSERT INTO deploy_release_runtimes(release_id, environment_id, kind, runtime_id, working_directory, state, created_at, updated_at) VALUES(?, ?, ?, 'jd-e1', ?, ?, 1, 1)`,
+			releaseID, environmentID, kind, directory, state); err != nil {
+			t.Fatal(err)
+		}
+	}
+	workspace := func(id int64) string { return filepath.Join(root, "run-"+strconv.FormatInt(id, 10)) }
+	runtime(ids[0], 1, "compose", "live", filepath.Join(workspace(ids[0]), "source"))
+	runtime(ids[1], 2, "compose", "stopped", filepath.Join(workspace(ids[1]), "source", "stack"))
+	runtime(ids[2], 3, "compose", "retired", filepath.Join(workspace(ids[2]), "source"))
+	runtime(ids[3], 4, "compose", "failed", filepath.Join(workspace(ids[3]), "source"))
+	runtime(ids[4], 5, "compose", "removed", filepath.Join(workspace(ids[4]), "source"))
+	// A container release's directory is nothing Compose reads again, and a
+	// sibling whose name only starts with the workspace's is another run's.
+	runtime(ids[5], 6, "container", "live", filepath.Join(workspace(ids[5]), "source"))
+	writeBuildFixture(t, root, "run-"+strconv.FormatInt(ids[0], 10)+"0/source.json", "{}")
+
+	observer := executor.HousekeepingObserver()
+	observer.RunFinished(context.Background(), EngineRun{ID: ids[0], State: RunSucceeded})
+	if !workspaceExists(t, root, ids[0]) {
+		t.Fatal("the workspace a live Compose release runs from was removed when its run finished")
+	}
+	observer.RunFinished(context.Background(), EngineRun{ID: ids[2], State: RunSucceeded})
+	if workspaceExists(t, root, ids[2]) {
+		t.Fatal("a retired Compose release's workspace was kept when its run finished")
+	}
+	removed, err := executor.SweepWorkspaces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, want := range []bool{true, true, false, false, false, false} {
+		if got := workspaceExists(t, root, ids[index]); got != want {
+			t.Fatalf("after the sweep, run %d's workspace exists = %v, want %v", index, got, want)
+		}
+	}
+	if removed != 4 {
+		t.Fatalf("removed %d workspaces, want the failed, removed and container releases' and the unrecorded run's", removed)
+	}
+	if _, err := db.Exec(`UPDATE deploy_release_runtimes SET state = 'retired' WHERE working_directory = ?`, filepath.Join(workspace(ids[0]), "source")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := executor.SweepWorkspaces(context.Background()); err != nil || workspaceExists(t, root, ids[0]) || !workspaceExists(t, root, ids[1]) {
+		t.Fatalf("after the live release retired: kept %v (want false), stopped kept %v (want true), %v",
+			workspaceExists(t, root, ids[0]), workspaceExists(t, root, ids[1]), err)
+	}
+}
+
+// A Compose release whose project directory, a Compose file or its
+// override is no longer there is stopped and started by its containers; one
+// whose files are all there is Compose's.
+func TestComposeFilesGoneNamesAReleaseWithoutItsFiles(t *testing.T) {
+	t.Parallel()
+	directory := t.TempDir()
+	writeBuildFixture(t, directory, "compose.yaml", "services: {}")
+	writeBuildFixture(t, directory, ".just-dashboard/release.yml", "services: {}")
+	whole := dockerReleaseRuntimeMetadata{ProjectDirectory: directory, ComposeFiles: []string{"compose.yaml"},
+		OverrideFile: filepath.Join(directory, ".just-dashboard/release.yml")}
+	if composeFilesGone(whole) {
+		t.Fatal("a release with every file was taken for one without")
+	}
+	for name, metadata := range map[string]dockerReleaseRuntimeMetadata{
+		"directory": {ProjectDirectory: filepath.Join(directory, "gone"), ComposeFiles: []string{"compose.yaml"}},
+		"file":      {ProjectDirectory: directory, ComposeFiles: []string{"compose.yaml", "other.yaml"}},
+		"override":  {ProjectDirectory: directory, ComposeFiles: []string{"compose.yaml"}, OverrideFile: filepath.Join(directory, "missing.yml")},
+	} {
+		if !composeFilesGone(metadata) {
+			t.Fatalf("a release without its %s was taken for a whole one", name)
+		}
+	}
+	if composeFilesGone(dockerReleaseRuntimeMetadata{}) {
+		t.Fatal("a record without a project directory is not one whose files went")
+	}
+}

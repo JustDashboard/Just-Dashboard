@@ -1,6 +1,6 @@
 {
   "id": "media-essential",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Media server (Essential)",
   "stack": "media",
   "category": "http",
@@ -10,22 +10,30 @@
   "docsUrl": "https://jellyfin.org/docs/",
   "access": {
     "kind": "setup",
-    "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and keeps the accounts it creates. Reveal them on the stack's page."
+    "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and signs every one in with one login: admin and a password it keeps. Reveal it, or change it, on the stack's page."
   },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://github.com/jellyfin/jellyfin",
-    "reviewedAt": "2026-11-26",
+    "reviewedAt": "2026-11-27",
     "minimumDashboard": "0.9.1"
   },
   "inputs": [
     {
       "name": "domain",
       "kind": "domain",
-      "label": "Jellyfin's domain",
+      "label": "Domain",
+      "required": true,
+      "description": "The address Jellyfin opens at. Seerr gets its own beside it: media.example.com gives media-requests.example.com."
+    },
+    {
+      "name": "login-password",
+      "kind": "secret",
+      "label": "Password for every app",
+      "variable": "MEDIA_LOGIN_PASSWORD",
       "required": false,
-      "description": "Optional; the address you and your apps open Jellyfin at. Seerr and the managers stay on this server until you publish them."
+      "description": "Every app signs in as admin with one password. Leave it empty and the dashboard makes one; change it later on the stack's page."
     },
     {
       "name": "request-approval",
@@ -143,7 +151,7 @@
           "name": "http",
           "internal": 5055,
           "protocol": "tcp",
-          "purpose": "The request desk, on this server's loopback until you publish it",
+          "purpose": "The request desk, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -180,7 +188,8 @@
           "condition": "healthy"
         }
       ],
-      "egress": true
+      "egress": true,
+      "address": "requests"
     }
   ],
   "checks": [
@@ -203,8 +212,10 @@
   "fixtures": [
     {
       "name": "default",
-      "inputs": {},
-      "digest": "sha256:1d3807c8dbd91af0f075e235b4ff7567dff6a2f574b7161c748288f1dce013b4"
+      "inputs": {
+        "domain": "media.example.com"
+      },
+      "digest": "sha256:3e6774ade496338669b2f0fa20037f64116cc4faa550b4b40a5047000297c198"
     }
   ]
 }

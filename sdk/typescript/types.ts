@@ -3080,6 +3080,79 @@ export interface ManifestStart {
   state?: string
 }
 
+/** media.MediaSource in the dashboard's source. */
+export interface MediaSource {
+  definition?: string
+  enabled?: boolean
+  id?: number
+  name?: string
+  privacy?: MediaSourcePrivacy
+  protocol?: string
+}
+
+/** media.MediaSourceCatalogue in the dashboard's source. */
+export interface MediaSourceCatalogue {
+  definitions?: MediaSourceDefinition[] | null
+  fetchedAt?: string
+}
+
+/** media.MediaSourceDefinition in the dashboard's source. */
+export interface MediaSourceDefinition {
+  definition?: string
+  description?: string
+  language?: string
+  name?: string
+  needsInput?: boolean
+  privacy?: MediaSourcePrivacy
+}
+
+/** media.MediaSourceDetail in the dashboard's source. */
+export interface MediaSourceDetail {
+  definition?: string
+  description?: string
+  fields?: MediaSourceField[] | null
+  name?: string
+  privacy?: MediaSourcePrivacy
+  urls?: string[] | null
+}
+
+/** media.MediaSourceField in the dashboard's source. */
+export interface MediaSourceField {
+  advanced?: boolean
+  help?: string
+  label?: string
+  name?: string
+  options?: MediaSourceOption[] | null
+  type?: MediaSourceFieldType
+  /** Any JSON value. */
+  value?: unknown
+}
+
+/** One of the values of media.MediaSourceFieldType. */
+export const MediaSourceFieldType = {
+  Text: "text",
+  Password: "password",
+  Number: "number",
+  Checkbox: "checkbox",
+  Select: "select",
+} as const
+export type MediaSourceFieldType = (typeof MediaSourceFieldType)[keyof typeof MediaSourceFieldType]
+
+/** media.MediaSourceOption in the dashboard's source. */
+export interface MediaSourceOption {
+  label?: string
+  /** Any JSON value. */
+  value?: unknown
+}
+
+/** One of the values of media.MediaSourcePrivacy. */
+export const MediaSourcePrivacy = {
+  Public: "public",
+  SemiPrivate: "semiPrivate",
+  Private: "private",
+} as const
+export type MediaSourcePrivacy = (typeof MediaSourcePrivacy)[keyof typeof MediaSourcePrivacy]
+
 /** metrics.MemorySizing in the dashboard's source. */
 export interface MemorySizing {
   limitMb?: number
@@ -3294,6 +3367,7 @@ export interface Plan {
   profile?: Profile
   pullPolicy?: string
   security?: Security
+  serviceDomains?: ServiceDomain[] | null
   services?: RenderedService[] | null
   stopCommands?: string[] | null
   stopSignal?: string
@@ -3348,9 +3422,11 @@ export interface PlannedDomain {
   hostname?: string
   https?: boolean
   ownership?: OwnershipMode
+  port?: number
   protection?: DomainProtection | null
   redirectCode?: number
   redirectTo?: string
+  service?: string
   tunnel?: boolean
 }
 
@@ -4691,6 +4767,7 @@ export interface Series {
 
 /** blueprint.Service in the dashboard's source. */
 export interface Service {
+  address?: string
   dependsOn?: Dependency[] | null
   egress?: boolean
   environment?: Environment[] | null
@@ -4702,6 +4779,12 @@ export interface Service {
   resources?: Resources
   role?: ServiceRole
   volumes?: Volume[] | null
+}
+
+/** blueprint.ServiceDomain in the dashboard's source. */
+export interface ServiceDomain {
+  hostname?: string
+  service?: string
 }
 
 /** One of the values of blueprint.ServiceRole. */
@@ -4943,6 +5026,31 @@ export const SourceMode = {
 } as const
 export type SourceMode = (typeof SourceMode)[keyof typeof SourceMode]
 
+/** api.stackAddress in the dashboard's source. */
+export interface StackAddress {
+  hostname?: string
+  service?: string
+  title?: string
+}
+
+/** api.stackAddresses in the dashboard's source. */
+export interface StackAddresses {
+  missing?: StackAddress[] | null
+  primary?: string
+  unpublished?: StackAddress[] | null
+}
+
+/** api.stackAddressesAnswer in the dashboard's source. */
+export interface StackAddressesAnswer {
+  domains?: string[] | null
+  runId?: number
+}
+
+/** api.stackAddressesRequest in the dashboard's source. */
+export interface StackAddressesRequest {
+  domain?: string
+}
+
 /** api.stackCatalogueEntry in the dashboard's source. */
 export interface StackCatalogueEntry {
   description?: string
@@ -4956,10 +5064,12 @@ export interface StackCatalogueEntry {
 /** api.stackCatalogueItem in the dashboard's source. */
 export interface StackCatalogueItem {
   access?: StacksAccess
+  address?: string
   docsUrl?: string
   image?: string
   name?: string
   port?: number
+  primary?: boolean
   purpose?: string
   title?: string
 }
@@ -5006,6 +5116,18 @@ export interface StackCredentialReveal {
   username?: string
 }
 
+/** api.stackLoginRequest in the dashboard's source. */
+export interface StackLoginRequest {
+  /** A secret: it is accepted here and never read back by any route. */
+  password?: string
+}
+
+/** api.stackLoginState in the dashboard's source. */
+export interface StackLoginState {
+  stored?: boolean
+  username?: string
+}
+
 /** api.stackReadiness in the dashboard's source. */
 export interface StackReadiness {
   acquisition?: boolean
@@ -5029,14 +5151,34 @@ export interface StackServiceState {
   url?: string
 }
 
+/** api.stackSourceAddAnswer in the dashboard's source. */
+export interface StackSourceAddAnswer {
+  source?: MediaSource
+  synced?: boolean
+}
+
+/** api.stackSourceAddRequest in the dashboard's source. */
+export interface StackSourceAddRequest {
+  definition?: string
+  /** A secret: it is accepted here and never read back by any route. */
+  fields?: Record<string, unknown> | null
+}
+
+/** api.stackSourcesAnswer in the dashboard's source. */
+export interface StackSourcesAnswer {
+  sources?: MediaSource[] | null
+}
+
 /** api.stackState in the dashboard's source. */
 export interface StackState {
   actions?: StacksAction[] | null
+  addresses?: StackAddresses
   configuredReleaseId?: number
   credentials?: StackCredentialListing[] | null
   finishedAt?: string | null
   limitations?: string[] | null
   liveReleaseId?: number
+  login?: StackLoginState
   preset?: string
   presetTitle?: string
   readiness?: StackReadiness

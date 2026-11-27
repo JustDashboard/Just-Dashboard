@@ -159,6 +159,9 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"GET /deploy/{id}/lifecycle/stream":                                 keyOpen,
 	"GET /deploy/{id}/availability":                                     keyOpen,
 	"GET /deploy/{id}/stack":                                            keyOpen,
+	"GET /deploy/{id}/stack/sources":                                    keyOpen,
+	"GET /deploy/{id}/stack/sources/catalogue":                          keyOpen,
+	"GET /deploy/{id}/stack/sources/catalogue/{definition}":             keyOpen,
 	"GET /deploy/{id}/alerts":                                           keyOpen,
 	"GET /deploy/{id}/commits":                                          keyOpen,
 	"GET /deploy/{id}/operations":                                       keyOpen,
@@ -197,11 +200,18 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/{id}/run":                         keyOpen,
 	"POST /deploy/{id}/environments/{env}/runs":     keyOpen,
 	"POST /deploy/{id}/stack/configure":             keyOpen,
+	"POST /deploy/{id}/stack/addresses":             keyOpen,
 	"POST /deploy/{id}/runs/{run}/cancel":           keyOpen,
 	"POST /deploy/{id}/runs/{run}/retry":            keyOpen,
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,
 	"POST /deploy/{id}/rollback":                    keyOpen,
 	"POST /deploy/{id}/environments/{env}/rollback": keyOpen,
+	// A media source is configuring the stack's applications, as Retry is; what
+	// is typed into its form goes to Prowlarr as a variable's value goes to the
+	// deployment, and is read back by no route. Removing one spends the
+	// destructive budget, as a rollback does.
+	"POST /deploy/{id}/stack/sources":              keyOpen,
+	"DELETE /deploy/{id}/stack/sources/{sourceId}": keyOpen,
 	// Promoting is deploying production with staging's image, or staging
 	// with a pull request preview's: the same capability, queue, checks and
 	// cutover as a deploy. A preview's takes the administrator's role, which
@@ -275,6 +285,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// Session-only, whatever the key.
 	"GET /deploy/{id}/environments/{env}/variables/{name}/reveal": keySession(whyReveal),
 	"GET /deploy/{id}/stack/credentials/{name}/reveal":            keySession(whyReveal),
+	"PUT /deploy/{id}/stack/login":                                keySession(whyReveal),
 	"GET /deploy/shared-variables/{name}/reveal":                  keySession(whyReveal),
 	"GET /deploy/{id}/shared-variables/{name}/reveal":             keySession(whyReveal),
 	"GET /deploy/{id}/env/reveal":                                 keySession(whyReveal),

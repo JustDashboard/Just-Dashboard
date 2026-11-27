@@ -66,7 +66,7 @@ func TestServarrAuthSecuresOnceThenLeavesAlone(t *testing.T) {
 
 			first := arrRun(t, stack.env, step)
 			arrWant(t, fake.written(), []string{"PUT config/host/1"})
-			password, _, _ := stack.env.LookupCredential(context.Background(), app.adminCredential)
+			password, _, _ := stack.env.LookupCredential(context.Background(), CredentialLogin)
 			if fake.password != password || len(password) != generatedPasswordLength {
 				t.Fatalf("the application was not given the stack's %d character password", generatedPasswordLength)
 			}
@@ -186,7 +186,7 @@ func TestServarrDownloadClientIsTestedSavedOnceAndUpdatedInPlace(t *testing.T) {
 		t.Run(app.service, func(t *testing.T) {
 			stack := newArrFakeStack(t)
 			fake := map[string]*arrFake{"radarr": stack.radarr, "sonarr": stack.sonarr}[app.service]
-			password, _ := stack.env.Credential(context.Background(), CredentialQBittorrent)
+			password, _ := stack.env.Credential(context.Background(), CredentialLogin)
 			accepted := password
 			fake.passes = arrQBittorrentAccepts(&accepted)
 			// A client the person made, which must come through untouched.
@@ -335,7 +335,7 @@ func TestProwlarrAppsAreTestedSavedOnceAndFoundByName(t *testing.T) {
 
 func TestDownloadsVerifyTestsBothClientsAndReadsHealth(t *testing.T) {
 	stack := newArrFakeStack(t)
-	password, _ := stack.env.Credential(context.Background(), CredentialQBittorrent)
+	password, _ := stack.env.Credential(context.Background(), CredentialLogin)
 	accepted := password
 	for _, fake := range []*arrFake{stack.radarr, stack.sonarr} {
 		fake.passes = arrQBittorrentAccepts(&accepted)
@@ -404,9 +404,9 @@ func TestProwlarrSourcesAsksForASourceAndNeverAddsOne(t *testing.T) {
 	}
 	none := action()
 	if none.ID != "media-source" || none.Service != "prowlarr" || !none.Blocking || none.Title != "Add a media source" ||
-		!strings.Contains(none.Description, "a source you are allowed to use") || !strings.Contains(none.Description, "None is included") ||
-		!strings.Contains(none.Description, "shares it with Radarr and Sonarr") ||
-		!strings.Contains(none.Description, "run the setup again") {
+		!strings.Contains(none.Description, "one you are allowed to use") || !strings.Contains(none.Description, "none is included") ||
+		!strings.Contains(none.Description, "share it with Radarr and Sonarr") ||
+		!strings.Contains(none.Description, "Sources page") {
 		t.Fatalf("action: %+v", none)
 	}
 
@@ -414,7 +414,7 @@ func TestProwlarrSourcesAsksForASourceAndNeverAddsOne(t *testing.T) {
 	// the live run), cut to what the step reads.
 	stack.prowlarr.indexers = []map[string]any{{"id": 1, "name": "A source", "enable": false, "protocol": "torrent", "privacy": "public"}}
 	if off := action(); !strings.Contains(off.Description, "1 media source, but none is switched on") ||
-		!strings.Contains(off.Description, "run the setup again") {
+		!strings.Contains(off.Description, "Sources page") || !strings.Contains(off.Description, "run the setup again") {
 		t.Fatalf("action: %+v", off)
 	}
 

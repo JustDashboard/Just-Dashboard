@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/url"
+	"slices"
+	"strings"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 )
@@ -72,12 +74,25 @@ type jellyfinKey struct {
 	AppName     string `json:"AppName"`
 }
 
+// Markers kept with the stack's credentials, though neither is a secret.
+const (
+	// markerJellyfinLogin records which login Jellyfin's administrator was
+	// last confirmed to sign in with (loginDigest), so a pass need not try a
+	// password to know it is still the one.
+	markerJellyfinLogin = "jellyfin-login-applied"
+	// markerJellyfinAsked records that the stack told the person to give its
+	// account to a Jellyfin someone else set up: from then on its password is
+	// one the person may have set, worth one sign-in a pass.
+	markerJellyfinAsked = "jellyfin-owner-asked"
+)
+
 // jellyfinSetup finishes Jellyfin's first-run wizard with the stack's own
-// administrator and keeps an API key for the steps after it.
+// administrator, keeps an API key for the steps after it, and brings the
+// administrator's password to the stack's one login.
 //
-// A wrong password counts towards Jellyfin locking an account out, so the
-// administrator's password is tried only when there is no working API key,
-// and never one the stack made up for the occasion.
+// A wrong password counts towards Jellyfin locking an account out, so a
+// password is tried only when there is no working API key or the login
+// changed, and never one Jellyfin cannot have been given.
 func jellyfinSetup(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	base, err := env.BaseURL(ctx, "jellyfin", PortJellyfin)
 	if err != nil {
@@ -96,14 +111,14 @@ func jellyfinSetup(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 		return stacks.Result{}, err
 	}
 	outputs := map[string]string{"serverId": info.ID, "version": info.Version}
+	login, older, err := loginCandidates(ctx, env, legacyJellyfinAdmin)
+	if err != nil {
+		return stacks.Result{}, err
+	}
 
-	ranWizard := false
+	ranWizard, keyWorks := false, false
 	if !info.StartupWizardCompleted {
-		password, err := env.Credential(ctx, CredentialJellyfinAdmin)
-		if err != nil {
-			return stacks.Result{}, err
-		}
-		if err := jellyfinWizard(ctx, api, password); err != nil {
+		if err := jellyfinWizard(ctx, api, login); err != nil {
 			return stacks.Result{}, err
 		}
 		ranWizard = true
@@ -111,89 +126,223 @@ func jellyfinSetup(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	} else if key, found, err := env.LookupCredential(ctx, CredentialJellyfinAPIKey); err != nil {
 		return stacks.Result{}, err
 	} else if found && key != "" {
-		works, err := jellyfinKeyWorks(ctx, env, base, key)
-		if err != nil {
+		if keyWorks, err = jellyfinKeyWorks(ctx, env, base, key); err != nil {
 			return stacks.Result{}, err
 		}
-		if works {
-			return stacks.Result{Message: "Jellyfin is set up, and the stack's API key works", Outputs: outputs}, nil
+		if !keyWorks {
+			env.Logf("Jellyfin no longer accepts the stack's API key; signing in to make another")
 		}
-		env.Logf("Jellyfin no longer accepts the stack's API key; signing in to make another")
 	}
 
-	password, found, err := env.LookupCredential(ctx, CredentialJellyfinAdmin)
-	if err != nil {
-		return stacks.Result{}, err
-	}
-	if !found || password == "" {
-		// Somebody finished the wizard before the stack had an account. The
-		// password is made now so the page can show what to set.
-		if _, err := env.Credential(ctx, CredentialJellyfinAdmin); err != nil {
+	created := false
+	if !keyWorks {
+		if created, err = jellyfinMakeKey(ctx, env, api, login, older, ranWizard); err != nil {
 			return stacks.Result{}, err
 		}
-		return stacks.Result{}, jellyfinTakenOver()
 	}
-	token, signedIn, err := jellyfinSignIn(ctx, api, password)
+	key, _, err := env.LookupCredential(ctx, CredentialJellyfinAPIKey)
 	if err != nil {
 		return stacks.Result{}, err
+	}
+	changed, err := jellyfinLogin(ctx, env, base, key, login)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	if err := forgetLegacy(ctx, env, legacyJellyfinAdmin); err != nil {
+		return stacks.Result{}, err
+	}
+	message := "Jellyfin is set up; " + AdminUsername + " signs in with the stack's password"
+	switch {
+	case ranWizard:
+		message = "Finished Jellyfin's first-run setup and created the administrator " + AdminUsername
+	case changed:
+		message = "Jellyfin's administrator " + AdminUsername + " now signs in with the stack's password"
+	case created:
+		message = "Jellyfin is set up; made a new API key for the stack"
+	case keyWorks:
+		message = "Jellyfin is set up, and the stack's API key works"
+	}
+	return stacks.Result{Message: message, Outputs: outputs}, nil
+}
+
+// jellyfinMakeKey signs in as the administrator and makes the stack's API
+// key, or finds the one it made before. It reports whether it made one.
+func jellyfinMakeKey(ctx context.Context, env stacks.Env, api *jellyfinAPI, login string, older []string, ranWizard bool) (bool, error) {
+	if !ranWizard {
+		// Somebody else finished the wizard. The stack's account can be
+		// there only if the stack set its password before, or asked the
+		// person to: otherwise a sign-in would be one refusal spent on a
+		// password Jellyfin was never given.
+		known := false
+		for _, marker := range []string{markerJellyfinLogin, markerJellyfinAsked, legacyJellyfinAdmin} {
+			_, found, err := env.LookupCredential(ctx, marker)
+			if err != nil {
+				return false, err
+			}
+			known = known || found
+		}
+		if !known {
+			if err := env.SetCredential(ctx, markerJellyfinAsked, "asked"); err != nil {
+				return false, err
+			}
+			return false, jellyfinTakenOver()
+		}
+	}
+	token, signedIn, err := jellyfinSignIn(ctx, api, login)
+	if err != nil {
+		return false, err
+	}
+	usedLogin := signedIn
+	// A login changed before Jellyfin was brought to it: the one before is
+	// tried once, and the steps below then set the new one.
+	for _, candidate := range older {
+		if signedIn || ranWizard {
+			break
+		}
+		if token, signedIn, err = jellyfinSignIn(ctx, api, candidate); err != nil {
+			return false, err
+		}
 	}
 	if !signedIn {
 		if ranWizard {
-			return stacks.Result{}, errors.New("Jellyfin refused the administrator it was just set up with")
+			return false, errors.New("Jellyfin refused the administrator it was just set up with")
 		}
-		return stacks.Result{}, jellyfinTakenOver()
+		if err := env.SetCredential(ctx, markerJellyfinAsked, "asked"); err != nil {
+			return false, err
+		}
+		return false, jellyfinTakenOver()
 	}
-	session := &jellyfinAPI{env: env, base: base, token: token}
+	session := &jellyfinAPI{env: env, base: api.base, token: token}
 	// The session was only for making the key. Leaving it would add a device
 	// to the administrator's list on every run.
 	defer func() { _, _ = session.call(context.WithoutCancel(ctx), http.MethodPost, "/Sessions/Logout", nil, nil) }()
+	if usedLogin {
+		if err := env.SetCredential(ctx, markerJellyfinLogin, loginDigest("jellyfin", login)); err != nil {
+			return false, err
+		}
+	}
 
 	stored, _, err := env.LookupCredential(ctx, CredentialJellyfinAPIKey)
 	if err != nil {
-		return stacks.Result{}, err
+		return false, err
 	}
 	key, err := jellyfinFindKey(ctx, session, stored)
 	if err != nil {
-		return stacks.Result{}, err
+		return false, err
 	}
 	created := false
 	if key == "" {
 		reply, err := session.call(ctx, http.MethodPost, "/Auth/Keys", url.Values{"app": {jellyfinKeyName}}, nil)
 		if err != nil {
-			return stacks.Result{}, err
+			return false, err
 		}
 		if reply.Status != http.StatusNoContent {
-			return stacks.Result{}, reply.unexpected("Jellyfin did not create an API key", password, token)
+			return false, reply.unexpected("Jellyfin did not create an API key", login, token)
 		}
 		// Creating a key answers with nothing; the key is read from the list.
 		if key, err = jellyfinFindKey(ctx, session, ""); err != nil {
-			return stacks.Result{}, err
+			return false, err
 		}
 		if key == "" {
-			return stacks.Result{}, errors.New("Jellyfin created an API key but does not list it")
+			return false, errors.New("Jellyfin created an API key but does not list it")
 		}
 		created = true
 	}
-	works, err := jellyfinKeyWorks(ctx, env, base, key)
+	works, err := jellyfinKeyWorks(ctx, env, api.base, key)
 	if err != nil {
-		return stacks.Result{}, err
+		return false, err
 	}
 	if !works {
-		return stacks.Result{}, errors.New("Jellyfin lists the stack's API key but does not accept it")
+		return false, errors.New("Jellyfin lists the stack's API key but does not accept it")
 	}
 	if key != stored {
 		if err := env.SetCredential(ctx, CredentialJellyfinAPIKey, key); err != nil {
-			return stacks.Result{}, err
+			return false, err
 		}
 	}
-	message := "Jellyfin is set up; its administrator signs in"
-	switch {
-	case ranWizard:
-		message = "Finished Jellyfin's first-run setup and created the administrator " + AdminUsername
-	case created:
-		message = "Jellyfin is set up; made a new API key for the stack"
+	return created, nil
+}
+
+// jellyfinLogin brings the administrator's password to the stack's login,
+// with the API key as an administrator changes anyone's. Whether it is the
+// login already is kept as a marker, so a pass that changes nothing tries
+// no password; when the marker does not say, one sign-in does, and that
+// sign-in also clears Jellyfin's count of refused ones. It reports whether it
+// changed the password.
+func jellyfinLogin(ctx context.Context, env stacks.Env, base, key, login string) (bool, error) {
+	want := loginDigest("jellyfin", login)
+	applied, _, err := env.LookupCredential(ctx, markerJellyfinLogin)
+	if err != nil {
+		return false, err
 	}
-	return stacks.Result{Message: message, Outputs: outputs}, nil
+	if applied == want {
+		return false, nil
+	}
+	api := &jellyfinAPI{env: env, base: base}
+	previous, _, err := env.LookupCredential(ctx, CredentialLoginPrevious)
+	if err != nil {
+		return false, err
+	}
+	// Known to be on the previous login: the probe would only be refused.
+	if previous == "" || applied != loginDigest("jellyfin", previous) {
+		token, signedIn, err := jellyfinSignIn(ctx, api, login)
+		if err != nil {
+			return false, err
+		}
+		if signedIn {
+			session := &jellyfinAPI{env: env, base: base, token: token}
+			_, _ = session.call(context.WithoutCancel(ctx), http.MethodPost, "/Sessions/Logout", nil, nil)
+			return false, env.SetCredential(ctx, markerJellyfinLogin, want)
+		}
+	}
+	admin := &jellyfinAPI{env: env, base: base, token: key}
+	id, err := jellyfinAdminID(ctx, admin)
+	if err != nil {
+		return false, err
+	}
+	reply, err := admin.call(ctx, http.MethodPost, "/Users/Password", url.Values{"userId": {id}},
+		map[string]any{"CurrentPw": "", "NewPw": login, "ResetPassword": false})
+	if err != nil {
+		return false, err
+	}
+	if reply.Status != http.StatusNoContent {
+		return false, reply.unexpected("Jellyfin did not take the stack's password for "+AdminUsername, login, key)
+	}
+	token, signedIn, err := jellyfinSignIn(ctx, api, login)
+	if err != nil {
+		return false, err
+	}
+	if !signedIn {
+		return false, errors.New("Jellyfin took the stack's password for " + AdminUsername + " but does not sign in with it")
+	}
+	session := &jellyfinAPI{env: env, base: base, token: token}
+	_, _ = session.call(context.WithoutCancel(ctx), http.MethodPost, "/Sessions/Logout", nil, nil)
+	env.Logf("gave Jellyfin's administrator %s the stack's password; its other devices sign in again", AdminUsername)
+	return true, env.SetCredential(ctx, markerJellyfinLogin, want)
+}
+
+// jellyfinAdminID is the id of the account named admin.
+func jellyfinAdminID(ctx context.Context, admin *jellyfinAPI) (string, error) {
+	reply, err := admin.call(ctx, http.MethodGet, "/Users", nil, nil)
+	if err != nil {
+		return "", err
+	}
+	if reply.Status != http.StatusOK {
+		return "", reply.unexpected("Jellyfin did not list its accounts", admin.token)
+	}
+	var users []struct {
+		ID   string `json:"Id"`
+		Name string `json:"Name"`
+	}
+	if err := reply.decode(&users); err != nil {
+		return "", err
+	}
+	for _, user := range users {
+		if user.Name == AdminUsername && user.ID != "" {
+			return user.ID, nil
+		}
+	}
+	return "", stacks.Permanent(fmt.Errorf("Jellyfin has no account named %s", AdminUsername))
 }
 
 // jellyfinWizard is the first-run wizard's own requests, in its order. Each
@@ -323,7 +472,7 @@ func jellyfinTakenOver() error {
 		Title:   "Jellyfin was set up by someone else",
 		Description: "Jellyfin's first-run setup is already finished, and the stack's administrator does not sign in. " +
 			"Nothing was changed. In Jellyfin, create an administrator named " + AdminUsername + " (or change that account's password) " +
-			"with the Jellyfin password shown under this stack's credentials, then run the setup again. " +
+			"with the stack's password shown on this page, then run the setup again. " +
 			"Each run before that is one refused sign-in for " + AdminUsername + ", and Jellyfin locks an account after several.",
 		Blocking: true,
 	})
@@ -432,4 +581,83 @@ func jellyfinFolderFor(folders []jellyfinFolder, path string) (jellyfinFolder, b
 		}
 	}
 	return jellyfinFolder{}, false
+}
+
+// jellyfinProxy has Jellyfin trust the proxy in front of it: the networks
+// its container is on become known proxies, so it reads each visitor's own
+// address from the proxy rather than seeing every one of them as the proxy,
+// on this server's own network, which it would count as local. Proxies the
+// person added stay. Jellyfin 12.4 saves them at once and reads them when it
+// starts, so they apply from its next start: the next deploy, or a restart
+// of the service. The stack does not restart it under whoever is watching.
+func jellyfinProxy(ctx context.Context, env stacks.Env) (stacks.Result, error) {
+	base, err := env.BaseURL(ctx, "jellyfin", PortJellyfin)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	key, found, err := env.LookupCredential(ctx, CredentialJellyfinAPIKey)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	if !found || key == "" {
+		return stacks.Result{}, errors.New("the stack has no Jellyfin API key yet")
+	}
+	subnets, err := env.NetworkSubnets(ctx, "jellyfin")
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	api := &jellyfinAPI{env: env, base: base, token: key}
+	read := func() (map[string]any, error) {
+		reply, err := api.call(ctx, http.MethodGet, "/System/Configuration/network", nil, nil)
+		if err != nil {
+			return nil, err
+		}
+		if reply.Status != http.StatusOK {
+			return nil, reply.unexpected("Jellyfin did not give its network settings", key)
+		}
+		network := map[string]any{}
+		return network, reply.decode(&network)
+	}
+	network, err := read()
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	known, missing := jellyfinProxies(network, subnets)
+	if len(missing) > 0 {
+		// The whole settings object goes back: Jellyfin replaces it.
+		network["KnownProxies"] = append(known, missing...)
+		reply, err := api.call(ctx, http.MethodPost, "/System/Configuration/network", nil, network)
+		if err != nil {
+			return stacks.Result{}, err
+		}
+		if reply.Status != http.StatusNoContent {
+			return stacks.Result{}, reply.unexpected("Jellyfin did not save its known proxies", key)
+		}
+		if network, err = read(); err != nil {
+			return stacks.Result{}, err
+		}
+		if _, still := jellyfinProxies(network, subnets); len(still) > 0 {
+			return stacks.Result{}, fmt.Errorf("Jellyfin's known proxies read back without %s", strings.Join(still, ", "))
+		}
+		env.Logf("Jellyfin trusts the proxy at %s from its next start", strings.Join(missing, ", "))
+		return stacks.Result{Message: "Jellyfin trusts the proxy at " + strings.Join(subnets, ", ") +
+			"; it reads each visitor's address from the proxy from its next start"}, nil
+	}
+	return stacks.Result{Message: "Jellyfin trusts the proxy at " + strings.Join(subnets, ", ")}, nil
+}
+
+// jellyfinProxies is Jellyfin's known proxies and the subnets not among them.
+func jellyfinProxies(network map[string]any, subnets []string) (known, missing []string) {
+	listed, _ := network["KnownProxies"].([]any)
+	for _, entry := range listed {
+		if text, ok := entry.(string); ok && text != "" {
+			known = append(known, text)
+		}
+	}
+	for _, subnet := range subnets {
+		if !slices.Contains(known, subnet) {
+			missing = append(missing, subnet)
+		}
+	}
+	return known, missing
 }

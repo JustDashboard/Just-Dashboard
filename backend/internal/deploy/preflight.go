@@ -1188,6 +1188,7 @@ func preflightFindings(
 		findings = append(findings, item)
 	}
 	findings = append(findings, readinessPreflightFindings(draft, configuration)...)
+	findings = append(findings, serviceDomainFindings(draft, configuration)...)
 	findings = append(findings, replayFindings(configuration, observation)...)
 	findings = append(findings, sleepFindings(configuration, observation)...)
 	findings = withoutSupersededHostFindings(append(findings, networkFindings(draft, configuration)...))

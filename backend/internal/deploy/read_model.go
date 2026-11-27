@@ -242,7 +242,9 @@ func (s *OrchestrationStore) fleetFor(ctx context.Context, budget QueueBudget, p
 		       COALESCE(NULLIF((
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = e.id AND d.kind = 'domain'
-		          ORDER BY d.id LIMIT 1
+		          -- A service domain (service_domains.go) is another app's
+		          -- address; the deployment's own name comes first.
+		          ORDER BY (COALESCE(json_extract(d.config_json, '$.service'), '') != '' OR COALESCE(json_extract(d.config_json, '$.port'), 0) != 0), d.id LIMIT 1
 		       ), ''), (
 		         -- A tailnet-only environment's address is the one it has.
 		         SELECT x.url FROM deploy_preview_addresses x

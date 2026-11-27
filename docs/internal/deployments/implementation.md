@@ -1036,12 +1036,24 @@ only renderer/executor/validation authority for their feature.
   build, a refused preflight, a cancel) used to keep its checkout for good. A run's workspace is now
   removed as the run finishes (the engine's run-finished `HousekeepingObserver`), and at start-up
   `SweepWorkspaces` removes every `run-N` directory whose run is terminal or no longer recorded (its
-  project permanently deleted). Nothing reads a finished run's workspace again: the materializer
-  reuses one only for the same run through its marker, a retry is a new run with its own, and a
-  terminal run runs no further step. A run that is queued, running or anywhere short of terminal
-  (`failed_activation`, `restoring_previous`, `cancelling` included) keeps its workspace, and nothing
-  in the folder but a `run-N` directory is touched — a file or a link of that name is left alone.
-  The dashboard's backups already exclude the folder.
+  project permanently deleted). The materializer reuses one only for the same run through its
+  marker, a retry is a new run with its own, and a terminal run runs no further step. A run that is
+  queued, running or anywhere short of terminal (`failed_activation`, `restoring_previous`,
+  `cancelling` included) keeps its workspace, and nothing in the folder but a `run-N` directory is
+  touched — a file or a link of that name is left alone. The dashboard's backups already exclude the
+  folder.
+  - **A Compose release runs from its run's workspace**: the runtime record names it as the project's
+    directory, with the Compose files and the release's override in it, and stopping that release for
+    the next one and starting it again (restart, wake, putting it back when its successor fails) run
+    Compose there. So a workspace that a Compose runtime record names is kept, whatever its run's
+    state, while the record says the release's containers may still be on the server: any state but
+    `retired`, `failed` or `removed` (`workspaceHoldsARelease`). Those three come only after the
+    containers were removed, and a rollback is a release of its own with its own run's workspace, so
+    the workspace goes at the next start-up after the release is retired.
+  - A release made by a dashboard of 22 to 27 Nov 2026 can have lost its files to the sweep before
+    that rule; every redeploy of it failed as `previous_stop_failed`. `composeFilesGone` notices a
+    missing project directory, Compose file or override, and such a release is stopped, removed and
+    started by the containers its record names instead, with a status line saying so.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
   an active deployment lease, a staging release an unfinished promotion is about to take its image
@@ -2027,7 +2039,7 @@ only renderer/executor/validation authority for their feature.
   its operationId, and made through the router as the MCP key with the deploy key gate and every
   handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
-  destructive actions. 104 tools generated, 117 tools in all; previews' approvals, reveals, saved
+  destructive actions. 110 tools generated, 123 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
   [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
@@ -2273,7 +2285,9 @@ only renderer/executor/validation authority for their feature.
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
   A template marked `stack` is a smart stack's preset: it may publish private web interfaces on
-  loopback (`exposure: loopback`), a data volume another of its services writes may be mounted
+  loopback (`exposure: loopback`), give such a service an address label (`address`) from which its
+  domain input yields a plan domain routed to that service beside the primary
+  (`blueprint.ServiceHostname`), a data volume another of its services writes may be mounted
   read-only, and once its release is live the dashboard configures it ([smart stacks](smart-stacks.md)).
   A template is not a Git source, so it is never offered a pull-request preview, though a Compose
   stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up
@@ -2513,6 +2527,61 @@ only renderer/executor/validation authority for their feature.
   while a served domain is HTTPS, or while a policy is saved so it stays removable, with the lifetimes,
   subdomains and preload confirmation the Proxy site form has, and a plain name's row says it is served
   plain, while the HTTPS switch's tooltip says what an HTTPS name does with plain visitors. Previews copy the policy with the other rules.
+- <a id="service-domains"></a>Service domains (`deploy/service_domains.go`, `proxysvc/deployment_route_hosts.go`). A
+  domain of a Compose plan may name the service it serves, `domains[].service`, and that service's
+  container port, `domains[].port`: a media stack's Seerr at `media-requests.example.com` beside the
+  Jellyfin the deployment's own name reaches. Empty `service` is the plan's primary service, as every
+  domain was before; zero `port` is the service's only TCP port published on `127.0.0.1`. Both are kept in
+  the domain's dependency row only when set, and a service equal to the primary (and, with no service, a
+  port equal to `runtime.internalPort`) is written as none (`normalizeServiceDomains`), so every other
+  domain keeps its bytes and digest. `Validate` refuses them outside `build.method compose`, on a
+  redirecting name, on a wildcard (a service is sent the names it answers one by one), beside the
+  `canary` strategy (its route shares the requests between two releases, which `proxysvc` refuses beside a
+  service domain, so every release after the first would fail its canary step; skew protection and sleep
+  are refused for a Compose plan already) and beyond 16 services; a tailnet-only environment takes no
+  domain at all. Against the plan's Compose analysis
+  (`validateServiceDomains`) the service has to exist and publish the port on `127.0.0.1`: a blueprint
+  `loopback` port does, and so does a user Compose file's `127.0.0.1:H:C` or `127.0.0.1::C`, with no port
+  named only when it publishes one. The draft's configuration step and commit hold a draft to its
+  detection's analysis, the Domains settings save to the evidence the current build plan carries, and
+  preflight says the same as `domain_service_unpublished` (blocked, `proxy`, the domain's field). A tunnel
+  and a password are allowed: the password still protects the whole route. The Compose runtime records
+  every TCP port each of its containers publishes on `127.0.0.1` as `servicePorts` (`{service,
+  containerPort, hostPort}`, `composeServicePorts`), read from the started containers after Compose's
+  port recovery moved anything. Every cutover — activation, a rollback's clone, the instant rollback, the
+  live-route rewrites — builds the route through `releaseRoute`, which adds `DeploymentRoute.HostUpstreams`
+  from the release's frozen domains and those ports, one entry per server with every name it serves; a
+  service domain whose service or port the release did not publish fails activation as
+  `service_port_missing`, recovered like any other activation failure. The names stay in the route's
+  `Domains`, so the certificate step, `TLSHostnames`, the DNS findings and the DNS-record tool cover them as
+  they cover every domain, and every rule of the route — TLS and the plain names, HSTS, the password or
+  the sign-in, allowed addresses, edge rules, the rate limit, CrowdSec, maintenance, error pages, the
+  request record and its trace, dropped cookies, the body limit, response headers — applies to them as
+  to the rest; only the server differs. `proxysvc` refuses host upstreams beside a canary, skew protection
+  or sleep, a name that is not one of the route's served names, a name sent twice, a server named twice
+  or one that is the release's own, and more than 16 entries, and `ApplyDeploymentRoute` takes only a
+  publication on this host's loopback. nginx forwards the catch-all through `map $host
+  $jd_<ident>_host_up` (the release's server, or its pool, as `default`, one line per service domain), so
+  every server block of the route — the HTTPS one, the plain one, a certificate group's — keeps its rules
+  and asks the map. Each line matches its whole name as a regular expression (`~^media-requests\.example\.com$`,
+  `hostMapKey`): nginx hashes a map's strings in buckets of `map_hash_bucket_size`, the cache line by
+  default, which hold a name of at most 46 characters, and a site file cannot raise it (nginx takes it only
+  before the first map it reads), so a long sibling name matched as a string failed `nginx -t` for the
+  whole configuration; the name's `server_name` is fitted like any other
+  ([`server_names_fit.go`](../backend/proxy.md)). `nginx -t` accepts the file on nginx 1.18, 1.24 and 1.28
+  (`TestLiveNginxSendsALongServiceDomainToItsServer` runs the host's nginx on a 57-character name), and the Sites list reads the
+  map's servers as the route's upstreams. A route without host upstreams renders as it always did. The
+  Docker Caddy ingress is in [the ingress decision](caddy-ingress.md#service-domains). Public-route checks
+  ask the primary's names (`publicRouteURLs` leaves service domains out, so a readiness probe never
+  introduces the primary as Seerr), and each public-route check is asked of every service domain too
+  (`serviceRouteCheck`), with any answer below 500 reachable, an application's own 401, 302 or 403
+  sign-in included. Traffic replay replays no service domain's requests against the candidate, and the
+  release comparison shows the service on the domain's line. Staging copies and pull-request previews
+  take none of production's domains, so none of its service domains either. Domains are kept in name
+  order, so `media-downloads.example.com` comes before `media.example.com`: the fleet's address, run
+  notifications and pull-request comments order a service domain's row last, and preflight's public-URL
+  findings (the origin they suggest, a domain template's value, a Clerk key's domain) read the first
+  domain that is not one (`ownDomain`).
 - Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
   `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
   `previewsOnly`) has the public route ask an auth server about every request before the application

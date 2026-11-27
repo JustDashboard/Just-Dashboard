@@ -118,6 +118,7 @@ var agentExcludedRoutes = map[string]string{
 	"POST /tokens/deploy":                     "a new key's value is shown once and would reach nobody, masked from the model and the page; the person makes it under Account → API keys",
 	"POST /tokens/mcp":                        "a new key's value is shown once and would reach nobody, masked from the model and the page; the person makes it under Account → API keys",
 	"POST /deploy/{id}/hooks/{triggerID}":     "a webhook authenticates by its own signature, not as a person",
+	"PUT /deploy/{id}/stack/login":            "the stack's one password opens every app of it, and what the assistant sends passes through the model's provider; the person changes it on the Stack page",
 }
 
 // agentExcludedAreas are whole parts of the API, by the start of their path.

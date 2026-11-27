@@ -406,6 +406,12 @@ type Service struct {
 	// sends mail or downloads models. Without it a private service is on an
 	// internal network that has no route out.
 	Egress bool `json:"egress,omitempty"`
+	// Address is the DNS label a stack's private web interface is given an
+	// address of its own with, beside the deployment's domain
+	// (ServiceHostname): "requests" makes media.example.com's Seerr
+	// media-requests.example.com. Only a stack's service with a loopback
+	// port has one; the route to it is an ordinary domain of the plan.
+	Address string `json:"address,omitempty"`
 }
 
 // Fixture is the expected render for a named set of inputs. Every blueprint

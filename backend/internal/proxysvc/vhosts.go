@@ -466,6 +466,12 @@ func (s *Service) fileVHost(name, path, layout string, logs logDefaults) VHost {
 		}
 		v.Upstreams = appendNew(v.Upstreams, upstream)
 	}
+	// A deployment route that sends its service domains to their own
+	// services forwards through a map on the request's name; every server
+	// the map names is one the site forwards to.
+	for _, upstream := range hostMapUpstreams(text) {
+		v.Upstreams = appendNew(v.Upstreams, upstream)
+	}
 	certs := certificatePaths(text)
 	for _, m := range includeRe.FindAllStringSubmatch(text, -1) {
 		certs = append(certs, s.includedCertificates(unquote(strings.TrimSpace(m[1])))...)

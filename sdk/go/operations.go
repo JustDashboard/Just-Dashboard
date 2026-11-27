@@ -2748,6 +2748,25 @@ func (c *Client) SharedVariables(ctx context.Context, opts ...RequestOption) ([]
 	return out, nil
 }
 
+// StackAddresses is POST /deploy/{id}/stack/addresses: give every app of the stack its own address
+// beside the primary domain: the missing domains are saved as the Domains settings save them and a
+// release is started; the body's domain is used, as the primary, only when the deployment has
+// none.
+//
+// With nothing missing but an address saved that the live release does not serve, it starts the
+// release again without adding a domain. 409 stack_addresses_present when every app has its
+// address and the live release serves each, 422 stack_no_domain when there is no primary domain
+// and none was given.
+//
+// A deploy key: allowed.
+func (c *Client) StackAddresses(ctx context.Context, id int64, body StackAddressesRequest, opts ...RequestOption) (*StackAddressesAnswer, error) {
+	var out StackAddressesAnswer
+	if err := c.do(ctx, "POST", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/addresses", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // StackCatalogue is GET /deploy/stacks: list the smart stacks: each preset with the template it
 // deploys, its memory and disk estimate and what it cannot do, and the services.
 //
@@ -2775,8 +2794,9 @@ func (c *Client) StackConfigure(ctx context.Context, id int64, opts ...RequestOp
 	return &out, nil
 }
 
-// StackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal an account the
-// stack created; audited without its value.
+// StackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal the stack's
+// one login (name login), which every application signs in with as admin; audited without its
+// value.
 //
 // Only an interactive session may call it; no key reaches it.
 func (c *Client) StackCredentialReveal(ctx context.Context, id int64, name string, opts ...RequestOption) (*StackCredentialReveal, error) {
@@ -2787,10 +2807,104 @@ func (c *Client) StackCredentialReveal(ctx context.Context, id int64, name strin
 	return &out, nil
 }
 
+// StackLoginUpdate is PUT /deploy/{id}/stack/login: change the password every application of the
+// stack signs in with; the previous one is kept until every application takes the new one, and a
+// configuration pass is asked for; audited without the value.
+//
+// 422 password_weak when the password breaks the dashboard's password rule, 409 stack_busy while a
+// pass runs.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) StackLoginUpdate(ctx context.Context, id int64, body StackLoginRequest, opts ...RequestOption) (*StackConfigureAnswer, error) {
+	var out StackConfigureAnswer
+	if err := c.do(ctx, "PUT", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/login", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StackSourceAdd is POST /deploy/{id}/stack/sources: add a media source: Prowlarr tests it with
+// the values given, saves it in its first app profile and shares it with Radarr and Sonarr, then
+// the stack checks its sources again; audited with the definition's name only.
+//
+// 422 source_test_failed with Prowlarr's reason, every text typed masked out of it; 422
+// source_invalid for a definition or a value the form does not take, with field; 409 source_exists
+// for a name Prowlarr has; 403 source_needs_person when the dashboard's assistant sends a
+// password, key or cookie; the same refusals as the sources list.
+//
+// A deploy key: allowed.
+func (c *Client) StackSourceAdd(ctx context.Context, id int64, body StackSourceAddRequest, opts ...RequestOption) (*StackSourceAddAnswer, error) {
+	var out StackSourceAddAnswer
+	if err := c.do(ctx, "POST", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/sources", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StackSourceCatalogue is GET /deploy/{id}/stack/sources/catalogue: list the torrent sources the
+// stack's Prowlarr can add, by name, each saying whether its form asks for something it cannot do
+// without.
+//
+// Read from Prowlarr's schema, bounded, and kept for 10 minutes per project; fetchedAt says when.
+// The same refusals as the sources list.
+//
+// A deploy key: allowed.
+func (c *Client) StackSourceCatalogue(ctx context.Context, id int64, opts ...RequestOption) (*MediaSourceCatalogue, error) {
+	var out MediaSourceCatalogue
+	if err := c.do(ctx, "GET", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/sources/catalogue", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StackSourceDefinition is GET /deploy/{id}/stack/sources/catalogue/{definition}: read one source
+// Prowlarr can add, with the settings its form asks for and their defaults.
+//
+// 404 source_definition_not_found for a definition the catalogue does not list; the same refusals
+// as the sources list.
+//
+// A deploy key: allowed.
+func (c *Client) StackSourceDefinition(ctx context.Context, id int64, definition string, opts ...RequestOption) (*MediaSourceDetail, error) {
+	var out MediaSourceDetail
+	if err := c.do(ctx, "GET", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/sources/catalogue/"+url.PathEscape(definition), nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
+// StackSourceRemove is DELETE /deploy/{id}/stack/sources/{sourceId}: remove one of Prowlarr's
+// media sources by its id; Prowlarr removes it from Radarr and Sonarr, and the stack checks its
+// sources again; audited.
+//
+// Destructive, with an ordinary confirmation: the source is added again in a minute. 404
+// source_not_found; the same refusals as the sources list.
+//
+// A deploy key: allowed. Destructive: it needs a role that may take destructive actions, and
+// spends their budget.
+func (c *Client) StackSourceRemove(ctx context.Context, id int64, sourceID string, opts ...RequestOption) error {
+	return c.do(ctx, "DELETE", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/sources/"+url.PathEscape(sourceID), nil, nil, nil, opts)
+}
+
+// StackSources is GET /deploy/{id}/stack/sources: list the media sources the stack's Prowlarr has,
+// whoever added them.
+//
+// 404 stack_not_found, 409 stack_waiting before a live release, 409 stack_not_preset, 409
+// stack_no_sources for a preset without Prowlarr, 502 stack_app_unreachable when Prowlarr did not
+// answer.
+//
+// A deploy key: allowed.
+func (c *Client) StackSources(ctx context.Context, id int64, opts ...RequestOption) (*StackSourcesAnswer, error) {
+	var out StackSourcesAnswer
+	if err := c.do(ctx, "GET", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/sources", nil, nil, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // StackState is GET /deploy/{id}/stack: read a stack deployment's state: whether it is installed,
-// healthy, connected and able to play and to acquire, each service's container and private
-// address, each configuration step, the actions only a person can take, and the accounts it
-// created.
+// healthy, connected and able to play and to acquire, each service's container, public address and
+// loopback address, each configuration step, the actions only a person can take, the one login,
+// and the apps' addresses the configuration does not have yet.
 //
 // 404 stack_not_found when the deployment is not a stack.
 //

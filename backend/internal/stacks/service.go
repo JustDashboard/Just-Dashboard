@@ -47,7 +47,11 @@ type ServiceDeps struct {
 	// Variables are the environment's literal variable values by name,
 	// secrets included: the API keys the template generated and the options.
 	Variables func(ctx context.Context, projectID, environmentID int64) (map[string]string, error)
-	Log       *slog.Logger
+	// PublicURLs are the addresses a release serves the stack's services at,
+	// by service (Env.PublicURL). Nil, or a service missing, is one served at
+	// no domain.
+	PublicURLs func(ctx context.Context, manifest *Manifest, environmentID, releaseID int64) map[string]string
+	Log        *slog.Logger
 	// Interval is how often every stack is looked at; Kick looks at once.
 	Interval time.Duration
 	Runner   *Runner
@@ -299,6 +303,10 @@ func (s *Service) Env(ctx context.Context, manifest *Manifest, preset Preset, re
 			outputs[id] = step.Outputs
 		}
 	}
+	urls := map[string]string{}
+	if s.deps.PublicURLs != nil {
+		urls = s.deps.PublicURLs(ctx, manifest, record.EnvironmentID, live.ReleaseID)
+	}
 	project := live.RuntimeID
 	return &DockerEnv{
 		Docker:  s.deps.Docker,
@@ -315,6 +323,7 @@ func (s *Service) Env(ctx context.Context, manifest *Manifest, preset Preset, re
 		Credentials: s.deps.Store.Credentials(record.ProjectID),
 		Lengths:     CredentialLengths(manifest),
 		Outputs:     outputs,
+		PublicURLs:  urls,
 	}, nil
 }
 

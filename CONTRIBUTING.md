@@ -403,6 +403,8 @@ never into `docs/audits/`.
   pinned images on a network and a volume of their own, run every step twice and require the second
   pass to change nothing. They need Docker as root and pull several gigabytes:
   `go test -c -o /tmp/media.test ./internal/stacks/media && sudo env JD_STACKS_LIVE=1 PATH=$PATH /tmp/media.test -test.run Live -test.v`.
+  The media-source picker's live test adds its own Torznab server (the test binary, in a container) on an
+  internal network, so no real site is ever asked anything.
   A change to a stack's template or to `internal/stacks` should also deploy the preset through the
   API (draft, commit, run) on a dashboard of its own and read its Stack page; see "Verified end to
   end" in [smart stacks](docs/internal/deployments/smart-stacks.md) for how that was done without
@@ -442,6 +444,11 @@ never into `docs/audits/`.
   route makes and brings it up through the same harness (it uses `nginx:alpine` and `redis:7-alpine`,
   so a host that has them pulls nothing; the harness removes only what it added, digest references
   included).
+  Changes to how a Compose release is stopped or started (`deploy/runtime_owner.go`'s Compose paths,
+  `deploy/workspace_sweep.go`) also run, as root,
+  `JD_DEPLOY_LIVE=1 go test ./internal/deploy -run TestLiveAComposeReleaseWithoutItsFilesIsStoppedAndStartedByItsContainers -count=1 -v`,
+  which starts an nginx-and-Redis release (`nginx:1.28-alpine`, `redis:7-alpine`), deletes its files and
+  requires it to stop, start again and be removed by its containers.
   A template's schema rules run at build time: every definition is parsed and validated when the
   catalogue loads, so `go test ./internal/blueprint` fails on a broken one before it can ship. The
   same package checks the catalogue's size: `catalogue_counts.go` declares how many definitions

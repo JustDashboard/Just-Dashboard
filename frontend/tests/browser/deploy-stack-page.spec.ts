@@ -1,21 +1,29 @@
 import { expect, test, type Page } from "@playwright/test"
-import { mockProject } from "./deploy-fixture"
-import { STACK_PASSWORD, mockStackProject, stackState } from "./deploy-stack-fixture"
+import { json, mockProject } from "./deploy-fixture"
+import {
+  STACK_PASSWORD,
+  mockStackProject,
+  stackCatalogue,
+  stackState,
+} from "./deploy-stack-fixture"
 
 /**
- * A stack project's page, `/deploy/[id]/stack`: the server's sentence and
- * state, the five facts each on its own, what needs the person, the services
- * and how each is reached, the setup step by step and the accounts it made.
+ * A stack project's page, `/deploy/[id]/stack`, as a launcher: the server's
+ * sentence and state, the five facts each on its own, the one next step
+ * when something is left, every app with what it is for, its address and
+ * Open, the one login beside them, and the setup step by step.
  */
 
 const lead = (page: Page) => page.locator("[data-slot='stack-lead']")
 const facts = (page: Page) => page.getByRole("list", { name: "What the stack can do" })
-const services = (page: Page) => page.getByRole("list", { name: "Services", exact: true })
+const services = (page: Page) => page.getByRole("list", { name: "Apps", exact: true })
+const login = (page: Page) => page.locator("[data-slot='stack-login']")
+const left = (page: Page) => page.getByRole("region", { name: "What is left to do" })
 /** A row of the project's rail, by where it goes: Runtime is also a settings page's name. */
 const railRow = (page: Page, path: string) =>
   page.locator("[data-slot='sidebar']").first().locator(`a[href="/deploy/7${path}"]`)
 
-test("a ready stack reads as ready, with every service, how it is reached and the whole setup", async ({
+test("a ready stack reads as a launcher: every app, what it is for, its address and Open", async ({
   page,
 }) => {
   const stack = await mockStackProject(page, { state: stackState("ready") })
@@ -24,7 +32,7 @@ test("a ready stack reads as ready, with every service, how it is reached and th
   // A reading page: the project's own header, then what is true of the stack.
   await expect(page.locator("[data-slot='page']")).toHaveAttribute("data-register", "reading")
   await expect(page.getByRole("heading", { name: "Media server", exact: true })).toBeVisible()
-  await expect(lead(page)).toContainText("Complete · v1.0.0")
+  await expect(lead(page)).toContainText("Complete · v1.1.0")
   await expect(lead(page).locator("[data-slot='stack-summary']")).toHaveText(
     "Everything is set up and connected: a request in Seerr is searched for, downloaded and lands in Jellyfin.",
   )
@@ -36,50 +44,75 @@ test("a ready stack reads as ready, with every service, how it is reached and th
     "Can fetch new titles",
     "Can play your library",
   ])
-  // Nothing needs a look, so nothing is drawn for it; and no figure is a tile.
-  await expect(page.getByRole("region", { name: "What needs a look" })).toHaveCount(0)
+  // Nothing is left to do, so nothing is drawn for it; and no figure is a tile.
+  await expect(left(page)).toHaveCount(0)
   await expect(page.locator("[data-slot='stat-tile']")).toHaveCount(0)
 
   const rows = services(page).locator("[data-slot='choice-row']")
   await expect(rows).toHaveCount(8)
-  // The public service is a link to where it answers.
+  // Each app says what it is for, where it answers, its state and Open.
   const jellyfin = rows.filter({ hasText: "Jellyfin" })
   await expect(jellyfin).toContainText("Plays your films and series")
   await expect(jellyfin).toContainText("media.example.test")
   await expect(jellyfin).toContainText("Healthy")
+  const open = jellyfin.getByRole("link", { name: "Open Jellyfin at media.example.test" })
+  await expect(open).toHaveAttribute("href", "https://media.example.test")
+  await expect(open).toHaveAttribute("target", "_blank")
+  await expect(open).toHaveText("Open")
+  const seerr = rows.filter({ hasText: "Seerr" })
+  await expect(seerr).toContainText("media-requests.example.test")
   await expect(
-    jellyfin.getByRole("link", { name: "Open Jellyfin at media.example.test" }),
-  ).toHaveAttribute("href", "https://media.example.test")
-  // Its card opens its container in Docker.
-  await expect(jellyfin.getByRole("link", { name: "Open Jellyfin's container" })).toHaveAttribute(
+    seerr.getByRole("link", { name: "Open Seerr at media-requests.example.test" }),
+  ).toHaveAttribute("href", "https://media-requests.example.test")
+  await expect(
+    rows
+      .filter({ hasText: "qBittorrent" })
+      .getByRole("link", { name: "Open qBittorrent at media-downloads.example.test" }),
+  ).toBeVisible()
+  // A worker has no interface: it says so and offers nothing to open.
+  const recyclarr = rows.filter({ hasText: "Recyclarr" })
+  await expect(recyclarr).toContainText("In the background")
+  await expect(recyclarr.getByRole("link")).toHaveCount(0)
+  await expect(recyclarr).toContainText("Running")
+  // Nothing on the page sends anyone to a tunnel or a loopback address.
+  await expect(page.locator("[data-slot='page']")).not.toContainText(/\bssh\b|tunnel|127\.0\.0\.1/i)
+
+  // The container is behind the row's menu, in words.
+  await jellyfin.getByRole("button", { name: "More for Jellyfin" }).click()
+  await expect(page.getByRole("menu").locator("svg")).toHaveCount(0)
+  await expect(page.getByRole("menuitem", { name: "Open its container" })).toHaveAttribute(
     "href",
     `/docker/containers/${stack.containerId("jellyfin")}`,
   )
-
-  // A private service says its address on this server, and offers no way to
-  // open it that would not work: the tunnel is behind the mark.
-  const seerr = rows.filter({ hasText: "Seerr" })
-  await expect(seerr).toContainText("127.0.0.1:28055")
-  await expect(seerr.getByRole("link", { name: /Open Seerr at/ })).toHaveCount(0)
-  await seerr.getByRole("button", { name: "How to reach Seerr" }).click()
-  const how = page.getByRole("dialog", { name: "How to reach Seerr" })
-  await expect(how).toContainText("which only this server can open")
-  await expect(how).toContainText("ssh -L 28055:127.0.0.1:28055 user@")
-  await expect(how).toContainText("http://127.0.0.1:28055")
-  // The mark is a toggle: a second press puts the card away.
-  await seerr.getByRole("button", { name: "How to reach Seerr" }).click()
-  await page.mouse.move(0, 0)
-  await expect(how).toBeHidden()
-  // A worker has no address and no mark.
-  const recyclarr = rows.filter({ hasText: "Recyclarr" })
-  await expect(recyclarr.getByRole("button")).toHaveCount(0)
-  await expect(recyclarr).toContainText("Running")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("menu")).toHaveCount(0)
 
   // Every row is one height, whatever it carries.
   const heights = await rows.evaluateAll((items) =>
     items.map((item) => Math.round(item.getBoundingClientRect().height)),
   )
   expect(new Set(heights).size).toBe(1)
+
+  // The one login, beside the apps: its user name, and a password nobody has read.
+  await expect(login(page)).toContainText("One login for every app")
+  await expect(login(page)).toContainText("admin")
+  await expect(login(page).getByLabel("Password hidden")).toBeVisible()
+  await expect(login(page)).toContainText(
+    "Jellyfin, Seerr, Radarr, Sonarr, Prowlarr, qBittorrent and Bazarr all sign in with it.",
+  )
+  // At a laptop's width it is one panel over the apps, so their rows keep room for
+  // what each is for; from 2xl it stands beside them.
+  let apps = await services(page).boundingBox()
+  let beside = await login(page).boundingBox()
+  expect(beside!.y + beside!.height).toBeLessThanOrEqual(apps!.y)
+  await page.setViewportSize({ width: 1600, height: 900 })
+  await expect
+    .poll(async () => (await login(page).boundingBox())!.x)
+    .toBeGreaterThan((await services(page).boundingBox())!.x + 100)
+  apps = await services(page).boundingBox()
+  beside = await login(page).boundingBox()
+  expect(beside!.x).toBeGreaterThan(apps!.x + apps!.width - 1)
+  await page.setViewportSize({ width: 1280, height: 720 })
 
   // The setup by stage, in the order a pass runs it.
   const setup = page.getByRole("region", { name: "Setting up each application" })
@@ -111,22 +144,22 @@ test("a stack waiting for its release says so, links the run and claims nothing 
   await expect(lead(page).getByText("Not installed yet", { exact: true }).first()).toBeVisible()
   // Only the one fact that can be read: its containers do not exist.
   await expect(facts(page).getByRole("listitem")).toHaveText(["Not installed"])
-  const waiting = page.getByRole("region", { name: "What needs a look" })
+  const waiting = left(page)
   await expect(waiting).toContainText("The deployment's run is still bringing the release up")
   await expect(waiting.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
     "href",
     "/deploy/7/runs/84",
   )
-  // Nothing to configure yet, so no button offers it; no account exists yet.
+  // Nothing to configure yet, so no button offers it; the login is not made yet.
   await expect(lead(page).getByRole("button", { name: /Repair|Retry/ })).toHaveCount(0)
-  await expect(page.getByRole("list", { name: "Accounts the stack created" })).toHaveCount(0)
-  await expect(
-    page.getByText(/6 more accounts appear once their applications are set up/),
-  ).toBeVisible()
-  // A service with no container is a row that opens nothing.
+  await expect(login(page)).toContainText("Made by the stack's first setup")
+  await expect(login(page).getByRole("button", { name: "Show the password" })).toHaveCount(0)
+  await expect(login(page).getByRole("button", { name: "Change password" })).toHaveCount(0)
+  // An app with no container and no address is a row that opens nothing.
   const rows = services(page).locator("[data-slot='choice-row']")
   await expect(rows).toHaveCount(8)
   await expect(rows.first()).toContainText("No container")
+  await expect(rows.first()).toContainText("No address yet")
   await expect(rows.first().getByRole("link")).toHaveCount(0)
 
   // It asks every two seconds while the release is coming up, and the page
@@ -161,12 +194,8 @@ test("a stack being configured shows the pass moving and is never called ready",
   await expect(page.locator("li[data-status='pending']").first()).toContainText("Waiting")
   // A pass is running, so there is nothing to press.
   await expect(lead(page).getByRole("button", { name: /Repair|Retry/ })).toHaveCount(0)
-  // Only the account that exists is listed.
-  await expect(
-    page
-      .getByRole("list", { name: "Accounts the stack created" })
-      .locator("[data-slot='choice-row']"),
-  ).toHaveCount(1)
+  // The login exists from the first pass on.
+  await expect(login(page).getByRole("button", { name: "Show the password" })).toBeVisible()
 
   stack.set(stackState("ready"))
   await expect(lead(page).getByText("Ready", { exact: true }).first()).toBeVisible({
@@ -175,31 +204,41 @@ test("a stack being configured shows the pass moving and is never called ready",
   await expect(page.getByText("22 of 22 done", { exact: true })).toBeVisible()
 })
 
-test("what only the person can do is said in words, the blocking one first", async ({ page }) => {
+test("the one next step is said in words and leads to the source picker, the blocking one first", async ({
+  page,
+}) => {
   await mockStackProject(page, { state: stackState("action_required") })
   await page.goto("/deploy/7/stack")
   await expect(lead(page).getByText("Needs you", { exact: true }).first()).toBeVisible()
   await expect(lead(page).locator("[data-slot='stack-summary']")).toContainText(
-    "nothing can be downloaded until you add a media source in Prowlarr",
+    "nothing can be downloaded until you add a media source",
   )
   await expect(facts(page).getByRole("listitem").nth(3)).toHaveText("Cannot fetch new titles")
   const actions = page.locator("[data-slot='stack-action']")
   await expect(actions).toHaveCount(2)
   await expect(actions.first()).toHaveAttribute("data-blocking", "true")
-  await expect(actions.first()).toContainText("Add a media source in Prowlarr")
-  await expect(actions.first()).toContainText(
-    "Open Prowlarr, add an indexer you are allowed to use",
-  )
+  await expect(actions.first()).toContainText("Add a media source")
+  await expect(actions.first()).toContainText("Choose one you are allowed to use")
   await expect(actions.first()).toContainText(
     "Prowlarr · the stack is not ready until this is done",
   )
+  // The page's one next step: a link to the picker, in the brand's face.
+  const next = actions.first().getByRole("link", { name: "Add a media source" })
+  await expect(next).toHaveAttribute("href", "/deploy/7/stack/sources")
+  await expect(next).toHaveAttribute("data-variant", "default")
   await expect(actions.nth(1)).toHaveAttribute("data-blocking", "false")
   await expect(actions.nth(1)).toContainText("Let people in to Seerr")
   await expect(actions.nth(1)).toContainText("optional")
+  await expect(actions.nth(1).getByRole("link")).toHaveCount(0)
+  // Nobody is told to open Prowlarr itself.
+  await expect(left(page)).not.toContainText(/open Prowlarr|indexer/i)
   await expect(
     services(page).locator("[data-slot='choice-row']").filter({ hasText: "Prowlarr" }),
   ).toContainText("Needs you")
   await expect(lead(page).getByRole("button", { name: "Repair", exact: true })).toBeVisible()
+
+  await next.click()
+  await expect(page).toHaveURL(/\/deploy\/7\/stack\/sources$/)
 })
 
 test("a failed stack shows the error, collapses what it blocked, and Retry starts a pass", async ({
@@ -254,7 +293,7 @@ test("a preset's skipped steps are one quiet line and no stage of nothing is dra
 }) => {
   await mockStackProject(page, { state: stackState("ready", { essential: true }) })
   await page.goto("/deploy/7/stack")
-  await expect(lead(page)).toContainText("Essential · v1.0.0")
+  await expect(lead(page)).toContainText("Essential · v1.1.0")
   await expect(services(page).locator("[data-slot='choice-row']")).toHaveCount(2)
   await expect(page.locator("[data-slot='stack-skipped']")).toHaveText(
     "16 steps skipped: Not part of the Essential preset.",
@@ -268,39 +307,269 @@ test("a preset's skipped steps are one quiet line and no stage of nothing is dra
   )
 })
 
-test("an account's password is revealed where its mask was, and only one that exists is listed", async ({
+test("the login's password is shown where its mask was, copied without being drawn, and audited", async ({
+  page,
+  context,
+}) => {
+  await context.grantPermissions(["clipboard-read", "clipboard-write"])
+  const stack = await mockStackProject(page, { state: stackState("ready") })
+  await page.goto("/deploy/7/stack")
+  const panel = login(page)
+  await expect(panel.getByLabel("Password hidden")).toBeVisible()
+  await expect(page.getByText(STACK_PASSWORD)).toHaveCount(0)
+  expect(stack.reveals()).toEqual([])
+  const line = panel.locator("dl > div").nth(1)
+  const height = (await line.boundingBox())!.height
+
+  await panel.getByRole("button", { name: "Show the password" }).click()
+  await expect(panel.getByText(STACK_PASSWORD)).toBeVisible()
+  expect(stack.reveals()).toEqual(["login"])
+  // Showing moves nothing: the line is the height it was.
+  expect((await line.boundingBox())!.height).toBe(height)
+  await panel.getByRole("button", { name: "Hide the password" }).click()
+  await expect(page.getByText(STACK_PASSWORD)).toHaveCount(0)
+
+  // Copy reads it again and puts it on the clipboard, never on the screen.
+  await panel.getByRole("button", { name: "Copy the password" }).click()
+  await expect.poll(() => stack.reveals()).toEqual(["login", "login"])
+  await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(STACK_PASSWORD)
+  await expect(page.getByText(STACK_PASSWORD)).toHaveCount(0)
+  await expect(panel).toContainText("Showing or copying it is recorded in the audit log.")
+})
+
+test("Change password asks for one by the dashboard's rule and moves every app to it", async ({
   page,
 }) => {
   const stack = await mockStackProject(page, { state: stackState("ready") })
   await page.goto("/deploy/7/stack")
-  const accounts = page.getByRole("list", { name: "Accounts the stack created" })
-  const rows = accounts.locator("[data-slot='choice-row']")
-  await expect(rows).toHaveCount(6)
-  const jellyfin = rows.first()
-  await expect(jellyfin).toContainText("Jellyfin administrator (also signs in to Seerr)")
-  await expect(jellyfin).toContainText("admin")
+  await login(page).getByRole("button", { name: "Show the password" }).click()
+  await expect(login(page).getByText(STACK_PASSWORD)).toBeVisible()
+  await login(page).getByRole("button", { name: "Change password" }).click()
+  const dialog = page.getByRole("dialog", { name: "Change the password for every app" })
+  const field = dialog.getByLabel("New password", { exact: true })
+  await expect(field).toHaveAttribute("type", "password")
+  const change = dialog.getByRole("button", { name: "Change password", exact: true })
+  await expect(change).toBeDisabled()
+  await field.fill("short")
+  await expect(change).toBeDisabled()
+  await field.fill("Every-app-new-password-1")
+  await expect(change).toBeEnabled()
+  await change.click()
+  await expect(dialog).toBeHidden()
+  expect(stack.logins()).toEqual([{ password: "Every-app-new-password-1" }])
+  // 202: the pass it started is followed, and the old password is no longer drawn.
+  await expect(lead(page).getByText("Setting up", { exact: true }).first()).toBeVisible()
   await expect(page.getByText(STACK_PASSWORD)).toHaveCount(0)
-  expect(stack.reveals()).toEqual([])
-  const height = (await jellyfin.boundingBox())!.height
+  await expect(page.getByText("Every-app-new-password-1")).toHaveCount(0)
+})
 
-  await jellyfin
-    .getByRole("button", {
-      name: "Reveal the password for Jellyfin administrator (also signs in to Seerr)",
-    })
-    .click()
-  await expect(jellyfin.getByText(STACK_PASSWORD)).toBeVisible()
-  expect(stack.reveals()).toEqual(["jellyfin-admin"])
-  // Revealing moves nothing: the row is the height it was.
-  expect((await jellyfin.boundingBox())!.height).toBe(height)
-  await expect(rows.nth(1).getByText(STACK_PASSWORD)).toHaveCount(0)
+test("a password the server calls weak is answered in the dialog, in its words", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, {
+    state: stackState("ready"),
+    login: "password_weak",
+  })
+  await page.goto("/deploy/7/stack")
+  await login(page).getByRole("button", { name: "Change password" }).click()
+  const dialog = page.getByRole("dialog", { name: "Change the password for every app" })
+  await dialog.getByLabel("New password", { exact: true }).fill("Every-app-new-password-1")
+  await dialog.getByRole("button", { name: "Change password", exact: true }).click()
+  await expect.poll(() => stack.logins().length).toBe(1)
+  await expect(dialog).toContainText("The password needs at least 12 characters")
+  await expect(dialog).toBeVisible()
+  await expect(page.getByText("password_weak")).toHaveCount(0)
+  // Cancel puts it away with nothing kept.
+  await dialog.getByRole("button", { name: "Cancel" }).click()
+  await expect(dialog).toBeHidden()
+  await login(page).getByRole("button", { name: "Change password" }).click()
+  await expect(dialog.getByLabel("New password", { exact: true })).toHaveValue("")
+})
 
-  await jellyfin
-    .getByRole("button", {
-      name: "Hide the password for Jellyfin administrator (also signs in to Seerr)",
-    })
+test("a stack with apps that have no address offers to give them theirs, then links the run", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("Give every app its address")
+  await expect(step).toContainText(
+    "Seerr, Radarr, Sonarr, Prowlarr, qBittorrent and Bazarr have no address yet. Each gets one beside media.example.test, and a deployment starts to serve them.",
+  )
+  // Until then those apps say so and offer nothing to open.
+  const rows = services(page).locator("[data-slot='choice-row']")
+  const seerr = rows.filter({ hasText: "Seerr" })
+  await expect(seerr).toContainText("No address yet")
+  await expect(seerr.getByRole("link", { name: /^Open Seerr/ })).toHaveCount(0)
+  await expect(
+    rows.filter({ hasText: "Jellyfin" }).getByRole("link", { name: /^Open/ }),
+  ).toBeVisible()
+
+  // The page's one next step, so its command wears the brand.
+  const give = step.getByRole("button", { name: "Give every app its address" })
+  await expect(give).toHaveAttribute("data-variant", "default")
+  await give.click()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  const names = dialog.getByRole("list", { name: "The addresses the apps get" })
+  await expect(names.getByRole("listitem")).toHaveCount(6)
+  await expect(names.getByRole("listitem").first()).toHaveText(
+    /Seerr\s*media-requests\.example\.test/,
+  )
+  await expect(names).toContainText("media-subtitles.example.test")
+  await expect(dialog.getByRole("textbox")).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Add the addresses and deploy" }).click()
+  await expect(dialog).toBeHidden()
+  expect(stack.addressRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is giving every app its address")
+  await expect(step).toContainText("media-requests.example.test")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/91",
+  )
+  // The next read has every app at its address.
+  await expect(
+    seerr.getByRole("link", { name: "Open Seerr at media-requests.example.test" }),
+  ).toBeVisible({ timeout: 20_000 })
+})
+
+test("a stack with no domain is given one in the dialog, and the names follow what is typed", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, { state: stackState("ready", { noDomain: true }) })
+  await page.route("**/api/v1/deploy/stacks", (route) => json(route, stackCatalogue))
+  await page.route("**/api/v1/deploy/hostname**", (route) =>
+    json(route, {
+      hostname: "media-server.203-0-113-7.sslip.io",
+      base: "203-0-113-7.sslip.io",
+      covered: false,
+      certificateMethod: "caddy",
+      method: "sslip",
+      address: "203.0.113.7",
+      detail: "Resolves to 203.0.113.7 with no DNS record to create.",
+    }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("and neither has the stack: give it a domain")
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  const domain = dialog.getByRole("textbox", { name: "The stack's domain" })
+  await expect(domain).toHaveValue("media-server.203-0-113-7.sslip.io")
+  const names = dialog.getByRole("list", { name: "The addresses the apps get" })
+  await expect(names).toContainText("media-server-requests.203-0-113-7.sslip.io")
+  await domain.fill("tv.example.org")
+  await expect(names).toContainText("tv-requests.example.org")
+  await expect(names).toContainText("tv-downloads.example.org")
+  await domain.fill("not a name")
+  await expect(dialog.getByRole("button", { name: "Add the addresses and deploy" })).toBeDisabled()
+  await domain.fill("https://tv.example.org/")
+  await dialog.getByRole("button", { name: "Add the addresses and deploy" }).click()
+  await expect(dialog).toBeHidden()
+  expect(stack.addressRequests()).toEqual([{ domain: "tv.example.org" }])
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/91",
+  )
+})
+
+test("an address request refused for want of a domain is answered in the dialog", async ({
+  page,
+}) => {
+  await mockStackProject(page, {
+    state: stackState("ready", { addressless: true }),
+    addresses: "stack_no_domain",
+  })
+  await page.goto("/deploy/7/stack")
+  await page
+    .locator("[data-slot='stack-addresses']")
+    .getByRole("button", { name: "Give every app its address" })
     .click()
-  await expect(page.getByText(STACK_PASSWORD)).toHaveCount(0)
-  await expect(page.getByText("Reading a password is recorded in the audit log.")).toBeVisible()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  await dialog.getByRole("button", { name: "Add the addresses and deploy" }).click()
+  await expect(dialog).toContainText("The stack has no domain yet")
+  await expect(page.getByText("stack_no_domain")).toHaveCount(0)
+})
+
+/** A stack whose apps' addresses are saved but not served: the release that was to publish them failed. */
+function unpublishedState() {
+  const addressless = stackState("ready", { addressless: true })
+  return {
+    ...addressless,
+    addresses: {
+      primary: "media.example.test",
+      missing: [],
+      unpublished: addressless.addresses!.missing,
+    },
+  }
+}
+
+test("addresses saved but not live are offered Deploy again, which links its run", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, { state: unpublishedState() })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("Publish the apps' addresses")
+  await expect(step).toContainText(
+    "have their addresses saved, but the release that was to publish them did not finish. Deploying again publishes them.",
+  )
+  const again = step.getByRole("button", { name: "Deploy again" })
+  await expect(again).toHaveAttribute("data-variant", "default")
+  await again.click()
+  const dialog = page.getByRole("dialog", { name: "Publish the apps' addresses" })
+  const names = dialog.getByRole("list", { name: "The addresses the apps get" })
+  await expect(names.getByRole("listitem")).toHaveCount(6)
+  await expect(names).toContainText("media-requests.example.test")
+  await expect(dialog.getByRole("textbox")).toHaveCount(0)
+  await dialog.getByRole("button", { name: "Deploy again" }).click()
+  await expect(dialog).toBeHidden()
+  expect(stack.addressRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is publishing the saved addresses.")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/91",
+  )
+  await expect(step.getByRole("button")).toHaveCount(0)
+})
+
+test("while a deployment is under way, saved addresses wait for it rather than offering another", async ({
+  page,
+}) => {
+  // Back on the page from "Watch the run": the run that publishes them is still going.
+  const stack = await mockStackProject(page, { state: unpublishedState(), running: true })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("A deployment is publishing the saved addresses.")
+  await expect(step).not.toContainText("did not finish")
+  await expect(step.getByRole("button", { name: "Deploy again" })).toHaveCount(0)
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/84",
+  )
+  expect(stack.addressRequests()).toEqual([])
+})
+
+test("an address request the server finds nothing missing for closes and reads the stack again", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, {
+    state: stackState("ready", { addressless: true }),
+    addresses: "stack_addresses_present",
+  })
+  await page.goto("/deploy/7/stack")
+  await page
+    .locator("[data-slot='stack-addresses']")
+    .getByRole("button", { name: "Give every app its address" })
+    .click()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  const before = stack.reads()
+  await dialog.getByRole("button", { name: "Add the addresses and deploy" }).click()
+  await expect(dialog).toBeHidden()
+  await expect(page.locator("[data-sonner-toast]")).toContainText(
+    "Every app already has its address.",
+  )
+  await expect.poll(() => stack.reads()).toBeGreaterThan(before)
+  await expect(page.getByText("stack_addresses_present")).toHaveCount(0)
 })
 
 test("a project that is not a stack has no Stack row and no stack page", async ({ page }) => {
@@ -375,11 +644,20 @@ test("the stack page is one column on a phone, with every row one height", async
     items.map((item) => Math.round(item.getBoundingClientRect().height)),
   )
   expect(new Set(heights).size).toBe(1)
-  // The state stays on the row; the address gives way to it.
+  // The state and Open stay on the row; the address gives way to them.
   await expect(rows.nth(1)).toContainText("Healthy")
-  await expect(rows.nth(1).getByText("127.0.0.1:28055")).toBeHidden()
-  // The tunnel is still a press away.
-  await expect(rows.nth(1).getByRole("button", { name: "How to reach Seerr" })).toBeVisible()
+  await expect(rows.nth(1).getByText("media-requests.example.test")).toBeHidden()
+  const open = rows.nth(1).getByRole("link", { name: "Open Seerr at media-requests.example.test" })
+  await expect(open).toBeVisible()
+  await expect(open.getByText("Open", { exact: true })).toBeHidden()
+  // The login stands over the apps, the whole width, its two lines one under the other.
+  const apps = await services(page).boundingBox()
+  const over = await login(page).boundingBox()
+  expect(over!.y + over!.height).toBeLessThanOrEqual(apps!.y)
+  const lines = await login(page)
+    .locator("dl > div")
+    .evaluateAll((items) => items.map((item) => Math.round(item.getBoundingClientRect().x)))
+  expect(new Set(lines).size).toBe(1)
   const steps = page.locator("li[data-status]")
   const stepHeights = await steps.evaluateAll((items) =>
     items.map((item) => Math.round(item.getBoundingClientRect().height)),

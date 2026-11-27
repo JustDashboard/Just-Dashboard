@@ -36,14 +36,27 @@ const (
 	liveRadarrImage      = "lscr.io/linuxserver/radarr:7.0.3.10918-ls328"
 	liveSonarrImage      = "lscr.io/linuxserver/sonarr:4.0.20.3014-ls6"
 
-	liveRadarrKey = "0123456789abcdef0123456789abcdef"
-	liveSonarrKey = "fedcba9876543210fedcba9876543210"
+	liveProwlarrImage = "lscr.io/linuxserver/prowlarr:3.1.0.5799-ls170"
+	liveBazarrImage   = "lscr.io/linuxserver/bazarr:v1.6.2-ls374"
+
+	liveRadarrKey   = "0123456789abcdef0123456789abcdef"
+	liveSonarrKey   = "fedcba9876543210fedcba9876543210"
+	liveProwlarrKey = "00112233445566778899aabbccddeeff"
 )
+
+// livePublicURLs are the addresses a release with a domain gives the
+// services, which the steps set the applications up for.
+var livePublicURLs = map[string]string{
+	"jellyfin": "https://media.example.test", "seerr": "https://media-requests.example.test",
+	"qbittorrent": "https://media-downloads.example.test", "radarr": "https://media-radarr.example.test",
+	"sonarr": "https://media-sonarr.example.test", "prowlarr": "https://media-prowlarr.example.test",
+	"bazarr": "https://media-subtitles.example.test",
+}
 
 // d1StepIDs are this file's steps in the manifest's order.
 var d1StepIDs = []string{
-	"storage.folders", "jellyfin.setup", "jellyfin.libraries", "qbittorrent.auth", "qbittorrent.categories",
-	"seerr.setup", "seerr.managers", "seerr.policy", "seerr.verify",
+	"storage.folders", "jellyfin.setup", "jellyfin.libraries", "jellyfin.proxy", "qbittorrent.auth", "qbittorrent.categories",
+	"qbittorrent.address", "seerr.setup", "seerr.address", "seerr.managers", "seerr.policy", "seerr.verify",
 }
 
 func liveDocker(t *testing.T, args ...string) string {
@@ -136,6 +149,10 @@ func startLiveStack(t *testing.T, name, preset string, services []string) *liveS
 			args = append(append(args, linuxserver...), "-e", "RADARR__AUTH__APIKEY="+liveRadarrKey, liveRadarrImage)
 		case "sonarr":
 			args = append(append(args, linuxserver...), "-e", "SONARR__AUTH__APIKEY="+liveSonarrKey, liveSonarrImage)
+		case "prowlarr":
+			args = append(args, "-e", "PUID=1000", "-e", "PGID=1000", "-e", "PROWLARR__AUTH__APIKEY="+liveProwlarrKey, liveProwlarrImage)
+		case "bazarr":
+			args = append(append(args, linuxserver...), liveBazarrImage)
 		default:
 			t.Fatalf("no image for %s", service)
 		}
@@ -144,7 +161,8 @@ func startLiveStack(t *testing.T, name, preset string, services []string) *liveS
 	}
 	docker := stackstest.Live(t, Manifest(), stack.network, stack.containers, preset,
 		map[string]string{OptionRequestApproval: "admin"},
-		map[string]string{VariableRadarrAPIKey: liveRadarrKey, VariableSonarrAPIKey: liveSonarrKey})
+		map[string]string{VariableRadarrAPIKey: liveRadarrKey, VariableSonarrAPIKey: liveSonarrKey, VariableProwlarrAPIKey: liveProwlarrKey})
+	docker.PublicURLs = livePublicURLs
 	stack.env = &recordingEnv{DockerEnv: docker}
 	client := stacks.StackHTTPClient()
 	client.Transport = recordingTransport{next: client.Transport, env: stack.env}
@@ -161,7 +179,8 @@ func (s *liveStack) waitReady(ctx context.Context) {
 		path string
 	}{
 		"jellyfin": {PortJellyfin, "/health"}, "seerr": {PortSeerr, "/api/v1/status"}, "qbittorrent": {PortQBittorrent, "/"},
-		"radarr": {PortRadarr, "/ping"}, "sonarr": {PortSonarr, "/ping"},
+		"radarr": {PortRadarr, "/ping"}, "sonarr": {PortSonarr, "/ping"}, "prowlarr": {PortProwlarr, "/ping"},
+		"bazarr": {PortBazarr, "/api/system/ping"},
 	}
 	deadline := time.Now().Add(4 * time.Minute)
 	for service := range s.containers {
@@ -278,7 +297,8 @@ func (s *liveStack) snapshot(ctx context.Context) string {
 		reply, err = api.call(ctx, http.MethodGet, "/System/Configuration/network", nil, nil)
 		read("jellyfin network", reply, err)
 		network, _ := state["jellyfin network"].(map[string]any)
-		state["jellyfin network"] = map[string]any{"EnableRemoteAccess": network["EnableRemoteAccess"], "EnableUPnP": network["EnableUPnP"]}
+		state["jellyfin network"] = map[string]any{"EnableRemoteAccess": network["EnableRemoteAccess"], "EnableUPnP": network["EnableUPnP"],
+			"KnownProxies": network["KnownProxies"]}
 		reply, err = api.call(ctx, http.MethodGet, "/Users", nil, nil)
 		read("jellyfin users", reply, err)
 		users, _ := state["jellyfin users"].([]any)
@@ -286,7 +306,7 @@ func (s *liveStack) snapshot(ctx context.Context) string {
 	}
 	if s.containers["qbittorrent"] != "" {
 		base, _ := s.env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
-		password, _, _ := s.env.LookupCredential(ctx, CredentialQBittorrent)
+		password, _, _ := s.env.LookupCredential(ctx, CredentialLogin)
 		api := &qbittorrentAPI{env: s.env, base: base}
 		if outcome, err := api.signIn(ctx, password); err != nil || outcome != qbittorrentAccepted {
 			s.t.Fatalf("snapshot qbittorrent sign-in: %v %d", err, outcome)
@@ -307,7 +327,7 @@ func (s *liveStack) snapshot(ctx context.Context) string {
 		if err != nil {
 			s.t.Fatal(err)
 		}
-		for _, path := range []string{"/settings/main", "/settings/public", "/settings/jellyfin", "/settings/radarr", "/settings/sonarr", "/user"} {
+		for _, path := range []string{"/settings/main", "/settings/public", "/settings/network", "/settings/jellyfin", "/settings/radarr", "/settings/sonarr", "/user"} {
 			reply, err := api.call(ctx, http.MethodGet, path, nil)
 			read("seerr "+path, reply, err)
 		}
@@ -324,7 +344,7 @@ func (s *liveStack) snapshot(ctx context.Context) string {
 	slices.Sort(lines)
 	state["folders"] = lines
 	secrets := []string{liveRadarrKey, liveSonarrKey}
-	for _, name := range []string{CredentialJellyfinAdmin, CredentialJellyfinAPIKey, CredentialQBittorrent, CredentialSeerrAPIKey} {
+	for _, name := range []string{CredentialLogin, CredentialJellyfinAPIKey, CredentialSeerrAPIKey} {
 		value, _, _ := s.env.LookupCredential(ctx, name)
 		state["credential "+name] = value
 		secrets = append(secrets, value)
@@ -352,7 +372,7 @@ func changing(requests []string) []string {
 	harmless := []string{
 		"POST /Users/AuthenticateByName", "POST /Sessions/Logout",
 		"POST /api/v2/auth/login", "POST /api/v2/auth/logout",
-		"POST /api/v1/auth/jellyfin",
+		"POST /api/v1/auth/jellyfin", "POST /login", "POST /api/system/account",
 		"POST /api/v1/settings/radarr/test", "POST /api/v1/settings/sonarr/test",
 		"POST /api/v1/settings/cache/radarr/flush", "POST /api/v1/settings/cache/sonarr/flush",
 	}
@@ -423,6 +443,8 @@ func TestLiveCompleteStepsConfigureOnceAndThenChangeNothing(t *testing.T) {
 		`"initialized": true`, `"defaultPermissions": 32`, `1000:1000 755 d /data/media/movies`, `1000:1000 755 d /data/downloads/tv`,
 		`"bypass_local_auth": false`, `"bypass_auth_subnet_whitelist_enabled": false`,
 		`"EnableRemoteAccess": true`, `"EnableUPnP": false`,
+		`"web_ui_reverse_proxy_enabled": true`, `"trustProxy": true`,
+		`"applicationUrl": "https://media-requests.example.test"`, `"externalHostname": "https://media.example.test"`,
 	} {
 		if !strings.Contains(before, expected) {
 			t.Errorf("the configured state lacks %s", expected)
@@ -431,6 +453,119 @@ func TestLiveCompleteStepsConfigureOnceAndThenChangeNothing(t *testing.T) {
 	if strings.Contains(before, probeName) {
 		t.Error("a write test file was left on the media volume")
 	}
+
+	t.Run("behind the proxy each app sees the visitor", func(t *testing.T) {
+		subnets, err := stack.env.NetworkSubnets(ctx, "jellyfin")
+		if err != nil || len(subnets) == 0 {
+			t.Fatalf("subnets: %v %v", subnets, err)
+		}
+		for _, subnet := range subnets {
+			if !strings.Contains(before, `"`+subnet+`"`) {
+				t.Errorf("Jellyfin does not trust %s:\n%s", subnet, before)
+			}
+		}
+		// Jellyfin applies its known proxies without a restart: a request
+		// the proxy forwards for a visitor on the internet is not local.
+		base, _ := stack.env.BaseURL(ctx, "jellyfin", PortJellyfin)
+		key, _, _ := stack.env.LookupCredential(ctx, CredentialJellyfinAPIKey)
+		endpoint := func(forwardedFor string) map[string]any {
+			t.Helper()
+			header := map[string]string{"Authorization": jellyfinClientHeader + `, Token="` + key + `"`}
+			if forwardedFor != "" {
+				header["X-Forwarded-For"] = forwardedFor
+			}
+			reply, err := callApp(ctx, stack.env, appCall{Method: http.MethodGet, URL: stacks.JoinURL(base, "/System/Endpoint", nil), Header: header})
+			if err != nil || reply.Status != http.StatusOK {
+				t.Fatalf("endpoint: %v %d", err, reply.Status)
+			}
+			var answer map[string]any
+			_ = reply.decode(&answer)
+			return answer
+		}
+		direct, forwarded := endpoint(""), endpoint("203.0.113.9")
+		t.Logf("Jellyfin's endpoint before it restarts: direct %v, forwarded for a visitor %v", direct, forwarded)
+		// Jellyfin reads its known proxies when it starts: the next deploy
+		// restarts it, as this does.
+		liveDocker(t, "restart", stack.containers["jellyfin"])
+		stack.waitReady(ctx)
+		// Its health answers before its API does.
+		for deadline := time.Now().Add(3 * time.Minute); ; {
+			base, _ = stack.env.BaseURL(ctx, "jellyfin", PortJellyfin)
+			api := &jellyfinAPI{env: stack.env, base: base, token: key}
+			if reply, err := api.call(ctx, http.MethodGet, "/System/Endpoint", nil, nil); err == nil && reply.Status == http.StatusOK {
+				break
+			}
+			if time.Now().After(deadline) {
+				t.Fatal("Jellyfin's API did not come back after the restart")
+			}
+			time.Sleep(2 * time.Second)
+		}
+		stack.env.take()
+		direct, forwarded = endpoint(""), endpoint("203.0.113.9")
+		t.Logf("Jellyfin's endpoint after it restarts: direct %v, forwarded for a visitor %v", direct, forwarded)
+		if direct["IsInNetwork"] != true || forwarded["IsInNetwork"] != false {
+			t.Errorf("Jellyfin does not read the visitor's address from the proxy: direct %v, forwarded %v", direct, forwarded)
+		}
+		if state := liveDocker(t, "inspect", "-f", "{{.State.Status}} {{.RestartCount}}", stack.containers["jellyfin"]); state != "running 0" {
+			t.Errorf("Jellyfin is %s", state)
+		}
+		mustRunAgain := stack.mustRun(ctx, "jellyfin.proxy")
+		if strings.Contains(mustRunAgain.Message, "next start") || len(changing(stack.env.take())) != 0 {
+			t.Errorf("after the restart jellyfin.proxy changed something: %q", mustRunAgain.Message)
+		}
+
+		// qBittorrent answers a sign-in the proxy forwards for its address,
+		// and counts a refused one against the visitor, not the proxy.
+		qbase, _ := stack.env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
+		password, _, _ := stack.env.LookupCredential(ctx, CredentialLogin)
+		host := "media-downloads.example.test"
+		// As the proxy sends it: the visitor's Host, Origin and address.
+		forward := func(password string) int {
+			t.Helper()
+			form := url.Values{"username": {AdminUsername}, "password": {password}}
+			request, err := http.NewRequestWithContext(ctx, http.MethodPost, stacks.JoinURL(qbase, "/api/v2/auth/login", nil), strings.NewReader(form.Encode()))
+			if err != nil {
+				t.Fatal(err)
+			}
+			request.Host = host
+			for name, value := range map[string]string{
+				"Content-Type": "application/x-www-form-urlencoded", "Origin": "https://" + host, "Referer": "https://" + host + "/",
+				"X-Forwarded-For": "203.0.113.9", "X-Forwarded-Host": host, "X-Forwarded-Proto": "https",
+			} {
+				request.Header.Set(name, value)
+			}
+			response, err := stack.env.HTTP().Do(request)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_ = response.Body.Close()
+			return response.StatusCode
+		}
+		if status := forward(password); status != http.StatusNoContent && status != http.StatusOK {
+			t.Fatalf("a sign-in through the proxy's address = %d", status)
+		}
+		if status := forward("NotThePassword123"); status != http.StatusUnauthorized {
+			t.Fatalf("a wrong password through the proxy = %d", status)
+		}
+		logs := liveQBittorrentLog(ctx, t, stack)
+		var failures []string
+		for line := range strings.Lines(logs) {
+			if strings.Contains(strings.ToLower(line), "login failure") {
+				failures = append(failures, strings.TrimSpace(line))
+			}
+		}
+		t.Logf("qBittorrent's refused sign-ins: %v", failures)
+		if len(failures) != 1 || !strings.Contains(failures[0], "203.0.113.9") {
+			t.Errorf("the refused sign-in was not counted against the visitor: %v", failures)
+		}
+		// The stack's own sign-ins still work: the refusal was the visitor's.
+		api := &qbittorrentAPI{env: stack.env, base: qbase}
+		if outcome, err := api.signIn(ctx, password); err != nil || outcome != qbittorrentAccepted {
+			t.Fatalf("the stack's sign-in after the visitor's refusal: %v %d", err, outcome)
+		}
+		api.signOut(ctx)
+		stack.env.take()
+	})
 
 	t.Run("a changed option is applied and nothing else", func(t *testing.T) {
 		stack.env.Options[OptionRequestApproval] = "auto"
@@ -522,7 +657,7 @@ func TestLiveCompleteStepsConfigureOnceAndThenChangeNothing(t *testing.T) {
 
 	t.Run("a qBittorrent password somebody changed is an action, without a sign-in", func(t *testing.T) {
 		base, _ := stack.env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
-		password, _, _ := stack.env.LookupCredential(ctx, CredentialQBittorrent)
+		password, _, _ := stack.env.LookupCredential(ctx, CredentialLogin)
 		api := &qbittorrentAPI{env: stack.env, base: base}
 		if outcome, err := api.signIn(ctx, password); err != nil || outcome != qbittorrentAccepted {
 			t.Fatalf("sign-in: %v %d", err, outcome)
@@ -634,7 +769,7 @@ func TestLiveJellyfinSetUpBySomeoneElseIsAnAction(t *testing.T) {
 			t.Fatalf("pass %d: sign-in tried = %v", pass, tried)
 		}
 	}
-	if _, found, _ := stack.env.LookupCredential(ctx, CredentialJellyfinAdmin); !found {
+	if _, found, _ := stack.env.LookupCredential(ctx, CredentialLogin); !found {
 		t.Fatal("no password was made for the person to set")
 	}
 	if _, found, _ := stack.env.LookupCredential(ctx, CredentialJellyfinAPIKey); found {

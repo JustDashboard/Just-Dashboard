@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks/media"
 	"net"
 	"path/filepath"
 	"strconv"
@@ -172,6 +173,9 @@ type moduleSet struct {
 	// stack's preset, configured by the dashboard once their release is live.
 	stackStore *stacks.Store
 	stacks     *stacks.Service
+	// stackSources keeps each media stack's catalogue of sources for a few
+	// minutes: Prowlarr answers it with several megabytes.
+	stackSources *media.SourceCache
 	// releaseImages removes release images retention no longer keeps.
 	releaseImages *deploy.ReleaseImageSweeper
 	// sleeper stops environments that sleep once nobody visits and wakes
@@ -470,6 +474,7 @@ func (s *Server) initModules() {
 		WithSecretStores(s.modules.secretStores)
 	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
 	s.modules.stacks = s.newStackService()
+	s.modules.stackSources = media.NewSourceCache()
 	s.modules.githubApp = githubapp.New(githubapp.NewStore(s.Store.DB, s.Sealer), s.modules.deployPlanning)
 	s.modules.deployPlanning.WithInstallationTokens(s.modules.githubApp)
 	s.modules.githubRepos = githubrepos.New(s.Store.DB, s.Sealer)

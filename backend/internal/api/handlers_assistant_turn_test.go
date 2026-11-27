@@ -760,6 +760,22 @@ func TestTheAssistantIsNotOfferedHubSignIn(t *testing.T) {
 	}
 }
 
+// A media stack's one login opens every app of it, and what the assistant
+// sends has passed through the model's provider, which is kept from every
+// secret: the person sets it on the Stack page, as a source's password is
+// typed on the Sources page (source_needs_person).
+func TestTheAssistantIsNotOfferedTheStacksLogin(t *testing.T) {
+	s := testServer(t)
+	s.Routes()
+	route := s.apiCatalogue().byKey["PUT /deploy/{id}/stack/login"]
+	if route == nil {
+		t.Fatal("the catalogue has no PUT /deploy/{id}/stack/login")
+	}
+	if route.Excluded == "" {
+		t.Error("the stack's one login is offered to the assistant")
+	}
+}
+
 // The catalogue is every route under /deploy the person could make, but for what no
 // request of the assistant's makes; every line that names a route names a real one,
 // and every change says where it is shown.

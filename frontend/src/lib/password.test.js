@@ -27,3 +27,27 @@ test("a made password is the length asked for, drawn from the shared alphabet", 
   // Two draws are not the same password.
   expect(generatePassword(30)).not.toBe(generatePassword(30))
 })
+
+test("a made password always passes the rule: a draw with no digit is drawn again", () => {
+  const random = crypto.getRandomValues
+  const draws = []
+  // The first draw is all upper case ("AAAA…"), the second mixes every kind.
+  crypto.getRandomValues = (array) => {
+    const second = draws.length > 0
+    for (let index = 0; index < array.length; index += 1)
+      array[index] = second ? [0, 30, 50][index % 3] : 0
+    draws.push(array.length)
+    return array
+  }
+  try {
+    const made = generatePassword(30)
+    expect(draws).toEqual([30, 30])
+    expect(passwordChecks(made).ok).toBe(true)
+    // Too short to hold three kinds, it is not drawn again.
+    draws.length = 0
+    expect(generatePassword(2)).toBe("AA")
+    expect(draws).toEqual([2])
+  } finally {
+    crypto.getRandomValues = random
+  }
+})

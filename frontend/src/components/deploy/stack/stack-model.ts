@@ -1,11 +1,12 @@
 import { plural } from "@/lib/format"
+import { passwordChecks } from "@/lib/password"
 import type { DotTone } from "@/components/tone"
 import type {
-  SmartStackAccess,
   SmartStackAction,
+  SmartStackAddresses,
   SmartStackCatalogueEntry,
   SmartStackCatalogueService,
-  SmartStackCredential,
+  SmartStackMissingAddress,
   SmartStackPreset,
   SmartStackReadiness,
   SmartStackService,
@@ -26,17 +27,81 @@ import type {
  * connected, able to fetch and able to play are five different facts.
  */
 
-/** How a service is reached, as one word on its row. */
-export const ACCESS_WORD: Record<SmartStackAccess, string> = {
-  public: "Public",
-  private: "Private",
-  worker: "Background",
+/** A DNS label is at most this long, so a sibling name cuts the domain's first label to fit. */
+const LABEL_MAX = 63
+
+/**
+ * The address a stack's service gets beside its domain, by the server's rule
+ * (`blueprint.ServiceHostname`): a sibling of the domain's first label,
+ * `media.example.com` and `requests` making `media-requests.example.com`, so
+ * one wildcard certificate, the just-dashboard.com app domain and sslip.io all
+ * cover it. An apex such as `example.com` has no first label to join, so the
+ * service's label goes in front of it instead. A first label that would make
+ * the joined one longer than a DNS label is cut from its end.
+ */
+export function serviceHostname(domain: string, rawLabel: string): string {
+  const name = domain.trim().toLowerCase().replace(/\.$/, "")
+  const label = rawLabel.trim().toLowerCase()
+  const labels = name.split(".")
+  if (!name || !label) return ""
+  if (labels.length < 3) return `${label}.${name}`
+  // As the server's: a long first label gives way at its end, never ending
+  // in the hyphen a cut can leave.
+  const room = LABEL_MAX - label.length - 1
+  let first = labels[0]
+  if (first.length > room) first = first.slice(0, Math.max(room, 1)).replace(/-+$/, "")
+  return [`${first}-${label}`, ...labels.slice(1)].join(".")
 }
 
-const ACCESS_MEANING: Record<SmartStackAccess, string> = {
-  public: "public is on the project's address",
-  private: "private is on this server only (127.0.0.1)",
-  worker: "background has no web interface",
+export type PlannedAddress = { service: string; title: string; hostname: string }
+
+/**
+ * The address each of a preset's apps gets from the domain typed on the
+ * Stacks tab: the primary service the domain itself, the others their
+ * sibling names, and a background worker none.
+ */
+export function plannedAddresses(
+  services: Pick<SmartStackCatalogueService, "name" | "title" | "address" | "primary">[],
+  domain: string,
+): PlannedAddress[] {
+  const name = domain.trim().toLowerCase().replace(/\.$/, "")
+  if (!name) return []
+  return services.flatMap((service) => {
+    if (service.primary) return [{ service: service.name, title: service.title, hostname: name }]
+    if (!service.address) return []
+    return [
+      {
+        service: service.name,
+        title: service.title,
+        hostname: serviceHostname(name, service.address),
+      },
+    ]
+  })
+}
+
+/**
+ * What the Stacks tab says under the services: that each app answers at an
+ * address of its own and signs in with one password, and which run without
+ * a web interface.
+ */
+export function addressSentence(
+  services: Pick<SmartStackCatalogueService, "title" | "access">[],
+): string {
+  const apps = services.filter((service) => service.access !== "worker")
+  const workers = services.filter((service) => service.access === "worker")
+  if (apps.length === 0) return ""
+  const each =
+    apps.length === 1
+      ? `${apps[0].title} answers at its own HTTPS address and signs in with the stack's one password.`
+      : "Every app answers at its own HTTPS address beside the domain, and they all sign in with one password."
+  if (workers.length === 0) return each
+  return `${each} ${listWords(workers.map((worker) => worker.title))} ${workers.length === 1 ? "runs" : "run"} in the background with no web interface.`
+}
+
+/** "Seerr", "Seerr and Radarr", "Seerr, Radarr and Sonarr". */
+export function listWords(words: string[]): string {
+  if (words.length <= 1) return words[0] ?? ""
+  return `${words.slice(0, -1).join(", ")} and ${words.at(-1)}`
 }
 
 /** A memory figure as the tab says it: megabytes under a gigabyte, else gigabytes. */
@@ -73,27 +138,6 @@ export function chosenPreset(
 /** What a preset asks of the server, in one sentence. Media is not in the estimate. */
 export function footprintWords(preset: Pick<SmartStackPreset, "memoryMb" | "diskGb">): string {
   return `Memory limits add up to ${memoryWords(preset.memoryMb)}, and the applications' own data takes about ${preset.diskGb} GB of disk. Your media takes what you add on top.`
-}
-
-const ACCESS_ORDER = ["public", "private", "worker"] as const
-
-/** How many of each kind of access a set of services has: "1 public, 6 private, 1 background". */
-export function accessCounts(services: Pick<SmartStackCatalogueService, "access">[]): string {
-  return ACCESS_ORDER.map((access) => {
-    const count = services.filter((service) => service.access === access).length
-    return count > 0 ? `${count} ${ACCESS_WORD[access].toLowerCase()}` : undefined
-  })
-    .filter(Boolean)
-    .join(", ")
-}
-
-/** The counts, then what each word on the rows means, for the kinds this set has. */
-export function accessSentence(services: Pick<SmartStackCatalogueService, "access">[]): string {
-  const meanings = ACCESS_ORDER.filter((access) =>
-    services.some((service) => service.access === access),
-  ).map((access) => ACCESS_MEANING[access])
-  if (meanings.length === 0) return ""
-  return `${capital(accessCounts(services))}: ${meanings.join(", ")}.`
 }
 
 // ---------------------------------------------------------------------------
@@ -248,36 +292,119 @@ function capital(word: string) {
   return word ? word[0].toUpperCase() + word.slice(1) : word
 }
 
-/** The port of a published address: "127.0.0.1:23950" and "[::1]:23950" are 23950. */
-export function addressPort(address: string | undefined): number | undefined {
-  const match = /:(\d{1,5})$/.exec(address ?? "")
-  const port = match ? Number(match[1]) : NaN
-  return port > 0 && port < 65536 ? port : undefined
+/**
+ * How an app is reached, on its row: opened at its address, run in the
+ * background with no interface, or not reachable from outside yet, with the
+ * loopback address it is published on as the detail behind the words.
+ */
+export type AppReach =
+  { kind: "open"; url: string } | { kind: "background" } | { kind: "none"; detail?: string }
+
+export function appReach(service: Pick<SmartStackService, "access" | "url" | "address">): AppReach {
+  if (service.access === "worker") return { kind: "background" }
+  if (service.url) return { kind: "open", url: service.url }
+  return {
+    kind: "none",
+    detail: service.address ? `Published on this server at ${service.address}` : undefined,
+  }
 }
 
 /**
- * How a private service is opened from another computer: a tunnel to the
- * loopback address it is published on. `host` is the name this dashboard was
- * opened at, which is the server; the account is the reader's own.
+ * One thing left for the person, in the order the page offers them: what
+ * holds the stack from ready, then the apps with no address, then what is
+ * optional. The first is the page's one next step.
  */
-export function tunnelFor(
-  address: string | undefined,
-  host: string,
-): { command: string; url: string } | undefined {
-  const port = addressPort(address)
-  if (!port) return undefined
-  return {
-    command: `ssh -L ${port}:127.0.0.1:${port} user@${host || "your-server"}`,
-    url: `http://127.0.0.1:${port}`,
-  }
+export type NextStep =
+  | { kind: "action"; action: SmartStackAction }
+  | { kind: "addresses"; addresses: SmartStackAddresses }
+
+export function nextSteps(
+  state: Pick<SmartStackState, "actions" | "addresses" | "status">,
+): NextStep[] {
+  const actions = orderedActions(state.actions)
+  const blocking = actions.filter((action) => action.blocking)
+  const optional = actions.filter((action) => !action.blocking)
+  const missing =
+    state.status !== "waiting" &&
+    state.addresses &&
+    (state.addresses.missing.length > 0 || (state.addresses.unpublished?.length ?? 0) > 0)
+      ? [{ kind: "addresses" as const, addresses: state.addresses }]
+      : []
+  return [
+    ...blocking.map((action) => ({ kind: "action" as const, action })),
+    ...missing,
+    ...optional.map((action) => ({ kind: "action" as const, action })),
+  ]
 }
 
-/** The accounts that exist to be revealed, and how many are still to be made. */
-export function splitCredentials(credentials: SmartStackCredential[]) {
-  return {
-    stored: credentials.filter((credential) => credential.stored),
-    pending: credentials.filter((credential) => !credential.stored).length,
+/** Whether an action is the one that leads to the source picker. */
+export function isSourceAction(action: Pick<SmartStackAction, "id">): boolean {
+  return action.id === "media-source"
+}
+
+/**
+ * The sentence over "Give every app its address": which apps have none, and
+ * where theirs go. Without a primary domain the names cannot be made yet, so
+ * it says the domain comes first.
+ */
+/**
+ * Whether every app has its address saved and the step is only to publish
+ * the ones the live release does not serve: the release that was to failed.
+ */
+export function onlyUnpublished(addresses: SmartStackAddresses): boolean {
+  return addresses.missing.length === 0 && (addresses.unpublished?.length ?? 0) > 0
+}
+
+export function addressesSentence(addresses: SmartStackAddresses): string {
+  if (onlyUnpublished(addresses)) {
+    const unpublished = addresses.unpublished ?? []
+    const titles = listWords(unpublished.map((entry) => entry.title))
+    const one = unpublished.length === 1
+    return `${titles} ${one ? "has its address" : "have their addresses"} saved, but the release that was to publish ${one ? "it" : "them"} did not finish. Deploying again publishes ${one ? "it" : "them"}.`
   }
+  const titles = listWords(addresses.missing.map((missing) => missing.title))
+  const count = addresses.missing.length
+  const have = count === 1 ? "has" : "have"
+  if (!addresses.primary)
+    return `${titles} ${have} no address yet, and neither has the stack: give it a domain and every app gets an address beside it.`
+  return `${titles} ${have} no address yet. ${count === 1 ? "It gets one" : "Each gets one"} beside ${addresses.primary}, and a deployment starts to serve ${count === 1 ? "it" : "them"}.`
+}
+
+/**
+ * The names the apps would get from a domain typed in the dialog, where the
+ * stack has no primary domain to make them from: the server's own name when
+ * it gave one, else the label's sibling of what was typed.
+ */
+export function missingHostnames(
+  missing: SmartStackMissingAddress[],
+  labels: Record<string, string | undefined>,
+  domain: string,
+): SmartStackMissingAddress[] {
+  return missing.map((entry) => {
+    if (entry.hostname) return entry
+    const label = labels[entry.service]
+    return { ...entry, hostname: label ? serviceHostname(domain, label) : "" }
+  })
+}
+
+/** A refusal of "Give every app its address", in words; anything else is the caller's error. */
+export function addressesRefusal(code: string | undefined): string | undefined {
+  if (code === "stack_addresses_present") return "Every app already has its address."
+  if (code === "stack_no_domain")
+    return "The stack has no domain yet. Give the one the apps' addresses are made from."
+  return undefined
+}
+
+/**
+ * What still keeps a new password from being the stack's, by the dashboard's
+ * own rule (`passwordChecks`): twelve characters, three kinds of them.
+ */
+export function loginPasswordProblem(password: string): string | undefined {
+  const checks = passwordChecks(password)
+  if (!password) return "Type the new password."
+  if (!checks.long) return "Use at least 12 characters."
+  if (!checks.mixed) return "Mix three of upper case, lower case, digits and symbols."
+  return undefined
 }
 
 /**

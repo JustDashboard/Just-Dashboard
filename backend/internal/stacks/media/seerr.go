@@ -285,7 +285,7 @@ func seerrSignIn(ctx context.Context, env stacks.Env, api *seerrAPI, public seer
 	if !fresh && public.MediaServerType != seerrServerJellyfin {
 		return seerrTakenOver("Seerr is connected to a media server that is not Jellyfin.")
 	}
-	password, err := env.Credential(ctx, CredentialJellyfinAdmin)
+	password, err := stackLogin(ctx, env)
 	if err != nil {
 		return err
 	}
@@ -851,4 +851,106 @@ func seerrVerify(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 		message += ". Its test of " + strings.Join(others, ", ") + " failed; that server is not the stack's"
 	}
 	return stacks.Result{Message: message}, nil
+}
+
+// seerrAddress sets Seerr up for the addresses the release serves: its own
+// as its application URL (the links in its notifications), proxy support on
+// so it reads each visitor's address from the proxy, and Jellyfin's public
+// address as the one "Play on Jellyfin" opens. Seerr reads proxy support
+// when it starts, so a change to it applies from its next start.
+func seerrAddress(ctx context.Context, env stacks.Env) (stacks.Result, error) {
+	api, err := seerrWithKey(ctx, env)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	var notes []string
+	if address, found := env.PublicURL("seerr"); found {
+		var main struct {
+			ApplicationURL string `json:"applicationUrl"`
+		}
+		if err := seerrGet(ctx, api, "/settings/main", &main); err != nil {
+			return stacks.Result{}, err
+		}
+		if main.ApplicationURL != address {
+			if err := seerrPost(ctx, api, "/settings/main", map[string]any{"applicationUrl": address}); err != nil {
+				return stacks.Result{}, err
+			}
+			if err := seerrGet(ctx, api, "/settings/main", &main); err != nil {
+				return stacks.Result{}, err
+			}
+			if main.ApplicationURL != address {
+				return stacks.Result{}, fmt.Errorf("Seerr's application URL reads back as %q, not %s", main.ApplicationURL, address)
+			}
+			env.Logf("Seerr's application URL is now %s", address)
+		}
+		notes = append(notes, "Seerr's address is "+address)
+	}
+
+	var network struct {
+		TrustProxy bool `json:"trustProxy"`
+	}
+	if err := seerrGet(ctx, api, "/settings/network", &network); err != nil {
+		return stacks.Result{}, err
+	}
+	if !network.TrustProxy {
+		if err := seerrPost(ctx, api, "/settings/network", map[string]any{"trustProxy": true}); err != nil {
+			return stacks.Result{}, err
+		}
+		if err := seerrGet(ctx, api, "/settings/network", &network); err != nil {
+			return stacks.Result{}, err
+		}
+		if !network.TrustProxy {
+			return stacks.Result{}, errors.New("Seerr's proxy support reads back as off")
+		}
+		env.Logf("turned on Seerr's proxy support; it applies from Seerr's next start")
+	}
+	notes = append(notes, "it reads visitors' addresses from the proxy")
+
+	if address, found := env.PublicURL("jellyfin"); found {
+		var jellyfin struct {
+			ExternalHostname string `json:"externalHostname"`
+		}
+		if err := seerrGet(ctx, api, "/settings/jellyfin", &jellyfin); err != nil {
+			return stacks.Result{}, err
+		}
+		if strings.TrimRight(jellyfin.ExternalHostname, "/") != address {
+			// Seerr tests its connection to Jellyfin before it saves, over
+			// the address it already has; only the one it shows people moves.
+			if err := seerrPost(ctx, api, "/settings/jellyfin", map[string]any{"externalHostname": address}); err != nil {
+				return stacks.Result{}, err
+			}
+			if err := seerrGet(ctx, api, "/settings/jellyfin", &jellyfin); err != nil {
+				return stacks.Result{}, err
+			}
+			if strings.TrimRight(jellyfin.ExternalHostname, "/") != address {
+				return stacks.Result{}, fmt.Errorf("Seerr's address for Jellyfin reads back as %q, not %s", jellyfin.ExternalHostname, address)
+			}
+			env.Logf("Seerr opens Jellyfin at %s", address)
+		}
+		notes = append(notes, "it opens Jellyfin at "+address)
+	}
+	message := strings.Join(notes, "; ")
+	return stacks.Result{Message: strings.ToUpper(message[:1]) + message[1:]}, nil
+}
+
+func seerrGet(ctx context.Context, api *seerrAPI, path string, out any) error {
+	reply, err := api.call(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return err
+	}
+	if reply.Status != http.StatusOK {
+		return api.fail(reply, "Seerr did not give "+path)
+	}
+	return reply.decode(out)
+}
+
+func seerrPost(ctx context.Context, api *seerrAPI, path string, body any) error {
+	reply, err := api.call(ctx, http.MethodPost, path, body)
+	if err != nil {
+		return err
+	}
+	if reply.Status != http.StatusOK {
+		return api.fail(reply, "Seerr did not save "+path)
+	}
+	return nil
 }

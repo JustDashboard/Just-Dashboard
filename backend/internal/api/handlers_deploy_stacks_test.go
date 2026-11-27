@@ -49,10 +49,19 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 		complete.TemplateVersion == "" || len(complete.Limitations) == 0 {
 		t.Fatalf("complete preset = %+v", complete)
 	}
+	labels := map[string]string{}
 	for _, service := range catalogue[0].Services {
 		if service.Image == "" {
 			t.Fatalf("service %s has no image", service.Name)
 		}
+		labels[service.Name] = service.Address
+		if service.Primary != (service.Name == "jellyfin") {
+			t.Fatalf("service %s primary = %v", service.Name, service.Primary)
+		}
+	}
+	if labels["seerr"] != "requests" || labels["qbittorrent"] != "downloads" || labels["bazarr"] != "subtitles" ||
+		labels["jellyfin"] != "" || labels["recyclarr"] != "" {
+		t.Fatalf("address labels = %v", labels)
 	}
 
 	// The Template tab is told which templates are a stack's.
@@ -76,7 +85,7 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 	_ = json.Unmarshal(call(http.MethodPut, "/deploy/drafts/"+draft.ID, fmt.Sprintf(
 		`{"revision":%d,"step":"intent","intent":{"name":"media","profile":"compose"}}`, draft.Revision), http.StatusOK), &draft)
 	_ = json.Unmarshal(call(http.MethodPut, "/deploy/drafts/"+draft.ID, fmt.Sprintf(
-		`{"revision":%d,"step":"source","source":{"kind":"compose","mode":"blueprint","blueprintId":%q,"blueprintVersion":"1.0.0","blueprintInputs":{"request-approval":"admin"}}}`,
+		`{"revision":%d,"step":"source","source":{"kind":"compose","mode":"blueprint","blueprintId":%q,"blueprintVersion":"1.1.0","blueprintInputs":{"domain":"media.example.test","request-approval":"admin"}}}`,
 		draft.Revision, media.TemplateEssential), http.StatusOK), &draft)
 	if draft.Data.Source == nil || draft.Data.Source.BlueprintID != media.TemplateEssential || len(draft.Data.Source.ComposeFiles) != 1 {
 		t.Fatalf("the draft did not take the preset's template: %+v", draft.Data.Source)
@@ -119,10 +128,10 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 			t.Fatalf("an Essential stack lists %s's step %s", step.Service, step.ID)
 		}
 	}
-	for _, credential := range state.Credentials {
-		if credential.Name == media.CredentialJellyfinAPIKey || credential.Stored {
-			t.Fatalf("credential listing = %+v", state.Credentials)
-		}
+	// One login for every app, and nothing else a person signs in with.
+	if len(state.Credentials) != 1 || state.Credentials[0].Name != media.CredentialLogin || state.Credentials[0].Service != "" ||
+		state.Credentials[0].Username != "admin" || state.Credentials[0].Stored || state.Login.Username != "admin" || state.Login.Stored {
+		t.Fatalf("credential listing = %+v, login = %+v", state.Credentials, state.Login)
 	}
 
 	// Retry before there is anything to configure says why.
@@ -133,17 +142,18 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 
 	// Reveal: an account once its step stored it; never an internal token.
 	store := s.modules.stackStore.Credentials(result.ProjectID)
-	if err := store.Put(context.Background(), media.CredentialJellyfinAdmin, "admin-password-value"); err != nil {
+	if err := store.Put(context.Background(), media.CredentialLogin, "admin-password-value"); err != nil {
 		t.Fatal(err)
 	}
 	if err := store.Put(context.Background(), media.CredentialJellyfinAPIKey, "internal-token-value"); err != nil {
 		t.Fatal(err)
 	}
-	revealed := call(http.MethodGet, path+"/credentials/"+media.CredentialJellyfinAdmin+"/reveal", "", http.StatusOK)
+	revealed := call(http.MethodGet, path+"/credentials/"+media.CredentialLogin+"/reveal", "", http.StatusOK)
 	if !strings.Contains(string(revealed), "admin-password-value") || !strings.Contains(string(revealed), `"username":"admin"`) {
 		t.Fatalf("reveal = %s", revealed)
 	}
 	call(http.MethodGet, path+"/credentials/"+media.CredentialJellyfinAPIKey+"/reveal", "", http.StatusNotFound)
+	call(http.MethodGet, path+"/credentials/"+media.CredentialLoginPrevious+"/reveal", "", http.StatusNotFound)
 	call(http.MethodGet, path+"/credentials/nothing/reveal", "", http.StatusNotFound)
 	var audited int
 	if err := s.Store.DB.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'deploy.stack.credential.reveal'`).Scan(&audited); err != nil || audited != 1 {
@@ -154,7 +164,7 @@ func TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts(t *testing.T) 
 		t.Fatalf("the audit log carries the password: %d %v", leaked, err)
 	}
 	var sealed string
-	if err := s.Store.DB.QueryRow(`SELECT sealed FROM deploy_stack_credentials WHERE name = ?`, media.CredentialJellyfinAdmin).Scan(&sealed); err != nil ||
+	if err := s.Store.DB.QueryRow(`SELECT sealed FROM deploy_stack_credentials WHERE name = ?`, media.CredentialLogin).Scan(&sealed); err != nil ||
 		strings.Contains(sealed, "admin-password-value") {
 		t.Fatalf("the credential is stored in the clear: %q %v", sealed, err)
 	}
@@ -175,8 +185,11 @@ func TestStackStateGivesThePublicServiceTheDeploymentsAddress(t *testing.T) {
 	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
 	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
 	projectID, environmentID := seedStackProject(t, s)
-	if _, err := s.Store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id, kind, ownership, resource_kind, resource_id, created_at) VALUES(?, 'domain', 'managed', 'proxy_site', 'media.example.test', 1)`, environmentID); err != nil {
-		t.Fatal(err)
+	// A wildcard first, which is no address to open.
+	for _, hostname := range []string{"*.example.test", "media.example.test"} {
+		if _, err := s.Store.DB.Exec(`INSERT INTO deploy_dependencies(environment_id, kind, ownership, resource_kind, resource_id, created_at) VALUES(?, 'domain', 'managed', 'proxy_site', ?, 1)`, environmentID, hostname); err != nil {
+			t.Fatal(err)
+		}
 	}
 	read := func() map[string]stackServiceState {
 		t.Helper()

@@ -128,6 +128,11 @@ type DeploymentRoute struct {
 	// CrowdSec refuses the addresses CrowdSec's local engine has banned,
 	// from a list the dashboard refreshes from its decisions.
 	CrowdSec bool `json:"crowdSec,omitempty"`
+	// HostUpstreams send some of Domains to servers of their own: a
+	// Compose stack's service domains (deployment_route_hosts.go). Every
+	// other rule of the route applies to them as to the rest. A route
+	// without any renders as it always did.
+	HostUpstreams []HostUpstream `json:"hostUpstreams,omitempty"`
 }
 
 // MaxDeploymentUpstreams is the most servers a route shares requests
@@ -414,6 +419,9 @@ func validateDeploymentRules(route DeploymentRoute) error {
 	if err := validateDeploymentSkew(route); err != nil {
 		return err
 	}
+	if err := validateHostUpstreams(route); err != nil {
+		return err
+	}
 	if err := validateHostRedirects(route.Domains, route.Redirects); err != nil {
 		return err
 	}
@@ -613,6 +621,9 @@ func (s *Service) ApplyDeploymentRoute(ctx context.Context, route DeploymentRout
 	route = s.onDashboardName(route)
 	route = s.withAppDomainCertificates(ctx, route)
 	if err := validateDeploymentRules(route); err != nil {
+		return DeploymentRouteResult{}, err
+	}
+	if err := requirePrivateHostUpstreams(route); err != nil {
 		return DeploymentRouteResult{}, err
 	}
 	if err := validateRouteCertificates(route, false); err != nil {
@@ -1014,6 +1025,7 @@ func deploymentSiteSpec(route DeploymentRoute, authFile string) *SiteSpec {
 		certGroups:    append([]RouteCertificate(nil), route.Certificates...),
 		deployment:    true,
 		dropCookies:   append([]string(nil), route.DropCookies...),
+		hostUpstreams: siteHostUpstreams(route),
 	}
 	if pool := deploymentPool(route.Servers(), route.Canary != nil || route.Skew != nil); pool != nil {
 		spec.Upstream, spec.Pool = "", pool

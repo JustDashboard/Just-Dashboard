@@ -814,6 +814,9 @@ func (s *PlanningStore) Save(
 		if err := copy.Validate(); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
+		if copy.Domains, err = draft.serviceDomains(copy); err != nil {
+			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+		}
 		if err := refuseUnrunnableChecks(copy.Checks); err != nil {
 			return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 		}
@@ -1237,6 +1240,7 @@ func (s *PlanningStore) Commit(
 				domainConfig["redirectCode"] = domain.RedirectCode
 			}
 		}
+		domain.serviceConfig(domainConfig)
 		config := mustJSON(domainConfig)
 		if _, err := tx.ExecContext(ctx, `
 			INSERT INTO deploy_dependencies(
@@ -1318,6 +1322,9 @@ func validateDraftComplete(draft *Draft) error {
 		return err
 	}
 	if err := draft.Data.Configuration.Validate(); err != nil {
+		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
+	}
+	if _, err := draft.serviceDomains(*draft.Data.Configuration); err != nil {
 		return fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	if err := refuseRailpackWithoutCheckout(draft.Data.Source.Kind, draft.Data.Configuration.Build); err != nil {

@@ -19,13 +19,13 @@ type runHousekeeping struct{ executor *NormalizedStepExecutor }
 
 func (runHousekeeping) RunStarted(context.Context, EngineRun) {}
 
-func (h runHousekeeping) RunFinished(_ context.Context, run EngineRun) {
+func (h runHousekeeping) RunFinished(ctx context.Context, run EngineRun) {
 	if h.executor == nil {
 		return
 	}
 	h.executor.prewarms.finish(run.ID, run.State == RunCancelled)
 	if run.State.Terminal() {
 		// A failure is the start-up sweep's to retry.
-		_, _ = h.executor.removeRunWorkspace(run.ID)
+		_, _ = h.executor.removeRunWorkspace(ctx, run.ID)
 	}
 }

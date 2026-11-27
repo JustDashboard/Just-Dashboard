@@ -3048,6 +3048,83 @@ type ManifestStart struct {
 	State    string   `json:"state,omitempty"`
 }
 
+// MediaSource is media.MediaSource in the dashboard's source.
+type MediaSource struct {
+	Definition string             `json:"definition,omitempty"`
+	Enabled    bool               `json:"enabled,omitempty"`
+	ID         int64              `json:"id,omitempty"`
+	Name       string             `json:"name,omitempty"`
+	Privacy    MediaSourcePrivacy `json:"privacy,omitempty"`
+	Protocol   string             `json:"protocol,omitempty"`
+}
+
+// MediaSourceCatalogue is media.MediaSourceCatalogue in the dashboard's source.
+type MediaSourceCatalogue struct {
+	Definitions []MediaSourceDefinition `json:"definitions"`
+	FetchedAt   time.Time               `json:"fetchedAt,omitzero"`
+}
+
+// MediaSourceDefinition is media.MediaSourceDefinition in the dashboard's source.
+type MediaSourceDefinition struct {
+	Definition  string             `json:"definition,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Language    string             `json:"language,omitempty"`
+	Name        string             `json:"name,omitempty"`
+	NeedsInput  bool               `json:"needsInput,omitempty"`
+	Privacy     MediaSourcePrivacy `json:"privacy,omitempty"`
+}
+
+// MediaSourceDetail is media.MediaSourceDetail in the dashboard's source.
+type MediaSourceDetail struct {
+	Definition  string             `json:"definition,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Fields      []MediaSourceField `json:"fields"`
+	Name        string             `json:"name,omitempty"`
+	Privacy     MediaSourcePrivacy `json:"privacy,omitempty"`
+	URLs        []string           `json:"urls"`
+}
+
+// MediaSourceField is media.MediaSourceField in the dashboard's source.
+type MediaSourceField struct {
+	Advanced bool                 `json:"advanced,omitempty"`
+	Help     string               `json:"help,omitempty"`
+	Label    string               `json:"label,omitempty"`
+	Name     string               `json:"name,omitempty"`
+	Options  []MediaSourceOption  `json:"options"`
+	Type     MediaSourceFieldType `json:"type,omitempty"`
+	// Any JSON value.
+	Value any `json:"value"`
+}
+
+// MediaSourceFieldType is one of the values of media.MediaSourceFieldType.
+type MediaSourceFieldType string
+
+// The values of MediaSourceFieldType.
+const (
+	MediaSourceFieldTypeText     MediaSourceFieldType = "text"
+	MediaSourceFieldTypePassword MediaSourceFieldType = "password"
+	MediaSourceFieldTypeNumber   MediaSourceFieldType = "number"
+	MediaSourceFieldTypeCheckbox MediaSourceFieldType = "checkbox"
+	MediaSourceFieldTypeSelect   MediaSourceFieldType = "select"
+)
+
+// MediaSourceOption is media.MediaSourceOption in the dashboard's source.
+type MediaSourceOption struct {
+	Label string `json:"label,omitempty"`
+	// Any JSON value.
+	Value any `json:"value"`
+}
+
+// MediaSourcePrivacy is one of the values of media.MediaSourcePrivacy.
+type MediaSourcePrivacy string
+
+// The values of MediaSourcePrivacy.
+const (
+	MediaSourcePrivacyPublic      MediaSourcePrivacy = "public"
+	MediaSourcePrivacySemiPrivate MediaSourcePrivacy = "semiPrivate"
+	MediaSourcePrivacyPrivate     MediaSourcePrivacy = "private"
+)
+
 // MemorySizing is metrics.MemorySizing in the dashboard's source.
 type MemorySizing struct {
 	LimitMb     int64    `json:"limitMb,omitempty"`
@@ -3268,6 +3345,7 @@ type Plan struct {
 	Profile          Profile            `json:"profile,omitempty"`
 	PullPolicy       string             `json:"pullPolicy,omitempty"`
 	Security         Security           `json:"security,omitzero"`
+	ServiceDomains   []ServiceDomain    `json:"serviceDomains"`
 	Services         []RenderedService  `json:"services"`
 	StopCommands     []string           `json:"stopCommands"`
 	StopSignal       string             `json:"stopSignal,omitempty"`
@@ -3322,9 +3400,11 @@ type PlannedDomain struct {
 	Hostname     string            `json:"hostname,omitempty"`
 	HTTPS        bool              `json:"https,omitempty"`
 	Ownership    OwnershipMode     `json:"ownership,omitempty"`
+	Port         int64             `json:"port,omitempty"`
 	Protection   *DomainProtection `json:"protection,omitempty"`
 	RedirectCode int64             `json:"redirectCode,omitempty"`
 	RedirectTo   string            `json:"redirectTo,omitempty"`
+	Service      string            `json:"service,omitempty"`
 	Tunnel       bool              `json:"tunnel,omitempty"`
 }
 
@@ -4677,6 +4757,7 @@ type Series struct {
 
 // Service is blueprint.Service in the dashboard's source.
 type Service struct {
+	Address     string         `json:"address,omitempty"`
 	DependsOn   []Dependency   `json:"dependsOn"`
 	Egress      bool           `json:"egress,omitempty"`
 	Environment []Environment  `json:"environment"`
@@ -4688,6 +4769,12 @@ type Service struct {
 	Resources   Resources      `json:"resources,omitzero"`
 	Role        ServiceRole    `json:"role,omitempty"`
 	Volumes     []Volume       `json:"volumes"`
+}
+
+// ServiceDomain is blueprint.ServiceDomain in the dashboard's source.
+type ServiceDomain struct {
+	Hostname string `json:"hostname,omitempty"`
+	Service  string `json:"service,omitempty"`
 }
 
 // ServiceRole is one of the values of blueprint.ServiceRole.
@@ -4937,6 +5024,31 @@ const (
 	SourceModeExistingStack       SourceMode = "existing_stack"
 )
 
+// StackAddress is api.stackAddress in the dashboard's source.
+type StackAddress struct {
+	Hostname string `json:"hostname,omitempty"`
+	Service  string `json:"service,omitempty"`
+	Title    string `json:"title,omitempty"`
+}
+
+// StackAddresses is api.stackAddresses in the dashboard's source.
+type StackAddresses struct {
+	Missing     []StackAddress `json:"missing"`
+	Primary     string         `json:"primary,omitempty"`
+	Unpublished []StackAddress `json:"unpublished"`
+}
+
+// StackAddressesAnswer is api.stackAddressesAnswer in the dashboard's source.
+type StackAddressesAnswer struct {
+	Domains []string `json:"domains"`
+	RunID   int64    `json:"runId,omitempty"`
+}
+
+// StackAddressesRequest is api.stackAddressesRequest in the dashboard's source.
+type StackAddressesRequest struct {
+	Domain string `json:"domain,omitempty"`
+}
+
 // StackCatalogueEntry is api.stackCatalogueEntry in the dashboard's source.
 type StackCatalogueEntry struct {
 	Description string                 `json:"description,omitempty"`
@@ -4950,10 +5062,12 @@ type StackCatalogueEntry struct {
 // StackCatalogueItem is api.stackCatalogueItem in the dashboard's source.
 type StackCatalogueItem struct {
 	Access  StacksAccess `json:"access,omitempty"`
+	Address string       `json:"address,omitempty"`
 	DocsURL string       `json:"docsUrl,omitempty"`
 	Image   string       `json:"image,omitempty"`
 	Name    string       `json:"name,omitempty"`
 	Port    int64        `json:"port,omitempty"`
+	Primary bool         `json:"primary,omitempty"`
 	Purpose string       `json:"purpose,omitempty"`
 	Title   string       `json:"title,omitempty"`
 }
@@ -5000,6 +5114,18 @@ type StackCredentialReveal struct {
 	Username string `json:"username,omitempty"`
 }
 
+// StackLoginRequest is api.stackLoginRequest in the dashboard's source.
+type StackLoginRequest struct {
+	// A secret: it is accepted here and never read back by any route.
+	Password string `json:"password,omitempty"`
+}
+
+// StackLoginState is api.stackLoginState in the dashboard's source.
+type StackLoginState struct {
+	Stored   bool   `json:"stored,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
 // StackReadiness is api.stackReadiness in the dashboard's source.
 type StackReadiness struct {
 	Acquisition bool `json:"acquisition,omitempty"`
@@ -5023,14 +5149,34 @@ type StackServiceState struct {
 	URL       string               `json:"url,omitempty"`
 }
 
+// StackSourceAddAnswer is api.stackSourceAddAnswer in the dashboard's source.
+type StackSourceAddAnswer struct {
+	Source MediaSource `json:"source,omitzero"`
+	Synced bool        `json:"synced,omitempty"`
+}
+
+// StackSourceAddRequest is api.stackSourceAddRequest in the dashboard's source.
+type StackSourceAddRequest struct {
+	Definition string `json:"definition,omitempty"`
+	// A secret: it is accepted here and never read back by any route.
+	Fields map[string]any `json:"fields"`
+}
+
+// StackSourcesAnswer is api.stackSourcesAnswer in the dashboard's source.
+type StackSourcesAnswer struct {
+	Sources []MediaSource `json:"sources"`
+}
+
 // StackState is api.stackState in the dashboard's source.
 type StackState struct {
 	Actions             []StacksAction           `json:"actions"`
+	Addresses           StackAddresses           `json:"addresses,omitzero"`
 	ConfiguredReleaseID int64                    `json:"configuredReleaseId,omitempty"`
 	Credentials         []StackCredentialListing `json:"credentials"`
 	FinishedAt          *time.Time               `json:"finishedAt,omitempty"`
 	Limitations         []string                 `json:"limitations"`
 	LiveReleaseID       int64                    `json:"liveReleaseId,omitempty"`
+	Login               StackLoginState          `json:"login,omitzero"`
 	Preset              string                   `json:"preset,omitempty"`
 	PresetTitle         string                   `json:"presetTitle,omitempty"`
 	Readiness           StackReadiness           `json:"readiness,omitzero"`

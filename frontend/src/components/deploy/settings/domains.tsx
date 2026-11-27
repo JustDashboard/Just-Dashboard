@@ -118,6 +118,8 @@ import { OwnershipSelect } from "@/components/deploy/settings/mounts"
 import { useDraftScope, useProject } from "@/components/deploy/project-context"
 import { EdgeRulesForm } from "@/components/deploy/settings/edge-rules"
 import { DNSRecordPanel } from "@/components/deploy/settings/dns-record-panel"
+import { ServiceRoute } from "@/components/deploy/service-route"
+import { useServiceTitles } from "@/components/deploy/stack/use-stack"
 import {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_MAX_AGES,
@@ -516,6 +518,8 @@ function DomainsForm({
   )
   const liveNames = new Set(liveList?.domains.map((route) => route.hostname.toLowerCase()))
 
+  // A stack's apps each answer on a name of their own: the row says which.
+  const serviceTitle = useServiceTitles(domains.some((domain) => domain.service))
   const routeFor = (hostname: string) =>
     routes?.find((route) => route.hostname.toLowerCase() === hostname.toLowerCase())
   // This server's just-dashboard.com address, for the control that adds its name and for
@@ -766,6 +770,7 @@ function DomainsForm({
                     routeFor(domain.hostname),
                     appStatus,
                   )}
+                  serviceTitle={domain.service ? serviceTitle(domain.service) : undefined}
                   onRemove={canAdmin ? () => removeName(domain.hostname) : undefined}
                 />
               ))}
@@ -863,8 +868,11 @@ function DomainRow({
   askRedirect,
   onRedirectAsked,
   appDomain,
+  serviceTitle,
   onRemove,
 }: {
+  /** The app this name routes to, where it is not the deployment's primary service. */
+  serviceTitle?: string
   /**
    * The row was just made a redirect from its menu: open where it sends
    * visitors and with which answer, both at once, as the press asked.
@@ -971,53 +979,13 @@ function DomainRow({
       (password && typedProblem)),
   )
 
-  // One group, so turning HTTPS back on brings the live certificate's
-  // readings back together rather than popping in one by one. At the line's
-  // end it gives way with an ellipsis ("9 da…"), never a second line, and the
-  // whole of it is its explanation, opened by hover, focus or a press. The
-  // group's own ring is outside the box it cuts, so the cut never clips it.
-  const daysLeft =
-    certificateRead &&
-    typeof certificateRead.certificateDaysLeft === "number" &&
-    certificateRead.certificateDaysLeft > 0
-      ? certificateRead.certificateDaysLeft
-      : undefined
-  const certificateWords =
-    certificateRead &&
-    [
-      `${
-        certificateRead.certificate === "unavailable"
-          ? "Certificate not observed"
-          : CERTIFICATE_LABEL[certificateRead.certificate]
-      }${daysLeft !== undefined ? `, ${plural(daysLeft, "day")} left` : ""}.`,
-      renewal,
-    ]
-      .filter(Boolean)
-      .join(" ")
   const certificateFacts = certificateRead && (
-    <Explain face="wrap" tip={certificateWords} label={`Certificate on ${host}`}>
-      <span
-        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that what the line cuts can be read without a pointer
-        tabIndex={0}
-        className={cn(
-          "block animate-rise truncate rounded-sm focus-ring",
-          // Whole when it leads; at the line's end it gives way.
-          certificateUrgent ? "shrink-0" : "min-w-0",
-        )}
-      >
-        <CertificateStatus domain={certificateRead} named />
-        {daysLeft !== undefined && (
-          <span
-            className={cn(
-              "numeric ml-3",
-              certificateRead.certificate === "expiring" ? "text-warning" : "text-muted-foreground",
-            )}
-          >
-            {plural(daysLeft, "day")} left
-          </span>
-        )}
-      </span>
-    </Explain>
+    <CertificateFacts
+      route={certificateRead}
+      host={host}
+      renewal={renewal}
+      urgent={certificateUrgent}
+    />
   )
 
   return (
@@ -1105,6 +1073,10 @@ function DomainRow({
             </Popover>
           )}
           <Status key={routeLabel} tone={routeTone} label={routeLabel} className="animate-rise" />
+          {/* Which app the name serves, where it is not the primary one. */}
+          {serviceTitle && (
+            <ServiceRoute title={serviceTitle} className="shrink-0 text-muted-foreground" />
+          )}
           {/* The sign-in is a mark on the row and its two fields a layer over
               it, so the list never grows under a row (PGD-26). The mark takes
               the warning ink while the sign-in is incomplete. */}
@@ -1407,6 +1379,67 @@ function DomainRow({
         </p>
       )}
     </li>
+  )
+}
+
+/**
+ * The live certificate's readings on a domain row, as one group, so turning
+ * HTTPS back on brings them back together rather than popping in one by one.
+ * At the line's end it gives way with an ellipsis ("9 da…"), never a second
+ * line, and the whole of it is its explanation, opened by hover, focus or a
+ * press. The group's own ring is outside the box it cuts, so the cut never
+ * clips it.
+ */
+function CertificateFacts({
+  route,
+  host,
+  renewal,
+  urgent,
+}: {
+  route: DeploymentDomainRoute
+  host: string
+  renewal?: string
+  /** It leads the line, whole, rather than giving way at its end. */
+  urgent: boolean
+}) {
+  const daysLeft =
+    typeof route.certificateDaysLeft === "number" && route.certificateDaysLeft > 0
+      ? route.certificateDaysLeft
+      : undefined
+  const words = [
+    `${
+      route.certificate === "unavailable"
+        ? "Certificate not observed"
+        : CERTIFICATE_LABEL[route.certificate]
+    }${daysLeft !== undefined ? `, ${plural(daysLeft, "day")} left` : ""}.`,
+    renewal,
+  ]
+    .filter(Boolean)
+    .join(" ")
+  return (
+    <Explain face="wrap" tip={words} label={`Certificate on ${host}`}>
+      <span
+        // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex -- takes the keyboard so that what the line cuts can be read without a pointer
+        tabIndex={0}
+        className={cn(
+          "block animate-rise truncate rounded-sm focus-ring",
+          // Whole when it leads; at the line's end it gives way.
+          urgent ? "shrink-0" : "min-w-0",
+        )}
+      >
+        <CertificateStatus domain={route} named />
+        {daysLeft !== undefined && (
+          <span
+            className={cn(
+              "numeric ml-3",
+              route.certificate === "expiring" ? "text-warning" : "text-muted-foreground",
+            )}
+          >
+            {plural(daysLeft, "day")} left
+          </span>
+        )}
+      </span>
+    </Explain>
   )
 }
 

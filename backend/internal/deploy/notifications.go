@@ -1497,7 +1497,7 @@ func (s *OrchestrationStore) RunNotificationContext(ctx context.Context, run Eng
 	err := s.db.QueryRowContext(ctx, `
 		SELECT e.name,
 		       COALESCE((SELECT d.resource_id FROM deploy_dependencies d
-		                  WHERE d.environment_id = e.id AND d.kind = 'domain' ORDER BY d.id LIMIT 1), ''),
+		                  WHERE d.environment_id = e.id AND d.kind = 'domain' ORDER BY (COALESCE(json_extract(d.config_json, '$.service'), '') != '' OR COALESCE(json_extract(d.config_json, '$.port'), 0) != 0), d.id LIMIT 1), ''),
 		       COALESCE((SELECT src.identity_json FROM deploy_sources src
 		                  WHERE src.environment_id = e.id AND src.revision = ? ORDER BY src.id DESC LIMIT 1), '{}')
 		  FROM deploy_environments e WHERE e.id = ?`, run.PlanRevision, run.EnvironmentID).

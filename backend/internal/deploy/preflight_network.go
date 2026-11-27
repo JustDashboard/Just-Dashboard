@@ -323,8 +323,8 @@ func publicURLFindings(configuration PlanConfiguration, selected *DetectedCandid
 			continue
 		}
 		expected := ""
-		if len(configuration.Domains) > 0 {
-			expected = domainTemplateValue(variable.DomainTemplate, configuration.Domains[0])
+		if domain, ok := ownDomain(configuration.Domains); ok {
+			expected = domainTemplateValue(variable.DomainTemplate, domain)
 		}
 		action := "Add a domain, which fills it, or set " + variable.Name + " to the address visitors use."
 		if expected != "" {
