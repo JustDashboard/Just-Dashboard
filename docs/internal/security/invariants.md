@@ -266,7 +266,13 @@ A change that weakens any of these has to say so explicitly.
    major-version upgrade runs the servers' own clients inside their own containers through
    `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
    (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
-   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is.
+   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is. A copy of a
+   managed database — a migration rehearsal's, a release's data copy, a preview's branch (`prepareCopy`) —
+   is restored the same way: a SQL dump by `dbx` over a connection to the copy's address on its own network,
+   a `pg_dump` archive by the copy's own `pg_restore`, and no password on a command line in it (`psql -c`
+   reads one from a session setting in `PGOPTIONS`, MySQL's account statements go over the connection, its
+   ping reads `MYSQL_PWD`). `TestCopyCodeFeedsNoClientAScriptAndNamesNoPasswordFlag` holds the copy's code
+   to that, and `TestNoCommandACopyRunsCarriesAPassword` the commands it runs.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf

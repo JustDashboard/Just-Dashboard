@@ -12,6 +12,8 @@ import (
 	"time"
 
 	"github.com/go-sql-driver/mysql"
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -1092,7 +1094,7 @@ func restoreScript(ctx context.Context, driver Driver, dsn, database, path strin
 		return "", err
 	}
 	defer closeDump()
-	db, err := openForDump(ctx, d, dsnForDatabase(driver, dsn, database))
+	db, err := openForReplay(ctx, d, driver, dsnForDatabase(driver, dsn, database), opts)
 	if err != nil {
 		return "", err
 	}
@@ -1108,4 +1110,43 @@ func restoreScript(ctx context.Context, driver Driver, dsn, database, path strin
 		return replayPostgresScript(ctx, conn, text, opts)
 	}
 	return replayMySQLScript(ctx, conn, text, opts)
+}
+
+// openForReplay is openForDump for a replay, with a PostgreSQL server's
+// warnings handed to opts.Warnings as they are raised.
+func openForReplay(ctx context.Context, d Dialect, driver Driver, dsn string, opts RestoreOptions) (*sql.DB, error) {
+	if driver != DriverPostgres || opts.Warnings == nil {
+		return openForDump(ctx, d, dsn)
+	}
+	cfg, err := pgx.ParseConfig(d.NormaliseDSN(dsn))
+	if err != nil {
+		return nil, err
+	}
+	cfg.OnNotice = func(_ *pgconn.PgConn, n *pgconn.Notice) {
+		if replayWarning(n) {
+			for _, line := range noticeLines(n) {
+				opts.Warnings(line)
+			}
+		}
+	}
+	db := stdlib.OpenDB(*cfg)
+	db.SetMaxOpenConns(2)
+	pingCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+	if err := db.PingContext(pingCtx); err != nil {
+		db.Close()
+		return nil, err
+	}
+	return db, nil
+}
+
+// replayWarning reports a notice at warning level. The untranslated severity
+// is what a server of any language sends; one older than 9.6 sends only the
+// translated one.
+func replayWarning(n *pgconn.Notice) bool {
+	severity := n.SeverityUnlocalized
+	if severity == "" {
+		severity = n.Severity
+	}
+	return severity == "WARNING"
 }

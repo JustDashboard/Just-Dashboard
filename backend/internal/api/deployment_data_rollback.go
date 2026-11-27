@@ -21,9 +21,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/backups"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
-	"github.com/docker/docker/errdefs"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -525,7 +523,12 @@ func dataCopyPassword() (string, error) {
 // setCopyPassword gives the account the application signs in as a password
 // made for the copy, so the copy's address carries no password production
 // accepts. The server's own superuser, which the dashboard reaches the copy
-// through with docker exec, is left as it is unless it is that account.
+// through, is left as it is unless it is that account.
+//
+// The password is on no command line. PostgreSQL's statement goes through
+// the server's socket and reads it from the session's environment (execSQL);
+// MySQL's go over a connection to the copy as its root, which has no such
+// setting to read one from.
 func (m *migrationRehearser) setCopyPassword(ctx context.Context, made *madeCopy, password string) error {
 	user := made.info.User
 	if user == "" {
@@ -533,16 +536,38 @@ func (m *migrationRehearser) setCopyPassword(ctx context.Context, made *madeCopy
 	}
 	if made.engine.name == "postgres" {
 		return m.execSQL(ctx, made.copy.Container, made.engine, made.info.Database,
-			fmt.Sprintf(`ALTER ROLE %s WITH LOGIN PASSWORD %s`, sqlIdentifier(user), sqlLiteral(password)))
+			`DO $$ BEGIN EXECUTE format('ALTER ROLE %I WITH LOGIN PASSWORD %L', `+copyRoleSQL+`, `+copySecretSQL+`); END $$`, user, password)
 	}
-	hosts, err := m.execMySQL(ctx, made.copy.Container, made.engine, fmt.Sprintf(`SELECT host FROM mysql.user WHERE user = %s`, sqlLiteral(user)))
+	dsn, err := m.copySuperuserDSN(ctx, made)
 	if err != nil {
+		return err
+	}
+	db, err := dbx.OpenDatabase(ctx, made.conn.Driver, dsn, made.info.Database)
+	if err != nil {
+		return fmt.Errorf("the copy could not be signed in to as %s: %w", made.engine.user, withoutSecrets(dsn, err))
+	}
+	defer db.Close()
+	rows, err := db.QueryContext(ctx, `SELECT host FROM mysql.user WHERE user = ?`, user)
+	if err != nil {
+		return err
+	}
+	hosts := []string{}
+	for rows.Next() {
+		var host string
+		if err := rows.Scan(&host); err != nil {
+			rows.Close()
+			return err
+		}
+		hosts = append(hosts, host)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
 		return err
 	}
 	statements := []string{}
 	for _, host := range hosts {
-		// localhost is the socket docker exec signs in through; the network
-		// only ever reaches the other hosts.
+		// localhost is the server's socket; the network only ever reaches
+		// the other hosts.
 		if host == "" || host == "localhost" {
 			continue
 		}
@@ -551,38 +576,12 @@ func (m *migrationRehearser) setCopyPassword(ctx context.Context, made *madeCopy
 	if len(statements) == 0 {
 		return fmt.Errorf("%s has no account the network signs in to", user)
 	}
-	_, err = m.execMySQL(ctx, made.copy.Container, made.engine, strings.Join(statements, "; "))
-	return err
-}
-
-// execMySQL runs statements in a MySQL or MariaDB copy as its root, through
-// the socket, and answers what they printed on standard output, a row a
-// line. The password goes in through MYSQL_PWD, which both clients read, so
-// neither warns about one on its command line — a warning that would
-// otherwise be read back as a row.
-func (m *migrationRehearser) execMySQL(ctx context.Context, container string, engine rehearsalEngine, statements string) ([]string, error) {
-	var out []string
-	var refusal string
-	code, err := m.server.modules.docker.ExecStream(ctx, container,
-		[]string{"sh", "-c", `client=mysql; command -v mysql >/dev/null 2>&1 || client=mariadb; "$client" -uroot -N -B -e "$1"`, "sh", statements},
-		"", []string{"MYSQL_PWD=" + engine.password},
-		func(line dockerx.LogLine) {
-			if line.Stream == "stdout" {
-				out = append(out, strings.TrimSpace(line.Text))
-			} else if strings.TrimSpace(line.Text) != "" {
-				refusal = line.Text
-			}
-		})
-	if err != nil {
-		return nil, err
-	}
-	if code != 0 {
-		if refusal == "" {
-			refusal = fmt.Sprintf("the client exited with code %d", code)
+	for _, statement := range statements {
+		if _, err := db.ExecContext(ctx, statement); err != nil {
+			return err
 		}
-		return nil, errors.New(refusal)
 	}
-	return out, nil
+	return nil
 }
 
 // dataCopyURL is the copy's address as an application on the deployment's
@@ -783,17 +782,5 @@ func (o *dataCopyOwner) compare(ctx context.Context, copy deploy.DataCopy) (*Dat
 // copyAddress is the copy's address on the deployment's network, which this
 // process — on the host's network — reaches directly.
 func (o *dataCopyOwner) copyAddress(ctx context.Context, copy deploy.DataCopy) (string, error) {
-	detail, err := o.server.modules.docker.Inspect(ctx, copy.Container)
-	if errdefs.IsNotFound(err) {
-		return "", errors.New("the copy's container is gone")
-	}
-	if err != nil {
-		return "", err
-	}
-	for _, endpoint := range detail.NetworkList {
-		if endpoint.Name == copy.Network && endpoint.IPAddress != "" {
-			return endpoint.IPAddress, nil
-		}
-	}
-	return "", errors.New("the copy is not on the deployment's network")
+	return containerAddress(ctx, o.server.modules.docker, copy.Container, copy.Network)
 }
