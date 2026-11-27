@@ -70,7 +70,11 @@ func seedStackDeployment(t *testing.T, s *Server, name, template, preset string,
 		if !keep(domain) {
 			continue
 		}
-		config, _ := json.Marshal(map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS})
+		row := map[string]any{"hostname": domain.Hostname, "https": domain.HTTPS}
+		if domain.Service != "" {
+			row["service"] = domain.Service
+		}
+		config, _ := json.Marshal(row)
 		if _, err := db.Exec(`INSERT INTO deploy_dependencies(environment_id, release_id, kind, ownership, resource_kind, resource_id, config_json, created_at)
 			VALUES(?, 0, 'domain', 'managed', 'proxy_site', ?, ?, ?)`, environmentID, domain.Hostname, string(config), now); err != nil {
 			t.Fatal(err)
@@ -173,6 +177,111 @@ func TestStackAddressesAreSavedAsDomainsAndDeployed(t *testing.T) {
 	refused := c.do(http.MethodPost, path+"/addresses", "{}", nil)
 	if refused.Code != http.StatusConflict || !strings.Contains(refused.Body.String(), "stack_addresses_present") {
 		t.Fatalf("second press = %d %s", refused.Code, refused.Body.String())
+	}
+}
+
+// Addresses that are saved but that the live release does not serve are
+// published by deploying again, through the same press, once no release of
+// the deployment is under way: one that is may be the release publishing
+// them, and the page must not call it unfinished or start a second.
+func TestStackAddressesDeployAgainOnlyOnceNoReleaseIsUnderWay(t *testing.T) {
+	s := testServer(t)
+	wireDeployPlanningAndSources(t, s, []string{t.TempDir()})
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	s.modules.stacks = s.newStackService()
+	c := &client{t: t, h: s.Routes(), cookie: signIn(t, s)}
+	projectID, environmentID := seedStackDeployment(t, s, "media", media.TemplateComplete, "complete",
+		func(deploy.PlannedDomain) bool { return true })
+	path := fmt.Sprintf("/api/v1/deploy/%d/stack", projectID)
+	// The live release is one from before the addresses were saved: it
+	// serves none of them.
+	db := s.Store.DB
+	var sourceID, buildID, runtimeID int64
+	if err := db.QueryRow(`SELECT (SELECT id FROM deploy_sources WHERE environment_id = ?), (SELECT id FROM deploy_build_plans WHERE environment_id = ?),
+		(SELECT id FROM deploy_runtime_plans WHERE environment_id = ?)`, environmentID, environmentID, environmentID).Scan(&sourceID, &buildID, &runtimeID); err != nil {
+		t.Fatal(err)
+	}
+	deployed, err := db.Exec(`INSERT INTO deploy_runs(project_id, environment_id, started_at, ended_at, status, state) VALUES(?, ?, 1, 2, 'success', 'succeeded')`, projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	deployedID, _ := deployed.LastInsertId()
+	if _, err := db.Exec(`INSERT INTO deploy_run_plan_snapshots(run_id, environment_id, digest, created_at) VALUES(?, ?, 'sha256:plan-seed', 1)`, deployedID, environmentID); err != nil {
+		t.Fatal(err)
+	}
+	release, err := db.Exec(`INSERT INTO deploy_releases(project_id, environment_id, release_number, plan_revision, run_id, source_id, build_plan_id, runtime_plan_id, source_identity_json, created_at)
+		VALUES(?, ?, 1, 1, ?, ?, ?, ?, '{"template":"media-complete@1.1.0"}', 1)`, projectID, environmentID, deployedID, sourceID, buildID, runtimeID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	releaseID, _ := release.LastInsertId()
+	for _, statement := range []string{
+		`INSERT INTO deploy_release_runtimes(release_id, environment_id, kind, runtime_id, created_at, updated_at) VALUES(?, ?, 'compose', 'jd-media', 1, 1)`,
+		`UPDATE deploy_environments SET live_release_id = ? WHERE id = ?`,
+		`UPDATE deploy_stacks SET live_release_id = ? WHERE environment_id = ?`,
+	} {
+		if _, err := db.Exec(statement, releaseID, environmentID); err != nil {
+			t.Fatal(err)
+		}
+	}
+	read := func() stackAddresses {
+		t.Helper()
+		response := c.do(http.MethodGet, path, "", nil)
+		if response.Code != http.StatusOK {
+			t.Fatalf("state = %d %s", response.Code, response.Body.String())
+		}
+		var state stackState
+		if err := json.Unmarshal(response.Body.Bytes(), &state); err != nil {
+			t.Fatal(err)
+		}
+		return state.Addresses
+	}
+	// The runs since the one that made the live release.
+	runs := func() int {
+		t.Helper()
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM deploy_runs WHERE project_id = ? AND id != ?`, projectID, deployedID).Scan(&count); err != nil {
+			t.Fatal(err)
+		}
+		return count
+	}
+
+	// A release is under way, perhaps the one publishing them.
+	run, err := s.Store.DB.Exec(`INSERT INTO deploy_runs(project_id, environment_id, started_at, status, state) VALUES(?, ?, 1, 'running', 'running')`, projectID, environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runID, _ := run.LastInsertId()
+	if addresses := read(); len(addresses.Missing) != 0 || len(addresses.Unpublished) != 0 {
+		t.Fatalf("while a release is under way, addresses = %+v", addresses)
+	}
+	if refused := c.do(http.MethodPost, path+"/addresses", "", nil); refused.Code != http.StatusConflict ||
+		!strings.Contains(refused.Body.String(), "stack_addresses_present") || runs() != 1 {
+		t.Fatalf("a press while a release is under way = %d %s, %d runs", refused.Code, refused.Body.String(), runs())
+	}
+
+	// It failed: the six saved addresses are unpublished, and the press
+	// deploys again without adding any.
+	if _, err := s.Store.DB.Exec(`UPDATE deploy_runs SET state = 'failed', status = 'failed', ended_at = 2 WHERE id = ?`, runID); err != nil {
+		t.Fatal(err)
+	}
+	if addresses := read(); len(addresses.Missing) != 0 || len(addresses.Unpublished) != 6 {
+		t.Fatalf("after the release failed, addresses = %+v", addresses)
+	}
+	response := c.do(http.MethodPost, path+"/addresses", "", nil)
+	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"domains":[]`) {
+		t.Fatalf("deploy again = %d %s", response.Code, response.Body.String())
+	}
+	var answer stackAddressesAnswer
+	if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil || answer.RunID == 0 || runs() != 2 {
+		t.Fatalf("answer = %+v %v, %d runs", answer, err, runs())
+	}
+	started, err := s.modules.deployRuns.Run(t.Context(), answer.RunID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if started.Operation != deploy.OperationDeploy || started.EnvironmentID != environmentID || started.PlanRevision != 1 {
+		t.Fatalf("run = %+v", started)
 	}
 }
 
