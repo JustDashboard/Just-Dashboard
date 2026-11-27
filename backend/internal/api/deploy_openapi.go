@@ -535,6 +535,7 @@ var requestFilterQuery = []openapiQuery{
 	{"agent", "string", "Only requests whose user agent contains this."},
 	{"referer", "string", "Only requests whose referer contains this."},
 	{"pages", "string", "1 to keep page requests only, 0 to leave them out."},
+	{"who", "string", "people for the requests a person's browser made, bots for everything else; any other value is refused."},
 	{"minMs", "integer", "Only requests that took at least this many milliseconds."},
 	{"maxMs", "integer", "Only requests that took at most this many milliseconds."},
 }

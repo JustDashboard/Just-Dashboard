@@ -186,6 +186,16 @@
             "format": "int64",
             "type": "integer"
           },
+          "history": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/accesslog.History"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "refreshedAt": {
             "format": "date-time",
             "type": "string"
@@ -237,6 +247,26 @@
           }
         },
         "title": "accesslog.Facet",
+        "type": "object"
+      },
+      "accesslog.History": {
+        "properties": {
+          "days": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "from": {
+            "format": "date-time",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "recording": {
+            "type": "boolean"
+          }
+        },
+        "title": "accesslog.History",
         "type": "object"
       },
       "accesslog.Latency": {
@@ -27598,6 +27628,15 @@
             }
           },
           {
+            "description": "people for the requests a person's browser made, bots for everything else; any other value is refused.",
+            "in": "query",
+            "name": "who",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
             "description": "Only requests that took at least this many milliseconds.",
             "in": "query",
             "name": "minMs",
@@ -27750,6 +27789,15 @@
             "description": "1 to keep page requests only, 0 to leave them out.",
             "in": "query",
             "name": "pages",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "people for the requests a person's browser made, bots for everything else; any other value is refused.",
+            "in": "query",
+            "name": "who",
             "required": false,
             "schema": {
               "type": "string"

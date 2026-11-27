@@ -207,10 +207,87 @@ each byte once and keeps what it parsed.
   least recently asked-about route is dropped whole), nothing older than eight days, and a route
   unasked-about for half an hour is dropped. Strings that repeat across a record — path, user agent,
   client address — are interned, so a hundred thousand rows from one browser share one copy of its
-  name; at roughly 180 bytes a request a full route is under 30 MB.
+  name; at roughly 180 bytes a request a full route is under 30 MB. Memory is the fast, recent half
+  of the answer; what reaches further back is the request history below.
 - **Stale rather than refused.** A read that fails against a record already held serves the previous
   answer with `Coverage.Stale` set; the page says the ingress did not answer and when it last did.
   Nothing held and the read failing is the one case that is an error.
+
+### History
+
+The held record is the ingress's files read back, and the files are what the ingress keeps: on the
+Caddy ingress five generations of 16 MiB (`renderAccessLogDirective`), read with the 48 MB seed and
+the 150k cap above. A site serving 3,000 requests an hour has well under a day of them, and the memory
+goes with every restart, so "Last 7 days" used to be the last day presented as a week. The request
+history (`internal/requesthistory`) keeps every routed deployment's requests for **30 days**, past the
+files and past the process.
+
+- **Its own file.** `requests.db` beside `vpsd.db` in the data directory, opened by
+  `store.OpenSideDatabase` (private from the first byte, WAL, the store's lock guard, one writer at
+  `synchronous=NORMAL`, a read-only pool). Request-volume writes never queue behind the store's
+  writer, and never ride in each update's copy of `vpsd.db` or grow the file the configuration lives
+  in. The backup suggestion for the dashboard's data snapshots it beside the store. A file that cannot
+  be opened is logged and costs the history only: windows reach as far as the files, as before.
+- **The recorder** (`recorder.go`) follows every environment `OrchestrationStore.RecordedRoutes`
+  names — one with a live release, in a project and environment that are not archived — listed again
+  every minute, whether or not anybody has the page open. It is started beside the traffic alert
+  evaluator under `safego` and stops with the server. Every 20 seconds it reads each due route once,
+  through the same opener as the store (`openRequestRecord`), at most 8 MiB a route and 32 MiB a pass,
+  so a backfill of five generations spreads over a few minutes rather than one long `docker exec`. A
+  route with nothing new is read less often, up to every two minutes; a reader is resolved again every
+  ten minutes, since an ingress replaced by another fails no read.
+- **A cursor kept with the rows.** Each route's row in `routes` holds the generation's identity, the
+  offset past the last whole line, the newest instant read, a guard instant and a loss instant; it is
+  written in the transaction that writes the requests it covers, so a restart continues exactly where
+  the last commit left off — nothing twice, nothing skipped. A route never recorded is read from its
+  oldest generation on disk to the live file. A roll is followed as the store follows one: the rest
+  of the old generation by identity, each one rolled after it, then the new live file. A truncation
+  in place, or a generation gone before its end was read, sets the loss instant and starts again from
+  what is on disk; any read that may repeat bytes drops what is at or before the newest instant
+  already kept, so bytes found again under a new identity are not kept twice. Requests older than
+  the retention are not written.
+- **Compact rows.** `requests` is `WITHOUT ROWID`, clustered on `(route, at, seq)`, so a window is one
+  range read and a prune one range delete. Everything but the route and the instant is a packed body
+  of varints (`codec.go`): status, size, flags, eleven ids into the `strings` dictionary (method,
+  path, query, host, protocol, address, user agent, referer, release, login, edge rule), the duration
+  as the float64 it was measured as, and the trace context as bytes. A request read back is the
+  request written, `Seq` aside (0 for a kept row), and costs about **80 bytes** on disk with the
+  dictionary counted (`TestAKeptRequestIsAboutEightyBytes`). Dictionary ids are `AUTOINCREMENT`, never
+  given to a second string.
+- **Retention and caps.** Pruned hourly, first five minutes after start: rows older than 30 days, then
+  each route past **4,000,000 rows** (about 320 MB) is cut to 90% of it from its oldest, then all routes
+  past **10,000,000 rows** (about 800 MB) give up their oldest, busiest route first. Every delete moves
+  the route's loss instant to the newest request it removed. The dictionary's strings last written into
+  a row more than an hour before the retention's start go with them, and free pages past a quarter of
+  the file are returned to the disk (`auto_vacuum = INCREMENTAL`).
+- **Answered with memory** (`accesslog/history.go`). With an `Archive` attached (`Store.WithArchive`),
+  a window that starts before memory's first request reads the history for the part before a cut and
+  memory for the rest, through one `Collector`, so every figure — summary, columns, facets, audience,
+  slowest — is over the window asked. The cut is one second past memory's first request when the
+  history reaches comfortably past it; requests are written in completion order a few milliseconds
+  apart, so the ones around memory's first are on the history's side, which holds them, and none is
+  counted twice. A window inside memory never reads the history. The export reads the same two halves
+  oldest first; the live tail is memory's alone. A history that cannot be read costs the history, not
+  the answer.
+- **Complete, and where history begins.** `coverage.history` is `{from, days, recording}`: the oldest
+  kept request (absent until one is kept), the retention in days, and whether the recorder follows the
+  route. `coverage.from` becomes the earliest request either half holds. `complete` (and `coverage.complete`)
+  is true when nothing the window covers is known to be missing: the window starts inside what is
+  held, or the history and memory meet, and no loss instant falls at or after the window's start. A
+  window reaching back before the first kept request is complete in the way the held record always
+  was — nothing was recorded before it, which `history.from` says ("History since 20 Nov") — and not a
+  floor. A gap between the history's newest request and memory's first is.
+- **Fast enough for a week.** A scan reads in chunks of 4,096 rows, each continuing from the last, so
+  no read transaction holds back the WAL's checkpoint, and it is pipelined: rows are read, their
+  strings looked up and the collector fed on three goroutines. The collector recognises each user agent
+  and referer once per window. Half a million requests over seven days answer in about 2.7 s on this
+  host at a load average of 50 on 12 cores (`JD_REQUEST_HISTORY_SCALE=1 go test ./internal/requesthistory
+  -run TestAWeekOfHistoryIsAnsweredQuickly`), and a window of six hours or more that read the history is
+  kept for 30 seconds under its route and filter, its ends rounded to that, so the page's ten-second
+  polls of "Last 7 days" are one read in three.
+- **Callers that want the moment ask for it.** The sleeper asks for the idle minutes before the whole
+  stretch since the release went live, so a busy environment's pass is not a read of days of history
+  every minute.
 
 The container-side script was validated against `caddy:2-alpine` (busybox 1.37): `stat -L` through
 `/proc/self/fd`, `find -inum`, `tail -c +N` on a held descriptor, and `caddy validate` of the rendered
@@ -253,7 +330,10 @@ new live file, a vanished inode reading as absent.
   showing the last 500 requests must not report a p95 of only those 500.
 - **Latency** is a distribution (`p50/p75/p90/p95/p99/max/mean`), nearest-rank rather than
   interpolated, so a reported percentile is a duration some request actually took and can be found in
-  the rows. A mean alone is the one number that hides the problem.
+  the rows. A mean alone is the one number that hides the problem. Past `latencyCap` samples the
+  percentiles are read from a uniform sample of the whole window (reservoir sampling, seeded the same
+  for every collector) rather than its first 250k requests, and the mean and max are over every
+  request; a sampled percentile does not set `Truncated`.
 - **Facets** carry their own error counts, so "the busiest path" and "the path that is failing" are
   one table read two ways.
 - **Slowest** is a running top-5 during the scan, not a sort of the row buffer: the slowest request
@@ -266,11 +346,14 @@ new live file, a vanished inode reading as absent.
   chart has — "the last hour" asked at 12:00:40 runs from 11:00:40, so it spans 11:00 through 12:00 —
   and the column that goes is the oldest, which the window only clips: dropping the newest, as the
   histogram first did, drew a 5xx the readings had already counted nowhere on the chart or on the
-  minute strip. A window asked for whole, both ends on the minute, keeps its own start.
+  minute strip. A window asked for whole, both ends on the minute, keeps its own start. Past an hour a
+  column is the narrowest whole number of hours dividing a day that fits the window in 59 columns,
+  starting on such a boundary in UTC: three hours for a week (56 columns), a day for a month (31), so
+  a week's columns begin at 00:00, 03:00, 06:00 rather than every 2 h 48 min from whenever it was asked.
 - Bounds: `latencyCap` 250k samples, `facetCap` 20k distinct values per dimension. A path with a
   request id in it produces a new key per request; without a bound the top-paths table is a memory
-  leak that happens to render. Hitting either sets `Truncated`, and the page says the figures are a
-  floor.
+  leak that happens to render. Hitting `facetCap` sets `Truncated`, and the page says the figures are
+  a floor.
 
 `deploy.ObserveRequests` maps an environment to `deploymentRouteName(environmentID)` and asks the
 store. `RequestRecord` is an interface so the read model is testable without a Caddy container and
@@ -281,7 +364,7 @@ addresses, so the reason shown is the operator's next move.
 
 | Route | Answers |
 | --- | --- |
-| `GET /deploy/{id}/requests` | The window: rows, readings, facets, chart columns |
+| `GET /deploy/{id}/requests` | The window: rows, readings, facets, chart columns, and `coverage.history` (`from`, `days`, `recording`) — any window up to the history's 30 days |
 | `GET /deploy/{id}/requests/stream?after=<cursor>` | WebSocket: every 400ms, what the store holds past the cursor, batched — a deployment under load writes thousands of lines a second and one frame each would spend the budget on envelopes |
 | `GET /deploy/{id}/lifecycle` | Docker events for this environment's containers and networks — the ring's and the persisted record's as one list — filtered by `kinds`, `search`, `since` and `limit`, each correlated against the audit log; `recordSince` and `retentionDays` say how far back the record reaches and how long it is kept |
 | `GET /deploy/{id}/lifecycle/stream` | WebSocket: this environment's past from both records, then every arriving event that carries its label |
@@ -306,7 +389,10 @@ The window's filter is `requestFilterFrom`, shared by the window, the socket and
 `client`, `host`, exact `status` codes, `classes`, `methods`, `pages`, `minMs` and `maxMs`, and `agent`
 and `referer` — an agent family as the Agents list names it (`accesslog.AgentFamily`) and a referring
 site as Came from names it, the site's own links excluded — so a row of either list narrows like every
-other. The window also carries where the proxy says why it failed a request: `ingress` (the Caddy
+other — and `who`: `people` keeps the requests a person's browser made (`accesslog.IsPerson`: an agent
+containing `mozilla/` in any case that `IsBot` does not claim, on a request that is not an `IsProbe`
+probe), `bots` everything else, an absent agent included; any other value is a 400 naming `who`.
+Every request is on exactly one side. The window also carries where the proxy says why it failed a request: `ingress` (the Caddy
 ingress container, whose runtime log has the upstream's refusal) or `errorLog` (the nginx site's
 `.error.log`).
 
@@ -823,11 +909,18 @@ the verbs that change something step forward in weight.
   an empty table.
 - nginx-served deployments have no latency column at all. The page names the reason instead of
   drawing dashes.
-- What is held is a tail of the retained record when the seed budget, the cap or a roll cut it, and
-  every figure taken from one is reported as a floor with the instant it begins.
-- The record is in memory, per process. A backend restart re-seeds each route on its first question
-  and sequences start again; a page holding an older cursor gets everything held rather than nothing,
-  and dedups by sequence.
+- Where neither the history nor memory reaches a window's start without a gap — no history for the
+  route, the seed budget, the cap or a roll cutting memory before the history catches up, a loss
+  inside the window — every figure is reported as a floor with the instant what is held begins.
+- The held record is in memory, per process. A backend restart re-seeds each route on its first
+  question and sequences start again; a page holding an older cursor gets everything held rather than
+  nothing, and dedups by sequence. The request history survives a restart and keeps 30 days of
+  deployments' routes; a proxy site's own record (`file:` routes) and the host nginx traffic page are
+  not recorded and reach only as far as their files.
+- The history is recorded at the speed of a poll: a request is in it about 20 seconds after the ingress
+  wrote it, up to two minutes on a quiet route. Memory answers the recent part of every window, so
+  nothing on the page waits for it. What rolled off the ingress before this version recorded the
+  route is not in it.
 - The Docker event buffer is memory-resident and bounded; it is an hour of a busy host, not an audit
   trail. What the dashboard itself did is in `audit_log`. A restart of the backend — a self-update
   included — empties it, and the Events view, its count and the chart's failure marks all
@@ -904,6 +997,24 @@ back from the store with its code, its labels and its cause.
 crawler, a script and an asset-only browser never one, a probe not a page, an agentless record keyed by
 its address, devices, browsers and systems counted per visitor, the journey's order and bound, the
 landing page and referring site, each column's visitors and the filter respected.
+`internal/accesslog` covers the history half of a window against a fake archive (`history_test.go`):
+a week spanning the history and memory counting each request once with its columns and its facets, a
+window inside memory never reading the history, a gap between the two and a loss inside the window read
+as a floor, an unreadable history answered from memory alone, the export oldest first and once, the
+half-minute cache of long windows, `who`, a week's and a month's columns, and percentiles sampled over
+the whole window. `internal/requesthistory` covers the archive (`archive_test.go`: every field of a
+Caddy, a stock nginx and a timed nginx request read back identical, the cursor kept with its rows and a
+loss only moved later, the retention and its strings, each route's cap and the total's, the bytes a row
+costs) and the recorder against a fake disk (`recorder_test.go`: a backfill from the oldest generation
+over several passes, steady appends, a roll through every newer generation, a truncation and a vanished
+generation recorded as losses, bytes found again under a new identity kept once, a restart continuing
+from the kept cursor, a quiet route read less often, an unlisted route no longer recording), and
+`TestLiveRequestHistoryFollowsTheCaddyIngress` (`JD_DEPLOY_LIVE=1`) drives the recorder through the
+real container-side script on `caddy:2-alpine`: a backfill, a roll followed by inode, and a restart
+on the reopened history continuing from its cursor, every request once and nothing recorded lost.
+`internal/store` covers the side database's modes and its read-only pool, `internal/deploy` the
+`coverage.history` wire shape and the sleeper asking for the idle minutes first, and `internal/api`
+`who` read or refused (`TestRequestFilterReadsWhoOrRefusesIt`).
 `internal/accesslog` also covers the agent and referring-site filters, and `internal/api` the filter
 reading them (`TestRequestFilterReadsTheAgentAndTheSiteItCameFrom`) and a site's record read from the
 file its site names, held to the roots, re-resolved when the file moves, streamed and exported

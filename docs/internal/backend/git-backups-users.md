@@ -304,7 +304,8 @@ protection actions are unavailable while coverage is stale; existing job logs, r
 configuration and recovery controls retain their owner and capability boundaries.
 
 `GET /backups/resources` (`backup_resources.go`) is the coverage report: what the other owners hold that
-a job could protect — the dashboard's data directory (with its SQLite file as a snapshot suggestion),
+a job could protect — the dashboard's data directory (with its SQLite files, `vpsd.db` and the request
+history's `requests.db`, as snapshot suggestions),
 the nginx directory and the Caddyfile's directory when they exist, local Docker volumes with the
 containers mounting them, compose stacks by working directory with their running containers, deployment
 checkouts (by name, with the project's id for its mark), discovered Git repositories, and saved database connections (a SQLite connection also as its
