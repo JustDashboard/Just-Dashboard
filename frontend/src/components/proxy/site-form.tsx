@@ -111,7 +111,6 @@ export {
   HSTS_DEFAULT_MAX_AGE,
   HSTS_PRELOAD_MAX_AGE,
 } from "@/components/proxy/site-form/hsts"
-export { ListField } from "@/components/proxy/site-form/fields"
 export { HeaderListField } from "@/components/proxy/site-form/headers"
 
 /**
