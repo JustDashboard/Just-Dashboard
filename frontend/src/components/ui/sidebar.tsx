@@ -499,7 +499,11 @@ const sidebarMenuButtonVariants = cva(
   // has, not the selection's (§6): they were one colour, so the page you are
   // on and the row under the pointer looked the same. A current row keeps its
   // fill under the pointer.
-  "group/menu-button peer/menu-button relative flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 text-left text-body font-medium text-secondary-foreground focus-ring transition-colors duration-fast select-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-control hover:text-foreground active:bg-control-active active:text-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:text-foreground data-[active=true]:hover:bg-accent data-[active=true]:active:bg-accent data-[state=open]:hover:bg-control [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg:first-child]:text-muted-foreground [&>svg:first-child]:transition-colors data-[active=true]:[&>svg:first-child]:text-brand",
+  //
+  // Only the ink and the fill ease. `transition-colors` would ease the focus
+  // ring's colour too, so the ring faded in after a Tab rather than being
+  // there at once (states.md), and a read straight after focus saw it halfway.
+  "group/menu-button peer/menu-button relative flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 text-left text-body font-medium text-secondary-foreground focus-ring transition-[color,background-color] duration-fast select-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-control hover:text-foreground active:bg-control-active active:text-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:text-foreground data-[active=true]:hover:bg-accent data-[active=true]:active:bg-accent data-[state=open]:hover:bg-control [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg:first-child]:text-muted-foreground [&>svg:first-child]:transition-colors data-[active=true]:[&>svg:first-child]:text-brand",
   {
     variants: {
       variant: {

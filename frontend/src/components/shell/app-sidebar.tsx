@@ -568,7 +568,7 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
       // it is a row in the list, one that goes out instead of in. Muted rather
       // than the rows' secondary ink so it does not compete with the page you
       // are on for "where am I".
-      className="flex h-11 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body font-medium text-muted-foreground focus-ring transition-colors duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-control hover:text-foreground md:h-8"
+      className="flex h-11 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body font-medium text-muted-foreground focus-ring transition-[color,background-color] duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-control hover:text-foreground md:h-8"
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate group-data-[collapsible=icon]:hidden">{label}</span>
