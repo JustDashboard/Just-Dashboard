@@ -5,10 +5,8 @@ page about one thing opens on (D1).
 
 **Members:** `Page`, `PageContext`, `BackLink`, `PageState` (`components/page.tsx`);
 `IdentityHeader`, `IdentityVerbs`, `platformName` (`components/identity-header.tsx`).
-**Deprecated, kept until WP-39 bans them:** `HostIdentity` (an alias of `IdentityHeader`),
-`HostFact` (use `Fact` with `product`), `FactDot` (see [`values-facts.md`](values-facts.md)),
-`PageContext`'s and `PageState`'s `eyebrow` (use `back`), and the `BackLink` export of
-`components/detail-page.tsx` (import it from `components/page.tsx`).
+**Deprecated, kept until their callers move:** `PageContext`'s and `PageState`'s `eyebrow` (use
+`back`).
 
 ## Anatomy
 
@@ -214,7 +212,8 @@ shape while it loads and nothing under the line moves when the words land (D11).
 - `tests/browser/design-system.spec.ts` (*… keeps the identity line's rules*, at 1440 and on a touch
   phone): no destructive verb in the brand face, and on a phone a command that is its icon with a
   name. `tests/browser/axe-gate.spec.ts` reads every route's header with the rest of the page.
-- WP-39 adds the lint rules that ban `HostIdentity`, `HostFact`, `FactDot` and string eyebrows.
+- `eslint-rules/retired-apis.mjs` refuses an import of the identity line's old names (ids
+  `host-identity` and `fact-dot`). A string eyebrow is not linted yet.
 
 ## Related
 

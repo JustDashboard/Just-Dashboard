@@ -3,12 +3,11 @@
 import { usePrompt as useSharedPrompt, type PromptOptions } from "@/components/prompt-dialog"
 
 /**
- * Files' first shape of a prompt request, kept while its callers move to
- * `PromptOptions` (`components/prompt-dialog.tsx`).
- *
- * @deprecated use `usePrompt` from `@/components/prompt-dialog`.
+ * Files' first shape of a prompt request: what the deprecated `usePrompt`
+ * below takes, until Files' page moves to `PromptOptions`
+ * (`components/prompt-dialog.tsx`).
  */
-export type PromptRequest = {
+type PromptRequest = {
   title: string
   label?: string
   placeholder?: string

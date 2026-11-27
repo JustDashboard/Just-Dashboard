@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test"
 import { Fragment, createElement as h } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
-import { Fact, FactDot, FactLine, facts, hasFacts } from "./fact-line"
+import { Fact, FactLine, facts, hasFacts } from "./fact-line"
 
 // What a line of facts says, read as `textContent` would: the 68 specs that
 // read a header's facts read them this way.
@@ -41,18 +41,16 @@ describe("FactLine", () => {
     expect(text(html)).toBe("a · b · c")
   })
 
-  test("a line still written with FactDot reads the same, each run between dots one fact", () => {
+  test("a run of other nodes between two facts is drawn as one fact", () => {
     const html = draw(
-      h("span", null, "member since May"),
-      h(FactDot),
+      h(Fact, null, "member since May"),
       h("span", null, "signed in"),
       " ",
       h("span", null, "now"),
-      h(Fragment, null, h(FactDot), h("span", null, "Firefox")),
+      h(Fragment, null, h(Fact, null, "Firefox")),
     )
     expect(text(html).replace(/\s+/g, " ")).toBe("member since May · signed in now · Firefox")
     expect(html.match(/data-slot="fact"/g)).toHaveLength(3)
-    expect(html).not.toContain(">·</span>")
   })
 
   test("nowrap keeps the line on one row and lets its facts truncate", () => {
@@ -67,7 +65,7 @@ describe("FactLine", () => {
   })
 
   test("hasFacts tells a run of facts from anything else", () => {
-    expect(hasFacts(h(Fragment, null, h("span", null, "a"), h(FactDot)))).toBe(true)
+    expect(hasFacts(h(Fragment, null, h("span", null, "a"), h(Fact, null, "b")))).toBe(true)
     expect(hasFacts([h(Fact, { key: 1 }, "a")])).toBe(true)
     expect(hasFacts(h("span", null, "a"))).toBe(false)
   })

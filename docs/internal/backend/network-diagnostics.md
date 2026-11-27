@@ -258,7 +258,7 @@ acceptance, which the list page replaces with the run's own page, `/network/runs
 Tools/Saved runs links join the two surfaces; no page arrival or reload emits a probe.
 
 `components/network/saved-runs.tsx` renders `/network/runs` in the reporting register. It opens on
-an identity line (`HostIdentity`): what is running, how many runs are kept, the retention policy in
+an identity line (`IdentityHeader`): what is running, how many runs are kept, the retention policy in
 words and how many failed, with **Run a tool** as its command and Refresh and **Retention policy**
 behind the menu. There is no `StatGrid`: the four tiles that counted run states are the list's
 filter chips (`runChips` in `lib/network/runs-view.ts`, which draws only the states that hold a

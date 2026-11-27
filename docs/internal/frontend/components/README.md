@@ -33,8 +33,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 
 | Export | Family | File | One line | Status |
 | --- | --- | --- | --- | --- |
-| `HostIdentity` | [Page header](page-header.md) | `components/identity-header.tsx` | The identity line: a mark, the title, its state and a line of facts. | deprecated (use `IdentityHeader`) |
-| `IdentityHeader` | [Page header](page-header.md) | `components/identity-header.tsx` | `HostIdentity` under its own name, with a `loading` form that stands at the loaded shape. | keep |
+| `IdentityHeader` | [Page header](page-header.md) | `components/identity-header.tsx` | The identity line: a mark, the title, its state and a line of facts, with a `loading` form that stands at the loaded shape. | keep |
 | `platformName` | [Page header](page-header.md) | `components/identity-header.tsx` | The distribution as its own name spells it, for an identity line. | keep |
 | `PageContext` | [Page header](page-header.md) | `components/page.tsx` | A page's accessible name, its way back (`back={{href, label}}`), the walk and the help, with no visual title; a thing's verbs are on its identity line. | keep |
 | `BackLink`, `Back` (type) | [Page header](page-header.md) | `components/page.tsx` | The one way back to the list a page sits under ("← Containers"), drawn by `PageContext back`, `FlowHeader`, `DetailPage` and, outside them, on its own. | keep |
@@ -42,8 +41,6 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `Metric`, `MetricStrip` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | One figure with its name, and a run of them; they draw as `FormFact` and `FormFacts` now. | deprecated (use `FormFact`, `FormFacts`) |
 | `DetailList`, `Detail` | [Facts lines](values-facts.md) | `components/detail-list.tsx` | Label and value pairs in a stacked list; `ruled` draws a rule between pairs, `labelWidth` sets the label column and `size` the type. | keep |
 | `FactLine`, `Fact`, `facts`, `hasFacts` | [Facts lines](values-facts.md) | `components/fact-line.tsx` | A line of facts with the dot between them drawn once, in the faint ink; `facts` makes one from data, and `hasFacts` says whether children are written as facts. | keep |
-| `HostFact` | [Facts lines](values-facts.md) | `components/identity-header.tsx` | A fact in the identity line with the product it names drawn before it. | deprecated (use `Fact`) |
-| `FactDot` | [Facts lines](values-facts.md) | `components/fact-line.tsx` | The dot between two facts of a line, as an item of its own (`identity-header.tsx` re-exports it). | deprecated (use `FactLine`) |
 | `FactsLine` | [Facts lines](values-facts.md) | `components/settings/facts-line.tsx` | A settings section's facts line, with the paragraph it used to print behind a mark. | keep |
 | `SectionLink` | [Section head](section-head.md) | `components/section-link.tsx` | The way on to the page a block stands for, at the end of its head. | keep |
 | `Section` | [Section head](section-head.md) | `components/section.tsx` | A titled group of blocks inside a page: the title and a hairline. | keep |
@@ -181,7 +178,7 @@ page you are building ([`../recipes/`](../recipes/README.md)).
 | `Tooltip`, `TooltipTrigger`, `TooltipContent`, `TooltipProvider` | [Overlays](overlays-confirm.md) | `components/ui/tooltip.tsx` | A label for an icon-only control; an explanation is an `Explain`. | keep |
 | `useFocusReturn`, `firstReachable`, `claimFocusReturn` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | Where the keyboard goes when a dialog closes. | keep |
 | `NameDialog` | [Overlays](overlays-confirm.md) | `components/git/name-dialog.tsx` | Git's dialog asking for a name. | deprecated (use `PromptDialog`) |
-| `usePrompt`, `PromptRequest` (type) | [Overlays](overlays-confirm.md) | `components/files/prompt-dialog.tsx` | Files' own prompt. | deprecated (use `usePrompt` from `prompt-dialog.tsx`) |
+| `usePrompt` | [Overlays](overlays-confirm.md) | `components/files/prompt-dialog.tsx` | Files' own prompt. | deprecated (use `usePrompt` from `prompt-dialog.tsx`) |
 | `menuOpener`, `openerOf` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | The one walk from a menu item back to the control that opened its menu, and the control a press came from. | keep |
 | `useFocusTrail` | [Overlays](overlays-confirm.md) | `hooks/use-focus-return.ts` | A page's fallback for the keyboard when a dialog's opener went with what it did. | keep |
 | `IconAction`, `RevealGroup` (type) | [Menus](menus.md) | `components/icon-action.tsx` | An icon-only control with a real tooltip label. | keep |
@@ -453,14 +450,14 @@ layout. The rules are in [`../standard.md`](../standard.md) and [`../foundations
   dead weight, and a sheet's `sm:max-w-3xl` is about ninety columns of terminal. Those are their own
   destination with a breadcrumb back: `PageContext` with `back` and the verbs on the identity line
   (`IdentityVerbs`), then the resource name and state among the page's facts — an identity line
-  (`HostIdentity`) on a container's page and on a stack's, with the verdict at its end. The run page
+  (`IdentityHeader`) on a container's page and on a stack's, with the verdict at its end. The run page
   (`deploy/run-page.tsx`) goes one step further: since 2026-10-05 it opens on the header its
   project's pages open on (`run-header.tsx`, the project's tile, the commit, the run's state and how
   long it took, one line of provenance),
   because a run is one of the project's Deployments, and that header is the first thing on the
   page — its verbs sit at its far end beside the run's state, and the way back is the rail's panel
   and the menu's Open project rather than an eyebrow. (From 2026-09-24 it opened on the
-  `HostIdentity` line the host Overview opens on instead.) A container,
+  `IdentityHeader` line the host Overview opens on instead.) A container,
   a compose stack and a backup job went that way on 2026-09-21, and a proxy site
   (`/proxy/sites/<name>`) on 2026-09-27, since it now holds its logs — the way back is a "Sites" link
   beside its verbs, the form and the raw file staying sheets it opens. A process followed in 0.8.6 and a network

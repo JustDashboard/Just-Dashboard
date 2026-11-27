@@ -3,16 +3,14 @@ import { cn } from "@/lib/utils"
 import { breakpointQuery } from "@/lib/breakpoints"
 import { useIsPhone } from "@/hooks/use-mobile"
 import type { HostInfo } from "@/lib/types"
-import { ProductGlyph, ProductLogo } from "@/components/product-logo"
+import { ProductLogo } from "@/components/product-logo"
 import { Cpu, type Icon } from "@/components/icons"
 import { Bone } from "@/components/bone"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip"
 import { VerbMenu, type Verb } from "@/components/verbs"
-import { FactDot, FactLine, hasFacts } from "@/components/fact-line"
-
-export { FactDot }
+import { FactLine, hasFacts } from "@/components/fact-line"
 
 const PLATFORM_NAME: Record<string, string> = {
   ubuntu: "Ubuntu",
@@ -47,10 +45,9 @@ type IdentityHeaderProps = {
   /** What the thing is called. Left out only while `loading`, where a bone holds its place. */
   title?: React.ReactNode
   /**
-   * The facts under the title. Written as `Fact`s (or, until the page passes
-   * move them, with `FactDot`s between them) they are drawn as a `FactLine`,
-   * so no dot is left at the end of a wrapped line. Left out only while
-   * `loading`.
+   * The facts under the title. Written as `Fact`s they are drawn as a
+   * `FactLine`, so no dot is left at the end of a wrapped line. Left out only
+   * while `loading`.
    */
   facts?: React.ReactNode
   /** The right end of the line: the health verdict. */
@@ -232,12 +229,6 @@ export function IdentityHeader({
     </div>
   )
 }
-
-/**
- * @deprecated use `IdentityHeader`; the old name stays until the page passes
- * move its importers and WP-39 bans it.
- */
-export const HostIdentity = IdentityHeader
 
 /** Facts written as facts go through a `FactLine`; anything else is drawn as it was given. */
 function factRun(facts: React.ReactNode) {
@@ -723,18 +714,4 @@ export function IdentityVerbs({ verbs, name }: { verbs: Verb[]; name: string }):
     ),
     menu: rest.length > 0 && <VerbMenu verbs={rest} label={`More actions for ${name}`} />,
   }
-}
-
-/**
- * A fact in the identity line, with the product it names drawn before it.
- *
- * @deprecated use `Fact` with `product`, inside a `FactLine`.
- */
-export function HostFact({ product, children }: { product?: string; children: React.ReactNode }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      {product && <ProductGlyph id={product} />}
-      <span className="truncate">{children}</span>
-    </span>
-  )
 }

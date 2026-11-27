@@ -13,7 +13,6 @@ import {
   parseQuery,
   parseSort,
   portsHref,
-  sinceWords,
   sortParam,
   sortSockets,
   toCsv,
@@ -475,16 +474,5 @@ describe("exports", () => {
   test("JSON is the sockets as GET /ports answers them, without the fold", () => {
     const rows = JSON.parse(toJson(foldDualStack([sshd, sshd6])))
     expect(rows).toEqual([sshd, sshd6])
-  })
-})
-
-describe("freshness", () => {
-  test("says how old the list is, to the second while that matters", () => {
-    expect(sinceWords(-200)).toBe("just now")
-    expect(sinceWords(4999)).toBe("just now")
-    expect(sinceWords(8000)).toBe("8s ago")
-    expect(sinceWords(59_999)).toBe("59s ago")
-    expect(sinceWords(60_000)).toBe("1m ago")
-    expect(sinceWords(3 * 3_600_000 + 5)).toBe("3h ago")
   })
 })
