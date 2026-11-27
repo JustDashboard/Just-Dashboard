@@ -703,3 +703,32 @@ func TestRemoveSourceByProwlarrsID(t *testing.T) {
 		t.Fatalf("a removal Prowlarr fails: %v", err)
 	}
 }
+
+// The bound holds while catalogues are being read: more projects read at once
+// than there is room for still leave at most sourceCacheSize kept, rather
+// than every one of them for good.
+func TestSourceCacheBoundHoldsWhileReadsAreUnderWay(t *testing.T) {
+	cache := NewSourceCache()
+	entered, release := make(chan struct{}), make(chan struct{})
+	cache.Fetch = func(context.Context, stacks.Env) (*MediaSourceCatalogue, error) {
+		entered <- struct{}{}
+		<-release
+		return &MediaSourceCatalogue{}, nil
+	}
+	var wg sync.WaitGroup
+	for index := range sourceCacheSize + 2 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if _, err := cache.Catalogue(context.Background(), "busy/"+strconv.Itoa(index), nil); err != nil {
+				t.Error(err)
+			}
+		}()
+		<-entered
+	}
+	close(release)
+	wg.Wait()
+	if kept := len(cache.slots); kept > sourceCacheSize {
+		t.Fatalf("%d catalogues kept after %d were read at once", kept, sourceCacheSize+2)
+	}
+}

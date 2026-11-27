@@ -975,20 +975,27 @@ func (c *SourceCache) Catalogue(ctx context.Context, key string, env stacks.Env)
 	return catalogue, nil
 }
 
-// evictLocked drops the slot kept longest ago. Callers hold c.mu.
+// evictLocked drops slots until there is room for one more: the one kept
+// longest ago first, and one being read only when every slot is, so more reads
+// at once than there is room for never leave more kept for good. A slot dropped
+// while it is read still answers the requests waiting on it. Callers hold c.mu.
 func (c *SourceCache) evictLocked() {
-	oldest, oldestKey := time.Time{}, ""
-	for key, slot := range c.slots {
-		if !slot.mu.TryLock() {
-			continue
+	for len(c.slots) >= sourceCacheSize {
+		oldest, oldestKey, busyKey := time.Time{}, "", ""
+		for key, slot := range c.slots {
+			if !slot.mu.TryLock() {
+				busyKey = key
+				continue
+			}
+			kept := slot.kept
+			slot.mu.Unlock()
+			if oldestKey == "" || kept.Before(oldest) {
+				oldest, oldestKey = kept, key
+			}
 		}
-		kept := slot.kept
-		slot.mu.Unlock()
-		if oldestKey == "" || kept.Before(oldest) {
-			oldest, oldestKey = kept, key
+		if oldestKey == "" {
+			oldestKey = busyKey
 		}
-	}
-	if oldestKey != "" {
 		delete(c.slots, oldestKey)
 	}
 }
