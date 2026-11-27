@@ -267,7 +267,9 @@ To put the dashboard's own data back, onto the same server or a new one:
    when they exist), then copy the backed-up directory's contents into it. `vpsd.db` is the database.
    If the backup has `vpsd.db-wal` and `vpsd.db-shm` beside it, restore all three together, and never
    leave the ones you set aside next to a restored `vpsd.db`: they belong to the file they were taken
-   with.
+   with. `requests.db` beside it is the deployments' request history (30 days); restore it the same
+   way with its own `-wal` and `-shm`, or leave it out and the dashboard starts a new one from what
+   the proxy still holds.
 4. Start it again: `sudo docker compose start backend`, then `sudo ./scripts/manage.sh status`. With a
    different key the dashboard still starts, but the secrets it stored cannot be read and have to be
    entered again.
