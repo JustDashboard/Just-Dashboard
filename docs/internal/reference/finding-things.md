@@ -6,8 +6,8 @@ way in. The [repository map](repository-map.md) says what every directory is for
 which file to open first.
 
 The codebase is large and flat. `backend/internal/api` holds every HTTP handler in one package,
-`frontend/src/lib/types.ts` holds every API type in one file, and the browser specs sit in one
-directory. What makes that workable is that the same area name runs through every layer, so most of
+every page imports the API's types from the one module `frontend/src/lib/types.ts`, and the browser
+specs sit in one directory. What makes that workable is that the same area name runs through every layer, so most of
 this page is the naming rules and the places where they break.
 
 **Shorthand used in the tables.** To keep cells short, a path is written from the root its column
@@ -31,7 +31,7 @@ the route every other feature takes.
 | Sidebar entry | `frontend/src/components/shell/nav.ts` | `NAV`, group "Protection": `{ title: "Backups", href: "/backups" }`. `SECTION_KEYS` in `frontend/src/lib/sidebar-sections.ts` is what lets an account hide it |
 | Page route | `frontend/src/app/(dashboard)/backups/page.tsx` | The list page; `[job]/page.tsx` beside it is one job. A page file holds state, polling and composition |
 | Components | `frontend/src/components/backups/` | `job-form.tsx`, `job-card.tsx`, `import-dialog.tsx`; pure logic as `import-model.ts` with `import-model.test.js` beside it |
-| Types | `frontend/src/lib/types.ts` | `BackupJob`, `BackupResourceReport`: the API's shapes, written by hand |
+| Types | `frontend/src/lib/types/backups.ts` | `BackupJob`, `BackupResourceReport`: the API's shapes, written by hand, imported from `@/lib/types` |
 | API call | `frontend/src/lib/api.ts` | `get<BackupJob[]>("/backups/")` inside `usePoll`; `post`, `put` and `del` for changes. Paths are relative to `/api/v1` |
 | Route mount | `backend/internal/api/routes.go` | `Routes` calls `mountBackupRoutes`, which is at the top of `handlers_backups.go` |
 | Capability | `backend/internal/api/handlers_backups.go` | Reads need a sign-in; changes are under `RequireCapability(auth.CapSystemAdmin)`; delete and restore are inside `s.destructive` |
@@ -56,7 +56,7 @@ Two things Backups does not show. A feature with logic worth sharing has a modul
 | Components | `components/<section>/`, named as the route's first segment | `/` → `overview/`, `processes` → `procs/`, `databases` → `database/`, `excalidraw` → `boards/`, `dashboard` → `update/`, `config/`, `account-link/`, `hub-link/` |
 | Shared UI | `components/ui/` for low-level controls; single files at the top of `components/` for primitives (`panel.tsx`, `page.tsx`, `state.tsx`) | `components/workspace/` is shared page behaviour, not a section |
 | Logic | `lib/<area>.ts` or `lib/<area>-<topic>.ts`, its test beside it as `.test.js` | Many areas have none and keep pure logic beside their components. Database modules are `lib/db-*.ts` and `lib/database-*.ts` |
-| Types | The API's types are in `lib/types.ts`, one file | Some areas keep theirs beside the code: `lib/network/investigator-types.ts`, and `types.ts` files under `components/database/` and `components/logs/` |
+| Types | The API's types are in `lib/types/<area>.ts`, one file per area, and `lib/types.ts` re-exports them all, so every page imports them from `@/lib/types` | The file is named for the area, not the route: `procs` → `processes.ts`, `databases` → `database.ts`, `system-users` and the dashboard's own accounts → `accounts.ts`, and `update/`, `config/`, `account-link/`, `hub-link/` → `dashboard.ts`. `core.ts` holds only what every area shares: `Capability`, `Job`, `AuditEntry`. The proxy pages' are `lib/proxy/types-*.ts`. Some areas keep theirs beside the code: `lib/network/investigator-types.ts`, and `types.ts` files under `components/database/` and `components/logs/` |
 | API path | The first segment under `/api/v1` is the section | See the path column of the next table: Processes, Security, Proxy and System users each use several |
 | Handlers | `api/handlers_<area>*.go`; `mount<Area>Routes` is at the top of `handlers_<area>.go` | Databases are `handlers_db*.go`. Code that is not a handler drops the prefix: `database_*.go`, `deployment_*.go`, `boards_*.go`, `backup_*.go`, `map_*.go` |
 | Package | One package per feature under `backend/internal/` | Named for the mechanism, not the page: Security is `netsec`, Packages is `updates`, System users is `linuxusers`. Excalidraw and the Map have no package; they live in `api/` |
@@ -240,7 +240,9 @@ Each is a checklist. The linked document owns the rule; this only says which fil
    hand), and only a handler that writes its own entry because there is no principal to name goes on
    `selfAuditedRoutes`. Both lists are reviewed like the routes themselves, and the test fails on an
    entry the routers no longer mount.
-4. Add the response type to `lib/types.ts` and call it through `lib/api.ts`.
+4. Add the response type to its area's file under `lib/types/` (`backups.ts` for a backups
+   route; `core.ts` only for a type every area shares), import it from `@/lib/types`, and call it
+   through `lib/api.ts`. A new area gets its own file and an `export type *` line in `lib/types.ts`.
 5. A route under `/deploy` also needs a line in `deployOperations` (`api/deploy_openapi.go`) and
    the regenerated description and clients: [`../backend/deploy-api.md`](../backend/deploy-api.md).
 6. Document it in the feature's backend document.
