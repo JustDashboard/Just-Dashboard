@@ -177,6 +177,11 @@ export function RequestsWorkspace({
 }) {
   const { can } = useAuth()
   const [selected, setSelected] = useState<RequestEntry | null>(null)
+  // The window's sentence opens Insights everywhere, where it took the place
+  // of five audience tiles. Over the rows it is the deployment workbench's:
+  // the host Logs page and a site's pane hold their rows in a pane a third of
+  // the height, and a sentence over them left the rows a strip.
+  const sentence = view === "insights" || Boolean(inspect)
   // Below `lg` the inspector is the pane: the rows step aside for it.
   const narrow = useBelow("lg")
   const [live, setLive] = useState(false)
@@ -290,7 +295,7 @@ export function RequestsWorkspace({
     return (
       <>
         {bar}
-        <WindowHeadline range={query.range} since={query.since} until={query.until} />
+        {sentence && <WindowHeadline range={query.range} since={query.since} until={query.until} />}
         <div className="shrink-0 border-b border-hairline px-3 py-3">
           <Skeleton className="h-36 w-full" />
         </div>
@@ -304,7 +309,7 @@ export function RequestsWorkspace({
   const threshold = alertLine(alerts)
   const narrowed = isNarrowed(query)
   const askedFrom = answer?.asked.since ? Date.parse(answer.asked.since) : undefined
-  const headline = (
+  const headline = sentence && (
     <WindowHeadline
       data={data}
       range={query.range}
@@ -330,7 +335,7 @@ export function RequestsWorkspace({
       total={data.summary.total}
       failed={counts["5xx"] ?? 0}
       custom={query.range === "custom"}
-      counted={false}
+      counted={!sentence}
       onReset={onReset}
       onZoom={(from, to) =>
         onQueryChange({

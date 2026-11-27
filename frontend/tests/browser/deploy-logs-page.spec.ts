@@ -164,7 +164,8 @@ test.describe("at a desk", () => {
     await expect(headline(page)).toContainText("Over the last 30 days")
     await expect(headline(page)).toContainText(/Recorded since \w+ \d+, \d\d:\d\d/)
 
-    await page.goto("/deploy/7/logs")
+    // The tab remembers the window, so the hour is asked for by name.
+    await page.goto("/deploy/7/logs?range=1h")
     await expect(headline(page)).toContainText("Kept for 30 days")
     await expect(headline(page)).not.toContainText("Recorded since")
   })
