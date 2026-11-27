@@ -197,6 +197,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/{id}/run":                         keyOpen,
 	"POST /deploy/{id}/environments/{env}/runs":     keyOpen,
 	"POST /deploy/{id}/stack/configure":             keyOpen,
+	"POST /deploy/{id}/stack/addresses":             keyOpen,
 	"POST /deploy/{id}/runs/{run}/cancel":           keyOpen,
 	"POST /deploy/{id}/runs/{run}/retry":            keyOpen,
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,
@@ -275,6 +276,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	// Session-only, whatever the key.
 	"GET /deploy/{id}/environments/{env}/variables/{name}/reveal": keySession(whyReveal),
 	"GET /deploy/{id}/stack/credentials/{name}/reveal":            keySession(whyReveal),
+	"PUT /deploy/{id}/stack/login":                                keySession(whyReveal),
 	"GET /deploy/shared-variables/{name}/reveal":                  keySession(whyReveal),
 	"GET /deploy/{id}/shared-variables/{name}/reveal":             keySession(whyReveal),
 	"GET /deploy/{id}/env/reveal":                                 keySession(whyReveal),

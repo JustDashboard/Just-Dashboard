@@ -66,7 +66,7 @@ func TestServarrAuthSecuresOnceThenLeavesAlone(t *testing.T) {
 
 			first := arrRun(t, stack.env, step)
 			arrWant(t, fake.written(), []string{"PUT config/host/1"})
-			password, _, _ := stack.env.LookupCredential(context.Background(), app.adminCredential)
+			password, _, _ := stack.env.LookupCredential(context.Background(), CredentialLogin)
 			if fake.password != password || len(password) != generatedPasswordLength {
 				t.Fatalf("the application was not given the stack's %d character password", generatedPasswordLength)
 			}
@@ -186,7 +186,7 @@ func TestServarrDownloadClientIsTestedSavedOnceAndUpdatedInPlace(t *testing.T) {
 		t.Run(app.service, func(t *testing.T) {
 			stack := newArrFakeStack(t)
 			fake := map[string]*arrFake{"radarr": stack.radarr, "sonarr": stack.sonarr}[app.service]
-			password, _ := stack.env.Credential(context.Background(), CredentialQBittorrent)
+			password, _ := stack.env.Credential(context.Background(), CredentialLogin)
 			accepted := password
 			fake.passes = arrQBittorrentAccepts(&accepted)
 			// A client the person made, which must come through untouched.
@@ -335,7 +335,7 @@ func TestProwlarrAppsAreTestedSavedOnceAndFoundByName(t *testing.T) {
 
 func TestDownloadsVerifyTestsBothClientsAndReadsHealth(t *testing.T) {
 	stack := newArrFakeStack(t)
-	password, _ := stack.env.Credential(context.Background(), CredentialQBittorrent)
+	password, _ := stack.env.Credential(context.Background(), CredentialLogin)
 	accepted := password
 	for _, fake := range []*arrFake{stack.radarr, stack.sonarr} {
 		fake.passes = arrQBittorrentAccepts(&accepted)

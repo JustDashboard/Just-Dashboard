@@ -2027,7 +2027,7 @@ only renderer/executor/validation authority for their feature.
   its operationId, and made through the router as the MCP key with the deploy key gate and every
   handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
-  destructive actions. 104 tools generated, 117 tools in all; previews' approvals, reveals, saved
+  destructive actions. 105 tools generated, 118 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
   [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
@@ -2273,7 +2273,9 @@ only renderer/executor/validation authority for their feature.
   rest publish nothing on a network with no route out, each deploy stops the stack first, shared
   passwords are generated here, and a backup is a file copy of a running database rather than a dump.
   A template marked `stack` is a smart stack's preset: it may publish private web interfaces on
-  loopback (`exposure: loopback`), a data volume another of its services writes may be mounted
+  loopback (`exposure: loopback`), give such a service an address label (`address`) from which its
+  domain input yields a plan domain routed to that service beside the primary
+  (`blueprint.ServiceHostname`), a data volume another of its services writes may be mounted
   read-only, and once its release is live the dashboard configures it ([smart stacks](smart-stacks.md)).
   A template is not a Git source, so it is never offered a pull-request preview, though a Compose
   stack from a Git source is ([Compose previews](preview-isolation.md#compose-previews)). `TestLiveEveryComposeTemplateStartsAndAnswersItsOwnChecks` brings every stack up

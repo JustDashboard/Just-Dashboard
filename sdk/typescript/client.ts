@@ -173,9 +173,12 @@ import type {
   SitePage,
   SitePageWrite,
   SleepStatus,
+  StackAddressesAnswer,
+  StackAddressesRequest,
   StackCatalogueEntry,
   StackConfigureAnswer,
   StackCredentialReveal,
+  StackLoginRequest,
   StackState,
   StagingCopy,
   StagingCreateRequest,
@@ -4917,6 +4920,34 @@ export function sharedVariables(
 }
 
 /**
+ * stackAddresses is POST /deploy/{id}/stack/addresses: give every app of the stack its own address
+ * beside the primary domain: the missing domains are saved as the Domains settings save them and a
+ * release is started; the body's domain is used, as the primary, only when the deployment has
+ * none.
+ *
+ * 409 stack_addresses_present when every app has one, 422 stack_no_domain when there is no primary
+ * domain and none was given.
+ *
+ * A deploy key: allowed.
+ */
+export function stackAddresses(
+  client: Client,
+  id: number,
+  body: StackAddressesRequest,
+  options?: RequestOptions,
+): Promise<StackAddressesAnswer> {
+  return client.request<StackAddressesAnswer>(
+    {
+      method: "POST",
+      path: `/deploy/${pathParam(id)}/stack/addresses`,
+      body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
  * stackCatalogue is GET /deploy/stacks: list the smart stacks: each preset with the template it
  * deploys, its memory and disk estimate and what it cannot do, and the services.
  *
@@ -4961,8 +4992,9 @@ export function stackConfigure(
 }
 
 /**
- * stackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal an account the
- * stack created; audited without its value.
+ * stackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal the stack's
+ * one login (name login), which every application signs in with as admin; audited without its
+ * value.
  *
  * Only an interactive session may call it; no key reaches it.
  */
@@ -4983,10 +5015,37 @@ export function stackCredentialReveal(
 }
 
 /**
+ * stackLoginUpdate is PUT /deploy/{id}/stack/login: change the password every application of the
+ * stack signs in with; the previous one is kept until every application takes the new one, and a
+ * configuration pass is asked for; audited without the value.
+ *
+ * 422 password_weak when the password breaks the dashboard's password rule, 409 stack_busy while a
+ * pass runs.
+ *
+ * Only an interactive session may call it; no key reaches it.
+ */
+export function stackLoginUpdate(
+  client: Client,
+  id: number,
+  body: StackLoginRequest,
+  options?: RequestOptions,
+): Promise<StackConfigureAnswer> {
+  return client.request<StackConfigureAnswer>(
+    {
+      method: "PUT",
+      path: `/deploy/${pathParam(id)}/stack/login`,
+      body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
  * stackState is GET /deploy/{id}/stack: read a stack deployment's state: whether it is installed,
- * healthy, connected and able to play and to acquire, each service's container and private
- * address, each configuration step, the actions only a person can take, and the accounts it
- * created.
+ * healthy, connected and able to play and to acquire, each service's container, public address and
+ * loopback address, each configuration step, the actions only a person can take, the one login,
+ * and the apps' addresses the configuration does not have yet.
  *
  * 404 stack_not_found when the deployment is not a stack.
  *

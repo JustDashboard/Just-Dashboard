@@ -22,7 +22,7 @@ func TestQBittorrentAuthReplacesTheTemporaryPasswordOnce(t *testing.T) {
 	qbittorrent, env := qbittorrentEnv(t)
 
 	result := mustRunStep(t, env, "qbittorrent.auth")
-	password := credential(env, CredentialQBittorrent)
+	password := credential(env, CredentialLogin)
 	if len(password) != generatedPasswordLength || qbittorrent.password != password {
 		t.Fatalf("qBittorrent's password is not the stack's (%d characters stored)", len(password))
 	}
@@ -45,7 +45,7 @@ func TestQBittorrentAuthReplacesTheTemporaryPasswordOnce(t *testing.T) {
 	if got := qbittorrent.take(); !slices.Equal(got, []string{"GET /api/v2/app/version", "POST /api/v2/auth/login", "POST /api/v2/auth/logout"}) {
 		t.Fatalf("the second run made %v", got)
 	}
-	if credential(env, CredentialQBittorrent) != password || qbittorrent.password != password || qbittorrent.refusals != 0 {
+	if credential(env, CredentialLogin) != password || qbittorrent.password != password || qbittorrent.refusals != 0 {
 		t.Fatal("the second run changed the password or was refused")
 	}
 	if !strings.Contains(result.Message, "signs in with the stack's password") {
@@ -61,7 +61,7 @@ func TestQBittorrentAuthUsesTheLastTemporaryPasswordInTheLog(t *testing.T) {
 		return qbittorrentFirstLog + strings.ReplaceAll(qbittorrentFirstLog, "fJYXIRjS2", "Zq8RestartA"), nil
 	}
 	mustRunStep(t, env, "qbittorrent.auth")
-	if qbittorrent.refusals != 0 || qbittorrent.password != credential(env, CredentialQBittorrent) {
+	if qbittorrent.refusals != 0 || qbittorrent.password != credential(env, CredentialLogin) {
 		t.Fatalf("refusals = %d", qbittorrent.refusals)
 	}
 }
@@ -72,7 +72,7 @@ func TestQBittorrentAuthAfterAnAttemptThatStoredAPasswordButNeverSetIt(t *testin
 	if _, err := runStep(t, env, "qbittorrent.auth"); err == nil || stacks.IsPermanent(err) {
 		t.Fatalf("expected an error the runner retries, got %v", err)
 	}
-	password := credential(env, CredentialQBittorrent)
+	password := credential(env, CredentialLogin)
 	delete(qbittorrent.forced, "POST /api/v2/app/setPreferences")
 
 	// The stored password is not yet qBittorrent's, which the settings file
@@ -104,7 +104,7 @@ func TestQBittorrentPasswordSetBySomeoneElseIsAnActionWithoutASignIn(t *testing.
 			if got := qbittorrent.take(); !slices.Equal(got, []string{"GET /api/v2/app/version"}) || qbittorrent.refusals != 0 {
 				t.Fatalf("requests = %v, refusals = %d", got, qbittorrent.refusals)
 			}
-			password := credential(env, CredentialQBittorrent)
+			password := credential(env, CredentialLogin)
 			if password == "" || qbittorrent.password != "somebody-elses" {
 				t.Fatal("no password was made for the page to show, or theirs was changed")
 			}
@@ -141,8 +141,8 @@ func TestQBittorrentAuthStopsWhenTheLogHasNoTemporaryPassword(t *testing.T) {
 	if err == nil || errors.As(err, &action) || !strings.Contains(err.Error(), "restart the qbittorrent service") {
 		t.Fatalf("error = %v", err)
 	}
-	if qbittorrent.refusals != 0 || credential(env, CredentialQBittorrent) != "" {
-		t.Fatalf("refusals = %d, password made = %v", qbittorrent.refusals, credential(env, CredentialQBittorrent) != "")
+	if qbittorrent.refusals != 0 {
+		t.Fatalf("refusals = %d", qbittorrent.refusals)
 	}
 }
 
@@ -308,5 +308,22 @@ func TestQBittorrentCategoriesDoNotRetryARefusedPassword(t *testing.T) {
 	_, err := runStep(t, env, "qbittorrent.categories")
 	if !stacks.IsPermanent(err) || qbittorrent.refusals != 1 {
 		t.Fatalf("error = %v, refusals = %d", err, qbittorrent.refusals)
+	}
+}
+
+// Without its settings file there is no telling which password qBittorrent
+// holds: the attempt fails to be retried, having spent no sign-in.
+func TestQBittorrentAuthWaitsForItsSettingsFileRatherThanGuess(t *testing.T) {
+	qbittorrent, env := qbittorrentEnv(t)
+	mustRunStep(t, env, "qbittorrent.auth")
+	delete(env.Files, "qbittorrent:"+qbittorrentConfigFile)
+	qbittorrent.take()
+
+	_, err := runStep(t, env, "qbittorrent.auth")
+	if err == nil || stacks.IsPermanent(err) || !strings.Contains(err.Error(), "settings file") {
+		t.Fatalf("error = %v", err)
+	}
+	if slices.Contains(qbittorrent.take(), "POST /api/v2/auth/login") || qbittorrent.refusals != 0 {
+		t.Fatal("a sign-in was tried without the settings file")
 	}
 }

@@ -19,7 +19,7 @@ func seerrEnv(t *testing.T, preset string) (*fakeSeerr, *stackstest.Fake) {
 		services["radarr"], services["sonarr"] = "", ""
 	}
 	env := newFake(preset, services)
-	password, err := env.Credential(t.Context(), CredentialJellyfinAdmin)
+	password, err := env.Credential(t.Context(), CredentialLogin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -185,7 +185,7 @@ func TestSeerrSetupDoesNotRetryAPasswordJellyfinRefused(t *testing.T) {
 	if !stacks.IsPermanent(err) || !strings.Contains(err.Error(), "INVALID_CREDENTIALS") {
 		t.Fatalf("error = %v", err)
 	}
-	wantNoSecret(t, err.Error(), credential(env, CredentialJellyfinAdmin))
+	wantNoSecret(t, err.Error(), credential(env, CredentialLogin))
 }
 
 func TestSeerrSetupRetriesWhileSeerrCannotReachJellyfin(t *testing.T) {

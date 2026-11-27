@@ -42,9 +42,10 @@ configuration steps against the live release's containers and records each step'
   already has (`dockerx/compose_ports.go`) when taken, so two stacks on one server do not collide.
   Nothing but Caddy binds a routable address (invariant 1). A service with a loopback port must
   declare `egress`: Docker publishes no port of a container that is only on an internal network.
-  A domain of the deployment that names the service (`domains[].service`, a
-  [service domain](implementation.md#service-domains)) reaches it from elsewhere over HTTPS: the
-  route sends that name to the service's loopback publication, with every rule of the route.
+  Each of them is reached from elsewhere at an address of its own beside the domain (below): a
+  domain of the deployment that names the service (`domains[].service`, a
+  [service domain](implementation.md#service-domains)), which the route sends to that loopback
+  publication with every rule of the route.
 - **One shared volume, `media`, at `/data`**: downloads and the library on one filesystem so a
   finished download is renamed into the library, not copied. Writers (qBittorrent, Radarr, Sonarr,
   Bazarr) mount it read-write; Jellyfin mounts it **read-only** in Complete. The validator allows a
@@ -59,8 +60,49 @@ configuration steps against the live release's containers and records each step'
 - **Options** are template inputs that become deployment variables: `MEDIA_QUALITY` (720p, 1080p,
   2160p), `MEDIA_SUBTITLE_LANGUAGES`, `MEDIA_REQUEST_APPROVAL` (`admin` or `auto`). Changing one is
   changing a variable and redeploying; the pass after the new release applies it.
+- **The domain is required** (template version 1.1.0), and an optional secret input,
+  `login-password` (`MEDIA_LOGIN_PASSWORD`, "Password for every app"), seeds the one login
+  (below). Blank means the dashboard generates it.
 - An added template may not claim `stack` (`validateUserRules`): the adapters trust the services to
   be the images they were written and tested against.
+
+## Addresses
+
+Every web interface of the stack has an HTTPS address of its own, made from the domain and the
+service's address label (`Service.Address` in the template, a DNS label of at most 20 characters,
+allowed only on a stack's service with a loopback port and unique in the template):
+
+| Service | Label | `media.example.com` gives |
+|---|---|---|
+| Jellyfin | (the primary) | `media.example.com` |
+| Seerr | `requests` | `media-requests.example.com` |
+| Radarr | `radarr` | `media-radarr.example.com` |
+| Sonarr | `sonarr` | `media-sonarr.example.com` |
+| Prowlarr | `prowlarr` | `media-prowlarr.example.com` |
+| qBittorrent | `downloads` | `media-downloads.example.com` |
+| Bazarr | `subtitles` | `media-subtitles.example.com` |
+
+- `blueprint.ServiceHostname(domain, label)`: a domain of three labels or more gets a sibling,
+  `<first label>-<label>.<rest>`; an apex such as `example.com` gets `<label>.example.com`. A first
+  label too long for the 63 a DNS label holds is cut from its end, never the service's label.
+  Siblings, because a wildcard certificate for `*.example.com` covers them, the just-dashboard.com
+  app-domain wildcard covers `<app>-requests.<handle>.<zone>` as another app name, and sslip.io
+  resolves them; a sub-label (`requests.media.example.com`) is covered by none of those.
+- Rendering a stack template with a domain yields, besides the primary, one plan domain per
+  labelled service (`Plan.ServiceDomains` → `PlannedDomain{Hostname, HTTPS, Service}`). They are
+  ordinary domains of the plan: the configure step and the Domains settings show them, and the
+  person may change or remove them. Each routes to its service's loopback port: a domain naming
+  another Compose service (`PlannedDomain.Service`, [deployments](implementation.md)).
+- **Give every app its address.** A stack made from the 1.0.0 templates has only Jellyfin's domain,
+  though those templates already publish the other interfaces on loopback. The state's
+  `addresses` names the primary domain and, from the current configuration's domains and the
+  shipped template's labels, each service that has no domain yet with the hostname it would get.
+  `POST /deploy/{id}/stack/addresses` adds them through the configuration save the Domains settings
+  make (`saveDeploymentConfiguration`: the same checks, a deploy key's guard, the
+  `deploy.configuration.update` audit), each served over HTTPS and through the tunnel as the primary
+  is, then starts the release at that revision as "Deploy changes" does (`deploy.run.request`), and
+  answers `202 {runId, domains}`. With no primary domain the body's `domain` becomes the primary
+  (`422 stack_no_domain` without one); with nothing missing it answers `409 stack_addresses_present`.
 
 ## When a pass runs
 
@@ -104,24 +146,55 @@ names (`http://radarr:7878`). The HTTP client takes no proxy from the environmen
 redirect to another host. Commands inside a container (`ExecCapture`) are closed argv built by the
 adapters, never a shell string from a request.
 
-## Credentials
+## One login
 
-Accounts the stack creates (Jellyfin's administrator, which is also Seerr's owner; qBittorrent;
-Radarr, Sonarr, Prowlarr, Bazarr) are generated on first use (24 letters and digits) and sealed in
-`deploy_stack_credentials` with the dashboard's sealer. Tokens an application hands back (Jellyfin's
-and Seerr's API keys, Bazarr's) are kept there too and are never revealed. The state lists the
-accounts with `stored`; `GET /deploy/{id}/stack/credentials/{name}/reveal` returns one on the terms a
-variable reveal has — an administrator, in a session, not through Just Hub, audited without the
-value. Nothing in a response, a step record or a log carries a value otherwise.
+Every application signs in as `admin` with one password, the credential `login` (`stacks/login.go`,
+`media/login.go`): Jellyfin's administrator (which is also how Seerr's owner signs in),
+qBittorrent, Radarr, Sonarr, Prowlarr and Bazarr. It is sealed in `deploy_stack_credentials` with
+the dashboard's sealer. Tokens an application hands back (Jellyfin's and Seerr's API keys,
+Bazarr's) are kept there too and are never revealed.
+
+- **Where it comes from**, the first time a step asks (`stackLogin`): a stack made before the one
+  login adopts Jellyfin's administrator password (`jellyfin-admin`), so Jellyfin and Seerr sessions
+  and saved passwords keep working; a new stack takes `MEDIA_LOGIN_PASSWORD` when the person chose
+  one the dashboard's password rule accepts (one it refuses is not used, and the step says so);
+  otherwise 24 letters and digits are generated. From then on only the change route sets it.
+- **Migration.** The first pass of manifest 1.1.0 brings every other application to it: Radarr,
+  Sonarr, Prowlarr and Bazarr with their API keys; qBittorrent by matching its settings file
+  offline against the login, the previous login and its own old password, then signing in once
+  with the one it holds, so no refused sign-in counts towards its lock-out. Each application's old
+  credential (`qbittorrent-admin`, `radarr-admin`, …) is removed once that application answers to
+  the login. The state lists only `login`.
+- **Change.** `PUT /deploy/{id}/stack/login {"password"}` holds the password to the dashboard's own
+  rule (`422 password_weak {message}`), at most 128 characters with no control character; refuses
+  during a pass (`409 stack_busy`), since that pass has read the old one; keeps the old one as
+  `login-previous`; asks for a pass and answers `202 {"status": "configuring"}` (`waiting` before a
+  live release). Jellyfin's administrator password is set with the stack's API key, as an
+  administrator changes anyone's, which signs its other devices out; qBittorrent is signed in to
+  with the password its file holds. `login.verify`, after every step that signs in, removes
+  `login-previous` once all of them took the new one; a pass cut short leaves it for the next.
+  Changed twice before a pass reaches qBittorrent, qBittorrent can be left on the first; it is
+  then the action `qbittorrent-password`.
+- **Jellyfin is not signed in to on every pass.** A wrong password counts towards Jellyfin locking
+  the account, so `jellyfin-login-applied` records (as a digest) which login its administrator was
+  last confirmed with; a sign-in is tried only when that differs, and never for a Jellyfin someone
+  else set up before the stack asked the person to give its account the password
+  (`jellyfin-owner-asked`).
+- **Reveal.** `GET /deploy/{id}/stack/credentials/login/reveal`, on the terms a variable reveal has
+  (an administrator, in a session, not through Just Hub, audited without the value), as is the
+  change (`deploy.stack.login.update`). Nothing in a response, a step record or a log carries a
+  value otherwise.
 
 ## Routes
 
 | Route | Who | What |
 |---|---|---|
-| `GET /deploy/stacks` | any signed-in account, any key | the catalogue: presets with their template, memory and disk estimate, limitations, services |
-| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, a private one's loopback address and, once live, the public one's URL (the deployment's endpoint), steps, actions, accounts; `404 stack_not_found` otherwise |
+| `GET /deploy/stacks` | any signed-in account, any key | the catalogue: presets with their template, memory and disk estimate, limitations, services with their address label (`address`) and Jellyfin as `primary` |
+| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, each one's public `url` once the live release serves it (Jellyfin's is the primary domain) and a private one's loopback `address`, steps, actions, `login {username, stored}`, `credentials` (the one login), `addresses {primary, missing}`; `404 stack_not_found` otherwise |
 | `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass, `409 stack_not_preset` when the live release is not one of the stack's presets (no pass would ever run); audited |
-| `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | one account's password; audited |
+| `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | the login's password (`name` is `login`); audited |
+| `PUT /deploy/{id}/stack/login` | administrator, session, not Hub | change the login; a pass follows; audited without the value |
+| `POST /deploy/{id}/stack/addresses` | a configuration save's terms (an administrator in a session, or a deploy key) | give every app without one its address and deploy; audited |
 
 Blueprint summaries and details carry `stack`; the Template tab leaves those templates out.
 
@@ -141,11 +214,11 @@ another name is the person's and is not read past its name.
 
 | Application | The stack's own | Left alone |
 |---|---|---|
-| Radarr, Sonarr, Prowlarr | the sign-in: a form on every address, user `admin`, the stack's password (`config/host`; the whole resource goes back with four fields changed) | every other host setting |
+| Radarr, Sonarr, Prowlarr | the sign-in: a form on every address, user `admin`, the stack's login; the application URL (`applicationUrl`) is its public address (`config/host`; the whole resource goes back with those fields changed) | every other host setting |
 | Radarr, Sonarr | the root folder `/data/media/movies` or `/data/media/tv` | other root folders |
 | Radarr, Sonarr | the download client **qBittorrent (Just Dashboard)**: host `qbittorrent`, port, user, password, category `movies` or `tv`, enabled | other clients; every other setting of the stack's own client (priority, removal, tags) |
 | Prowlarr | the applications **Radarr (Just Dashboard)** and **Sonarr (Just Dashboard)**: URLs, key, full sync | other applications; the sync categories, which come from Prowlarr's own schema |
-| Bazarr | its sign-in; Radarr and Sonarr switched on with host, port and key; the languages profile **Just Dashboard** | other profiles and enabled languages (saving either replaces the list, so the person's go back with the stack's); a default profile the person chose; subtitle providers, which need the person's own account and are never added |
+| Bazarr | its sign-in; Radarr and Sonarr switched on with host, port and key; the languages profile **Just Dashboard**; the subtitle sources that need no account and are not for one language, turned on once: `embeddedsubtitles`, `gestdown`, `tvsubtitles`, `yifysubtitles` | other profiles and enabled languages (saving either replaces the list, so the person's go back with the stack's); a default profile the person chose; every other source, and the settings of any source; one of the four the person turned off stays off (the step's `turnedOn` output) |
 | Recyclarr | `/config/recyclarr.yml`, written again on every pass | files under `/config/configs/` |
 
 - A new download client or application starts from the application's own schema, so a setting the
@@ -184,6 +257,21 @@ another name is the person's and is not read past its name.
 
 ## What Jellyfin, qBittorrent and Seerr steps make
 
+- **Set up for their public addresses** (`Env.PublicURL`, from the live release's domains: an
+  HTTPS one when a service has one, the primary domain for Jellyfin):
+  - `seerr.address`: Seerr's application URL is its address; "Enable proxy support"
+    (`/settings/network` `trustProxy`) is on, which Seerr reads when it starts, so it applies from
+    its next start; its Jellyfin "external URL" (`externalHostname`) is Jellyfin's address, so
+    "Play on Jellyfin" opens the public one.
+  - `qbittorrent.address`: reverse proxy support on, with the subnets of the networks its
+    container is on as trusted proxies (`Env.NetworkSubnets`), so the ban counts the visitor's
+    address and not the proxy's; its address added to the Host header list when that list is not
+    `*` (the image's). Entries the person added stay.
+  - `jellyfin.proxy`: the same subnets become Jellyfin's known proxies, so it no longer counts
+    every visitor as local. Jellyfin 12.4 saves them at once but reads them when it starts, so they
+    apply from its next start (the next deploy); the stack does not restart it, and a second pass
+    changes nothing, so there is no restart loop. The published server URL is left as it is: it
+    would send clients on the server's own network out through the internet.
 - **Folders** (`storage.folders`): the four library and download folders and their two parents are
   made as root in qBittorrent's container (Jellyfin's in Essential) and given to 1000:1000 only when
   missing or root-owned, never recursively; every writer then proves it can create a file there as
@@ -231,15 +319,36 @@ containers:
 Not exercised end to end: a request fetched through a real source, imported and played. That needs a
 source the tester is allowed to use; none ships, by design.
 
+On 27 Nov 2026 the one login and the address settings were run against the pinned images, each test
+on containers, networks and volumes of its own:
+
+- A stack set up as manifest 1.0.0 left it, every application on a password of its own
+  (`TestLiveOneLoginMigratesAStackAndFollowsAChange`): the first pass made Jellyfin's password the
+  login without changing Jellyfin, changed qBittorrent, Radarr, Sonarr, Prowlarr and Bazarr to it,
+  removed the six old credentials, and qBittorrent logged no refused sign-in; the pass after changed
+  nothing. A change of the login then reached all six (Jellyfin with its API key), Seerr's owner
+  signed in with the new one, `login-previous` was gone after `login.verify`, and the pass after
+  changed nothing.
+- `TestLiveCompleteStepsConfigureOnceAndThenChangeNothing`: Seerr took its application URL, proxy
+  support and Jellyfin's address; a wrong password sent as the proxy sends it, for a visitor's
+  address, was counted by qBittorrent against that address (`IP: 203.0.113.9` in its log) and the
+  stack still signed in; Jellyfin counted the forwarded visitor as outside its network once it had
+  restarted, and not before.
+- `TestLiveServarrBazarrRecyclarrSteps`: Radarr, Sonarr and Prowlarr report their addresses as the
+  application URL; Bazarr reports the four sources it turned on as `Good` and holds none back.
+  Whether each finds subtitles for a film was not tried: the test's library is empty.
+
 ## Not done yet
 
 Said here so nobody builds on it by mistake:
 
 - Adopting an existing Jellyfin or Seerr deployment into a stack. The Stacks tab offers fresh
   installs only.
+- Seerr's proxy support and Jellyfin's known proxies apply from each one's next start, which is the
+  next deploy; the stack does not restart either.
 - Mounting an existing library folder from the host; media goes into the stack's own volume.
-- Hardware transcoding, the Ultimate preset's optional modules, and a guided form for adding a media
-  source (it is added in Prowlarr itself, and subtitle providers in Bazarr).
+- Hardware transcoding, and the Ultimate preset's optional modules. Subtitle sources that need an
+  account are added in Bazarr itself.
 - Jellyfin is reachable at the deployment's domain from the moment the release is live, and its
   wizard is finished by the stack within seconds of that, as the single Jellyfin template has always
   left it to the first visitor. A deployment without a domain has no such window.
@@ -253,8 +362,19 @@ Said here so nobody builds on it by mistake:
   templates, each adapter against recorded upstream answers (first run, a second run with no
   writes, upstream errors, the actions).
 - `go test ./internal/blueprint/` — the templates render to their recorded digests; loopback ports
-  only on loopback and only in a stack.
+  only on loopback and only in a stack; address labels only on a stack's loopback service, unique;
+  `ServiceHostname`; a service domain per label.
 - `TestStackRoutesRegisterAWaitingStackAndRevealOnlyItsAccounts` (`api`) — commit registers, the
-  page waits, Retry refuses in words, reveal is by name and audited, no secret in the state.
+  page waits, Retry refuses in words, reveal is by name and audited, no secret in the state, one
+  login listed, the catalogue's labels.
+- `TestStackAddressesAreSavedAsDomainsAndDeployed`, `TestStackAddressesTakeADomainWhenThereIsNone`,
+  `TestStackLoginChangeKeepsThePreviousAndAsksForAPass` (`api`) — "Give every app its address" saves
+  through the configuration save and starts the run; the login's change, refusal, audit and reveal.
+- `media/login_test.go`, `media/address_test.go` — a 1.0.0 stack migrating over fakes with no
+  refused qBittorrent sign-in, a changed login reaching every app, the deploy-time seed, and each
+  address step converging.
 - Live (`JD_STACKS_LIVE=1`, as root): each adapter lane's test brings its pinned images up on a
   network of its own and runs its steps twice. See the header of each `*_live_test.go`.
+  `TestLiveOneLoginMigratesAStackAndFollowsAChange` sets the seven applications up as manifest
+  1.0.0 did, one password each, then runs this manifest's pass, a change of the login and a pass
+  after each.

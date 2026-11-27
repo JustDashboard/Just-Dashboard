@@ -122,6 +122,7 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 		}
 	}
 	public := 0
+	addresses := map[string]bool{}
 	for index := range blueprint.Services {
 		service := &blueprint.Services[index]
 		fail := func(format string, args ...any) error {
@@ -156,10 +157,17 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 		// Docker publishes no port of a container that is only on a network
 		// declared internal, so a private interface published on loopback
 		// needs the egress network to be published through at all.
+		loopback := false
 		for _, port := range service.Ports {
-			if port.Exposure == "loopback" && !service.Egress {
-				return fail("publishes port %q on loopback but declares no egress, and Docker publishes nothing from an internal-only network", port.Name)
+			if port.Exposure == "loopback" {
+				loopback = true
+				if !service.Egress {
+					return fail("publishes port %q on loopback but declares no egress, and Docker publishes nothing from an internal-only network", port.Name)
+				}
 			}
+		}
+		if err := validateServiceAddress(blueprint, service, loopback, addresses); err != nil {
+			return fail("%v", err)
 		}
 		if serviceIsPublic {
 			public++
@@ -208,6 +216,30 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 			return fmt.Errorf("secret %q is generated but no service references it", secret.Name)
 		}
 	}
+	return nil
+}
+
+// validateServiceAddress holds a service's address label to what the route
+// to it needs: a stack's own service (the adapters set the application up
+// for the address), one that publishes its interface on loopback (which is
+// what the route reaches), and a label no other service of the template has.
+func validateServiceAddress(blueprint *Blueprint, service *Service, loopback bool, seen map[string]bool) error {
+	if service.Address == "" {
+		return nil
+	}
+	if blueprint.Stack == "" {
+		return fmt.Errorf("has the address label %q, which only a stack's service may have", service.Address)
+	}
+	if !loopback {
+		return fmt.Errorf("has the address label %q but publishes no port on loopback for its route to reach", service.Address)
+	}
+	if !addressLabelRE.MatchString(service.Address) {
+		return fmt.Errorf("address label %q is not a DNS label of at most 20 lowercase letters, digits and hyphens", service.Address)
+	}
+	if seen[service.Address] {
+		return fmt.Errorf("address label %q is another service's too", service.Address)
+	}
+	seen[service.Address] = true
 	return nil
 }
 

@@ -1,6 +1,6 @@
 {
   "id": "media-complete",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Media server (Complete)",
   "stack": "media",
   "category": "http",
@@ -10,22 +10,30 @@
   "docsUrl": "https://jellyfin.org/docs/",
   "access": {
     "kind": "setup",
-    "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and keeps the accounts it creates. Reveal them on the stack's page."
+    "note": "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and signs every one in with one login: admin and a password it keeps. Reveal it, or change it, on the stack's page."
   },
   "provenance": {
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://github.com/jellyfin/jellyfin",
-    "reviewedAt": "2026-11-26",
+    "reviewedAt": "2026-11-27",
     "minimumDashboard": "0.9.1"
   },
   "inputs": [
     {
       "name": "domain",
       "kind": "domain",
-      "label": "Jellyfin's domain",
+      "label": "Domain",
+      "required": true,
+      "description": "The address Jellyfin opens at. Every other app gets its own beside it: media.example.com gives Seerr media-requests.example.com."
+    },
+    {
+      "name": "login-password",
+      "kind": "secret",
+      "label": "Password for every app",
+      "variable": "MEDIA_LOGIN_PASSWORD",
       "required": false,
-      "description": "Optional; the address you and your apps open Jellyfin at. Seerr and the managers stay on this server until you publish them."
+      "description": "Every app signs in as admin with one password. Leave it empty and the dashboard makes one; change it later on the stack's page."
     },
     {
       "name": "quality",
@@ -205,7 +213,7 @@
           "name": "http",
           "internal": 5055,
           "protocol": "tcp",
-          "purpose": "The request desk, on this server's loopback until you publish it",
+          "purpose": "The request desk, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -242,7 +250,8 @@
           "condition": "healthy"
         }
       ],
-      "egress": true
+      "egress": true,
+      "address": "requests"
     },
     {
       "name": "radarr",
@@ -276,7 +285,7 @@
           "name": "http",
           "internal": 7878,
           "protocol": "tcp",
-          "purpose": "Radarr's web interface, on this server's loopback only",
+          "purpose": "Radarr's web interface, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -315,7 +324,8 @@
         "retries": 30,
         "startPeriodSeconds": 60
       },
-      "egress": true
+      "egress": true,
+      "address": "radarr"
     },
     {
       "name": "sonarr",
@@ -349,7 +359,7 @@
           "name": "http",
           "internal": 8989,
           "protocol": "tcp",
-          "purpose": "Sonarr's web interface, on this server's loopback only",
+          "purpose": "Sonarr's web interface, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -388,7 +398,8 @@
         "retries": 30,
         "startPeriodSeconds": 60
       },
-      "egress": true
+      "egress": true,
+      "address": "sonarr"
     },
     {
       "name": "prowlarr",
@@ -422,7 +433,7 @@
           "name": "http",
           "internal": 9696,
           "protocol": "tcp",
-          "purpose": "Prowlarr's web interface, on this server's loopback only",
+          "purpose": "Prowlarr's web interface, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -454,7 +465,8 @@
         "retries": 30,
         "startPeriodSeconds": 60
       },
-      "egress": true
+      "egress": true,
+      "address": "prowlarr"
     },
     {
       "name": "qbittorrent",
@@ -492,7 +504,7 @@
           "name": "http",
           "internal": 8080,
           "protocol": "tcp",
-          "purpose": "qBittorrent's web interface, on this server's loopback only",
+          "purpose": "qBittorrent's web interface, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -531,7 +543,8 @@
         "retries": 30,
         "startPeriodSeconds": 60
       },
-      "egress": true
+      "egress": true,
+      "address": "downloads"
     },
     {
       "name": "bazarr",
@@ -561,7 +574,7 @@
           "name": "http",
           "internal": 6767,
           "protocol": "tcp",
-          "purpose": "Bazarr's web interface, on this server's loopback only",
+          "purpose": "Bazarr's web interface, at its own address beside the domain",
           "exposure": "loopback"
         }
       ],
@@ -600,7 +613,8 @@
         "retries": 30,
         "startPeriodSeconds": 60
       },
-      "egress": true
+      "egress": true,
+      "address": "subtitles"
     },
     {
       "name": "recyclarr",
@@ -685,8 +699,10 @@
   "fixtures": [
     {
       "name": "default",
-      "inputs": {},
-      "digest": "sha256:55fb4d2fb6c898c442ad176ad16546a81ca5230834d1acb018ec8efe79fa34ab"
+      "inputs": {
+        "domain": "media.example.com"
+      },
+      "digest": "sha256:08d7b80c7860eb56cbbcfe3285b18107a5c9a1d41b8ffd44be08adc4e808cdf4"
     }
   ]
 }

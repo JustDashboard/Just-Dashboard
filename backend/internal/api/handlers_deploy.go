@@ -188,6 +188,11 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// An account a stack created is revealed on the terms a
 				// variable is.
 				r.With(httpx.RefuseHubSession).Method(http.MethodGet, "/{id}/stack/credentials/{name}/reveal", s.handle(s.handleStackCredentialReveal))
+				// The stack's one password is set on the terms it is revealed.
+				r.With(httpx.RefuseHubSession).Method(http.MethodPut, "/{id}/stack/login", s.handle(s.handleStackLoginUpdate))
+				// Giving a stack's apps their addresses is a domain change, on
+				// a configuration save's terms, and the deploy that applies it.
+				r.Method(http.MethodPost, "/{id}/stack/addresses", s.handle(s.handleStackAddresses))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariableDelete))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/import", s.handle(s.handleDeploymentDotenvImport))

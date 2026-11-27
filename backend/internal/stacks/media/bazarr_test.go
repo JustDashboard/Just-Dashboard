@@ -160,6 +160,15 @@ func (f *bazarrFake) save(form url.Values) {
 			continue
 		}
 		var value any = values[0]
+		if parts[2] == "enabled_providers" {
+			// A list is the repeated key, as save_settings reads it.
+			list := []any{}
+			for _, entry := range values {
+				list = append(list, entry)
+			}
+			f.settings[parts[1]][parts[2]] = list
+			continue
+		}
 		switch text := values[0]; {
 		case parts[2] == "password":
 			value = bazarrPasswordHash(text)
@@ -211,7 +220,7 @@ func TestBazarrAuthStoresItsKeyAndSecuresOnce(t *testing.T) {
 	if key, found, _ := stack.env.LookupCredential(ctx, CredentialBazarrAPIKey); !found || key != bazarr.key {
 		t.Fatal("the API key from Bazarr's configuration file was not stored")
 	}
-	password, _, _ := stack.env.LookupCredential(ctx, CredentialBazarrAdmin)
+	password, _, _ := stack.env.LookupCredential(ctx, CredentialLogin)
 	posts := bazarr.posted()
 	if len(posts) != 1 || len(posts[0]) != 3 || posts[0].Get("settings-auth-type") != "form" || posts[0].Get("settings-auth-username") != AdminUsername || posts[0].Get("settings-auth-password") != password {
 		t.Fatalf("settings posted: %d", len(posts))

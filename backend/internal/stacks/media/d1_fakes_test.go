@@ -169,10 +169,15 @@ type fakeJellyfin struct {
 	folders       []jellyfinFolder
 	signIns       int
 	minted        int
+	// passwordChanges counts the administrator's password being set with
+	// the API key; network is its network settings.
+	passwordChanges int
+	network         map[string]any
 }
 
 func newFakeJellyfin(t *testing.T) *fakeJellyfin {
-	fake := &fakeJellyfin{fakeApp: fakeApp{t: t}, userName: "root", administrator: true, sessions: map[string]bool{}}
+	fake := &fakeJellyfin{fakeApp: fakeApp{t: t}, userName: "root", administrator: true, sessions: map[string]bool{},
+		network: map[string]any{"EnableRemoteAccess": true, "EnableUPnP": false, "KnownProxies": []any{}, "LocalNetworkSubnets": []any{}}}
 	fake.start(fake.handle)
 	return fake
 }
@@ -285,6 +290,51 @@ func (f *fakeJellyfin) handle(w http.ResponseWriter, r *http.Request, body []byt
 		f.minted++
 		f.keys = append(f.keys, jellyfinKey{AccessToken: fmt.Sprintf("%032x", f.minted), AppName: r.URL.Query().Get("app")})
 		w.WriteHeader(204)
+	case "GET /Users":
+		if !f.authorized(r) {
+			w.WriteHeader(401)
+			return
+		}
+		answerJSON(w, 200, []map[string]any{{"Name": f.userName, "Id": "e1b04d7430924858afab7bd745bff13a", "HasPassword": f.userPassword != ""}})
+	case "POST /Users/Password":
+		if !f.authorized(r) {
+			w.WriteHeader(401)
+			return
+		}
+		if r.URL.Query().Get("userId") != "e1b04d7430924858afab7bd745bff13a" {
+			answerText(w, 404, "User not found")
+			return
+		}
+		var change struct{ NewPw string }
+		_ = json.Unmarshal(body, &change)
+		f.userPassword = change.NewPw
+		f.passwordChanges++
+		// Every session of the account but the caller's ends.
+		for token := range f.sessions {
+			if token != f.token(r) {
+				delete(f.sessions, token)
+			}
+		}
+		w.WriteHeader(204)
+	case "GET /System/Configuration/network":
+		if !f.authorized(r) {
+			w.WriteHeader(401)
+			return
+		}
+		answerJSON(w, 200, f.network)
+	case "POST /System/Configuration/network":
+		if !f.authorized(r) {
+			w.WriteHeader(401)
+			return
+		}
+		var network map[string]any
+		if err := json.Unmarshal(body, &network); err != nil || network["EnableRemoteAccess"] == nil {
+			// The whole object is required: a part would reset the rest.
+			answerText(w, 400, "Error processing request.")
+			return
+		}
+		f.network = network
+		w.WriteHeader(204)
 	case "GET /Library/VirtualFolders":
 		if !open && !f.authorized(r) {
 			w.WriteHeader(401)
@@ -362,6 +412,8 @@ func newFakeQBittorrent(t *testing.T) *fakeQBittorrent {
 			"save_path": "/downloads", "temp_path": "/downloads/incomplete", "temp_path_enabled": false, "auto_tmm_enabled": false,
 			"bypass_local_auth": false, "bypass_auth_subnet_whitelist_enabled": false, "web_ui_username": "admin",
 			"web_ui_max_auth_fail_count": 5, "web_ui_ban_duration": 3600, "web_ui_port": 8080,
+			"web_ui_reverse_proxy_enabled": false, "web_ui_reverse_proxies_list": "", "web_ui_csrf_protection_enabled": true,
+			"web_ui_host_header_validation_enabled": true, "web_ui_domain_list": "*",
 		},
 		categories: map[string]string{},
 	}
@@ -508,11 +560,16 @@ type fakeSeerr struct {
 	sessions     map[string]string
 	minted       int
 	lastSignIn   map[string]any
+	// network is GET /settings/network; externalHostname the address it
+	// shows people for Jellyfin.
+	network          map[string]any
+	externalHostname string
 }
 
 func newFakeSeerr(t *testing.T) *fakeSeerr {
 	fake := &fakeSeerr{
 		fakeApp: fakeApp{t: t}, apiKey: "seerr-api-key-for-tests", mediaServerType: seerrServerNotConfigured,
+		network: map[string]any{"csrfProtection": false, "forceIpv4First": false, "trustProxy": false},
 		main: map[string]any{
 			"applicationTitle": "Seerr", "applicationUrl": "", "cacheImages": false, "defaultPermissions": 32,
 			"localLogin": true, "mediaServerLogin": true, "newPlexLogin": true, "locale": "en", "partialRequestsEnabled": true,
@@ -637,6 +694,21 @@ func (f *fakeSeerr) handle(w http.ResponseWriter, r *http.Request, body []byte) 
 			f.main[key] = value
 		}
 		answerJSON(w, 200, f.main)
+	case route == "GET /settings/network":
+		answerJSON(w, 200, f.network)
+	case route == "POST /settings/network":
+		for key, value := range payload {
+			f.network[key] = value
+		}
+		answerJSON(w, 200, f.network)
+	case route == "GET /settings/jellyfin":
+		answerJSON(w, 200, map[string]any{"name": "8faf68313861", "ip": "jellyfin", "port": 8096, "useSsl": false,
+			"externalHostname": f.externalHostname, "apiKey": "jellyfin-key-seerr-holds", "libraries": f.librariesJSON()})
+	case route == "POST /settings/jellyfin":
+		if hostname, found := payload["externalHostname"].(string); found {
+			f.externalHostname = hostname
+		}
+		answerJSON(w, 200, map[string]any{"externalHostname": f.externalHostname})
 	case route == "GET /settings/jellyfin/library":
 		answerJSON(w, 200, f.librariesJSON())
 	case route == "POST /settings/jellyfin/library/sync":

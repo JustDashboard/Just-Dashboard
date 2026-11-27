@@ -101,6 +101,21 @@ func TestComposeValidationRejectsEachUnsafeShape(t *testing.T) {
 			b.Stack = "media"
 			db(b).Ports[0].Exposure = "loopback"
 		}, "declares no egress"},
+		{"an address label outside a stack", func(b *Blueprint) { db(b).Address = "sql" }, "only a stack's service"},
+		{"an address label with nothing on loopback", func(b *Blueprint) {
+			b.Stack = "media"
+			db(b).Address = "sql"
+		}, "publishes no port on loopback"},
+		{"an address label that is no DNS label", func(b *Blueprint) {
+			b.Stack = "media"
+			db(b).Ports[0].Exposure, db(b).Egress = "loopback", true
+			db(b).Address = "SQL.Server"
+		}, "not a DNS label"},
+		{"an address label too long for one", func(b *Blueprint) {
+			b.Stack = "media"
+			db(b).Ports[0].Exposure, db(b).Egress = "loopback", true
+			db(b).Address = strings.Repeat("a", 21)
+		}, "not a DNS label"},
 		{"a data volume nothing writes, mounted read-only", func(b *Blueprint) {
 			db(b).Volumes[0].ReadOnly = true
 		}, "holds data and is mounted read-only"},
@@ -422,5 +437,87 @@ func TestComposeSummaryListsServicesAndFootprint(t *testing.T) {
 	}
 	if Summarize(single).SourceKind != "blueprint" || len(Summarize(single).Services) != 0 {
 		t.Fatal("a single image is summarised as a stack")
+	}
+}
+
+// A stack's service address is a sibling of a domain with three labels or
+// more, a subdomain of an apex, and the service's label is never what a long
+// first label loses.
+func TestServiceHostnameIsASiblingOfTheDomain(t *testing.T) {
+	t.Parallel()
+	long := strings.Repeat("a", 60)
+	for _, testCase := range []struct{ domain, label, want string }{
+		{"media.example.com", "requests", "media-requests.example.com"},
+		{"Media.Example.COM.", "downloads", "media-downloads.example.com"},
+		{"app.handle.just-dashboard.com", "requests", "app-requests.handle.just-dashboard.com"},
+		{"media.203-0-113-7.sslip.io", "radarr", "media-radarr.203-0-113-7.sslip.io"},
+		{"example.com", "requests", "requests.example.com"},
+		{long + ".example.com", "requests", strings.Repeat("a", 54) + "-requests.example.com"},
+		{"", "requests", ""},
+	} {
+		got := ServiceHostname(testCase.domain, testCase.label)
+		if got != testCase.want {
+			t.Errorf("ServiceHostname(%q, %q) = %q, want %q", testCase.domain, testCase.label, got, testCase.want)
+		}
+		if first, _, _ := strings.Cut(got, "."); len(first) > 63 {
+			t.Errorf("ServiceHostname(%q, %q) has a first label of %d characters", testCase.domain, testCase.label, len(first))
+		}
+	}
+}
+
+// A stack template's domain gives each labelled service an address beside
+// it, which the plan carries as a service domain; the media templates will
+// not render without one, and no template that is not a stack has any.
+func TestStackTemplatesRenderAServiceDomainPerLabel(t *testing.T) {
+	t.Parallel()
+	complete, err := Get("media-complete")
+	if err != nil {
+		t.Fatal(err)
+	}
+	plan, err := Render(complete, map[string]string{"domain": "media.example.test"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	got := map[string]string{}
+	for _, domain := range plan.ServiceDomains {
+		got[domain.Service] = domain.Hostname
+	}
+	want := map[string]string{
+		"seerr": "media-requests.example.test", "radarr": "media-radarr.example.test", "sonarr": "media-sonarr.example.test",
+		"prowlarr": "media-prowlarr.example.test", "qbittorrent": "media-downloads.example.test", "bazarr": "media-subtitles.example.test",
+	}
+	if fmt.Sprint(got) != fmt.Sprint(want) || !slices.Equal(plan.Domains, []string{"media.example.test"}) {
+		t.Fatalf("domains %v, service domains %v", plan.Domains, got)
+	}
+	if _, err := Render(complete, nil); err == nil || !strings.Contains(err.Error(), `"domain" is required`) {
+		t.Fatalf("a stack without a domain rendered: %v", err)
+	}
+	stack := minimalComposeTemplate()
+	stack.Stack = "example"
+	stack.Services[1].Ports[0].Exposure, stack.Services[1].Egress, stack.Services[1].Address = "loopback", true, "sql"
+	if err := Validate(stack); err != nil {
+		t.Fatal(err)
+	}
+	if plan, err := Render(stack, map[string]string{"domain": "app.example.test"}); err != nil ||
+		len(plan.ServiceDomains) != 1 || plan.ServiceDomains[0] != (ServiceDomain{Hostname: "app-sql.example.test", Service: "db"}) {
+		t.Fatalf("service domains %v: %v", plan, err)
+	}
+	everything, err := All()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, summary := range everything {
+		if summary.Stack != "" {
+			continue
+		}
+		definition, err := Get(summary.ID)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, fixture := range definition.Fixtures {
+			if plan, err := Render(definition, fixture.Inputs); err == nil && len(plan.ServiceDomains) > 0 {
+				t.Fatalf("%s, not a stack, rendered service domains", summary.ID)
+			}
+		}
 	}
 }

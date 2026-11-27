@@ -49,7 +49,7 @@ var liveArrImages = map[string]string{
 var liveArrSteps = []string{
 	"radarr.auth", "radarr.rootfolder", "sonarr.auth", "sonarr.rootfolder", "prowlarr.auth", "bazarr.auth",
 	"recyclarr.sync", "radarr.downloadclient", "sonarr.downloadclient", "prowlarr.apps", "bazarr.link",
-	"downloads.verify", "prowlarr.sources",
+	"bazarr.providers", "downloads.verify", "prowlarr.sources",
 }
 
 func TestLiveServarrBazarrRecyclarrSteps(t *testing.T) {
@@ -99,6 +99,7 @@ func TestLiveServarrBazarrRecyclarrSteps(t *testing.T) {
 
 	env := stackstest.Live(t, Manifest(), liveArrNetwork, containers, "complete",
 		map[string]string{OptionQuality: "1080p", OptionSubtitleLanguages: "en,ro", OptionRequestApproval: "admin"}, variables)
+	env.PublicURLs = livePublicURLs
 
 	// What lane D1's steps do before these run, by the test's own hand: the
 	// folders on the shared volume, and qBittorrent's password and folders.
@@ -163,7 +164,7 @@ func TestLiveServarrBazarrRecyclarrSteps(t *testing.T) {
 		}
 	}
 	for _, id := range order {
-		if id == "prowlarr.sources" || id == "downloads.verify" {
+		if id == "prowlarr.sources" || id == "downloads.verify" || id == "bazarr.providers" {
 			continue
 		}
 		if !strings.Contains(second[id].Message, "already") {
@@ -175,6 +176,22 @@ func TestLiveServarrBazarrRecyclarrSteps(t *testing.T) {
 			}
 		}
 	}
+
+	for _, app := range []arrApp{arrRadarr, arrSonarr, arrProwlarr} {
+		if host := before[app.service+" config/host"]; !strings.Contains(host, `"applicationUrl":"`+livePublicURLs[app.service]+`"`) {
+			t.Errorf("%s's application URL is not its address: %s", app.title, host)
+		}
+	}
+	general := before["bazarr settings general"]
+	for _, provider := range bazarrProvidersOwned {
+		if !strings.Contains(general, `"`+provider+`"`) {
+			t.Errorf("Bazarr does not have %s turned on: %s", provider, general)
+		}
+	}
+	if first["bazarr.providers"].Outputs["turnedOn"] != strings.Join(bazarrProvidersOwned, ",") {
+		t.Errorf("bazarr.providers outputs: %v", first["bazarr.providers"].Outputs)
+	}
+	liveBazarrProviders(ctx, t, env)
 
 	sync := first["recyclarr.sync"].Outputs
 	if sync["radarrProfileName"] != "HD Bluray + WEB (Just Dashboard)" || sync["sonarrProfileName"] != "WEB-1080p (Just Dashboard)" || sync["radarrProfileId"] == "" || sync["sonarrProfileId"] == "" {
@@ -241,7 +258,7 @@ func liveArrDrift(ctx context.Context, t *testing.T, env *stacks.DockerEnv, step
 	if err := radarr.call(ctx, http.MethodPut, "config/host/1", host, nil); err != nil {
 		t.Fatal(err)
 	}
-	password, _ := env.Credential(ctx, CredentialRadarrAdmin)
+	password, _ := env.Credential(ctx, CredentialLogin)
 	if signedIn, err := radarr.signIn(ctx, AdminUsername, password); err != nil || signedIn {
 		t.Fatalf("the password change by hand did not take: %v %v", signedIn, err)
 	}
@@ -454,7 +471,7 @@ func liveArrWait(ctx context.Context, t *testing.T, env *stacks.DockerEnv, servi
 // categories.
 func liveArrPrepareQBittorrent(ctx context.Context, t *testing.T, env *stacks.DockerEnv) {
 	t.Helper()
-	password, err := env.Credential(ctx, CredentialQBittorrent)
+	password, err := env.Credential(ctx, CredentialLogin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,10 +624,37 @@ func liveArrSecrets(ctx context.Context, t *testing.T, env *stacks.DockerEnv, va
 	for _, value := range variables {
 		secrets = append(secrets, value)
 	}
-	for _, name := range []string{CredentialRadarrAdmin, CredentialSonarrAdmin, CredentialProwlarrAdmin, CredentialBazarrAdmin, CredentialQBittorrent, CredentialBazarrAPIKey} {
+	for _, name := range []string{CredentialLogin, CredentialLogin, CredentialLogin, CredentialLogin, CredentialLogin, CredentialBazarrAPIKey} {
 		if value, found, err := env.LookupCredential(ctx, name); err == nil && found {
 			secrets = append(secrets, value)
 		}
 	}
 	return secrets
+}
+
+// liveBazarrProviders asks Bazarr how the stack's subtitle sources stand:
+// none may be held back (throttled) once they are turned on.
+func liveBazarrProviders(ctx context.Context, t *testing.T, env *stacks.DockerEnv) {
+	t.Helper()
+	key, _, _ := env.LookupCredential(ctx, CredentialBazarrAPIKey)
+	client, err := newBazarrClient(ctx, env, key)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var status struct {
+		Data []struct {
+			Name   string `json:"name"`
+			Status string `json:"status"`
+			Retry  string `json:"retry"`
+		} `json:"data"`
+	}
+	if err := client.get(ctx, "/api/providers", &status); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Bazarr's provider status: %+v", status.Data)
+	for _, entry := range status.Data {
+		if slices.Contains(bazarrProvidersOwned, strings.ToLower(entry.Name)) && entry.Status != "" && entry.Status != "Good" {
+			t.Errorf("Bazarr holds back the stack's source %s: %s (retry %s)", entry.Name, entry.Status, entry.Retry)
+		}
+	}
 }

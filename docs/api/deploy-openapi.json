@@ -2870,6 +2870,67 @@
         "title": "api.sizingOOMs",
         "type": "object"
       },
+      "api.stackAddress": {
+        "properties": {
+          "hostname": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackAddress",
+        "type": "object"
+      },
+      "api.stackAddresses": {
+        "properties": {
+          "missing": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackAddress"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "primary": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackAddresses",
+        "type": "object"
+      },
+      "api.stackAddressesAnswer": {
+        "properties": {
+          "domains": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "runId": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        "title": "api.stackAddressesAnswer",
+        "type": "object"
+      },
+      "api.stackAddressesRequest": {
+        "properties": {
+          "domain": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackAddressesRequest",
+        "type": "object"
+      },
       "api.stackCatalogueEntry": {
         "properties": {
           "description": {
@@ -2917,6 +2978,9 @@
             "title": "stacks.Access",
             "type": "string"
           },
+          "address": {
+            "type": "string"
+          },
           "docsUrl": {
             "type": "string"
           },
@@ -2929,6 +2993,9 @@
           "port": {
             "format": "int64",
             "type": "integer"
+          },
+          "primary": {
+            "type": "boolean"
           },
           "purpose": {
             "type": "string"
@@ -3058,6 +3125,27 @@
         "title": "api.stackCredentialReveal",
         "type": "object"
       },
+      "api.stackLoginRequest": {
+        "properties": {
+          "password": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackLoginRequest",
+        "type": "object"
+      },
+      "api.stackLoginState": {
+        "properties": {
+          "stored": {
+            "type": "boolean"
+          },
+          "username": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackLoginState",
+        "type": "object"
+      },
       "api.stackReadiness": {
         "properties": {
           "acquisition": {
@@ -3139,6 +3227,13 @@
               "null"
             ]
           },
+          "addresses": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/api.stackAddresses"
+              }
+            ]
+          },
           "configuredReleaseId": {
             "format": "int64",
             "type": "integer"
@@ -3171,6 +3266,13 @@
           "liveReleaseId": {
             "format": "int64",
             "type": "integer"
+          },
+          "login": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/api.stackLoginState"
+              }
+            ]
           },
           "preset": {
             "type": "string"
@@ -4264,6 +4366,15 @@
               }
             ]
           },
+          "serviceDomains": {
+            "items": {
+              "$ref": "#/components/schemas/blueprint.ServiceDomain"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
           "services": {
             "items": {
               "$ref": "#/components/schemas/blueprint.RenderedService"
@@ -4716,6 +4827,9 @@
       },
       "blueprint.Service": {
         "properties": {
+          "address": {
+            "type": "string"
+          },
           "dependsOn": {
             "items": {
               "$ref": "#/components/schemas/blueprint.Dependency"
@@ -4794,6 +4908,18 @@
           }
         },
         "title": "blueprint.Service",
+        "type": "object"
+      },
+      "blueprint.ServiceDomain": {
+        "properties": {
+          "hostname": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          }
+        },
+        "title": "blueprint.ServiceDomain",
         "type": "object"
       },
       "blueprint.ServiceSummary": {
@@ -28807,7 +28933,7 @@
             "deployKey": []
           }
         ],
-        "summary": "Read a stack deployment's state: whether it is installed, healthy, connected and able to play and to acquire, each service's container and private address, each configuration step, the actions only a person can take, and the accounts it created.",
+        "summary": "Read a stack deployment's state: whether it is installed, healthy, connected and able to play and to acquire, each service's container, public address and loopback address, each configuration step, the actions only a person can take, the one login, and the apps' addresses the configuration does not have yet.",
         "tags": [
           "stacks"
         ],
@@ -28825,6 +28951,62 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/stack/addresses": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "409 stack_addresses_present when every app has one, 422 stack_no_domain when there is no primary domain and none was given.",
+        "operationId": "stackAddresses",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.stackAddressesRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackAddressesAnswer"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Give every app of the stack its own address beside the primary domain: the missing domains are saved as the Domains settings save them and a release is started; the body's domain is used, as the primary, only when the deployment has none.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      }
     },
     "/deploy/{id}/stack/configure": {
       "parameters": [
@@ -28898,7 +29080,7 @@
             "session": []
           }
         ],
-        "summary": "Reveal an account the stack created; audited without its value.",
+        "summary": "Reveal the stack's one login (name login), which every application signs in with as admin; audited without its value.",
         "tags": [
           "stacks"
         ],
@@ -28925,6 +29107,59 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/stack/login": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "put": {
+        "description": "422 password_weak when the password breaks the dashboard's password rule, 409 stack_busy while a pass runs.",
+        "operationId": "stackLoginUpdate",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.stackLoginRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackConfigureAnswer"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          }
+        ],
+        "summary": "Change the password every application of the stack signs in with; the previous one is kept until every application takes the new one, and a configuration pass is asked for; audited without the value.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "refused (session_required): variables are write-only to a deploy key: a value is read back only in the dashboard"
+      }
     },
     "/deploy/{id}/unarchive": {
       "parameters": [

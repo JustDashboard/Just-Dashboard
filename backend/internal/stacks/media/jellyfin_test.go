@@ -13,7 +13,7 @@ func TestJellyfinSetupFinishesTheWizardOnceAndThenOnlyReads(t *testing.T) {
 	env := newFake("complete", map[string]string{"jellyfin": jellyfin.server.URL})
 
 	result := mustRunStep(t, env, "jellyfin.setup")
-	password, key := credential(env, CredentialJellyfinAdmin), credential(env, CredentialJellyfinAPIKey)
+	password, key := credential(env, CredentialLogin), credential(env, CredentialJellyfinAPIKey)
 	if len(password) != generatedPasswordLength || jellyfin.userName != "admin" || jellyfin.userPassword != password {
 		t.Fatalf("the administrator is %q with a password of %d characters", jellyfin.userName, len(jellyfin.userPassword))
 	}
@@ -42,7 +42,7 @@ func TestJellyfinSetupFinishesTheWizardOnceAndThenOnlyReads(t *testing.T) {
 	if got := jellyfin.take(); !slices.Equal(got, []string{"GET /System/Info/Public", "GET /Auth/Keys"}) {
 		t.Fatalf("the second run made %v", got)
 	}
-	if credential(env, CredentialJellyfinAdmin) != password || credential(env, CredentialJellyfinAPIKey) != key {
+	if credential(env, CredentialLogin) != password || credential(env, CredentialJellyfinAPIKey) != key {
 		t.Fatal("the second run changed a credential")
 	}
 	if !strings.Contains(result.Message, "the stack's API key works") {
@@ -58,7 +58,7 @@ func TestJellyfinSetupFinishesAWizardAnEarlierAttemptLeftHalfway(t *testing.T) {
 	if _, err := runStep(t, env, "jellyfin.setup"); err == nil || stacks.IsPermanent(err) {
 		t.Fatalf("expected an error the runner retries, got %v", err)
 	}
-	password := credential(env, CredentialJellyfinAdmin)
+	password := credential(env, CredentialLogin)
 	if password == "" || jellyfin.wizardDone {
 		t.Fatalf("after the failed attempt: password stored = %v, wizard done = %v", password != "", jellyfin.wizardDone)
 	}
@@ -85,7 +85,7 @@ func TestJellyfinSetupBySomeoneElseIsAnActionAndChangesNothing(t *testing.T) {
 	if got := jellyfin.take(); !slices.Equal(got, []string{"GET /System/Info/Public"}) {
 		t.Fatalf("requests = %v", got)
 	}
-	password := credential(env, CredentialJellyfinAdmin)
+	password := credential(env, CredentialLogin)
 	if password == "" {
 		t.Fatal("no password was made for the page to show")
 	}
@@ -112,7 +112,7 @@ func TestJellyfinSetupBySomeoneElseIsAnActionAndChangesNothing(t *testing.T) {
 func TestJellyfinSetupTreatsAnAdminThatIsNotAnAdministratorAsSomeoneElses(t *testing.T) {
 	jellyfin := newFakeJellyfin(t)
 	env := newFake("complete", map[string]string{"jellyfin": jellyfin.server.URL})
-	password, _ := env.Credential(t.Context(), CredentialJellyfinAdmin)
+	password, _ := env.Credential(t.Context(), CredentialLogin)
 	jellyfin.wizardDone, jellyfin.userName, jellyfin.userPassword, jellyfin.administrator = true, "admin", password, false
 
 	_, err := runStep(t, env, "jellyfin.setup")
@@ -171,7 +171,7 @@ func TestJellyfinSetupWaitsForAServerThatIsStillStarting(t *testing.T) {
 func TestJellyfinSetupReportsARefusedKeyWithoutItsSecrets(t *testing.T) {
 	jellyfin := newFakeJellyfin(t)
 	env := newFake("complete", map[string]string{"jellyfin": jellyfin.server.URL})
-	password, _ := env.Credential(t.Context(), CredentialJellyfinAdmin)
+	password, _ := env.Credential(t.Context(), CredentialLogin)
 	// An upstream that echoes what it was sent.
 	jellyfin.force("POST /Auth/Keys", 500, "could not make a key for "+password)
 
