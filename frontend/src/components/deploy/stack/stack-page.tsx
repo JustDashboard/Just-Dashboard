@@ -2,52 +2,41 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Copy, External, Eye, EyeOff, Monorepo, RotateClockwise, Wrench } from "@/components/icons"
-import { ApiError, get, post } from "@/lib/api"
-import { copyText } from "@/lib/clipboard"
+import { ArrowRight, Monorepo, RotateClockwise, Wrench } from "@/components/icons"
+import { ApiError, post } from "@/lib/api"
 import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import type {
-  SmartStackCredential,
-  SmartStackService,
-  SmartStackState,
-  SmartStackStep,
-} from "@/lib/types"
-import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
-import { CopyValue } from "@/components/copy"
-import { Explain } from "@/components/explain"
+import type { SmartStackAddressesStarted, SmartStackState, SmartStackStep } from "@/lib/types"
+import { INLINE_LINK } from "@/components/inline-link"
 import { LoadingPanel } from "@/components/loading"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
-import { ProductLogo, hasProductLogo, imageProduct } from "@/components/product-logo"
 import { Stale } from "@/components/stale"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
 import { TextShimmer } from "@/components/ui/text-shimmer"
-import { VerbActions, type Verb } from "@/components/verbs"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import { useProject } from "@/components/deploy/project-context"
-import { RevealedValue } from "@/components/deploy/settings/variable-type"
-import { hostOf } from "@/components/deploy/vocabulary"
+import { AddressesStarted, AddressesStep } from "@/components/deploy/stack/stack-addresses"
+import { StackApps, StackAppsSkeleton } from "@/components/deploy/stack/stack-apps"
+import { StackLogin } from "@/components/deploy/stack/stack-login"
 import {
-  ACCESS_WORD,
   STACK_STATUS,
   STEP_STATUS,
   canConfigure,
   configureRefusal,
   configureVerb,
   failedSteps,
-  orderedActions,
+  isSourceAction,
+  nextSteps,
+  onlyUnpublished,
   readinessLines,
-  serviceState,
   skippedLine,
-  splitCredentials,
   stackPollInterval,
   stageGroups,
   stepDetail,
-  tunnelFor,
 } from "@/components/deploy/stack/stack-model"
 import { useStackState } from "@/components/deploy/stack/use-stack"
 
@@ -63,11 +52,12 @@ import { useStackState } from "@/components/deploy/stack/use-stack"
  * play) each said on its own, because a stack that is installed and healthy
  * with nothing connected is not ready and must not read as if it were.
  *
- * Then, in the order they are acted on: what only the person can do, what
- * failed, the services and how each is reached, the setup step by step, and
- * the accounts the stack created. A list here keeps one height in every row:
- * a private service's tunnel is behind its mark, a failed step's whole error
- * stands above the list, and the steps a preset has no use for are one line.
+ * Then the one next step when something is left (a media source to add,
+ * the apps' addresses to give) and what failed, with its whole error. Then
+ * it is a launcher: the one login every app takes, and each app with what
+ * it is for, its address and Open. Under those, the setup step by
+ * step. A list here keeps one height in every row, and the steps a preset has
+ * no use for are one line.
  *
  * It follows a pass every two seconds and rests at fifteen (`usePoll`).
  */
@@ -82,6 +72,9 @@ export function StackPage() {
   const named = Boolean(project.blueprint?.stack)
   const [pace, setPace] = useState(stackPollInterval(undefined))
   const stack = useStackState(project.projectId, named, pace)
+  // The release "Give every app its address" started, kept past the read
+  // that no longer lists the apps as missing theirs.
+  const [addressRun, setAddressRun] = useState<SmartStackAddressesStarted>()
   const absent =
     stack.error instanceof ApiError &&
     (stack.error.code === "stack_not_found" || stack.error.status === 404)
@@ -109,6 +102,7 @@ export function StackPage() {
   if (!stack.data) return <StackSkeleton />
 
   const state = stack.data
+  const admin = session?.user?.role === "admin"
   return (
     <>
       <Lead
@@ -118,14 +112,37 @@ export function StackPage() {
         stale={stack.error ? <Stale error={stack.error} onRetry={stack.refresh} /> : undefined}
         onStarted={stack.refresh}
       />
-      <NeedsALook state={state} runHref={runHref(base, deployment.activeRun?.id)} />
-      <Services state={state} runtime={project.detail.runtime?.services ?? []} />
-      <Setup state={state} />
-      <Accounts
+      <NextSteps
         state={state}
         projectId={project.projectId}
-        canReveal={session?.user?.role === "admin"}
+        projectName={project.detail.project.name}
+        runHref={runHref(base, deployment.activeRun?.id)}
+        activeRunId={deployment.activeRun?.id}
+        canChangeDomains={can("system.admin") && !project.archived}
+        addressRun={addressRun}
+        onAddressesStarted={(answer) => {
+          setAddressRun(answer)
+          stack.refresh()
+        }}
+        onChanged={stack.refresh}
       />
+      {/* The one login every app takes and the apps. Side by side only where
+          the apps' rows keep room for what each is for (2xl); narrower, the
+          login is one compact panel over them, read before an app is opened. */}
+      <div className="grid min-w-0 items-start gap-x-6 gap-y-6 2xl:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 2xl:col-start-2 2xl:row-start-1">
+          <StackLogin
+            state={state}
+            projectId={project.projectId}
+            canReveal={admin && !project.archived}
+            onChanged={stack.refresh}
+          />
+        </div>
+        <div className="min-w-0 2xl:col-start-1 2xl:row-start-1">
+          <StackApps state={state} runtime={project.detail.runtime?.services ?? []} />
+        </div>
+      </div>
+      <Setup state={state} />
       <Limits limitations={state.limitations} />
     </>
   )
@@ -141,12 +158,7 @@ function StackSkeleton() {
   return (
     <div role="status" aria-label="Loading the stack" className="contents">
       <LoadingPanel plain rows={2} />
-      <Panel plain>
-        <PanelHeader title="Services" />
-        <PanelBody className="pt-3">
-          <ChoiceListSkeleton rows={4} />
-        </PanelBody>
-      </Panel>
+      <StackAppsSkeleton />
     </div>
   )
 }
@@ -276,43 +288,108 @@ function PassAge({ state }: { state: SmartStackState }) {
 }
 
 /**
- * What needs a look, when something does: that the release is still coming
- * up, what only the person can do (the ones holding the stack from ready
- * first), and what failed, each failure with its whole error. Nothing is
- * drawn when all is well.
+ * What is left for the person, when something is: that the release is still
+ * coming up, then the next steps in the order they matter (what holds the
+ * stack from ready, the apps with no address, what is optional), and what
+ * failed, each failure with its whole error. The first step's command wears
+ * the brand, because it is the page's one next step. Nothing is drawn when
+ * all is done.
  */
-function NeedsALook({ state, runHref }: { state: SmartStackState; runHref: string }) {
-  const actions = orderedActions(state.actions)
+function NextSteps({
+  state,
+  projectId,
+  projectName,
+  runHref,
+  activeRunId,
+  canChangeDomains,
+  addressRun,
+  onAddressesStarted,
+  onChanged,
+}: {
+  state: SmartStackState
+  projectId: number
+  projectName: string
+  runHref: string
+  /** The deployment's run in flight, which publishes saved addresses when it goes live. */
+  activeRunId?: number
+  canChangeDomains: boolean
+  addressRun?: SmartStackAddressesStarted
+  onAddressesStarted: (answer: SmartStackAddressesStarted) => void
+  onChanged: () => void
+}) {
+  // Once the addresses are on their way, their step is the run that brings them.
+  const steps = nextSteps(state).filter((step) => !addressRun || step.kind !== "addresses")
   const failures = failedSteps(state.steps)
-  if (state.status !== "waiting" && actions.length === 0 && failures.length === 0) return null
+  if (state.status !== "waiting" && steps.length === 0 && failures.length === 0 && !addressRun)
+    return null
+  const base = `/deploy/${projectId}`
   return (
-    <section aria-label="What needs a look" className="min-w-0 space-y-2">
+    <section aria-label="What is left to do" className="min-w-0 space-y-2">
       {state.status === "waiting" && (
         <Notice title="The deployment's run is still bringing the release up" live="status">
           <p>
-            The applications are set up and connected once it is live; nothing can be configured
-            before that.{" "}
-            <Link href={runHref} className="rounded-sm underline underline-offset-4 focus-ring">
+            The apps are set up and connected once it is live; nothing can be configured before
+            that.{" "}
+            <Link href={runHref} className={INLINE_LINK}>
               {runHref.includes("/runs/") ? "Watch the run" : "Open Deployments"}
             </Link>
           </p>
         </Notice>
       )}
-      {actions.map((action) => (
-        <Notice
-          key={action.id}
-          data-slot="stack-action"
-          data-blocking={action.blocking}
-          tone={action.blocking ? "warning" : "default"}
-          title={action.title}
-        >
-          <p>{action.description}</p>
-          <p className="text-hint text-muted-foreground">
-            {serviceTitle(state, action.service)} ·{" "}
-            {action.blocking ? "the stack is not ready until this is done" : "optional"}
-          </p>
-        </Notice>
-      ))}
+      {addressRun && <AddressesStarted started={addressRun} projectId={projectId} />}
+      {steps.map((step, index) => {
+        // Saved but not served yet, with a deployment under way: that run
+        // publishes them when it goes live, so it is the step, not another.
+        if (step.kind === "addresses" && activeRunId && onlyUnpublished(step.addresses))
+          return (
+            <AddressesStarted
+              key="addresses"
+              started={{ runId: activeRunId, domains: [] }}
+              projectId={projectId}
+            />
+          )
+        if (step.kind === "addresses")
+          return (
+            <AddressesStep
+              key="addresses"
+              addresses={step.addresses}
+              projectId={projectId}
+              projectName={projectName}
+              stackId={state.stackId}
+              canChange={canChangeDomains}
+              first={index === 0}
+              onStarted={onAddressesStarted}
+              onSettled={onChanged}
+            />
+          )
+        const { action } = step
+        const source = isSourceAction(action)
+        return (
+          <Notice
+            key={action.id}
+            data-slot="stack-action"
+            data-blocking={action.blocking}
+            tone={action.blocking ? "warning" : "default"}
+            title={action.title}
+          >
+            <p>{action.description}</p>
+            <p className="text-hint text-muted-foreground">
+              {serviceTitle(state, action.service)} ·{" "}
+              {action.blocking ? "the stack is not ready until this is done" : "optional"}
+            </p>
+            {source && (
+              <div className="pt-1">
+                <Button size="sm" variant={index === 0 ? "default" : "outline"} asChild>
+                  <Link href={`${base}/stack/sources`}>
+                    Add a media source
+                    <ArrowRight />
+                  </Link>
+                </Button>
+              </div>
+            )}
+          </Notice>
+        )
+      })}
       {failures.map((step) => (
         <Notice key={step.id} data-slot="stack-failure" tone="danger" title={step.title}>
           <p className="font-mono text-hint leading-relaxed break-words">{stepDetail(step)}</p>
@@ -329,136 +406,6 @@ function NeedsALook({ state, runHref }: { state: SmartStackState; runHref: strin
 
 function serviceTitle(state: SmartStackState, name: string) {
   return state.services.find((service) => service.name === name)?.title ?? name
-}
-
-/** A service's mark: its own where the product has one, else what its image is. */
-function serviceProduct(service: Pick<SmartStackService, "name" | "image">) {
-  return hasProductLogo(service.name) ? service.name : imageProduct(service.image)
-}
-
-/**
- * The services as cards, one height each: what it is, what it does, its
- * state, and how it is reached. A card opens its container in Docker where
- * there is one. A public service's address is a link; a private one's is an
- * address on this server only, with the tunnel that reaches it behind the
- * mark beside it, and never a button that would open nothing.
- */
-function Services({
-  state,
-  runtime,
-}: {
-  state: SmartStackState
-  runtime: { containerId: string; name: string; service?: string }[]
-}) {
-  // The stack names a container; the project's runtime read holds its id,
-  // which is what the Docker pages are addressed by.
-  const containerId = (service: SmartStackService) =>
-    runtime.find(
-      (one) =>
-        one.name === service.container?.name || (one.service && one.service === service.name),
-    )?.containerId
-  const host = typeof window === "undefined" ? "" : window.location.hostname
-  return (
-    <Panel plain>
-      <PanelHeader title="Services" count={state.services.length} />
-      <PanelBody className="pt-3">
-        <ChoiceList aria-label="Services">
-          {state.services.map((service) => {
-            const id = service.container ? containerId(service) : undefined
-            const reading = serviceState(service)
-            const tunnel =
-              service.access === "private" ? tunnelFor(service.address, host) : undefined
-            const verbs: Verb[] =
-              service.access === "public" && service.url
-                ? [
-                    {
-                      key: "open",
-                      label: `Open ${service.title} at ${hostOf(service.url)}`,
-                      icon: External,
-                      inline: true,
-                      href: service.url,
-                      run: () => undefined,
-                    },
-                  ]
-                : []
-            return (
-              <ChoiceRow
-                key={service.name}
-                verb={`Open ${service.title}'s container`}
-                href={id ? `/docker/containers/${id}` : undefined}
-                disabled={!id}
-                leading={<ProductLogo id={serviceProduct(service)} size="sm" />}
-                title={service.title}
-                description={service.purpose}
-                trailing={
-                  <>
-                    <Reach service={service} />
-                    <span className="flex justify-end sm:w-28 sm:justify-start">
-                      <Status tone={reading.tone} label={reading.label} />
-                    </span>
-                  </>
-                }
-                actions={
-                  tunnel ? (
-                    <Explain
-                      label={`How to reach ${service.title}`}
-                      side="left"
-                      entry={{
-                        title: "Only on this server",
-                        body: (
-                          <span className="block space-y-2">
-                            <span className="block">
-                              {service.title} is published at{" "}
-                              <span className="font-mono">{service.address}</span>, which only this
-                              server can open. From another computer, open a tunnel over SSH with
-                              your own account, then visit{" "}
-                              <span className="font-mono">{tunnel.url}</span> there.
-                            </span>
-                            <CopyValue
-                              framed
-                              wrap="anywhere"
-                              value={tunnel.command}
-                              label={`Copy the tunnel command for ${service.title}`}
-                            />
-                          </span>
-                        ),
-                      }}
-                    />
-                  ) : verbs.length > 0 ? (
-                    <VerbActions dim verbs={verbs} />
-                  ) : undefined
-                }
-              />
-            )
-          })}
-        </ChoiceList>
-      </PanelBody>
-    </Panel>
-  )
-}
-
-/** Where a service answers, in the row's line: a phone keeps the state and drops this. */
-function Reach({ service }: { service: SmartStackService }) {
-  const word = (
-    <span className="caps text-micro text-muted-foreground">{ACCESS_WORD[service.access]}</span>
-  )
-  if (service.access === "public" && service.url)
-    return (
-      <span className="flex min-w-0 items-center gap-2 max-md:hidden">
-        {word}
-        <span className="max-w-56 truncate font-mono text-hint text-foreground">
-          {hostOf(service.url)}
-        </span>
-      </span>
-    )
-  if (service.access === "private" && service.address)
-    return (
-      <span className="flex min-w-0 items-center gap-2 max-md:hidden">
-        {word}
-        <span className="font-mono text-hint text-foreground">{service.address}</span>
-      </span>
-    )
-  return <span className="max-md:hidden">{word}</span>
 }
 
 /**
@@ -528,156 +475,6 @@ function StepLine({ step }: { step: SmartStackStep }) {
         </span>
       )}
     </li>
-  )
-}
-
-/**
- * The accounts the stack created, each with a Reveal that reads its password
- * through the audited route and draws it where the mask was, as a variable's
- * is on the Variables page. Only an account that exists is listed.
- */
-function Accounts({
-  state,
-  projectId,
-  canReveal,
-}: {
-  state: SmartStackState
-  projectId: number
-  canReveal: boolean
-}) {
-  const { stored, pending } = splitCredentials(state.credentials)
-  const [revealed, setRevealed] = useState<Record<string, string>>({})
-  const [busy, setBusy] = useState("")
-  if (state.credentials.length === 0) return null
-
-  const read = (credential: SmartStackCredential) =>
-    get<{ name: string; username?: string; password: string }>(
-      `/deploy/${projectId}/stack/credentials/${encodeURIComponent(credential.name)}/reveal`,
-    )
-  const reveal = async (credential: SmartStackCredential) => {
-    setBusy(`reveal-${credential.name}`)
-    try {
-      const result = await read(credential)
-      setRevealed((current) => ({ ...current, [credential.name]: result.password }))
-    } catch (caught) {
-      notify.error(`Could not reveal the password for ${credential.label}`, caught)
-    } finally {
-      setBusy("")
-    }
-  }
-  const hide = (credential: SmartStackCredential) =>
-    setRevealed((current) => {
-      const next = { ...current }
-      delete next[credential.name]
-      return next
-    })
-  // Copies without drawing, for a screen somebody else can see.
-  const copy = async (credential: SmartStackCredential) => {
-    setBusy(`copy-${credential.name}`)
-    try {
-      const result = await read(credential)
-      await copyText(result.password, `Password for ${credential.label} copied`)
-    } catch (caught) {
-      notify.error(`Could not copy the password for ${credential.label}`, caught)
-    } finally {
-      setBusy("")
-    }
-  }
-
-  return (
-    <Panel plain>
-      <PanelHeader title="Accounts the stack created" count={stored.length || undefined} />
-      <PanelBody className="space-y-3 pt-3">
-        {stored.length > 0 && (
-          <ChoiceList aria-label="Accounts the stack created">
-            {stored.map((credential) => {
-              const shown = revealed[credential.name]
-              const verbs: Verb[] = canReveal
-                ? [
-                    {
-                      key: "reveal",
-                      label:
-                        shown !== undefined
-                          ? `Hide the password for ${credential.label}`
-                          : `Reveal the password for ${credential.label}`,
-                      icon: shown !== undefined ? EyeOff : Eye,
-                      inline: true,
-                      disabled: Boolean(busy),
-                      run: () => (shown !== undefined ? hide(credential) : void reveal(credential)),
-                    },
-                    {
-                      key: "copy",
-                      label: `Copy the password for ${credential.label}`,
-                      icon: Copy,
-                      inline: true,
-                      disabled: Boolean(busy),
-                      run: () => void copy(credential),
-                    },
-                  ]
-                : []
-              const service = state.services.find((one) => one.name === credential.service)
-              return (
-                <ChoiceRow
-                  key={credential.name}
-                  // A reading with two verbs of its own and nowhere to go.
-                  disabled
-                  verb={credential.label}
-                  leading={
-                    <ProductLogo
-                      id={service ? serviceProduct(service) : credential.service}
-                      size="sm"
-                    />
-                  }
-                  title={credential.label}
-                  description={
-                    <span className="flex min-w-0 items-center gap-2">
-                      {credential.username && (
-                        <span className="shrink-0 font-mono text-foreground">
-                          {credential.username}
-                        </span>
-                      )}
-                      <span className="min-w-0 flex-1">
-                        {shown !== undefined ? (
-                          <RevealedValue name={`${credential.label} password`} value={shown} />
-                        ) : (
-                          <span
-                            className="block h-4 truncate leading-4"
-                            aria-label="Password hidden"
-                          >
-                            ••••••••••••
-                          </span>
-                        )}
-                      </span>
-                    </span>
-                  }
-                  actions={
-                    verbs.length > 0 ? (
-                      <VerbActions
-                        dim
-                        verbs={verbs}
-                        menuLabel={`Actions for ${credential.label}`}
-                      />
-                    ) : undefined
-                  }
-                />
-              )
-            })}
-          </ChoiceList>
-        )}
-        <p className="text-hint leading-relaxed text-muted-foreground">
-          {[
-            pending > 0 &&
-              `${plural(pending, "more account")} ${pending === 1 ? "appears" : "appear"} once ${pending === 1 ? "its application is" : "their applications are"} set up.`,
-            stored.length > 0 &&
-              (canReveal
-                ? "Reading a password is recorded in the audit log."
-                : "An administrator can reveal these passwords."),
-          ]
-            .filter(Boolean)
-            .join(" ")}
-        </p>
-      </PanelBody>
-    </Panel>
   )
 }
 

@@ -9,7 +9,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 ## Deploy almost anything
 
 - Deploy from a repository, an image, a Compose stack or **157 reviewed templates**, 56 of them multi-service stacks — an application with its own database, cache or worker
-- Smart stacks: a media server — Jellyfin, Seerr, Radarr, Sonarr, Prowlarr, qBittorrent, Bazarr and Recyclarr — deployed from one form and set up and connected to each other by the dashboard, with every account and API key generated here; it fetches only from sources you add, and says so until you have
+- Smart stacks: a media server — Jellyfin, Seerr, Radarr, Sonarr, Prowlarr, qBittorrent, Bazarr and Recyclarr — deployed from one form and set up and connected to each other by the dashboard: every app at its own HTTPS address beside the domain, one login for all of them, and every API key generated here; it fetches only from sources you add, and says so until you have; you pick one you are allowed to use from the stack's own Sources page, where the dashboard has Prowlarr test it and share it with Radarr and Sonarr
 - Templates of your own beside them: a pasted Compose file or a running deployment saved as one, validated as a built-in is, its passwords made secrets each deployment generates or is asked for, exported and imported as JSON
 - Minecraft Java and Bedrock servers with their console, players and settings file, kept on loopback until you open the port and its firewall rule
 - Detects Node, Bun, Deno, Python, PHP, Go, Rust, Java, .NET, Ruby, Elixir and more, and builds what no recipe does with Railpack, the builder Railway and Coolify use, pinned to a reviewed release
@@ -67,6 +67,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 - An address for every app under just-dashboard.com, `shop.acme.just-dashboard.com`, from a handle the linked server holds: one wildcard record and one wildcard certificate, nothing to create per app ([app domains](../guides/linking-and-usage.md#app-domains))
 - A domain's DNS record created from its settings with those same credentials: the A and AAAA to this server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the connector runs as a container, and its routes and DNS records are set as each release goes live
+- A Compose stack's other services at addresses of their own: a domain that names a service is sent to it, with the certificate, the password and every other rule of the deployment's domains
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a rate limit per visitor, and CrowdSec's bans refused at the route
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with no public domain, no sign-in server and no certificate to order

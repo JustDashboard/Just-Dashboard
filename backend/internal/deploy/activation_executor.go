@@ -714,7 +714,13 @@ func (e *NormalizedStepExecutor) activate(
 			evidence.Recovery = &recovery
 			return StepResult{State: StepUnavailable, ErrorCode: "proxy_unavailable", ErrorMessage: "a managed domain requires an available HTTP proxy", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
-		routeValue := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
+		routeValue, routeErr := releaseRoute(release.Release.EnvironmentID, snapshot, *runtime)
+		if routeErr != nil {
+			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, nil)
+			evidence.Recovery = &recovery
+			code, message := servicePortFailure(routeErr)
+			return StepResult{State: StepFailed, ErrorCode: code, ErrorMessage: message, Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
+		}
 		if routeValue.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -788,6 +794,7 @@ func (e *NormalizedStepExecutor) activate(
 		for _, check := range publicChecks {
 			evidence.PublicChecks = append(evidence.PublicChecks, e.checks.Run(ctx, check, target))
 		}
+		evidence.PublicChecks = append(evidence.PublicChecks, serviceRouteChecks(ctx, e.checks, publicChecks, snapshot.Domains)...)
 		if requiredCheckFailed(evidence.PublicChecks) {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 			evidence.Recovery = &recovery
@@ -926,8 +933,23 @@ func publicRouteActivationEvidence(result proxysvc.DeploymentRouteResult) routeA
 	}
 }
 
-// publicRoute is the route a release's snapshot asks the proxy for: its
-// names, and the rules its plan sets on them.
+// releaseRoute is the route a release's snapshot asks the proxy for, which
+// every cutover writes: publicRoute with the servers its service domains go
+// to (service_domains.go). A service domain whose service the release does
+// not publish is errServicePortMissing.
+func releaseRoute(environmentID int64, snapshot runtimeReleaseSnapshot, runtime ReleaseRuntime) (proxysvc.DeploymentRoute, error) {
+	route := publicRoute(environmentID, snapshot, runtime)
+	hosts, err := serviceHostUpstreams(snapshot, runtime)
+	if err != nil {
+		return route, err
+	}
+	route.HostUpstreams = hosts
+	return route, nil
+}
+
+// publicRoute is a release's names and the rules its plan sets on them, all
+// of them sent to the release itself; releaseRoute adds where its service
+// domains go.
 func publicRoute(environmentID int64, snapshot runtimeReleaseSnapshot, runtime ReleaseRuntime) proxysvc.DeploymentRoute {
 	route := deploymentRoute(environmentID, snapshot.Domains, runtimeUpstreams(runtime))
 	route.MaxBodyMB = snapshot.Plan.MaxRequestBodyMB
@@ -1018,11 +1040,12 @@ func deploymentRoute(environmentID int64, domains []PlannedDomain, upstreams []s
 
 // publicRouteURLs are the addresses a public-route check asks, which are
 // the names that serve the application: a redirecting name answers with a
-// redirect to one of them, which says nothing about the release.
+// redirect to one of them, which says nothing about the release, and a
+// service domain is answered by another service (serviceRouteURLs).
 func publicRouteURLs(domains []PlannedDomain) []string {
 	urls := make([]string, 0, len(domains))
 	for _, domain := range domains {
-		if domain.Redirects() {
+		if domain.Redirects() || domain.ServiceDomain() {
 			continue
 		}
 		scheme := "http"

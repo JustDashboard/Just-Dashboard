@@ -36,15 +36,16 @@ type arrApp struct {
 	api string
 	// keyVariable is the deployment variable holding the API key the
 	// template generated and handed to the application as
-	// <APP>__AUTH__APIKEY; adminCredential the stack's own sign-in for it.
-	keyVariable     string
-	adminCredential string
+	// <APP>__AUTH__APIKEY; legacyCredential its own sign-in from before the
+	// stack had one login.
+	keyVariable      string
+	legacyCredential string
 }
 
 var (
-	arrRadarr   = arrApp{service: "radarr", title: "Radarr", port: PortRadarr, api: "v3", keyVariable: VariableRadarrAPIKey, adminCredential: CredentialRadarrAdmin}
-	arrSonarr   = arrApp{service: "sonarr", title: "Sonarr", port: PortSonarr, api: "v3", keyVariable: VariableSonarrAPIKey, adminCredential: CredentialSonarrAdmin}
-	arrProwlarr = arrApp{service: "prowlarr", title: "Prowlarr", port: PortProwlarr, api: "v1", keyVariable: VariableProwlarrAPIKey, adminCredential: CredentialProwlarrAdmin}
+	arrRadarr   = arrApp{service: "radarr", title: "Radarr", port: PortRadarr, api: "v3", keyVariable: VariableRadarrAPIKey, legacyCredential: legacyRadarrAdmin}
+	arrSonarr   = arrApp{service: "sonarr", title: "Sonarr", port: PortSonarr, api: "v3", keyVariable: VariableSonarrAPIKey, legacyCredential: legacySonarrAdmin}
+	arrProwlarr = arrApp{service: "prowlarr", title: "Prowlarr", port: PortProwlarr, api: "v1", keyVariable: VariableProwlarrAPIKey, legacyCredential: legacyProwlarrAdmin}
 )
 
 // The names of what the stack makes inside the applications. A step finds
@@ -220,8 +221,9 @@ func (c *arrClient) signIn(ctx context.Context, username, password string) (bool
 
 // arrAuth waits for the application to answer with the key from its
 // environment, then gives it a sign-in form asked of every address, with
-// the stack's own administrator. It writes only when the application is not
-// already so, or no longer lets that administrator in.
+// the stack's administrator and one login, and its public address as its
+// application URL. It writes only when the application is not already so,
+// or no longer lets that administrator in.
 func arrAuth(ctx context.Context, env stacks.Env, app arrApp) (stacks.Result, error) {
 	client, err := newArrClient(ctx, env, app)
 	if err != nil {
@@ -231,7 +233,7 @@ func arrAuth(ctx context.Context, env stacks.Env, app arrApp) (stacks.Result, er
 	if err := client.call(ctx, http.MethodGet, "system/status", nil, &status); err != nil {
 		return stacks.Result{}, err
 	}
-	password, err := env.Credential(ctx, app.adminCredential)
+	password, err := stackLogin(ctx, env)
 	if err != nil {
 		return stacks.Result{}, err
 	}
@@ -248,10 +250,18 @@ func arrAuth(ctx context.Context, env stacks.Env, app arrApp) (stacks.Result, er
 			return stacks.Result{}, err
 		}
 	}
+	// The address links in the application's notifications and its own pages
+	// are built from. A build without the field is left as it is.
+	address, hasAddress := env.PublicURL(app.service)
+	current, hasField := host["applicationUrl"]
+	addressWanted := hasAddress && hasField && current != address
 	outputs := map[string]string{"version": status.Version}
-	if secured {
+	if secured && !addressWanted {
+		if err := forgetLegacy(ctx, env, app.legacyCredential); err != nil {
+			return stacks.Result{}, err
+		}
 		return stacks.Result{
-			Message: fmt.Sprintf("%s %s already asks every address to sign in, as %s", app.title, status.Version, AdminUsername),
+			Message: fmt.Sprintf("%s %s already %s", app.title, status.Version, arrAuthWords(hasAddress && hasField, address)),
 			Outputs: outputs,
 		}, nil
 	}
@@ -260,13 +270,18 @@ func arrAuth(ctx context.Context, env stacks.Env, app arrApp) (stacks.Result, er
 	if !found {
 		return stacks.Result{}, fmt.Errorf("%s's host configuration has no id", app.title)
 	}
-	// The whole resource goes back with four fields changed: the API takes
-	// no partial update, and everything else in it is the person's.
+	// The whole resource goes back with the sign-in's fields and the address
+	// changed: the API takes no partial update, and everything else in it is
+	// the person's. The password is sent with every save, as the
+	// application's own page does, so a save for the address alone keeps it.
 	host["authenticationMethod"] = "forms"
 	host["authenticationRequired"] = "enabled"
 	host["username"] = AdminUsername
 	host["password"] = password
 	host["passwordConfirmation"] = password
+	if addressWanted {
+		host["applicationUrl"] = address
+	}
 	if err := client.call(ctx, http.MethodPut, "config/host/"+strconv.Itoa(id), host, nil); err != nil {
 		return stacks.Result{}, err
 	}
@@ -278,6 +293,9 @@ func arrAuth(ctx context.Context, env stacks.Env, app arrApp) (stacks.Result, er
 	if !arrHostSecured(host) {
 		return stacks.Result{}, fmt.Errorf("%s took the sign-in settings but does not report them back", app.title)
 	}
+	if addressWanted && host["applicationUrl"] != address {
+		return stacks.Result{}, fmt.Errorf("%s took its address but reads it back as %v", app.title, host["applicationUrl"])
+	}
 	signedIn, err := client.signIn(ctx, AdminUsername, password)
 	if err != nil {
 		return stacks.Result{}, err
@@ -285,11 +303,27 @@ func arrAuth(ctx context.Context, env stacks.Env, app arrApp) (stacks.Result, er
 	if !signedIn {
 		return stacks.Result{}, fmt.Errorf("%s does not let %s in with the password it was just given", app.title, AdminUsername)
 	}
-	env.Logf("%s now asks for a sign-in on every address", app.title)
+	if !secured {
+		env.Logf("%s now asks for a sign-in on every address, with the stack's password", app.title)
+	}
+	if addressWanted {
+		env.Logf("%s's application URL is now %s", app.title, address)
+	}
+	if err := forgetLegacy(ctx, env, app.legacyCredential); err != nil {
+		return stacks.Result{}, err
+	}
 	return stacks.Result{
-		Message: fmt.Sprintf("%s %s asks every address to sign in, as %s", app.title, status.Version, AdminUsername),
+		Message: fmt.Sprintf("%s %s %s", app.title, status.Version, arrAuthWords(hasAddress && hasField, address)),
 		Outputs: outputs,
 	}, nil
+}
+
+func arrAuthWords(withAddress bool, address string) string {
+	words := "asks every address to sign in, as " + AdminUsername
+	if withAddress {
+		words += "; its address is " + address
+	}
+	return words
 }
 
 func (c *arrClient) hostConfig(ctx context.Context) (map[string]any, error) {
@@ -596,7 +630,7 @@ func arrDownloadClient(ctx context.Context, env stacks.Env, app arrApp, category
 	if err != nil {
 		return stacks.Result{}, err
 	}
-	password, err := env.Credential(ctx, CredentialQBittorrent)
+	password, err := stackLogin(ctx, env)
 	if err != nil {
 		return stacks.Result{}, err
 	}

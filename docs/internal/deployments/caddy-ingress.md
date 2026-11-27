@@ -183,6 +183,50 @@ on the target lines after the live release's, so the maintenance pass repairs th
 `JD_DEPLOY_LIVE=1 go test ./internal/api -run TestLiveSkewProtectionKeepsAVisitorOnTheirRelease -count=1 -v`
 runs a cutover, a kept visitor, a fresh one and the window's end through a real Caddy.
 
+## Service domains
+
+A Compose deployment's service domains ([service domains](implementation.md#service-domains)) are
+names of the route answered by another of the stack's services. Each site block that serves one ends its
+handling in a `handle` per service, matched by the name asked for, and the release's own last:
+
+```
+  route {
+    … the fence, the edge rules, maintenance, the password or the sign-in …
+    @jd_service_1 host media-requests.example.com
+    handle @jd_service_1 {
+      reverse_proxy "http://172.18.0.9:5055"
+    }
+    handle {
+      reverse_proxy "http://172.18.0.5:8096"
+    }
+  }
+```
+
+The handles are inside the route's `route` block, which a route with service domains always has, so
+everything before them applies to every name alike and only one handle answers. A matcher is numbered
+after its service, so a service has one name in the HTTPS block and the plain one, and a block lists only
+the names it serves. The service's `reverse_proxy` is written as the release's is, with the cookies the
+dashboard's name drops and the application's intercepted error pages; the header block, the request
+record and the error pages are the site block's. Each service's loopback publication is resolved to its
+container like the release's (`findTarget`): Caddy joins that container's network, which may be one the
+release is not on, and the container is recorded on a `# Just Dashboard target:` line after the
+release's. The lifecycle worker reads those lines as it reads replicas', so a service container that
+came back at another address, or a Caddy recreated without its network, is repaired by one pass
+(`replaceProxiedUpstreams` rewrites the service's `reverse_proxy` and leaves the release's), and the
+inventory lists each service's address among the route's upstreams, the names once each. A canary, skew
+protection and sleep are refused beside service domains: they pick a release per request, and a name
+another service answers has no release to pick. A route without service domains is written as it always
+was.
+
+`JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveDockerCaddySendsServiceDomainsToTheirOwnContainers -count=1 -v`
+puts a release and a service, each on a network of its own, behind a real Caddy: each name reaches its
+own container, in any case; the route's password, response header, maintenance switch and request
+record hold on both; the inventory lists both containers; a service container moved to another address
+and a Caddy taken off the service's network are each repaired by one pass while the release's name keeps
+answering; and a pass with nothing to repair rewrites nothing. Run it against a Docker daemon of its own
+(Docker-in-Docker): `findTarget` and the pass read every running container of the daemon they are
+pointed at.
+
 ## Request body limit
 
 A managed route carries the plan's `runtime.maxRequestBodyMb` as `request_body { max_size <N>MB }` when

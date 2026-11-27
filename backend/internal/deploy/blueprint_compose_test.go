@@ -316,3 +316,24 @@ func TestComposeTemplateSourceOutlivesItsVersionAndRefusesTampering(t *testing.T
 		t.Fatalf("a template identity for another version: %v", err)
 	}
 }
+
+// A stack template's domain is the primary's, and each app with an address
+// label gets an ordinary domain of the plan beside it, served over HTTPS as
+// the primary is and naming the service it routes to.
+func TestStackTemplatePlansEachAppsAddressAsADomain(t *testing.T) {
+	t.Parallel()
+	plan, err := RenderBlueprintPlan(composeTemplateSource(t, "media-essential", map[string]string{"domain": "media.example.test"}), "media")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PlannedDomain{
+		{Hostname: "media.example.test", HTTPS: true, Ownership: OwnershipManaged},
+		{Hostname: "media-requests.example.test", HTTPS: true, Ownership: OwnershipManaged, Service: "seerr"},
+	}
+	if !slices.Equal(plan.Configuration.Domains, want) {
+		t.Fatalf("domains = %+v", plan.Configuration.Domains)
+	}
+	if err := plan.Configuration.Validate(); err != nil {
+		t.Fatal(err)
+	}
+}

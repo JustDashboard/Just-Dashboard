@@ -1416,10 +1416,10 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	if err := refuseRailpackWithoutCheckout(sourceKind, configuration.Build); err != nil {
 		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
-	var previousBuildJSON string
+	var previousBuildJSON, evidenceJSON string
 	if err := tx.QueryRowContext(ctx, `
-		SELECT config_json FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`,
-		environmentID, current).Scan(&previousBuildJSON); err != nil {
+		SELECT config_json, evidence_json FROM deploy_build_plans WHERE environment_id = ? AND revision = ?`,
+		environmentID, current).Scan(&previousBuildJSON, &evidenceJSON); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, fmt.Errorf("%w: desired build plan is missing", ErrInvalidPlan)
 		}
@@ -1428,6 +1428,13 @@ func (s *PlanningStore) SaveEnvironmentConfiguration(
 	var previousBuild BuildPlanConfig
 	if err := json.Unmarshal([]byte(previousBuildJSON), &previousBuild); err != nil {
 		return nil, fmt.Errorf("%w: desired build plan is malformed", ErrInvalidPlan)
+	}
+	// A service domain is held to the Compose stack the source was last
+	// inspected as, the evidence this revision carries forward.
+	var evidence StoredBuildEvidence
+	_ = json.Unmarshal([]byte(evidenceJSON), &evidence)
+	if configuration.Domains, err = validateServiceDomains(configuration, evidence.Compose); err != nil {
+		return nil, fmt.Errorf("%w: %w", ErrInvalidPlan, err)
 	}
 	configuration.Build.Framework = carriedFramework(previousBuild, configuration.Build)
 	next, now := current+1, s.now().UTC().Unix()

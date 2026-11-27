@@ -4,15 +4,17 @@ import { useState } from "react"
 import { Monorepo, Warning } from "@/components/icons"
 import { get } from "@/lib/api"
 import { plural } from "@/lib/format"
+import { passwordChecks } from "@/lib/password"
 import { usePoll } from "@/hooks/use-poll"
-import { useSessionState } from "@/lib/view-state"
+import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   BlueprintDetail,
+  BlueprintInput,
   SmartStackCatalogueEntry,
   SmartStackCatalogueService,
   SmartStackPreset,
 } from "@/lib/types"
-import { Disclosure } from "@/components/form"
+import { Disclosure, FieldCheck, FieldChecks } from "@/components/form"
 import { FlowActions, FlowPanel, FlowPanelBody, FlowPanelHeader } from "@/components/flow"
 import { ChoiceCard, ChoiceGrid } from "@/components/choice-card"
 import { ChipStrip, FilterChip } from "@/components/chips"
@@ -22,15 +24,22 @@ import { LoadingRows } from "@/components/loading"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
 import { ProductLogo, hasProductLogo, imageProduct } from "@/components/product-logo"
+import { SecretField } from "@/components/secret-field"
 import { AccessPromise } from "@/components/deploy/first-sign-in"
+import { discoveredEnvironmentRows } from "@/components/deploy/deployment-defaults"
 import { deploymentName } from "@/components/deploy/vocabulary"
-import { inspectAndPrepare, type ConfigureFlow } from "@/components/deploy/new-project/draft"
 import {
-  ACCESS_WORD,
-  accessSentence,
+  inspectAndPrepare,
+  type ConfigureFlow,
+  type EnvironmentDraft,
+} from "@/components/deploy/new-project/draft"
+import {
+  addressSentence,
   chosenPreset,
   footprintWords,
+  loginPasswordProblem,
   memoryWords,
+  plannedAddresses,
   presetServices,
 } from "@/components/deploy/stack/stack-model"
 import { BlueprintField, useSuggestedDomain } from "./blueprint-field"
@@ -56,7 +65,11 @@ function asError(error: unknown) {
  *
  * The preset's options are its template's inputs, asked with the fields the
  * Template tab asks them with and held to the same rules, and remembered for
- * each preset, so trying the other one loses nothing typed.
+ * each preset, so trying the other one loses nothing typed. Two are the
+ * stack's own: under the domain, the address each app gets beside it, by the
+ * server's rule (`serviceHostname`); and the password every app signs in
+ * with, optional, which is a secret and so is held in memory only and handed
+ * to Configure's Variables as the variable the template declares for it.
  */
 export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow) => void }) {
   const catalogue = usePoll(
@@ -76,6 +89,12 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
   const [showAdvanced, setShowAdvanced] = useSessionState(
     `deploy.new.stack.advanced.${templateId}`,
     false,
+  )
+  // The password for every app is a secret: memory only, never the tab's storage.
+  const [login, setLogin] = useMemoryState(`deploy.new.stack.login.${templateId}`, "")
+  const [, setEnvironment] = useMemoryState<EnvironmentDraft | null>(
+    "deploy.new.configure.environment",
+    null,
   )
   const [busy, setBusy] = useState(false)
   const [attempted, setAttempted] = useState(false)
@@ -100,7 +119,13 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
   const projectName = entry ? deploymentName(entry.title) : ""
   const suggestion = useSuggestedDomain(definition, projectName, setInputs)
 
-  const errors = templateInputErrors(declared, inputs)
+  const loginInput = declared.find((input) => input.kind === "secret" && input.variable)
+  const errors = {
+    ...templateInputErrors(declared, inputs),
+    // Blank is the dashboard's to make; a typed one is held to the rule the
+    // stack's page holds a change to.
+    ...(loginInput && login ? { [loginInput.name]: loginPasswordProblem(login) } : {}),
+  }
   const invalid = declared.filter((input) => errors[input.name])
 
   const choose = (next: SmartStackPreset) => {
@@ -127,9 +152,30 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
     let current = true
     try {
       const { profile, source } = templateDraftSource(definition, inputs)
-      current = await inspection.inspect(() =>
-        inspectAndPrepare(projectName, profile, source, { sourceLabel: definition.name }),
-      )
+      current = await inspection.inspect(async () => {
+        const flow = await inspectAndPrepare(projectName, profile, source, {
+          sourceLabel: definition.name,
+        })
+        // The password goes where Configure keeps a draft's typed variables,
+        // so it is sent with them and nowhere else.
+        if (loginInput?.variable && login)
+          setEnvironment({
+            draftId: flow.draft.id,
+            rows: [
+              ...discoveredEnvironmentRows(flow.candidate).filter(
+                (row) => row.name !== loginInput.variable,
+              ),
+              {
+                name: loginInput.variable,
+                value: login,
+                note: "Typed on the Stacks tab: the password every app signs in with",
+              },
+            ],
+            dotenv: "",
+            retainedKeys: flow.draft.environmentKeys ?? [],
+          })
+        return flow
+      })
     } catch (error) {
       setFailure(asError(error))
     } finally {
@@ -234,9 +280,7 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
                         <span className="text-body font-medium text-foreground">
                           {service.title}
                         </span>
-                        <Tag tone={service.access === "public" ? "success" : "default"}>
-                          {ACCESS_WORD[service.access]}
-                        </Tag>
+                        {service.access === "worker" && <Tag>Background</Tag>}
                       </span>
                       <span className="block text-hint leading-relaxed text-muted-foreground">
                         {service.purpose}
@@ -246,7 +290,7 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
                 ))}
               </ul>
               <p className="max-w-3xl text-hint leading-relaxed text-muted-foreground">
-                {accessSentence(services)} {footprintWords(preset)}
+                {addressSentence(services)} {footprintWords(preset)}
               </p>
             </section>
 
@@ -322,18 +366,35 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
                 </Notice>
               )}
               <AccessPromise access={definition.access} />
-              {basic.map((input) => (
-                <BlueprintField
-                  key={input.name}
-                  input={input}
-                  value={inputs[input.name] ?? input.default ?? ""}
-                  error={attempted ? errors[input.name] : undefined}
-                  suggested={input.kind === "domain" ? suggestion : undefined}
-                  onChange={(value) =>
-                    setInputs((current) => ({ ...current, [input.name]: value }))
-                  }
-                />
-              ))}
+              {basic.map((input) =>
+                input === loginInput ? (
+                  <LoginField
+                    key={input.name}
+                    input={input}
+                    value={login}
+                    error={attempted ? errors[input.name] : undefined}
+                    onChange={setLogin}
+                  />
+                ) : (
+                  <div key={input.name} className="min-w-0 space-y-2">
+                    <BlueprintField
+                      input={input}
+                      value={inputs[input.name] ?? input.default ?? ""}
+                      error={attempted ? errors[input.name] : undefined}
+                      suggested={input.kind === "domain" ? suggestion : undefined}
+                      onChange={(value) =>
+                        setInputs((current) => ({ ...current, [input.name]: value }))
+                      }
+                    />
+                    {input.kind === "domain" && (
+                      <AddressPreview
+                        services={services}
+                        domain={inputs[input.name] ?? input.default ?? ""}
+                      />
+                    )}
+                  </div>
+                ),
+              )}
               {advanced.length > 0 && (
                 <Disclosure
                   quiet
@@ -343,17 +404,27 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
                 >
                   {showAdvanced && (
                     <div className="space-y-4">
-                      {advanced.map((input) => (
-                        <BlueprintField
-                          key={input.name}
-                          input={input}
-                          value={inputs[input.name] ?? input.default ?? ""}
-                          error={attempted ? errors[input.name] : undefined}
-                          onChange={(value) =>
-                            setInputs((current) => ({ ...current, [input.name]: value }))
-                          }
-                        />
-                      ))}
+                      {advanced.map((input) =>
+                        input === loginInput ? (
+                          <LoginField
+                            key={input.name}
+                            input={input}
+                            value={login}
+                            error={attempted ? errors[input.name] : undefined}
+                            onChange={setLogin}
+                          />
+                        ) : (
+                          <BlueprintField
+                            key={input.name}
+                            input={input}
+                            value={inputs[input.name] ?? input.default ?? ""}
+                            error={attempted ? errors[input.name] : undefined}
+                            onChange={(value) =>
+                              setInputs((current) => ({ ...current, [input.name]: value }))
+                            }
+                          />
+                        ),
+                      )}
                     </div>
                   )}
                 </Disclosure>
@@ -368,6 +439,79 @@ export function SourceStack({ onInspected }: { onInspected: (flow: ConfigureFlow
         </FlowActions>
       </FlowPanel>
     </div>
+  )
+}
+
+/**
+ * The address each app gets from the domain above, as the server will make
+ * them: one line each, the name in mono, so what Deploy creates is read
+ * before it is pressed. Nothing is drawn until there is a domain.
+ */
+function AddressPreview({
+  services,
+  domain,
+}: {
+  services: SmartStackCatalogueService[]
+  domain: string
+}) {
+  const addresses = plannedAddresses(services, domain)
+  if (addresses.length === 0) return null
+  return (
+    <ul aria-label="The address each app gets" className="min-w-0 divide-y divide-hairline">
+      {addresses.map((address) => (
+        <li key={address.service} className="flex h-7 min-w-0 items-center gap-3 text-hint">
+          <span className="w-24 shrink-0 truncate text-muted-foreground">{address.title}</span>
+          <span
+            className="min-w-0 flex-1 truncate font-mono text-foreground"
+            title={address.hostname}
+          >
+            {address.hostname}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * The password every app signs in with: optional, since a blank one is made
+ * by the dashboard, and held to the dashboard's own rule when typed. Hidden
+ * while typed, with Show, Generate and Copy in the box.
+ */
+function LoginField({
+  input,
+  value,
+  error,
+  onChange,
+}: {
+  input: BlueprintInput
+  value: string
+  error?: string
+  onChange: (value: string) => void
+}) {
+  const checks = passwordChecks(value)
+  return (
+    <SecretField
+      id={`blueprint-${input.name}`}
+      label={input.label}
+      value={value}
+      onChange={onChange}
+      shown={false}
+      error={error}
+      hint={
+        value ? (
+          <FieldChecks>
+            <FieldCheck met={checks.long}>12 characters or more</FieldCheck>
+            <FieldCheck met={checks.mixed}>
+              three of upper case, lower case, digits, symbols
+            </FieldCheck>
+          </FieldChecks>
+        ) : (
+          input.description ||
+          "Optional. Leave it empty and the dashboard makes one; the stack's page shows it."
+        )
+      }
+    />
   )
 }
 

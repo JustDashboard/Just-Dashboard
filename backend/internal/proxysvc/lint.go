@@ -28,7 +28,11 @@ type lintLevel struct {
 
 type linter struct {
 	upstreams map[string]bool
-	findings  []LintFinding
+	// maps are the values each map block's variable can take, by the
+	// variable's name; a value the file does not spell out (an include) is
+	// "$".
+	maps     map[string][]string
+	findings []LintFinding
 }
 
 // Lint reads a tree NginxTree built for the mistakes nginx accepts without a
@@ -36,12 +40,25 @@ type linter struct {
 // so a file EffectiveConfig leaves out — certbot's options, a password file —
 // is not linted.
 func Lint(tree []Directive) []LintFinding {
-	l := &linter{upstreams: map[string]bool{}}
+	l := &linter{upstreams: map[string]bool{}, maps: map[string][]string{}}
 	var collect func([]Directive)
 	collect = func(list []Directive) {
 		for _, d := range list {
 			if d.Name == "upstream" && len(d.Args) == 1 {
 				l.upstreams[strings.ToLower(d.Args[0])] = true
+			}
+			if d.Name == "map" && len(d.Args) == 2 {
+				values := []string{}
+				for _, entry := range d.Block {
+					switch {
+					case entry.Name == "hostnames" || entry.Name == "volatile":
+					case len(entry.Args) == 1 && entry.Name != "include":
+						values = append(values, entry.Args[0])
+					default:
+						values = append(values, "$")
+					}
+				}
+				l.maps[strings.TrimPrefix(d.Args[1], "$")] = values
 			}
 			if d.Block != nil {
 				collect(d.Block)
@@ -342,6 +359,9 @@ func (l *linter) proxyPass(levels []lintLevel, d Directive) {
 	}
 	host, _, _ := strings.Cut(target, "/")
 	if strings.Contains(host, "$") {
+		if l.mapNamesServers(host) {
+			return
+		}
 		l.add("proxy-pass-resolver", "notice", d, "proxy_pass picks its host at request time with no resolver",
 			"Unless the variable always names an upstream block, nginx needs a resolver to look the host up and answers 502 without one. Add resolver 127.0.0.53; (or your DNS server) in this server.")
 		return
@@ -356,6 +376,28 @@ func (l *linter) proxyPass(levels []lintLevel, d Directive) {
 	}
 	l.add("proxy-pass-resolver", "warning", d, "proxy_pass looks up "+name+" at request time with no resolver",
 		"A variable in proxy_pass makes nginx resolve the host on each request rather than at start, and with no resolver every request here fails with 502. Add resolver 127.0.0.53; (or your DNS server), or take the variable out.")
+}
+
+// mapNamesServers says whether host is one variable that a map sets only to
+// addresses and upstream blocks, which nginx connects to without a
+// resolver: a deployment route's service domains (deployment_route_hosts.go)
+// and a canary's split pick their server that way.
+func (l *linter) mapNamesServers(host string) bool {
+	name := strings.TrimPrefix(host, "$")
+	if braced, ok := strings.CutPrefix(name, "{"); ok {
+		name = strings.TrimSuffix(braced, "}")
+	}
+	values, ok := l.maps[name]
+	if !ok || len(values) == 0 || strings.ContainsAny(name, "${}") {
+		return false
+	}
+	for _, value := range values {
+		address, _, err := net.SplitHostPort(value)
+		if !l.upstreams[strings.ToLower(value)] && (err != nil || net.ParseIP(address) == nil) {
+			return false
+		}
+	}
+	return true
 }
 
 // unsafeIf: inside a location, if makes a nested location; only return and

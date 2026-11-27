@@ -146,16 +146,17 @@ var hubSessionRefused = []string{
 	"GET /api/v1/deploy/{id}/env/reveal",                                         // a project's secret values
 	"GET /api/v1/deploy/{id}/environments/{env}/variables/{name}/reveal",         // a variable's secret value
 	"GET /api/v1/deploy/{id}/stack/credentials/{name}/reveal",                    // an account a stack created
+	"PUT /api/v1/deploy/{id}/stack/login",                                        // the stack's one password
 	"POST /api/v1/deploy/{id}/environments/{env}/variables/{name}/generate",      // a new secret, shown
 	"POST /api/v1/deploy/{id}/environments/{env}/variables/{name}/rotate",        // a rotated secret, shown
 	"GET /api/v1/deploy/shared-variables/{name}/reveal",                          // a shared secret value
 	"GET /api/v1/deploy/{id}/shared-variables/{name}/reveal",                     // a project's shared secret value
-	"POST /api/v1/deploy/",                                   // a project's webhook secret
-	"POST /api/v1/proxy/import/npm",                          // basic-auth users and their passwords
-	"POST /api/v1/proxy/import/npm/apply",                    // writes them as password files
-	"POST /api/v1/remote-desktop/computers",                  // a computer's saved sign-in
-	"PUT /api/v1/remote-desktop/computers/{id}",              // changes it, or where it is sent
-	"POST /api/v1/remote-desktop/computers/{id}/stream/pair", // a client certificate the computer trusts
+	"POST /api/v1/deploy/",                                                       // a project's webhook secret
+	"POST /api/v1/proxy/import/npm",                                              // basic-auth users and their passwords
+	"POST /api/v1/proxy/import/npm/apply",                                        // writes them as password files
+	"POST /api/v1/remote-desktop/computers",                                      // a computer's saved sign-in
+	"PUT /api/v1/remote-desktop/computers/{id}",                                  // changes it, or where it is sent
+	"POST /api/v1/remote-desktop/computers/{id}/stream/pair",                     // a client certificate the computer trusts
 
 	// Found by the hub sign-in end-to-end run: the one second-factor route a
 	// hub session still reached. A hub session is complete already, and a

@@ -370,6 +370,11 @@ func TestTheDeployOpenAPIDescriptionCarriesShapesNotValues(t *testing.T) {
 	if variable["value"].(map[string]any)["writeOnly"] != true {
 		t.Errorf("deploy.VariableWriteRequest.value is not writeOnly: %v", variable["value"])
 	}
+	// So is the one password a smart stack's applications sign in with.
+	login := schemas["api.stackLoginRequest"].(map[string]any)["properties"].(map[string]any)
+	if login["password"].(map[string]any)["writeOnly"] != true {
+		t.Errorf("api.stackLoginRequest.password is not writeOnly: %v", login["password"])
+	}
 	listed := schemas["deploy.DeploymentVariable"].(map[string]any)["properties"].(map[string]any)
 	if _, has := listed["value"]; has {
 		t.Errorf("deploy.DeploymentVariable carries a value property: %v", listed["value"])

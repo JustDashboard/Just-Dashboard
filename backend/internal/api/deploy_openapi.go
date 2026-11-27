@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks/media"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -142,6 +143,8 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(stacks.StepStatus("")):          {"pending", "running", "done", "failed", "action_required", "skipped"},
 	reflect.TypeOf(stacks.Status("")):              {"waiting", "configuring", "ready", "action_required", "failed"},
 	reflect.TypeOf(stacks.Access("")):              {"public", "private", "worker"},
+	reflect.TypeOf(media.MediaSourcePrivacy("")):   {"public", "semiPrivate", "private"},
+	reflect.TypeOf(media.MediaSourceFieldType("")): {"text", "password", "number", "checkbox", "select"},
 	reflect.TypeOf(deploy.StepState("")):           {"pending", "blocked", "running", "passed", "warning", "failed", "skipped", "cancelled", "unavailable"},
 	reflect.TypeOf(deploy.CheckKind("")):           {"http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe"},
 	reflect.TypeOf(deploy.EventType("")):           {"run.state", "step.state", "step.log", "step.evidence", "queue.position", "finding", "artifact", "heartbeat", "resync"},
@@ -192,6 +195,8 @@ var openapiWriteOnly = map[string]bool{
 	"logdrain.Write.Headers":                 true,
 	"logdrain.Header.Value":                  true,
 	"secretstore.Write.Credentials":          true,
+	"api.stackSourceAddRequest.Fields":       true,
+	"api.stackLoginRequest.Password":         true,
 }
 
 // openapiErrorFields says what each field of httpx.APIError, the envelope
@@ -474,9 +479,11 @@ var deployOperations = map[string]deployOperation{
 
 	// Templates added on this dashboard.
 	"GET /deploy/stacks":                               {Tag: "stacks", Summary: "List the smart stacks: each preset with the template it deploys, its memory and disk estimate and what it cannot do, and the services.", Response: []stackCatalogueEntry(nil)},
-	"GET /deploy/{id}/stack":                           {Tag: "stacks", Summary: "Read a stack deployment's state: whether it is installed, healthy, connected and able to play and to acquire, each service's container and private address, each configuration step, the actions only a person can take, and the accounts it created.", Response: (*stackState)(nil), Note: "404 stack_not_found when the deployment is not a stack."},
+	"GET /deploy/{id}/stack":                           {Tag: "stacks", Summary: "Read a stack deployment's state: whether it is installed, healthy, connected and able to play and to acquire, each service's container, public address and loopback address, each configuration step, the actions only a person can take, the one login, and the apps' addresses the configuration does not have yet.", Response: (*stackState)(nil), Note: "404 stack_not_found when the deployment is not a stack."},
 	"POST /deploy/{id}/stack/configure":                {Tag: "stacks", Summary: "Run the stack's configuration again now; every step converges, so nothing already set up is done twice; audited.", Response: stackConfigureAnswer{}, Status: http.StatusAccepted, Note: "409 stack_waiting before the deployment has a live release, 409 stack_busy while a pass runs, 409 stack_not_preset when the live release is not one of the stack's presets."},
-	"GET /deploy/{id}/stack/credentials/{name}/reveal": {Tag: "stacks", Summary: "Reveal an account the stack created; audited without its value.", Response: stackCredentialReveal{}},
+	"GET /deploy/{id}/stack/credentials/{name}/reveal": {Tag: "stacks", Summary: "Reveal the stack's one login (name login), which every application signs in with as admin; audited without its value.", Response: stackCredentialReveal{}},
+	"PUT /deploy/{id}/stack/login":                     {Tag: "stacks", Summary: "Change the password every application of the stack signs in with; the previous one is kept until every application takes the new one, and a configuration pass is asked for; audited without the value.", Request: stackLoginRequest{}, Response: stackConfigureAnswer{}, Status: http.StatusAccepted, Note: "422 password_weak when the password breaks the dashboard's password rule, 409 stack_busy while a pass runs."},
+	"POST /deploy/{id}/stack/addresses":                {Tag: "stacks", Summary: "Give every app of the stack its own address beside the primary domain: the missing domains are saved as the Domains settings save them and a release is started; the body's domain is used, as the primary, only when the deployment has none.", Request: stackAddressesRequest{}, Response: stackAddressesAnswer{}, Status: http.StatusAccepted, Note: "With nothing missing but an address saved that the live release does not serve, it starts the release again without adding a domain. 409 stack_addresses_present when every app has its address and the live release serves each, 422 stack_no_domain when there is no primary domain and none was given."},
 	"GET /deploy/templates":                            {Tag: "templates", Summary: "List the templates added on this dashboard, with how each was made and how many deployments' sources name it.", Response: []deploy.UserTemplate(nil)},
 	"GET /deploy/templates/{template}":                 {Tag: "templates", Summary: "Read a template added on this dashboard, with its whole definition.", Response: (*deploy.UserTemplateDetail)(nil)},
 	"GET /deploy/templates/{template}/export":          {Tag: "templates", Summary: "Export a template's definition as a JSON file: a built-in's or one added here, in the catalogue's own schema.", Response: (*blueprint.Blueprint)(nil)},
@@ -485,6 +492,18 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/templates/import":                    {Tag: "templates", Summary: "Import a template's JSON definition; an id outside the user- namespace is put in it.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil), Status: http.StatusCreated},
 	"PUT /deploy/templates/{template}":                 {Tag: "templates", Summary: "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil)},
 	"DELETE /deploy/templates/{template}":              {Tag: "templates", Summary: "Remove a template from the catalogue; deployments made from it keep running from their own copy.", Status: http.StatusNoContent, Note: "Destructive, with an ordinary confirmation."},
+
+	// A smart stack's media sources (handlers_deploy_stack_sources.go).
+	"GET /deploy/{id}/stack/sources": {Tag: "stacks", Summary: "List the media sources the stack's Prowlarr has, whoever added them.", Response: stackSourcesAnswer{},
+		Note: "404 stack_not_found, 409 stack_waiting before a live release, 409 stack_not_preset, 409 stack_no_sources for a preset without Prowlarr, 502 stack_app_unreachable when Prowlarr did not answer."},
+	"GET /deploy/{id}/stack/sources/catalogue": {Tag: "stacks", Summary: "List the torrent sources the stack's Prowlarr can add, by name, each saying whether its form asks for something it cannot do without.", Response: (*media.MediaSourceCatalogue)(nil),
+		Note: "Read from Prowlarr's schema, bounded, and kept for 10 minutes per project; fetchedAt says when. The same refusals as the sources list."},
+	"GET /deploy/{id}/stack/sources/catalogue/{definition}": {Tag: "stacks", Summary: "Read one source Prowlarr can add, with the settings its form asks for and their defaults.", Response: media.MediaSourceDetail{},
+		Note: "404 source_definition_not_found for a definition the catalogue does not list; the same refusals as the sources list."},
+	"POST /deploy/{id}/stack/sources": {Tag: "stacks", Summary: "Add a media source: Prowlarr tests it with the values given, saves it in its first app profile and shares it with Radarr and Sonarr, then the stack checks its sources again; audited with the definition's name only.", Request: stackSourceAddRequest{}, Response: stackSourceAddAnswer{}, Status: http.StatusCreated,
+		Note: "422 source_test_failed with Prowlarr's reason, every text typed masked out of it; 422 source_invalid for a definition or a value the form does not take, with field; 409 source_exists for a name Prowlarr has; 403 source_needs_person when the dashboard's assistant sends a password, key or cookie; the same refusals as the sources list."},
+	"DELETE /deploy/{id}/stack/sources/{sourceId}": {Tag: "stacks", Summary: "Remove one of Prowlarr's media sources by its id; Prowlarr removes it from Radarr and Sonarr, and the stack checks its sources again; audited.", Status: http.StatusNoContent,
+		Note: "Destructive, with an ordinary confirmation: the source is added again in a minute. 404 source_not_found; the same refusals as the sources list."},
 
 	// Game servers.
 	"GET /deploy/{id}/game/":                  {Tag: "game", Summary: "Read a game server's overview: version, players online and its checks.", Response: gameOverview{}},

@@ -1,10 +1,13 @@
-import type { Page } from "@playwright/test"
+import type { Page, Route } from "@playwright/test"
 import type {
   BlueprintDetail,
   BlueprintInput,
   BlueprintSummary,
   DeploymentRuntimeServices,
   SmartStackCatalogueEntry,
+  SmartStackSource,
+  SmartStackSourceDefinition,
+  SmartStackSourceDetail,
   SmartStackState,
   SmartStackStatus,
   SmartStackStep,
@@ -21,11 +24,13 @@ import {
 } from "./deploy-fixture"
 
 /**
- * The media stack, mocked: its catalogue entry, its two preset templates and
- * a stack project's state in each of the five states the server gives it.
- * The shapes are the stack API contract's (`GET /deploy/stacks`,
- * `GET /deploy/{id}/stack`, `POST …/stack/configure`, `GET …/reveal`), and
- * the words are the manifest's own, so a spec reads like the product.
+ * The media stack, mocked: its catalogue entry, its two preset templates, a
+ * stack project's state in each of the five states the server gives it, and
+ * its media sources. The shapes are the stack API contract's
+ * (`GET /deploy/stacks`, `GET /deploy/{id}/stack`, `POST …/stack/configure`,
+ * `PUT …/stack/login`, `POST …/stack/addresses`, `GET …/reveal` and the
+ * `…/stack/sources` routes), and the words are the manifest's own, so a spec
+ * reads like the product.
  */
 
 const SERVICES = [
@@ -37,6 +42,7 @@ const SERVICES = [
     access: "public",
     docsUrl: "https://jellyfin.org/docs/",
     image: "jellyfin/jellyfin:12.4",
+    primary: true,
   },
   {
     name: "seerr",
@@ -46,6 +52,7 @@ const SERVICES = [
     access: "private",
     docsUrl: "https://docs.seerr.dev/",
     image: "ghcr.io/seerr-team/seerr:v3.5.2",
+    address: "requests",
   },
   {
     name: "radarr",
@@ -54,6 +61,7 @@ const SERVICES = [
     port: 7878,
     access: "private",
     image: "lscr.io/linuxserver/radarr:7.0.3.10918-ls328",
+    address: "radarr",
   },
   {
     name: "sonarr",
@@ -62,6 +70,7 @@ const SERVICES = [
     port: 8989,
     access: "private",
     image: "lscr.io/linuxserver/sonarr:4.0.20.3014-ls6",
+    address: "sonarr",
   },
   {
     name: "prowlarr",
@@ -70,6 +79,7 @@ const SERVICES = [
     port: 9696,
     access: "private",
     image: "lscr.io/linuxserver/prowlarr:3.1.0.5799-ls170",
+    address: "prowlarr",
   },
   {
     name: "qbittorrent",
@@ -78,6 +88,7 @@ const SERVICES = [
     port: 8080,
     access: "private",
     image: "lscr.io/linuxserver/qbittorrent:5.3.1_v2.1.3-ls490",
+    address: "downloads",
   },
   {
     name: "bazarr",
@@ -86,6 +97,7 @@ const SERVICES = [
     port: 6767,
     access: "private",
     image: "lscr.io/linuxserver/bazarr:v1.6.2-ls374",
+    address: "subtitles",
   },
   {
     name: "recyclarr",
@@ -102,7 +114,7 @@ const NO_LIBRARY_MOUNT =
   "Media goes into the stack's own volume. An existing library elsewhere on this server is not mounted."
 
 export const COMPLETE_LIMITATIONS = [
-  "Nothing can be downloaded until you add a source you are allowed to use in Prowlarr. None is included, and no films or series come with the stack.",
+  "Nothing can be downloaded until you add a source you are allowed to use. None is included, and no films or series come with the stack.",
   NO_LIBRARY_MOUNT,
 ]
 
@@ -114,7 +126,7 @@ export const ESSENTIAL_LIMITATIONS = [
 export const stackCatalogue: SmartStackCatalogueEntry[] = [
   {
     id: "media",
-    version: "1.0.0",
+    version: "1.1.0",
     title: "Media server",
     description:
       "Jellyfin to watch your films and series, and Seerr for people to ask for more. The Complete preset adds the managers, download client, subtitles and quality profiles that fetch what was asked for, from sources you add yourself.",
@@ -125,7 +137,7 @@ export const stackCatalogue: SmartStackCatalogueEntry[] = [
         description:
           "Everything connected: requests in Seerr are searched for by Radarr and Sonarr through the sources you add to Prowlarr, downloaded by qBittorrent, given subtitles by Bazarr and quality profiles by Recyclarr, and land in Jellyfin.",
         templateId: "media-complete",
-        templateVersion: "1.0.0",
+        templateVersion: "1.1.0",
         services: SERVICES.map((service) => service.name),
         recommended: true,
         limitations: COMPLETE_LIMITATIONS,
@@ -138,7 +150,7 @@ export const stackCatalogue: SmartStackCatalogueEntry[] = [
         description:
           "Jellyfin and Seerr for a library you already have. People can browse and ask for titles, but nothing fetches what they ask for.",
         templateId: "media-essential",
-        templateVersion: "1.0.0",
+        templateVersion: "1.1.0",
         services: ESSENTIAL,
         limitations: ESSENTIAL_LIMITATIONS,
         memoryMb: 3584,
@@ -151,14 +163,14 @@ export const stackCatalogue: SmartStackCatalogueEntry[] = [
 
 const ACCESS = {
   kind: "setup",
-  note: "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and keeps the accounts it creates. Reveal them on the stack's page.",
+  note: "The dashboard finishes every application's first-run setup itself, before anyone else can reach it, and signs every app in with one login. Read it on the stack's page.",
 } as const
 
 function summary(id: string, name: string, names: readonly string[]): BlueprintSummary {
   const services = SERVICES.filter((service) => names.includes(service.name))
   return {
     id,
-    version: "1.0.0",
+    version: "1.1.0",
     name,
     stack: "media",
     category: "http",
@@ -198,10 +210,19 @@ export const mediaSummaries: BlueprintSummary[] = [
 const DOMAIN_INPUT: BlueprintInput = {
   name: "domain",
   kind: "domain",
-  label: "Jellyfin's domain",
+  label: "Domain",
+  required: true,
+  description: "Jellyfin answers on it, and every other app gets an address beside it.",
+}
+
+const LOGIN_INPUT: BlueprintInput = {
+  name: "login-password",
+  kind: "secret",
+  label: "Password for every app",
+  variable: "MEDIA_LOGIN_PASSWORD",
   required: false,
   description:
-    "Optional; the address you and your apps open Jellyfin at. Seerr and the managers stay on this server until you publish them.",
+    "Optional. Leave it empty and the dashboard makes one; the stack's page shows it and can change it.",
 }
 
 const APPROVAL_INPUT: BlueprintInput = {
@@ -278,6 +299,7 @@ function definition(
 
 export const mediaCompleteDefinition = definition(mediaSummaries[0], [
   DOMAIN_INPUT,
+  LOGIN_INPUT,
   {
     name: "quality",
     kind: "choice",
@@ -307,8 +329,66 @@ export const mediaCompleteDefinition = definition(mediaSummaries[0], [
 
 export const mediaEssentialDefinition = definition(mediaSummaries[1], [
   DOMAIN_INPUT,
+  LOGIN_INPUT,
   APPROVAL_INPUT,
 ])
+
+/**
+ * The plan the server renders from a preset and its inputs, as a draft
+ * holds it: a Compose build, the password's variable declared with no value,
+ * and the domain's names, Jellyfin on the domain and each other app on its
+ * sibling, routed to its own service.
+ */
+export function stackRenderedConfiguration(
+  template: BlueprintDetail,
+  inputs: Record<string, string> = {},
+) {
+  const domain = (inputs.domain ?? "").trim().toLowerCase()
+  const names = new Set((template.services ?? []).map((service) => service.name))
+  const labelled = SERVICES.filter((service) => "address" in service && names.has(service.name))
+  const sibling = (label: string) => {
+    const [first, ...rest] = domain.split(".")
+    return rest.length >= 2 ? [`${first}-${label}`, ...rest].join(".") : `${label}.${domain}`
+  }
+  return {
+    build: { method: "compose", noCache: false, secrets: [], releaseTasks: [] },
+    runtime: {
+      image: "",
+      command: [],
+      internalPort: 8096,
+      hostPort: 0,
+      bindAddress: "127.0.0.1",
+      strategy: "stop_first",
+      privileged: false,
+      hostNetwork: false,
+      capabilities: [],
+      devices: [],
+      memoryMb: template.id === "media-complete" ? 7424 : 3584,
+      mounts: [],
+    },
+    variables: [
+      {
+        name: "MEDIA_LOGIN_PASSWORD",
+        sensitivity: "secret",
+        scopes: ["runtime"],
+        required: false,
+      },
+    ],
+    dependencies: [],
+    checks: [],
+    domains: domain
+      ? [
+          { hostname: domain, https: true, ownership: "managed" },
+          ...labelled.map((service) => ({
+            hostname: sibling("address" in service ? service.address : ""),
+            https: true,
+            ownership: "managed",
+            service: service.name,
+          })),
+        ]
+      : [],
+  }
+}
 
 /**
  * `/deploy/new` with the stack catalogue, both preset templates listed among
@@ -351,6 +431,10 @@ export async function mockNewStack(page: Page) {
       revision: held.revision + 1,
       data: {
         ...held.data,
+        configuration: stackRenderedConfiguration(
+          template,
+          (saved.blueprintInputs ?? {}) as Record<string, string>,
+        ),
         detection: {
           source: {
             kind: "compose",
@@ -465,14 +549,11 @@ const ESSENTIAL_STEPS = new Set([
   "seerr.verify",
 ])
 
-const CREDENTIALS = [
-  ["jellyfin-admin", "jellyfin", "Jellyfin administrator (also signs in to Seerr)"],
-  ["qbittorrent-admin", "qbittorrent", "qBittorrent web interface"],
-  ["radarr-admin", "radarr", "Radarr"],
-  ["sonarr-admin", "sonarr", "Sonarr"],
-  ["prowlarr-admin", "prowlarr", "Prowlarr"],
-  ["bazarr-admin", "bazarr", "Bazarr"],
-] as const
+/** The address an app answers at once the live release serves it: the domain, or its sibling. */
+export function appUrl(service: { name: string; address?: string; primary?: boolean }) {
+  if (service.primary) return "https://media.example.test"
+  return service.address ? `https://media-${service.address}.example.test` : undefined
+}
 
 const SUMMARY: Record<SmartStackStatus, string> = {
   waiting: "The media server is not installed yet: its first release is still coming up.",
@@ -480,7 +561,7 @@ const SUMMARY: Record<SmartStackStatus, string> = {
   ready:
     "Everything is set up and connected: a request in Seerr is searched for, downloaded and lands in Jellyfin.",
   action_required:
-    "Installed and connected, but nothing can be downloaded until you add a media source in Prowlarr.",
+    "Installed and connected, but nothing can be downloaded until you add a media source.",
   failed:
     "Setup stopped at qBittorrent, so nothing can be downloaded yet. Jellyfin and Seerr are set up.",
 }
@@ -543,20 +624,30 @@ function steps(status: SmartStackStatus, essential: boolean): SmartStackStep[] {
 
 /**
  * A stack project's state in one of the server's five, for the Complete
- * preset or the Essential one.
+ * preset or the Essential one. `addressless` is a stack made before every
+ * app had an address: only Jellyfin answers on the domain, and the others
+ * are listed as missing theirs. `noDomain` is one with no domain at all.
  */
 export function stackState(
   status: SmartStackStatus,
-  options: { essential?: boolean } & Partial<SmartStackState> = {},
+  options: {
+    essential?: boolean
+    addressless?: boolean
+    noDomain?: boolean
+  } & Partial<SmartStackState> = {},
 ): SmartStackState {
-  const { essential = false, ...overrides } = options
+  const { essential = false, addressless = false, noDomain = false, ...overrides } = options
   const waiting = status === "waiting"
   const settled = status === "ready" || status === "action_required"
   const names = essential ? ESSENTIAL : SERVICES.map((service) => service.name)
+  const included = SERVICES.filter((service) => names.includes(service.name))
+  const served = (service: (typeof SERVICES)[number]) =>
+    !waiting && !noDomain && (!addressless || "primary" in service)
+  const missing = addressless || noDomain ? included.filter((service) => "address" in service) : []
   return {
     stackId: "media",
     title: "Media server",
-    version: "1.0.0",
+    version: "1.1.0",
     preset: essential ? "essential" : "complete",
     presetTitle: essential ? "Essential" : "Complete",
     status,
@@ -570,17 +661,15 @@ export function stackState(
       acquisition: status === "ready" && !essential,
       playback: !waiting && status !== "configuring",
     },
-    services: SERVICES.filter((service) => names.includes(service.name)).map((service) => ({
+    services: included.map((service) => ({
       name: service.name,
       title: service.title,
       purpose: service.purpose,
       access: service.access,
       image: service.image,
       ...("docsUrl" in service ? { docsUrl: service.docsUrl } : {}),
-      ...(service.access === "private" && !waiting
-        ? { address: `127.0.0.1:${23000 + service.port}` }
-        : {}),
-      ...(service.access === "public" && !waiting ? { url: "https://media.example.test" } : {}),
+      ...("port" in service && !waiting ? { address: `127.0.0.1:${23000 + service.port}` } : {}),
+      ...(served(service) && appUrl(service) ? { url: appUrl(service) } : {}),
       ...(waiting
         ? {}
         : {
@@ -617,22 +706,27 @@ export function stackState(
             {
               id: "media-source",
               service: "prowlarr",
-              title: "Add a media source in Prowlarr",
+              title: "Add a media source",
               description:
-                "Radarr and Sonarr search through the sources Prowlarr holds, and it holds none. Open Prowlarr, add an indexer you are allowed to use, and run Repair here.",
+                "Radarr and Sonarr search the stack's sources for what is asked for, and it has none. Choose one you are allowed to use.",
               blocking: true,
             },
           ]
         : [],
-    credentials: CREDENTIALS.filter(([, service]) => names.includes(service)).map(
-      ([name, service, label], index) => ({
-        name,
-        service,
-        label,
-        username: "admin",
-        stored: waiting ? false : status === "configuring" ? index === 0 : true,
-      }),
-    ),
+    credentials: [
+      { name: "login", service: "", label: "Every app", username: "admin", stored: !waiting },
+    ],
+    login: { username: "admin", stored: !waiting },
+    addresses: {
+      primary: noDomain ? "" : "media.example.test",
+      missing: missing.map((service) => ({
+        service: service.name,
+        title: service.title,
+        hostname: noDomain
+          ? ""
+          : `media-${"address" in service ? service.address : ""}.example.test`,
+      })),
+    },
     limitations: essential ? ESSENTIAL_LIMITATIONS : COMPLETE_LIMITATIONS,
     ...(waiting ? {} : { liveReleaseId: 20 }),
     ...(settled ? { configuredReleaseId: 20 } : {}),
@@ -666,16 +760,44 @@ function stackRuntime(state: SmartStackState): DeploymentRuntimeServices {
   }
 }
 
-export const STACK_PASSWORD = "fixture-Jellyfin-pass-0001"
+export const STACK_PASSWORD = "fixture-Every-app-pass-0001"
+
+/** The domains a stack's plan carries: Jellyfin's, and each other app's routed to its service. */
+export function stackDomains(state: SmartStackState | null) {
+  const names = new Set(state?.services.map((service) => service.name) ?? [])
+  const missing = new Set(state?.addresses?.missing.map((entry) => entry.service) ?? [])
+  if (state?.addresses?.primary === "") return []
+  return [
+    { hostname: "media.example.test", https: true, ownership: "managed" as const },
+    ...SERVICES.filter(
+      (service) => "address" in service && names.has(service.name) && !missing.has(service.name),
+    ).map((service) => ({
+      hostname: `media-${"address" in service ? service.address : ""}.example.test`,
+      https: true,
+      ownership: "managed" as const,
+      service: service.name,
+      ...("port" in service ? { port: service.port } : {}),
+    })),
+  ]
+}
+
+function refuse(route: Route, status: number, code: string, message: string) {
+  return route.fulfill({
+    status,
+    contentType: "application/json",
+    body: JSON.stringify({ error: { code, message } }),
+  })
+}
 
 /**
  * Project 7 as a media stack, over `mockProject`: a Compose project made
- * from the stack's template, its stack state, the pass a press starts and
- * the reveal route.
+ * from the stack's template, its stack state and domains, the pass a press
+ * starts, the login's reveal and change, and "give every app its address".
  *
  * `state` may be replaced while the page is open (`set`), which is how a
  * spec watches a pass move. `configure` decides what a press is answered
- * with: 202 and a state that follows, or one of the two refusals.
+ * with: 202 and a state that follows, or one of the two refusals; `login`
+ * and `addresses` do the same for their routes.
  */
 export async function mockStackProject(
   page: Page,
@@ -684,6 +806,12 @@ export async function mockStackProject(
     showcase?: boolean
     /** What `POST …/stack/configure` answers. Default: 202, and the state becomes configuring. */
     configure?: "accepted" | "stack_busy" | "stack_waiting"
+    /** What `PUT …/stack/login` answers. Default: 202, and the state becomes configuring. */
+    login?: "accepted" | "password_weak"
+    /** What `POST …/stack/addresses` answers. Default: 202 with run 91, and every app has its address. */
+    addresses?: "accepted" | "stack_addresses_present" | "stack_no_domain"
+    /** A deployment run (84) is in flight whatever the stack's state; by default only while waiting. */
+    running?: boolean
   } = {},
 ) {
   const base = await mockProject(page, { showcase: options.showcase })
@@ -692,8 +820,12 @@ export async function mockStackProject(
   let reads = 0
   const configures: unknown[] = []
   const reveals: string[] = []
+  const logins: unknown[] = []
+  const addressRequests: unknown[] = []
   const template = () =>
     state?.preset === "essential" ? mediaEssentialDefinition : mediaCompleteDefinition
+  // The plan's own domains, which the Domains page reads and saves.
+  base.configuration().domains = stackDomains(state)
 
   await page.route(
     (url) => url.pathname === "/api/v1/deploy/7",
@@ -710,7 +842,7 @@ export async function mockStackProject(
               profile: "compose",
               sourceKind: "compose",
               buildMethod: "compose",
-              sourceTemplate: `${template().id}@1.0.0`,
+              sourceTemplate: `${template().id}@1.1.0`,
               sourceRef: undefined,
               sourceRepository: undefined,
               sourceRemote: undefined,
@@ -722,8 +854,9 @@ export async function mockStackProject(
               serviceCount: state?.services.length ?? 8,
               pendingChanges: false,
               liveReleaseId: state?.status === "waiting" ? undefined : 20,
-              // Only a stack still waiting for its release has a run in flight.
-              activeRun: state?.status === "waiting" ? run : undefined,
+              // Only a stack still waiting for its release has a run in flight,
+              // unless the spec puts one there.
+              activeRun: options.running || state?.status === "waiting" ? run : undefined,
               lastRun: { ...run, state: state?.status === "waiting" ? "starting" : "succeeded" },
               recentRuns: [],
             },
@@ -732,35 +865,60 @@ export async function mockStackProject(
   await page.route("**/api/v1/deploy/blueprints/media-*", (route) => json(route, template()))
   await page.route("**/api/v1/deploy/7/stack", (route) => {
     reads += 1
-    if (!state)
-      return route.fulfill({
-        status: 404,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: { code: "stack_not_found", message: "This project is not a stack" },
-        }),
-      })
+    if (!state) return refuse(route, 404, "stack_not_found", "This project is not a stack")
     return json(route, state)
   })
   await page.route("**/api/v1/deploy/7/stack/configure", (route) => {
     configures.push(route.request().postDataJSON())
     const answer = options.configure ?? "accepted"
     if (answer !== "accepted")
-      return route.fulfill({
-        status: 409,
-        contentType: "application/json",
-        body: JSON.stringify({
-          error: {
-            code: answer,
-            message: answer === "stack_busy" ? "a pass is already running" : "no live release yet",
-          },
-        }),
-      })
+      return refuse(
+        route,
+        409,
+        answer,
+        answer === "stack_busy" ? "a pass is already running" : "no live release yet",
+      )
     if (state) state = stackState("configuring", { essential: state.preset === "essential" })
     return route.fulfill({
       status: 202,
       contentType: "application/json",
       body: JSON.stringify({ status: "configuring" }),
+    })
+  })
+  await page.route("**/api/v1/deploy/7/stack/login", (route) => {
+    if (route.request().method() !== "PUT") return route.fallback()
+    logins.push(route.request().postDataJSON())
+    if (options.login === "password_weak")
+      return refuse(
+        route,
+        422,
+        "password_weak",
+        "The password needs at least 12 characters, mixing three of upper case, lower case, digits and symbols.",
+      )
+    if (state) state = stackState("configuring", { essential: state.preset === "essential" })
+    return route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ status: "configuring" }),
+    })
+  })
+  await page.route("**/api/v1/deploy/7/stack/addresses", (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    addressRequests.push(route.request().postDataJSON() ?? {})
+    const answer = options.addresses ?? "accepted"
+    if (answer === "stack_addresses_present")
+      return refuse(route, 409, answer, "every service already has its address")
+    if (answer === "stack_no_domain")
+      return refuse(route, 422, answer, "the deployment has no primary domain")
+    const domains = state?.addresses?.missing.map((entry) => entry.hostname) ?? []
+    if (state) {
+      state = stackState(state.status, { essential: state.preset === "essential" })
+      base.configuration().domains = stackDomains(state)
+    }
+    return route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ runId: 91, domains }),
     })
   })
   await page.route("**/api/v1/deploy/7/stack/credentials/*/reveal", (route) => {
@@ -776,6 +934,193 @@ export async function mockStackProject(
     reads: () => reads,
     configures: () => configures,
     reveals: () => reveals,
+    logins: () => logins,
+    addressRequests: () => addressRequests,
     containerId: container,
   }
+}
+
+// ---------------------------------------------------------------------------
+// Media sources
+// ---------------------------------------------------------------------------
+
+/**
+ * What Prowlarr can add, as the catalogue lists it: three named definitions
+ * with each kind of field between them, and enough fixture ones after them
+ * that the list is cut. None is a real tracker.
+ */
+export const SOURCE_DEFINITIONS: SmartStackSourceDefinition[] = [
+  {
+    definition: "communitylibrary",
+    name: "Community Library",
+    description: "A members' archive of community recordings",
+    privacy: "semiPrivate",
+    language: "en-US",
+    needsInput: true,
+  },
+  {
+    definition: "torznab",
+    name: "Generic Torznab",
+    description: "Any Torznab feed you run yourself",
+    privacy: "private",
+    language: "en-US",
+    needsInput: true,
+  },
+  {
+    definition: "publicdomainarchive",
+    name: "Public Domain Archive",
+    description: "Films whose copyright has expired",
+    privacy: "public",
+    language: "en-US",
+    needsInput: false,
+  },
+  ...Array.from({ length: 64 }, (_, index) => {
+    const number = String(index + 1).padStart(2, "0")
+    return {
+      definition: `sampleindex${number}`,
+      name: `Sample Index ${number}`,
+      description: "A fixture source with nothing to fill in",
+      privacy: index % 2 === 0 ? ("public" as const) : ("private" as const),
+      language: "en-US",
+      needsInput: false,
+    }
+  }),
+]
+
+const SOURCE_FIELDS: Record<string, SmartStackSourceDetail["fields"]> = {
+  torznab: [
+    {
+      name: "baseUrl",
+      label: "URL",
+      help: "The address of your Torznab feed",
+      type: "text",
+      value: "",
+      advanced: false,
+    },
+    { name: "apiKey", label: "API key", type: "password", value: "", advanced: false },
+    {
+      name: "minimumSeeders",
+      label: "Minimum seeders",
+      type: "number",
+      value: 1,
+      advanced: true,
+    },
+  ],
+  communitylibrary: [
+    { name: "username", label: "User name", type: "text", value: "", advanced: false },
+    { name: "password", label: "Password", type: "password", value: "", advanced: false },
+    {
+      name: "freeleech",
+      label: "Only what does not count against your ratio",
+      type: "checkbox",
+      value: false,
+      advanced: false,
+    },
+    {
+      name: "sort",
+      label: "Sort results by",
+      type: "select",
+      value: 0,
+      options: [
+        { value: 0, label: "Created" },
+        { value: 1, label: "Seeders" },
+      ],
+      advanced: true,
+    },
+  ],
+}
+
+export function sourceDetail(definition: string): SmartStackSourceDetail | undefined {
+  const listed = SOURCE_DEFINITIONS.find((one) => one.definition === definition)
+  if (!listed) return undefined
+  return {
+    definition: listed.definition,
+    name: listed.name,
+    description: listed.description,
+    privacy: listed.privacy,
+    urls: [`https://${listed.definition}.example.test/`],
+    fields: SOURCE_FIELDS[definition] ?? [],
+  }
+}
+
+/** A typed value the fixture's Prowlarr refuses, so a spec can watch a test fail. */
+export const REFUSED_KEY = "wrong-key"
+
+/**
+ * Project 7's media sources, over `mockStackProject`: the sources Prowlarr
+ * holds, its catalogue and one definition's fields, Add (tested, then kept)
+ * and Remove. `refusal` answers every route with one of their refusals.
+ */
+export async function mockStackSources(
+  page: Page,
+  options: {
+    sources?: SmartStackSource[]
+    refusal?: "stack_waiting" | "stack_no_sources" | "stack_app_unreachable"
+  } = {},
+) {
+  let sources = [...(options.sources ?? [])]
+  const added: { definition: string; fields: Record<string, unknown> }[] = []
+  const removed: number[] = []
+  let next = 10
+  const prefix = "/api/v1/deploy/7/stack/sources"
+  await page.route(
+    (url) => url.pathname === prefix || url.pathname.startsWith(`${prefix}/`),
+    async (route) => {
+      const request = route.request()
+      const path = new URL(request.url()).pathname.slice(prefix.length)
+      const method = request.method()
+      if (options.refusal)
+        return refuse(
+          route,
+          options.refusal === "stack_app_unreachable" ? 502 : 409,
+          options.refusal,
+          "refused",
+        )
+      if (path === "" && method === "GET") return json(route, { sources })
+      if (path === "/catalogue" && method === "GET")
+        return json(route, { definitions: SOURCE_DEFINITIONS, fetchedAt: now })
+      const detail = /^\/catalogue\/([^/]+)$/.exec(path)
+      if (detail && method === "GET") {
+        const found = sourceDetail(decodeURIComponent(detail[1]))
+        return found ? json(route, found) : refuse(route, 404, "not_found", "no such definition")
+      }
+      if (path === "" && method === "POST") {
+        const body = request.postDataJSON() as {
+          definition: string
+          fields: Record<string, unknown>
+        }
+        added.push(body)
+        const listed = SOURCE_DEFINITIONS.find((one) => one.definition === body.definition)
+        if (Object.values(body.fields).includes(REFUSED_KEY))
+          return refuse(
+            route,
+            422,
+            "source_test_failed",
+            "Unable to connect to indexer: the feed answered 401 Unauthorized for the API key ([redacted]).",
+          )
+        const source: SmartStackSource = {
+          id: next++,
+          name: listed?.name ?? body.definition,
+          definition: body.definition,
+          privacy: listed?.privacy ?? "public",
+          protocol: "torrent",
+          enabled: true,
+        }
+        sources = [...sources, source]
+        return route.fulfill({
+          status: 201,
+          contentType: "application/json",
+          body: JSON.stringify({ source, synced: true }),
+        })
+      }
+      const one = /^\/(\d+)$/.exec(path)
+      if (one && method === "DELETE") {
+        removed.push(Number(one[1]))
+        sources = sources.filter((source) => source.id !== Number(one[1]))
+        return route.fulfill({ status: 204 })
+      }
+      return route.fallback()
+    },
+  )
+  return { sources: () => sources, added: () => added, removed: () => removed }
 }

@@ -403,6 +403,8 @@ never into `docs/audits/`.
   pinned images on a network and a volume of their own, run every step twice and require the second
   pass to change nothing. They need Docker as root and pull several gigabytes:
   `go test -c -o /tmp/media.test ./internal/stacks/media && sudo env JD_STACKS_LIVE=1 PATH=$PATH /tmp/media.test -test.run Live -test.v`.
+  The media-source picker's live test adds its own Torznab server (the test binary, in a container) on an
+  internal network, so no real site is ever asked anything.
   A change to a stack's template or to `internal/stacks` should also deploy the preset through the
   API (draft, commit, run) on a dashboard of its own and read its Stack page; see "Verified end to
   end" in [smart stacks](docs/internal/deployments/smart-stacks.md) for how that was done without

@@ -123,13 +123,12 @@ func (e environmentState) note(code string) []EnvironmentNote {
 	return result
 }
 
+// primaryDomain is the first of the plan's domains the application itself
+// answers. A service domain is another of a Compose stack's services, and
+// the domains are in name order, so media-downloads.example.com would come
+// before media.example.com (service_domains.go).
 func (e environmentState) primaryDomain() (PlannedDomain, bool) {
-	for _, domain := range e.domains {
-		if strings.TrimSpace(domain.Hostname) != "" {
-			return domain, true
-		}
-	}
-	return PlannedDomain{}, false
+	return ownDomain(e.domains)
 }
 
 func (e environmentState) publicOrigin() string {

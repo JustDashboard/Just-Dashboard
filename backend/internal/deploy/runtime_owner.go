@@ -130,6 +130,10 @@ type dockerReleaseRuntimeMetadata struct {
 	// each with its own loopback publication. A release of one container
 	// records none and is its RuntimeID, as it always was.
 	Replicas []runtimeReplica `json:"replicas,omitempty"`
+	// ServicePorts are every TCP port a Compose release's services publish
+	// on 127.0.0.1, read from the started containers: where the route sends
+	// a service domain (service_domains.go).
+	ServicePorts []composeServicePort `json:"servicePorts,omitempty"`
 }
 
 // DockerRuntimeOwner is the only deployment adapter allowed to own runtime
@@ -553,6 +557,10 @@ func (o *DockerRuntimeOwner) startCompose(
 		ProjectName: project, ProjectDirectory: request.SourceRoot,
 		ComposeFiles: append([]string(nil), resolved.Files...), OverrideFile: override,
 		PrimaryContainerID: primaryID, ContainerIDs: containerIDs, VariableNames: variableNames,
+		ServicePorts: composeServicePorts(containers, containerIDs),
+	}
+	if len(metadata.ServicePorts) == 0 {
+		metadata.ServicePorts = nil
 	}
 	return StartedRuntime{
 		Input: ReleaseRuntimeInput{

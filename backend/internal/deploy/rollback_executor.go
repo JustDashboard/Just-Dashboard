@@ -569,7 +569,11 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 		if runtime.Port == 0 || e.proxy == nil {
 			return fail("proxy_unavailable", "A managed domain needs an available HTTP proxy.", nil)
 		}
-		value := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
+		value, routeErr := releaseRoute(release.Release.EnvironmentID, snapshot, *runtime)
+		if routeErr != nil {
+			code, message := servicePortFailure(routeErr)
+			return fail(code, message+".", nil)
+		}
 		if value.TLS {
 			resolver, ok := e.proxy.(interface {
 				ResolveDeploymentCertificate(context.Context, []string) (string, string, error)
@@ -599,13 +603,18 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 		}
 		applied = &result
 	}
+	publicChecks := []PlannedCheck{}
 	for _, check := range snapshot.Checks {
 		if check.Phase != "smoke" || check.Kind != string(CheckPublicRoute) || e.checks == nil {
 			continue
 		}
+		publicChecks = append(publicChecks, check)
 		target := targetForRuntime(*runtime, snapshot)
 		target.PublicURLs = publicRouteURLs(snapshot.Domains)
 		evidence.PublicChecks = append(evidence.PublicChecks, e.checks.Run(ctx, check, target))
+	}
+	if len(publicChecks) > 0 {
+		evidence.PublicChecks = append(evidence.PublicChecks, serviceRouteChecks(ctx, e.checks, publicChecks, snapshot.Domains)...)
 	}
 	if requiredCheckFailed(evidence.PublicChecks) {
 		return fail("public_route_failed", "The warm release failed its public-route check.", applied)
@@ -751,7 +760,10 @@ func (e *NormalizedStepExecutor) applyLiveRoute(ctx context.Context, releaseID i
 	if err != nil {
 		return err
 	}
-	route := publicRoute(release.Release.EnvironmentID, snapshot, *runtime)
+	route, err := releaseRoute(release.Release.EnvironmentID, snapshot, *runtime)
+	if err != nil {
+		return err
+	}
 	if route.TLS {
 		if resolver, ok := e.proxy.(interface {
 			ResolveDeploymentCertificate(context.Context, []string) (string, string, error)

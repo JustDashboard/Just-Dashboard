@@ -81,6 +81,11 @@ func (spec *SiteSpec) poolUpstream() string {
 // mainUpstream is what the site's catch-all forwards to: with a split, the
 // variable naming whichever of the two pools this request was given.
 func (spec *SiteSpec) mainUpstream() string {
+	// Through the map on the request's name, while some of the names go to
+	// other services (deployment_route_hosts.go).
+	if len(spec.hostUpstreams) > 0 {
+		return "http://$" + spec.hostUpstreamVar()
+	}
 	if spec.Pool != nil && spec.Split != nil {
 		return "http://$" + spec.splitUpstreamVar()
 	}

@@ -44,14 +44,16 @@ test("the Stacks tab says what each preset runs and what it cannot do before any
   const services = page.getByRole("list", { name: "Services Complete runs" })
   await expect(services.getByRole("listitem")).toHaveCount(8)
   await expect(services.getByRole("listitem").first()).toContainText("Jellyfin")
-  await expect(services.getByRole("listitem").first()).toContainText("Public")
   await expect(services.getByRole("listitem").first()).toContainText("Plays your films and series")
   await expect(services.getByRole("listitem").nth(1)).toContainText("Seerr")
-  await expect(services.getByRole("listitem").nth(1)).toContainText("Private")
+  // Every app has an address now, so nothing is called private; a worker says it has no interface.
+  await expect(services).not.toContainText(/Public|Private/)
   await expect(services.getByRole("listitem").last()).toContainText("Recyclarr")
   await expect(services.getByRole("listitem").last()).toContainText("Background")
   await expect(
-    page.getByText(/1 public, 6 private, 1 background: public is on the project's address/),
+    page.getByText(
+      /Every app answers at its own HTTPS address beside the domain, and they all sign in with one password\. Recyclarr runs in the background/,
+    ),
   ).toBeVisible()
   await expect(page.getByText(/Memory limits add up to 7\.3 GB/)).toBeVisible()
   await expect(page.getByText(/about 12 GB of disk/)).toBeVisible()
@@ -65,9 +67,24 @@ test("the Stacks tab says what each preset runs and what it cannot do before any
   await expect(
     settings(page).getByRole("heading", { name: "Media server · Complete" }),
   ).toBeVisible()
-  await expect(settings(page).getByRole("textbox", { name: "Jellyfin's domain" })).toHaveValue(
-    "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
-  )
+  // The domain is the server's suggestion, required, and under it the address each app gets.
+  const domain = settings(page).getByRole("textbox", { name: "Domain" })
+  await expect(domain).toHaveValue("wesmokefish-a1b2c3.203-0-113-7.sslip.io")
+  const addresses = settings(page).getByRole("list", { name: "The address each app gets" })
+  await expect(addresses.getByRole("listitem")).toHaveText([
+    /Jellyfin\s*wesmokefish-a1b2c3\.203-0-113-7\.sslip\.io/,
+    /Seerr\s*wesmokefish-a1b2c3-requests\.203-0-113-7\.sslip\.io/,
+    /Radarr\s*wesmokefish-a1b2c3-radarr\.203-0-113-7\.sslip\.io/,
+    /Sonarr\s*wesmokefish-a1b2c3-sonarr\.203-0-113-7\.sslip\.io/,
+    /Prowlarr\s*wesmokefish-a1b2c3-prowlarr\.203-0-113-7\.sslip\.io/,
+    /qBittorrent\s*wesmokefish-a1b2c3-downloads\.203-0-113-7\.sslip\.io/,
+    /Bazarr\s*wesmokefish-a1b2c3-subtitles\.203-0-113-7\.sslip\.io/,
+  ])
+  // The password for every app is optional and typed hidden.
+  const password = settings(page).getByLabel("Password for every app", { exact: true })
+  await expect(password).toHaveValue("")
+  await expect(password).toHaveAttribute("type", "password")
+  await expect(settings(page)).toContainText("Leave it empty and the dashboard makes one")
   await expect(settings(page).getByRole("combobox", { name: "Quality" })).toHaveText("1080p")
   await expect(settings(page).getByRole("textbox", { name: "Subtitle languages" })).toHaveValue(
     "en",
@@ -97,7 +114,10 @@ test("the Stacks tab says what each preset runs and what it cannot do before any
   await expect(
     settings(page).getByRole("heading", { name: "Media server · Essential" }),
   ).toBeVisible()
-  await expect(settings(page).getByRole("textbox", { name: "Jellyfin's domain" })).toBeVisible()
+  await expect(settings(page).getByRole("textbox", { name: "Domain" })).toBeVisible()
+  await expect(
+    settings(page).getByRole("list", { name: "The address each app gets" }).getByRole("listitem"),
+  ).toHaveCount(2)
   await expect(settings(page).getByRole("combobox", { name: "Requests" })).toBeVisible()
   await expect(settings(page).getByRole("combobox", { name: "Quality" })).toHaveCount(0)
   await expect(settings(page).getByRole("textbox", { name: "Subtitle languages" })).toHaveCount(0)
@@ -135,7 +155,7 @@ test("Continue hands a preset to Configure as a Compose template draft, keeping 
     kind: "compose",
     mode: "blueprint",
     blueprintId: "media-complete",
-    blueprintVersion: "1.0.0",
+    blueprintVersion: "1.1.0",
     blueprintInputs: {
       domain: "wesmokefish-a1b2c3.203-0-113-7.sslip.io",
       quality: "2160p",
@@ -151,6 +171,90 @@ test("Continue hands a preset to Configure as a Compose template draft, keeping 
   await expect(page.getByRole("group", { name: "Project source" })).toHaveCount(0)
   await gotoStep(page, "project")
   await expect(page.getByRole("textbox", { name: "Project name" })).toHaveValue("Media-server")
+})
+
+test("the address preview follows the domain, and the password for every app goes to Variables, never to the draft", async ({
+  page,
+}) => {
+  const journey = await mockNewStack(page)
+  await page.goto("/deploy/new?source=stack")
+  const domain = settings(page).getByRole("textbox", { name: "Domain" })
+  const addresses = settings(page).getByRole("list", { name: "The address each app gets" })
+  await domain.fill("media.example.com")
+  await expect(addresses.getByRole("listitem").first()).toHaveText(/Jellyfin\s*media\.example\.com/)
+  await expect(addresses.getByRole("listitem").nth(1)).toHaveText(
+    /Seerr\s*media-requests\.example\.com/,
+  )
+  // An apex has no first label to join, so each app's label goes in front of it.
+  await domain.fill("example.com")
+  await expect(addresses.getByRole("listitem").nth(1)).toHaveText(/Seerr\s*requests\.example\.com/)
+  // Cleared, nothing is listed, and the domain is required.
+  await domain.fill("")
+  await expect(addresses).toHaveCount(0)
+  await settings(page).getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(settings(page).getByText(/Domain: Required\./)).toBeVisible()
+  expect(journey.started()).toBe(0)
+  await domain.fill("media.example.com")
+
+  // A typed password is held to the dashboard's rule before anything is made.
+  const password = settings(page).getByLabel("Password for every app", { exact: true })
+  await password.fill("short")
+  await settings(page).getByRole("button", { name: "Continue", exact: true }).click()
+  await expect(
+    settings(page).getByText("Password for every app: Use at least 12 characters."),
+  ).toBeVisible()
+  expect(journey.started()).toBe(0)
+  await password.fill("Every-app-pass-0001")
+  await settings(page).getByRole("button", { name: "Continue", exact: true }).click()
+
+  await expect.poll(() => journey.sources().length).toBeGreaterThan(0)
+  const source = journey.sources()[0]
+  // Only what was typed goes, and never the password: it is a secret, not an input.
+  expect(source.blueprintInputs).toEqual({ domain: "media.example.com" })
+  expect(JSON.stringify(journey.sources())).not.toContain("Every-app-pass-0001")
+  // Never written to the tab's storage either.
+  expect(await page.evaluate(() => JSON.stringify({ ...sessionStorage }))).not.toContain(
+    "Every-app-pass-0001",
+  )
+
+  // The plan's names keep their services: each app's row says which it routes to.
+  await currentStep(page)
+  await gotoStep(page, "runtime")
+  const extra = page.getByRole("list", { name: "Additional hostnames" }).getByRole("listitem")
+  await expect(extra).toHaveCount(6)
+  await expect(extra.first()).toContainText("Seerr")
+  await expect(extra.first().locator("[data-slot='service-route']")).toHaveText("→ Serves Seerr")
+  await expect(extra.first().getByRole("textbox")).toHaveValue("media-requests.example.com")
+  await expect(extra.nth(4).locator("[data-slot='service-route']")).toContainText("qBittorrent")
+  // An edit of a row keeps the service it routes to.
+  await extra.first().getByRole("button", { name: "Serve this hostname over HTTPS" }).click()
+
+  // The password waits in Variables as the template's own variable.
+  await gotoStep(page, "variables")
+  const keys = await page
+    .locator("input[id^='env-key-']")
+    .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))
+  expect(keys).toContain("MEDIA_LOGIN_PASSWORD")
+
+  // Saved, every app's name still routes to its service, the edited one too.
+  await gotoStep(page, "review")
+  await page.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect.poll(() => journey.commits()).toBe(1)
+  const saved = (
+    journey.configuration() as {
+      domains: { hostname: string; https: boolean; service?: string }[]
+    }
+  ).domains
+  expect(saved[0]).toEqual(expect.objectContaining({ hostname: "media.example.com", https: true }))
+  expect(saved[0]).not.toHaveProperty("service")
+  expect(saved[1]).toEqual(
+    expect.objectContaining({
+      hostname: "media-requests.example.com",
+      https: false,
+      service: "seerr",
+    }),
+  )
+  expect(saved.filter((domain) => domain.service)).toHaveLength(6)
 })
 
 test("the Template tab lists no preset of a stack", async ({ page }) => {

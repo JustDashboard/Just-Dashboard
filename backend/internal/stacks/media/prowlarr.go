@@ -90,16 +90,15 @@ func prowlarrSources(ctx context.Context, env stacks.Env) (stacks.Result, error)
 		}
 	}
 	if enabled == 0 {
-		// The stack looks again only on a pass, so the person is told to ask
-		// for one: until then the page goes on saying nothing can be fetched.
-		description := "Nothing can be searched for or downloaded until Prowlarr has a source. " +
-			"None is included with the stack. Open Prowlarr, sign in, and add a source you are allowed to use under Indexers; " +
-			"Prowlarr shares it with Radarr and Sonarr by itself. Then run the setup again so the stack sees it."
+		// The stack's Sources page adds one and asks for the pass itself; a
+		// source switched on in Prowlarr is seen on the next pass, which the
+		// person asks for.
+		description := "Nothing can be searched for or downloaded until Prowlarr has a source, and none is included with the stack. " +
+			"Pick one you are allowed to use on this stack's Sources page: the dashboard has Prowlarr test it and share it with Radarr and Sonarr."
 		if len(indexers) > 0 {
 			description = fmt.Sprintf("Prowlarr has %s, but none is switched on, so nothing can be searched for or downloaded. ", prowlarrCount(len(indexers))) +
-				"Open Prowlarr, sign in, and enable a source you are allowed to use under Indexers, or add one; " +
-				"Prowlarr shares it with Radarr and Sonarr by itself. None is included with the stack. " +
-				"Then run the setup again so the stack sees it."
+				"Add one you are allowed to use on this stack's Sources page, which Prowlarr shares with Radarr and Sonarr. " +
+				"None is included with the stack. One switched on in Prowlarr itself is seen when you run the setup again."
 		}
 		return stacks.Result{}, stacks.NeedsAction(stacks.Action{
 			ID:          actionMediaSource,

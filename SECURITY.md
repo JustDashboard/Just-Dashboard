@@ -44,14 +44,23 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Destructive actions are confirmed and audited; deleting a project, database, stack, Git checkout, a
   host account's home or a repository on GitHub, and uninstalling with a wipe, asks for a typed phrase
   checked on the server.
-- A smart stack (the media server on the Stacks tab) creates its applications' accounts and API keys
-  itself: generated here, sealed under the master key, handed to the applications as environment or
-  through their own APIs, revealed only to an administrator in a session (never through Just Hub)
-  and audited without the value, and masked out of every recorded step. Its configuration runs
-  reviewed code compiled into the dashboard against the stack's own containers only, as closed
-  commands, never a shell string; its applications' web interfaces other than Jellyfin are published
-  on 127.0.0.1 only, each with its own sign-in. No media source, catalogue or third-party credential
-  ships with it.
+- A smart stack (the media server on the Stacks tab) creates its applications' API keys and one
+  login itself: every application signs in as `admin` with the same password, generated here (or
+  chosen when deploying, held to the dashboard's own password rule), sealed under the master key,
+  handed to the applications through their own APIs, revealed and changed only by an administrator
+  in a session (never through Just Hub) and audited without the value, and masked out of every
+  recorded step. One password for every application means a person who learns it signs in to all of
+  them; change it on the stack's page, which keeps the previous one only until every application has
+  taken the new one. Its configuration runs reviewed code compiled into the dashboard against the
+  stack's own containers only, as closed commands, never a shell string. Its web interfaces other
+  than Jellyfin are published on 127.0.0.1 only and reached from outside through the proxy, each at
+  its own HTTPS address and behind its own sign-in on every address; qBittorrent and Jellyfin trust
+  only the stack's own Docker networks as proxies, so a visitor's refused sign-ins count against
+  the visitor. No media source, catalogue or third-party credential ships with it.
+  A source the person adds from the dashboard is chosen by them; what they type into its form (an
+  account, a key, a cookie) goes to Prowlarr in that request only: the dashboard keeps no copy,
+  audits the source's name alone, masks it out of Prowlarr's answer, and the dashboard's assistant
+  may not send one.
 - The GitHub page acts on GitHub only as the person who connected their own GitHub account, through
   this dashboard's own GitHub App (no personal access tokens). A connection is used only by the
   dashboard account that made it, administrators included. The App's client secret and private key

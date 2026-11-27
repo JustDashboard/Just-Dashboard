@@ -39,21 +39,32 @@ func (c *Credentials) Put(_ context.Context, name, value string) error {
 	return nil
 }
 
+func (c *Credentials) Delete(_ context.Context, name string) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.Values, name)
+	return nil
+}
+
 // Fake is an Env whose services are base URLs (httptest servers) and whose
 // container operations are functions a test sets. Anything a test does not
 // set fails loudly.
 type Fake struct {
-	PresetID    string
-	Services    map[string]string // service → base URL
-	OptionsMap  map[string]string
-	Vars        map[string]string
-	Creds       Credentials
-	Lengths     map[string]int
-	Outputs     map[string]map[string]string
-	ExecFunc    func(service, user string, argv []string) (stacks.ExecResult, error)
-	LogsFunc    func(service string) (string, error)
-	Files       map[string][]byte // "service:path" → content
-	Lines       []string
+	PresetID   string
+	Services   map[string]string // service → base URL
+	OptionsMap map[string]string
+	Vars       map[string]string
+	Creds      Credentials
+	Lengths    map[string]int
+	Outputs    map[string]map[string]string
+	ExecFunc   func(service, user string, argv []string) (stacks.ExecResult, error)
+	LogsFunc   func(service string) (string, error)
+	Files      map[string][]byte // "service:path" → content
+	Lines      []string
+	// URLs are the public addresses PublicURL answers, by service; Subnets
+	// what NetworkSubnets answers.
+	URLs        map[string]string
+	Subnets     []string
 	mu          sync.Mutex
 	writtenMode map[string]int64
 }
@@ -105,6 +116,22 @@ func (f *Fake) SetCredential(ctx context.Context, name, value string) error {
 
 func (f *Fake) LookupCredential(ctx context.Context, name string) (string, bool, error) {
 	return f.Creds.Get(ctx, name)
+}
+
+func (f *Fake) DeleteCredential(ctx context.Context, name string) error {
+	return f.Creds.Delete(ctx, name)
+}
+
+func (f *Fake) PublicURL(service string) (string, bool) {
+	address, found := f.URLs[service]
+	return address, found && address != ""
+}
+
+func (f *Fake) NetworkSubnets(_ context.Context, service string) ([]string, error) {
+	if len(f.Subnets) == 0 {
+		return nil, fmt.Errorf("unexpected network read of %s", service)
+	}
+	return append([]string(nil), f.Subnets...), nil
 }
 
 func (f *Fake) Exec(_ context.Context, service, user string, argv []string) (stacks.ExecResult, error) {
