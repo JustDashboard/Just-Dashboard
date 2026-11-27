@@ -287,7 +287,9 @@ nothing), a notice that the address came from a link, under the field whose mach
 while the check refuses the address — a look-alike name off this tailnet — Connect stays disabled
 and the terminal's command is not offered), the three scope cards with `maintain` chosen when the
 address is typed and none chosen after a `?connect=` link (Connect stays disabled until one is, and
-**What this server will send** appears once it is), **Connect** and `sudo ./scripts/manage.sh hub
+**What this server will send** appears once it is, with what only a hub is sent after Connect's own items:
+package updates and sign-in counts at every scope, certificate names and fixable image-scan findings from
+`operate` up, `sharedItems(scope, "hub")`, [protocol](../../backend/hub-link-protocol.md) §5.4), **Connect** and `sudo ./scripts/manage.sh hub
 connect <url>` beside it, and one line on turning key expiry off with its link to the Tailscale
 admin console; nothing is sent to the hub until Connect is pressed. No sentence stands under the
 field or the cards: what the address has to be, that no scope gives the hub a shell, files or

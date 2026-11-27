@@ -83,6 +83,43 @@ test("names are shared from operate up, and nothing else is added there", () => 
   expect(NEVER_SENT).toContain("API keys")
 })
 
+test("a hub is also sent the fleet fields, and the site never is", () => {
+  expect(sharedItems("observe", "site")).toEqual(sharedItems("observe"))
+  const observe = sharedItems("observe", "hub").map((item) => item.key)
+  expect(observe).toEqual([
+    ...sharedItems("observe").map((item) => item.key),
+    "packages",
+    "signins",
+  ])
+  const operate = sharedItems("operate", "hub").map((item) => item.key)
+  expect(operate.slice(-3)).toEqual(["names", "certificates", "scans"])
+  expect(sharedItems("maintain", "hub")).toEqual(sharedItems("operate", "hub"))
+  expect(new Set(operate).size).toBe(operate.length)
+  expect(sharedItems("observe", "hub").at(-1)?.label).toBe(
+    "Sign-in counts for the last day, never who",
+  )
+})
+
+test("the fleet fields read as groups of their own", () => {
+  const groups = sharedGroups({
+    protocol: 1,
+    os: { updates: { pending: 7, security: 2, rebootRequired: true, checkedAt: 1761350340 } },
+    signins: { successes: 4, failures: 2 },
+    certificates: [{ name: "shop.example.com", daysLeft: 12, issuer: "R11" }],
+  })
+  expect(groups.map((group) => group.label)).toEqual([
+    "Heartbeat",
+    "OS",
+    "Sign-ins",
+    "Certificates",
+  ])
+  expect(groups[1].rows.map((row) => row.label)).toContain("Updates reboot required")
+  expect(groups[3].rows[0].records?.[0]).toEqual({
+    title: "shop.example.com",
+    detail: "days left 12 · R11",
+  })
+})
+
 test("a command is said in words, and an unknown kind as it was sent", () => {
   expect(commandWords("container.restart")).toBe("Restart a container")
   expect(commandWords("dashboard.update.install")).toBe("Install a dashboard update")
