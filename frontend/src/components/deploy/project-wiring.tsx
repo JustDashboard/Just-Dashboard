@@ -5,6 +5,7 @@ import Link from "next/link"
 import {
   ArrowRight,
   Box,
+  ChevronDown,
   External,
   FolderClosed,
   Globe,
@@ -26,12 +27,14 @@ import { cn } from "@/lib/utils"
 import { Status, StatusDot, type DotTone } from "@/components/status-dot"
 import { Tag } from "@/components/tag"
 import { AnimatedBeam } from "@/components/ui/animated-beam"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ProductGlyph, hasProductLogo } from "@/components/product-logo"
 import { BranchChip } from "@/components/git/marks"
 import { SourceBranch } from "@/components/git/glyphs"
 import { RunStrip } from "@/components/deploy/run-marks"
 import {
   CertificateReading,
+  CertificatesReading,
   HealthStatus,
   autoDeployReading,
   formatDuration,
@@ -43,6 +46,12 @@ import {
 import { WireMark, WireNode, WirePlaceholder } from "@/components/wire/wire"
 import { serviceProduct } from "@/components/deploy/service-product"
 import { replicaReading } from "@/components/deploy/replicas-model"
+import {
+  LISTED_DOMAINS,
+  leadFirst,
+  listedServices,
+  serviceLabel,
+} from "@/components/deploy/wiring-model"
 
 /** How many of the environment's runs the release node's strip draws. */
 const STRIP = 14
@@ -70,6 +79,11 @@ const STRIP = 14
  * checked, the release how long it took and how its last runs went, the
  * containers the products their images are, and each address its
  * certificate's issuer, state and the days it has left.
+ *
+ * A project of many parts keeps the picture's height: past four containers
+ * the node names three and counts the rest into the Runtime page, and past
+ * two names it leads with the deployment's own address, puts every name
+ * behind "N more" and says the certificates in one line (`wiring-model.ts`).
  */
 export function ProjectWiring({
   projectId,
@@ -130,10 +144,14 @@ export function ProjectWiring({
       ? runtime.services.filter((service) => service.liveRelease)
       : undefined
   const running = services?.filter((service) => service.state === "running") ?? []
+  const listed = listedServices(services ?? [])
   // A replicated release is read as its replicas, against the count it was
   // started with, so a replica Docker no longer lists is still one missing.
   const replicas = replicaReading(services)
   const host = url && hostOf(url)
+  // A stack's apps or a site's aliases: the lead name, the rest behind a press.
+  const folded =
+    domains && domains.length > LISTED_DOMAINS ? leadFirst(domains, host || undefined) : undefined
   const git = deployment.sourceKind === "git" || deployment.sourceKind === "local"
   const reading = watch && autoDeployReading(watch)
   // The containers' own reading, not the project's: a release being
@@ -338,17 +356,32 @@ export function ProjectWiring({
                   {/* A check that passed before the containers stopped is not
                       a reading of containers that are not running. */}
                   {running.length > 0 && <HealthStatus health={deployment.health} />}
-                  {services.map((service) => (
-                    <span
-                      key={service.containerId}
-                      className="inline-flex min-w-0 items-center gap-1 font-mono"
+                  {listed.shown.map((service) => {
+                    const label = serviceLabel(service, services.length > 1)
+                    const image = serviceProduct(service.image, deployment.sourceKind, product)
+                    return (
+                      <span
+                        key={service.containerId}
+                        title={service.name}
+                        className="inline-flex min-w-0 items-center gap-1 font-mono"
+                      >
+                        {/* A stack's app is drawn as itself where its image
+                            names nothing more than Docker. */}
+                        <ProductGlyph
+                          id={image === "docker" && hasProductLogo(label) ? label : image}
+                        />
+                        <span className="truncate">{label}</span>
+                      </span>
+                    )
+                  })}
+                  {listed.hidden > 0 && (
+                    <Link
+                      href={`/deploy/${projectId}/runtime`}
+                      className="numeric rounded-sm focus-ring hover:text-foreground"
                     >
-                      <ProductGlyph
-                        id={serviceProduct(service.image, deployment.sourceKind, product)}
-                      />
-                      <span className="truncate">{service.name}</span>
-                    </span>
-                  ))}
+                      {listed.hidden} more
+                    </Link>
+                  )}
                 </span>
               ) : (
                 runtime?.reason || "Docker has not reported this release yet"
@@ -379,36 +412,19 @@ export function ProjectWiring({
               )
             }
             eyebrow="Domains"
+            // Folded, the certificates are one reading under the lead name.
+            hint={folded && <CertificatesReading domains={folded} />}
             title={
               domains ? (
                 domains.length === 0 ? (
                   <span className="text-muted-foreground">No public domain</span>
+                ) : folded ? (
+                  <span className="flex min-w-0 items-center gap-2">
+                    <DomainLink domain={folded[0]} />
+                    <AllDomains domains={folded} />
+                  </span>
                 ) : (
-                  // From `sm` the names are one column and their certificates
-                  // another, so every domain is one line of the same shape
-                  // rather than wrapping where its name happens to be long.
-                  <ul className="grid grid-cols-1 gap-y-1 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)] sm:gap-x-3">
-                    {domains.map((domain) => (
-                      <li
-                        key={domain.hostname}
-                        className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 sm:col-span-2 sm:grid sm:grid-cols-subgrid"
-                      >
-                        <a
-                          href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
-                        >
-                          <span className="truncate font-mono">{domain.hostname}</span>
-                          <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
-                        </a>
-                        <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-normal">
-                          <CertificateReading domain={domain} />
-                          {domain.protected && <Tag>Password</Tag>}
-                        </span>
-                      </li>
-                    ))}
-                  </ul>
+                  <DomainLines domains={domains} />
                 )
               ) : host ? (
                 <a
@@ -432,6 +448,91 @@ export function ProjectWiring({
         </li>
       </ol>
     </div>
+  )
+}
+
+/** A name as a way to it, in a new tab. */
+function DomainLink({ domain }: { domain: DeploymentDomainRoute }) {
+  return (
+    <a
+      href={`${domain.https ? "https" : "http"}://${domain.hostname}/`}
+      target="_blank"
+      rel="noopener noreferrer"
+      className="inline-flex min-w-0 items-center gap-1 rounded-sm focus-ring hover:underline"
+    >
+      <span className="truncate font-mono">{domain.hostname}</span>
+      <External aria-hidden className="size-3 shrink-0 text-muted-foreground" />
+    </a>
+  )
+}
+
+/**
+ * One or two names, each a line with its certificate. From `sm` the names
+ * are one column and their certificates another, so both lines are the same
+ * shape rather than wrapping where a name happens to be long.
+ */
+function DomainLines({ domains }: { domains: DeploymentDomainRoute[] }) {
+  return (
+    <ul className="grid grid-cols-1 gap-y-1 sm:grid-cols-[minmax(0,max-content)_minmax(0,1fr)] sm:gap-x-3">
+      {domains.map((domain) => (
+        <li
+          key={domain.hostname}
+          className="flex min-w-0 flex-wrap items-center gap-x-3 gap-y-0.5 sm:col-span-2 sm:grid sm:grid-cols-subgrid"
+        >
+          <DomainLink domain={domain} />
+          <span className="flex min-w-0 flex-wrap items-center gap-x-2 font-normal">
+            <CertificateReading domain={domain} />
+            {domain.protected && <Tag>Password</Tag>}
+          </span>
+        </li>
+      ))}
+    </ul>
+  )
+}
+
+/**
+ * Every name, behind "N more" beside the lead one: the list the node used to
+ * stack, each name with its own certificate, in a popover over the page
+ * rather than down it.
+ */
+function AllDomains({ domains }: { domains: DeploymentDomainRoute[] }) {
+  const more = domains.length - 1
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        {/* Its wash reaches past the line's height rather than growing it,
+            so the node stands as tall as Runtime over it. */}
+        <button
+          type="button"
+          className="numeric -my-0.5 inline-flex shrink-0 items-center gap-1 rounded-md px-1.5 py-0.5 text-hint font-normal text-muted-foreground focus-ring transition-colors hover:bg-row-hover hover:text-foreground aria-expanded:bg-row-hover aria-expanded:text-foreground"
+        >
+          {more} more<span className="sr-only"> domains</span>
+          <ChevronDown aria-hidden className="size-3" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-max p-3">
+        <p className="eyebrow numeric px-1 pb-2">{domains.length} domains</p>
+        {/* As the node's own lines: names one column, certificates another,
+            and on a phone each certificate under its name. */}
+        <ul
+          aria-label="Domains"
+          className="grid grid-cols-1 sm:grid-cols-[minmax(0,max-content)_minmax(0,max-content)] sm:gap-x-4"
+        >
+          {domains.map((domain) => (
+            <li
+              key={domain.hostname}
+              className="flex min-h-8 min-w-0 flex-col justify-center px-1 py-1 text-body sm:col-span-2 sm:grid sm:grid-cols-subgrid sm:items-center sm:py-0"
+            >
+              <DomainLink domain={domain} />
+              <span className="flex min-w-0 flex-wrap items-center gap-x-2">
+                <CertificateReading domain={domain} />
+                {domain.protected && <Tag>Password</Tag>}
+              </span>
+            </li>
+          ))}
+        </ul>
+      </PopoverContent>
+    </Popover>
   )
 }
 

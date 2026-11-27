@@ -16,9 +16,11 @@ import { Stale } from "@/components/stale"
 import { EmptyState, ErrorState, Notice } from "@/components/state"
 import { Status, StatusDot } from "@/components/status-dot"
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import { useProject } from "@/components/deploy/project-context"
+import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { AddressesStarted, AddressesStep } from "@/components/deploy/stack/stack-addresses"
 import { StackApps, StackAppsSkeleton } from "@/components/deploy/stack/stack-apps"
 import { StackLogin } from "@/components/deploy/stack/stack-login"
@@ -55,9 +57,9 @@ import { useStackState } from "@/components/deploy/stack/use-stack"
  * Then the one next step when something is left (a media source to add,
  * the apps' addresses to give) and what failed, with its whole error. Then
  * it is a launcher: the one login every app takes, and each app with what
- * it is for, its address and Open. Under those, the setup step by
- * step. A list here keeps one height in every row, and the steps a preset has
- * no use for are one line.
+ * it is for, its address and Open. Under those, the setup as a checklist,
+ * each step's record behind its line. A list here keeps one height in every
+ * row, and the steps a preset has no use for are one line.
  *
  * It follows a pass every two seconds and rests at fifteen (`usePoll`).
  */
@@ -409,9 +411,14 @@ function serviceTitle(state: SmartStackState, name: string) {
 }
 
 /**
- * The setup, stage by stage. Each step is one line: its state, what it is,
- * and what it did. The steps a preset has no use for are one quiet line at
- * the foot, with why.
+ * The setup, stage by stage, as a checklist: each step one line of its mark
+ * and what it is, in two columns from `md`, so a pass of twenty-seven steps
+ * is a block the eye takes in rather than a page of text. What a step did,
+ * its error and its report are behind the line, in a popover: on the line
+ * they were a second sentence on every row, and a done step's "Done" said
+ * twenty-six times what its tick says once. A step that is not done says
+ * its state in a word; the failures' whole errors are over the apps already.
+ * The steps a preset has no use for are one quiet line at the foot, with why.
  */
 function Setup({ state }: { state: SmartStackState }) {
   const groups = stageGroups(state.steps)
@@ -420,9 +427,9 @@ function Setup({ state }: { state: SmartStackState }) {
   const shown = groups.reduce((total, group) => total + group.steps.length, 0)
   const done = groups.reduce((total, group) => total + group.done, 0)
   return (
-    <Panel plain>
+    <Panel plain data-slot="stack-setup">
       <PanelHeader title="Setup" count={shown > 0 ? `${done} of ${shown} done` : undefined} />
-      <PanelBody className="space-y-4 pt-3">
+      <PanelBody className="space-y-5 pt-3">
         {groups.map((group) => (
           <section key={group.stage} aria-label={group.title} className="min-w-0">
             <p className="eyebrow flex items-baseline justify-between gap-3">
@@ -431,7 +438,10 @@ function Setup({ state }: { state: SmartStackState }) {
                 {group.done} of {group.steps.length}
               </span>
             </p>
-            <ul aria-label={group.title} className="mt-1 divide-y divide-hairline">
+            {/* Down the first column and then the second, in the order the
+                pass runs them. The lines bleed by their wash's inset, so the
+                marks stand under the stage's name. */}
+            <ul aria-label={group.title} className="-mx-2 mt-1.5 gap-x-6 md:columns-2">
               {group.steps.map((step) => (
                 <StepLine key={step.id} step={step} />
               ))}
@@ -448,33 +458,100 @@ function Setup({ state }: { state: SmartStackState }) {
   )
 }
 
+/** A step's state as the run page's step marks draw it: a tick, a live dot, a ring. */
+const STEP_MARK: Record<Exclude<SmartStackStep["status"], "skipped">, ReleaseNodeState> = {
+  done: "passed",
+  running: "running",
+  failed: "failed",
+  action_required: "warning",
+  pending: "pending",
+}
+
 function StepLine({ step }: { step: SmartStackStep }) {
   if (step.status === "skipped") return null
   const reading = STEP_STATUS[step.status]
-  const detail = stepDetail(step)
+  // Done says nothing beside its tick, and waiting says it in a ring and a
+  // fainter name; the rest say their state, a retry its attempt.
+  const word =
+    step.status === "running"
+      ? step.attempts > 1
+        ? `Attempt ${step.attempts}`
+        : reading.label
+      : step.status === "failed" || step.status === "action_required"
+        ? reading.label
+        : undefined
   return (
-    <li data-status={step.status} className="flex h-9 min-w-0 items-center gap-3">
-      <span className="flex w-24 shrink-0">
+    <li data-status={step.status} className="break-inside-avoid">
+      <Popover>
+        <PopoverTrigger asChild>
+          <button
+            type="button"
+            className="flex h-8 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left focus-ring transition-colors hover:bg-row-hover aria-expanded:bg-row-hover"
+          >
+            <StepMark state={STEP_MARK[step.status]} />
+            <span
+              className={cn(
+                "min-w-0 flex-1 truncate text-body",
+                step.status === "pending" && "text-muted-foreground",
+              )}
+            >
+              {step.title}
+            </span>
+            {word && (
+              <span
+                className={cn(
+                  "shrink-0 text-hint",
+                  step.status === "failed"
+                    ? "text-destructive"
+                    : step.status === "action_required"
+                      ? "text-warning"
+                      : "text-muted-foreground",
+                )}
+              >
+                {word}
+              </span>
+            )}
+            <span className="sr-only">, {reading.label}</span>
+          </button>
+        </PopoverTrigger>
+        <PopoverContent align="start" className="w-96 space-y-2">
+          <StepDetail step={step} />
+        </PopoverContent>
+      </Popover>
+    </li>
+  )
+}
+
+/** What a step did, behind its line: its state and when, its words, and its last report. */
+function StepDetail({ step }: { step: SmartStackStep }) {
+  if (step.status === "skipped") return null
+  const reading = STEP_STATUS[step.status]
+  const detail = stepDetail(step)
+  const at = step.finishedAt ?? step.startedAt
+  return (
+    <>
+      <p className="text-body font-medium">{step.title}</p>
+      <p className="flex flex-wrap items-center gap-x-2 text-hint text-muted-foreground">
         <Status tone={reading.tone} label={reading.label} />
-      </span>
-      <span
-        className="min-w-0 truncate text-body max-sm:flex-1 sm:max-w-[60%] sm:shrink-0"
-        title={step.title}
-      >
-        {step.title}
-      </span>
+        {step.attempts > 1 && <span className="numeric">{plural(step.attempts, "attempt")}</span>}
+        {at && <span>{relativeTime(at)}</span>}
+      </p>
       {detail && (
-        <span
-          title={detail}
+        <p
           className={cn(
-            "min-w-0 flex-1 truncate text-hint max-sm:hidden",
+            "text-hint leading-relaxed break-words",
             step.status === "failed" ? "text-destructive" : "text-muted-foreground",
           )}
         >
           {detail}
-        </span>
+        </p>
       )}
-    </li>
+      {step.log && step.log.length > 0 && (
+        <pre className="max-h-40 overflow-auto rounded-md border border-hairline bg-surface-sunken px-2 py-1.5 font-mono text-micro leading-relaxed whitespace-pre-wrap text-muted-foreground">
+          {step.log.join("\n")}
+        </pre>
+      )}
+    </>
   )
 }
 

@@ -125,6 +125,25 @@ test("a ready stack reads as a launcher: every app, what it is for, its address 
   )
   await expect(page.getByText("22 of 22 done", { exact: true })).toBeVisible()
   await expect(page.locator("[data-slot='stack-skipped']")).toHaveCount(0)
+  // A checklist: a done step is its tick and its name, in two columns, and
+  // what it did is behind the line rather than a second sentence on it.
+  await expect(setup.getByText("Done", { exact: true })).toHaveCount(0)
+  await expect(setup.getByText("Checked and unchanged")).toHaveCount(0)
+  const lines = setup.locator("li[data-status='done']")
+  const columns = await lines.evaluateAll((items) =>
+    items.map((item) => Math.round(item.getBoundingClientRect().x)),
+  )
+  expect(new Set(columns).size).toBe(2)
+  await lines
+    .first()
+    .getByRole("button", { name: /Make the download and library folders/ })
+    .click()
+  const detail = page.getByRole("dialog")
+  await expect(detail).toContainText("Make the download and library folders")
+  await expect(detail).toContainText("Done")
+  await expect(detail).toContainText("Checked and unchanged")
+  await page.keyboard.press("Escape")
+  await expect(page.getByRole("dialog")).toHaveCount(0)
 
   // What it does not do is said again where it runs.
   await expect(page.getByRole("list", { name: "What this stack does not do" })).toContainText(
@@ -191,7 +210,11 @@ test("a stack being configured shows the pass moving and is never called ready",
   await expect(running).toHaveCount(1)
   await expect(running).toContainText("Secure Sonarr with its own sign-in")
   await expect(running).toContainText("Attempt 2")
-  await expect(page.locator("li[data-status='pending']").first()).toContainText("Waiting")
+  // A step still to run is its ring and a fainter name, not fifteen "Waiting"s.
+  const pending = page.locator("li[data-status='pending']")
+  await expect(pending).toHaveCount(14)
+  await expect(pending.getByText("Waiting", { exact: true })).toHaveCount(0)
+  await expect(pending.first().getByRole("button")).toHaveAccessibleName(/, Waiting$/)
   // A pass is running, so there is nothing to press.
   await expect(lead(page).getByRole("button", { name: /Repair|Retry/ })).toHaveCount(0)
   // The login exists from the first pass on.
@@ -664,4 +687,95 @@ test("the stack page is one column on a phone, with every row one height", async
   )
   expect(new Set(stepHeights).size).toBe(1)
   await page.screenshot({ path: "test-results/deploy-stack-action-390.png", fullPage: true })
+})
+
+test("a stack's Overview leads with its address and folds its apps' names behind a press", async ({
+  page,
+}) => {
+  await mockStackProject(page, { state: stackState("ready") })
+  await page.routeWebSocket(/\/api\/v1\/docker\/containers\/.*\/stats\/stream/, () => {})
+  const names = [
+    "media.example.test",
+    "media-downloads.example.test",
+    "media-prowlarr.example.test",
+    "media-radarr.example.test",
+    "media-requests.example.test",
+    "media-sonarr.example.test",
+    "media-subtitles.example.test",
+  ]
+  // Listed in the order the server sorts them, the deployment's own address
+  // among the others rather than first.
+  const sorted = [...names.slice(1, 4), names[0], ...names.slice(4)]
+  await page.route("**/api/v1/deploy/7/operations", (route) =>
+    json(route, {
+      observedAt: new Date().toISOString(),
+      releaseId: 20,
+      evidence: "release",
+      runtime: { status: "available", observedAt: new Date().toISOString(), services: [] },
+      domains: {
+        status: "available",
+        siteName: "just-dashboard-env-12.conf",
+        domains: sorted.map((hostname) => ({
+          hostname,
+          https: true,
+          ownership: "managed",
+          route: "served",
+          certificate: "valid",
+          certificateName: hostname,
+          certificateDaysLeft: 85,
+          certificateIssuer: "R12",
+        })),
+      },
+      storage: { status: "available", mounts: [] },
+      backups: { status: "available", jobs: [] },
+      dependencies: { status: "available", items: [] },
+    }),
+  )
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await page.goto("/deploy/7")
+  const wiring = page.getByRole("list", { name: "How the project is wired" })
+  const domains = wiring.getByRole("listitem").filter({ hasText: "Domains" })
+  // The address the deployment is reached at, then every certificate once.
+  await expect(domains.getByRole("link")).toHaveCount(1)
+  await expect(domains.getByRole("link")).toHaveAttribute("href", "https://media.example.test/")
+  await expect(domains.locator("[data-slot='certificates-reading']")).toHaveText(
+    /^7 certificates valid\s*85 days left$/,
+  )
+  // Eight containers are their apps' names, three of them, and the rest one
+  // way to the Runtime page.
+  const runtime = wiring.getByRole("listitem").filter({ hasText: "Runtime" })
+  // A name and one line under it, as tall as Runtime's node rather than seven
+  // rows: within the pixel a mono name's line stands over a sans one.
+  const tall = (await domains.boundingBox())!.height
+  expect(tall).toBeLessThanOrEqual((await runtime.boundingBox())!.height + 3)
+
+  await expect(runtime).toContainText("8 of 8 containers running")
+  await expect(runtime.getByText("jellyfin", { exact: true })).toBeVisible()
+  await expect(runtime.getByText("media-server-jellyfin-1")).toHaveCount(0)
+  await expect(runtime.getByRole("link", { name: "5 more" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runtime",
+  )
+
+  // Every name is behind the press, each with its own certificate.
+  const more = domains.getByRole("button", { name: "6 more domains" })
+  await more.click()
+  const list = page.getByRole("dialog").getByRole("list", { name: "Domains" })
+  await expect(list.getByRole("listitem")).toHaveCount(7)
+  await expect(list.getByRole("link").first()).toHaveText("media.example.test")
+  await expect(list.getByText("Certificate valid", { exact: true })).toHaveCount(7)
+  await page.screenshot({ path: "test-results/deploy-stack-overview-1440.png" })
+  await page.keyboard.press("Escape")
+
+  await page.setViewportSize({ width: 390, height: 844 })
+  await expect(domains.locator("[data-slot='certificates-reading']")).toBeVisible()
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  await more.click()
+  await expect(page.getByRole("dialog").getByRole("listitem")).toHaveCount(7)
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
+    true,
+  )
+  await page.screenshot({ path: "test-results/deploy-stack-overview-390.png" })
 })
