@@ -32,7 +32,7 @@
   the plan that never deletes, the dry-run and write routes, what was written and by whom, preflight's
   `dns_record_writable` / `dns_record_missing` and the Domains sheet's Create the record.
 - [`request-observability.md`](request-observability.md) — what a deployment served: ingress access
-  logs, trace context, the request readings, traffic alerts, the traffic replay before a cutover,
+  logs, the 30-day request history (`requests.db`), trace context, the request readings, traffic alerts, the traffic replay before a cutover,
   security intel and blocking, container lifecycle events, availability and the Prometheus
   exposition, the three container-output fixes, and a project's Logs page.
 - [`image-vulnerabilities.md`](image-vulnerabilities.md) — each release's image and the bases it was

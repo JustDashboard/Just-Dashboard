@@ -227,3 +227,44 @@ func TestObserveTrafficPulseDrawsTheLastHour(t *testing.T) {
 		t.Fatalf("empty pulse = %+v", empty)
 	}
 }
+
+// historyRecord answers every window with a fixed coverage, as the store does
+// once a request history is attached.
+type historyRecord struct{ coverage accesslog.Coverage }
+
+func (h historyRecord) Window(context.Context, string, accesslog.Filter) (accesslog.Window, error) {
+	return accesslog.Window{Result: &accesslog.Result{Entries: []accesslog.Entry{}}, Coverage: h.coverage}, nil
+}
+
+// The page reads where the history begins, how long it keeps, and whether it
+// is recording, from coverage.history; a history with nothing kept yet says
+// so by leaving out its start.
+func TestObserveRequestsCarriesTheHistory(t *testing.T) {
+	from := time.Date(2026, 11, 20, 8, 0, 0, 0, time.UTC)
+	for _, tc := range []struct {
+		history accesslog.History
+		want    string
+	}{
+		{accesslog.History{From: &from, Days: 30, Recording: true}, `{"from":"2026-11-20T08:00:00Z","days":30,"recording":true}`},
+		{accesslog.History{Days: 30}, `{"days":30,"recording":false}`},
+	} {
+		history := tc.history
+		window := ObserveRequests(context.Background(), historyRecord{accesslog.Coverage{Exists: true, Complete: true, History: &history}}, 7, accesslog.Filter{})
+		raw, err := json.Marshal(window)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var shape struct {
+			Complete bool `json:"complete"`
+			Coverage struct {
+				History json.RawMessage `json:"history"`
+			} `json:"coverage"`
+		}
+		if err := json.Unmarshal(raw, &shape); err != nil {
+			t.Fatal(err)
+		}
+		if string(shape.Coverage.History) != tc.want || !shape.Complete {
+			t.Fatalf("coverage.history = %s (complete %v), want %s", shape.Coverage.History, shape.Complete, tc.want)
+		}
+	}
+}

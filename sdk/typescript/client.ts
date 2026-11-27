@@ -3166,6 +3166,11 @@ export interface DeploymentRequestExportQuery {
   referer?: string
   /** 1 to keep page requests only, 0 to leave them out. */
   pages?: string
+  /**
+   * people for the requests a person's browser made, bots for everything else; any other value is
+   * refused.
+   */
+  who?: string
   /** Only requests that took at least this many milliseconds. */
   minMs?: number
   /** Only requests that took at most this many milliseconds. */
@@ -3231,6 +3236,11 @@ export interface DeploymentRequestsQuery {
   referer?: string
   /** 1 to keep page requests only, 0 to leave them out. */
   pages?: string
+  /**
+   * people for the requests a person's browser made, bots for everything else; any other value is
+   * refused.
+   */
+  who?: string
   /** Only requests that took at least this many milliseconds. */
   minMs?: number
   /** Only requests that took at most this many milliseconds. */

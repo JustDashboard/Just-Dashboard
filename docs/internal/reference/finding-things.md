@@ -220,6 +220,7 @@ and `deploy-stack-sources.spec.ts` over `deploy-stack-fixture.ts`.
 | Deployments | `blueprint`, `gameserver` | Templates and game servers |
 | | `githubapp`, `dnsrecords`, `cftunnel`, `tailnetgate` | The GitHub App, DNS records, Cloudflare Tunnel, tailnet-only access |
 | | `secretstore`, `logdrain`, `accesslog`, `imagescan` | Secret stores, log drains, request records, image scans |
+| | `requesthistory` | The 30-day request history in `requests.db`: the archive (`archive.go`, `codec.go`, `scan.go`, `prune.go`) and the recorder that follows each route's files (`recorder.go`) |
 | | `proxysvc` (`deployment_*.go`), `dockerx`, `backups` | Routes, containers and backup coverage, each done by its owner |
 | Network | `netsec` | Firewall, connections, diagnostic tools |
 | | `netdiag`, `netcapture`, `netpath`, `netvantage` | Saved runs, packet captures, connection path, external checks |

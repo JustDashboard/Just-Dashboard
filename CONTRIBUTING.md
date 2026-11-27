@@ -754,6 +754,14 @@ never into `docs/audits/`.
   drives the container-side script against `caddy:2-alpine`: a roll under the reader, the rolled
   generation found by inode with its tail recovered, the new live file, a vanished inode reading as
   absent. It starts one idle container and removes it.
+- Changes to the request history — `internal/requesthistory`, or the history half of a window in
+  `accesslog/history.go` — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveRequestHistoryFollowsTheCaddyIngress -count=1 -v`
+  (the recorder through the real container-side script: a backfill, a roll followed by inode, a
+  restart continuing from the kept cursor, every request once; one idle container, removed) and
+  `JD_REQUEST_HISTORY_SCALE=1 go test ./internal/requesthistory -run TestAWeekOfHistoryIsAnsweredQuickly -v`,
+  which writes half a million requests over a week and logs what reading the week back costs, wall
+  and CPU, so a change that slows the page's "Last 7 days" is seen before it ships.
 - Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds,
   either endpoint in `handlers_deploy_requests.go`, or the persisted record in
   `dockerx/events_store.go` — also run

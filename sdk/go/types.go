@@ -749,6 +749,7 @@ type Coverage struct {
 	Exists      bool       `json:"exists,omitempty"`
 	From        *time.Time `json:"from,omitempty"`
 	Held        int64      `json:"held,omitempty"`
+	History     *History   `json:"history,omitempty"`
 	RefreshedAt time.Time  `json:"refreshedAt,omitzero"`
 	Stale       bool       `json:"stale,omitempty"`
 	To          *time.Time `json:"to,omitempty"`
@@ -2744,6 +2745,13 @@ type Healthcheck struct {
 	StartPeriodSeconds int64    `json:"startPeriodSeconds,omitempty"`
 	Test               []string `json:"test"`
 	TimeoutSeconds     int64    `json:"timeoutSeconds,omitempty"`
+}
+
+// History is accesslog.History in the dashboard's source.
+type History struct {
+	Days      int64      `json:"days,omitempty"`
+	From      *time.Time `json:"from,omitempty"`
+	Recording bool       `json:"recording,omitempty"`
 }
 
 // HostnameSuggestion is api.hostnameSuggestion in the dashboard's source.
