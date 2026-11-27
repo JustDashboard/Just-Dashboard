@@ -17,6 +17,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func request() Request {
@@ -116,7 +117,7 @@ func TestPCAPStreamingCapsIntegrityAndByteOrder(t *testing.T) {
 
 func service(t *testing.T, runner Runner) (*Service, *store.Store) {
 	t.Helper()
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

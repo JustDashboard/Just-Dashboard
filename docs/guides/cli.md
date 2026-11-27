@@ -35,7 +35,10 @@ jd vars set shop STRIPE_KEY=- < stripe.key        # KEY=- reads the value from s
 jd vars import shop .env --dry-run                # then without --dry-run
 jd vars rm shop OLD_FLAG
 jd config get shop --json > shop.json             # edit, then: jd config set shop shop.json
+jd source set shop shop.json                      # the source alone, from that file or one of its own
 jd create --name blog --image nginx:1.27-alpine --port 80   # a new deployment, through a draft
+jd logout                                         # forget the stored URL and key; the key works until revoked
+jd version                                        # this jd's version
 ```
 
 Every read takes `--json`. In CI, set `JD_URL` and `JD_KEY` instead of logging in; nothing is written.
@@ -82,6 +85,52 @@ database tools. *Read* is offered the reads; *Deploy* also the changes, held to 
 do; a destructive route also needs a role that may take destructive actions. Each call goes through
 the dashboard's own routes as the key and is in the audit log twice: as the MCP call and as the
 route's own entry.
+
+## Flags
+
+A flag can be written before or after the command and its words, and `jd COMMAND -h` lists the
+command's flags with their defaults.
+
+| Command | Flags |
+| --- | --- |
+| Every command | `--json` (the server's JSON; JSON lines for `logs`), `--quiet` (no hints), `--timeout D` (how long `--wait` and `--follow` keep waiting, default `30m`), `--ca-file PEM`, `--insecure-skip-verify` (do not check the dashboard's certificate; not recommended), `--insecure-http` (send the key over plain http to an address off loopback) |
+| Every command that acts on an environment | `--env NAME` or id; without it, production |
+| `jd login` | `--key KEY`; `--key -` reads it from stdin |
+| `jd openapi` | `--yaml` |
+| `jd deploy` | `--wait`, `--ref REF` (a branch, tag or commit instead of the configured one) |
+| `jd runs` | `--limit N` (default 20) |
+| `jd logs` | `--run N`, `--follow` (or `-f`) |
+| `jd rollback` | `--to ID`, `--instant`, `--wait` |
+| `jd promote` | `--release ID`, `--from-preview N`, `--wait` |
+| `jd maintenance` | `--bypass CIDR,...` (an empty value clears the list) |
+| `jd vars set`, `jd vars import` | `--plain` or `--secret` (the default); `--scope` with `runtime`, `build` and `release_task`, comma-separated (default `runtime`); `import` also takes `--dry-run` |
+| `jd create` | `--name`, `--image`, `--port P` (default 80; 0 for none), `--profile P` (`web`, `static`, `service` or `worker`; default `web`), `--no-check`, `--ack CODE`, `--ack-warnings` |
+| `jd drafts commit` | `--ack CODE`, once per warning it accepts |
+| `jd app-domain challenge` | `--credentials FILE` |
+
+## A deployment step by step
+
+`jd create` takes an image through the new-deployment page's steps in one go: it opens a draft, saves
+the name and profile, the image, and a configuration that listens on `--port` with an HTTP readiness
+check (`--no-check`, or `--port 0`, leaves the check out), then runs the preflight and commits. A
+finding that blocks stops it before the commit; a warning stops the commit until it is acknowledged,
+by its code with `--ack CODE` or all of them with `--ack-warnings`. Either way the draft is kept, to
+look at or finish by hand. Anything else, a Git repository or a Compose file, is the same journey one
+step at a time:
+
+```bash
+jd drafts create                    # a new draft; prints its id
+jd drafts save ID intent.json       # one step's document, {"step": "intent", "intent": {…}}; - reads stdin
+jd drafts detect ID                 # the dashboard inspects the source
+jd drafts preflight ID              # the checks; exits 1 while a finding blocks the commit
+jd drafts commit ID --ack CODE      # makes the deployment, accepting that warning
+jd drafts ls                        # the unfinished drafts
+jd drafts show ID                   # a draft's step, name, source and findings (--json for all of it)
+jd drafts rm ID                     # discards a draft
+```
+
+`save` fills in the draft's current revision when the document names none. A key narrowed to some
+deployments makes drafts of its own, and reaches the deployments it commits.
 
 ## certbot's hook for the just-dashboard.com address
 

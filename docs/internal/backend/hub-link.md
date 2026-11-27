@@ -60,7 +60,7 @@ The hooks the hub link uses:
 | `BeforePoll` | The hub node check before every poll of a pending request, in whichever process polls it. A `*RequestEndedError` ends the request as failed and nothing is sent |
 | `OnReply` | Decodes and checks `fleet`, `notices` and `signIn`, and returns the write the engine runs inside the heartbeat's own transaction, only while the link is still the one it was sent for: it caches them in `hub.link.view` and ends every sign-in grant whose hub user the reply no longer offers, and audits those ends once that transaction commits. A reply that does not decode strictly fails the heartbeat and nothing in it is used |
 | `OnClear` | In the same transaction that ends a link (disconnect, removal in the hub) or stores a new one: deletes `hub.link.view`, every sign-in grant and ticket record, and every hub session. What it returns runs after the commit (the audit entries) |
-| `HeartbeatExtra` | With `JD_HUB_SIGNIN=true`, adds `signIn: {grants: [...]}` to every heartbeat; the engine keeps such keys whole and cuts the snapshot's lists to make room. Off, the body is the snapshot alone |
+| `HeartbeatExtra` | Adds the fleet fields `os`, `signins` and, from `operate` up, `certificates` and `imageScans` (protocol 5.4, `fleet.go`), and with `JD_HUB_SIGNIN=true` `signIn: {grants: [...]}`; the engine keeps such keys whole and cuts the snapshot's lists to make room. None of them is in `accountlink.Snapshot`, so the account link never sends them |
 
 ## Files
 
@@ -71,13 +71,14 @@ The hooks the hub link uses:
 | `node.go` | The hub's machine (2.4): the check before sending, the dialer's gate, recording a node later, setting a link idle (`goIdle`), `NodeNote` for the begin audit |
 | `dial.go` | `tailscale status --json` on the host, and the dialer that only reaches a hub over `100.64.0.0/10` |
 | `view.go` | The fleet, notices and sign-in offer: strict decoding, per-entry rules, the cache |
+| `fleet.go` | The fleet fields of every heartbeat (protocol 5.4): `FleetSources`, one cached reading per field refreshed in the background on its own interval (6 hours for packages, 10 minutes for certificates, 5 for scans, 1 for sign-ins; 2 minutes after a failure), the scope cut, the 24 KiB cap on the two lists, and `AuditSignIns`, the sign-in counts read from the audit log |
 | `status.go` | `Status` (`GET /dashboard/hub`), `Session` (the `hub` field of `/auth/session`), `Hello` and its exact bodies |
 | `ticket.go` | Hub sign-in tickets: the shape, the pinned key, the signature, the payload scanned token by token, the server, time and second-factor checks, and the device check (protocol 9.4, 9.7 steps 3 to 10) |
 | `redeem.go` | `Redeem`: section 9.7 from the switches to the session, and its `hub.signin` audit entry |
 | `signin.go` | Grants (`Allow`, `Revoke`, `Grants`), the heartbeat's `signIn`, the hub-session check auth asks on every use, and every link and switch event that ends grants or hub sessions |
 | `hubstub/` | A signature-less stand-in hub for the `api` and `admin` tests |
 
-Outside the package: `api/handlers_hublink.go` (routes, construction), `api/handlers_hubsignin.go` (the redeem
+Outside the package: `api/handlers_hublink.go` (routes, construction), `api/hub_fleet.go` (the fleet fields' sources: the Packages check, the certificate inventory, the live image scans), `api/handlers_hubsignin.go` (the redeem
 and grant routes), the `hub` field in `api/handlers_auth.go`, `admin/hub.go` (terminal commands),
 `store/hub_link_schema.go` and `store/hub_signin_schema.go`, `auth/hub_signin.go` (hub sessions, and the end of a
 grant inside auth's own transactions), `httpx.RefuseHubSession`, `JD_HUB_LINK*` and `JD_HUB_SIGNIN` in `config`,
@@ -225,7 +226,8 @@ unchosen after a `?connect=` link ([feature map](../frontend/features/README.md)
 first, under the API rate limit per address, `Cache-Control: no-store`, and nothing in it but
 `{"product":"just-dashboard","protocol":1,"hub":"available|pending|linked"}` (written by hand, byte for byte the
 vectors' bodies). It is not mounted with `JD_HUB_LINK=false` or in agent mode, so those answer `404` as an older
-dashboard does. It is the one route under `/api/v1` that answers without a credential: `publicAPIRoutes` in
+dashboard does. It is the one route under `/api/v1` of a normal install that answers without a credential (an
+agent's are its two pre-enrolment routes, [platform](platform.md)): `publicAPIRoutes` in
 `routes_test.go` lists it with its exact body, `TestNoAPIRouteAnswersWithoutAuthentication` checks that body, and
 the walks of what an API, deploy or MCP key may open read the same list.
 

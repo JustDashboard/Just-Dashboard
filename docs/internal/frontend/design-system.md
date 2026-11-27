@@ -1,7 +1,7 @@
 # The design system
 
 This page is an index. Until 0.9.0 it held every rule in one 4,852-line file; the rules now live in
-the pages below, and the section numbers stay as their ids. About 720 comments in `frontend/src`
+the pages below, and the section numbers stay as their ids. More than 600 comments in `frontend/src`
 cite a section as `§n` (`§14`, `§15 pass 2`, `§16's table`): find the number here and follow it.
 
 Start from [`README.md`](README.md) to build a page, and from [`standard.md`](standard.md) for what

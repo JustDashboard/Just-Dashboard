@@ -29,7 +29,10 @@ and it goes back by itself when the new version does not answer; see
 machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enforced:
 
 - The backend refuses to start on a non-loopback address without a `JD_ALLOWED_CIDRS` allowlist,
-  and the allowlist is checked **before** authentication.
+  or with one that admits every address (`0.0.0.0/0`, `::/0`, or ranges that add up to either), and
+  the allowlist is checked **before** authentication. The Docker Compose stack goes further: the
+  backend and the web app listen on `127.0.0.1` alone, and Caddy is the only thing it puts on an
+  address other machines can reach.
 - Two-factor is enforced for every account that has enrolled, except accounts that opted in to hub
   sign-in on a server whose operator turned it on (`JD_HUB_SIGNIN=true`, off by default; see below);
   `JD_REQUIRE_2FA` decides whether an account *must* enrol. A passkey replaces the password at
@@ -120,7 +123,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Connecting to a Just Hub is optional and outbound only, to one machine on the server's own tailnet,
   reached only over the tailnet. It has its own key, pinned hub key, counter and audit name, separate
   from the just-dashboard.com link, and a hub's command runs only under the same checks and the scope
-  you chose. The hub's key is pinned when you approve and nothing the hub sends later can change it; the
+  you chose. Besides the report just-dashboard.com gets, the hub is told how many package updates are
+  waiting and whether a reboot is, and how many sign-ins succeeded and failed in the last day (counts,
+  never who or from where); from `operate` up, also certificate names with their days left and each
+  deployment's fixable image-scan findings. The hub's key is pinned when you approve and nothing the hub sends later can change it; the
   hub's tailnet machine is pinned too, so if another machine takes the hub's name the server sends it
   nothing and the connection goes quiet until you reconnect. What the hub sends to show (notices, server
   names, its messages) is shown as the hub's, never as the dashboard's own prompt. The one-time token the

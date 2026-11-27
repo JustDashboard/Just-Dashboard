@@ -1,7 +1,8 @@
 # Internal documentation
 
 This directory is the engineering reference for Just Dashboard. Its source coverage and factual
-inventories were reverified against the worktree on 2026-09-09. `AGENTS.md` is the short, canonical
+inventories were reverified against the worktree on 2026-09-09, and the package map and file-group
+counts again on 2026-11-26. `AGENTS.md` is the short, canonical
 operating guide; the documents here explain the implementation, rationale, security boundaries, test
 strategy, and feature ownership behind those rules.
 
@@ -41,8 +42,9 @@ strategy, and feature ownership behind those rules.
   the contract between a dashboard and a Just Hub on its tailnet (the URL rule, signing, the hub's endpoints,
   the heartbeat reply's fleet and notices, commands, the dashboard's routes and terminal commands, hub sign-in),
   with its vectors in [`backend/hub-link-vectors.json`](backend/hub-link-vectors.json).
-- [`backend/hub-link-errata.md`](backend/hub-link-errata.md) — the Just Hub repository's record of the
-  2026-11-05 amendments to that protocol and hub sign-in, entry by entry, with who implements each.
+- [`backend/hub-link-errata.md`](backend/hub-link-errata.md) — a snapshot of the Just Hub repository's record of
+  the 2026-11-05 amendments to that protocol and hub sign-in, entry by entry, with who implements each; its paths
+  are the hub's, and the hub's copy is the record.
 - [`backend/hub-link.md`](backend/hub-link.md) — how the dashboard implements it: the account link's engine run
   as a second instance with the hub's profile and sharing none of its state, the tailnet rule and the tailnet-only
   dialer, the hub's pinned machine and the idle link, the test origin, the cached fleet and notices, the discovery

@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/errdefs"
 )
 
 // RunToCompletion runs one container from an already present image until its
@@ -30,7 +30,7 @@ func (c *Client) RunToCompletion(ctx context.Context, spec ContainerSpec, out ch
 		cleanup, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 		defer cancel()
 		removeErr := c.RemoveContainer(cleanup, created.ID, true, true)
-		removed = removeErr == nil || errdefs.IsNotFound(removeErr)
+		removed = removeErr == nil || cerrdefs.IsNotFound(removeErr)
 	}()
 	cli, err := c.api()
 	if err != nil {

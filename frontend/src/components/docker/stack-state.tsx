@@ -1,8 +1,7 @@
 "use client"
 
-import { cn } from "@/lib/utils"
-import type { ComposeStack, StackState } from "@/lib/types"
-import { Status, type DotTone } from "@/components/status-dot"
+import type { StackState } from "@/lib/types"
+import type { DotTone } from "@/components/status-dot"
 
 /**
  * A stack's state as a word, because "0/0 up" is not a state.
@@ -32,26 +31,6 @@ export function stackTone(state: StackState): DotTone {
 /** A stack's state as its word. */
 export function stackLabel(state: StackState): string {
   return (STATE[state] ?? STATE.unknown).label
-}
-
-export function StackStateBadge({
-  stack,
-  className,
-}: {
-  stack: Pick<ComposeStack, "state" | "running" | "total" | "summary">
-  className?: string
-}) {
-  const meta = STATE[stack.state] ?? STATE.unknown
-  return (
-    <span className={cn("flex shrink-0 items-center gap-2", className)}>
-      <Status tone={meta.tone} label={meta.label} />
-      {stack.total > 0 && (
-        <span className="numeric text-hint whitespace-nowrap text-muted-foreground">
-          {stack.running}/{stack.total} services
-        </span>
-      )}
-    </span>
-  )
 }
 
 /**

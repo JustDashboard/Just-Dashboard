@@ -16,7 +16,8 @@ request. The frontend's build helpers are in `frontend/scripts/`, and the change
 | `dotenv.sh` | Writes a literal value into `.env` so Compose reads it unchanged | Installer (sourced) |
 | `password.sh` | The backend's password rule in shell, so a weak password is refused while the question is on screen | Installer (sourced) |
 | `build-stamp.sh` | The commit a build is stamped with when it is not the tagged release | Installer and `manage.sh` (sourced) |
-| `release.sh` | Writes a version everywhere it is carried, generates `CHANGELOG.md` and regenerates the OpenAPI description; the release notes go into `changelog.json` first | Release |
+| `release.sh` | Writes a version everywhere it is carried, generates `CHANGELOG.md` and regenerates the OpenAPI description; the release notes go into `changelog.json` first. Refuses while a version already on `main` has no tag on origin | Release |
+| `release-tags.sh` | Which versions on origin's `main` have no `v<version>` tag there, and the list of those known to be left untagged, with why | `release.sh` (sourced) |
 | `deps-check.sh` | Advisories that reach the code, and dependencies that are behind; needs the network | Release, and a contributor in between |
 | `pin-images.py` | Moves the image digests the Dockerfiles and the compose file are held to; `--check` verifies them offline | Release |
 | `test-changed.sh` | Runs the checks, Go tests and browser specs the diff can reach, and nothing else | Contributor |

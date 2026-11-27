@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 func TestLivePreviewStorageCredentialsNetworkAndCleanup(t *testing.T) {
@@ -122,7 +122,7 @@ func livePreviewContainerIsolation(t *testing.T) {
 	if err := owner.RemovePreviewResources(ctx, environmentID); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := client.InspectVolume(ctx, plan.Mounts[0].Source); !errdefs.IsNotFound(err) {
+	if _, err := client.InspectVolume(ctx, plan.Mounts[0].Source); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("preview volume survived cleanup: %v", err)
 	}
 	if _, err := client.InspectVolume(ctx, productionVolume); err != nil {

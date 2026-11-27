@@ -81,11 +81,7 @@ export default function AccountSecurityPage() {
           }
         />
         {user && (
-          <SignInPath
-            user={user}
-            required={required}
-            sessions={sessions.data ?? undefined}
-          />
+          <SignInPath user={user} required={required} sessions={sessions.data ?? undefined} />
         )}
         <SettingsColumn>
           <TwoFactorSection />

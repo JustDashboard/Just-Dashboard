@@ -16,7 +16,7 @@ Bun only. Keep `bun.lock`; never add `package-lock.json` or `yarn.lock`.
 | `src/hooks/` | Polling, sockets, authentication and other shared state |
 | `src/proxy.ts` | The request proxy: the CSP nonce and policy, and the trailing-slash rule |
 | `tests/browser/` | Playwright specs (`<area>-*.spec.ts`) and the mocked APIs they run against (`*-fixture.ts`, `fixtures/`) |
-| `scripts/` | Build helpers (`sync-monaco.mjs`, `sync-excalidraw.mjs`), the standalone server `bun run start` uses, the recording scripts, and `move-files.ts`, which moves files and exports to where `moves.json` says and rewrites every import, test path and doc mention of them (`bun scripts/move-files.ts --dry-run` lists what it would change) |
+| `scripts/` | Build helpers (`sync-monaco.mjs`, `sync-excalidraw.mjs`), the standalone server `bun run start` uses, the recording scripts, `move-files.ts`, which moves files and exports to where `moves.json` says and rewrites every import, test path and doc mention of them (`bun scripts/move-files.ts --dry-run` lists what it would change), and `function-sizes.ts`, which measures the functions in `src/` over 500 lines against the record in `function-sizes.json` that they may only fall below |
 | `eslint-rules/` | The design system's lint rules, turned on in `eslint.config.mjs` |
 | `public/` | Static files: the product logos, and the Monaco and Excalidraw files the sync scripts copy in |
 | `Dockerfile` | The frontend image |
@@ -30,7 +30,8 @@ repository root.
 bun install && bun dev               # :3000, proxies /api to 127.0.0.1:8080
 bun run lint && bun run build
 bun test src                         # the unit tests over src/lib and src/components
-bun test scripts                     # the move script's own tests
+bun test scripts                     # the scripts' own tests, and the function-size ratchet
+bun scripts/function-sizes.ts --write   # lower the ratchet's record after a long function shrinks
 bun run start --hostname 127.0.0.1 --port 43117   # the built server the browser specs open
 bunx playwright test tests/browser/docker-ui.spec.ts
 ```

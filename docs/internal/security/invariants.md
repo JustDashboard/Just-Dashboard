@@ -17,6 +17,9 @@ A change that weakens any of these has to say so explicitly.
    enforced server-side inside the handler. See below. A route that also serves routine, non-destructive
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
+   `TestEveryMutatingRouteIsAuditedAndGated` (`api/routes_gates_test.go`) walks the normal and the agent
+   router and fails on a route that asks for the destructive capability outside `s.destructive`, or that
+   carries its mark without the capability.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed, and each such check has one owner:
    - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
@@ -214,31 +217,67 @@ A change that weakens any of these has to say so explicitly.
    carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is
    not a sandbox around the server. Each check and the rule are stated in
    [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
+
+   Every mutating route asks for a capability a read-only account lacks, or is on `ungatedMutations` in
+   `api/routes_gates_test.go` under the reason it was reviewed for: the account's own things
+   (self-service), proving who the caller is (sign-in), a webhook or machine with a secret the handler
+   checks (own secret), a request that changes nothing (a read sent as POST), or a capability the handler
+   asks for itself (checked by hand, above). `TestEveryMutatingRouteIsAuditedAndGated` reads each
+   `RequireCapability` in a route's chain by wrapping it around a stub, never the handler, and fails on a
+   route that is neither, so a new route needs that decision before it merges.
 5. Every state-changing request lands in the audit log. A request made with an API key carries the
    key's id and name (`audit_log.key_id`, `key_name`) as well as its account, and a deploy key refused
    by the gate is written as `auth.deploy_key.refused`, reads included, since it is answered before the
    group's audit middleware runs. Every request a hub session makes is audited as actor `hub-session`
    (the assistant acting in one, `assistant`) with its hub user and session id (`audit_log.hub_user`,
    `session_id`), so it reads apart from the same account's own session
-   ([below](#the-exception-hub-sign-in)).
+   ([below](#the-exception-hub-sign-in)). `httpx.AuditMutations` is in front of every mutating route of
+   both routers; the one exception is certbot's hook (`POST /app-domain/hook/challenge`), which has no
+   principal for the middleware to name and records each challenge itself. `selfAuditedRoutes` in
+   `api/routes_gates_test.go` lists it, and `TestEveryMutatingRouteIsAuditedAndGated` fails on any other
+   mutating route outside an `AuditMutations` group.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
-   `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
-   those are pipelines an admin stored for their own project, not anything supplied per request — and, since
-   0.8.5, to the assistant's `run_command` (`term.Manager.RunCommand`), which is the terminal's own way of running
+   `hostexec` with an argv, never a shell string. Request-defined shell source is confined to two kinds,
+   deliberately. The first is command text an administrator stored for their own project: pipelines they
+   wrote, read back from the store when the project deploys, never anything a request supplies to be run
+   then. These are all of them, each `/bin/sh -c` over the stored text:
+
+   - **A legacy project's `preCommand` and `postCommand`** (`deploy.Deployer.shell`). Written by
+     `POST /deploy` and `PUT /deploy/{id}` under `system.admin`, in a session or with an ordinary key; a
+     deploy key is refused both (`whyLegacy`). Runs in the dashboard's own container, over the project's
+     checkout, with `deploy.mergeEnv`'s environment.
+   - **A release task with no `runner`**, the historical one (`deploy.runStoredReleaseTask`). Written in
+     the plan by `PUT /deploy/{id}/environments/{env}/configuration` and `POST /deploy/drafts/{draft}/commit`
+     under `system.admin` in a session, and carried on the same terms by what copies a plan (duplicating,
+     adding staging, a template). A deploy key reaches both routes, but `hostAuthority` refuses it
+     this task, and an environment that has one is changed by a person only. Runs in the dashboard's own
+     container (`hostexec.CommandInDir` finds `/bin/sh` there), over the run's checkout, with only the
+     task's own variables; a preview plans none, and a release whose code came from a pull request refuses
+     one (`refuseShellTasksForPullRequestCode`).
+   - **In the release's image rather than the dashboard's**: a release task with `runner: "image"`
+     (`releaseTaskContainerSpec`, a one-shot container of the release's image, its working directory a
+     positional argument of the script and never text in it), the plan's start command (the image's `CMD`,
+     `shellCMD`), and its build command and the migration or seed a build runs first (steps of the build).
+     Written in the plan as above, a deploy key's included; they run with the application's privileges, not
+     the dashboard's.
+
+   The assistant reaches these only through the same routes, as the person. The second kind is, since
+   0.8.5, the assistant's `run_command` (`term.Manager.RunCommand`), which is the terminal's own way of running
    a line handed a line to run: the terminal's account and login shell, under the terminal capability checked on
    every call, with a built environment (never the dashboard's own, which holds its secrets), nothing on standard
    input, a deadline that stops its process group, its output masked, each line in the press's audit entry, and,
    unless the person chose full access, an Allow for every line that is not a plain read
    ([the assistant's modes](../deployments/operator.md#the-modes)). It is a shell on purpose, as the terminal is;
    the argv rule is about the dashboard's own features never building a shell string out of what a request
-   carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third: it types into a real window
+   carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third kind: it types into a real window
    of the terminal's own, as the person would at the Terminal page, under the same capability, with each line in
    the audit entry. A `run_command` line that changes packages, restarts Docker or runs a `sudo` that may ask is
    typed into that window instead (`commandForTerminal`), so that an upgrade restarting Docker does not stop it
    halfway; its kind, and the Allow that kind needs, are still the line's own. A password a command asks for is never the model's to type: the person types it into the
    window from the chat (`POST /assistant/chats/{chat}/terminal`), and it reaches no provider, saved line or audit
-   entry. Do not add a third request-defined shell, and do not "fix" either into an argv. A git clone's parent and an
+   entry. Do not add a third kind of request-defined shell or a stored shell this list does not name, and do not
+   "fix" one of them into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
    clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. An
@@ -251,8 +290,39 @@ A change that weakens any of these has to say so explicitly.
    major-version upgrade runs the servers' own clients inside their own containers through
    `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
    (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
-   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is.
-7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
+   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is. A copy of a
+   managed database — a migration rehearsal's, a release's data copy, a preview's branch (`prepareCopy`) —
+   is restored the same way: a SQL dump by `dbx` over a connection to the copy's address on its own network,
+   a `pg_dump` archive by the copy's own `pg_restore`, and no password on a command line in it (`psql -c`
+   reads one from a session setting in `PGOPTIONS`, MySQL's account statements go over the connection, its
+   ping reads `MYSQL_PWD`). `TestCopyCodeFeedsNoClientAScriptAndNamesNoPasswordFlag` holds the copy's code
+   to that, and `TestNoCommandACopyRunsCarriesAPassword` the commands it runs. The one
+   statement that is fed to `psql` or `mysql` on standard input is the host account route's
+   (`POST /databases/host/grant`, `handlers_db_host.go`), because it carries a password an argument would
+   show every account on the machine: the dashboard writes it, on one line, with the password only inside a
+   quoted literal (a dollar quote for `psql`), where neither client reads a command, and a password with a
+   control character is refused.
+7. Nothing but Caddy binds a routable address in the shipped stack: `docker-compose.yml` pins the
+   backend's `JD_ADDR` to `127.0.0.1:${JD_BACKEND_PORT}`, publishes the frontend on `127.0.0.1` alone,
+   and puts nothing on the host's network but the backend and Caddy (`scripts/test_compose_binds.py`).
+   The program holds a looser rule, and holds it itself: `config.Load` refuses to start on a `JD_ADDR`
+   that is not a literal loopback address (a name, `localhost` included, counts as routable) unless
+   `JD_ALLOWED_CIDRS` is set, and refuses an allowlist that admits every IPv4 or every IPv6 address on
+   such a bind, however it is split. A routable `JD_ADDR` with an allowlist is the operator's
+   documented choice for the binary run by hand ([SECURITY.md](../../../SECURITY.md)): the allowlist
+   still runs before authentication, and the Security overview reports the socket as a broken
+   `ingress` boundary (below). **Agent mode** (`JD_AGENT_MODE`) is the named exception among the
+   dashboard's own listeners: its hub is on another machine and must reach it, so an agent is run by
+   hand on a routable `JD_ADDR` (the stack's loopback pin leaves it unreachable), under the same
+   allowlist rule. It serves that address over TLS that asks every caller for a certificate, and
+   without the enrolled hub's pinned certificate it answers `/healthz`, the signed webhooks,
+   `/agent/info` and `/agent/enrol` (a one-time token, on the login budget) and nothing else: every
+   feature route goes through `httpx.HubOnly`. `TestARoutableAddressWithoutAnAllowlistRefusesToStart`,
+   `TestAnAllowlistOfEveryAddressIsRefusedOnARoutableAddress`,
+   `TestAgentModeServesTLSThatAsksEveryCallerForACertificate` and
+   `TestHubOnlyAdmitsTheEnrolledHubsCertificateAlone` hold the program's half.
+
+   The exceptions below are not the dashboard's own listener. The first:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf
    (`selfcfg.TailnetServe`, `tailscale serve`), forwarding each to a loopback port the dashboard
@@ -310,6 +380,9 @@ A change that weakens any of these has to say so explicitly.
    `applyAddedColumns` ALTERs in at open. Every entry needs a `DEFAULT` (SQLite refuses a NOT NULL column
    on a populated table without one) and **no entry is ever removed** — the list is the path from every
    shipped schema to the current one, not a description of the current one.
+   `TestNoShippedAddedColumnIsRemoved` holds `addedColumns` to `store/testdata/added_columns.txt`, one
+   `table column` line per entry it has held: an entry gone from the code fails, and a new entry fails
+   until its line is added. `TestAddedColumnsAllDeclareADefault` checks the `DEFAULT`.
 
 9. A blueprint is data, never a script. `internal/blueprint` parses with unknown fields rejected and
    validates at package initialization, so a built-in that breaks the supply-chain policy cannot reach a
@@ -507,7 +580,11 @@ What did **not** change, and must not:
   [passkeys](../architecture/runtime-boundaries.md#passkeys).
 - A temporary password does not grant feature access. After required factors, only authentication
   status/logout and the session-only password change are available until `must_change_pw` is
-  cleared. API tokens cannot bypass this restriction.
+  cleared. API tokens cannot bypass this restriction. The factors come first: under `JD_REQUIRE_2FA`
+  an account made with a temporary password enrols from its partial session and then changes the
+  password, and from then on the 2FA routes refuse its session with `403 password_change_required`
+  (`httpx.RefuseOwedPasswordChange`, before a guess is spent) as every feature route does
+  (`resolveWithPasswordChange`). `api/password_change_order_test.go` holds both orders.
 
 Two deliberate loosenings. The first: with the policy off, an account that has never enrolled signs in
 on a password alone. `auth.Service.Login` elevates that session at creation, and `ResolveSession`

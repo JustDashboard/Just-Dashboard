@@ -13,7 +13,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 type adGuardFixture struct {
@@ -196,7 +196,7 @@ func newServiceFixture(t *testing.T, management bool) (*Service, *adGuardFixture
 	f := &adGuardFixture{protection: true, upstreams: []string{"192.0.2.53:53"}, allowed: []string{"10.0.0.0/24"}, denied: []string{}, blocked: []string{"retained.private.example"}, password: "fixture-only-secret-value"}
 	server := httptest.NewServer(http.HandlerFunc(f.serve))
 	t.Cleanup(server.Close)
-	db, err := store.Open(t.TempDir())
+	db, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

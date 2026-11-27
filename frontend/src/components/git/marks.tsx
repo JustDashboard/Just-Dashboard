@@ -2,7 +2,7 @@
 
 import { createContext, useContext } from "react"
 import { commitLogin } from "@/lib/commit-faces"
-import { plural, relativeTime } from "@/lib/format"
+import { plural } from "@/lib/format"
 import { workingTreeCounts, workingTreeSquares, type WorkingTreePart } from "@/lib/git-status"
 import type { GitRepo } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -257,57 +257,6 @@ export function ForgeFace({
         />
       </AvatarFallback>
     </Avatar>
-  )
-}
-
-/**
- * The last thing that happened in a repository, on one line: who, what, when.
- *
- * The order is a forge's — mark, subject, then the attribution trailing off in
- * muted text — rather than a table's, because the subject is the part being
- * scanned and anything in front of it is a delay.
- */
-export function CommitLine({
-  sha,
-  subject,
-  author,
-  at,
-  empty,
-  className,
-}: {
-  sha?: string
-  subject?: string
-  author?: string
-  at?: string
-  /** No commits yet — a fresh `git init`. */
-  empty?: boolean
-  className?: string
-}) {
-  if (empty || !subject) {
-    return (
-      <p className={cn("truncate text-hint text-muted-foreground italic", className)}>
-        {empty ? "no commits yet" : "—"}
-      </p>
-    )
-  }
-  return (
-    <p className={cn("flex min-w-0 items-center gap-1.5", className)}>
-      <AuthorMark name={author} />
-      <ShortSha sha={sha} />
-      {/* The subject takes the slack, so a wide row spends it on the message
-          and the attribution keeps a column of its own at the right. */}
-      <span className="min-w-0 flex-1 truncate text-hint text-foreground" title={subject}>
-        {subject}
-      </span>
-      {/* On a phone the subject is what the line is for: the name drops and
-          the stamp stays, rather than both surviving as two characters
-          each. */}
-      <span className="shrink-0 text-hint whitespace-nowrap text-muted-foreground">
-        <span className="hidden sm:inline">{author}</span>
-        {at ? <span className="hidden sm:inline"> · </span> : null}
-        {at ? relativeTime(at) : null}
-      </span>
-    </p>
   )
 }
 

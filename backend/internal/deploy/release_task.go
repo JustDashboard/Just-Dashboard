@@ -54,8 +54,12 @@ func runStoredReleaseTask(
 	}
 	taskCtx, cancel := context.WithTimeout(ctx, time.Duration(task.TimeoutSeconds)*time.Second)
 	defer cancel()
-	// This is the sole normalized host shell boundary. The command is immutable
-	// admin-authored plan content; request data and secret values never join it.
+	// One of the stored shells invariant 6 names (docs/internal/security/
+	// invariants.md): the normalized engine's only shell in the dashboard's own
+	// container, beside the legacy project hooks in Deployer.shell. The command
+	// is immutable plan content an administrator wrote, and a deploy key may
+	// not write it (hostAuthority); request data and secret values never join
+	// it, and the task's own variables reach it as its environment.
 	command := hostexec.CommandInDir(taskCtx, workingDirectory, "/bin/sh", "-c", task.Command)
 	command.Env = mergeEnv(scoped)
 	started := time.Now()

@@ -19,7 +19,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // The write half of the Docker surface: creating containers, volumes and
@@ -133,7 +133,7 @@ func (s *Server) authoriseSpec(r *http.Request, spec *dockerx.ContainerSpec) err
 		if m.Type == "volume" || m.Type == "" {
 			if m.Source != "" {
 				volume, err := s.modules.docker.InspectVolume(r.Context(), m.Source)
-				if err != nil && !errdefs.IsNotFound(err) {
+				if err != nil && !cerrdefs.IsNotFound(err) {
 					return httpx.Err(http.StatusForbidden, "volume_policy_unavailable", "the volume backing configuration could not be verified; retry when Docker is available")
 				}
 				if err == nil {

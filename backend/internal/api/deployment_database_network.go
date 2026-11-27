@@ -20,7 +20,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 type deploymentDatabaseNetworks struct {
@@ -165,7 +165,7 @@ func (o *deploymentDatabaseNetworks) network(ctx context.Context, environmentID 
 		return n, deploy.ErrRuntimeUnavailable
 	}
 	observed, err := o.server.modules.docker.InspectNetwork(ctx, n.Name)
-	if errdefs.IsNotFound(err) && create {
+	if cerrdefs.IsNotFound(err) && create {
 		_, err = o.server.modules.docker.CreateNetwork(ctx, dockerx.NetworkSpec{Name: n.Name, Driver: "bridge", Labels: map[string]string{
 			"io.just-dashboard.managed": "true", "io.just-dashboard.environment-id": strconv.FormatInt(environmentID, 10), "io.just-dashboard.database-network": n.OwnerKey,
 		}})
@@ -266,7 +266,7 @@ func (o *deploymentDatabaseNetworks) attachDatabase(ctx context.Context, network
 	}
 	if binding.ContainerID != "" && binding.ContainerID != detail.ID {
 		old, err := o.server.modules.docker.Inspect(ctx, binding.ContainerID)
-		if err != nil && !errdefs.IsNotFound(err) {
+		if err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		}
 		if err == nil {
@@ -410,7 +410,7 @@ func (o *deploymentDatabaseNetworks) attachPooler(ctx context.Context, network d
 	}
 	docker := o.server.modules.docker
 	detail, err := docker.Inspect(ctx, rec.Container)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		// Nothing to join; the pooler's own page says its container is gone.
 		return nil
 	}
@@ -651,7 +651,7 @@ func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, 
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil
 	}
-	if err != nil && !errdefs.IsNotFound(err) {
+	if err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	if err == nil {
@@ -693,7 +693,7 @@ func (o *deploymentDatabaseNetworks) removeRuntimeNetworks(ctx context.Context, 
 		}
 		err = o.server.modules.docker.RemoveNetwork(ctx, n.Name)
 		o.record(ctx, "deploy.database.network.remove", environmentID, 0, "", err)
-		if err != nil && !errdefs.IsNotFound(err) {
+		if err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		}
 	}

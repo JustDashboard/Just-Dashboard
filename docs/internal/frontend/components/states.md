@@ -11,12 +11,10 @@ Empty, absent, failed, stale, notice and loading: each one designed, and each at
 `MissingPage` and `StandaloneState` for a whole route, and `DatabaseMissingPage`
 (`database/shell/missing-page.tsx`) under a database, whose rail is the nearest pages.
 
-**Deprecated, kept while they have callers:** `ReadFailed` (`database/fleet/read-failed.tsx`,
-called only from `database/schema/` and `database/diagram/` now), `ReadError`
-(`database/kit/read-error.tsx`; `database/redis/read-error.tsx` re-exports it),
+**Deprecated, kept while they have callers:** `ReadError` (`database/kit/read-error.tsx`) and
 `NetworkReadWarning` (`network/read-warning.tsx`). Each is one call of the member named in its
-`@deprecated` line. The database home's own two copies are gone: its blocks use `ErrorState` and
-`Stale`.
+`@deprecated` line. The database pages' `ReadFailed` and the Redis pages' re-export of `ReadError`
+are gone, and so are the database home's own two copies: its blocks use `ErrorState` and `Stale`.
 
 ## Which one
 

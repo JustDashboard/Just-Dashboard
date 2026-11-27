@@ -368,9 +368,11 @@ are dated evidence, not proof of current attachment ownership.
   minutes is the hour it was inside, not the day you started from. Deliberately component state — a named
   range is a standing choice, a zoom is a question being asked now, and restoring yesterday's zoom shows an
   empty window with no obvious way out. `useMetricEvents` polls on a much slower cadence.
-- `src/lib/types.ts` mirrors the backend's JSON by hand, including the `Capability` union — it drifts if
-  backend types change without it. The proxy pages' shapes live in `src/lib/proxy/types-*.ts`, one file
-  per area of those pages, and `types.ts` re-exports them, so an import from `@/lib/types` finds them. `useAuth`'s `can("capability")` hides controls a role cannot use:
+- `src/lib/types/` mirrors the backend's JSON by hand, one file per area (`deploy.ts`, `network.ts`,
+  `database.ts` …), with the `Capability` union in `core.ts` — it drifts if backend types change
+  without it. The proxy pages' shapes live in `src/lib/proxy/types-*.ts`, one file per area of those
+  pages. `src/lib/types.ts` re-exports both with `export type *`, so an import from `@/lib/types` finds
+  every one of them. `useAuth`'s `can("capability")` hides controls a role cannot use:
   **affordance only**, the server re-decides every request.
 - An account that owes a password change remains unauthenticated in the UI after completing any
   required second factor. `/login` presents the current/new password form, then returns to credentials

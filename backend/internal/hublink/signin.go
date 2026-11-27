@@ -419,12 +419,14 @@ func (s *Service) checkHubSession(ctx context.Context, sess *auth.Session) bool 
 	return hubUser == sess.HubUser && created <= sess.CreatedAt.Unix()
 }
 
-// heartbeatExtra tells the hub, on every heartbeat while hub sign-in is on,
-// which accounts let which of its users sign them in (section 9.3). Off, the
-// key is absent and the hub reads that as sign-in off here.
+// heartbeatExtra is the hub link's own keys of every heartbeat: the fleet
+// fields (fleet.go, section 5.4), and while hub sign-in is on which accounts
+// let which of the hub's users sign them in (section 9.3). Off, signIn is
+// absent and the hub reads that as sign-in off here.
 func (s *Service) heartbeatExtra(ctx context.Context, st accountlink.State) (map[string]json.RawMessage, error) {
-	if !s.SignInEnabled() {
-		return nil, nil
+	out, err := s.fleet.extra(s.now(), st.Scope)
+	if err != nil || !s.SignInEnabled() {
+		return out, err
 	}
 	grants, err := grantsFor(ctx, s.st.DB, st.ServerID)
 	if err != nil {
@@ -435,18 +437,22 @@ func (s *Service) heartbeatExtra(ctx context.Context, st accountlink.State) (map
 		Username string `json:"username"`
 		HubUser  string `json:"hubUser"`
 	}
-	out := []wireGrant{}
+	list := []wireGrant{}
 	for _, g := range grants {
-		if len(out) == maxGrantsSent {
+		if len(list) == maxGrantsSent {
 			break
 		}
-		out = append(out, wireGrant{UserID: g.UserID, Username: g.Username, HubUser: g.HubUser})
+		list = append(list, wireGrant{UserID: g.UserID, Username: g.Username, HubUser: g.HubUser})
 	}
-	raw, err := json.Marshal(map[string]any{"grants": out})
+	raw, err := json.Marshal(map[string]any{"grants": list})
 	if err != nil {
 		return nil, err
 	}
-	return map[string]json.RawMessage{"signIn": raw}, nil
+	if out == nil {
+		out = map[string]json.RawMessage{}
+	}
+	out["signIn"] = raw
+	return out, nil
 }
 
 // endUnofferedTx ends every grant whose hub user the latest reply no longer

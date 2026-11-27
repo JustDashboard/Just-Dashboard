@@ -60,7 +60,10 @@ type dbTLSEngine struct {
 	files func(leaf *dbtls.Leaf, ca []byte) []dbTLSFile
 	// reload makes a running server read the files again. It is shell text run
 	// inside the container, where the account's password is already in the
-	// environment the image was started with.
+	// environment the image was started with. It hands the password to the
+	// client through the client's environment (MYSQL_PWD, REDISCLI_AUTH,
+	// process.env), never as an argument: a container's processes are the
+	// host's, and every account on the host can read their argv.
 	reload string
 	// reloadReplies, when set, says whether the reload's output means it took.
 	reloadReplies func(out string) bool
@@ -100,7 +103,7 @@ var dbTLSEngines = map[string]dbTLSEngine{
 			return args
 		},
 		files:  certFiles("server.key"),
-		reload: `mysql -uroot -p"$MYSQL_ROOT_PASSWORD" -e 'ALTER INSTANCE RELOAD TLS'`,
+		reload: `MYSQL_PWD="$MYSQL_ROOT_PASSWORD" mysql -uroot -e 'ALTER INSTANCE RELOAD TLS'`,
 	},
 	"mariadb": {
 		account: "mysql", servers: []string{"mariadbd", "mysqld"}, keyFile: "server.key", optional: true,
@@ -112,7 +115,7 @@ var dbTLSEngines = map[string]dbTLSEngine{
 			return args
 		},
 		files:  certFiles("server.key"),
-		reload: `mariadb -uroot -p"$MARIADB_ROOT_PASSWORD" -e 'FLUSH SSL'`,
+		reload: `MYSQL_PWD="$MARIADB_ROOT_PASSWORD" mariadb -uroot -e 'FLUSH SSL'`,
 	},
 	"mongodb": {
 		account: "mongodb", servers: []string{"mongod"}, keyFile: "server.pem", optional: true,
@@ -127,9 +130,12 @@ var dbTLSEngines = map[string]dbTLSEngine{
 				"--tlsCAFile", dbTLSDir + "/ca.crt", "--tlsAllowConnectionsWithoutCertificates"}
 		},
 		files: certFiles("server.pem"),
+		// mongosh takes a password as -p or in a connection string, both
+		// arguments, so the script signs in itself with what the image's
+		// environment holds.
 		reload: `mongosh --quiet --tls --tlsCAFile ` + dbTLSDir + `/ca.crt --tlsAllowInvalidHostnames --host 127.0.0.1 ` +
-			`-u "$MONGO_INITDB_ROOT_USERNAME" -p "$MONGO_INITDB_ROOT_PASSWORD" --authenticationDatabase admin ` +
-			`--eval 'db.adminCommand({rotateCertificates: 1})'`,
+			`--eval 'db.getSiblingDB("admin").auth(process.env.MONGO_INITDB_ROOT_USERNAME, process.env.MONGO_INITDB_ROOT_PASSWORD); ` +
+			`db.adminCommand({rotateCertificates: 1})'`,
 	},
 	"redis":  redisTLS("redis-server", "redis", "redis-cli"),
 	"valkey": redisTLS("valkey-server", "valkey", "valkey-cli"),

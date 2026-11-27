@@ -27,13 +27,20 @@ func TestAssistantStreamKeepsAQuietAnswerAlive(t *testing.T) {
 	}
 
 	st.send(map[string]any{"type": "thinking"})
-	time.Sleep(150 * time.Millisecond)
+	sent := time.Now()
+	waitFor(t, "two pings in a 20ms quiet", func() bool {
+		st.mu.Lock()
+		defer st.mu.Unlock()
+		return strings.Count(rec.Body.String(), `{"type":"ping"}`) >= 2
+	})
+	// However loaded the machine, two pings of a 20ms quiet come long before
+	// this; a stream that ignored the quiet it was given and kept the 15s one
+	// would take half a minute, which waitFor alone would still wait out.
+	if waited := time.Since(sent); waited > 5*time.Second {
+		t.Fatalf("two pings of a 20ms quiet took %s", waited.Round(time.Millisecond))
+	}
 	stop()
 	after := rec.Body.String()
-	pings := strings.Count(after, `{"type":"ping"}`)
-	if pings < 2 {
-		t.Fatalf("a quiet answer wrote %d pings in 150ms of a 20ms quiet:\n%s", pings, after)
-	}
 	for _, line := range strings.Split(strings.TrimSpace(after), "\n") {
 		if !strings.HasPrefix(line, "{") || !strings.HasSuffix(line, "}") {
 			t.Fatalf("a line is not whole JSON: %q", line)

@@ -22,7 +22,9 @@ How to read it:
   change lands.
 - `src/docs-catalogue.test.js` fails when a shared export has no row, when a row names something
   that is not an export, and when any page here names a component the code does not have. Its
-  baseline (`src/docs-catalogue.baseline.json`) is empty and stays empty.
+  baseline (`src/docs-catalogue.baseline.json`) is empty and stays empty. It also fails when a page
+  says a lint id is "coming" that `eslint-rules/` already defines, names one after "lint" that it
+  does not, or when [`standard.md`](../standard.md)'s list of what the linter refuses misses one.
 
 Looking for a shape rather than a name? Start from the families below, or from the recipe for the
 page you are building ([`../recipes/`](../recipes/README.md)).
@@ -358,8 +360,8 @@ where they are used); a page in that area takes them instead of drawing a copy.
 | `CHANGE_STATE` | [Databases](../features/databases.md) | `components/database/grid/legend.ts` | A staged change's sign, words and hue. | keep |
 | `PageControls` | [Databases](../features/databases.md) | `components/database/data/foot.tsx` | A pager's size picker and arrows. | keep |
 | `FileDrop` | [Databases](../features/databases.md) | `components/database/data/file-drop.tsx` | An import's file picker and drop zone. | keep |
-| `RunningCommand` | [Databases](../features/databases.md) | `components/database/query/running-command.tsx` | Stop, for a read that is out. | keep |
-| `COMMAND_CLASS`, `CommandClassTag` | [Databases](../features/databases.md) | `components/database/query/command-class.tsx` | What a console command does: reads, writes, removes or is refused. | keep |
+| `RunningCommand` | [Databases](../features/databases.md) | `components/database/kit/running-command.tsx` | Stop, for a read that is out. | keep |
+| `COMMAND_CLASS`, `CommandClassTag` | [Databases](../features/databases.md) | `components/database/kit/command-class.tsx` | What a console command does: reads, writes, removes or is refused. | keep |
 | `streamExport`, `settledExport`, `exportBlob`, `exportName`, `saveExport` | [Databases](../features/databases.md) | `lib/stream-export.ts` | The database exports' stream, record and save. | keep |
 | `exitWords`, `changeWords`, `crashed` | [Docker](../features/host.md) | `components/docker/words.ts` | What an exit code and a file change read as, and whether an exit was a crash. | keep |
 | `EventBand` | [Docker](../features/host.md) | `components/docker/event-band.tsx` | The band a Docker page opens on: what happened as one bar of four kinds, and the newest of them on the window's axis. | keep |

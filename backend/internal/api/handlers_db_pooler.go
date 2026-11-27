@@ -11,7 +11,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -103,7 +103,7 @@ func (s *Server) describePooler(ctx context.Context, conn *dbConnection, dsn str
 	}
 	detail, err := s.modules.docker.Inspect(ctx, rec.Container)
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		return view, nil
 	case err != nil:
 		return nil, s.dockerErr(err)
@@ -168,7 +168,7 @@ func (s *Server) handleDBPoolerStats(w http.ResponseWriter, r *http.Request) err
 	defer cancel()
 	detail, err := s.modules.docker.Inspect(ctx, rec.Container)
 	if err != nil {
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return httpx.Err(http.StatusConflict, "pooler_missing", "the pooler's container is gone; turn it on again to rebuild it")
 		}
 		return s.dockerErr(err)

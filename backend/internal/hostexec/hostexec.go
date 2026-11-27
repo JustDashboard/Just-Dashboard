@@ -247,11 +247,13 @@ func RunGroup(ctx context.Context, cmd *exec.Cmd, grace time.Duration) (GroupRes
 	defer ticker.Stop()
 	timer := time.NewTimer(grace)
 	defer timer.Stop()
-	var waitErr error
+	// What Wait returns is not kept: the context's cause is the public error
+	// and the exit code is the evidence. Waiting for it still matters, because
+	// ProcessState is only set once Wait has returned.
 	waitComplete := false
 	for groupAlive(pgid) {
 		select {
-		case waitErr = <-waited:
+		case <-waited:
 			waitComplete = true
 		case <-ticker.C:
 		case <-timer.C:
@@ -259,17 +261,15 @@ func RunGroup(ctx context.Context, cmd *exec.Cmd, grace time.Duration) (GroupRes
 				result.KILLSent = true
 			}
 			if !waitComplete {
-				waitErr = <-waited
-				waitComplete = true
+				<-waited
 			}
 			result.ExitCode = cmd.ProcessState.ExitCode()
 			return result, &GroupError{Cause: ctx.Err(), Result: result}
 		}
 	}
 	if !waitComplete {
-		waitErr = <-waited
+		<-waited
 	}
-	_ = waitErr // The context cause is the public error; exit is evidence.
 	result.ExitCode = cmd.ProcessState.ExitCode()
 	return result, &GroupError{Cause: ctx.Err(), Result: result}
 }

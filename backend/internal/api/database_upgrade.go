@@ -23,7 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // A major-version upgrade, carried out.
@@ -570,7 +570,7 @@ func (s *Server) startScratch(ctx context.Context, spec dockerx.ContainerSpec, s
 // name it is about to use again.
 func (s *Server) removeUpgradeLeftover(ctx context.Context, name string) error {
 	detail, err := s.modules.docker.Inspect(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -589,12 +589,12 @@ func (s *Server) removeScratch(ctx context.Context, id, volume string) []string 
 	defer cancel()
 	problems := []string{}
 	if id != "" {
-		if err := s.modules.docker.RemoveContainer(cleanup, id, true, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := s.modules.docker.RemoveContainer(cleanup, id, true, true); err != nil && !cerrdefs.IsNotFound(err) {
 			problems = append(problems, err.Error())
 		}
 	}
 	if volume != "" {
-		if err := s.modules.docker.RemoveVolume(cleanup, volume, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := s.modules.docker.RemoveVolume(cleanup, volume, true); err != nil && !cerrdefs.IsNotFound(err) {
 			problems = append(problems, fmt.Sprintf("volume %s: %v", volume, err))
 		}
 	}
@@ -1346,11 +1346,11 @@ func (u *upgradeRun) cutover(ctx context.Context, result *upgradeResult) error {
 	}
 
 	stop := 30
-	if err := s.modules.docker.Lifecycle(ctx, u.candidate.container, dockerx.ActionStop, &stop); err != nil && !errdefs.IsNotFound(err) {
+	if err := s.modules.docker.Lifecycle(ctx, u.candidate.container, dockerx.ActionStop, &stop); err != nil && !cerrdefs.IsNotFound(err) {
 		u.failCutover(ctx, err, true, "")
 		return err
 	}
-	if err := s.modules.docker.RemoveContainer(ctx, u.candidate.container, true, false); err != nil && !errdefs.IsNotFound(err) {
+	if err := s.modules.docker.RemoveContainer(ctx, u.candidate.container, true, false); err != nil && !cerrdefs.IsNotFound(err) {
 		u.failCutover(ctx, err, true, "")
 		return err
 	}

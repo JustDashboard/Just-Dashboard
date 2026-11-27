@@ -104,7 +104,8 @@ logins and an access list's addresses, sites and include line are in the sheet i
 site's page (`/proxy/sites/<name>`, `site-page.tsx`, with the list as a rail from `xl`,
 `site-rail.tsx`) keeps its views in the address (`site-tabs.ts`, unit-tested): Overview, Logs
 (`?tab=logs`) and, for an administrator and a file the form saves back, Settings (`?tab=settings`).
-Settings is the site form (`SiteSettings` in `site-form.tsx`) as one column of sections split across
+Settings is the site form (`SiteSettings` in `site-form.tsx`, its parts a file each in
+`site-form/`) as one column of sections split across
 parts (`&view=` general, https, access, hardening, headers, paths, file), with a strip naming the
 parts that hold unsaved changes (`site-sections.ts`, unit-tested) and one floating bar holding the
 form's saves (`site-settings.tsx`); leaving it with unsaved changes asks first. A new site, or a copy
@@ -213,7 +214,7 @@ report afterwards; the `ufw` line it would run is in the footer. `ssh-panel.tsx`
 applies them together, and its dialog says to keep the session open and check a second terminal — the one
 piece of advice no error message can give afterwards. `site-form.tsx` shows the server-rendered nginx as
 the form's last part (same renderer that writes the file, so the form is not a black box), with the DNS checks
-(`DomainChecks`) under the domain field because "the name does not point here yet" causes most certificate failures and
+(`DomainChecks`, `site-form/review.tsx`) under the domain field because "the name does not point here yet" causes most certificate failures and
 certbot reports it as "challenge failed". `tls-report.tsx` says out loud what `unknown` means for a
 protocol row.
 
@@ -286,5 +287,4 @@ strip were removed in 0.7.5.
 - **Logins** (0.8.7) opens on this server's identity line and a picture of where sessions are held
   from, who is attacking and which accounts are in (`logins-picture.tsx`); then the open sessions as
   one-line cards, attackers as a `RankList` and the login record as the page's one framed table.
-  Addresses use `PeerIdentity` or the inline
-  `Address`; address block and lookup actions remain in `address-verbs.tsx`.
+  Addresses use the inline `Address`; address block and lookup actions remain in `address-verbs.tsx`.

@@ -169,7 +169,9 @@ there after Compose restarted the container, it went down again.
   recovers nothing.
 - `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
   error. `jobs.Manager.run` calls every job's runner through it, so a job that panics is a failed job
-  with the reason on it, not the end of the dashboard and of every other job.
+  with the reason on it, not the end of the dashboard and of every other job. The hub link's fleet
+  readings (`hublink/fleet.go`) run through it too, so a source that panics is a failed reading, left
+  out of the heartbeat and read again two minutes later.
 
 Every task is remembered by name (`safego.Tasks`); a name is a fixed phrase, never built from an id.
 `GET /dashboard/health` lists the ones that panicked in the last half hour as `tasks` and the Overview
@@ -401,6 +403,8 @@ and its count share one immediate transaction that does not end with the request
 even if the client disconnects. `VerifyReauthentication` reads and adds to the same count.
 An account marked `must_change_pw` must finish its required factors before the password-change
 route becomes available, and cannot use feature routes or API tokens until the password is changed.
+Once its factors are given, the 2FA routes refuse it too (`httpx.RefuseOwedPasswordChange`), so a
+session owing the change reaches only its status, sign-out and the change.
 API tokens may narrow their creator's role, never widen it, and are demoted with the account.
 The account keys page replaces an owned key through the existing create route, followed by an
 optional, separately confirmed revoke after the tool has switched credentials. The old key remains

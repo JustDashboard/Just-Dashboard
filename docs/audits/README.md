@@ -47,23 +47,23 @@ by commit, never a file under this directory ([`../../AGENTS.md`](../../AGENTS.m
 | 2026-10-07 | [`2026-10-07-packages-overhaul/`](2026-10-07-packages-overhaul/README.md) | Packages overhaul | [24 files][2026-10-07-packages-overhaul] |
 | 2026-10-07 | [`2026-10-07-pm2-overhaul/`](2026-10-07-pm2-overhaul/README.md) | PM2 overhaul and merge verification | [21 files][2026-10-07-pm2-overhaul] |
 | 2026-10-07 | [`2026-10-07-process-refresh/`](2026-10-07-process-refresh/README.md) | Process refresh continuity | [3 files][2026-10-07-process-refresh] |
-| 2026-10-08 | [`2026-10-08-container-page-overhaul/`](2026-10-08-container-page-overhaul/) | Capture scripts only (`capture.ts`) | [30 files][2026-10-08-container-page-overhaul] |
+| 2026-10-08 | [`2026-10-08-container-page-overhaul/`](2026-10-08-container-page-overhaul/) | Capture scripts only (`capture.ts`). The container page overhaul they record shipped in [PR #183](https://github.com/JustDashboard/Just-Dashboard/pull/183) (0.7.1) | [30 files][2026-10-08-container-page-overhaul] |
 | 2026-10-08 | [`2026-10-08-docker-images-overhaul/`](2026-10-08-docker-images-overhaul/README.md) | Docker Images overhaul | [25 files][2026-10-08-docker-images-overhaul] |
 | 2026-10-08 | [`2026-10-08-docker-networks-overhaul/`](2026-10-08-docker-networks-overhaul/README.md) | Docker Networks overhaul | [15 files][2026-10-08-docker-networks-overhaul] |
 | 2026-10-08 | [`2026-10-08-docker-overview/`](2026-10-08-docker-overview/README.md) | Docker overview overhaul | [13 files][2026-10-08-docker-overview] |
-| 2026-10-08 | [`2026-10-08-docker-volumes-overhaul/`](2026-10-08-docker-volumes-overhaul/) | Capture scripts only (`capture.ts`) | [26 files][2026-10-08-docker-volumes-overhaul] |
+| 2026-10-08 | [`2026-10-08-docker-volumes-overhaul/`](2026-10-08-docker-volumes-overhaul/) | Capture scripts only (`capture.ts`). The Volumes page overhaul they record shipped in [PR #181](https://github.com/JustDashboard/Just-Dashboard/pull/181) (0.7.1) | [26 files][2026-10-08-docker-volumes-overhaul] |
 | 2026-10-08 | [`2026-10-08-network-audit/`](2026-10-08-network-audit/README.md) | Networking inventory, fixes and compatibility audit | [4 files][2026-10-08-network-audit] |
-| 2026-10-08 | [`2026-10-08-network-capability-report/`](2026-10-08-network-capability-report/README.md) | Networking capability, quality and competitor report | [146 files][2026-10-08-network-capability-report] |
+| 2026-10-08 | [`2026-10-08-network-capability-report/`](2026-10-08-network-capability-report/README.md) | Networking capability, quality and competitor report. Its ledger closed when [PR #173](https://github.com/JustDashboard/Just-Dashboard/pull/173) merged (0.7.1): of the 22 projects, 9 verified, 7 built with acceptance pending, 6 deferred | [146 files][2026-10-08-network-capability-report] |
 | 2026-10-11 | [`2026-10-11-log-filters-insights/`](2026-10-11-log-filters-insights/README.md) | Log filters, Insights and per-page log sources | [30 files][2026-10-11-log-filters-insights] |
 | 2026-10-12 | [`2026-10-12-actionable-findings/`](2026-10-12-actionable-findings/README.md) | Actionable findings across the dashboard | [14 files][2026-10-12-actionable-findings] |
 | 2026-10-12 | [`2026-10-12-onboarding/`](2026-10-12-onboarding/README.md) | The first-run question | [26 files][2026-10-12-onboarding] |
-| 2026-10-13 | [`2026-10-13-remote-desktop/`](2026-10-13-remote-desktop/) | Capture scripts only (`capture-cards.ts`, `capture.ts`) | [18 files][2026-10-13-remote-desktop] |
+| 2026-10-13 | [`2026-10-13-remote-desktop/`](2026-10-13-remote-desktop/) | Capture scripts only (`capture-cards.ts`, `capture.ts`). Remote Desktop shipped in [PR #216](https://github.com/JustDashboard/Just-Dashboard/pull/216), its Sunshine stream in [PR #219](https://github.com/JustDashboard/Just-Dashboard/pull/219) (0.7.5) | [18 files][2026-10-13-remote-desktop] |
 | 2026-10-14 | [`2026-10-14-current-non-network-fixes/`](2026-10-14-current-non-network-fixes/README.md) | Current non-network audit repairs | [14 files][2026-10-14-current-non-network-fixes] |
 | 2026-10-14 | [`2026-10-14-non-network-fixes/`](2026-10-14-non-network-fixes/README.md) | Non-network audit repairs | — |
 | 2026-10-14 | [`2026-10-14-operation-progress/`](2026-10-14-operation-progress/README.md) | Operation progress feedback | [43 files][2026-10-14-operation-progress] |
 | 2026-10-15 | [`2026-10-15-api-keys/`](2026-10-15-api-keys/README.md) | API key lifecycle and discovery | [11 files][2026-10-15-api-keys] |
 | 2026-11-05 | [`2026-11-05-hub-signin/`](2026-11-05-hub-signin/security-review.md) | Hub sign-in: security review against invariant 2 | — |
-| 2026-11-13 | [`2026-11-13-ui-overhaul-map/`](2026-11-13-ui-overhaul-map/README.md) | UI overhaul map: every page against the deploy pages, and what is left | [3 files][2026-11-13-ui-overhaul-map] |
+| 2026-11-13 | [`2026-11-13-ui-overhaul-map/`](2026-11-13-ui-overhaul-map/README.md) | UI overhaul map: every page against the deploy pages, and what is left. G1 to G4 and W1 to W12 were done in PRs [#451](https://github.com/JustDashboard/Just-Dashboard/pull/451) to [#503](https://github.com/JustDashboard/Just-Dashboard/pull/503), merged on 2026-11-14 (0.8.7) | [3 files][2026-11-13-ui-overhaul-map] |
 
 ## Records that were pictures only
 

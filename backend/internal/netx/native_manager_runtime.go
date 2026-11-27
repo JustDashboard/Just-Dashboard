@@ -101,7 +101,7 @@ func nativeNetworkdDNS(ctx context.Context, p *nativeProfile, intent NativeInten
 	if json.Unmarshal([]byte(out), &state) != nil || state.Name != p.View.Device {
 		return nil, nil, errors.New("unreadable networkd DNS evidence")
 	}
-	dns, domains := []string{}, []string{}
+	dns := []string{}
 	for _, server := range state.DNS {
 		switch {
 		case server.Family == 2 && len(server.Address) == 4:
@@ -124,7 +124,7 @@ func nativeNetworkdDNS(ctx context.Context, p *nativeProfile, intent NativeInten
 	if err != nil {
 		return nil, nil, err
 	}
-	domains, err = nativeNetworkdVerifyDomainPolicy(policy, intent, state.Search, state.Routes)
+	domains, err := nativeNetworkdVerifyDomainPolicy(policy, intent, state.Search, state.Routes)
 	if err != nil {
 		return nil, nil, err
 	}

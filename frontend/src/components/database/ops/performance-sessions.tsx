@@ -240,11 +240,7 @@ function Sessions({ activity }: { activity: PollState<DbActivityResponse> }) {
                   quiet
                   open={idleOpen}
                   onOpenChange={setIdleOpen}
-                  summary={
-                    <>
-                      {plural(idle.length, "idle session")}
-                    </>
-                  }
+                  summary={<>{plural(idle.length, "idle session")}</>}
                   facts={
                     longestIdle > 0 ? `connected and waiting, up to ${duration(longestIdle)}` : ""
                   }
@@ -579,9 +575,7 @@ function RunningQueries() {
           return (
             <PanelBody flush className={cn("animate-rise", FIT_COLUMN)}>
               {others.length === 0 ? (
-                <EmptyNote>
-                  Nothing is running but this page&apos;s own read of the list.
-                </EmptyNote>
+                <EmptyNote>Nothing is running but this page&apos;s own read of the list.</EmptyNote>
               ) : width < TABLE_FROM ? (
                 // Drawn down where a table has no room: nothing is dropped.
                 <ul className="divide-y divide-hairline border-y border-hairline">

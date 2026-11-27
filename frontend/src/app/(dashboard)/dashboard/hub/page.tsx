@@ -274,6 +274,7 @@ export default function HubLinkPage() {
                   <>
                     <SharedFields
                       scope={status.scope ?? scope ?? "observe"}
+                      peer="hub"
                       snapshot={link.lastSnapshot}
                       sentAt={status.lastHeartbeatAt}
                       className={BLOCK}
@@ -323,7 +324,7 @@ export default function HubLinkPage() {
                     className={BLOCK}
                   />
                 )}
-                {scope && <SharedFields scope={scope} className={BLOCK} />}
+                {scope && <SharedFields scope={scope} peer="hub" className={BLOCK} />}
               </>
             ) : null}
           </div>

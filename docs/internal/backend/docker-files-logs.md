@@ -714,7 +714,9 @@ State is saved as interaction happens; a stable history listener restores listin
 without stealing focus from a toolbar control. Removed entries cannot remain selected or inspected.
 
 `keyboard.ts` scopes the page and path-bar shortcuts to Files, leaving text fields, composition,
-open dialogs/menus/listboxes and the dashboard rail in charge of their own keys. F5/Ctrl/Cmd+R
+open dialogs/menus/listboxes and the dashboard rail in charge of their own keys. What each key does
+on the page is decided in `keymap.ts` (`filesKey`, unit-tested in `keymap.test.js`) from the press
+and the page's state, and the page's listener only carries the answer out. F5/Ctrl/Cmd+R
 refreshes only the folder; a modified hard refresh keeps the browser's behavior. Ctrl/Cmd+F opens
 name search; Ctrl/Cmd+Shift+N creates a folder, Ctrl/Cmd+Shift+. toggles hidden files and Ctrl/Cmd+Space
 toggles the active item. Name typing jumps through entries, repeated letters cycle matches, and
@@ -916,7 +918,8 @@ own save arriving back is neither. `watch_test.go` and `handlers_files_transfer_
 remove, rename, growth, coalescing, the limits and fallback, a path outside the roots, release and a
 moved folder; `files-transfer.spec.ts` the page.
 
-**Uploads in pieces** (`files/resumable.go`, `components/files/pieces.tsx`, `upload-pieces.ts`). A
+**Uploads in pieces** (`files/resumable.go`, `components/files/upload-pieces.ts`, and the queue in
+`uploads.tsx` that drives it). A
 file over 32 MiB goes to `POST /files/pieces` (`file.write`, audited as `file.upload.begin`), which
 checks the destination as a one-request upload would and the disk's room for the whole file, and
 creates a staging file `.jd-part-<id>` (0600, root's) beside the destination, on its filesystem. Pieces
