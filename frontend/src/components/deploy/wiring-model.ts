@@ -105,7 +105,9 @@ function daysLeft(domain: DeploymentDomainRoute) {
 
 /**
  * A group as the line's lead says it: the single certificate's own word
- * (`CERTIFICATE_LABEL`), or how many share the state.
+ * (`CERTIFICATE_LABEL`), or how many share the state. On a line of its own,
+ * beside the other states, a bare "Not observed" does not say what was not,
+ * so it is named as `CertificateStatus` names it beside another status.
  */
 export function groupLabel(state: Certificate, count: number): string {
   if (count === 1) return SINGLE[state]
@@ -123,7 +125,7 @@ const SINGLE: Record<Certificate, string> = {
   expired: "Certificate expired",
   missing: "No certificate",
   "not requested": "HTTP only",
-  unavailable: "Not observed",
+  unavailable: "Certificate not observed",
 }
 
 const MANY: Record<Certificate, string> = {
@@ -132,7 +134,7 @@ const MANY: Record<Certificate, string> = {
   expired: "certificates expired",
   missing: "with no certificate",
   "not requested": "HTTP only",
-  unavailable: "not observed",
+  unavailable: "certificates not observed",
 }
 
 const SHORT: Record<Certificate, string> = {

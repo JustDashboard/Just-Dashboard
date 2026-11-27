@@ -111,6 +111,12 @@ describe("the certificates in one line", () => {
     expect(groupShort("valid", 6)).toBe("6 valid")
     expect(groupShort("unavailable", 1)).toBe("1 not observed")
   })
+
+  test("certificates that could not be read say what was not observed", () => {
+    // Under the lead name there is no certificate column to say it for them.
+    expect(groupLabel("unavailable", 1)).toBe("Certificate not observed")
+    expect(groupLabel("unavailable", 7)).toBe("7 certificates not observed")
+  })
 })
 
 describe("what the names share", () => {
