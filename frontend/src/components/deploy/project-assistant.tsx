@@ -10,7 +10,8 @@ import { DIAGNOSE_QUESTION } from "@/components/assistant/agent/model"
 import type { AgentScope } from "@/components/assistant/agent/sessions"
 import { SubjectAssistant } from "@/components/assistant/agent/subject-page"
 
-// Eight, which wrap to two rows under the title on a laptop: a ninth was a third.
+// Eight: three rows under the title on a laptop and six on a phone, where a ninth
+// was a seventh. "What happened lately?" made way, being what Diagnose reads.
 const SUGGESTIONS: AgentSuggestion[] = [
   {
     label: "Fix the failed deploy",
