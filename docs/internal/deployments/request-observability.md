@@ -721,7 +721,10 @@ back the record reaches when that is less than the window ("Recorded since Nov 2
 `coverage.history`; "Held since …, so the figures are a floor" where nothing is kept; the words are
 the unit-tested `window-headline-model.ts`), and at its end the alerts in a word with the channels
 they tell (the rules' sentences are the word's title). The sentence and its line are one height with
-a reading and without one. The ranges are 15 minutes to **30 days**; a window of a day or more is
+a reading and without one. Over the rows it is the deployment page's (`RequestsWorkspace inspect`):
+the host Logs page and a site's pane keep their rows in a pane a third of the window's height, so
+they draw the sentence on Insights only, where it took the place of the audience tiles, and their
+chart keeps its own count. The ranges are 15 minutes to **30 days**; a window of a day or more is
 read again a minute apart, a shorter one every ten seconds. Under the sentence is the chart, then
 the rows.
 
