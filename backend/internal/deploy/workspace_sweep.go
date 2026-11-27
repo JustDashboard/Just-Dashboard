@@ -23,6 +23,14 @@ import (
 // all, is removed too. A workspace of a run that is queued, running or
 // anywhere short of terminal is never touched, nor anything in the folder
 // that is not a run-N directory.
+//
+// One finished run's workspace is read again: a Compose release runs from
+// it. Its runtime record names the workspace as the project's directory,
+// with the Compose files and the release's override in it
+// (runtime_owner.go), and stopping that release for the next one, starting
+// it again and rolling back to it all run Compose there. Such a workspace
+// is kept for as long as a runtime record that is not removed names it,
+// and goes at the first start-up after that.
 
 var runWorkspaceRE = regexp.MustCompile(`^run-([1-9][0-9]{0,18})$`)
 
@@ -37,10 +45,13 @@ func (e *NormalizedStepExecutor) runWorkspace(runID int64) string {
 
 // removeRunWorkspace removes a finished run's workspace, reporting whether
 // there was one.
-func (e *NormalizedStepExecutor) removeRunWorkspace(runID int64) (bool, error) {
+func (e *NormalizedStepExecutor) removeRunWorkspace(ctx context.Context, runID int64) (bool, error) {
 	workspace := e.runWorkspace(runID)
 	if workspace == "" {
 		return false, nil
+	}
+	if held, err := e.workspaceHoldsARelease(ctx, workspace); err != nil || held {
+		return false, err
 	}
 	info, err := os.Lstat(workspace)
 	if os.IsNotExist(err) {
@@ -97,11 +108,29 @@ func (e *NormalizedStepExecutor) SweepWorkspaces(ctx context.Context) (int, erro
 		case !state.Terminal():
 			continue
 		}
-		if gone, err := e.removeRunWorkspace(runID); err != nil {
+		if gone, err := e.removeRunWorkspace(ctx, runID); err != nil {
 			failures = append(failures, err)
 		} else if gone {
 			removed++
 		}
 	}
 	return removed, errors.Join(failures...)
+}
+
+// workspaceHoldsARelease says whether a Compose release still runs from
+// the workspace: a runtime record that is not removed names it, or a folder
+// inside it, as its project's directory. The comparison is of the paths
+// as Materialize and the runtime owner both derive them from the trusted
+// root, never a pattern.
+func (e *NormalizedStepExecutor) workspaceHoldsARelease(ctx context.Context, workspace string) (bool, error) {
+	if e == nil || e.store == nil {
+		return false, nil
+	}
+	var held int
+	err := e.store.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM deploy_release_runtimes
+		 WHERE kind = 'compose' AND state <> 'removed'
+		   AND (working_directory = ? OR substr(working_directory, 1, length(?) + 1) = ? || '/')`,
+		workspace, workspace, workspace).Scan(&held)
+	return held > 0, err
 }
