@@ -815,15 +815,19 @@ export function Configure({
    * carrying an unanswered field is still sent to the screen that owns it —
    * and that changes `current`, which is what stops this from firing again.
    *
-   * A check that fails leaves `preflight` empty and clears `busy`, which is
-   * every condition above, so on its own this would save and ask again at
-   * once — a revision a pass, for as long as preflight kept failing. It asks
-   * once per plan; after a failure, Deploy is the retry.
+   * A check that fails leaves `preflight` empty and clears `busy`, so on its
+   * own this would save and ask again at once: it asks once per plan, and after
+   * a failure Deploy is the retry. While the assistant works, its saves read
+   * back move `planSignature` with the page's revision behind the server's, so
+   * a check would save over its draft and take the revision its next call holds
+   * (a 409): the check, and every press here that saves, waits for it.
    */
+  const assistantSession = useAgentSession(draftScope(flow))
+  const assistantWorking = agentBusy(assistantSession)
   const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
     const plan = `${draftId}:${planSignature}`
-    if (current !== "review" || preflight || busy || created) return
+    if (current !== "review" || preflight || busy || created || assistantWorking) return
     if (autoChecked.current === plan) return
     // Scheduled rather than called: `submit` raises the busy flag as its first
     // act, and a state write in an effect's own body is a cascading render.
@@ -836,7 +840,7 @@ export function Configure({
     // `submit` closes over the whole form; re-running this for each of those
     // is what the `preflight` guard is there to make unnecessary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, preflight, busy, created, draftId, planSignature])
+  }, [current, preflight, busy, created, assistantWorking, draftId, planSignature])
 
   /**
    * `source_moved`'s remedy: the branch has moved past the commit Review
@@ -896,10 +900,6 @@ export function Configure({
     automatic: isGitSource ? gitPolicy.automatic : undefined,
   })
   const openRow = (row: PlanRow) => (row.section ? openSection(row.section) : goto(row.step))
-  // While it works the page's revision is behind the server's, so what commits the
-  // plan waits for it to finish.
-  const assistantSession = useAgentSession(draftScope(flow))
-  const assistantWorking = agentBusy(assistantSession)
   // Once it is deployed there is no setup to go back to, so the dock lets it go.
   useEffect(() => {
     if (created) dismissAgent(assistantSession)
@@ -1117,7 +1117,7 @@ export function Configure({
                     variant="ghost"
                     onClick={() => void submit("save")}
                     pending={busy === "save"}
-                    disabled={Boolean(busy)}
+                    disabled={Boolean(busy) || assistantWorking}
                   >
                     Save only
                   </Button>
@@ -1139,7 +1139,7 @@ export function Configure({
                     : "Deploy"}
               </Button>
             ) : (
-              <Button onClick={advance} disabled={Boolean(busy)}>
+              <Button onClick={advance} disabled={Boolean(busy) || assistantWorking}>
                 <ArrowRight className="size-4" />
                 Continue
               </Button>
