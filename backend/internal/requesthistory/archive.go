@@ -146,6 +146,9 @@ type Archive struct {
 	// history again. A route's name is its environment's id, never given to
 	// a second environment, so the set only ever names the gone.
 	forgotten map[string]bool
+	// forgottenHour is the hour of the last Forget whose strings the next
+	// prune owes a sweep (sweepUnnamed), or 0; held under write.
+	forgottenHour int64
 	// counted says this process has recounted every route's rows (prune.go).
 	counted bool
 }
@@ -172,7 +175,7 @@ func newArchive(db *store.SideDatabase) *Archive {
 // and agents, and the ingress's own record of them goes with the route
 // (proxysvc's RemoveDeploymentRoute), so keeping them a month with nothing
 // left to read them would keep personal data for no one. The strings only
-// those rows named go with the dictionary's sweep.
+// those rows named go on the next hourly prune (sweepUnnamed).
 func (a *Archive) Forget(ctx context.Context, route string) error {
 	if a == nil {
 		return nil
@@ -196,6 +199,10 @@ func (a *Archive) Forget(ctx context.Context, route string) error {
 	if _, err := a.db.Writer.ExecContext(ctx, `DELETE FROM routes WHERE id = ?`, id); err != nil {
 		return err
 	}
+	// Its visitors' addresses and agents stay in the dictionary until a
+	// prune sweeps the strings no kept row names, rather than for the
+	// retention's month.
+	a.forgottenHour = a.now().Unix() / 3600
 	a.routeMu.Lock()
 	delete(a.routeIDs, route)
 	a.routeMu.Unlock()

@@ -68,3 +68,51 @@ func TestACapTakesTheStringsOnlyTheRowsItCutNamed(t *testing.T) {
 		t.Fatalf("a request appended after the sweep reads back as %+v", got[len(got)-1])
 	}
 }
+
+// A forgotten route's rows go at once, and the strings only they named go on
+// the next hourly prune rather than a month later: its visitors' addresses
+// and agents are personal data with nothing left to read them.
+func TestForgettingARouteTakesTheStringsOnlyItNamed(t *testing.T) {
+	a, c := openTest(t)
+	ctx := context.Background()
+	kept := parse(t, caddyLine(c.Now().Add(-time.Hour), "/kept?a=1", 200, "KeptBrowser/1"))
+	if err := a.Append(ctx, "kept", []accesslog.Entry{kept}, Cursor{}); err != nil {
+		t.Fatal(err)
+	}
+	gone := make([]accesslog.Entry, 200)
+	for i := range gone {
+		at := c.Now().Add(-30 * time.Minute).Add(time.Duration(i) * time.Second)
+		gone[i] = parse(t, caddyLine(at, fmt.Sprintf("/visitor/%d?v=%d", i, i), 200, fmt.Sprintf("Visitor/%d", i)))
+	}
+	if err := a.Append(ctx, "gone", gone, Cursor{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Forget(ctx, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	count := func() int {
+		var n int
+		if err := a.db.Reader.QueryRow(`SELECT count(*) FROM strings`).Scan(&n); err != nil {
+			t.Fatal(err)
+		}
+		return n
+	}
+	// The hourly pass after it, with caps nothing reaches.
+	c.Advance(time.Hour)
+	if err := a.Prune(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if n := count(); n > 20 {
+		t.Fatalf("%d strings are kept for one request: the forgotten route's stayed", n)
+	}
+	if got := scanAll(t, a, "kept"); len(got) != 1 || got[0].Query != kept.Query || got[0].UserAgent != kept.UserAgent {
+		t.Fatalf("the kept route's request lost its strings: %+v", got)
+	}
+	// Paid: a later pass with nothing cut and nothing forgotten does not mark again.
+	a.write.Lock()
+	owed := a.forgottenHour
+	a.write.Unlock()
+	if owed != 0 {
+		t.Fatalf("the sweep is still owed after a later hour's pass (%d)", owed)
+	}
+}

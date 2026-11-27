@@ -92,10 +92,24 @@ func (a *Archive) prune(ctx context.Context, limit caps) error {
 	if err := a.sweepStrings(ctx, now); err != nil {
 		return err
 	}
-	if cut {
+	// A Forget owes the same sweep: its rows went, their strings did not.
+	// Strings named in the hour it ran are swept by a pass in a later hour,
+	// so the debt is paid only once such a pass has run.
+	hour := now.Unix() / 3600
+	a.write.Lock()
+	forgotten := a.forgottenHour
+	a.write.Unlock()
+	if cut || forgotten != 0 {
 		if err := a.sweepUnnamed(ctx, now); err != nil {
 			return err
 		}
+	}
+	if forgotten != 0 && hour > forgotten {
+		a.write.Lock()
+		if a.forgottenHour == forgotten {
+			a.forgottenHour = 0
+		}
+		a.write.Unlock()
 	}
 	return a.vacuum(ctx)
 }

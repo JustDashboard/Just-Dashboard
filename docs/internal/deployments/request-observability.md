@@ -237,7 +237,9 @@ files and past the process.
   route with nothing new is read less often, up to every two minutes; a reader is resolved again every
   ten minutes, since an ingress replaced by another fails no read. A route no longer listed keeps
   its history until it ages out, unless its project is deleted: `Archive.Forget` then deletes its
-  rows and cursor, and refuses any append the recorder still had in flight for it.
+  rows and cursor, refuses any append the recorder still had in flight for it, and has the next
+  hourly prune delete the strings only those rows named (`sweepUnnamed`,
+  `TestForgettingARouteTakesTheStringsOnlyItNamed`).
 - **A cursor kept with the rows.** Each route's row in `routes` holds the generation's identity, the
   offset past the last whole line, the newest instant read, a guard instant and a loss instant; it is
   written in the transaction that writes the requests it covers, so a restart continues exactly where
@@ -261,7 +263,7 @@ files and past the process.
   past **10,000,000 rows** (about 800 MB) give up their oldest, busiest route first. Every delete moves
   the route's loss instant to the newest request it removed. The dictionary's strings last written into
   a row more than an hour before the retention's start go with them. A pass in which a cap cut rows
-  also deletes every string no kept row names (`sweepUnnamed`: the kept rows' ids marked a chunk at a
+  (or that follows a `Forget`) also deletes every string no kept row names (`sweepUnnamed`: the kept rows' ids marked a chunk at a
   time, then the unmarked strings last used before the pass's hour deleted in batches), since a busy
   route's unique queries and addresses would otherwise outlive the rows that named them by a month
   and the caps would bound the rows but not the file (`TestACapTakesTheStringsOnlyTheRowsItCutNamed`).
