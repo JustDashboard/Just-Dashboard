@@ -180,11 +180,11 @@ func TestStackAddressesAreSavedAsDomainsAndDeployed(t *testing.T) {
 	}
 }
 
-// Addresses that are saved but that the live release does not serve are
-// published by deploying again, through the same press, once no release of
-// the deployment is under way: one that is may be the release publishing
-// them, and the page must not call it unfinished or start a second.
-func TestStackAddressesDeployAgainOnlyOnceNoReleaseIsUnderWay(t *testing.T) {
+// Addresses that are saved but that the live release does not serve, because
+// the release that was to publish them failed, are published by the same
+// press: it deploys again without adding a domain. They stay listed while
+// that release runs, which is how the page knows to link it.
+func TestStackAddressesSavedButNotLiveAreDeployedAgain(t *testing.T) {
 	s := testServer(t)
 	wireDeployPlanningAndSources(t, s, []string{t.TempDir()})
 	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
@@ -246,34 +246,15 @@ func TestStackAddressesDeployAgainOnlyOnceNoReleaseIsUnderWay(t *testing.T) {
 		return count
 	}
 
-	// A release is under way, perhaps the one publishing them.
-	run, err := s.Store.DB.Exec(`INSERT INTO deploy_runs(project_id, environment_id, started_at, status, state) VALUES(?, ?, 1, 'running', 'running')`, projectID, environmentID)
-	if err != nil {
-		t.Fatal(err)
-	}
-	runID, _ := run.LastInsertId()
-	if addresses := read(); len(addresses.Missing) != 0 || len(addresses.Unpublished) != 0 {
-		t.Fatalf("while a release is under way, addresses = %+v", addresses)
-	}
-	if refused := c.do(http.MethodPost, path+"/addresses", "", nil); refused.Code != http.StatusConflict ||
-		!strings.Contains(refused.Body.String(), "stack_addresses_present") || runs() != 1 {
-		t.Fatalf("a press while a release is under way = %d %s, %d runs", refused.Code, refused.Body.String(), runs())
-	}
-
-	// It failed: the six saved addresses are unpublished, and the press
-	// deploys again without adding any.
-	if _, err := s.Store.DB.Exec(`UPDATE deploy_runs SET state = 'failed', status = 'failed', ended_at = 2 WHERE id = ?`, runID); err != nil {
-		t.Fatal(err)
-	}
 	if addresses := read(); len(addresses.Missing) != 0 || len(addresses.Unpublished) != 6 {
-		t.Fatalf("after the release failed, addresses = %+v", addresses)
+		t.Fatalf("saved but not live, addresses = %+v", addresses)
 	}
 	response := c.do(http.MethodPost, path+"/addresses", "", nil)
 	if response.Code != http.StatusAccepted || !strings.Contains(response.Body.String(), `"domains":[]`) {
 		t.Fatalf("deploy again = %d %s", response.Code, response.Body.String())
 	}
 	var answer stackAddressesAnswer
-	if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil || answer.RunID == 0 || runs() != 2 {
+	if err := json.Unmarshal(response.Body.Bytes(), &answer); err != nil || answer.RunID == 0 || runs() != 1 {
 		t.Fatalf("answer = %+v %v, %d runs", answer, err, runs())
 	}
 	started, err := s.modules.deployRuns.Run(t.Context(), answer.RunID)
@@ -282,6 +263,13 @@ func TestStackAddressesDeployAgainOnlyOnceNoReleaseIsUnderWay(t *testing.T) {
 	}
 	if started.Operation != deploy.OperationDeploy || started.EnvironmentID != environmentID || started.PlanRevision != 1 {
 		t.Fatalf("run = %+v", started)
+	}
+	var audited int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM audit_log WHERE action = 'deploy.stack.addresses'`).Scan(&audited); err != nil || audited != 1 {
+		t.Fatalf("deploying again audited %d times: %v", audited, err)
+	}
+	if addresses := read(); len(addresses.Unpublished) != 6 {
+		t.Fatalf("while the release runs, addresses = %+v", addresses)
 	}
 }
 

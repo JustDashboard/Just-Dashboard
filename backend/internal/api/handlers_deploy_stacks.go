@@ -150,9 +150,9 @@ type stackAddresses struct {
 	Primary string         `json:"primary"`
 	Missing []stackAddress `json:"missing"`
 	// Unpublished are the services whose address is saved but that the
-	// live release does not serve, while no run of the deployment is under
-	// way: the release that was to publish them failed, or none was
-	// started. Pressing the same button deploys again.
+	// live release does not serve: the release that was to publish them
+	// failed, has not run, or is still running, in which case the page
+	// links that run. Pressing the same button deploys again.
 	Unpublished []stackAddress `json:"unpublished"`
 }
 
@@ -424,10 +424,7 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 	}
 	if domains, err := s.stackDomains(ctx, record.EnvironmentID); err == nil {
 		state.Addresses = stackMissingAddresses(manifest, preset, domains, "")
-		// While a run of the deployment has not ended, it may be the release
-		// that publishes them: that one is neither unfinished nor to be
-		// started again.
-		if state.LiveReleaseID != 0 && !s.stackReleaseUnderWay(ctx, record.ProjectID) {
+		if state.LiveReleaseID != 0 {
 			state.Addresses.Unpublished = stackUnpublishedAddresses(manifest, domains, state.Services)
 		}
 	}
@@ -523,15 +520,6 @@ func stackMissingAddresses(manifest *stacks.Manifest, preset stacks.Preset, doma
 		out.Missing = append(out.Missing, stackAddress{Service: info.Name, Title: info.Title, Hostname: hostname})
 	}
 	return out
-}
-
-// stackReleaseUnderWay is whether a run of the deployment has not ended yet.
-func (s *Server) stackReleaseUnderWay(ctx context.Context, projectID int64) bool {
-	if s.modules.deployRuns == nil {
-		return false
-	}
-	active, err := s.modules.deployRuns.ProjectActive(ctx, projectID)
-	return err == nil && active
 }
 
 // stackUnpublishedAddresses are the services a saved domain names that the
