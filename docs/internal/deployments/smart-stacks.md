@@ -194,7 +194,7 @@ Bazarr's) are kept there too and are never revealed.
 | `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, each one's public `url` once the live release serves it (Jellyfin's is the primary domain) and a private one's loopback `address`, steps, actions, `login {username, stored}`, `credentials` (the one login), `addresses {primary, missing}`; `404 stack_not_found` otherwise |
 | `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass, `409 stack_not_preset` when the live release is not one of the stack's presets (no pass would ever run); audited |
 | `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | the login's password (`name` is `login`); audited |
-| `PUT /deploy/{id}/stack/login` | administrator, session, not Hub | change the login; a pass follows; audited without the value |
+| `PUT /deploy/{id}/stack/login` | administrator, session, not Hub, not the assistant | change the login; a pass follows; audited without the value |
 | `POST /deploy/{id}/stack/addresses` | a configuration save's terms (an administrator in a session, or a deploy key) | give every app without one its address and deploy; audited |
 | `GET /deploy/{id}/stack/sources` | whoever reads the project | the sources Prowlarr has, whoever added them |
 | `GET /deploy/{id}/stack/sources/catalogue` | whoever reads the project | the torrent sources Prowlarr can add, each with `needsInput`, and `fetchedAt` |
@@ -263,6 +263,8 @@ is the dashboard's.
 - **The assistant** may add a source that needs no password, key or cookie. One with any of those
   is `403 source_needs_person`: what the assistant sends has passed through the model's provider,
   which is kept from every secret, so the person types it into the form, as a terminal's password is.
+  For the same reason the assistant is not offered `PUT /deploy/{id}/stack/login`
+  (`agentExcludedRoutes`): the person changes the one login on the Stack page.
 
 ## The Stacks tab and the Stack page
 
