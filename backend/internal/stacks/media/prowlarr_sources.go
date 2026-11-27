@@ -123,7 +123,7 @@ type MediaSourceOption struct {
 // stack's download client is qBittorrent), sorted by name.
 type MediaSourceCatalogue struct {
 	Definitions []MediaSourceDefinition `json:"definitions"`
-	FetchedAt   time.Time               `json:"fetchedAt"`
+	FetchedAt   time.Time               `json:"fetchedAt,omitzero"`
 	entries     map[string]*prowlarrSchemaEntry
 }
 
