@@ -5,12 +5,10 @@ import { AnimatePresence, motion } from "motion/react"
 import {
   Database,
   MoreHorizontal,
-  Pencil,
   Plus,
   Rocket,
   Servers,
   SettingsSliders,
-  Trash,
   type Icon,
 } from "@/components/icons"
 import { ApiError } from "@/lib/api"
@@ -330,11 +328,9 @@ function ChatRow({
                 setRenaming(true)
               }}
             >
-              <Pencil />
               Rename
             </DropdownMenuItem>
             <DropdownMenuItem variant="destructive" disabled={running} onSelect={onDelete}>
-              <Trash />
               Delete
             </DropdownMenuItem>
           </DropdownMenuContent>

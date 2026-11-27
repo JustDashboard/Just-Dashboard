@@ -111,7 +111,7 @@ export function StackApps({
                 actions={
                   verbs.length > 0 ? (
                     <DimActions>
-                      <VerbMenu verbs={verbs} glyphs={false} label={`More for ${service.title}`} />
+                      <VerbMenu verbs={verbs} label={`More for ${service.title}`} />
                     </DimActions>
                   ) : (
                     // The menu's room, so every row's Open stands on one edge.

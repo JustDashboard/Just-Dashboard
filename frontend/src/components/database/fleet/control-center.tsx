@@ -214,7 +214,6 @@ export function ControlCenter() {
     <VerbMenu
       verbs={verbs}
       label="More about the databases"
-      glyphs={false}
       trigger={
         <Button
           ref={more}
