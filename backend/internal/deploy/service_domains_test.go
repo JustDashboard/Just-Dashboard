@@ -795,3 +795,24 @@ func TestFleetShowsTheDeploymentsOwnNameBeforeAServiceDomain(t *testing.T) {
 		t.Fatalf("the shown address is %q, want the deployment's own name", got)
 	}
 }
+
+// Preflight's word on a public-URL variable names the deployment's own
+// domain, not a service domain that sorts before it: the plan's domains are
+// in name order, so media-radarr.example.test comes before media.example.test.
+func TestPreflightNamesTheDeploymentsOwnDomainBeforeAServiceDomain(t *testing.T) {
+	t.Parallel()
+	plan := canonicalConfiguration(mediaPlan())
+	if !plan.Domains[0].ServiceDomain() {
+		t.Fatalf("the fixture's first domain is %+v, want a service domain", plan.Domains[0])
+	}
+	if got := (environmentState{domains: plan.Domains}).publicOrigin(); got != "https://media.example.test" {
+		t.Fatalf("the public origin is %q, want the deployment's own name", got)
+	}
+	selected := &DetectedCandidate{NetworkVariables: []DetectedNetworkVariable{
+		{Name: "NEXTAUTH_URL", DomainTemplate: "{{scheme}}://{{hostname}}", Reason: "next-auth builds its callbacks from it"},
+	}}
+	findings := publicURLFindings(plan, selected, map[string]string{})
+	if len(findings) != 1 || findings[0].Action != "Set NEXTAUTH_URL=https://media.example.test." {
+		t.Fatalf("the public URL is filled from %+v", findings)
+	}
+}

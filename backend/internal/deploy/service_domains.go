@@ -41,6 +41,17 @@ func normalizeServiceDomains(domains []PlannedDomain, primary string, internalPo
 	return domains
 }
 
+// ownDomain is the first named domain the application itself answers: the
+// deployment's own address, never a service domain that sorts before it.
+func ownDomain(domains []PlannedDomain) (PlannedDomain, bool) {
+	for _, domain := range domains {
+		if strings.TrimSpace(domain.Hostname) != "" && !domain.ServiceDomain() {
+			return domain, true
+		}
+	}
+	return PlannedDomain{}, false
+}
+
 // validateServiceDomainShapes is what a plan's own validation can say about
 // its service domains without the Compose file they name: where a domain may
 // route to a service at all.

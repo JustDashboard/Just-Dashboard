@@ -2574,7 +2574,11 @@ only renderer/executor/validation authority for their feature.
   (`serviceRouteCheck`), with any answer below 500 reachable, an application's own 401, 302 or 403
   sign-in included. Traffic replay replays no service domain's requests against the candidate, and the
   release comparison shows the service on the domain's line. Staging copies and pull-request previews
-  take none of production's domains, so none of its service domains either.
+  take none of production's domains, so none of its service domains either. Domains are kept in name
+  order, so `media-downloads.example.com` comes before `media.example.com`: the fleet's address, run
+  notifications and pull-request comments order a service domain's row last, and preflight's public-URL
+  findings (the origin they suggest, a domain template's value, a Clerk key's domain) read the first
+  domain that is not one (`ownDomain`).
 - Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
   `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
   `previewsOnly`) has the public route ask an auth server about every request before the application
