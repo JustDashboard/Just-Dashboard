@@ -45,8 +45,9 @@ type Access string
 const (
 	// AccessPublic: the deployment's own domain routes to it.
 	AccessPublic Access = "public"
-	// AccessPrivate: published on this server's loopback only, for the
-	// person to open through a tunnel or publish through a site of their own.
+	// AccessPrivate: published on this server's loopback only, and reached
+	// from elsewhere at an address of its own beside the domain, which the
+	// proxy routes to that loopback port.
 	AccessPrivate Access = "private"
 	// AccessWorker: no web interface.
 	AccessWorker Access = "worker"

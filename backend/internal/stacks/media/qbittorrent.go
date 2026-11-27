@@ -148,24 +148,19 @@ func qbittorrentAuth(ctx context.Context, env stacks.Env) (stacks.Result, error)
 	if err != nil {
 		return stacks.Result{}, err
 	}
-	config, configErr := env.ReadFile(ctx, "qbittorrent", qbittorrentConfigFile)
+	// Without the file there is no telling which password it holds, and a
+	// guess could be one of the five: the attempt waits for the file.
+	config, err := env.ReadFile(ctx, "qbittorrent", qbittorrentConfigFile)
+	if err != nil {
+		return stacks.Result{}, fmt.Errorf("could not read qBittorrent's settings file, which says which password it holds: %w", err)
+	}
 	passwordSet, current := false, ""
-	if configErr == nil {
-		for _, candidate := range append([]string{login}, older...) {
-			set, matches := qbittorrentPasswordState(config, candidate)
-			passwordSet = set
-			if matches {
-				current = candidate
-				break
-			}
-		}
-	} else if _, haveLegacy, err := env.LookupCredential(ctx, legacyQBittorrent); err != nil {
-		return stacks.Result{}, err
-	} else {
-		// Without the file, one try: the password this stack set last.
-		passwordSet, current = true, login
-		if haveLegacy && len(older) > 0 {
-			current = older[len(older)-1]
+	for _, candidate := range append([]string{login}, older...) {
+		set, matches := qbittorrentPasswordState(config, candidate)
+		passwordSet = set
+		if matches {
+			current = candidate
+			break
 		}
 	}
 
@@ -178,11 +173,8 @@ func qbittorrentAuth(ctx context.Context, env stacks.Env) (stacks.Result, error)
 		case qbittorrentBanned:
 			return stacks.Result{}, errQBittorrentBanned
 		case qbittorrentRefused:
-			if configErr == nil {
-				// Not retried: every refusal is one of five.
-				return stacks.Result{}, stacks.Permanent(errors.New("qBittorrent refused the password its own settings hold"))
-			}
-			return stacks.Result{}, qbittorrentPasswordAction()
+			// Not retried: every refusal is one of five.
+			return stacks.Result{}, stacks.Permanent(errors.New("qBittorrent refused the password its own settings hold"))
 		}
 		if current == login {
 			api.signOut(ctx)

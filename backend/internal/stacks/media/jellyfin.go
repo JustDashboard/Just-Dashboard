@@ -587,8 +587,9 @@ func jellyfinFolderFor(folders []jellyfinFolder, path string) (jellyfinFolder, b
 // its container is on become known proxies, so it reads each visitor's own
 // address from the proxy rather than seeing every one of them as the proxy,
 // on this server's own network, which it would count as local. Proxies the
-// person added stay. Jellyfin applies the network settings when they are
-// saved, without a restart.
+// person added stay. Jellyfin 12.4 saves them at once and reads them when it
+// starts, so they apply from its next start: the next deploy, or a restart
+// of the service. The stack does not restart it under whoever is watching.
 func jellyfinProxy(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	base, err := env.BaseURL(ctx, "jellyfin", PortJellyfin)
 	if err != nil {
@@ -638,9 +639,11 @@ func jellyfinProxy(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 		if _, still := jellyfinProxies(network, subnets); len(still) > 0 {
 			return stacks.Result{}, fmt.Errorf("Jellyfin's known proxies read back without %s", strings.Join(still, ", "))
 		}
-		env.Logf("Jellyfin trusts the proxy at %s", strings.Join(missing, ", "))
+		env.Logf("Jellyfin trusts the proxy at %s from its next start", strings.Join(missing, ", "))
+		return stacks.Result{Message: "Jellyfin trusts the proxy at " + strings.Join(subnets, ", ") +
+			"; it reads each visitor's address from the proxy from its next start"}, nil
 	}
-	return stacks.Result{Message: "Jellyfin reads each visitor's address from the proxy at " + strings.Join(subnets, ", ")}, nil
+	return stacks.Result{Message: "Jellyfin trusts the proxy at " + strings.Join(subnets, ", ")}, nil
 }
 
 // jellyfinProxies is Jellyfin's known proxies and the subnets not among them.

@@ -310,3 +310,20 @@ func TestQBittorrentCategoriesDoNotRetryARefusedPassword(t *testing.T) {
 		t.Fatalf("error = %v, refusals = %d", err, qbittorrent.refusals)
 	}
 }
+
+// Without its settings file there is no telling which password qBittorrent
+// holds: the attempt fails to be retried, having spent no sign-in.
+func TestQBittorrentAuthWaitsForItsSettingsFileRatherThanGuess(t *testing.T) {
+	qbittorrent, env := qbittorrentEnv(t)
+	mustRunStep(t, env, "qbittorrent.auth")
+	delete(env.Files, "qbittorrent:"+qbittorrentConfigFile)
+	qbittorrent.take()
+
+	_, err := runStep(t, env, "qbittorrent.auth")
+	if err == nil || stacks.IsPermanent(err) || !strings.Contains(err.Error(), "settings file") {
+		t.Fatalf("error = %v", err)
+	}
+	if slices.Contains(qbittorrent.take(), "POST /api/v2/auth/login") || qbittorrent.refusals != 0 {
+		t.Fatal("a sign-in was tried without the settings file")
+	}
+}

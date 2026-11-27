@@ -156,7 +156,7 @@ A change that weakens any of these has to say so explicitly.
    and any key read, a deploy key included; it derives each operation's security from this table and
    from `RequireSession` in the route's chain, and a test walks both keys to check it
    ([`../backend/deploy-api.md`](../backend/deploy-api.md)). What stays a
-   session's whatever the key: every reveal (`…/variables/{name}/reveal`, a smart stack's accounts, shared variables, the legacy
+   session's whatever the key: every reveal (`…/variables/{name}/reveal`, a smart stack's one login and its change, shared variables, the legacy
    `…/env/reveal`), the saved registry and Git credentials (list, create, update, test and delete), the secret-store
    connections that hold credentials of their own (create, update, test and delete),
    the pull-request merge and comment that speak as the dashboard's GitHub account, preview approval,

@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -416,8 +417,8 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 	if login, found := manifest.CredentialByName(stacks.CredentialLogin); found {
 		state.Login = stackLoginState{Username: login.Username, Stored: stored[login.Name]}
 	}
-	if configuration, err := s.stackConfiguration(ctx, record); err == nil {
-		state.Addresses = stackMissingAddresses(manifest, preset, configuration.Domains, "")
+	if domains, err := s.stackDomains(ctx, record.EnvironmentID); err == nil {
+		state.Addresses = stackMissingAddresses(manifest, preset, domains, "")
 	}
 	state.Summary = stackSummary(state)
 	return state, nil
@@ -430,6 +431,33 @@ func (s *Server) stackConfiguration(ctx context.Context, record *stacks.Record) 
 		return nil, errors.New("deployment planning is not running on this dashboard")
 	}
 	return s.modules.deployPlanning.EnvironmentConfiguration(ctx, record.ProjectID, record.EnvironmentID)
+}
+
+// stackDomains are the environment's configured domains, as the Domains
+// settings show them, read without the rest of the configuration: the page
+// asks for the state every two seconds while a pass runs.
+func (s *Server) stackDomains(ctx context.Context, environmentID int64) ([]deploy.PlannedDomain, error) {
+	rows, err := s.Store.DB.QueryContext(ctx, `
+		SELECT config_json FROM deploy_dependencies
+		 WHERE environment_id = ? AND release_id = 0 AND kind = 'domain'
+		 ORDER BY resource_id`, environmentID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	domains := []deploy.PlannedDomain{}
+	for rows.Next() {
+		var config string
+		if err := rows.Scan(&config); err != nil {
+			return nil, err
+		}
+		var domain deploy.PlannedDomain
+		if err := json.Unmarshal([]byte(config), &domain); err != nil {
+			return nil, err
+		}
+		domains = append(domains, domain)
+	}
+	return domains, rows.Err()
 }
 
 // stackPrimaryDomain is the domain the primary service is served at: the
