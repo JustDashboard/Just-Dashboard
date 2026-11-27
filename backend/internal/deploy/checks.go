@@ -196,6 +196,10 @@ type CheckTarget struct {
 	Host          string
 	Port          int
 	PublicURLs    []string
+	// ServiceRoute is a public-route check asked of a service domain
+	// (service_domains.go): the application behind it answers with its own
+	// sign-in as often as not, so any answer below 500 is reachable.
+	ServiceRoute bool
 }
 
 type CheckAttemptEvidence struct {

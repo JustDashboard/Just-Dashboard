@@ -988,11 +988,23 @@ type PlannedDomain struct {
 	// than at this server's public address: Cloudflare terminates its HTTPS,
 	// and the route serves it over plain HTTP to the connector alone.
 	Tunnel bool `json:"tunnel,omitempty"`
+	// Service is the Compose service this name serves, a service domain
+	// (service_domains.go): the stack's Seerr at its own address beside the
+	// Jellyfin the deployment's own names reach. Empty is the plan's primary
+	// service, as every domain was before. Port is that service's container
+	// port, published on 127.0.0.1; zero is its only such port.
+	Service string `json:"service,omitempty"`
+	Port    int    `json:"port,omitempty"`
 }
 
 // Redirects says whether the domain sends visitors to another rather than
 // serving the application.
 func (d PlannedDomain) Redirects() bool { return d.RedirectTo != "" }
+
+// ServiceDomain says whether the name is answered by a Compose service or a
+// port other than the primary service's own, rather than by the release the
+// route serves.
+func (d PlannedDomain) ServiceDomain() bool { return d.Service != "" || d.Port != 0 }
 
 // domainConfig is the domain as its dependency row stores it. The redirect
 // is written only when there is one, so a domain saved before redirects
@@ -1013,7 +1025,19 @@ func (d PlannedDomain) domainConfig() map[string]any {
 	if d.Tunnel {
 		config["tunnel"] = true
 	}
+	d.serviceConfig(config)
 	return config
+}
+
+// serviceConfig adds the service a service domain routes to, written only
+// when set so every other domain keeps its bytes and its digest.
+func (d PlannedDomain) serviceConfig(config map[string]any) {
+	if d.Service != "" {
+		config["service"] = d.Service
+	}
+	if d.Port != 0 {
+		config["port"] = d.Port
+	}
 }
 
 type PlanConfiguration struct {
@@ -1938,6 +1962,9 @@ func (c PlanConfiguration) Validate() error {
 		}
 	}
 	if err := validateDomainRedirects(c.Domains); err != nil {
+		return err
+	}
+	if err := validateServiceDomainShapes(c); err != nil {
 		return err
 	}
 	// Every request a tunnel brings reaches the route from its connector's
@@ -2881,7 +2908,9 @@ func canonicalConfiguration(c PlanConfiguration) PlanConfiguration {
 		if c.Domains[index].Tunnel {
 			c.Domains[index].HTTPS = true
 		}
+		c.Domains[index].Service = strings.TrimSpace(c.Domains[index].Service)
 	}
+	c.Domains = normalizeServiceDomains(c.Domains, c.Build.PrimaryService, c.Runtime.InternalPort)
 	// Spelled the way the proxy writes them, so 10.0.0.1/32 and 10.0.0.1 are
 	// one entry and an edit that changes nothing changes no digest. Empty
 	// lists stay absent for the same reason.
