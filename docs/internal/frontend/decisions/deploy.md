@@ -31,7 +31,8 @@ Storage, Databases and Automation opened on four readings each.
 The rest of the deployment section took the pass as a question of *which* figures. The fleet
 opened on four the chips beneath it cannot say — how many projects are live, requests a minute
 across the fleet, the share of them failing, the build slots in use. The Logs page's readings
-each carry their last hour, as the host Overview's do.
+each carried their last hour, as the host Overview's do, until 27 Nov 2026, when the page
+became a workbench and its figures one sentence about the window on screen (`window-headline.tsx`).
 
 ## Notifications and Credentials (§15 pass 2)
 
@@ -86,6 +87,8 @@ is an Attention finding. The Build, Runtime, Domains, Storage, Databases and Aut
 start on their first section, whose head says what it currently is — Runtime's limits are drawn
 against the last hour's peak beside their fields and a blue/green plan the executor would refuse
 is said at the strategy, Domains' warning about a public bind address sits in its section, and
-Databases' cards say whether the gating job dumps each one. Logs is the one deployment page that
-keeps its row: four readings of the ingress's last hour that no row or chip says. Its fifth,
+Databases' cards say whether the gating job dumps each one. Logs was the one deployment page that
+kept its row until 27 Nov 2026, when the operator asked for no stat cards there and the row became
+the window's own sentence ([request observability](../../deployments/request-observability.md#frontend)):
+four readings of the ingress's last hour that no row or chip says. Its fifth,
 Container, went — the Events tab already counts the hour's disruptions.

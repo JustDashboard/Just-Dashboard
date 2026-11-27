@@ -698,9 +698,10 @@ window's height and the sheet's edges, with no project header over it. The proje
 `IdentityHeader` on `/logs` (`project-shell.tsx`, `<Page fill="workspace">`); the page opens on one
 strip of its own (`logs-strip.tsx`, the shared `WorkbenchHeader`): the way back to the Overview, the
 project's mark, name, address and state, the four views as tabs (`ViewTabList` inside a Radix `Tabs`
-the page holds, whose one panel is the view on screen) with the hour's container disruptions as a dot
-on Events, and the environment switch where there is staging. The header's facts and verbs are the
-Overview's, one press back. The operator asked for this: the header, four reading tiles and an alerts
+the page holds, whose one panel is the view on screen) with the hour's container disruptions as a
+count beside Events (on the bar's Events stop on a phone), and the environment switch where there is
+staging. The header's facts and verbs are the Overview's, one press back. The operator asked for
+this: the header, four reading tiles and an alerts
 line stood between the page and the first request, in a box of their own above the box of requests,
 and the tiles read the last hour whatever window was chosen below them.
 
