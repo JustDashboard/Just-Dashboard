@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"net"
 	"os"
 	"path/filepath"
@@ -787,6 +788,19 @@ func (o *DockerRuntimeOwner) StartExisting(
 		if err != nil {
 			return err
 		}
+		if composeFilesGone(metadata) {
+			// The containers are what is left of the release; starting them
+			// is starting it, as a container release's restart is.
+			if emit != nil {
+				_ = emit(BuildLog{Stream: "status", Text: "This release's Compose files are no longer on this server, so its containers are started one by one"})
+			}
+			for _, id := range metadata.ContainerIDs {
+				if err := o.client.Lifecycle(ctx, id, dockerx.ActionStart, nil); err != nil && !cerrdefs.IsNotModified(err) {
+					return err
+				}
+			}
+			return nil
+		}
 		return o.client.RunComposeRelease(ctx, composeSpecFromMetadata(metadata, variables),
 			dockerx.ComposeReleaseUp, 0, composeBuildEmitter(emit))
 	default:
@@ -817,27 +831,18 @@ func (o *DockerRuntimeOwner) Stop(
 	case "container":
 		// A replicated release's containers are stopped together, each given
 		// the whole grace period, so stopping eight takes as long as one.
-		ids := runtimeContainerIDs(runtime)
-		results := make([]containerStop, len(ids))
-		var wait sync.WaitGroup
-		for index, id := range ids {
-			wait.Add(1)
-			go func() {
-				defer wait.Done()
-				results[index] = o.stopContainer(ctx, id, grace, remove)
-			}()
-		}
-		wait.Wait()
-		evidence.Removed = remove
-		for _, result := range results {
-			evidence.Forced = evidence.Forced || result.forced
-			evidence.Removed = evidence.Removed && result.removed
-			err = errors.Join(err, result.err)
-		}
+		err = o.stopContainers(ctx, runtimeContainerIDs(runtime), grace, remove, &evidence)
 	case "compose":
 		metadata, decodeErr := decodeDockerRuntimeMetadata(runtime.Metadata)
 		if decodeErr != nil {
 			err = decodeErr
+			break
+		}
+		if composeFilesGone(metadata) {
+			if emit != nil {
+				_ = emit(BuildLog{Stream: "status", Text: "This release's Compose files are no longer on this server, so its containers are stopped one by one"})
+			}
+			err = o.stopContainers(ctx, metadata.ContainerIDs, grace, remove, &evidence)
 			break
 		}
 		spec := composeSpecFromMetadata(metadata, variables)
@@ -861,6 +866,58 @@ func (o *DockerRuntimeOwner) Stop(
 	}
 	evidence.CompletedAt = time.Now().UTC()
 	return evidence, err
+}
+
+// stopContainers stops a release's containers together, each given the
+// whole grace period, and records what that found on the evidence.
+func (o *DockerRuntimeOwner) stopContainers(ctx context.Context, ids []string, grace int, remove bool, evidence *RuntimeStopEvidence) error {
+	results := make([]containerStop, len(ids))
+	var wait sync.WaitGroup
+	for index, id := range ids {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			results[index] = o.stopContainer(ctx, id, grace, remove)
+		}()
+	}
+	wait.Wait()
+	evidence.Removed = remove
+	var err error
+	for _, result := range results {
+		evidence.Forced = evidence.Forced || result.forced
+		evidence.Removed = evidence.Removed && result.removed
+		err = errors.Join(err, result.err)
+	}
+	return err
+}
+
+// composeFilesGone says whether a Compose release's files are no longer
+// where its runtime record put them: its project's directory, a Compose
+// file or its override. A dashboard of 22 to 27 Nov 2026 removed a finished
+// run's workspace, and with it the files a Compose release made by that run
+// runs from (workspace_sweep.go now keeps them). Compose cannot stop or
+// start such a release, so it is stopped and started by the containers its
+// record names; only a fault reading a path that is there is not "gone".
+func composeFilesGone(metadata dockerReleaseRuntimeMetadata) bool {
+	if metadata.ProjectDirectory == "" {
+		return false
+	}
+	paths := []string{metadata.ProjectDirectory}
+	for _, file := range metadata.ComposeFiles {
+		if !filepath.IsAbs(file) {
+			file = filepath.Join(metadata.ProjectDirectory, filepath.FromSlash(file))
+		}
+		paths = append(paths, file)
+	}
+	if metadata.OverrideFile != "" {
+		paths = append(paths, metadata.OverrideFile)
+	}
+	for _, path := range paths {
+		if _, err := os.Stat(path); errors.Is(err, fs.ErrNotExist) {
+			return true
+		}
+	}
+	return false
 }
 
 // containerStop is what stopping one container of a release found.

@@ -1036,12 +1036,24 @@ only renderer/executor/validation authority for their feature.
   build, a refused preflight, a cancel) used to keep its checkout for good. A run's workspace is now
   removed as the run finishes (the engine's run-finished `HousekeepingObserver`), and at start-up
   `SweepWorkspaces` removes every `run-N` directory whose run is terminal or no longer recorded (its
-  project permanently deleted). Nothing reads a finished run's workspace again: the materializer
-  reuses one only for the same run through its marker, a retry is a new run with its own, and a
-  terminal run runs no further step. A run that is queued, running or anywhere short of terminal
-  (`failed_activation`, `restoring_previous`, `cancelling` included) keeps its workspace, and nothing
-  in the folder but a `run-N` directory is touched — a file or a link of that name is left alone.
-  The dashboard's backups already exclude the folder.
+  project permanently deleted). The materializer reuses one only for the same run through its
+  marker, a retry is a new run with its own, and a terminal run runs no further step. A run that is
+  queued, running or anywhere short of terminal (`failed_activation`, `restoring_previous`,
+  `cancelling` included) keeps its workspace, and nothing in the folder but a `run-N` directory is
+  touched — a file or a link of that name is left alone. The dashboard's backups already exclude the
+  folder.
+  - **A Compose release runs from its run's workspace**: the runtime record names it as the project's
+    directory, with the Compose files and the release's override in it, and stopping that release for
+    the next one and starting it again (restart, wake, putting it back when its successor fails) run
+    Compose there. So a workspace that a Compose runtime record names is kept, whatever its run's
+    state, while the record says the release's containers may still be on the server: any state but
+    `retired`, `failed` or `removed` (`workspaceHoldsARelease`). Those three come only after the
+    containers were removed, and a rollback is a release of its own with its own run's workspace, so
+    the workspace goes at the next start-up after the release is retired.
+  - A release made by a dashboard of 22 to 27 Nov 2026 can have lost its files to the sweep before
+    that rule; every redeploy of it failed as `previous_stop_failed`. `composeFilesGone` notices a
+    missing project directory, Compose file or override, and such a release is stopped, removed and
+    started by the containers its record names instead, with a status line saying so.
 - Artifact retention keeps the live release, five prior successful rollback releases, candidates, pins,
   retain-until windows, recent failed diagnostics, shared physical digests, every environment under
   an active deployment lease, a staging release an unfinished promotion is about to take its image
