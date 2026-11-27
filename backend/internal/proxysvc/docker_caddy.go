@@ -432,6 +432,14 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 	if err != nil {
 		return "", err
 	}
+	if len(route.HostUpstreams) > 0 && len(servers) == 0 {
+		return "", errors.New("a route sends names to other services only beside a release of its own")
+	}
+	for _, entry := range route.HostUpstreams {
+		if _, err := caddyUpstreams([]string{entry.Upstream}); err != nil {
+			return "", err
+		}
+	}
 	// The proxy to one release's servers, written at the handling's own
 	// depth: further lines are indented two spaces more than the first.
 	proxy := func(servers []string) string {
@@ -591,9 +599,21 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 		crowdSec = dockerCaddyCrowdSecFile
 	}
 	edge := renderCaddyEdgeRules(route, crowdSec)
-	handlingFor := func(https bool) string {
-		handling := trace + fence + edge + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directiveFor(https) + "\n"
-		if fence != "" || edge != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil || route.Skew != nil {
+	// A block whose names include service domains ends in a handle per
+	// service, matched by the name asked for, and the release's own last;
+	// everything before them applies to every name alike.
+	hostHandles := func(names []string, directive string) (string, bool) {
+		handles := caddyHostHandles(route.HostUpstreams, names, proxy)
+		if len(handles) == 0 {
+			return directive, false
+		}
+		handles = append(handles, "handle {\n    "+strings.ReplaceAll(directive, "\n", "\n  ")+"\n  }")
+		return strings.Join(handles, "\n  "), true
+	}
+	handlingFor := func(https bool, names []string) string {
+		directive, hosts := hostHandles(names, directiveFor(https))
+		handling := trace + fence + edge + maintenance + authDirective + gateDirective + bodyDirective + sleep + "  " + directive + "\n"
+		if fence != "" || edge != "" || maintenance != "" || route.ForwardAuth != nil || route.Canary != nil || route.Skew != nil || hosts {
 			handling = "  route {\n" + indentCaddy(handling) + "  }\n"
 		}
 		return handling
@@ -614,7 +634,7 @@ func renderDockerCaddyRoute(route DeploymentRoute, upstreams ...string) (string,
 				addresses[index] = "http://" + addresses[index]
 			}
 		}
-		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handlingFor(https) + errorPages + "}\n"
+		return strings.Join(addresses, ", ") + " {\n" + content + logDirective + headerDirective(https) + handlingFor(https, names) + errorPages + "}\n"
 	}
 	tlsServed, plainServed := route.servedByScheme()
 	// The app names a route serves with their wildcard are a block of
@@ -853,6 +873,32 @@ func caddyUpstreams(upstreams []string) ([]string, error) {
 // every other one is drawn as above and told its release in a cookie of the
 // warm window's lifetime, Secure on the HTTPS names. A route whose answers
 // are recorded says which release gave each one (log_append).
+// caddyHostHandles are the handles a site block's service domains are
+// answered by, in the order the route lists its host upstreams, each naming
+// the block's own names it serves. A matcher is numbered after its host
+// upstream, so one service has one name in every block of the route.
+func caddyHostHandles(entries []HostUpstream, names []string, proxy func([]string) string) []string {
+	var handles []string
+	for index, entry := range entries {
+		hosts := []string{}
+		for _, name := range names {
+			if containsFold(entry.Hostnames, name) {
+				hosts = append(hosts, strings.ToLower(name))
+			}
+		}
+		if len(hosts) == 0 {
+			continue
+		}
+		sort.Strings(hosts)
+		matcher := "@jd_service_" + strconv.Itoa(index+1)
+		// The proxy was written for the handling's depth; inside a handle
+		// every line of it is two spaces further in.
+		handles = append(handles, matcher+" host "+strings.Join(hosts, " ")+"\n"+
+			"  handle "+matcher+" {\n    "+strings.ReplaceAll(proxy([]string{entry.Upstream}), "\n", "\n  ")+"\n  }")
+	}
+	return handles
+}
+
 type caddyReleases struct {
 	live      string
 	liveLabel string
@@ -1183,6 +1229,22 @@ func (c *dockerCaddy) routeContent(ctx context.Context, route DeploymentRoute) (
 			resolved.Pinned = append(resolved.Pinned, found)
 		}
 		rendered.Skew = &resolved
+	}
+	// A service domain's container is found by its own loopback
+	// publication and recorded on a target line after the release's, so the
+	// maintenance pass repairs it as it does a replica.
+	if len(route.HostUpstreams) > 0 {
+		rendered.HostUpstreams = make([]HostUpstream, 0, len(route.HostUpstreams))
+		for _, entry := range route.HostUpstreams {
+			target, err := c.target(ctx, entry.Upstream)
+			if err != nil {
+				return "", nil, fmt.Errorf("%s: %w", strings.Join(entry.Hostnames, ", "), err)
+			}
+			targets = append(targets, target)
+			rendered.HostUpstreams = append(rendered.HostUpstreams, HostUpstream{
+				Hostnames: append([]string(nil), entry.Hostnames...), Upstream: target.upstream(),
+			})
+		}
 	}
 	// The trace is recorded with log_append, which Caddy has had since 2.8;
 	// an operator's older ingress serves the route without one rather than

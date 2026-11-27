@@ -280,6 +280,13 @@ func renderHTTPBlock(l *lines, spec *SiteSpec) {
 		l.blank()
 		renderSplit(l, spec)
 	}
+	if spec.Kind == "proxy" && len(spec.hostUpstreams) > 0 {
+		if wrote {
+			l.blank()
+		}
+		renderHostUpstreamMap(l, spec)
+		wrote = true
+	}
 	if spec.Trace {
 		if wrote {
 			l.blank()
