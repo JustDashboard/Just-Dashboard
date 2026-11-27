@@ -986,7 +986,11 @@ only renderer/executor/validation authority for their feature.
   gzipped or not) is never handed to `psql` or `mysql`: it is replayed by `dbx` over a connection to
   the copy's address on the rehearsal network, which the dashboard, on the host's network, reaches
   directly, signed in as the server's superuser with the password its container was started with, TLS
-  when the copy offers it ([invariant 6](../security/invariants.md)). The transcript keeps the replay's
+  when the copy offers it ([invariant 6](../security/invariants.md)). That password is read from the
+  container's environment (`POSTGRES_PASSWORD`, `MYSQL_ROOT_PASSWORD` or `MARIADB_ROOT_PASSWORD`): a
+  PostgreSQL server given its password only as a file (`POSTGRES_PASSWORD_FILE`) cannot be copied from a
+  SQL dump, and the restore fails saying so; its archives and point-in-time copies are restored over the
+  socket and need none. The transcript keeps the replay's
   progress and the server's warnings, not its notices, and a failure names the statement and its line.
   The application's role is made first when it is not the superuser, over the socket with its password
   handed to `psql` as a session setting in `PGOPTIONS`, never on the command line; MySQL and MariaDB's
