@@ -238,22 +238,46 @@ A change that weakens any of these has to say so explicitly.
    mutating route outside an `AuditMutations` group.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
-   `hostexec` with an argv, never a shell string. Request-defined shell source is confined to `deploy.Deployer.shell`, deliberately:
-   those are pipelines an admin stored for their own project, not anything supplied per request — and, since
-   0.8.5, to the assistant's `run_command` (`term.Manager.RunCommand`), which is the terminal's own way of running
+   `hostexec` with an argv, never a shell string. Request-defined shell source is confined to two kinds,
+   deliberately. The first is command text an administrator stored for their own project: pipelines they
+   wrote, read back from the store when the project deploys, never anything a request supplies to be run
+   then. These are all of them, each `/bin/sh -c` over the stored text:
+
+   - **A legacy project's `preCommand` and `postCommand`** (`deploy.Deployer.shell`). Written by
+     `POST /deploy` and `PUT /deploy/{id}` under `system.admin`, in a session or with an ordinary key; a
+     deploy key is refused both (`whyLegacy`). Runs in the dashboard's own container, over the project's
+     checkout, with `deploy.mergeEnv`'s environment.
+   - **A release task with no `runner`**, the historical one (`deploy.runStoredReleaseTask`). Written in
+     the plan by `PUT /deploy/{id}/environments/{env}/configuration` and `POST /deploy/drafts/{draft}/commit`
+     under `system.admin` in a session, and carried on the same terms by what copies a plan (duplicating,
+     adding staging, a template). A deploy key reaches both routes, but `hostAuthority` refuses it
+     this task, and an environment that has one is changed by a person only. Runs in the dashboard's own
+     container (`hostexec.CommandInDir` finds `/bin/sh` there), over the run's checkout, with only the
+     task's own variables; a preview plans none, and a release whose code came from a pull request refuses
+     one (`refuseShellTasksForPullRequestCode`).
+   - **In the release's image rather than the dashboard's**: a release task with `runner: "image"`
+     (`releaseTaskContainerSpec`, a one-shot container of the release's image, its working directory a
+     positional argument of the script and never text in it), the plan's start command (the image's `CMD`,
+     `shellCMD`), and its build command and the migration or seed a build runs first (steps of the build).
+     Written in the plan as above, a deploy key's included; they run with the application's privileges, not
+     the dashboard's.
+
+   The assistant reaches these only through the same routes, as the person. The second kind is, since
+   0.8.5, the assistant's `run_command` (`term.Manager.RunCommand`), which is the terminal's own way of running
    a line handed a line to run: the terminal's account and login shell, under the terminal capability checked on
    every call, with a built environment (never the dashboard's own, which holds its secrets), nothing on standard
    input, a deadline that stops its process group, its output masked, each line in the press's audit entry, and,
    unless the person chose full access, an Allow for every line that is not a plain read
    ([the assistant's modes](../deployments/operator.md#the-modes)). It is a shell on purpose, as the terminal is;
    the argv rule is about the dashboard's own features never building a shell string out of what a request
-   carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third: it types into a real window
+   carries. The assistant's terminal (`terminal_run`, `terminal_send`) is not a third kind: it types into a real window
    of the terminal's own, as the person would at the Terminal page, under the same capability, with each line in
    the audit entry. A `run_command` line that changes packages, restarts Docker or runs a `sudo` that may ask is
    typed into that window instead (`commandForTerminal`), so that an upgrade restarting Docker does not stop it
    halfway; its kind, and the Allow that kind needs, are still the line's own. A password a command asks for is never the model's to type: the person types it into the
    window from the chat (`POST /assistant/chats/{chat}/terminal`), and it reaches no provider, saved line or audit
-   entry. Do not add a third request-defined shell, and do not "fix" either into an argv. A git clone's parent and an
+   entry. Do not add a third kind of request-defined shell or a stored shell this list does not name, and do not
+   "fix" one of them into an argv. A git clone's parent and an
    `init` target go through `gitx.ResolveDir` against `JD_GIT_ROOTS` — the Git page's own boundary — and a
    clone can only create a directory that does not exist. Terminal startup also uses
    a bundled constant bootstrap to load the native prompt; paths remain separate positional arguments. An
@@ -272,7 +296,12 @@ A change that weakens any of these has to say so explicitly.
    a `pg_dump` archive by the copy's own `pg_restore`, and no password on a command line in it (`psql -c`
    reads one from a session setting in `PGOPTIONS`, MySQL's account statements go over the connection, its
    ping reads `MYSQL_PWD`). `TestCopyCodeFeedsNoClientAScriptAndNamesNoPasswordFlag` holds the copy's code
-   to that, and `TestNoCommandACopyRunsCarriesAPassword` the commands it runs.
+   to that, and `TestNoCommandACopyRunsCarriesAPassword` the commands it runs. The one
+   statement that is fed to `psql` or `mysql` on standard input is the host account route's
+   (`POST /databases/host/grant`, `handlers_db_host.go`), because it carries a password an argument would
+   show every account on the machine: the dashboard writes it, on one line, with the password only inside a
+   quoted literal (a dollar quote for `psql`), where neither client reads a command, and a password with a
+   control character is refused.
 7. Nothing but Caddy binds a routable address. The one exception is not the dashboard's own listener:
    a pull request preview is reachable at `https://<node>.<tailnet>.ts.net:<port>` because **tailscaled**
    listens on the host's tailnet address for ports **21000–21999** on the dashboard's behalf

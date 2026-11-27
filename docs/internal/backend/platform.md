@@ -61,8 +61,17 @@ running and the transcript complete.
 **Secrets, four places, one goal.** `main.scrubSecretEnv` unsets boot secrets (`JD_` and `VPSD_`) once
 consumed. `deploy.mergeEnv` strips every `JD_*`/`VPSD_*` from a deploy child's environment — the command
 is content the repository owner controls — and is the half that keeps working when a new secret-bearing
-variable is added later. `dbx` never puts a password in argv (`/proc/*/cmdline` is world-readable):
-`PGPASSWORD` in the environment, a temporary defaults file for MySQL. `dockerx.RedactEnv` masks
+variable is added later. No package puts a password in argv: `/proc/*/cmdline` is world-readable, and a
+container's processes are the host's, so that holds for a client started with `docker exec` too. `dbx`
+uses `PGPASSWORD` in the environment and a temporary defaults file for MySQL; elsewhere a client takes the
+password in its environment (`MYSQL_PWD`, `REDISCLI_AUTH`, a variable a mongosh script reads from
+`process.env`, as the TLS reloads in `database_tls_engines.go` do) or in a statement on its standard input
+(the host account route, `handlers_db_host.go`, which keeps that statement to one line with the password
+inside a quoted literal: `psql` and `mysql` read standard input as a script, where `\!` runs a shell).
+A copy of a managed database (`prepareCopy`) hands `psql -c` the role and password it sets as session
+settings in `PGOPTIONS`, and its MySQL ping takes root's password from `MYSQL_PWD`. One known exception,
+still to change: the legacy `mongo` shell (gone since MongoDB 6.0, used only where `mongosh` is missing)
+cannot read its environment and gets the new account's password in its `--eval` script. `dockerx.RedactEnv` masks
 credential-shaped container env, because that is where deployments keep secrets and container detail is
 not a `system.admin` route.
 
