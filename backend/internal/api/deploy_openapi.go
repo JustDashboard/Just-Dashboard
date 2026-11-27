@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks/media"
 	"net/http"
 	"reflect"
 	"regexp"
@@ -142,6 +143,8 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(stacks.StepStatus("")):          {"pending", "running", "done", "failed", "action_required", "skipped"},
 	reflect.TypeOf(stacks.Status("")):              {"waiting", "configuring", "ready", "action_required", "failed"},
 	reflect.TypeOf(stacks.Access("")):              {"public", "private", "worker"},
+	reflect.TypeOf(media.MediaSourcePrivacy("")):   {"public", "semiPrivate", "private"},
+	reflect.TypeOf(media.MediaSourceFieldType("")): {"text", "password", "number", "checkbox", "select"},
 	reflect.TypeOf(deploy.StepState("")):           {"pending", "blocked", "running", "passed", "warning", "failed", "skipped", "cancelled", "unavailable"},
 	reflect.TypeOf(deploy.CheckKind("")):           {"http", "tcp", "docker_health", "command", "public_route", "dns", "tls", "game_handshake", "backup_freshness", "udp_probe"},
 	reflect.TypeOf(deploy.EventType("")):           {"run.state", "step.state", "step.log", "step.evidence", "queue.position", "finding", "artifact", "heartbeat", "resync"},
@@ -192,6 +195,7 @@ var openapiWriteOnly = map[string]bool{
 	"logdrain.Write.Headers":                 true,
 	"logdrain.Header.Value":                  true,
 	"secretstore.Write.Credentials":          true,
+	"api.stackSourceAddRequest.Fields":       true,
 }
 
 // openapiErrorFields says what each field of httpx.APIError, the envelope
@@ -487,6 +491,18 @@ var deployOperations = map[string]deployOperation{
 	"POST /deploy/templates/import":                    {Tag: "templates", Summary: "Import a template's JSON definition; an id outside the user- namespace is put in it.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil), Status: http.StatusCreated},
 	"PUT /deploy/templates/{template}":                 {Tag: "templates", Summary: "Replace a template's definition; its id does not change, and a changed definition at the same version is the next patch version.", Request: blueprint.Blueprint{}, Response: (*deploy.UserTemplateDetail)(nil)},
 	"DELETE /deploy/templates/{template}":              {Tag: "templates", Summary: "Remove a template from the catalogue; deployments made from it keep running from their own copy.", Status: http.StatusNoContent, Note: "Destructive, with an ordinary confirmation."},
+
+	// A smart stack's media sources (handlers_deploy_stack_sources.go).
+	"GET /deploy/{id}/stack/sources": {Tag: "stacks", Summary: "List the media sources the stack's Prowlarr has, whoever added them.", Response: stackSourcesAnswer{},
+		Note: "404 stack_not_found, 409 stack_waiting before a live release, 409 stack_not_preset, 409 stack_no_sources for a preset without Prowlarr, 502 stack_app_unreachable when Prowlarr did not answer."},
+	"GET /deploy/{id}/stack/sources/catalogue": {Tag: "stacks", Summary: "List the torrent sources the stack's Prowlarr can add, by name, each saying whether its form asks for something it cannot do without.", Response: (*media.MediaSourceCatalogue)(nil),
+		Note: "Read from Prowlarr's schema, bounded, and kept for 10 minutes per project; fetchedAt says when. The same refusals as the sources list."},
+	"GET /deploy/{id}/stack/sources/catalogue/{definition}": {Tag: "stacks", Summary: "Read one source Prowlarr can add, with the settings its form asks for and their defaults.", Response: media.MediaSourceDetail{},
+		Note: "404 source_definition_not_found for a definition the catalogue does not list; the same refusals as the sources list."},
+	"POST /deploy/{id}/stack/sources": {Tag: "stacks", Summary: "Add a media source: Prowlarr tests it with the values given, saves it in its first app profile and shares it with Radarr and Sonarr, then the stack checks its sources again; audited with the definition's name only.", Request: stackSourceAddRequest{}, Response: stackSourceAddAnswer{}, Status: http.StatusCreated,
+		Note: "422 source_test_failed with Prowlarr's reason, every text typed masked out of it; 422 source_invalid for a definition or a value the form does not take, with field; 409 source_exists for a name Prowlarr has; 403 source_needs_person when the dashboard's assistant sends a password, key or cookie; the same refusals as the sources list."},
+	"DELETE /deploy/{id}/stack/sources/{sourceId}": {Tag: "stacks", Summary: "Remove one of Prowlarr's media sources by its id; Prowlarr removes it from Radarr and Sonarr, and the stack checks its sources again; audited.", Status: http.StatusNoContent,
+		Note: "Destructive, with an ordinary confirmation: the source is added again in a minute. 404 source_not_found; the same refusals as the sources list."},
 
 	// Game servers.
 	"GET /deploy/{id}/game/":                  {Tag: "game", Summary: "Read a game server's overview: version, players online and its checks.", Response: gameOverview{}},

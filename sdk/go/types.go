@@ -3048,6 +3048,83 @@ type ManifestStart struct {
 	State    string   `json:"state,omitempty"`
 }
 
+// MediaSource is media.MediaSource in the dashboard's source.
+type MediaSource struct {
+	Definition string             `json:"definition,omitempty"`
+	Enabled    bool               `json:"enabled,omitempty"`
+	ID         int64              `json:"id,omitempty"`
+	Name       string             `json:"name,omitempty"`
+	Privacy    MediaSourcePrivacy `json:"privacy,omitempty"`
+	Protocol   string             `json:"protocol,omitempty"`
+}
+
+// MediaSourceCatalogue is media.MediaSourceCatalogue in the dashboard's source.
+type MediaSourceCatalogue struct {
+	Definitions []MediaSourceDefinition `json:"definitions"`
+	FetchedAt   time.Time               `json:"fetchedAt,omitzero"`
+}
+
+// MediaSourceDefinition is media.MediaSourceDefinition in the dashboard's source.
+type MediaSourceDefinition struct {
+	Definition  string             `json:"definition,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Language    string             `json:"language,omitempty"`
+	Name        string             `json:"name,omitempty"`
+	NeedsInput  bool               `json:"needsInput,omitempty"`
+	Privacy     MediaSourcePrivacy `json:"privacy,omitempty"`
+}
+
+// MediaSourceDetail is media.MediaSourceDetail in the dashboard's source.
+type MediaSourceDetail struct {
+	Definition  string             `json:"definition,omitempty"`
+	Description string             `json:"description,omitempty"`
+	Fields      []MediaSourceField `json:"fields"`
+	Name        string             `json:"name,omitempty"`
+	Privacy     MediaSourcePrivacy `json:"privacy,omitempty"`
+	URLs        []string           `json:"urls"`
+}
+
+// MediaSourceField is media.MediaSourceField in the dashboard's source.
+type MediaSourceField struct {
+	Advanced bool                 `json:"advanced,omitempty"`
+	Help     string               `json:"help,omitempty"`
+	Label    string               `json:"label,omitempty"`
+	Name     string               `json:"name,omitempty"`
+	Options  []MediaSourceOption  `json:"options"`
+	Type     MediaSourceFieldType `json:"type,omitempty"`
+	// Any JSON value.
+	Value any `json:"value"`
+}
+
+// MediaSourceFieldType is one of the values of media.MediaSourceFieldType.
+type MediaSourceFieldType string
+
+// The values of MediaSourceFieldType.
+const (
+	MediaSourceFieldTypeText     MediaSourceFieldType = "text"
+	MediaSourceFieldTypePassword MediaSourceFieldType = "password"
+	MediaSourceFieldTypeNumber   MediaSourceFieldType = "number"
+	MediaSourceFieldTypeCheckbox MediaSourceFieldType = "checkbox"
+	MediaSourceFieldTypeSelect   MediaSourceFieldType = "select"
+)
+
+// MediaSourceOption is media.MediaSourceOption in the dashboard's source.
+type MediaSourceOption struct {
+	Label string `json:"label,omitempty"`
+	// Any JSON value.
+	Value any `json:"value"`
+}
+
+// MediaSourcePrivacy is one of the values of media.MediaSourcePrivacy.
+type MediaSourcePrivacy string
+
+// The values of MediaSourcePrivacy.
+const (
+	MediaSourcePrivacyPublic      MediaSourcePrivacy = "public"
+	MediaSourcePrivacySemiPrivate MediaSourcePrivacy = "semiPrivate"
+	MediaSourcePrivacyPrivate     MediaSourcePrivacy = "private"
+)
+
 // MemorySizing is metrics.MemorySizing in the dashboard's source.
 type MemorySizing struct {
 	LimitMb     int64    `json:"limitMb,omitempty"`
@@ -5068,6 +5145,24 @@ type StackServiceState struct {
 	Status    string               `json:"status,omitempty"`
 	Title     string               `json:"title,omitempty"`
 	URL       string               `json:"url,omitempty"`
+}
+
+// StackSourceAddAnswer is api.stackSourceAddAnswer in the dashboard's source.
+type StackSourceAddAnswer struct {
+	Source MediaSource `json:"source,omitzero"`
+	Synced bool        `json:"synced,omitempty"`
+}
+
+// StackSourceAddRequest is api.stackSourceAddRequest in the dashboard's source.
+type StackSourceAddRequest struct {
+	Definition string `json:"definition,omitempty"`
+	// A secret: it is accepted here and never read back by any route.
+	Fields map[string]any `json:"fields"`
+}
+
+// StackSourcesAnswer is api.stackSourcesAnswer in the dashboard's source.
+type StackSourcesAnswer struct {
+	Sources []MediaSource `json:"sources"`
 }
 
 // StackState is api.stackState in the dashboard's source.

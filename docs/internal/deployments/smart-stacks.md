@@ -28,6 +28,7 @@ configuration steps against the live release's containers and records each step'
 | When a pass runs; the environment it runs in | `stacks/service.go`, `stacks/dockerenv.go` |
 | Tables | `store/schema_deploy_stacks.go`, `stacks/store.go` |
 | Routes and the state the page reads | `api/handlers_deploy_stacks.go` |
+| The media-source picker: Prowlarr's catalogue, an add, a removal | `stacks/media/prowlarr_sources.go`, `api/handlers_deploy_stack_sources.go` |
 | Test helpers (fake over httptest; DockerEnv over a test's own containers) | `stacks/stackstest/` |
 
 ## The templates
@@ -195,6 +196,18 @@ Bazarr's) are kept there too and are never revealed.
 | `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | the login's password (`name` is `login`); audited |
 | `PUT /deploy/{id}/stack/login` | administrator, session, not Hub | change the login; a pass follows; audited without the value |
 | `POST /deploy/{id}/stack/addresses` | a configuration save's terms (an administrator in a session, or a deploy key) | give every app without one its address and deploy; audited |
+| `GET /deploy/{id}/stack/sources` | whoever reads the project | the sources Prowlarr has, whoever added them |
+| `GET /deploy/{id}/stack/sources/catalogue` | whoever reads the project | the torrent sources Prowlarr can add, each with `needsInput`, and `fetchedAt` |
+| `GET /deploy/{id}/stack/sources/catalogue/{definition}` | whoever reads the project | one of them with its form |
+| `POST /deploy/{id}/stack/sources` | the deploy control capability | test, save and share a source; `201`, or `422 source_test_failed`; audited as `deploy.stack.source.add` with the definition's name only |
+| `DELETE /deploy/{id}/stack/sources/{sourceId}` | destructive, ordinary confirmation | remove one of Prowlarr's sources; `204`; audited as `deploy.stack.source.remove` |
+
+Every source route answers `404 stack_not_found`, `409 stack_waiting` (no live release), `409
+stack_not_preset`, `409 stack_no_sources` (a preset without Prowlarr: Essential) and `502
+stack_app_unreachable` (Prowlarr did not answer, with what it said) before anything else. Deploy keys
+and MCP keys reach all five: an add's values are write-only, as a variable's are, and a removal spends
+the destructive budget as a rollback does. A session opened through Just Hub reaches them too: an add
+sends a value in, as a variable's save does, and none of them shows one.
 
 Blueprint summaries and details carry `stack`; the Template tab leaves those templates out.
 
@@ -206,6 +219,50 @@ running and healthy), connected (every link step done), able to play (Jellyfin s
 libraries) and able to acquire (Complete, connected, the download link verified and at least one
 source in Prowlarr). A Complete stack with no source is `action_required: Add a media source` — never
 "set up" — and still plays what is in its library.
+
+## Media sources from the dashboard
+
+A Complete stack ends with one thing only the person may choose: a source they are allowed to use.
+The source routes let them pick and add it on the stack's Sources page; everything after the choice
+is the dashboard's.
+
+- **The catalogue** is Prowlarr's own `GET /api/v1/indexer/schema` (6.3 MB and 662 definitions at
+  Prowlarr 3.1.0), read with a 32 MiB bound (a longer answer is an error, never a list cut short) and
+  kept ten minutes per project and live release (`media.SourceCache`, about 6 MB each in memory, for
+  at most four projects at once; requests at once share one read). Only torrent definitions are listed, since the stack downloads with qBittorrent, sorted by
+  name, and what is kept of each is trimmed of its capabilities and presets, which an add does not
+  send. Prowlarr downloads the sites' definitions from its own server when it starts; a Prowlarr with
+  no way out has only those built into it (57 torrent ones).
+- **Names.** A definition is named by Prowlarr's definition name, except for the presets that share
+  one, named `<definition>:<preset>` (`Torznab:Generic Torznab`, `Torrent RSS Feed:Torrent RSS Feed`).
+- **`needsInput`.** The schema marks nothing as required, so it is read from what each shown,
+  non-advanced setting is: an empty account, password, key, cookie, PIN or address, a captcha, or a
+  select with no choices needs input; an empty number or checkbox means Prowlarr's own default, an
+  address chosen from the definition's (`getUrls`) has its first, and a setting whose label or help
+  says it is optional ("optional", "leave empty", "if your site…") does not.
+- **The form** leaves out hidden settings, information lines and captchas (only Prowlarr's own page
+  can show one). A setting is `text`, `password` (Prowlarr's password type, any setting Prowlarr
+  keeps secret, such as Torznab's API key, and any whose name says it is one: most sites' keys,
+  cookies and passkeys are plain textboxes in the schema), `number`, `checkbox` or `select` (its own
+  choices, or the definition's addresses). Each value is Prowlarr's default.
+- **An add** checks the values against the form (`422 source_invalid` with the setting in `field`),
+  trims the spaces a paste brings from everything but a password, and refuses a name Prowlarr already
+  has (`409 source_exists`, whatever its case). Then Prowlarr's own test (`POST indexer/test`); the
+  save in Prowlarr's lowest app profile (the "Standard" it makes on first start), switched on, with
+  `forceSave` because the test has just passed and a second sign-in to a site within a second can
+  trip its limit; `ApplicationIndexerSync`, waited for up to a minute (`synced`); and a pass
+  requested, so `prowlarr.sources` turns done. A failed test is `422 source_test_failed` with
+  Prowlarr's reason, every text the person typed masked out of it, as typed and as a URL carries it.
+- **A removal** is of any of Prowlarr's sources, by Prowlarr's id, the person's own included: it is
+  what the Sources page lists. Prowlarr removes it from Radarr and Sonarr itself (full sync), and a
+  pass is requested.
+- **What it never does.** It picks, suggests or ships no source, and asks no site anything but
+  through Prowlarr's test of the one the person chose. What the person types goes to Prowlarr in that
+  request and nowhere else: not into the dashboard's store, the audit (the definition's name only; a
+  removal's id and name), a step's record or a log. It changes no other Prowlarr setting.
+- **The assistant** may add a source that needs no password, key or cookie. One with any of those
+  is `403 source_needs_person`: what the assistant sends has passed through the model's provider,
+  which is kept from every secret, so the person types it into the form, as a terminal's password is.
 
 ## What the manager, subtitle and quality steps make
 
@@ -253,7 +310,7 @@ another name is the person's and is not read past its name.
   an error about the download client or its folders, names anything else, and leaves the checks
   about indexers to `prowlarr.sources`.
 - `prowlarr.sources` counts the sources that are switched on. None is the blocking action
-  `media-source`; the step never adds one.
+  `media-source`; the step never adds one (the person does, from the Sources page).
 
 ## What Jellyfin, qBittorrent and Seerr steps make
 
@@ -378,3 +435,16 @@ Said here so nobody builds on it by mistake:
   `TestLiveOneLoginMigratesAStackAndFollowsAChange` sets the seven applications up as manifest
   1.0.0 did, one password each, then runs this manifest's pass, a change of the login and a pass
   after each.
+- `prowlarr_sources_test.go` (`stacks/media`) — the source picker against a stand-in for Prowlarr
+  whose schema (`testdata/prowlarr-indexer-schema.json`) is eight entries of the pinned Prowlarr's,
+  renamed so no real site is named: the trimming, `needsInput`, the form, the checks on what is
+  typed, the add, the masking, the bounded read and the cache.
+- `TestStackSourceRoutesGateAndAnswerInWords` (`api`) — every refusal in words, the capabilities, the
+  catalogue read once, an add audited by its definition alone, a failed test without the typed key,
+  the assistant kept from a key, a removal by id.
+- `TestLiveSourcePickerAddsTestsSyncsAndRemoves` — the pinned Prowlarr, Radarr and Sonarr, connected
+  by `prowlarr.apps`, and a Torznab server of the test's own (the test binary itself, in a container),
+  on an internal network so no real site is reached. On 27 Nov 2026: the catalogue read in 11 s; a
+  wrong key answered `source_test_failed` with the key and the typed address masked; the right one
+  was tested, saved and synced in 11 s and appeared in Radarr and Sonarr as "Generic Torznab
+  (Prowlarr)"; `prowlarr.sources` turned done; a removal took it out of both and the action came back.

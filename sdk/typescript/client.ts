@@ -123,6 +123,8 @@ import type {
   MaintenanceSwitchRequest,
   ManifestRequest,
   ManifestStart,
+  MediaSourceCatalogue,
+  MediaSourceDetail,
   Names,
   NotificationChannel,
   NotificationDelivery,
@@ -179,6 +181,9 @@ import type {
   StackConfigureAnswer,
   StackCredentialReveal,
   StackLoginRequest,
+  StackSourceAddAnswer,
+  StackSourceAddRequest,
+  StackSourcesAnswer,
   StackState,
   StagingCopy,
   StagingCreateRequest,
@@ -5035,6 +5040,137 @@ export function stackLoginUpdate(
       method: "PUT",
       path: `/deploy/${pathParam(id)}/stack/login`,
       body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackSourceAdd is POST /deploy/{id}/stack/sources: add a media source: Prowlarr tests it with
+ * the values given, saves it in its first app profile and shares it with Radarr and Sonarr, then
+ * the stack checks its sources again; audited with the definition's name only.
+ *
+ * 422 source_test_failed with Prowlarr's reason, every text typed masked out of it; 422
+ * source_invalid for a definition or a value the form does not take, with field; 409 source_exists
+ * for a name Prowlarr has; 403 source_needs_person when the dashboard's assistant sends a
+ * password, key or cookie; the same refusals as the sources list.
+ *
+ * A deploy key: allowed.
+ */
+export function stackSourceAdd(
+  client: Client,
+  id: number,
+  body: StackSourceAddRequest,
+  options?: RequestOptions,
+): Promise<StackSourceAddAnswer> {
+  return client.request<StackSourceAddAnswer>(
+    {
+      method: "POST",
+      path: `/deploy/${pathParam(id)}/stack/sources`,
+      body,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackSourceCatalogue is GET /deploy/{id}/stack/sources/catalogue: list the torrent sources the
+ * stack's Prowlarr can add, by name, each saying whether its form asks for something it cannot do
+ * without.
+ *
+ * Read from Prowlarr's schema, bounded, and kept for 10 minutes per project; fetchedAt says when.
+ * The same refusals as the sources list.
+ *
+ * A deploy key: allowed.
+ */
+export function stackSourceCatalogue(
+  client: Client,
+  id: number,
+  options?: RequestOptions,
+): Promise<MediaSourceCatalogue> {
+  return client.request<MediaSourceCatalogue>(
+    {
+      method: "GET",
+      path: `/deploy/${pathParam(id)}/stack/sources/catalogue`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackSourceDefinition is GET /deploy/{id}/stack/sources/catalogue/{definition}: read one source
+ * Prowlarr can add, with the settings its form asks for and their defaults.
+ *
+ * 404 source_definition_not_found for a definition the catalogue does not list; the same refusals
+ * as the sources list.
+ *
+ * A deploy key: allowed.
+ */
+export function stackSourceDefinition(
+  client: Client,
+  id: number,
+  definition: string,
+  options?: RequestOptions,
+): Promise<MediaSourceDetail> {
+  return client.request<MediaSourceDetail>(
+    {
+      method: "GET",
+      path: `/deploy/${pathParam(id)}/stack/sources/catalogue/${pathParam(definition)}`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackSourceRemove is DELETE /deploy/{id}/stack/sources/{sourceId}: remove one of Prowlarr's
+ * media sources by its id; Prowlarr removes it from Radarr and Sonarr, and the stack checks its
+ * sources again; audited.
+ *
+ * Destructive, with an ordinary confirmation: the source is added again in a minute. 404
+ * source_not_found; the same refusals as the sources list.
+ *
+ * A deploy key: allowed. Destructive: it needs a role that may take destructive actions, and
+ * spends their budget.
+ */
+export function stackSourceRemove(
+  client: Client,
+  id: number,
+  sourceId: string,
+  options?: RequestOptions,
+): Promise<void> {
+  return client.request<void>(
+    {
+      method: "DELETE",
+      path: `/deploy/${pathParam(id)}/stack/sources/${pathParam(sourceId)}`,
+      accept: "none",
+    },
+    options,
+  )
+}
+
+/**
+ * stackSources is GET /deploy/{id}/stack/sources: list the media sources the stack's Prowlarr has,
+ * whoever added them.
+ *
+ * 404 stack_not_found, 409 stack_waiting before a live release, 409 stack_not_preset, 409
+ * stack_no_sources for a preset without Prowlarr, 502 stack_app_unreachable when Prowlarr did not
+ * answer.
+ *
+ * A deploy key: allowed.
+ */
+export function stackSources(
+  client: Client,
+  id: number,
+  options?: RequestOptions,
+): Promise<StackSourcesAnswer> {
+  return client.request<StackSourcesAnswer>(
+    {
+      method: "GET",
+      path: `/deploy/${pathParam(id)}/stack/sources`,
       accept: "json",
     },
     options,

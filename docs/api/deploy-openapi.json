@@ -3216,6 +3216,57 @@
         "title": "api.stackServiceState",
         "type": "object"
       },
+      "api.stackSourceAddAnswer": {
+        "properties": {
+          "source": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/media.MediaSource"
+              }
+            ]
+          },
+          "synced": {
+            "type": "boolean"
+          }
+        },
+        "title": "api.stackSourceAddAnswer",
+        "type": "object"
+      },
+      "api.stackSourceAddRequest": {
+        "properties": {
+          "definition": {
+            "type": "string"
+          },
+          "fields": {
+            "additionalProperties": {
+              "description": "Any JSON value."
+            },
+            "description": "A secret: it is accepted here and never read back by any route.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "writeOnly": true
+          }
+        },
+        "title": "api.stackSourceAddRequest",
+        "type": "object"
+      },
+      "api.stackSourcesAnswer": {
+        "properties": {
+          "sources": {
+            "items": {
+              "$ref": "#/components/schemas/media.MediaSource"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "api.stackSourcesAnswer",
+        "type": "object"
+      },
       "api.stackState": {
         "properties": {
           "actions": {
@@ -16638,6 +16689,181 @@
         "title": "logdrain.Write",
         "type": "object"
       },
+      "media.MediaSource": {
+        "properties": {
+          "definition": {
+            "type": "string"
+          },
+          "enabled": {
+            "type": "boolean"
+          },
+          "id": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "name": {
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "public",
+              "semiPrivate",
+              "private"
+            ],
+            "title": "media.MediaSourcePrivacy",
+            "type": "string"
+          },
+          "protocol": {
+            "type": "string"
+          }
+        },
+        "title": "media.MediaSource",
+        "type": "object"
+      },
+      "media.MediaSourceCatalogue": {
+        "properties": {
+          "definitions": {
+            "items": {
+              "$ref": "#/components/schemas/media.MediaSourceDefinition"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "fetchedAt": {
+            "format": "date-time",
+            "type": "string"
+          }
+        },
+        "title": "media.MediaSourceCatalogue",
+        "type": "object"
+      },
+      "media.MediaSourceDefinition": {
+        "properties": {
+          "definition": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "language": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "needsInput": {
+            "type": "boolean"
+          },
+          "privacy": {
+            "enum": [
+              "public",
+              "semiPrivate",
+              "private"
+            ],
+            "title": "media.MediaSourcePrivacy",
+            "type": "string"
+          }
+        },
+        "title": "media.MediaSourceDefinition",
+        "type": "object"
+      },
+      "media.MediaSourceDetail": {
+        "properties": {
+          "definition": {
+            "type": "string"
+          },
+          "description": {
+            "type": "string"
+          },
+          "fields": {
+            "items": {
+              "$ref": "#/components/schemas/media.MediaSourceField"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "name": {
+            "type": "string"
+          },
+          "privacy": {
+            "enum": [
+              "public",
+              "semiPrivate",
+              "private"
+            ],
+            "title": "media.MediaSourcePrivacy",
+            "type": "string"
+          },
+          "urls": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          }
+        },
+        "title": "media.MediaSourceDetail",
+        "type": "object"
+      },
+      "media.MediaSourceField": {
+        "properties": {
+          "advanced": {
+            "type": "boolean"
+          },
+          "help": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "options": {
+            "items": {
+              "$ref": "#/components/schemas/media.MediaSourceOption"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "type": {
+            "enum": [
+              "text",
+              "password",
+              "number",
+              "checkbox",
+              "select"
+            ],
+            "title": "media.MediaSourceFieldType",
+            "type": "string"
+          },
+          "value": {
+            "description": "Any JSON value."
+          }
+        },
+        "title": "media.MediaSourceField",
+        "type": "object"
+      },
+      "media.MediaSourceOption": {
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "value": {
+            "description": "Any JSON value."
+          }
+        },
+        "title": "media.MediaSourceOption",
+        "type": "object"
+      },
       "metrics.CPUSizing": {
         "properties": {
           "limit": {
@@ -29160,6 +29386,259 @@
         ],
         "x-deploy-key": "refused (session_required): variables are write-only to a deploy key: a value is read back only in the dashboard"
       }
+    },
+    "/deploy/{id}/stack/sources": {
+      "get": {
+        "description": "404 stack_not_found, 409 stack_waiting before a live release, 409 stack_not_preset, 409 stack_no_sources for a preset without Prowlarr, 502 stack_app_unreachable when Prowlarr did not answer.",
+        "operationId": "stackSources",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackSourcesAnswer"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "List the media sources the stack's Prowlarr has, whoever added them.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "422 source_test_failed with Prowlarr's reason, every text typed masked out of it; 422 source_invalid for a definition or a value the form does not take, with field; 409 source_exists for a name Prowlarr has; 403 source_needs_person when the dashboard's assistant sends a password, key or cookie; the same refusals as the sources list.",
+        "operationId": "stackSourceAdd",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/api.stackSourceAddRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackSourceAddAnswer"
+                }
+              }
+            },
+            "description": "Created"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Add a media source: Prowlarr tests it with the values given, saves it in its first app profile and shares it with Radarr and Sonarr, then the stack checks its sources again; audited with the definition's name only.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      }
+    },
+    "/deploy/{id}/stack/sources/catalogue": {
+      "get": {
+        "description": "Read from Prowlarr's schema, bounded, and kept for 10 minutes per project; fetchedAt says when. The same refusals as the sources list.",
+        "operationId": "stackSourceCatalogue",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/media.MediaSourceCatalogue"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "List the torrent sources the stack's Prowlarr can add, by name, each saying whether its form asks for something it cannot do without.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/stack/sources/catalogue/{definition}": {
+      "get": {
+        "description": "404 source_definition_not_found for a definition the catalogue does not list; the same refusals as the sources list.",
+        "operationId": "stackSourceDefinition",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/media.MediaSourceDetail"
+                }
+              }
+            },
+            "description": "OK"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Read one source Prowlarr can add, with the settings its form asks for and their defaults.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The definition.",
+          "in": "path",
+          "name": "definition",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "/deploy/{id}/stack/sources/{sourceId}": {
+      "delete": {
+        "description": "Destructive, with an ordinary confirmation: the source is added again in a minute. 404 source_not_found; the same refusals as the sources list.",
+        "operationId": "stackSourceRemove",
+        "responses": {
+          "204": {
+            "description": "No Content: done, with no body."
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "apiKey": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Remove one of Prowlarr's media sources by its id; Prowlarr removes it from Radarr and Sonarr, and the stack checks its sources again; audited.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed",
+        "x-destructive": true
+      },
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        },
+        {
+          "description": "The sourceId.",
+          "in": "path",
+          "name": "sourceId",
+          "required": true,
+          "schema": {
+            "type": "string"
+          }
+        }
+      ]
     },
     "/deploy/{id}/unarchive": {
       "parameters": [

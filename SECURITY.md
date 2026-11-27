@@ -57,6 +57,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   its own HTTPS address and behind its own sign-in on every address; qBittorrent and Jellyfin trust
   only the stack's own Docker networks as proxies, so a visitor's refused sign-ins count against
   the visitor. No media source, catalogue or third-party credential ships with it.
+  A source the person adds from the dashboard is chosen by them; what they type into its form (an
+  account, a key, a cookie) goes to Prowlarr in that request only: the dashboard keeps no copy,
+  audits the source's name alone, masks it out of Prowlarr's answer, and the dashboard's assistant
+  may not send one.
 - The GitHub page acts on GitHub only as the person who connected their own GitHub account, through
   this dashboard's own GitHub App (no personal access tokens). A connection is used only by the
   dashboard account that made it, administrators included. The App's client secret and private key

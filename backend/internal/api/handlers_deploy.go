@@ -80,6 +80,7 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 		r.Method(http.MethodGet, "/{id}/lifecycle/stream", s.handle(s.handleDeploymentLifecycleStream))
 		r.Method(http.MethodGet, "/{id}/availability", s.handle(s.handleDeploymentAvailability))
 		r.Method(http.MethodGet, "/{id}/stack", s.handle(s.handleStackState))
+		s.mountStackSourceReads(r)
 		r.Method(http.MethodGet, "/{id}/alerts", s.handle(s.handleTrafficAlertList))
 		r.Method(http.MethodGet, "/traffic", s.handle(s.handleDeploymentTrafficPulse))
 		r.Method(http.MethodGet, "/{id}/commits", s.handle(s.handleDeployCommits))
@@ -133,6 +134,8 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// Configuring a stack again is the control a deploy is: it changes
 			// the applications the deployment runs, never what it is built from.
 			r.Method(http.MethodPost, "/{id}/stack/configure", s.handle(s.handleStackConfigure))
+			// Adding a media source is that control too.
+			s.mountStackSourceWrites(r)
 			// Keeping the new release only removes a container nothing routes
 			// to; it is the same control a deploy is.
 			r.Method(http.MethodPost, "/{id}/environments/{env}/rollback-watch/keep", s.handle(s.handleDeploymentKeepRelease))
@@ -314,6 +317,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 			// from it runs from its own copy, and it is added again in a
 			// minute, so an ordinary confirmation.
 			s.mountTemplateRemoval(r)
+			// Removing a stack's media source takes it from Prowlarr, Radarr and
+			// Sonarr, with the account given for it, and is added again in a minute.
+			s.mountStackSourceRemoval(r)
 		})
 	})
 }
