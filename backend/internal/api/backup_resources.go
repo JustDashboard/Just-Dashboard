@@ -109,6 +109,12 @@ func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backup
 	// database an update takes before it starts, which would put the store
 	// in every archive three times.
 	dataDir := filepath.Clean(s.Cfg.DataDir)
+	snapshots := []string{filepath.Join(dataDir, store.DatabaseFile)}
+	if s.modules.requestHistory != nil {
+		// The request history too, so an archive holds it as one moment
+		// rather than as a file copied while the recorder wrote to it.
+		snapshots = append(snapshots, s.modules.requestHistory.Path())
+	}
 	add(backupResource{
 		Kind: "dashboard", ID: "dashboard", Name: "Just Dashboard",
 		Detail: "Settings, accounts, saved connections and deployment records",
@@ -120,7 +126,7 @@ func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backup
 			// with an archive of that data.
 			Excludes: []string{filepath.Join(dataDir, "staging"), filepath.Join(dataDir, "deployment-workspaces"),
 				filepath.Join(dataDir, selfupdate.PreUpdateDir), filepath.Join(dataDir, uninstall.KeptEnv)},
-			SQLitePaths: []string{filepath.Join(dataDir, store.DatabaseFile)},
+			SQLitePaths: snapshots,
 		},
 	})
 
