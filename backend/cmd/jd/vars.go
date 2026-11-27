@@ -169,7 +169,7 @@ func (a *app) readValue(name string) (string, error) {
 }
 
 func (a *app) varsSet(args []string) error {
-	fs := a.newFlags("vars set", "vars set APP KEY=VALUE [KEY=- ...] [--plain] [--scope runtime,build]")
+	fs := a.newFlags("vars set", "vars set APP KEY=VALUE [KEY=- ...] [--plain|--secret] [--scope runtime,build]")
 	flags := a.addVariableFlags(fs)
 	positional, err := a.parse(fs, args)
 	if err != nil {
