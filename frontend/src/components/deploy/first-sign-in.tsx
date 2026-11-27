@@ -13,6 +13,7 @@ import { ProductLogo } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { useStackState } from "@/components/deploy/stack/use-stack"
 import {
   InputGroup,
   InputGroupAddon,
@@ -126,6 +127,11 @@ export function FirstSignIn({
 }) {
   const [revealed, setRevealed] = useState<Revealed>()
   const [busy, setBusy] = useState(false)
+  // Whether there is a Stack page to send the reader to is the server's to
+  // say, as it is for the rail's row (one shared read): a preset's project
+  // the server does not call a stack has no login there to see.
+  const stack = useStackState(projectId, access.kind === "managed")
+  const stackPage = access.kind === "managed" && Boolean(stack.data)
   const target = url && access.path ? new URL(access.path, url).toString() : url
   const variables = `/deploy/${projectId}/settings/variables`
 
@@ -220,9 +226,9 @@ export function FirstSignIn({
         // looking for a login page that does not exist.
         title={access.kind === "client" ? "How to connect" : "First sign-in"}
         actions={
-          (target || access.kind === "managed") && (
+          (target || stackPage) && (
             <>
-              {access.kind === "managed" && (
+              {stackPage && (
                 <Button variant="outline" size="sm" asChild>
                   <Link href={`/deploy/${projectId}/stack`}>See the login</Link>
                 </Button>

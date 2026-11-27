@@ -606,6 +606,13 @@ test("a stack's template whose project the server does not call a stack gets no 
   await page.goto("/deploy/7")
   await expect(railRow(page, "/runtime")).toBeVisible()
   await expect(railRow(page, "/stack")).toHaveCount(0)
+  // Nor a way to it from the Overview: there is no login on a page that is
+  // not there.
+  const signIn = page
+    .locator("[data-slot='panel']")
+    .filter({ has: page.getByRole("heading", { name: "First sign-in", exact: true }) })
+  await expect(signIn.getByRole("link", { name: /Open it/ })).toBeVisible()
+  await expect(signIn.getByRole("link", { name: "See the login" })).toHaveCount(0)
   await page.goto("/deploy/7/stack")
   await expect(page.getByText("This project is not a stack", { exact: true })).toBeVisible()
 })
