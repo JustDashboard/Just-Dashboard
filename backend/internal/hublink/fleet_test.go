@@ -233,6 +233,31 @@ func TestAHeartbeatDoesNotWaitForAReading(t *testing.T) {
 	}
 }
 
+// A reading runs on a goroutine of its own, outside the connector's
+// supervision, and its sources parse what the host prints: one that panics is
+// a failed reading, retried like any other, not the end of the dashboard.
+func TestAFleetReadingThatPanicsIsAFailedReading(t *testing.T) {
+	calls := 0
+	c := &cached[int]{every: time.Hour, read: func(context.Context) (int, error) {
+		calls++
+		if calls == 1 {
+			panic("an unusual line")
+		}
+		return 5, nil
+	}}
+	inline := func(fn func()) { fn() }
+	now := time.Unix(vectorNow, 0)
+	if _, ok := c.get(now, inline); ok {
+		t.Fatal("a reading that panicked gave a value")
+	}
+	if _, ok := c.get(now.Add(time.Minute), inline); ok || calls != 1 {
+		t.Fatalf("read %d times before the retry", calls)
+	}
+	if v, ok := c.get(now.Add(readRetry), inline); !ok || v != 5 || calls != 2 {
+		t.Fatalf("after the retry: %d %v, read %d times", v, ok, calls)
+	}
+}
+
 // The two lists are cut to their counts and then to a share of the body,
 // keeping the soonest to expire and the worst scans.
 func TestTheFleetListsFitTheirShareOfTheBody(t *testing.T) {

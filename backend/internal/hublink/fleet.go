@@ -13,6 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/accountlink"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 )
 
 // The fleet fields: what the hub needs to know what each server needs
@@ -144,7 +145,15 @@ func (c *cached[T]) get(now time.Time, spawn func(func())) (T, bool) {
 		spawn(func() {
 			ctx, cancel := context.WithTimeout(context.Background(), readTimeout)
 			defer cancel()
-			v, err := c.read(ctx)
+			// This goroutine is nobody's loop, and the sources parse what the
+			// host prints: a panic is a failed reading, retried like any other,
+			// rather than the end of the process (runtime-boundaries.md).
+			var v T
+			err := safego.Try(nil, "hub link fleet reading", func() error {
+				var err error
+				v, err = c.read(ctx)
+				return err
+			})
 			c.mu.Lock()
 			defer c.mu.Unlock()
 			// Timed from when it was asked for, on the link's own clock.
