@@ -199,6 +199,11 @@ describe("selection", () => {
       taken({ kind: "toggle", entry: notes, on: false }),
     )
     expect(decide(ctrl(" "))).toEqual(NOTHING)
+    // The key's place decides, not its character.
+    expect(decide(ctrl("Unidentified", { code: "Space" }), { active: notes }).action.kind).toBe(
+      "toggle",
+    )
+    expect(decide(ctrl(" ", { code: "" }), { active: notes })).toEqual(NOTHING)
   })
 
   test("Ctrl/Cmd+A selects every entry in the folder", () => {
