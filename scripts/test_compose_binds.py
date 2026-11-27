@@ -121,13 +121,22 @@ def problems(text):
     """Each way the file puts a socket other than Caddy's on a routable address."""
     found = []
     stack = services(text)
-    on_host = {name for name, lines in stack.items() if section(lines, "network_mode")[0] == "host"}
+    modes = {name: section(lines, "network_mode")[0] or "" for name, lines in stack.items()}
+    on_host = {name for name, mode in modes.items() if mode == "host"}
+    # service:<name> shares that service's namespace, so the host's when that one is on it.
+    for _ in modes:
+        on_host |= {name for name, mode in modes.items() if mode.startswith("service:") and mode[8:] in on_host}
     for name in sorted(on_host - HOST_NETWORK):
         found.append(f"{name} is on the host's network, where it can bind any address")
     for name in sorted(HOST_NETWORK - on_host):
         found.append(f"{name} is expected on the host's network and is not")
+    for name in sorted(name for name, mode in modes.items() if mode.startswith("container:")):
+        found.append(f"{name} shares another container's network, which this check cannot follow")
     for name, lines in stack.items():
-        for entry in items(section(lines, "ports")[1]):
+        inline, nested = section(lines, "ports")
+        if inline is not None:
+            found.append(f"{name} publishes ports as {inline}, which this check cannot read")
+        for entry in items(nested):
             host = published_host(entry)
             if not loopback(host):
                 found.append(f"{name} publishes {entry} on {host or 'every address'}, not loopback")
@@ -194,6 +203,21 @@ volumes:
             ],
         )
         self.assertIn("the backend's JD_ADDR is not set, so it is whatever .env says", problems("services:\n  backend:\n    network_mode: host\n"))
+        # The other spellings Compose takes for the same two ways out.
+        other = """services:
+  backend:
+    network_mode: host
+  frontend:
+    ports: ["${JD_FRONTEND_PORT:-3000}:3000"]
+  sidecar:
+    network_mode: service:backend
+  helper:
+    network_mode: "container:jd-backend"
+"""
+        found = problems(other)
+        self.assertIn("sidecar is on the host's network, where it can bind any address", found)
+        self.assertIn("helper shares another container's network, which this check cannot follow", found)
+        self.assertIn('frontend publishes ports as ["${JD_FRONTEND_PORT:-3000}:3000"], which this check cannot read', found)
 
 
 if __name__ == "__main__":
