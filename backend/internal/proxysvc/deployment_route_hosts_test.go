@@ -3,6 +3,9 @@ package proxysvc
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -46,10 +49,12 @@ func TestNginxRouteSendsServiceDomainsToTheirOwnServers(t *testing.T) {
 	}
 	content := mustRender(t, deploymentSiteSpec(route, ""))
 	variable := "$" + NginxIdent(route.Name) + "_host_up"
+	// Each name is matched whole, as a regular expression, which nginx does
+	// not keep in the map's hash and so takes at any length.
 	wantMap := "map $host " + variable + " {\n" +
-		"    default                     127.0.0.1:30080;\n" +
-		"    media-radarr.example.test   127.0.0.1:30082;\n" +
-		"    media-requests.example.test 127.0.0.1:30081;\n" +
+		"    default                          127.0.0.1:30080;\n" +
+		`    ~^media-radarr\.example\.test$   127.0.0.1:30082;` + "\n" +
+		`    ~^media-requests\.example\.test$ 127.0.0.1:30081;` + "\n" +
 		"}"
 	if !strings.Contains(content, wantMap) {
 		t.Fatalf("the route has no host map %q:\n%s", wantMap, content)
@@ -95,7 +100,7 @@ func TestNginxHostMapDefaultsToTheReleasesPool(t *testing.T) {
 	route.Upstream, route.Upstreams = "", []string{"http://127.0.0.1:30080", "http://127.0.0.1:30090"}
 	content := mustRender(t, deploymentSiteSpec(route, ""))
 	pool := NginxIdent(route.Name) + "_pool"
-	if !strings.Contains(content, "    default                     "+pool+";\n") || !strings.Contains(content, "upstream "+pool+" {") {
+	if !strings.Contains(content, "    default                          "+pool+";\n") || !strings.Contains(content, "upstream "+pool+" {") {
 		t.Fatalf("the map does not default to the pool:\n%s", content)
 	}
 	if !strings.Contains(content, "proxy_connect_timeout 2s;") {
@@ -349,5 +354,53 @@ func TestNginxListingNamesTheServiceServers(t *testing.T) {
 	want := []string{"http://127.0.0.1:30080", "http://127.0.0.1:30082", "http://127.0.0.1:30081"}
 	if strings.Join(site.Upstreams, " ") != strings.Join(want, " ") {
 		t.Fatalf("the listing names %q, want %q", site.Upstreams, want)
+	}
+}
+
+// The host's real nginx takes a service domain of any length: a sibling
+// name such as media-subtitles.<handle>.just-dashboard.com is past the 46
+// characters a map's hash bucket holds by default, and the map matched by
+// string refused the whole configuration with "could not build map_hash".
+// The server-name hash is raised the way the dashboard's fit does
+// (server_names_fit.go), and each name reaches its own server whatever its
+// case.
+func TestLiveNginxSendsALongServiceDomainToItsServer(t *testing.T) {
+	root := liveNginx(t)
+	server := func(name string) string {
+		backend := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			fmt.Fprint(w, name)
+		}))
+		t.Cleanup(backend.Close)
+		return backend.URL
+	}
+	long := "media-subtitles.a-handle-of-twelve.just-dashboard.example"
+	route := DeploymentRoute{
+		Name: "just-dashboard-env-7.conf", Domains: []string{long, "media.example.test"},
+		Upstream:      server("release"),
+		HostUpstreams: []HostUpstream{{Hostnames: []string{long}, Upstream: server("service")}},
+	}
+	if err := validateDeploymentRules(route); err != nil {
+		t.Fatal(err)
+	}
+	fit := filepath.Join(root, "conf.d", serverNamesFile)
+	if err := os.WriteFile(fit, []byte(fmt.Sprintf("%s %d;\n", bucketDirective, bucketFor(len(long)))), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// An unprivileged nginx cannot open the route's request record under
+	// /var/log; the route is otherwise installed as rendered.
+	spec := deploymentSiteSpec(route, "")
+	spec.AccessLog = false
+	port := freePort(t)
+	installSite(t, root, spec, port)
+	if result := runValidator(context.Background(), "nginx", "-t"); !result.Valid {
+		t.Fatalf("nginx refused a %d-character service domain: %s", len(long), result.Output)
+	}
+	startNginx(t, root)
+	for host, want := range map[string]string{
+		long: "service", strings.ToUpper(long): "service", "media.example.test": "release",
+	} {
+		if _, body := siteGet(t, port, host, "/"); body != want {
+			t.Errorf("%s reached %q, want %q", host, body, want)
+		}
 	}
 }

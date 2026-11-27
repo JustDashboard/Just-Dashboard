@@ -177,21 +177,36 @@ func (spec *SiteSpec) hostMapDefault() string {
 }
 
 // renderHostUpstreamMap picks the server by the name a request asked for.
-// $host is the request's name in lower case, without its port, and a map
-// compares strings without case, so each service domain is one line.
+// $host is the request's name in lower case, without its port, so each
+// service domain is one line. The line matches the whole name as a regular
+// expression rather than as a string: nginx keeps a map's strings in a hash
+// whose buckets (map_hash_bucket_size, the CPU's cache line, 64 on most
+// hosts) take a name of at most 46 characters, so a longer sibling name —
+// media-subtitles.<handle>.just-dashboard.com — failed `nginx -t` for the
+// whole configuration. A site file cannot raise the size, which nginx takes
+// only before the first map it reads, and a regular expression is not
+// hashed. The name's server_name is fitted as every other is
+// (server_names_fit.go).
 func renderHostUpstreamMap(l *lines, spec *SiteSpec) {
 	l.add("# A service domain is answered by its own Compose service; every other")
 	l.add("# name by the release. The rest of the site applies to both alike.")
 	l.add("map $host $%s {", spec.hostUpstreamVar())
 	width := len("default")
 	for _, entry := range spec.hostUpstreams {
-		width = max(width, len(entry.Host))
+		width = max(width, len(hostMapKey(entry.Host)))
 	}
 	l.add("    %-*s %s;", width, "default", spec.hostMapDefault())
 	for _, entry := range spec.hostUpstreams {
-		l.add("    %-*s %s;", width, entry.Host, entry.Address)
+		l.add("    %-*s %s;", width, hostMapKey(entry.Host), entry.Address)
 	}
 	l.add("}")
+}
+
+// hostMapKey is a host map line's match for name: the whole name, its dots
+// literal. A name is a validated domain, so it holds nothing else a regular
+// expression or nginx's parser would read.
+func hostMapKey(name string) string {
+	return "~^" + regexp.QuoteMeta(name) + "$"
 }
 
 // hostMapLineRe reads one line of a host upstream map back, for the

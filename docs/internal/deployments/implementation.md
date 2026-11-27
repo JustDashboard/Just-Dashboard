@@ -2557,7 +2557,13 @@ only renderer/executor/validation authority for their feature.
   publication on this host's loopback. nginx forwards the catch-all through `map $host
   $jd_<ident>_host_up` (the release's server, or its pool, as `default`, one line per service domain), so
   every server block of the route — the HTTPS one, the plain one, a certificate group's — keeps its rules
-  and asks the map; `nginx -t` accepts the file on nginx 1.18, 1.24 and 1.28, and the Sites list reads the
+  and asks the map. Each line matches its whole name as a regular expression (`~^media-requests\.example\.com$`,
+  `hostMapKey`): nginx hashes a map's strings in buckets of `map_hash_bucket_size`, the cache line by
+  default, which hold a name of at most 46 characters, and a site file cannot raise it (nginx takes it only
+  before the first map it reads), so a long sibling name matched as a string failed `nginx -t` for the
+  whole configuration; the name's `server_name` is fitted like any other
+  ([`server_names_fit.go`](../backend/proxy.md)). `nginx -t` accepts the file on nginx 1.18, 1.24 and 1.28
+  (`TestLiveNginxSendsALongServiceDomainToItsServer` runs the host's nginx on a 57-character name), and the Sites list reads the
   map's servers as the route's upstreams. A route without host upstreams renders as it always did. The
   Docker Caddy ingress is in [the ingress decision](caddy-ingress.md#service-domains). Public-route checks
   ask the primary's names (`publicRouteURLs` leaves service domains out, so a readiness probe never
