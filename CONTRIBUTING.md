@@ -326,6 +326,12 @@ never into `docs/audits/`.
   what the API suite spent, and a hash carries its own parameters, so verification is unchanged. A
   test that names a MongoDB nothing listens on puts `serverSelectionTimeoutMS` in the connection
   string, or it waits eight seconds to find out.
+- A Go test that waits for something to happen polls for it with its package's
+  `waitFor(t, what, cond)` (a package without one gets the same few lines), whose deadline matters
+  only when the test fails, instead of sleeping a guessed amount: on a loaded machine the guess is
+  too short, and everywhere else too long. A sleep stays where the time is the point: a fake
+  server's latency, a window in which nothing may happen, or code that reads the clock with no way
+  to be handed another.
 - A test that reaches an update, restart or uninstall puts the recording `docker` of
   `selfupdatetest.Docker` (`internal/selfupdate/selfupdatetest`) on `PATH` first. Those operations run
   the docker CLI, and without it the test would ask the daemon of the machine running it to remove and
