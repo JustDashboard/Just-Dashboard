@@ -120,7 +120,10 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
 - Connecting to a Just Hub is optional and outbound only, to one machine on the server's own tailnet,
   reached only over the tailnet. It has its own key, pinned hub key, counter and audit name, separate
   from the just-dashboard.com link, and a hub's command runs only under the same checks and the scope
-  you chose. The hub's key is pinned when you approve and nothing the hub sends later can change it; the
+  you chose. Besides the report just-dashboard.com gets, the hub is told how many package updates are
+  waiting and whether a reboot is, and how many sign-ins succeeded and failed in the last day (counts,
+  never who or from where); from `operate` up, also certificate names with their days left and each
+  deployment's fixable image-scan findings. The hub's key is pinned when you approve and nothing the hub sends later can change it; the
   hub's tailnet machine is pinned too, so if another machine takes the hub's name the server sends it
   nothing and the connection goes quiet until you reconnect. What the hub sends to show (notices, server
   names, its messages) is shown as the hub's, never as the dashboard's own prompt. The one-time token the

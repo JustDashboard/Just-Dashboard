@@ -35,6 +35,21 @@ const NAMED: SharedItem = {
 }
 
 /**
+ * What only a hub is sent (hub-link-protocol.md 5.4), so it can say what each server needs. Never
+ * part of the snapshot, which just-dashboard.com's link sends too.
+ */
+const HUB_OBSERVED: SharedItem[] = [
+  { key: "packages", label: "package updates waiting, and whether a reboot is" },
+  { key: "signins", label: "sign-in counts for the last day, never who" },
+]
+
+/** What only a hub is sent from `operate` up. */
+const HUB_NAMED: SharedItem[] = [
+  { key: "certificates", label: "certificate names, days left and issuers" },
+  { key: "scans", label: "image scan findings you can fix, per deployment" },
+]
+
+/**
  * Never in the heartbeat at any scope (plan §3.6 and §4.4). Said next to what is shared because
  * the list of what leaves a root-equivalent machine is only half of a trust decision.
  */
@@ -53,9 +68,17 @@ export const NEVER_SENT: readonly string[] = [
 const upper = (text: string) => text[0].toUpperCase() + text.slice(1)
 const capital = (item: SharedItem) => ({ ...item, label: upper(item.label) })
 
-/** Everything the heartbeat carries at this scope, one thing to an entry. */
-export function sharedItems(scope: AccountLinkScope): SharedItem[] {
-  return (scope === "observe" ? OBSERVED : [...OBSERVED, NAMED]).map(capital)
+/**
+ * Everything the heartbeat carries at this scope, one thing to an entry. A hub is sent a few
+ * things the site never is.
+ */
+export function sharedItems(scope: AccountLinkScope, peer: "site" | "hub" = "site"): SharedItem[] {
+  const hub = peer === "hub"
+  const items =
+    scope === "observe"
+      ? [...OBSERVED, ...(hub ? HUB_OBSERVED : [])]
+      : [...OBSERVED, ...(hub ? HUB_OBSERVED : []), NAMED, ...(hub ? HUB_NAMED : [])]
+  return items.map(capital)
 }
 
 /** The scope card's sentence for what the site may do with it. */
@@ -173,6 +196,7 @@ const WORDS: Record<string, string> = {
   rx: "received",
   tx: "sent",
   load1: "load (1 min)",
+  signins: "sign-ins",
 }
 
 const words = (key: string) =>

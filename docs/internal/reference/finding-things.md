@@ -229,7 +229,8 @@ Each is a checklist. The linked document owns the rule; this only says which fil
 1. Mount it in the area's `mount<Area>Routes` (`api/handlers_<area>.go`) with `r.Method(…,
    s.handle(…))`, inside the group whose capability it needs.
 2. Write the handler beside it: decode with `httpx.DecodeJSON`, name the audit action with
-   `httpx.SetAudit`, return `httpx` errors.
+   `httpx.SetAudit`, return `httpx` errors. A GET records nothing through `SetAudit`; one worth a trail
+   writes its own entry with `s.recordAudit`.
 3. A mutating route (anything but `GET`, `HEAD` and `OPTIONS`) is held by
    `TestEveryMutatingRouteIsAuditedAndGated` (`api/routes_gates_test.go`) on the normal and the agent
    router: audited by `httpx.AuditMutations`, asking for a capability a read-only account lacks, and
