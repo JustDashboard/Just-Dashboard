@@ -303,10 +303,19 @@ func TestNoCommandACopyRunsCarriesAPassword(t *testing.T) {
 	if len(execs) != 5 {
 		t.Fatalf("the steps ran %d commands, not the five that go through the copy's own clients: %v", len(execs), execs)
 	}
+	// A password is looked for in every form a client could be handed it in:
+	// as it is, escaped for PGOPTIONS, and inside a SQL or a MySQL literal,
+	// each of which doubles its quotes.
+	forms := []string{copyTestSecret, pgOptionsValue(copyTestSecret)}
+	for _, literal := range []string{sqlLiteral(copyTestSecret), mysqlLiteral(copyTestSecret)} {
+		forms = append(forms, literal[1:len(literal)-1])
+	}
 	for _, exec := range execs {
 		for _, arg := range exec.Cmd {
-			if strings.Contains(arg, copyTestSecret) || strings.Contains(arg, pgOptionsValue(copyTestSecret)) {
-				t.Fatalf("%v carries a password on its command line", exec.Cmd)
+			for _, form := range forms {
+				if strings.Contains(arg, form) {
+					t.Fatalf("%v carries a password on its command line", exec.Cmd)
+				}
 			}
 		}
 	}
