@@ -3080,6 +3080,79 @@ export interface ManifestStart {
   state?: string
 }
 
+/** media.MediaSource in the dashboard's source. */
+export interface MediaSource {
+  definition?: string
+  enabled?: boolean
+  id?: number
+  name?: string
+  privacy?: MediaSourcePrivacy
+  protocol?: string
+}
+
+/** media.MediaSourceCatalogue in the dashboard's source. */
+export interface MediaSourceCatalogue {
+  definitions?: MediaSourceDefinition[] | null
+  fetchedAt?: string
+}
+
+/** media.MediaSourceDefinition in the dashboard's source. */
+export interface MediaSourceDefinition {
+  definition?: string
+  description?: string
+  language?: string
+  name?: string
+  needsInput?: boolean
+  privacy?: MediaSourcePrivacy
+}
+
+/** media.MediaSourceDetail in the dashboard's source. */
+export interface MediaSourceDetail {
+  definition?: string
+  description?: string
+  fields?: MediaSourceField[] | null
+  name?: string
+  privacy?: MediaSourcePrivacy
+  urls?: string[] | null
+}
+
+/** media.MediaSourceField in the dashboard's source. */
+export interface MediaSourceField {
+  advanced?: boolean
+  help?: string
+  label?: string
+  name?: string
+  options?: MediaSourceOption[] | null
+  type?: MediaSourceFieldType
+  /** Any JSON value. */
+  value?: unknown
+}
+
+/** One of the values of media.MediaSourceFieldType. */
+export const MediaSourceFieldType = {
+  Text: "text",
+  Password: "password",
+  Number: "number",
+  Checkbox: "checkbox",
+  Select: "select",
+} as const
+export type MediaSourceFieldType = (typeof MediaSourceFieldType)[keyof typeof MediaSourceFieldType]
+
+/** media.MediaSourceOption in the dashboard's source. */
+export interface MediaSourceOption {
+  label?: string
+  /** Any JSON value. */
+  value?: unknown
+}
+
+/** One of the values of media.MediaSourcePrivacy. */
+export const MediaSourcePrivacy = {
+  Public: "public",
+  SemiPrivate: "semiPrivate",
+  Private: "private",
+} as const
+export type MediaSourcePrivacy = (typeof MediaSourcePrivacy)[keyof typeof MediaSourcePrivacy]
+
 /** metrics.MemorySizing in the dashboard's source. */
 export interface MemorySizing {
   limitMb?: number
@@ -5027,6 +5100,24 @@ export interface StackServiceState {
   status?: string
   title?: string
   url?: string
+}
+
+/** api.stackSourceAddAnswer in the dashboard's source. */
+export interface StackSourceAddAnswer {
+  source?: MediaSource
+  synced?: boolean
+}
+
+/** api.stackSourceAddRequest in the dashboard's source. */
+export interface StackSourceAddRequest {
+  definition?: string
+  /** A secret: it is accepted here and never read back by any route. */
+  fields?: Record<string, unknown> | null
+}
+
+/** api.stackSourcesAnswer in the dashboard's source. */
+export interface StackSourcesAnswer {
+  sources?: MediaSource[] | null
 }
 
 /** api.stackState in the dashboard's source. */
