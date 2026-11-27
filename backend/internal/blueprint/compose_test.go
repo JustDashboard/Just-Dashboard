@@ -55,6 +55,13 @@ func minimalComposeTemplate() *Blueprint {
 	}
 }
 
+// asStack makes the template a preset of a stack, which the stack's own
+// configuration pass sets up: its access is "managed" from then on.
+func asStack(b *Blueprint, stack string) {
+	b.Stack = stack
+	b.Access = Access{Kind: AccessManaged, Note: "The dashboard sets every application up and keeps the login."}
+}
+
 func TestMinimalComposeTemplateIsValid(t *testing.T) {
 	t.Parallel()
 	if err := Validate(minimalComposeTemplate()); err != nil {
@@ -98,21 +105,21 @@ func TestComposeValidationRejectsEachUnsafeShape(t *testing.T) {
 		{"a port published on every interface", func(b *Blueprint) { db(b).Ports[0].Exposure = "direct" }, "proxy, internal or loopback"},
 		{"a loopback port outside a stack", func(b *Blueprint) { db(b).Ports[0].Exposure = "loopback" }, "only a stack's private services"},
 		{"a loopback port with no route to publish it through", func(b *Blueprint) {
-			b.Stack = "media"
+			asStack(b, "media")
 			db(b).Ports[0].Exposure = "loopback"
 		}, "declares no egress"},
 		{"an address label outside a stack", func(b *Blueprint) { db(b).Address = "sql" }, "only a stack's service"},
 		{"an address label with nothing on loopback", func(b *Blueprint) {
-			b.Stack = "media"
+			asStack(b, "media")
 			db(b).Address = "sql"
 		}, "publishes no port on loopback"},
 		{"an address label that is no DNS label", func(b *Blueprint) {
-			b.Stack = "media"
+			asStack(b, "media")
 			db(b).Ports[0].Exposure, db(b).Egress = "loopback", true
 			db(b).Address = "SQL.Server"
 		}, "not a DNS label"},
 		{"an address label too long for one", func(b *Blueprint) {
-			b.Stack = "media"
+			asStack(b, "media")
 			db(b).Ports[0].Exposure, db(b).Egress = "loopback", true
 			db(b).Address = strings.Repeat("a", 21)
 		}, "not a DNS label"},
@@ -162,6 +169,16 @@ func TestComposeValidationRejectsEachUnsafeShape(t *testing.T) {
 		{"a check naming a private service's port", func(b *Blueprint) {
 			b.Checks = []Check{{Name: "SQL", Kind: CheckTCP, Phase: "readiness", Required: true, Port: "postgres"}}
 		}, "names undeclared port"},
+		// The person was told the first visitor claims an account the stack's
+		// pass had already made, and the warning never went away.
+		{"a stack's preset whose first visitor sets it up", func(b *Blueprint) { b.Stack = "media" }, `so it is "managed"`},
+		{"a managed sign-in outside a stack", func(b *Blueprint) {
+			b.Access = Access{Kind: AccessManaged, Note: "Set up for you."}
+		}, "only a stack's preset"},
+		{"a managed sign-in that names a variable", func(b *Blueprint) {
+			asStack(b, "media")
+			b.Access.SecretVariable = "DB_PASSWORD"
+		}, "hands over no credential"},
 		{"a mutable service image with no explanation", func(b *Blueprint) { db(b).Image.TagPolicy = "mutable" }, "must explain itself"},
 		{"a secret alphabet the generator does not write", func(b *Blueprint) { b.Secrets[0].Alphabet = "emoji" }, "letters and digits, or hex"},
 	} {
@@ -496,7 +513,7 @@ func TestStackTemplatesRenderAServiceDomainPerLabel(t *testing.T) {
 		t.Fatalf("a stack without a domain rendered: %v", err)
 	}
 	stack := minimalComposeTemplate()
-	stack.Stack = "example"
+	asStack(stack, "example")
 	stack.Services[1].Ports[0].Exposure, stack.Services[1].Egress, stack.Services[1].Address = "loopback", true, "sql"
 	if err := Validate(stack); err != nil {
 		t.Fatal(err)

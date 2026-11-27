@@ -2,6 +2,7 @@ import { expect, test, type Page } from "@playwright/test"
 import { json, mockProject } from "./deploy-fixture"
 import {
   STACK_PASSWORD,
+  mediaCompleteDefinition,
   mockStackProject,
   stackCatalogue,
   stackState,
@@ -605,8 +606,51 @@ test("a stack's template whose project the server does not call a stack gets no 
   await page.goto("/deploy/7")
   await expect(railRow(page, "/runtime")).toBeVisible()
   await expect(railRow(page, "/stack")).toHaveCount(0)
+  // Nor a way to it from the Overview: there is no login on a page that is
+  // not there.
+  const signIn = page
+    .locator("[data-slot='panel']")
+    .filter({ has: page.getByRole("heading", { name: "First sign-in", exact: true }) })
+  await expect(signIn.getByRole("link", { name: /Open it/ })).toBeVisible()
+  await expect(signIn.getByRole("link", { name: "See the login" })).toHaveCount(0)
   await page.goto("/deploy/7/stack")
   await expect(page.getByText("This project is not a stack", { exact: true })).toBeVisible()
+})
+
+// The stack set every app up before its address answered anyone, so its
+// Overview never tells the person to hurry and claim the account: that warning
+// stood under a stack someone had long since signed in to, and never went away.
+test("a stack's Overview links the one login and never asks anyone to claim an account", async ({
+  page,
+}) => {
+  await mockStackProject(page)
+  await page.goto("/deploy/7")
+  const signIn = page
+    .locator("[data-slot='panel']")
+    .filter({ has: page.getByRole("heading", { name: "First sign-in", exact: true }) })
+  await expect(signIn).toContainText("The dashboard finishes every application's first-run setup")
+  await expect(signIn.getByRole("link", { name: "See the login" })).toHaveAttribute(
+    "href",
+    "/deploy/7/stack",
+  )
+  await expect(signIn.getByRole("link", { name: /Open it/ })).toHaveAttribute(
+    "href",
+    /^https:\/\/media\.example\.test\/?$/,
+  )
+  await expect(signIn).not.toContainText("Do this now")
+  await expect(signIn).not.toContainText("Nobody owns this yet")
+
+  // The warning is the kind's, not the page's: a template whose first visitor
+  // does make the account still says so.
+  await page.route("**/api/v1/deploy/blueprints/media-*", (route) =>
+    json(route, {
+      ...mediaCompleteDefinition,
+      access: { kind: "setup", note: "The first visitor creates the account." },
+    }),
+  )
+  await page.reload()
+  await expect(signIn).toContainText("Nobody owns this yet")
+  await expect(signIn.getByRole("link", { name: "See the login" })).toHaveCount(0)
 })
 
 test("a later read that fails keeps the last reading on screen", async ({ page }) => {

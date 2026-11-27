@@ -183,7 +183,7 @@ func validateProvenance(provenance Provenance) error {
 func validateAccess(blueprint *Blueprint) error {
 	access := blueprint.Access
 	switch access.Kind {
-	case AccessSetup, AccessCredentials, AccessToken, AccessClient, AccessOpen:
+	case AccessSetup, AccessCredentials, AccessToken, AccessClient, AccessOpen, AccessManaged:
 	case AccessUnavailable:
 		// The whole point of the vocabulary. An image whose first password
 		// exists only in its own log, or is the same for everybody, cannot be
@@ -195,7 +195,18 @@ func validateAccess(blueprint *Blueprint) error {
 	case "":
 		return errors.New("access.kind is required: every blueprint says how the first sign-in works")
 	default:
-		return fmt.Errorf("access.kind %q is not one of setup, credentials, token, client, open", access.Kind)
+		return fmt.Errorf("access.kind %q is not one of setup, credentials, token, client, open, managed", access.Kind)
+	}
+	// Only a stack's configuration pass sets an application up before anyone
+	// reaches it, and it sets up every application of the preset. Any other
+	// kind on a preset sends the person to do what the dashboard has done
+	// (the first visitor does not claim the account; it is already made), and
+	// "managed" anywhere else promises a setup nothing performs.
+	if blueprint.Stack != "" && access.Kind != AccessManaged {
+		return fmt.Errorf("access.kind %q on a preset of the %s stack: the stack sets every application up and keeps the login, so it is \"managed\"", access.Kind, blueprint.Stack)
+	}
+	if blueprint.Stack == "" && access.Kind == AccessManaged {
+		return errors.New("access.kind \"managed\" means a stack's configuration pass sets the application up, so only a stack's preset may declare it")
 	}
 	if strings.TrimSpace(access.Note) == "" {
 		return errors.New("access.note is required: the sentence the operator reads before deploying")
@@ -244,9 +255,10 @@ func validateAccess(blueprint *Blueprint) error {
 		if access.SecretVariable == "" {
 			return errors.New("a client credential must name the generated secret the connecting program uses")
 		}
-	case AccessSetup, AccessOpen, AccessUnavailable:
+	case AccessSetup, AccessOpen, AccessUnavailable, AccessManaged:
 		// Nothing is handed over, so naming a credential here would describe a
-		// sign-in that does not happen.
+		// sign-in that does not happen. A managed login is the stack's own
+		// credential, which no variable holds.
 		if access.SecretVariable != "" || access.Username != "" || access.UsernameVariable != "" {
 			return fmt.Errorf("a %q sign-in hands over no credential, so it must not name one", access.Kind)
 		}

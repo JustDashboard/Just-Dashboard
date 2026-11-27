@@ -15,6 +15,7 @@ export const AccessKind = {
   Token: "token",
   Client: "client",
   Open: "open",
+  Managed: "managed",
   Unavailable: "unavailable",
 } as const
 export type AccessKind = (typeof AccessKind)[keyof typeof AccessKind]

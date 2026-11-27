@@ -92,7 +92,11 @@ test("the Stacks tab says what each preset runs and what it cannot do before any
   await expect(settings(page).getByRole("combobox", { name: "Requests" })).toHaveText(
     "You approve each request",
   )
-  await expect(settings(page).getByText("You create the first account")).toBeVisible()
+  // The stack sets every app up itself; nothing says the first visitor claims it.
+  await expect(
+    settings(page).getByText("The dashboard sets it up and keeps the login"),
+  ).toBeVisible()
+  await expect(settings(page)).not.toContainText("You create the first account")
 
   // The pins are there for whoever checks them, folded.
   const pins = page.getByRole("button", { name: "Pinned images" })
