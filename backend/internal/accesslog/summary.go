@@ -386,7 +386,7 @@ type Collector struct {
 	// agent to recognise, and recognising it is most of what a request
 	// costs to count.
 	agentsRead   map[string]agentReading
-	referersRead map[visitorKey]string
+	referersRead map[refererKey]string
 
 	latencies []float64
 	// timed counts every timed request, of which latencies is a sample once
@@ -430,7 +430,7 @@ func NewCollector(f Filter) *Collector {
 		byMinute:      map[int64]*minuteBucket{},
 		audience:      newAudienceTally(),
 		agentsRead:    map[string]agentReading{},
-		referersRead:  map[visitorKey]string{},
+		referersRead:  map[refererKey]string{},
 	}
 }
 
@@ -452,12 +452,16 @@ func (c *Collector) readAgent(agent string) agentReading {
 	return got
 }
 
+// refererKey is a referer with the host it was sent to, which decides whether
+// it names an outside site or the site's own.
+type refererKey struct{ referer, host string }
+
 // readReferer is refererHost, remembered for the window.
 func (c *Collector) readReferer(referer, host string) string {
 	if referer == "" {
 		return ""
 	}
-	key := visitorKey{ip: referer, agent: host}
+	key := refererKey{referer: referer, host: host}
 	if got, ok := c.referersRead[key]; ok {
 		return got
 	}
