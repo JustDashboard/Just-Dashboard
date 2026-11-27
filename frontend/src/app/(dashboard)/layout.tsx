@@ -20,7 +20,6 @@ import { WorkspaceCommandsProvider } from "@/components/workspace/commands"
 import { NetworkChangeConfirmation } from "@/components/network/change-confirmation"
 import { HeldSessionsHost, HeldSessionsProvider } from "@/components/remote-desktop/held-sessions"
 import { AgentDock } from "@/components/assistant/agent/dock"
-import { AskAboutPage } from "@/components/assistant/ask-about"
 import { HubLinkProvider, useShellHub } from "@/hooks/use-hub-link"
 import { signInAddress } from "@/lib/sign-in-return"
 import { waitingReason } from "@/lib/session-probe"
@@ -152,10 +151,8 @@ function DashboardShell({ children }: { children: React.ReactNode }) {
                     <SidebarTrigger className="size-11 text-muted-foreground" />
                     {hub ? <ServerSwitcher hub={hub} strip /> : <Logo />}
                     {/* A phone has no ⌘K and the rail's search field is inside
-                      a closed sheet, so search had no way in at all here; nor
-                      had asking the assistant about the page. */}
+                      a closed sheet, so search had no way in at all here. */}
                     <div className="ml-auto flex items-center">
-                      <AskAboutPage className="h-11" />
                       <MobileSearch />
                     </div>
                   </header>
