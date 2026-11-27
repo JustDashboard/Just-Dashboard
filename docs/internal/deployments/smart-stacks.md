@@ -42,8 +42,9 @@ configuration steps against the live release's containers and records each step'
   already has (`dockerx/compose_ports.go`) when taken, so two stacks on one server do not collide.
   Nothing but Caddy binds a routable address (invariant 1). A service with a loopback port must
   declare `egress`: Docker publishes no port of a container that is only on an internal network.
-  To reach one from elsewhere the person
-  uses an SSH tunnel or publishes it through a site of their own.
+  A domain of the deployment that names the service (`domains[].service`, a
+  [service domain](implementation.md#service-domains)) reaches it from elsewhere over HTTPS: the
+  route sends that name to the service's loopback publication, with every rule of the route.
 - **One shared volume, `media`, at `/data`**: downloads and the library on one filesystem so a
   finished download is renamed into the library, not copied. Writers (qBittorrent, Radarr, Sonarr,
   Bazarr) mount it read-write; Jellyfin mounts it **read-only** in Complete. The validator allows a

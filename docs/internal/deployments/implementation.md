@@ -2513,6 +2513,48 @@ only renderer/executor/validation authority for their feature.
   while a served domain is HTTPS, or while a policy is saved so it stays removable, with the lifetimes,
   subdomains and preload confirmation the Proxy site form has, and a plain name's row says it is served
   plain, while the HTTPS switch's tooltip says what an HTTPS name does with plain visitors. Previews copy the policy with the other rules.
+- <a id="service-domains"></a>Service domains (`deploy/service_domains.go`, `proxysvc/deployment_route_hosts.go`). A
+  domain of a Compose plan may name the service it serves, `domains[].service`, and that service's
+  container port, `domains[].port`: a media stack's Seerr at `media-requests.example.com` beside the
+  Jellyfin the deployment's own name reaches. Empty `service` is the plan's primary service, as every
+  domain was before; zero `port` is the service's only TCP port published on `127.0.0.1`. Both are kept in
+  the domain's dependency row only when set, and a service equal to the primary (and, with no service, a
+  port equal to `runtime.internalPort`) is written as none (`normalizeServiceDomains`), so every other
+  domain keeps its bytes and digest. `Validate` refuses them outside `build.method compose`, on a
+  redirecting name, on a wildcard (a service is sent the names it answers one by one) and beyond 16
+  services; a tailnet-only environment takes no domain at all. Against the plan's Compose analysis
+  (`validateServiceDomains`) the service has to exist and publish the port on `127.0.0.1`: a blueprint
+  `loopback` port does, and so does a user Compose file's `127.0.0.1:H:C` or `127.0.0.1::C`, with no port
+  named only when it publishes one. The draft's configuration step and commit hold a draft to its
+  detection's analysis, the Domains settings save to the evidence the current build plan carries, and
+  preflight says the same as `domain_service_unpublished` (blocked, `proxy`, the domain's field). A tunnel
+  and a password are allowed: the password still protects the whole route. The Compose runtime records
+  every TCP port each of its containers publishes on `127.0.0.1` as `servicePorts` (`{service,
+  containerPort, hostPort}`, `composeServicePorts`), read from the started containers after Compose's
+  port recovery moved anything. Every cutover — activation, a rollback's clone, the instant rollback, the
+  live-route rewrites — builds the route through `releaseRoute`, which adds `DeploymentRoute.HostUpstreams`
+  from the release's frozen domains and those ports, one entry per server with every name it serves; a
+  service domain whose service or port the release did not publish fails activation as
+  `service_port_missing`, recovered like any other activation failure. The names stay in the route's
+  `Domains`, so the certificate step, `TLSHostnames`, the DNS findings and the DNS-record tool cover them as
+  they cover every domain, and every rule of the route — TLS and the plain names, HSTS, the password or
+  the sign-in, allowed addresses, edge rules, the rate limit, CrowdSec, maintenance, error pages, the
+  request record and its trace, dropped cookies, the body limit, response headers — applies to them as
+  to the rest; only the server differs. `proxysvc` refuses host upstreams beside a canary, skew protection
+  or sleep, a name that is not one of the route's served names, a name sent twice, a server named twice
+  or one that is the release's own, and more than 16 entries, and `ApplyDeploymentRoute` takes only a
+  publication on this host's loopback. nginx forwards the catch-all through `map $host
+  $jd_<ident>_host_up` (the release's server, or its pool, as `default`, one line per service domain), so
+  every server block of the route — the HTTPS one, the plain one, a certificate group's — keeps its rules
+  and asks the map; `nginx -t` accepts the file on nginx 1.18, 1.24 and 1.28, and the Sites list reads the
+  map's servers as the route's upstreams. A route without host upstreams renders as it always did. The
+  Docker Caddy ingress is in [the ingress decision](caddy-ingress.md#service-domains). Public-route checks
+  ask the primary's names (`publicRouteURLs` leaves service domains out, so a readiness probe never
+  introduces the primary as Seerr), and each public-route check is asked of every service domain too
+  (`serviceRouteCheck`), with any answer below 500 reachable, an application's own 401, 302 or 403
+  sign-in included. Traffic replay replays no service domain's requests against the candidate, and the
+  release comparison shows the service on the domain's line. Staging copies and pull-request previews
+  take none of production's domains, so none of its service domains either.
 - Route sign-in. `runtime.forwardAuth` (`provider` authelia, authentik, oauth2-proxy or custom;
   `verify`, the auth server's check address; `signIn`, the page a visitor without a session is sent to;
   `previewsOnly`) has the public route ask an auth server about every request before the application
