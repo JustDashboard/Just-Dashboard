@@ -227,8 +227,9 @@ that begins the chat and never again. A chat opened
 from the history is read back from the server and folded through the same reducer the stream feeds, so it looks
 exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
-*Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
-read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
+*Continued somewhere else* and stops. Below the chats, what it has read, once it has read something, and the
+tokens it took; a change is not listed again there, since its shortcut stands under its call in the conversation.
+On a phone the chat, the chats and what it read are one full-height pane at a time with a bar at the foot
 (`phone-panes.tsx`, shared by every page that shows one pane at a time: `patterns/keyboard-and-place.md` lists them).
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition

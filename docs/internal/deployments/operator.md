@@ -112,7 +112,9 @@ stored secret are reads, whose answer is masked before the provider is sent it. 
 unasked like the rest. Holding those routes alone there would not keep an instruction the model read from
 leaving access behind: an administrator's shell line or file write can add the same key or sudo rule and runs
 unasked too, and holding those as well is the mode called "Ask before changes". So the mode says what it
-includes where it is chosen (`MODE_DETAIL` in `components/assistant/settings.ts`), and making full access stop
+includes in a line where the default is chosen (`MODE_DETAIL` in `components/assistant/settings.ts`, the
+settings page's Default mode: *Does anything you could do, without asking*); the composer's menu is the three
+names alone, by the operator's choice (27 Nov 2026), with full access amber. Making full access stop
 at lasting access would change what the mode means (security invariant 13), which is the operator's to decide.
 
 A call is one of four kinds: `free` reads nothing of the server; `read`; `change`; and `destructive` for a route
@@ -562,8 +564,7 @@ The usage line under an answer and in the rail counts every token the model read
 counts what it read from and wrote to its cache apart from `input`, so a long chat once read "6 tokens in".
 `components/assistant/elements/` is AI Elements (vercel/ai-elements, Apache-2.0, see its `NOTICE`), adapted to
 this product's marks. `components/deploy/project-assistant.tsx` is the project's page: the conversation, and
-beside it its chats and what it read; a change's shortcut is under its call in the conversation; `?chat=<id>`
-opens a saved chat there.
+beside it its chats and what it read (each change's shortcut stands under its call in the conversation); `?chat=<id>` opens a saved chat there.
 `components/assistant/assistant-page.tsx` is `/assistant`: a chat over the whole server, every chat of the
 person's listed beside it (a deployment's opens on that deployment's page), and the settings under
 `?view=settings`. A chat another tab is answering offers Take over, which stops that press and carries the

@@ -121,7 +121,7 @@ to the window below the break so the pane has a height to be the whole of. These
 | Page | Break | Stops | Opens on |
 | --- | --- | --- | --- |
 | Git workspace | `lg` | Changes, History, Branches, GitHub, Files | Changes |
-| Assistant chat | `lg` | Chat, Chats, What it did (and Settings on the assistant's own page) | Chat |
+| Assistant chat | `lg` | Chat, Chats, What it read (and Settings on the assistant's own page) | Chat |
 | `/logs` | `md` | Log, Sources | the log |
 | `/network/tools` | `md` | Tool, Every tool | the tool, the one a link asked for |
 | `/files` | `lg` | Places, Folder, Details | the folder |
