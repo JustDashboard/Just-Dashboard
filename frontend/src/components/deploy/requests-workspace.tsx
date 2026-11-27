@@ -62,6 +62,7 @@ import { RequestChart, type ChartMarker } from "@/components/deploy/request-char
 import { RequestConsole } from "@/components/deploy/request-console"
 import { RequestInspector } from "@/components/deploy/request-inspector"
 import { WindowHeadline } from "@/components/deploy/window-headline"
+import { floorWords } from "@/components/deploy/window-headline-model"
 import { Address, LiveDot, socketReading } from "@/components/deploy/request-marks"
 import { TrafficFacets } from "@/components/deploy/traffic-facets"
 import {
@@ -1145,14 +1146,8 @@ function WindowNotes({
       </span>,
     )
   }
-  if (!data.complete && data.coverage.from) {
-    notes.push(
-      <span key="from">
-        What is held begins {timestamp(data.coverage.from)}; earlier requests have rolled off, so
-        the figures are a floor.
-      </span>,
-    )
-  }
+  const floor = floorWords(data, timestamp)
+  if (floor) notes.push(<span key="from">{floor}</span>)
   if (data.coverage.stale) {
     notes.push(
       <span key="stale">

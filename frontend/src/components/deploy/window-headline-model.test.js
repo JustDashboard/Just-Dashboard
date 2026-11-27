@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { coverageNote, keptWords, periodWords } from "./window-headline-model"
+import { coverageNote, floorWords, keptWords, periodWords } from "./window-headline-model"
 
 const at = (iso) => iso.slice(5, 16).replace("T", " ")
 const NOW = Date.parse("2026-11-27T19:00:00Z")
@@ -52,6 +52,37 @@ describe("how far back the record reaches", () => {
     const data = answer({ complete: false, from: "2026-11-27T02:00:00Z" })
     expect(coverageNote(data, week, at)).toBe("Held since 11-27 02:00, so the figures are a floor")
     expect(coverageNote(answer({ from: "2026-11-27T02:00:00Z" }), week, at)).toBeUndefined()
+  })
+
+  test("a stretch the history lost inside the window makes the figures a floor", () => {
+    // The window starts inside what is kept, but the server knows part of it
+    // is missing (a prune, a truncated file read too late): complete is false.
+    const data = answer({
+      complete: false,
+      from: "2026-11-01T00:00:00Z",
+      history: { from: "2026-11-01T00:00:00Z", days: 30, recording: true },
+    })
+    expect(coverageNote(data, week, at)).toBe(
+      "Part of this window was not recorded, so the figures are a floor",
+    )
+    // Starting before the history too: where it starts, and that it has a hole.
+    const young = answer({
+      complete: false,
+      from: "2026-11-25T08:00:00Z",
+      history: { from: "2026-11-25T08:00:00Z", days: 30, recording: true },
+    })
+    expect(coverageNote(young, week, at)).toBe(
+      "Recorded since 11-25 08:00, with a stretch missing, so the figures are a floor",
+    )
+    // The line under the rows names the same hole, not "earlier requests have
+    // rolled off" before a start that is earlier than the window's.
+    expect(floorWords(data, at)).toBe(
+      "Part of this window was not recorded, so the figures are a floor.",
+    )
+    expect(floorWords(answer({ complete: false, from: "2026-11-27T02:00:00Z" }), at)).toBe(
+      "What is held begins 11-27 02:00; earlier requests have rolled off, so the figures are a floor.",
+    )
+    expect(floorWords(answer({ from: "2026-11-27T02:00:00Z" }), at)).toBeUndefined()
   })
 
   test("a route nobody records says so, rather than nothing", () => {

@@ -36,7 +36,10 @@ export function historyOf(data: DeploymentRequests): RequestHistory | undefined 
  * rather than left for the reader to find in the chart's empty left half.
  * Without a kept history (a proxy site, a dashboard that has not recorded the
  * route yet), what the proxy still holds is the record, and a window reaching
- * past it is a floor.
+ * past it is a floor. With one, the server still says `complete: false` when
+ * a stretch inside the window is known to be missing — a prune, a file that
+ * rolled or was truncated before it was read, history and memory not meeting
+ * — and that is a floor too, whatever "Kept for 30 days" would say.
  */
 export function coverageNote(
   data: DeploymentRequests,
@@ -50,13 +53,34 @@ export function coverageNote(
   // first request is rarely at the window's very first second.
   const short = since !== undefined && Number.isFinite(begins) && begins > since + 60_000
   if (history?.from) {
-    return short ? `Recorded since ${format(history.from)}` : undefined
+    if (short && !data.complete) {
+      return `Recorded since ${format(history.from)}, with a stretch missing, so the figures are a floor`
+    }
+    if (short) return `Recorded since ${format(history.from)}`
+    return data.complete ? undefined : HOLE
   }
   if (!data.complete && data.coverage.from) {
     return `Held since ${format(data.coverage.from)}, so the figures are a floor`
   }
   if (history && !history.recording) return "Not recorded past what the proxy holds"
   return undefined
+}
+
+const HOLE = "Part of this window was not recorded, so the figures are a floor"
+
+/**
+ * Why a window that is not complete is a floor, for the line under the rows.
+ * Without a kept history the proxy's files are the record and what rolled off
+ * is before what is held; with one, the missing stretch is inside the window,
+ * and "earlier requests have rolled off" would name the wrong part of it.
+ */
+export function floorWords(
+  data: DeploymentRequests,
+  format: (iso: string) => string,
+): string | undefined {
+  if (data.complete || !data.coverage.from) return undefined
+  if (historyOf(data)?.from) return `${HOLE}.`
+  return `What is held begins ${format(data.coverage.from)}; earlier requests have rolled off, so the figures are a floor.`
 }
 
 /** How long the dashboard keeps a route's requests, in the words of the range picker. */
