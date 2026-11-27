@@ -68,10 +68,10 @@ password in its environment (`MYSQL_PWD`, `REDISCLI_AUTH`, a variable a mongosh 
 `process.env`, as the TLS reloads in `database_tls_engines.go` do) or in a statement on its standard input
 (the host account route, `handlers_db_host.go`, which keeps that statement to one line with the password
 inside a quoted literal: `psql` and `mysql` read standard input as a script, where `\!` runs a shell).
-Known exceptions, still to change: the legacy `mongo` shell (gone since MongoDB 6.0, used only where
-`mongosh` is missing) cannot read its environment and gets the new account's password in its `--eval`
-script, and a data copy's own password (`setCopyPassword`) and a migration rehearsal's copy
-(`deployment_rehearsal.go`) still reach their clients as arguments inside the copy's container. `dockerx.RedactEnv` masks
+A copy of a managed database (`prepareCopy`) hands `psql -c` the role and password it sets as session
+settings in `PGOPTIONS`, and its MySQL ping takes root's password from `MYSQL_PWD`. One known exception,
+still to change: the legacy `mongo` shell (gone since MongoDB 6.0, used only where `mongosh` is missing)
+cannot read its environment and gets the new account's password in its `--eval` script. `dockerx.RedactEnv` masks
 credential-shaped container env, because that is where deployments keep secrets and container detail is
 not a `system.admin` route.
 
