@@ -173,7 +173,7 @@ test.describe("at a desk", () => {
     await mockProject(page)
     const urls = await asked(page)
     await page.goto("/deploy/7/logs")
-    const who = page.getByRole("group", { name: "Who sent them" })
+    const who = page.getByRole("radiogroup", { name: "Who sent them" })
     await expect(who.getByRole("radio", { name: "Everyone" })).toHaveAttribute(
       "aria-checked",
       "true",

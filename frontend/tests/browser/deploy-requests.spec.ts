@@ -1398,7 +1398,7 @@ test.describe("a deployment's traffic", () => {
     const sockets: string[] = []
     page.on("websocket", (socket) => sockets.push(socket.url()))
     await page.goto("/deploy/7/logs")
-    await expect(page.getByText("21.4")).toBeVisible()
+    await expect(page.locator("[data-slot=window-headline]")).toContainText("1,284 requests")
 
     await page.getByRole("button", { name: "Live", exact: true }).click()
     // The fixture's window ends at sequence 9917; the socket asks for what
@@ -1803,11 +1803,13 @@ test.describe("a deployment's traffic", () => {
     for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 })
       await page.goto("/deploy/7/logs")
-      // A phone picks the view on the bar at the pane's foot, a desk on the
-      // strip at its head; both are buttons, so the phone's is the bar's.
+      // A phone picks the view on the bar at the page's foot, a desk on the
+      // tabs in the strip at its head.
       const bar = page.locator("[data-slot=pane-bar]")
       const view = (name: string) =>
-        (width === 390 ? bar : page).getByRole("button", { name, exact: true })
+        width === 390
+          ? bar.getByRole("button", { name, exact: true })
+          : page.getByRole("tab", { name, exact: true })
       await expect(view("Requests")).toBeVisible()
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

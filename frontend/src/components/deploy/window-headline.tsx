@@ -78,7 +78,7 @@ export function WindowHeadline({
           dense && "max-md:hidden",
         )}
       >
-        <span className="first-letter:uppercase">{period}</span>
+        <span>{period.charAt(0).toUpperCase() + period.slice(1)}</span>
         {data && <RecordWords data={data} asked={asked} />}
         {aside && <span className="ml-auto flex min-w-0 items-center">{aside}</span>}
       </div>

@@ -86,14 +86,24 @@ export function LogsStrip({
             className="border-b-0"
             views={(Object.keys(VIEW_LABEL) as LogsView[]).map((id) => ({
               key: id,
-              label: VIEW_LABEL[id],
-              dot:
-                id === "events" && disruptions > 0
-                  ? {
-                      tone: "warning" as const,
-                      label: `${plural(disruptions, "exit or restart", "exits or restarts")} in the last hour`,
-                    }
-                  : undefined,
+              // The count is the tab's title rather than its name, so the
+              // tab is "Events" to a screen reader and a test alike, and the
+              // figure is said where the pointer asks for it.
+              label:
+                id === "events" && disruptions > 0 ? (
+                  <>
+                    {VIEW_LABEL[id]}
+                    <span
+                      aria-hidden
+                      title={`${plural(disruptions, "exit or restart", "exits or restarts")} in the last hour`}
+                      className="numeric text-hint text-warning"
+                    >
+                      {disruptions}
+                    </span>
+                  </>
+                ) : (
+                  VIEW_LABEL[id]
+                ),
             }))}
           />
         )

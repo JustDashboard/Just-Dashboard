@@ -338,7 +338,7 @@ export function RequestInspector({
         </PaneSection>
 
         <PaneSection title="Details">
-          <dl className="grid grid-cols-[6.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
+          <dl className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-x-3 gap-y-1.5 text-xs">
             {facts.map(([label, value, title]) => (
               <div key={label} className="contents">
                 <dt className="text-hint leading-4 text-muted-foreground">{label}</dt>
