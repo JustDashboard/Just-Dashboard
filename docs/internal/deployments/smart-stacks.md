@@ -103,7 +103,10 @@ allowed only on a stack's service with a loopback port and unique in the templat
   `deploy.configuration.update` audit), each served over HTTPS and through the tunnel as the primary
   is, then starts the release at that revision as "Deploy changes" does (`deploy.run.request`), and
   answers `202 {runId, domains}`. With no primary domain the body's `domain` becomes the primary
-  (`422 stack_no_domain` without one); with nothing missing it answers `409 stack_addresses_present`.
+  (`422 stack_no_domain` without one). With nothing missing but an address saved that the live
+  release does not serve (`addresses.unpublished`: the release that was to publish it failed, has
+  not run or is still running), it starts the release again without adding a domain
+  (`202 {runId, domains: []}`); with neither it answers `409 stack_addresses_present`.
 
 ## When a pass runs
 
@@ -191,11 +194,11 @@ Bazarr's) are kept there too and are never revealed.
 | Route | Who | What |
 |---|---|---|
 | `GET /deploy/stacks` | any signed-in account, any key | the catalogue: presets with their template, memory and disk estimate, limitations, services with their address label (`address`) and Jellyfin as `primary` |
-| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, each one's public `url` once the live release serves it (Jellyfin's is the primary domain) and a private one's loopback `address`, steps, actions, `login {username, stored}`, `credentials` (the one login), `addresses {primary, missing}`; `404 stack_not_found` otherwise |
+| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, each one's public `url` once the live release serves it (Jellyfin's is the primary domain) and a private one's loopback `address`, steps, actions, `login {username, stored}`, `credentials` (the one login), `addresses {primary, missing, unpublished}`; `404 stack_not_found` otherwise |
 | `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass, `409 stack_not_preset` when the live release is not one of the stack's presets (no pass would ever run); audited |
 | `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | the login's password (`name` is `login`); audited |
 | `PUT /deploy/{id}/stack/login` | administrator, session, not Hub, not the assistant | change the login; a pass follows; audited without the value |
-| `POST /deploy/{id}/stack/addresses` | a configuration save's terms (an administrator in a session, or a deploy key) | give every app without one its address and deploy; audited |
+| `POST /deploy/{id}/stack/addresses` | a configuration save's terms (an administrator in a session, or a deploy key) | give every app without one its address and deploy, or deploy again for addresses saved but not live; audited |
 | `GET /deploy/{id}/stack/sources` | whoever reads the project | the sources Prowlarr has, whoever added them |
 | `GET /deploy/{id}/stack/sources/catalogue` | whoever reads the project | the torrent sources Prowlarr can add, each with `needsInput`, and `fetchedAt` |
 | `GET /deploy/{id}/stack/sources/catalogue/{definition}` | whoever reads the project | one of them with its form |
@@ -499,8 +502,10 @@ Said here so nobody builds on it by mistake:
   page waits, Retry refuses in words, reveal is by name and audited, no secret in the state, one
   login listed, the catalogue's labels.
 - `TestStackAddressesAreSavedAsDomainsAndDeployed`, `TestStackAddressesTakeADomainWhenThereIsNone`,
+  `TestStackAddressesSavedButNotLiveAreDeployedAgain`,
   `TestStackLoginChangeKeepsThePreviousAndAsksForAPass` (`api`) — "Give every app its address" saves
-  through the configuration save and starts the run; the login's change, refusal, audit and reveal.
+  through the configuration save and starts the run, and deploys again for addresses saved but not
+  live; the login's change, refusal, audit and reveal.
 - `media/login_test.go`, `media/address_test.go` — a 1.0.0 stack migrating over fakes with no
   refused qBittorrent sign-in, a changed login reaching every app, the deploy-time seed, and each
   address step converging.

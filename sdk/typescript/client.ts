@@ -4930,8 +4930,10 @@ export function sharedVariables(
  * release is started; the body's domain is used, as the primary, only when the deployment has
  * none.
  *
- * 409 stack_addresses_present when every app has one, 422 stack_no_domain when there is no primary
- * domain and none was given.
+ * With nothing missing but an address saved that the live release does not serve, it starts the
+ * release again without adding a domain. 409 stack_addresses_present when every app has its
+ * address and the live release serves each, 422 stack_no_domain when there is no primary domain
+ * and none was given.
  *
  * A deploy key: allowed.
  */

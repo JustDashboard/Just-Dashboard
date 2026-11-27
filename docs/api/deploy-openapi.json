@@ -29203,7 +29203,7 @@
         }
       ],
       "post": {
-        "description": "409 stack_addresses_present when every app has one, 422 stack_no_domain when there is no primary domain and none was given.",
+        "description": "With nothing missing but an address saved that the live release does not serve, it starts the release again without adding a domain. 409 stack_addresses_present when every app has its address and the live release serves each, 422 stack_no_domain when there is no primary domain and none was given.",
         "operationId": "stackAddresses",
         "requestBody": {
           "content": {
