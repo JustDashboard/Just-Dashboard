@@ -52,7 +52,16 @@ func TestHostAccountPasswordsStayOutOfTheClientsArguments(t *testing.T) {
 		t.Errorf("mongosh: the script does not read the password from its environment: %s", script)
 	}
 
-	stmts := clickHouseAccountStatements("just_dashboard", password, true)
+	args, stmts, err := clickHouseAccountInvocation(9000, "just_dashboard", password, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inArgs("clickhouse-client", args)
+	for _, arg := range args {
+		if arg == "--query" || arg == "-q" || strings.HasPrefix(arg, "--query=") {
+			t.Errorf("clickhouse-client: a query is an argument again: %v", args)
+		}
+	}
 	if len(stmts) != 3 || !strings.Contains(stmts[0], mysqlLiteral(password)) {
 		t.Errorf("clickhouse: the statements it reads are %v", stmts)
 	}
@@ -167,6 +176,9 @@ func TestHostAccountStatementsRefuseAnAccountThatIsNotAName(t *testing.T) {
 		}
 		if _, _, err := mysqlAccountInvocation("", account, "pw", false); err == nil {
 			t.Errorf("mysql accepted the account %q", account)
+		}
+		if _, _, err := clickHouseAccountInvocation(9000, account, "pw", false); err == nil {
+			t.Errorf("clickhouse-client accepted the account %q", account)
 		}
 	}
 }

@@ -547,21 +547,31 @@ func hostClickHouseAccount(ctx context.Context, port int, account, password stri
 	if !hostexec.Available("clickhouse-client") {
 		return "", fmt.Errorf("clickhouse-client is not installed on this server")
 	}
-	if err := validateRoleName(account); err != nil {
+	args, stmts, err := clickHouseAccountInvocation(port, account, password, superuser)
+	if err != nil {
 		return "", err
 	}
-	for _, stmt := range clickHouseAccountStatements(account, password, superuser) {
-		// The port is the server's native one, which is the one the saved
-		// connection dials: a second server on this machine is another port.
-		// Without --query the client reads its one query from standard input,
-		// which keeps the password out of the argv.
-		cmd := hostexec.CommandOnHost(ctx, "clickhouse-client", "--port", strconv.Itoa(port))
+	for _, stmt := range stmts {
+		cmd := hostexec.CommandOnHost(ctx, "clickhouse-client", args...)
 		cmd.Stdin = strings.NewReader(stmt)
 		if _, err := runHostCmd(ctx, cmd); err != nil {
 			return "", err
 		}
 	}
 	return "", nil
+}
+
+// clickHouseAccountInvocation is the client's argv and the queries that
+// create or reset the account, one per run of the client on its standard
+// input. Without --query the client reads its one query from there, which
+// keeps the password out of the argv.
+func clickHouseAccountInvocation(port int, account, password string, superuser bool) ([]string, []string, error) {
+	if err := validateRoleName(account); err != nil {
+		return nil, nil, err
+	}
+	// The port is the server's native one, which is the one the saved
+	// connection dials: a second server on this machine is another port.
+	return []string{"--port", strconv.Itoa(port)}, clickHouseAccountStatements(account, password, superuser), nil
 }
 
 // clickHouseAccountStatements are the queries that create or reset the
