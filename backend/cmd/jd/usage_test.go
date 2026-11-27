@@ -228,34 +228,76 @@ func TestEveryFlagIsInTheUsageText(t *testing.T) {
 	}
 }
 
+// namesCommand reports whether text names the command as it is typed, by
+// any of its aliases: jd vars set, jd variables set.
+func namesCommand(text string, command dispatched) bool {
+	for _, name := range command[0] {
+		if len(command) == 1 {
+			if mentions(text, "jd "+name) {
+				return true
+			}
+			continue
+		}
+		for _, verb := range command[1] {
+			if mentions(text, "jd "+name+" "+verb) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// flagRows are the rows of the guide's Flags table: the commands a row is
+// for, and the flags it names for them.
+func flagRows(t *testing.T, guide string) [][2]string {
+	t.Helper()
+	_, table, ok := strings.Cut(guide, "\n## Flags\n")
+	if !ok {
+		t.Fatal("docs/guides/cli.md has no Flags section")
+	}
+	table, _, _ = strings.Cut(table, "\n## ")
+	var rows [][2]string
+	for _, line := range strings.Split(table, "\n") {
+		if cells := strings.Split(line, "|"); len(cells) == 4 && strings.TrimSpace(cells[0]) == "" {
+			rows = append(rows, [2]string{cells[1], cells[2]})
+		}
+	}
+	return rows
+}
+
 // The guide names every command and every flag, so what `jd help` lists is
-// in the documentation too.
+// in the documentation too, and a command's own flags on its row of the
+// Flags table, as `jd help` names them on its own lines.
 func TestTheGuideNamesEveryCommandAndFlag(t *testing.T) {
 	raw, err := os.ReadFile("../../../docs/guides/cli.md")
 	if err != nil {
 		t.Fatal(err)
 	}
 	guide := string(raw)
+	_, shared, general := readUsage()
+	rows := flagRows(t, guide)
 	missing := map[string]bool{}
 	for _, command := range dispatchedCommands(t) {
-		named := false
-		for _, name := range command[0] {
-			if len(command) == 1 {
-				named = named || mentions(guide, "jd "+name)
-				continue
-			}
-			for _, verb := range command[1] {
-				named = named || mentions(guide, "jd "+name+" "+verb)
-			}
-		}
-		if !named {
+		if !namesCommand(guide, command) {
 			t.Errorf("docs/guides/cli.md does not name jd %s", command)
+		}
+		var own []string
+		for _, row := range rows {
+			if namesCommand(row[0], command) {
+				own = append(own, row[1])
+			}
 		}
 		for _, flag := range helpFlags(t, command) {
 			// A shared flag is reported once, not for every command.
 			if !mentions(guide, spelled(flag)) && !missing[flag] {
 				missing[flag] = true
 				t.Errorf("docs/guides/cli.md does not name %s (jd %s has it)", spelled(flag), command)
+			}
+			if slices.Contains(shared, spelled(flag)) || mentions(general, spelled(flag)) {
+				continue
+			}
+			if !slices.ContainsFunc(own, func(cell string) bool { return mentions(cell, spelled(flag)) }) {
+				t.Errorf("docs/guides/cli.md's Flags table has no row for jd %s that names %s", command, spelled(flag))
 			}
 		}
 	}
