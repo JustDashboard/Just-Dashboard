@@ -10,9 +10,9 @@ import (
 	"sort"
 	"strings"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/errdefs"
 )
 
 // Conflict levels. A block is refused by the backend as well as shown; a
@@ -135,7 +135,7 @@ func (c *Client) NetworkDependencies(ctx context.Context, id string, extra ...st
 	for _, ref := range refs {
 		detail, err := cli.ContainerInspect(ctx, ref)
 		if err != nil {
-			if errdefs.IsNotFound(err) {
+			if cerrdefs.IsNotFound(err) {
 				d.missing[ref] = true
 			}
 			d.Unread = append(d.Unread, ref)

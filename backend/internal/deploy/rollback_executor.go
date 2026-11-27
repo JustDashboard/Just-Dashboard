@@ -13,7 +13,7 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // RuntimeWarmer keeps a retired release's container in memory without
@@ -74,7 +74,7 @@ func (o *DockerRuntimeOwner) replicaStates(ctx context.Context, runtime ReleaseR
 	states := make([]string, 0, len(ids))
 	for _, id := range ids {
 		detail, err := o.client.Inspect(ctx, id)
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			states = append(states, "missing")
 			continue
 		}

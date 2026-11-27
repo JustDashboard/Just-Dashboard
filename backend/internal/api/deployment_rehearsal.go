@@ -19,7 +19,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/go-sql-driver/mysql"
 )
 
@@ -504,7 +504,7 @@ func containerAddress(ctx context.Context, docker *dockerx.Client, container, ne
 		return "", errors.New("this host has no Docker socket")
 	}
 	detail, err := docker.Inspect(ctx, container)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return "", errors.New("the copy's container is gone")
 	}
 	if err != nil {
@@ -669,7 +669,7 @@ func (m *migrationRehearser) removeRehearsals(ctx context.Context, match map[str
 		if item.Labels[rehearsalLabel] == "" || keep[item.Labels[rehearsalLabel]] {
 			continue
 		}
-		if err := docker.RemoveContainer(ctx, item.ID, true, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.RemoveContainer(ctx, item.ID, true, true); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -681,7 +681,7 @@ func (m *migrationRehearser) removeRehearsals(ctx context.Context, match map[str
 		if volume.Labels[rehearsalLabel] == "" || keep[volume.Labels[rehearsalLabel]] || (match != nil && volume.Labels[rehearsalLabel] != match[rehearsalLabel]) {
 			continue
 		}
-		if err := docker.RemoveVolume(ctx, volume.Name, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.RemoveVolume(ctx, volume.Name, true); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -693,7 +693,7 @@ func (m *migrationRehearser) removeRehearsals(ctx context.Context, match map[str
 		if network.Labels[rehearsalLabel] == "" || keep[network.Labels[rehearsalLabel]] || (match != nil && network.Labels[rehearsalLabel] != match[rehearsalLabel]) {
 			continue
 		}
-		if err := docker.RemoveNetwork(ctx, network.ID); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.RemoveNetwork(ctx, network.ID); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -832,7 +832,7 @@ func (m *migrationRehearser) recoverPITRCopy(ctx context.Context, srv *pitrServe
 	if err := docker.RemoveContainer(ctx, created, true, true); err != nil {
 		return source, time.Time{}, err
 	}
-	if err := docker.RemoveVolume(ctx, toolVolume, true); err != nil && !errdefs.IsNotFound(err) {
+	if err := docker.RemoveVolume(ctx, toolVolume, true); err != nil && !cerrdefs.IsNotFound(err) {
 		return source, time.Time{}, err
 	}
 	started, err := docker.Create(ctx, *copySpec, nil)

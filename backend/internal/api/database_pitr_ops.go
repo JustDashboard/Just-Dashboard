@@ -18,7 +18,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // What point-in-time recovery does to a server, each a job on the server
@@ -694,7 +694,7 @@ func (s *Server) recoverCopy(ctx context.Context, id string, start bool, srv *pi
 			return id, time.Time{}, ctx.Err()
 		}
 		detail, err := docker.Inspect(ctx, id)
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			stop()
 			return id, time.Time{}, fmt.Errorf("the copy's container was removed while it recovered")
 		}

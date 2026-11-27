@@ -17,7 +17,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netsec"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // Where a database can be reached from, and changing it.
@@ -674,7 +674,7 @@ func (s *Server) releaseOrphanedDBPort(ctx context.Context, port int) error {
 		if !ours || e.Port != port || e.Protocol != "tcp" {
 			continue
 		}
-		if _, err := s.modules.docker.Inspect(ctx, name); !errdefs.IsNotFound(err) {
+		if _, err := s.modules.docker.Inspect(ctx, name); !cerrdefs.IsNotFound(err) {
 			continue
 		}
 		if _, err := keeper.RemovePortAllowlist(ctx, e.Owner); err != nil {

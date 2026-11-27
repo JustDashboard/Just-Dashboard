@@ -21,7 +21,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // The connection pooler: a PgBouncer container the dashboard runs beside a
@@ -266,7 +266,7 @@ func (s *Server) ensurePooler(ctx context.Context, r *http.Request, t *poolerTar
 	}
 	existing, err := docker.Inspect(ctx, rec.Container)
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		existing = nil
 	case err != nil:
 		return change, s.dockerErr(err)
@@ -407,7 +407,7 @@ func (s *Server) ensurePoolerNetwork(ctx context.Context, rec *poolerRecord) err
 	docker := s.modules.docker
 	owner := strconv.FormatInt(rec.ConnectionID, 10)
 	observed, err := docker.InspectNetwork(ctx, rec.Network)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		_, err = docker.CreateNetwork(ctx, dockerx.NetworkSpec{Name: rec.Network, Driver: "bridge", Labels: map[string]string{poolerLabel: owner}})
 		if err != nil {
 			return httpx.BadRequest("could not create the pooler's network: %v", err)
@@ -431,14 +431,14 @@ func (s *Server) removePoolerContainer(ctx context.Context, rec *poolerRecord) e
 	docker := s.modules.docker
 	existing, err := docker.Inspect(ctx, rec.Container)
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		return nil
 	case err != nil:
 		return err
 	case existing.Labels[poolerLabel] != strconv.FormatInt(rec.ConnectionID, 10):
 		return nil
 	}
-	if err := docker.RemoveContainer(ctx, existing.ID, true, false); err != nil && !errdefs.IsNotFound(err) {
+	if err := docker.RemoveContainer(ctx, existing.ID, true, false); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil
@@ -458,7 +458,7 @@ func (s *Server) removePoolerResources(ctx context.Context, rec *poolerRecord) e
 	}
 	observed, err := docker.InspectNetwork(ctx, rec.Network)
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		return nil
 	case err != nil:
 		return err
@@ -467,11 +467,11 @@ func (s *Server) removePoolerResources(ctx context.Context, rec *poolerRecord) e
 	}
 	if rec.ServerName != "" {
 		// The database stays on after the network goes.
-		if err := docker.DisconnectNetwork(ctx, rec.Network, rec.ServerName, false); err != nil && !errdefs.IsNotFound(err) && !strings.Contains(strings.ToLower(err.Error()), "is not connected") {
+		if err := docker.DisconnectNetwork(ctx, rec.Network, rec.ServerName, false); err != nil && !cerrdefs.IsNotFound(err) && !strings.Contains(strings.ToLower(err.Error()), "is not connected") {
 			return err
 		}
 	}
-	if err := docker.RemoveNetwork(ctx, rec.Network); err != nil && !errdefs.IsNotFound(err) {
+	if err := docker.RemoveNetwork(ctx, rec.Network); err != nil && !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	return nil
@@ -509,7 +509,7 @@ func (s *Server) followPoolerPower(ctx context.Context, id int64, action dockerx
 	}
 	timeout := 10
 	if err := s.modules.docker.Lifecycle(ctx, rec.Container, action, &timeout); err != nil {
-		if errdefs.IsNotFound(err) {
+		if cerrdefs.IsNotFound(err) {
 			return "missing"
 		}
 		return "failed: " + err.Error()
@@ -568,7 +568,7 @@ func (s *Server) poolerSlotFree(ctx context.Context, rec *poolerRecord, t *poole
 	}
 	existing, err := s.modules.docker.Inspect(ctx, rec.Container)
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		return nil
 	case err != nil:
 		return s.dockerErr(err)
@@ -718,7 +718,7 @@ func (s *Server) syncPooler(ctx context.Context, id int64) error {
 		return err
 	}
 	existing, err := s.modules.docker.Inspect(ctx, rec.Container)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil
 	}
 	if err != nil {
@@ -827,7 +827,7 @@ func (s *Server) followPoolerExposure(ctx context.Context, r *http.Request, conn
 		if ip, _ := poolerBinding(spec); ip == bind {
 			return nil
 		}
-	} else if errdefs.IsNotFound(err) {
+	} else if cerrdefs.IsNotFound(err) {
 		// Nothing is published.
 		return nil
 	}

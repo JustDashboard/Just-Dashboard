@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 )
 
 // A release task is how a migration runs once before a release starts —
@@ -186,7 +186,7 @@ func (o *DockerRuntimeOwner) removeReleaseTaskContainers(ctx context.Context, la
 			(name != "" && !slicesContain(item.Names, name)) {
 			continue
 		}
-		if err := o.client.RemoveContainer(ctx, item.ID, true, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := o.client.RemoveContainer(ctx, item.ID, true, true); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}

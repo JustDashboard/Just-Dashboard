@@ -10,12 +10,12 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
-	"github.com/docker/docker/errdefs"
 )
 
 type Image struct {
@@ -146,7 +146,7 @@ func (c *Client) ImageLabels(ctx context.Context, ref string) (map[string]string
 		return nil, err
 	}
 	insp, err := cli.ImageInspect(ctx, ImageRef(ref))
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return nil, nil
 	}
 	if err != nil || insp.Config == nil {
@@ -298,7 +298,7 @@ func (c *Client) VolumeExists(ctx context.Context, name string) (bool, error) {
 		return false, err
 	}
 	_, err = cli.VolumeInspect(ctx, name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return false, nil
 	}
 	return err == nil, err

@@ -21,7 +21,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"go.mongodb.org/mongo-driver/bson"
 )
 
@@ -1721,7 +1721,7 @@ func (s *Server) reserveDatabaseName(ctx context.Context, requested, engine stri
 			switch {
 			case err == nil:
 				occupied = true
-			case !errdefs.IsNotFound(err):
+			case !cerrdefs.IsNotFound(err):
 				return "", nil, httpx.Err(http.StatusBadGateway, "docker_failed", err.Error())
 			}
 		}

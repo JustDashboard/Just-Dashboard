@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
@@ -279,7 +279,7 @@ func decisionRefusal(stage string, original error, receipt decisionRuntimeReceip
 			code = "cancelled"
 		} else if errors.Is(original, context.DeadlineExceeded) {
 			code = "deadline"
-		} else if errdefs.IsNotFound(original) {
+		} else if cerrdefs.IsNotFound(original) {
 			code = "native_not_found"
 		}
 	}
@@ -341,7 +341,7 @@ func (s *decisionSidecar) importHelper(ctx context.Context, helper []byte) error
 	if err != nil {
 		return err
 	}
-	if _, err := s.d.cli.ImageInspect(ctx, s.tag); !errdefs.IsNotFound(err) {
+	if _, err := s.d.cli.ImageInspect(ctx, s.tag); !cerrdefs.IsNotFound(err) {
 		return errors.New("fixture image tag already exists or is unreadable")
 	}
 	changes := []string{"USER 65534:65534", "WORKDIR /", `ENTRYPOINT ["/dns-fixture"]`, fmt.Sprintf(`CMD ["serve",%q]`, s.nonce), fmt.Sprintf("LABEL %s=%s io.justdashboard.dns.decision-helper=%s", decisionLabel, s.nonce, s.digest)}
@@ -389,7 +389,7 @@ func decisionImportID(body []byte) (string, error) {
 
 func (s *decisionSidecar) start(ctx context.Context) error {
 	name := "jd-dns-decisions-" + s.nonce
-	if _, err := s.d.cli.ContainerInspect(ctx, name); !errdefs.IsNotFound(err) {
+	if _, err := s.d.cli.ContainerInspect(ctx, name); !cerrdefs.IsNotFound(err) {
 		return errors.New("sidecar name exists or is unreadable")
 	}
 	pids := int64(16)
@@ -439,11 +439,11 @@ func (s *decisionSidecar) inspect(ctx context.Context) (container.InspectRespons
 
 func (s *decisionSidecar) cleanup(ctx context.Context) error {
 	if s.containerID != "" {
-		if _, err := s.inspect(ctx); err != nil && !errdefs.IsNotFound(err) {
+		if _, err := s.inspect(ctx); err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		} else if err == nil {
 			seconds := 3
-			if err = s.d.cli.ContainerStop(ctx, s.containerID, container.StopOptions{Timeout: &seconds}); err != nil && !errdefs.IsNotFound(err) {
+			if err = s.d.cli.ContainerStop(ctx, s.containerID, container.StopOptions{Timeout: &seconds}); err != nil && !cerrdefs.IsNotFound(err) {
 				return err
 			}
 			if _, err = s.inspect(ctx); err != nil {
@@ -453,13 +453,13 @@ func (s *decisionSidecar) cleanup(ctx context.Context) error {
 				return err
 			}
 		}
-		if _, err := s.d.cli.ContainerInspect(ctx, s.containerID); !errdefs.IsNotFound(err) {
+		if _, err := s.d.cli.ContainerInspect(ctx, s.containerID); !cerrdefs.IsNotFound(err) {
 			return errors.New("exact sidecar remains after removal")
 		}
 	}
 	if s.imageID != "" {
 		info, err := s.d.cli.ImageInspect(ctx, s.imageID)
-		if err != nil && !errdefs.IsNotFound(err) {
+		if err != nil && !cerrdefs.IsNotFound(err) {
 			return err
 		}
 		if err == nil {
@@ -470,7 +470,7 @@ func (s *decisionSidecar) cleanup(ctx context.Context) error {
 				return err
 			}
 		}
-		if _, err = s.d.cli.ImageInspect(ctx, s.imageID); !errdefs.IsNotFound(err) {
+		if _, err = s.d.cli.ImageInspect(ctx, s.imageID); !cerrdefs.IsNotFound(err) {
 			return errors.New("exact sidecar image remains after removal")
 		}
 	}

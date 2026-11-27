@@ -20,9 +20,9 @@ import (
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/network"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/docker/pkg/stdcopy"
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -556,14 +556,14 @@ func assertNativeResourcesAbsent(t *testing.T, d *dockerRuntime, r ProvisionReso
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	if _, err := d.cli.ContainerInspect(ctx, r.ContainerName); !errdefs.IsNotFound(err) {
+	if _, err := d.cli.ContainerInspect(ctx, r.ContainerName); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("owned fixture container remains: %v", err)
 	}
-	if _, err := d.cli.NetworkInspect(ctx, r.NetworkName, network.InspectOptions{}); !errdefs.IsNotFound(err) {
+	if _, err := d.cli.NetworkInspect(ctx, r.NetworkName, network.InspectOptions{}); !cerrdefs.IsNotFound(err) {
 		t.Fatalf("owned fixture bridge remains: %v", err)
 	}
 	for _, name := range r.Volumes {
-		if _, err := d.cli.VolumeInspect(ctx, name); !errdefs.IsNotFound(err) {
+		if _, err := d.cli.VolumeInspect(ctx, name); !cerrdefs.IsNotFound(err) {
 			t.Fatalf("owned fixture volume remains: %v", err)
 		}
 	}
