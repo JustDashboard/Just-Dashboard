@@ -6,19 +6,7 @@ import { useRouter, useSearchParams } from "next/navigation"
 import { useConfirm } from "@/components/confirm-dialog"
 import { WireMark } from "@/components/wire/wire"
 import { ChoiceList, ChoiceListSkeleton, ChoiceRow } from "@/components/choice-row"
-import {
-  Crosshair,
-  Download,
-  File,
-  FileText,
-  Filter,
-  MoreHorizontal,
-  NetworkDevice,
-  Plus,
-  StopCircle,
-  Trash,
-  type Icon,
-} from "@/components/icons"
+import { Crosshair, File, Filter, MoreHorizontal, NetworkDevice, Plus } from "@/components/icons"
 import { IdentityHeader } from "@/components/identity-header"
 import { Fact } from "@/components/fact-line"
 import { Ago } from "@/components/ago"
@@ -423,15 +411,6 @@ export function CaptureMenu({
   omit?: ("pcap" | "stop")[]
   label?: string
 }) {
-  const item = (icon: Icon, words: string) => {
-    const Glyph = icon
-    return (
-      <>
-        <Glyph className="size-3.5" />
-        {words}
-      </>
-    )
-  }
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
@@ -448,25 +427,25 @@ export function CaptureMenu({
         {actions.pcap && !omit.includes("pcap") && (
           <DropdownMenuItem asChild>
             <a href={actions.pcap} download>
-              {item(Download, "Download original PCAP")}
+              Download original PCAP
             </a>
           </DropdownMenuItem>
         )}
         <DropdownMenuItem asChild>
           <a href={actions.support} download>
-            {item(FileText, "Export redacted support")}
+            Export redacted support
           </a>
         </DropdownMenuItem>
         {actions.stop && !omit.includes("stop") && (
           <DropdownMenuItem disabled={actions.stopping} onSelect={actions.stop}>
-            {item(StopCircle, actions.stopping ? "Stopping…" : "Stop capture")}
+            {actions.stopping ? "Stopping…" : "Stop capture"}
           </DropdownMenuItem>
         )}
         {actions.remove && (
           <>
             <DropdownMenuSeparator />
             <DropdownMenuItem variant="destructive" onSelect={actions.remove}>
-              {item(Trash, "Delete")}
+              Delete
             </DropdownMenuItem>
           </>
         )}

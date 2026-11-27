@@ -101,8 +101,9 @@ function braceEnd(source, from) {
 
 /**
  * The glyph an item's content starts with, if it starts with one: its first
- * child, or the first child of a wrapping element (a link, a text column), or
- * either arm of a condition in that place.
+ * child, or the first child of a wrapping element (a link, a text column, a
+ * fragment), or either arm of a condition in that place, or a glyph handed to
+ * a helper that draws the item's face (`{item(Trash, "Delete")}`).
  */
 function leadingGlyph(source, at, glyphs, depth = 0) {
   const rest = source.slice(at)
@@ -115,8 +116,13 @@ function leadingGlyph(source, at, glyphs, depth = 0) {
     for (const [, name] of expression.matchAll(/<([A-Z][A-Za-z0-9.]*)/g)) {
       if (glyphs.has(name) || DRAWN.test(name)) return name
     }
+    for (const [, name] of expression.matchAll(/[(,]\s*([A-Z][A-Za-z0-9]*)\s*[,)]/g)) {
+      if (glyphs.has(name)) return name
+    }
     return null
   }
+  if (source.startsWith("<>", start) && depth < 3)
+    return leadingGlyph(source, start + 2, glyphs, depth + 1)
   const element = /^<([A-Za-z][A-Za-z0-9.]*)/.exec(source.slice(start))
   if (!element) return null
   if (glyphs.has(element[1]) || DRAWN.test(element[1])) return element[1]

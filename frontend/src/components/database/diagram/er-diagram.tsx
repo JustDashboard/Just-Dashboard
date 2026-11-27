@@ -1324,7 +1324,7 @@ function Canvas({
             </DropdownMenuItem>
             <DropdownMenuSub>
               <DropdownMenuSubTrigger>
-                {/* In the slot the other rows' glyphs stand in, so the words line up. */}
+                {/* The table's colour as its swatch, the one mark this menu draws. */}
                 <span aria-hidden className="flex size-4 items-center justify-center">
                   <span
                     className="size-2.5 rounded-full border"
