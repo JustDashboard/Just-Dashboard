@@ -226,6 +226,8 @@ test("the address preview follows the domain, and the password for every app goe
   await expect(extra.first().locator("[data-slot='service-route']")).toHaveText("→ Serves Seerr")
   await expect(extra.first().getByRole("textbox")).toHaveValue("media-requests.example.com")
   await expect(extra.nth(4).locator("[data-slot='service-route']")).toContainText("qBittorrent")
+  // An edit of a row keeps the service it routes to.
+  await extra.first().getByRole("button", { name: "Serve this hostname over HTTPS" }).click()
 
   // The password waits in Variables as the template's own variable.
   await gotoStep(page, "variables")
@@ -233,6 +235,26 @@ test("the address preview follows the domain, and the password for every app goe
     .locator("input[id^='env-key-']")
     .evaluateAll((inputs) => inputs.map((input) => (input as HTMLInputElement).value))
   expect(keys).toContain("MEDIA_LOGIN_PASSWORD")
+
+  // Saved, every app's name still routes to its service, the edited one too.
+  await gotoStep(page, "review")
+  await page.getByRole("button", { name: "Save only", exact: true }).click()
+  await expect.poll(() => journey.commits()).toBe(1)
+  const saved = (
+    journey.configuration() as {
+      domains: { hostname: string; https: boolean; service?: string }[]
+    }
+  ).domains
+  expect(saved[0]).toEqual(expect.objectContaining({ hostname: "media.example.com", https: true }))
+  expect(saved[0]).not.toHaveProperty("service")
+  expect(saved[1]).toEqual(
+    expect.objectContaining({
+      hostname: "media-requests.example.com",
+      https: false,
+      service: "seerr",
+    }),
+  )
+  expect(saved.filter((domain) => domain.service)).toHaveLength(6)
 })
 
 test("the Template tab lists no preset of a stack", async ({ page }) => {

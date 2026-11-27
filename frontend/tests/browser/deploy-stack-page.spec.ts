@@ -565,7 +565,9 @@ test("an address request the server finds nothing missing for closes and reads t
   const before = stack.reads()
   await dialog.getByRole("button", { name: "Add the addresses and deploy" }).click()
   await expect(dialog).toBeHidden()
-  await expect(page.getByText("Every app already has its address.")).toBeVisible()
+  await expect(page.locator("[data-sonner-toast]")).toContainText(
+    "Every app already has its address.",
+  )
   await expect.poll(() => stack.reads()).toBeGreaterThan(before)
   await expect(page.getByText("stack_addresses_present")).toHaveCount(0)
 })
