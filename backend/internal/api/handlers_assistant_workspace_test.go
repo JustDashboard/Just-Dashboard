@@ -174,7 +174,7 @@ func TestCodeChangesWaitForThePersonInTheDefaultMode(t *testing.T) {
 		t.Fatalf("pending = %v", events)
 	}
 	view, _ := json.Marshal(pending[0])
-	if !strings.Contains(string(view), `"kind":"change"`) || strings.Contains(string(view), `"content"`) {
+	if !strings.Contains(string(view), `"kind":"change"`) || !strings.Contains(string(view), `"content":"x"`) {
 		t.Fatalf("the waiting call = %s", view)
 	}
 	if _, err := os.Stat(filepath.Join(repo, "x.txt")); err == nil {

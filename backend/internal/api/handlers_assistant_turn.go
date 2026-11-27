@@ -70,6 +70,8 @@ const (
 	// agentOutputBytes bounds what of an answer the page is sent to show under its
 	// call. The model gets the whole of it, up to maxOperatorResult.
 	agentOutputBytes = 4000
+	// agentFileTextShown bounds how much of a file's text a waiting call shows.
+	agentFileTextShown = 6000
 	// agentDiffLines bounds how much of a change is spelled out.
 	agentDiffLines = 12
 	// agentBudgetWait bounds how long a press waits for the install's budget of
@@ -998,16 +1000,23 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 	case assistant.ToolReadFile, assistant.ToolEditFile, assistant.ToolWriteFile:
 		in := call.FileInput()
 		view.Reason = in.Reason
-		// The path is what the page shows; a file's text is not sent to it twice.
-		view.Input, _ = json.Marshal(map[string]any{"path": in.Path})
+		// What the person allows is what will be written, so the text goes with
+		// the path, held to what a card shows; the diff says the rest once it ran.
+		input := map[string]any{"path": in.Path}
 		switch call.Name {
 		case assistant.ToolReadFile:
 			view.Label = "Read " + clipText(in.Path, 100)
 		case assistant.ToolEditFile:
 			view.Kind, view.Label = agentKindChange, "Edit "+clipText(in.Path, 100)
+			input["old_text"], input["new_text"] = clipText(in.OldText, agentFileTextShown), clipText(in.NewText, agentFileTextShown)
+			if in.ReplaceAll {
+				input["replace_all"] = true
+			}
 		default:
 			view.Kind, view.Label = agentKindChange, "Write "+clipText(in.Path, 100)
+			input["content"] = clipText(in.Content, agentFileTextShown)
 		}
+		view.Input, _ = json.Marshal(input)
 	case assistant.ToolAPIRequest:
 		in := call.RequestInput()
 		view.Reason, view.Input = in.Reason, call.Input
