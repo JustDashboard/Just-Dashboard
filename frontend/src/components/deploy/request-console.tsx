@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Fact, FactLine } from "@/components/fact-line"
 import {
@@ -193,6 +193,16 @@ export function RequestConsole({
     const el = scrollRef.current
     if (el) setFollowing(el.scrollTop < 24)
   }
+
+  // The request the inspector reads stays in the list's view as ↑ and ↓ walk
+  // it, the way a rail keeps its current item (`components/rail.tsx`): walked
+  // past the pane's edge, the row it lights was off its own list.
+  useEffect(() => {
+    if (!selectedId) return
+    scrollRef.current
+      ?.querySelector<HTMLElement>("[aria-pressed='true']")
+      ?.scrollIntoView({ block: "nearest" })
+  }, [selectedId])
 
   const copyAll = () =>
     copyText(

@@ -222,6 +222,37 @@ test.describe("at a desk", () => {
     await expect(inspector).toHaveCount(0)
   })
 
+  test("walking the requests with ↓ keeps the one inspected in the list's view", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    // More requests than the pane shows, so walking them leaves its edge.
+    await page.route("**/api/v1/deploy/7/requests?*", (route) => {
+      const window = deploymentRequests(new URL(route.request().url()))
+      const like = window.entries[1]
+      const entries = Array.from({ length: 60 }, (_, i) => ({
+        ...like,
+        seq: 9000 - i,
+        time: new Date(Date.parse("2026-09-03T11:59:00Z") - i * 10_000).toISOString(),
+        path: `/api/walk/${i}`,
+        query: undefined,
+      }))
+      return json(route, { ...window, entries })
+    })
+    await page.goto("/deploy/7/logs")
+    await page.getByRole("button").filter({ hasText: "/api/walk/0" }).first().click()
+    const inspector = page.locator("[data-slot=request-inspector]")
+    await expect(inspector).toContainText("/api/walk/0")
+    for (let i = 1; i <= 30; i++) {
+      await page.keyboard.press("ArrowDown")
+      await expect(inspector).toContainText(`/api/walk/${i}`)
+    }
+    // The row the inspector reads is the row lit in the list, and in view.
+    const lit = page.getByRole("button", { pressed: true }).filter({ hasText: "/api/walk/30" })
+    await expect(lit).toHaveCount(1)
+    await expect(lit).toBeInViewport()
+  })
+
   test("the page holds still while it reads", async ({ page }) => {
     await mockProject(page)
     const release = await held(page)
