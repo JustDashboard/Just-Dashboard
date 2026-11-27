@@ -1685,16 +1685,23 @@ func (s *Server) handleDeployPurge(w http.ResponseWriter, r *http.Request) error
 		return err
 	}
 	// Read before the records go: the route names are the environments'.
-	var routes []string
 	freeDomains := r.URL.Query().Get("routes") == "remove"
-	if freeDomains {
-		if routes, err = s.projectRouteNames(r.Context(), id); err != nil {
-			return httpx.Internal(err)
-		}
+	routes, err := s.projectRouteNames(r.Context(), id)
+	if err != nil {
+		return httpx.Internal(err)
 	}
 	project, err := s.modules.deployStore.PurgeArchived(r.Context(), id)
 	if err != nil {
 		return mapDeployError(err)
+	}
+	// The request history of the project's environments goes with them,
+	// whether or not the routes do: it holds their visitors' addresses, and
+	// with the records gone nothing is left to read it.
+	for _, name := range routes {
+		if err := s.modules.requestHistory.Forget(r.Context(), name); err != nil {
+			s.Log.Warn("a deleted project's request history could not be removed; it ages out within 30 days",
+				"route", name, "error", err)
+		}
 	}
 	detail := map[string]any{"deploymentId": id, "resourcesRemoved": false}
 	if !freeDomains {

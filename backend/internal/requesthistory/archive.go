@@ -22,6 +22,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -140,6 +141,11 @@ type Archive struct {
 
 	followMu  sync.Mutex
 	following map[string]bool
+	// forgotten is every route Forget took away in this process: an append
+	// the recorder had in flight for one is dropped rather than starting its
+	// history again. A route's name is its environment's id, never given to
+	// a second environment, so the set only ever names the gone.
+	forgotten map[string]bool
 	// counted says this process has recounted every route's rows (prune.go).
 	counted bool
 }
@@ -157,8 +163,43 @@ func newArchive(db *store.SideDatabase) *Archive {
 	return &Archive{
 		db: db, now: time.Now,
 		dict: newWriterDictionary(), names: newReaderDictionary(),
-		routeIDs: map[string]int64{}, following: map[string]bool{},
+		routeIDs: map[string]int64{}, following: map[string]bool{}, forgotten: map[string]bool{},
 	}
+}
+
+// Forget deletes everything kept for route, its requests and its cursor: the
+// history of a deployment that is gone. Its rows hold its visitors' addresses
+// and agents, and the ingress's own record of them goes with the route
+// (proxysvc's RemoveDeploymentRoute), so keeping them a month with nothing
+// left to read them would keep personal data for no one. The strings only
+// those rows named go with the dictionary's sweep.
+func (a *Archive) Forget(ctx context.Context, route string) error {
+	if a == nil {
+		return nil
+	}
+	a.write.Lock()
+	a.forgotten[route] = true
+	a.write.Unlock()
+	var id int64
+	err := a.db.Reader.QueryRowContext(ctx, `SELECT id FROM routes WHERE name = ?`, route).Scan(&id)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil
+	}
+	if err != nil {
+		return err
+	}
+	if _, err := a.dropBefore(ctx, id, math.MaxInt64, 0); err != nil {
+		return err
+	}
+	a.write.Lock()
+	defer a.write.Unlock()
+	if _, err := a.db.Writer.ExecContext(ctx, `DELETE FROM routes WHERE id = ?`, id); err != nil {
+		return err
+	}
+	a.routeMu.Lock()
+	delete(a.routeIDs, route)
+	a.routeMu.Unlock()
+	return nil
 }
 
 // Close closes the database.
@@ -239,6 +280,9 @@ func (a *Archive) Cursor(ctx context.Context, route string) (Cursor, bool, error
 func (a *Archive) Append(ctx context.Context, route string, entries []accesslog.Entry, cursor Cursor) error {
 	a.write.Lock()
 	defer a.write.Unlock()
+	if a.forgotten[route] {
+		return nil
+	}
 	err := a.append(ctx, route, entries, cursor)
 	if err != nil {
 		// The caches may name a string or a route the rollback took back out.
@@ -328,7 +372,8 @@ func (a *Archive) routeID(ctx context.Context, tx *sql.Tx, route string) (int64,
 		return 0, err
 	}
 	// Cached before the transaction commits: a failed append drops the cache
-	// (Append), and a committed route's row is never deleted.
+	// (Append), and a committed route's row is deleted only by Forget, which
+	// drops its entry and refuses every later append to the route.
 	a.routeMu.Lock()
 	a.routeIDs[route] = id
 	a.routeMu.Unlock()

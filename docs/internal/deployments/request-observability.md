@@ -235,7 +235,9 @@ files and past the process.
   through the same opener as the store (`openRequestRecord`), at most 8 MiB a route and 32 MiB a pass,
   so a backfill of five generations spreads over a few minutes rather than one long `docker exec`. A
   route with nothing new is read less often, up to every two minutes; a reader is resolved again every
-  ten minutes, since an ingress replaced by another fails no read.
+  ten minutes, since an ingress replaced by another fails no read. A route no longer listed keeps
+  its history until it ages out, unless its project is deleted: `Archive.Forget` then deletes its
+  rows and cursor, and refuses any append the recorder still had in flight for it.
 - **A cursor kept with the rows.** Each route's row in `routes` holds the generation's identity, the
   offset past the last whole line, the newest instant read, a guard instant and a loss instant; it is
   written in the transaction that writes the requests it covers, so a restart continues exactly where
@@ -950,7 +952,10 @@ the verbs that change something step forward in weight.
   forget together. The empty state and the feed's own footer say so rather than leaving a reader to
   infer steadiness from a record that starts three minutes ago.
 - Access logs hold client addresses. They are removed with the route, and they sit behind the same
-  authentication as every other host log this dashboard serves.
+  authentication as every other host log this dashboard serves. The request history holds the same
+  addresses: deleting a project (`DELETE /deploy/{id}/permanent`) forgets its environments' history
+  (`Archive.Forget`), whether or not it frees their routes; an archived project's stays, for a
+  restore, until it ages out.
 
 ## Verification
 

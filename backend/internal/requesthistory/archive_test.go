@@ -220,6 +220,52 @@ func TestPruneHoldsEachRouteAndAllOfThemToTheirCaps(t *testing.T) {
 	}
 }
 
+// A deployment deleted takes its history with it: the rows hold its visitors'
+// addresses, and nothing is left to read them. An append the recorder had in
+// flight for it does not start the history again, and another route keeps
+// everything.
+func TestForgetDeletesARoutesHistoryAndKeepsItGone(t *testing.T) {
+	a, c := openTest(t)
+	ctx := context.Background()
+	add := func(route string, n int) error {
+		batch := make([]accesslog.Entry, n)
+		for i := range batch {
+			batch[i] = parse(t, caddyLine(c.Now().Add(-time.Hour).Add(time.Duration(i)*time.Second), fmt.Sprintf("/%s/%d", route, i), 200, "x"))
+		}
+		return a.Append(ctx, route, batch, Cursor{Generation: "g", Offset: int64(n)})
+	}
+	if err := add("gone", 120); err != nil {
+		t.Fatal(err)
+	}
+	if err := add("kept", 3); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Forget(ctx, "gone"); err != nil {
+		t.Fatal(err)
+	}
+	if got := scanAll(t, a, "gone"); len(got) != 0 {
+		t.Fatalf("a forgotten route still holds %d requests", len(got))
+	}
+	if _, ok, err := a.Cursor(ctx, "gone"); ok || err != nil {
+		t.Fatalf("a forgotten route still has a cursor (%v)", err)
+	}
+	if span, _ := a.Span(ctx, "gone"); !span.From.IsZero() {
+		t.Fatalf("a forgotten route's span = %+v", span)
+	}
+	if err := add("gone", 2); err != nil {
+		t.Fatal(err)
+	}
+	if got := scanAll(t, a, "gone"); len(got) != 0 {
+		t.Fatalf("an append after the route was forgotten kept %d requests", len(got))
+	}
+	if got := scanAll(t, a, "kept"); len(got) != 3 {
+		t.Fatalf("another route keeps %d of its 3 requests", len(got))
+	}
+	if err := a.Forget(ctx, "never-recorded"); err != nil {
+		t.Fatalf("forgetting a route never recorded: %v", err)
+	}
+}
+
 // What a kept request costs on disk, measured on a mix like a public site's:
 // a few hundred paths, thousands of clients, a query string on one request in
 // ten that is never seen twice, and the ingress's trace context on every one.
