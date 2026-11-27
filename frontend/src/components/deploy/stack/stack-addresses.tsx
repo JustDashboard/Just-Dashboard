@@ -23,6 +23,7 @@ import {
   addressesRefusal,
   addressesSentence,
   missingHostnames,
+  onlyUnpublished,
 } from "@/components/deploy/stack/stack-model"
 
 /**
@@ -58,14 +59,18 @@ export function AddressesStep({
   onSettled: () => void
 }) {
   const [open, setOpen] = useState(false)
+  const republish = onlyUnpublished(addresses)
   return (
-    <Notice data-slot="stack-addresses" title="Give every app its address">
+    <Notice
+      data-slot="stack-addresses"
+      title={republish ? "Publish the apps' addresses" : "Give every app its address"}
+    >
       <p>{addressesSentence(addresses)}</p>
       {canChange ? (
         <div className="pt-1">
           <Button size="sm" variant={first ? "default" : "outline"} onClick={() => setOpen(true)}>
             <Globe />
-            Give every app its address
+            {republish ? "Deploy again" : "Give every app its address"}
           </Button>
         </div>
       ) : (
@@ -102,7 +107,7 @@ export function AddressesStarted({
       <p>
         {started.domains.length > 0
           ? `${started.domains.join(", ")} ${started.domains.length === 1 ? "is" : "are"} added to the domains.`
-          : "The names are added to the domains."}{" "}
+          : "A deployment started to publish the saved addresses."}{" "}
         <Link href={`/deploy/${projectId}/runs/${started.runId}`} className={INLINE_LINK}>
           Watch the run
         </Link>
@@ -131,7 +136,8 @@ function AddressesDialog({
   /** Nothing was missing after all: the page reads the stack again. */
   onSettled: () => void
 }) {
-  const needsDomain = !addresses.primary
+  const republish = onlyUnpublished(addresses)
+  const needsDomain = !republish && !addresses.primary
   // Without a primary domain the names are made here from the one typed, by
   // the labels the stack's catalogue gives each app.
   const catalogue = usePoll(
@@ -161,9 +167,11 @@ function AddressesDialog({
       service.address,
     ]),
   )
-  const names = needsDomain
-    ? missingHostnames(addresses.missing, labels, domain)
-    : addresses.missing
+  const names = republish
+    ? (addresses.unpublished ?? [])
+    : needsDomain
+      ? missingHostnames(addresses.missing, labels, domain)
+      : addresses.missing
   const domainProblem = needsDomain
     ? domain
       ? hostnameProblem(domain, [])
@@ -214,14 +222,14 @@ function AddressesDialog({
     <Modal
       open={open}
       onOpenChange={close}
-      title="Give every app its address"
+      title={republish ? "Publish the apps' addresses" : "Give every app its address"}
       footer={
         <>
           <Button variant="outline" onClick={() => close(false)} disabled={busy}>
             Cancel
           </Button>
           <Button pending={busy} disabled={Boolean(domainProblem)} onClick={() => void submit()}>
-            Add the addresses and deploy
+            {republish ? "Deploy again" : "Add the addresses and deploy"}
           </Button>
         </>
       }
@@ -260,9 +268,9 @@ function AddressesDialog({
           ))}
         </ul>
         <FormNote>
-          The names are added to the deployment&apos;s domains, each with its certificate, and a
-          deployment starts to serve them. They can be changed or removed on the Domains page
-          afterwards.
+          {republish
+            ? "The names are already among the deployment's domains; a deployment starts to serve them."
+            : "The names are added to the deployment's domains, each with its certificate, and a deployment starts to serve them. They can be changed or removed on the Domains page afterwards."}
         </FormNote>
         {refusal && (
           <Notice tone="warning" title="Nothing was added">

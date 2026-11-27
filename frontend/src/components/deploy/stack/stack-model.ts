@@ -325,7 +325,9 @@ export function nextSteps(
   const blocking = actions.filter((action) => action.blocking)
   const optional = actions.filter((action) => !action.blocking)
   const missing =
-    state.status !== "waiting" && state.addresses && state.addresses.missing.length > 0
+    state.status !== "waiting" &&
+    state.addresses &&
+    (state.addresses.missing.length > 0 || (state.addresses.unpublished?.length ?? 0) > 0)
       ? [{ kind: "addresses" as const, addresses: state.addresses }]
       : []
   return [
@@ -345,7 +347,21 @@ export function isSourceAction(action: Pick<SmartStackAction, "id">): boolean {
  * where theirs go. Without a primary domain the names cannot be made yet, so
  * it says the domain comes first.
  */
+/**
+ * Whether every app has its address saved and the step is only to publish
+ * the ones the live release does not serve: the release that was to failed.
+ */
+export function onlyUnpublished(addresses: SmartStackAddresses): boolean {
+  return addresses.missing.length === 0 && (addresses.unpublished?.length ?? 0) > 0
+}
+
 export function addressesSentence(addresses: SmartStackAddresses): string {
+  if (onlyUnpublished(addresses)) {
+    const unpublished = addresses.unpublished ?? []
+    const titles = listWords(unpublished.map((entry) => entry.title))
+    const one = unpublished.length === 1
+    return `${titles} ${one ? "has its address" : "have their addresses"} saved, but the release that was to publish ${one ? "it" : "them"} did not finish. Deploying again publishes ${one ? "it" : "them"}.`
+  }
   const titles = listWords(addresses.missing.map((missing) => missing.title))
   const count = addresses.missing.length
   const have = count === 1 ? "has" : "have"

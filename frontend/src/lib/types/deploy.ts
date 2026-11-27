@@ -727,6 +727,12 @@ export type SmartStackAddresses = {
   /** Empty when the deployment has no primary domain. */
   primary: string
   missing: SmartStackMissingAddress[]
+  /**
+   * Saved among the deployment's domains but not served by the live release,
+   * because the release that was to publish them failed. The same press
+   * deploys again. Absent from a server before it said so.
+   */
+  unpublished?: SmartStackMissingAddress[]
 }
 
 /** What `POST /deploy/{id}/stack/addresses` started: the release that serves the new names. */

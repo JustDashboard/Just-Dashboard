@@ -3,6 +3,7 @@ import {
   addressSentence,
   addressesRefusal,
   addressesSentence,
+  onlyUnpublished,
   appReach,
   canConfigure,
   chosenPreset,
@@ -384,4 +385,22 @@ test("a refused pass is said in words, and the button's verb follows the state",
   expect(canConfigure({ status: "configuring" })).toBe(false)
   expect(canConfigure({ status: "failed" })).toBe(true)
   expect(canConfigure({ status: "ready" })).toBe(true)
+})
+
+test("addresses saved but not served are offered again, in words", () => {
+  const saved = { primary: "media.example.com", missing: [], unpublished: missing.missing }
+  expect(onlyUnpublished(saved)).toBe(true)
+  expect(onlyUnpublished(missing)).toBe(false)
+  expect(onlyUnpublished({ primary: "m.example.com", missing: [] })).toBe(false)
+  expect(
+    nextSteps({ status: "action_required", actions: [], addresses: saved }).map(
+      (step) => step.kind,
+    ),
+  ).toEqual(["addresses"])
+  expect(addressesSentence(saved)).toBe(
+    "Seerr and Radarr have their addresses saved, but the release that was to publish them did not finish. Deploying again publishes them.",
+  )
+  expect(addressesSentence({ ...saved, unpublished: missing.missing.slice(0, 1) })).toBe(
+    "Seerr has its address saved, but the release that was to publish it did not finish. Deploying again publishes it.",
+  )
 })
