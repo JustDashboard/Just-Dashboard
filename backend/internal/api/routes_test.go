@@ -14,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/agent"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/audit"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/config"
@@ -30,18 +31,38 @@ import (
 
 func testServer(t *testing.T) *Server {
 	t.Helper()
-	st, err := storetest.Open(t.TempDir())
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { st.Close() })
+	return newTestServer(t, testServerConfig(t), nil)
+}
 
-	sealer, err := auth.NewSealer(strings.Repeat("ab", 32))
+// testAgentServer is the same program built as main builds an agent: agent
+// mode on from the start, and an identity of its own that no hub has claimed.
+// Its router has no sign-in surface, and its feature routes admit only the
+// enrolled hub's certificate.
+func testAgentServer(t *testing.T) *Server {
+	t.Helper()
+	id, err := agent.Load(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
+	cfg := testServerConfig(t)
+	cfg.AgentMode = true
+	return newTestServer(t, cfg, id)
+}
+
+// routeModes are the two routers the program can serve, for the walks that
+// hold a property of every route: what is true of one has to be true of the
+// other.
+var routeModes = []struct {
+	name   string
+	server func(*testing.T) *Server
+}{
+	{"normal", testServer},
+	{"agent", testAgentServer},
+}
+
+func testServerConfig(t *testing.T) *config.Config {
 	_, loopback, _ := net.ParseCIDR("127.0.0.1/32")
-	cfg := &config.Config{
+	return &config.Config{
 		Addr:         "127.0.0.1:8080",
 		DataDir:      t.TempDir(),
 		AllowedCIDRs: []*net.IPNet{loopback},
@@ -57,9 +78,23 @@ func testServer(t *testing.T) *Server {
 		// discovery route.
 		HubLink: true,
 	}
+}
+
+func newTestServer(t *testing.T, cfg *config.Config, id *agent.Identity) *Server {
+	t.Helper()
+	st, err := storetest.Open(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { st.Close() })
+
+	sealer, err := auth.NewSealer(strings.Repeat("ab", 32))
+	if err != nil {
+		t.Fatal(err)
+	}
 	log := slog.New(slog.NewTextHandler(io.Discard, nil))
 	svc := auth.NewService(st, sealer, cfg.SessionTTL, cfg.IdleTTL, cfg.Require2FA)
-	s := New(cfg, log, st, svc, sealer, audit.New(st, log), nil)
+	s := New(cfg, log, st, svc, sealer, audit.New(st, log), id)
 	t.Cleanup(s.Shutdown)
 	return s
 }
@@ -79,6 +114,18 @@ var publicAPIRoutes = map[string]string{
 func isPublicAPIRoute(rt route) bool {
 	_, ok := publicAPIRoutes[rt.method+" "+rt.pattern]
 	return ok
+}
+
+// agentPreEnrolmentRoutes are what an agent answers before it has a hub, and
+// so without a credential (handlers_agent.go): how a hub reads what it is
+// pointed at, and the enrolment that pins it. Neither has a fixed body to
+// compare, and a request would run the route's own handler rather than meet a
+// refusal, so the walk below sends them nothing;
+// TestTheAgentsPreEnrolmentRoutesTakeTheLoginBudget checks what stands in
+// front of them instead.
+var agentPreEnrolmentRoutes = map[string]bool{
+	"GET /api/v1/agent/info":   true,
+	"POST /api/v1/agent/enrol": true,
 }
 
 type route struct{ method, pattern, path string }
@@ -109,19 +156,24 @@ func apiRoutes(t *testing.T, h http.Handler) []route {
 }
 
 // Invariant 1: the allowlist runs before authentication, so an off-network
-// caller cannot reach the login handler — or anything else.
+// caller cannot reach the login handler — or anything else. An agent's
+// router is held to it too, its pre-enrolment routes included.
 func TestEveryAPIRouteIsBehindTheNetworkAllowlist(t *testing.T) {
-	s := testServer(t)
-	h := s.Routes()
-	for _, rt := range apiRoutes(t, h) {
-		req := httptest.NewRequest(rt.method, rt.path, nil)
-		req.RemoteAddr = "203.0.113.5:9999"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "network_denied") {
-			t.Errorf("%s %s: reachable from outside the allowlist (%d %s)",
-				rt.method, rt.pattern, w.Code, strings.TrimSpace(w.Body.String()))
-		}
+	for _, mode := range routeModes {
+		t.Run(mode.name, func(t *testing.T) {
+			s := mode.server(t)
+			h := s.Routes()
+			for _, rt := range apiRoutes(t, h) {
+				req := httptest.NewRequest(rt.method, rt.path, nil)
+				req.RemoteAddr = "203.0.113.5:9999"
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				if w.Code != http.StatusForbidden || !strings.Contains(w.Body.String(), "network_denied") {
+					t.Errorf("%s %s: reachable from outside the allowlist (%d %s)",
+						rt.method, rt.pattern, w.Code, strings.TrimSpace(w.Body.String()))
+				}
+			}
+		})
 	}
 }
 
@@ -133,29 +185,42 @@ func TestEveryAPIRouteIsBehindTheNetworkAllowlist(t *testing.T) {
 // fixed body naming nothing but the product, the protocol and whether this
 // server can be linked (hub-link-protocol.md section 8.1). It is still behind
 // the allowlist, which the test above checks for it like every other route.
+// An agent has none of the sign-in surface and no discovery probe; its two
+// pre-enrolment routes are its exceptions, and are not sent anything here.
 func TestNoAPIRouteAnswersWithoutAuthentication(t *testing.T) {
-	s := testServer(t)
-	h := s.Routes()
-	exceptions := publicAPIRoutes
-	seen := 0
-	for _, rt := range apiRoutes(t, h) {
-		req := httptest.NewRequest(rt.method, rt.path, nil)
-		req.RemoteAddr = "127.0.0.1:9999"
-		w := httptest.NewRecorder()
-		h.ServeHTTP(w, req)
-		if body, ok := exceptions[rt.method+" "+rt.pattern]; ok {
-			seen++
-			if w.Code != http.StatusOK || w.Body.String() != body {
-				t.Errorf("%s %s: %d %s", rt.method, rt.pattern, w.Code, w.Body)
+	for _, mode := range routeModes {
+		t.Run(mode.name, func(t *testing.T) {
+			s := mode.server(t)
+			h := s.Routes()
+			exceptions, unsent := publicAPIRoutes, map[string]bool{}
+			if s.Cfg.AgentMode {
+				exceptions, unsent = nil, agentPreEnrolmentRoutes
 			}
-			continue
-		}
-		if w.Code < 400 {
-			t.Errorf("%s %s: answered %d without a session", rt.method, rt.pattern, w.Code)
-		}
-	}
-	if seen != len(exceptions) {
-		t.Errorf("walked %d of the %d unauthenticated exceptions", seen, len(exceptions))
+			seen := 0
+			for _, rt := range apiRoutes(t, h) {
+				if unsent[rt.method+" "+rt.pattern] {
+					seen++
+					continue
+				}
+				req := httptest.NewRequest(rt.method, rt.path, nil)
+				req.RemoteAddr = "127.0.0.1:9999"
+				w := httptest.NewRecorder()
+				h.ServeHTTP(w, req)
+				if body, ok := exceptions[rt.method+" "+rt.pattern]; ok {
+					seen++
+					if w.Code != http.StatusOK || w.Body.String() != body {
+						t.Errorf("%s %s: %d %s", rt.method, rt.pattern, w.Code, w.Body)
+					}
+					continue
+				}
+				if w.Code < 400 {
+					t.Errorf("%s %s: answered %d without a session", rt.method, rt.pattern, w.Code)
+				}
+			}
+			if want := len(exceptions) + len(unsent); seen != want {
+				t.Errorf("walked %d of the %d unauthenticated exceptions", seen, want)
+			}
+		})
 	}
 }
 

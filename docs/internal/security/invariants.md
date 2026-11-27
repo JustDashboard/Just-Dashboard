@@ -17,6 +17,9 @@ A change that weakens any of these has to say so explicitly.
    enforced server-side inside the handler. See below. A route that also serves routine, non-destructive
    operations — the deployment run route's `stop`/`restart` alongside `deploy`/`redeploy` — cannot be
    wrapped in `s.destructive` wholesale, so it enforces the same capability and `destrLim` budget by hand.
+   `TestEveryMutatingRouteIsAuditedAndGated` (`api/routes_gates_test.go`) walks the normal and the agent
+   router and fails on a route that asks for the destructive capability outside `s.destructive`, or that
+   carries its mark without the capability.
 4. Capability checks live on the route, never in the UI alone. Where the answer depends on what is *in* the
    request, the handler checks by hand and fails closed, and each such check has one owner:
    - `api.authoriseSQL` for SQL, on the verdict `dbx` reads off each statement by the rules of the
@@ -214,13 +217,25 @@ A change that weakens any of these has to say so explicitly.
    carry are judged by the same classifiers as above. It guards the dashboard's own controls; it is
    not a sandbox around the server. Each check and the rule are stated in
    [request lifecycle](../architecture/request-lifecycle.md#checks-that-depend-on-what-a-request-carries).
+
+   Every mutating route asks for a capability a read-only account lacks, or is on `ungatedMutations` in
+   `api/routes_gates_test.go` under the reason it was reviewed for: the account's own things
+   (self-service), proving who the caller is (sign-in), a webhook or machine with a secret the handler
+   checks (own secret), a request that changes nothing (a read sent as POST), or a capability the handler
+   asks for itself (checked by hand, above). `TestEveryMutatingRouteIsAuditedAndGated` reads each
+   `RequireCapability` in a route's chain by wrapping it around a stub, never the handler, and fails on a
+   route that is neither, so a new route needs that decision before it merges.
 5. Every state-changing request lands in the audit log. A request made with an API key carries the
    key's id and name (`audit_log.key_id`, `key_name`) as well as its account, and a deploy key refused
    by the gate is written as `auth.deploy_key.refused`, reads included, since it is answered before the
    group's audit middleware runs. Every request a hub session makes is audited as actor `hub-session`
    (the assistant acting in one, `assistant`) with its hub user and session id (`audit_log.hub_user`,
    `session_id`), so it reads apart from the same account's own session
-   ([below](#the-exception-hub-sign-in)).
+   ([below](#the-exception-hub-sign-in)). `httpx.AuditMutations` is in front of every mutating route of
+   both routers; the one exception is certbot's hook (`POST /app-domain/hook/challenge`), which has no
+   principal for the middleware to name and records each challenge itself. `selfAuditedRoutes` in
+   `api/routes_gates_test.go` lists it, and `TestEveryMutatingRouteIsAuditedAndGated` fails on any other
+   mutating route outside an `AuditMutations` group.
 6. Client-supplied paths go through `files.Resolve` — including the ones that do not look like file
    operations (bind-mount source, build context, a new stack's directory). Host commands go through
    `hostexec` with an argv, never a shell string. Request-defined shell source is confined to two kinds,
@@ -275,7 +290,13 @@ A change that weakens any of these has to say so explicitly.
    major-version upgrade runs the servers' own clients inside their own containers through
    `dockerx.ExecPipe`, each an argv with any password in its environment: `pg_dump` read by `pg_restore`
    (an archive, never a script), and `psql` only with statements `dbx` wrote, each one `-c`. The roles'
-   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is. The one
+   script `pg_dumpall` writes is replayed by `dbx` over a connection, as a restored script is. A copy of a
+   managed database — a migration rehearsal's, a release's data copy, a preview's branch (`prepareCopy`) —
+   is restored the same way: a SQL dump by `dbx` over a connection to the copy's address on its own network,
+   a `pg_dump` archive by the copy's own `pg_restore`, and no password on a command line in it (`psql -c`
+   reads one from a session setting in `PGOPTIONS`, MySQL's account statements go over the connection, its
+   ping reads `MYSQL_PWD`). `TestCopyCodeFeedsNoClientAScriptAndNamesNoPasswordFlag` holds the copy's code
+   to that, and `TestNoCommandACopyRunsCarriesAPassword` the commands it runs. The one
    statement that is fed to `psql` or `mysql` on standard input is the host account route's
    (`POST /databases/host/grant`, `handlers_db_host.go`), because it carries a password an argument would
    show every account on the machine: the dashboard writes it, on one line, with the password only inside a
@@ -339,6 +360,9 @@ A change that weakens any of these has to say so explicitly.
    `applyAddedColumns` ALTERs in at open. Every entry needs a `DEFAULT` (SQLite refuses a NOT NULL column
    on a populated table without one) and **no entry is ever removed** — the list is the path from every
    shipped schema to the current one, not a description of the current one.
+   `TestNoShippedAddedColumnIsRemoved` holds `addedColumns` to `store/testdata/added_columns.txt`, one
+   `table column` line per entry it has held: an entry gone from the code fails, and a new entry fails
+   until its line is added. `TestAddedColumnsAllDeclareADefault` checks the `DEFAULT`.
 
 9. A blueprint is data, never a script. `internal/blueprint` parses with unknown fields rejected and
    validates at package initialization, so a built-in that breaks the supply-chain policy cannot reach a

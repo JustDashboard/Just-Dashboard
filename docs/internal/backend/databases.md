@@ -2413,7 +2413,11 @@ the detail of each classifier is below, with the surface it guards.
   other than `\restrict`/`\unrestrict`, a mysql client command, `\connect`, or a MySQL statement that
   is a `USE` of another database (wherever on a line, and inside a conditional comment) is refused
   with the database untouched. Postgres replays as one transaction; a MySQL connection used for a
-  replay has multi-statement queries switched off, so what one statement is stays decided here. The
+  replay has multi-statement queries switched off, so what one statement is stays decided here. A
+  caller that passes `RestoreOptions.Warnings` gets a Postgres server's warnings as they are raised
+  and none of its notices: the copy a migration rehearsal, a data copy or a preview branch restores
+  (`api/deployment_rehearsal.go`) replays its SQL dump this way, over a connection to the copy, and
+  keeps the warnings in its transcript as the client's output was kept. The
   only tools a restore runs are `pg_restore` and `mongorestore`, on archives. This confines the
   session, not the script: a statement that names another database explicitly still reaches it with
   the connection's rights, as it would from the query runner.
