@@ -20,26 +20,15 @@ import {
   ArrowLeftRight,
   ArrowUpDown,
   Check,
-  Code,
-  Copy,
   Cross,
-  Crosshair,
   Download,
-  Eye,
   EyeOff,
   Fullscreen,
   FullscreenClose,
   Layout,
-  GridSquare,
-  Image as ImageIcon,
-  Inspect,
-  Notes,
-  RotateCounterClockwise,
   SettingsSliders,
   SidebarRightClose,
   SidebarRightOpen,
-  Table as TableIcon,
-  Trash,
 } from "@/components/icons"
 import { get } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
@@ -926,26 +915,13 @@ function Canvas({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-48">
             <DropdownMenuLabel>A picture</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => void exportAs("png")}>
-              <ImageIcon />
-              PNG
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void exportAs("svg")}>
-              <ImageIcon />
-              SVG
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("png")}>PNG</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("svg")}>SVG</DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuLabel>As text</DropdownMenuLabel>
-            <DropdownMenuItem onSelect={() => void exportAs("mermaid")}>
-              <Code />
-              Mermaid
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={() => void exportAs("dbml")}>
-              <Code />
-              DBML
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("mermaid")}>Mermaid</DropdownMenuItem>
+            <DropdownMenuItem onSelect={() => void exportAs("dbml")}>DBML</DropdownMenuItem>
             <DropdownMenuItem onSelect={() => void exportAs("json")}>
-              <Code />
               JSON, with this layout
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -1017,7 +993,6 @@ function Canvas({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="max-h-80 w-64 overflow-y-auto">
               <DropdownMenuItem onSelect={() => show(hiddenHere.map((t) => t.id))}>
-                <Eye />
                 Show all
               </DropdownMenuItem>
               <DropdownMenuSeparator />
@@ -1082,11 +1057,9 @@ function Canvas({
             {selectedCount > 1 && (
               <>
                 <DropdownMenuItem onSelect={() => alignSelected("row")}>
-                  <ArrowLeftRight />
                   Arrange {selectedCount} selected in a row
                 </DropdownMenuItem>
                 <DropdownMenuItem onSelect={() => alignSelected("column")}>
-                  <ArrowUpDown />
                   Arrange {selectedCount} selected in a column
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
@@ -1094,16 +1067,11 @@ function Canvas({
             )}
             {unrelated.length > 0 && (
               <DropdownMenuItem onSelect={() => hide(unrelated)}>
-                <EyeOff />
                 Hide {plural(unrelated.length, "table")} with no relations
               </DropdownMenuItem>
             )}
-            <DropdownMenuItem onSelect={refresh}>
-              <RotateCounterClockwise />
-              Read the schema again
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={refresh}>Read the schema again</DropdownMenuItem>
             <DropdownMenuItem variant="destructive" disabled={!isArranged(doc)} onSelect={forget}>
-              <Trash />
               Forget this layout…
             </DropdownMenuItem>
           </DropdownMenuContent>
@@ -1328,7 +1296,6 @@ function Canvas({
                 goto("data", { schema: menu.table.schema || null, table: menu.table.name })
               }
             >
-              <GridSquare />
               Open data
             </DropdownMenuItem>
             <DropdownMenuItem
@@ -1336,12 +1303,10 @@ function Canvas({
                 goto("schema", { schema: menu.table.schema || null, table: menu.table.name })
               }
             >
-              <TableIcon />
               Open in Schema
             </DropdownMenuItem>
             {engine.has("query") && (
               <DropdownMenuItem onSelect={() => openQuery(menu.table)}>
-                <Code />
                 Open a SELECT in Query
               </DropdownMenuItem>
             )}
@@ -1349,15 +1314,12 @@ function Canvas({
             <DropdownMenuItem
               onSelect={() => focusTable(focus === menu.table.id ? null : menu.table.id)}
             >
-              <Crosshair />
               {focus === menu.table.id ? "Clear focus" : "Focus its neighbourhood"}
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => isolate(menu.table.id)}>
-              <Inspect />
               Show only this and its relations
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => setNoteFor(menu.table)}>
-              <Notes />
               {doc.notes[menu.table.id] ? "Edit note…" : "Add a note…"}
             </DropdownMenuItem>
             <DropdownMenuSub>
@@ -1401,12 +1363,10 @@ function Canvas({
                 )
               }
             >
-              <Copy />
               Copy name
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => hide([menu.table.id])}>
-              <EyeOff />
               Hide from the diagram
             </DropdownMenuItem>
           </DropdownMenuContent>

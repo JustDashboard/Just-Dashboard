@@ -15,10 +15,8 @@ import {
   MoreHorizontal,
   NetworkDevice,
   Plus,
-  RefreshClockwise,
   StopCircle,
   Trash,
-  Wrench,
   type Icon,
 } from "@/components/icons"
 import { IdentityHeader } from "@/components/identity-header"
@@ -286,14 +284,8 @@ function CapturesIdentity({
             </Button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="min-w-44">
-            <DropdownMenuItem onSelect={onRefresh}>
-              <RefreshClockwise className="size-3.5" />
-              Refresh
-            </DropdownMenuItem>
-            <DropdownMenuItem onSelect={onSummary}>
-              <Wrench className="size-3.5" />
-              Quick packet summary
-            </DropdownMenuItem>
+            <DropdownMenuItem onSelect={onRefresh}>Refresh</DropdownMenuItem>
+            <DropdownMenuItem onSelect={onSummary}>Quick packet summary</DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       }

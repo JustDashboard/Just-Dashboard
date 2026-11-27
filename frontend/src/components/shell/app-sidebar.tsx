@@ -3,14 +3,7 @@
 import { useEffect, useState, type CSSProperties } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import {
-  ChevronLeft,
-  ChevronRight,
-  EyeOff,
-  Logout,
-  MagnifyingGlass,
-  Pause,
-} from "@/components/icons"
+import { ChevronLeft, ChevronRight, EyeOff, MagnifyingGlass } from "@/components/icons"
 import { cn } from "@/lib/utils"
 import { notify } from "@/lib/toast"
 import { useSessionState } from "@/lib/view-state"
@@ -848,7 +841,7 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
             asChild
             style={riseAt(index + 1)}
             className={cn(
-              "group/account-link min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
+              "min-h-11 gap-2.5 rounded-md px-2 font-normal focus-ring-inset sm:min-h-8",
               stagger,
             )}
           >
@@ -858,7 +851,6 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
               aria-current={item.href === pathname ? "page" : undefined}
               className="data-[active]:bg-accent data-[active]:font-medium"
             >
-              <item.icon className="size-4 text-muted-foreground group-data-[active]/account-link:text-brand" />
               <span className="flex-1">{item.title}</span>
               {item.href === "/account/security" && (
                 <Status
@@ -882,7 +874,6 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
           style={riseAt(entries.length + 1)}
           className={cn("gap-2.5 rounded-md pl-2 font-normal focus-ring-inset", stagger)}
         >
-          <Pause className="size-4" />
           Pause animations
         </DropdownMenuCheckboxItem>
         <DropdownMenuItem
@@ -893,7 +884,6 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
             stagger,
           )}
         >
-          <Logout className="size-4" />
           Sign out
         </DropdownMenuItem>
       </DropdownMenuContent>

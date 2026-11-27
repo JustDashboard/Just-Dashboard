@@ -593,7 +593,6 @@ function FoundRow({
         !instance.self && (
           <VerbMenu
             label={`Actions for ${name}`}
-            glyphs={false}
             verbs={[
               instance.ignored
                 ? {

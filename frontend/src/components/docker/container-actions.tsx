@@ -408,7 +408,6 @@ export function ContainerMenu({
                 verb.run()
               }}
             >
-              <verb.icon className="size-3.5" />
               {verb.label}
             </DropdownMenuItem>
           </Fragment>
