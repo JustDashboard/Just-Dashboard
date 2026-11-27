@@ -590,6 +590,14 @@ export type SmartStackCatalogueService = {
   docsUrl?: string
   /** The pinned reference the preset's template runs. */
   image: string
+  /**
+   * The DNS label its own address is made with beside the stack's domain
+   * (`media-requests.example.com` for `requests`). Empty for the primary
+   * service, which answers on the domain itself, and for a worker.
+   */
+  address?: string
+  /** The service the stack's domain itself serves: Jellyfin's. */
+  primary?: boolean
 }
 
 /** One preset of a stack: a reviewed Compose template and what it runs. */
@@ -651,9 +659,12 @@ export type SmartStackService = {
   access: SmartStackAccess
   image: string
   docsUrl?: string
-  /** A private service's loopback address, as Docker published it. */
+  /**
+   * The loopback address Docker published the service on. Kept in the state,
+   * but the page no longer leads with it: every app answers on `url`.
+   */
   address?: string
-  /** A public service's URL, when the deployment has a domain. */
+  /** The service's public URL, when the live release serves one. Jellyfin's is the primary domain. */
   url?: string
   /** Absent when no container exists. */
   container?: { name: string; state: string; health?: string }
@@ -696,6 +707,93 @@ export type SmartStackCredential = {
   stored: boolean
 }
 
+/** The one login every app of a stack signs in with. Its password is read through the reveal route. */
+export type SmartStackLogin = {
+  username: string
+  /** False until the stack's first pass has made it. */
+  stored: boolean
+}
+
+/** A service of the stack that has no address of its own yet, and the name it would get. */
+export type SmartStackMissingAddress = {
+  service: string
+  title: string
+  /** Empty while the deployment has no primary domain to make it from. */
+  hostname: string
+}
+
+/** The stack's addresses: its primary domain, and the services that have none beside it. */
+export type SmartStackAddresses = {
+  /** Empty when the deployment has no primary domain. */
+  primary: string
+  missing: SmartStackMissingAddress[]
+}
+
+/** What `POST /deploy/{id}/stack/addresses` started: the release that serves the new names. */
+export type SmartStackAddressesStarted = {
+  runId: number
+  domains: string[]
+}
+
+/** How open a media source is, in Prowlarr's words. */
+export type SmartStackSourcePrivacy = "public" | "semiPrivate" | "private"
+
+/** A media source Prowlarr holds, as `GET /deploy/{id}/stack/sources` lists it. */
+export type SmartStackSource = {
+  id: number
+  name: string
+  /** The definition it was made from. */
+  definition: string
+  privacy: SmartStackSourcePrivacy
+  protocol: string
+  enabled: boolean
+}
+
+/** One of the sources Prowlarr knows how to add, as the catalogue lists it. */
+export type SmartStackSourceDefinition = {
+  definition: string
+  name: string
+  description: string
+  privacy: SmartStackSourcePrivacy
+  language: string
+  /** Some field has no usable default, so the person has to fill it in. */
+  needsInput: boolean
+}
+
+export type SmartStackSourceCatalogue = {
+  definitions: SmartStackSourceDefinition[]
+  fetchedAt: string
+}
+
+export type SmartStackSourceFieldType = "text" | "password" | "number" | "checkbox" | "select"
+
+export type SmartStackSourceField = {
+  name: string
+  label: string
+  help?: string
+  type: SmartStackSourceFieldType
+  value?: string | number | boolean | null
+  options?: { value: string | number; label: string }[]
+  advanced: boolean
+}
+
+/** One definition with its fields, as `GET …/sources/catalogue/{definition}` answers. */
+export type SmartStackSourceDetail = {
+  definition: string
+  name: string
+  description: string
+  privacy: SmartStackSourcePrivacy
+  urls: string[]
+  fields: SmartStackSourceField[]
+}
+
+/** What `POST …/sources` answers when Prowlarr tested and kept the source. */
+export type SmartStackSourceAdded = {
+  source: SmartStackSource
+  /** Radarr and Sonarr have it too. */
+  synced: boolean
+}
+
 /** A stack project's state, as `GET /deploy/{id}/stack` answers. */
 export type SmartStackState = {
   stackId: string
@@ -711,6 +809,10 @@ export type SmartStackState = {
   steps: SmartStackStep[]
   actions: SmartStackAction[]
   credentials: SmartStackCredential[]
+  /** The one login every app signs in with. Absent from a server older than it. */
+  login?: SmartStackLogin
+  /** The stack's addresses. Absent from a server older than them. */
+  addresses?: SmartStackAddresses
   limitations: string[]
   liveReleaseId?: number
   configuredReleaseId?: number
@@ -3094,6 +3196,14 @@ export type DeploymentPlannedDomain = {
    * and the name's route and CNAME are set as the release goes live.
    */
   tunnel?: boolean
+  /**
+   * The Compose service this name serves, where it is not the plan's primary
+   * one: a stack gives each of its apps a name of its own. Kept as it is by
+   * every form that edits the list.
+   */
+  service?: string
+  /** That service's container port; empty is its only one published on loopback. */
+  port?: number
 }
 
 export type DeploymentRedirectCode = 301 | 302 | 307 | 308

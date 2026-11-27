@@ -2,7 +2,7 @@ import { expect, test, type Locator, type Page, type Route } from "@playwright/t
 import { DATABASE_SURFACES, mockDatabases } from "./database-fixture"
 import { answerSystemUsers, mockSystemUsers } from "./system-users-fixture"
 import { mockProject } from "./deploy-fixture"
-import { mockStackProject, stackState } from "./deploy-stack-fixture"
+import { mockStackProject, mockStackSources, stackState } from "./deploy-stack-fixture"
 import { risen } from "./risen"
 import { SHIFT_BUDGET, watchShifts } from "./layout-shift"
 import { mockWorkbench } from "./workbench-fixture"
@@ -566,6 +566,27 @@ const ITEM_SURFACES: [path: string, mock: (page: Page) => Promise<unknown>][] = 
   // A stack project's page, with something for the person to do on it, so
   // its notices, its service cards and its accounts are all drawn.
   ["/deploy/7/stack", (page) => mockStackProject(page, { state: stackState("action_required") })],
+  // Its media sources, the list and one source's form with the catalogue as its rail.
+  ...["/deploy/7/stack/sources", "/deploy/7/stack/sources?definition=torznab"].map(
+    (path): [string, (page: Page) => Promise<unknown>] => [
+      path,
+      async (page) => {
+        await mockStackProject(page, { state: stackState("action_required") })
+        await mockStackSources(page, {
+          sources: [
+            {
+              id: 3,
+              name: "Public Domain Archive",
+              definition: "publicdomainarchive",
+              privacy: "public",
+              protocol: "torrent",
+              enabled: true,
+            },
+          ],
+        })
+      },
+    ],
+  ),
 ]
 
 for (const [label, viewport] of [

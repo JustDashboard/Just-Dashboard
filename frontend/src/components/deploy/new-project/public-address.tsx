@@ -21,6 +21,8 @@ import {
   InputGroupInput,
 } from "@/components/ui/input-group"
 import { HttpsToggle } from "@/components/deploy/https-toggle"
+import { ServiceRoute } from "@/components/deploy/service-route"
+import { useServiceTitles } from "@/components/deploy/stack/use-stack"
 import type { DeploymentConfiguration, DeploymentHostnameSuggestion } from "@/lib/types"
 
 type Domain = DeploymentConfiguration["domains"][number]
@@ -52,7 +54,8 @@ export function PublicAddress({
   /**
    * Every name this deployment will answer to. The first is the primary one,
    * with the suggestion and the certificate reading; the rest are a plain
-   * list. It used to be exactly one, so apex-plus-www — the commonest thing
+   * list, each saying the app it routes to where that is not the primary
+   * service (a stack's), and keeping its `service` and `port` as it is edited. It used to be exactly one, so apex-plus-www — the commonest thing
    * anyone wants on day one — meant creating the project and then going to
    * its Domains settings to add the second name.
    */
@@ -72,6 +75,8 @@ export function PublicAddress({
   // question the whole section turns on.
   const domain: Domain | undefined = domains[0]
   const extra = domains.slice(1)
+  // A stack's template gives each app a name of its own, routed to its service.
+  const serviceTitle = useServiceTitles(extra.some((entry) => entry.service))
   const setPrimary = (next: Domain) => onChange([next, ...extra])
   const publish = domain !== undefined
   const hostname = domain?.hostname ?? suggestion?.hostname ?? ""
@@ -312,7 +317,18 @@ export function PublicAddress({
             <ul className="space-y-2" aria-label="Additional hostnames">
               {extra.map((entry, index) => (
                 <li key={index} className="min-w-0">
-                  <Field label={`Also answers to ${index + 2}`} htmlFor={`extra-hostname-${index}`}>
+                  <Field
+                    label={`Also answers to ${index + 2}`}
+                    htmlFor={`extra-hostname-${index}`}
+                    trailing={
+                      entry.service && (
+                        <ServiceRoute
+                          title={serviceTitle(entry.service)}
+                          className="text-hint text-muted-foreground"
+                        />
+                      )
+                    }
+                  >
                     <InputGroup>
                       <InputGroupInput
                         id={`extra-hostname-${index}`}

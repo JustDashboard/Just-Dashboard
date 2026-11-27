@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test"
-import { expectSaved, healthyOperations, mockProject, saveSettings } from "./deploy-fixture"
+import { expectSaved, healthyOperations, json, mockProject, saveSettings } from "./deploy-fixture"
+import { stackCatalogue } from "./deploy-stack-fixture"
 
 const row = (page: Page, name: string) =>
   page
@@ -301,4 +302,60 @@ test("an unread certificate says what is unread", async ({ page }) => {
   })
   await page.goto("/deploy/7/settings/domains")
   await expect(page.getByText("Certificate not observed", { exact: true })).toBeVisible()
+})
+
+test("a name routed to a stack's app says which, and a save keeps its service and port", async ({
+  page,
+}) => {
+  const fixture = await seed(page, [
+    name("media.example.test"),
+    name("media-requests.example.test", { service: "seerr", port: 5055 }),
+    name("media-downloads.example.test", { service: "qbittorrent", port: 8080 }),
+  ])
+  await page.route("**/api/v1/deploy/stacks", (route) => json(route, stackCatalogue))
+  await page.goto("/deploy/7/settings/domains")
+  // The app each name serves, by the stack's own title for it; the primary says nothing.
+  await expect(
+    row(page, "media-requests.example.test").locator("[data-slot='service-route']"),
+  ).toHaveText("→ Serves Seerr")
+  await expect(
+    row(page, "media-downloads.example.test").locator("[data-slot='service-route']"),
+  ).toHaveText("→ Serves qBittorrent")
+  await expect(row(page, "media.example.test").locator("[data-slot='service-route']")).toHaveCount(
+    0,
+  )
+  // It is one more fact on the row's one line of readings, never a line of its own.
+  const middle = async (locator: ReturnType<Page["locator"]>) => {
+    const box = (await locator.boundingBox())!
+    return Math.round(box.y + box.height / 2)
+  }
+  const seerr = row(page, "media-requests.example.test")
+  expect(await middle(seerr.locator("[data-slot='service-route']"))).toBe(
+    await middle(seerr.getByText("Routes on the next deployment")),
+  )
+
+  await page.getByRole("button", { name: "HTTPS on media-requests.example.test" }).click()
+  await saveSettings(page)
+  await expectSaved(page)
+  const saved = (
+    fixture.configuration() as {
+      domains: { hostname: string; https: boolean; service?: string; port?: number }[]
+    }
+  ).domains
+  expect(saved).toEqual([
+    expect.objectContaining({ hostname: "media.example.test", https: true }),
+    expect.objectContaining({
+      hostname: "media-requests.example.test",
+      https: false,
+      service: "seerr",
+      port: 5055,
+    }),
+    expect.objectContaining({
+      hostname: "media-downloads.example.test",
+      https: true,
+      service: "qbittorrent",
+      port: 8080,
+    }),
+  ])
+  expect(saved[0]).not.toHaveProperty("service")
 })
