@@ -3,6 +3,9 @@ package deploy
 import (
 	"context"
 	"errors"
+	"os"
+	"os/exec"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -249,5 +252,72 @@ func TestPlanValidationRefusesBlankReleaseTaskCommands(t *testing.T) {
 	}
 	if err := configuration.Validate(); err == nil {
 		t.Fatal("a whitespace-only release task command was accepted")
+	}
+}
+
+// A task's working directory reaches the image's shell as a positional
+// argument, so no spelling of it is read as shell, and the command runs as it
+// did when the directory was quoted into the script: in that directory, with
+// no arguments and the same $0.
+func TestImageReleaseTaskWorkingDirectoryIsAnArgument(t *testing.T) {
+	t.Parallel()
+	dir := `it's "odd" $(touch pwned) ; x`
+	request := ReleaseTaskRuntimeRequest{
+		Run: EngineRun{ID: 3}, Release: Release{ID: 5, EnvironmentID: 7}, Image: "sha256:" + strings.Repeat("a", 64),
+		Task: ReleaseTaskConfig{Name: "migrate", Command: "bin/migrate --all", WorkingDirectory: dir},
+	}
+	spec, err := releaseTaskContainerSpec(request, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(spec.Entrypoint, []string{"/bin/sh", "-c"}) || len(spec.Command) != 3 ||
+		spec.Command[1] != "/bin/sh" || spec.Command[2] != dir || strings.Contains(spec.Command[0], "odd") ||
+		!strings.HasSuffix(spec.Command[0], "\nbin/migrate --all") {
+		t.Fatalf("task in a directory = %q %q", spec.Entrypoint, spec.Command)
+	}
+
+	if _, err := os.Stat("/bin/sh"); err != nil {
+		t.Skip("no /bin/sh")
+	}
+	root := t.TempDir()
+	if err := os.Mkdir(filepath.Join(root, dir), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run := func(argv []string) (string, int) {
+		cmd := exec.Command(argv[0], argv[1:]...)
+		cmd.Dir = root
+		out, err := cmd.CombinedOutput()
+		code := 0
+		var exit *exec.ExitError
+		if errors.As(err, &exit) {
+			code = exit.ExitCode()
+		} else if err != nil {
+			t.Fatal(err)
+		}
+		return string(out), code
+	}
+	quoted := "'" + strings.ReplaceAll(dir, "'", `'\''`) + "'"
+	for _, command := range []string{
+		`printf '%s|%s|%s\n' "$(basename "$PWD")" "$#" "$0"`,
+		`test "$*" = "" && echo none; exit 3`,
+		"set -e\nfalse\necho unreachable",
+	} {
+		entrypoint, cmd := releaseTaskInDirectory(command, dir)
+		got, gotCode := run(append(entrypoint, cmd...))
+		want, wantCode := run([]string{"/bin/sh", "-c", "cd " + quoted + " && " + command})
+		if got != want || gotCode != wantCode {
+			t.Errorf("%q: ran as %q (%d), quoted it ran as %q (%d)", command, got, gotCode, want, wantCode)
+		}
+	}
+	if _, err := os.Stat(filepath.Join(root, "pwned")); err == nil {
+		t.Fatal("the directory's name was run as a command")
+	}
+
+	// A directory that is not there ends the task before any of it runs,
+	// where `cd dir && a; b` ran b in the image's own directory.
+	entrypoint, cmd := releaseTaskInDirectory("echo first; echo second", "missing")
+	out, code := run(append(entrypoint, cmd...))
+	if code == 0 || strings.Contains(out, "first") || strings.Contains(out, "second") {
+		t.Fatalf("a missing directory ran the command: %q (%d)", out, code)
 	}
 }

@@ -1,7 +1,19 @@
 "use client"
 
 import { useId, useState } from "react"
-import { Archive, Bell, Clock, Gauge, Heart, Rocket, Slash, Terminal } from "@/components/icons"
+import {
+  Archive,
+  Bell,
+  Bug,
+  Clock,
+  Fingerprint,
+  Gauge,
+  Heart,
+  LockClosed,
+  Rocket,
+  Slash,
+  Terminal,
+} from "@/components/icons"
 import {
   NEVER_SENT,
   scopeName,
@@ -27,6 +39,10 @@ const ITEM_MARK: Record<string, Mark> = {
   counts: { product: "docker" },
   alerts: { glyph: Bell, hue: "var(--tag-pink)" },
   names: { product: "docker-compose" },
+  packages: { product: "linux" },
+  signins: { glyph: Fingerprint, hue: "var(--tag-slate)" },
+  certificates: { glyph: LockClosed, hue: "var(--tag-green)" },
+  scans: { glyph: Bug, hue: "var(--tag-amber)" },
 }
 
 function groupMark(key: string, snapshot?: Record<string, unknown>): Mark {
@@ -52,6 +68,14 @@ function groupMark(key: string, snapshot?: Record<string, unknown>): Mark {
       return { glyph: Rocket, hue: "var(--tag-blue)" }
     case "alerts":
       return ITEM_MARK.alerts
+    case "os":
+      return ITEM_MARK.packages
+    case "signins":
+      return ITEM_MARK.signins
+    case "certificates":
+      return ITEM_MARK.certificates
+    case "imageScans":
+      return ITEM_MARK.scans
     default:
       return { glyph: Heart, hue: "var(--tag-green)" }
   }
@@ -69,11 +93,14 @@ function groupMark(key: string, snapshot?: Record<string, unknown>): Mark {
  */
 export function SharedFields({
   scope,
+  peer = "site",
   snapshot,
   sentAt,
   className,
 }: {
   scope: AccountLinkScope
+  /** A hub is sent a few things the site never is (hub-link-protocol.md 5.4). */
+  peer?: "site" | "hub"
   snapshot?: Record<string, unknown>
   sentAt?: string
   className?: string
@@ -87,7 +114,7 @@ export function SharedFields({
         actions={<span className="text-xs text-muted-foreground">At {scopeName(scope)}</span>}
       >
         <ul className="grid min-w-0 gap-x-8 gap-y-4 sm:grid-cols-2 xl:grid-cols-4">
-          {sharedItems(scope).map((item) => (
+          {sharedItems(scope, peer).map((item) => (
             <li key={item.key} className="flex min-w-0 animate-rise items-center gap-3 text-body">
               <MarkTile mark={ITEM_MARK[item.key] ?? {}} />
               <span className="min-w-0">{item.label}</span>

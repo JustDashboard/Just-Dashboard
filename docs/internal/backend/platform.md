@@ -61,21 +61,40 @@ running and the transcript complete.
 **Secrets, four places, one goal.** `main.scrubSecretEnv` unsets boot secrets (`JD_` and `VPSD_`) once
 consumed. `deploy.mergeEnv` strips every `JD_*`/`VPSD_*` from a deploy child's environment — the command
 is content the repository owner controls — and is the half that keeps working when a new secret-bearing
-variable is added later. `dbx` never puts a password in argv (`/proc/*/cmdline` is world-readable):
-`PGPASSWORD` in the environment, a temporary defaults file for MySQL. `dockerx.RedactEnv` masks
+variable is added later. No package puts a password in argv: `/proc/*/cmdline` is world-readable, and a
+container's processes are the host's, so that holds for a client started with `docker exec` too. `dbx`
+uses `PGPASSWORD` in the environment and a temporary defaults file for MySQL; elsewhere a client takes the
+password in its environment (`MYSQL_PWD`, `REDISCLI_AUTH`, a variable a mongosh script reads from
+`process.env`, as the TLS reloads in `database_tls_engines.go` do) or in a statement on its standard input
+(the host account route, `handlers_db_host.go`, which keeps that statement to one line with the password
+inside a quoted literal: `psql` and `mysql` read standard input as a script, where `\!` runs a shell).
+A copy of a managed database (`prepareCopy`) hands `psql -c` the role and password it sets as session
+settings in `PGOPTIONS`, and its MySQL ping takes root's password from `MYSQL_PWD`. One known exception,
+still to change: the legacy `mongo` shell (gone since MongoDB 6.0, used only where `mongosh` is missing)
+cannot read its environment and gets the new account's password in its `--eval` script. `dockerx.RedactEnv` masks
 credential-shaped container env, because that is where deployments keep secrets and container detail is
 not a `system.admin` route.
 
 **Agent mode** (`JD_AGENT_MODE` / `-agent`) swaps the human login surface for mutual TLS: no password
-route, no session, no 2FA. `httpx.HubOnly` admits only the enrolled hub's certificate; `/agent/enrol` is
-the one route reachable before enrolment, which is why TLS *asks* every caller for a certificate without
-requiring one at the handshake and `HubOnly` enforces per route. The enrolment token is printed once per
-boot while unclaimed. Feature routes are the same program either way. Not useful standalone yet.
+route, no session, no 2FA. `httpx.HubOnly` admits only the enrolled hub's certificate. Two routes answer
+without one, before enrolment and after: `GET /agent/info`, which gives the agent's id, the hostname, the
+build version and the agent's public certificate, so a hub can see what it is enrolling, and
+`POST /agent/enrol`. That is why TLS *asks* every caller for a certificate without requiring one at the
+handshake and `HubOnly` enforces per route. Both are behind the allowlist and spend the login budget per
+address (`loginLim`, 10 a minute); the webhooks answer by their own signatures, as on any install. The
+enrolment token is printed once per boot while unclaimed. Feature routes are the same program either
+way, and the route walks in `api/routes_test.go` and `api/routes_gates_test.go` run over both routers
+(`testAgentServer`). Not useful standalone yet. It serves `JD_ADDR` itself, over TLS, so it is the named exception in
+[invariant 7](../security/invariants.md#invariants-that-must-not-regress) and held to the same bind rule as
+the ordinary listener: a routable address needs a `JD_ALLOWED_CIDRS` that names the hub. Under the Compose
+stack `JD_ADDR` is pinned to loopback and Caddy forwards plain HTTP, so no hub reaches an agent there.
 
 ## Configuration, version, release, self-update
 
 **`internal/config`** resolves `JD_*` at boot and **fails closed**: no `JD_ALLOWED_CIDRS` with a
-non-loopback bind is a startup error, a missing or malformed `JD_MASTER_KEY` is fatal. A `loader`
+non-loopback bind is a startup error, and so is one that admits every IPv4 or IPv6 address there
+(`admitsEveryAddress`, which reads the list as the allowlist middleware matches it); a missing or
+malformed `JD_MASTER_KEY` is fatal. A `loader`
 collects *every* malformed setting so `Load` refuses with the whole list rather than one error at a time.
 `config.Env` falls back to the legacy `VPSD_*` prefix and `adoptLegacyData` picks up pre-rename
 `/var/lib/vps-dashboard`. A handful of variables are **not** in `config.go`: `JD_LOG_LEVEL` and
@@ -165,12 +184,23 @@ announcement and the tag only decorated the Releases page: 0.8.5 was offered to 
 with a failed Verify run and no tag. Now a failed run means nothing is tagged and nothing is offered. The version
 comes from the changelog, never from the branch name, so a merge whose version is already released
 publishes nothing.
-A version merged whose run failed, and which the next release overtook before anyone tagged it, stays
+A version merged whose run did not pass, and which the next release overtook before anyone tagged it, stays
 in the history as what it is: 0.8.7 was never published, and its entry's title and summary say so and
 name the release that carries its changes (0.9.0). That is said in the entry's text, not with a new
 field: installs on 0.8.5 and older read the published changelog with `ParseManifest`, which refuses a
 field it does not know, so a field added to any entry would stop their update check altogether.
 Nothing is tagged by hand; a manual run of the workflow on `main` retries a failed publish.
+
+The workflow publishes only `latest`, so the time to publish a version whose run did not pass is
+before the next version reaches `main`, and nothing used to say it was missed. 0.8.5's run failed on
+the Streamlit fixture, which installed whatever was newest until 0.8.6 pinned it; 0.8.7's was
+cancelled, because the same commit was pushed to `patch/0.9.0` while it ran and Verify's push runs
+share one concurrency group per commit. `scripts/release.sh` now sources `scripts/release-tags.sh`
+before it writes anything: it reads the changelog of origin's `main` and the `v*` tags origin has, and
+refuses to cut a release while a version from 0.7.2 (the workflow's first) on `main` has no tag, other
+than the one being cut and those `jd_known_untagged_releases` lists with why (0.8.5 and 0.8.7). When
+origin cannot be asked it stops and says so; it never passes without looking.
+`python3 scripts/test_release_tags.py` holds both to fixture origins made in a temporary directory.
 
 ### Which build this is
 

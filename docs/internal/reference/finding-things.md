@@ -229,11 +229,21 @@ Each is a checklist. The linked document owns the rule; this only says which fil
 1. Mount it in the area's `mount<Area>Routes` (`api/handlers_<area>.go`) with `r.Method(…,
    s.handle(…))`, inside the group whose capability it needs.
 2. Write the handler beside it: decode with `httpx.DecodeJSON`, name the audit action with
-   `httpx.SetAudit`, return `httpx` errors.
-3. Add the response type to `lib/types.ts` and call it through `lib/api.ts`.
-4. A route under `/deploy` also needs a line in `deployOperations` (`api/deploy_openapi.go`) and
+   `httpx.SetAudit`, return `httpx` errors. A GET records nothing through `SetAudit`; one worth a trail
+   writes its own entry with `s.recordAudit`.
+3. A mutating route (anything but `GET`, `HEAD` and `OPTIONS`) is held by
+   `TestEveryMutatingRouteIsAuditedAndGated` (`api/routes_gates_test.go`) on the normal and the agent
+   router: audited by `httpx.AuditMutations`, asking for a capability a read-only account lacks, and
+   behind `s.destructive` if it asks for `destructive`. The fix for a failure is nearly always the
+   group it is mounted in. Only a route every role may really call goes on `ungatedMutations`, in the
+   list for the reason that holds (self-service, sign-in, own secret, a read sent as POST, checked by
+   hand), and only a handler that writes its own entry because there is no principal to name goes on
+   `selfAuditedRoutes`. Both lists are reviewed like the routes themselves, and the test fails on an
+   entry the routers no longer mount.
+4. Add the response type to `lib/types.ts` and call it through `lib/api.ts`.
+5. A route under `/deploy` also needs a line in `deployOperations` (`api/deploy_openapi.go`) and
    the regenerated description and clients: [`../backend/deploy-api.md`](../backend/deploy-api.md).
-5. Document it in the feature's backend document.
+6. Document it in the feature's backend document.
 
 **Add a page.** [`../frontend/README.md`](../frontend/README.md) (build a page in five steps),
 [`../frontend/shell.md`](../frontend/shell.md)
@@ -271,7 +281,10 @@ Each is a checklist. The linked document owns the rule; this only says which fil
    schema file beside it), so a new install has it.
 2. Add an entry to `addedColumns` with a `DEFAULT`, so an existing install gains it. Never remove
    or edit a shipped entry: the list is the path from every released schema.
-3. Add a migration test beside the others in `backend/internal/store/`.
+3. Add its `table column` line to `backend/internal/store/testdata/added_columns.txt`, in sorted
+   order. `TestNoShippedAddedColumnIsRemoved` fails until it is there, and fails for good if an entry
+   is ever taken out of `addedColumns`; a line is never removed either.
+4. Add a migration test beside the others in `backend/internal/store/`.
 
 **Add a module** (a feature package the API calls).
 [`../architecture/runtime-boundaries.md`](../architecture/runtime-boundaries.md)
@@ -300,7 +313,7 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | --- | --- | --- |
 | Network allowlist | `AllowlistCIDRs` in `backend/internal/httpx/middleware.go` | First middleware of `/api/v1` in `api/routes.go`; `JD_ALLOWED_CIDRS` is read in `config/config.go` |
 | Authentication | `Authenticator` in `backend/internal/httpx/authmw.go`; sessions and keys in `backend/internal/auth/` | Each group in `api/routes.go` picks its `Authenticate…` method |
-| Two-factor | `AuthenticatePartial` in `httpx/authmw.go`; codes in `backend/internal/auth/totp.go` | The half-authenticated group in `api/routes.go` |
+| Two-factor | `AuthenticatePartial` in `httpx/authmw.go`, with `RefuseOwedPasswordChange` in front of the 2FA routes; codes in `backend/internal/auth/totp.go` | The half-authenticated group in `api/routes.go` |
 | Capability | `RequireCapability` in `httpx/authmw.go`; roles in `backend/internal/auth/roles.go` | Each `mount…Routes`. Checks that depend on the request's content are listed in [`request-lifecycle.md`](../architecture/request-lifecycle.md) |
 | Destructive actions | `s.destructive` in `api/routes.go`; `backend/internal/httpx/confirm.go` for the typed phrase | Around the route at its mount |
 | CSRF | `RequireCSRF` in `backend/internal/httpx/csrf.go` | The groups in `api/routes.go` a session cookie reaches; the stream bridge asks for a same-site Origin instead |
@@ -318,7 +331,7 @@ Read [`../security/invariants.md`](../security/invariants.md) before changing an
 | The stack | `docker-compose.yml`, `deploy/Caddyfile`, `deploy/proxy-entrypoint.sh`, `backend/Dockerfile`, `frontend/Dockerfile` | [`implementation.md`](../deployments/implementation.md), [`overview.md`](../overview.md) |
 | Installer | `install.sh`, and the helpers it sources: `scripts/preflight.sh`, `scripts/install-dependencies.sh`, `scripts/dotenv.sh`, `scripts/password.sh` | [`terminal-tools.md`](../operations/terminal-tools.md), [`install.md`](../../guides/install.md) |
 | Operator's terminal tools | `scripts/manage.sh`; its account and link commands run `backend/internal/admin/` | [`terminal-tools.md`](../operations/terminal-tools.md) |
-| Release | `scripts/release.sh`, `backend/internal/selfupdate/changelog.json`, `backend/scripts/gen-changelog.go`, `backend/internal/version/`, `.github/workflows/release.yml` | [`platform.md`](../backend/platform.md) |
+| Release | `scripts/release.sh`, `scripts/release-tags.sh`, `backend/internal/selfupdate/changelog.json`, `backend/scripts/gen-changelog.go`, `backend/internal/version/`, `.github/workflows/release.yml` | [`platform.md`](../backend/platform.md) |
 | Self-update | `backend/internal/selfupdate/`; the `-self-update` mode in `backend/cmd/server/main.go` | [`platform.md`](../backend/platform.md) |
 | Local checks and CI | `scripts/test-changed.sh`, `scripts/ci-plan.py`, `.github/workflows/verify.yml` | [`AGENTS.md`](../../../AGENTS.md#required-checks), [`CONTRIBUTING.md`](../../../CONTRIBUTING.md) |
 | The `jd` command line | `backend/cmd/jd/`; `backend/internal/clihost/` keeps the server's copy current; `api/handlers_cli.go` serves it | [`cli.md`](../../guides/cli.md) |

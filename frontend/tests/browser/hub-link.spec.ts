@@ -527,9 +527,13 @@ test("?connect= fills in the hub, says so, shows its machine, chooses no scope, 
   await expect(page.getByRole("button", { name: "Connect", exact: true })).toBeEnabled()
   await expect(sends.getByText("At Maintain")).toBeVisible()
   await expect(sends.getByText(/project names/)).toBeVisible()
+  // A hub is also told what each server needs: names from operate up, counts at every scope.
+  await expect(sends.getByText("Certificate names, days left and issuers")).toBeVisible()
   await scopeCard(page, "Observe").click()
   await expect(sends.getByText("At Observe")).toBeVisible()
   await expect(sends.getByText(/project names/)).toHaveCount(0)
+  await expect(sends.getByText("Certificate names, days left and issuers")).toHaveCount(0)
+  await expect(sends.getByText("Sign-in counts for the last day, never who")).toBeVisible()
   await expect(sends.getByText("Never sent")).toBeVisible()
   await expect(
     page.getByText("sudo ./scripts/manage.sh hub connect https://hub.tailed39ba.ts.net"),

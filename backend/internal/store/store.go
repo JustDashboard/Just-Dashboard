@@ -1752,7 +1752,9 @@ END;
 //
 // Never remove an entry. It is not a list of the current schema, it is the
 // list of steps between every shipped schema and the current one, and dropping
-// one strands whichever installs stopped at that version.
+// one strands whichever installs stopped at that version. Every pair is also a
+// line of testdata/added_columns.txt, and TestNoShippedAddedColumnIsRemoved
+// fails when an entry is gone from here or a new one has no line there yet.
 var addedColumns = []struct{ table, column, spec string }{
 	// Access completion predates factor provenance; old sessions cannot prove a method.
 	{"sessions", "auth_method", "TEXT NOT NULL DEFAULT 'unknown'"},

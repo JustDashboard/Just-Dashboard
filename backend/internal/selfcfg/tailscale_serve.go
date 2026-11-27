@@ -15,7 +15,7 @@ import (
 
 // A preview environment is reachable on the tailnet and nowhere else.
 //
-// The dashboard's own invariant is that nothing but Caddy binds a routable
+// The shipped stack's invariant is that nothing but Caddy binds a routable
 // address, and a pull request's code is the last thing that should get an
 // exception: it was written by somebody else and has not been merged. So the
 // preview's container stays on loopback, and `tailscale serve` — which
