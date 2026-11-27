@@ -16,6 +16,17 @@ behind one menu where each verb is its word, one to a line. A verb that needs a 
 understood needs a better word, or a confirmation that carries the sentence
 ([`../foundations/words.md`](../foundations/words.md#13-a-verb-is-a-word)).
 
+## Menus are words
+
+No menu item draws a glyph in front of its word: the operator's *Menus are words*
+([standard](../standard.md)), product-wide since 27 Nov 2026. A verb's `icon` is drawn where it is
+an inline control, never in a menu. What an item may still draw is what it *is*: a tick on the
+current choice, a colour's swatch (`mark`), a status dot, the chevron of a submenu, the arrow after
+a link that leaves the product, and in a list of things (places, containers, servers) each one's
+own mark. `components/ui/menu-words.test.js` reads every `.tsx` in `src` and fails on a dropdown or
+right-click item whose content starts with a glyph; a mark that is the thing itself is named there
+with its reason.
+
 ## The verb
 
 `VerbSpec` is a verb as data. `Verb` is a `VerbSpec` with `run`, the form a caller holds when it
@@ -33,7 +44,7 @@ presses a verb itself (`verb.run()`); every component takes the wider `VerbSpec`
 | `group` | the part of a long menu it belongs to; a group opens under its name |
 | `shortcut` | the key that does the same, said at the item's end |
 | `checked` | the current one of a set of choices: a tick, and `menuitemcheckbox` to a screen reader |
-| `mark` | a drawing in place of the glyph: a colour's swatch |
+| `mark` | a drawing in front of the word in a menu, which otherwise draws none: a colour's swatch |
 | `submenu` | verbs one level down |
 
 A verb that navigates is a link, never a handler calling `router.push`: it can be opened in a new
@@ -48,13 +59,12 @@ tab, copied, and middle-clicked.
   booleans `reveal` and `dim` are the old spelling, deprecated.
 - **`VerbBar({ verbs, menuLabel })`** — a detail surface's controls: the inline verbs as named
   `xs` outline buttons (`short` where given), the rest behind the menu.
-- **`VerbMenu({ verbs, align, label, trigger, glyphs })`** — the overflow menu: the ellipsis, or a
-  named `trigger` for a menu that stands alone in a header. A choice closes the menu. `glyphs={false}`
-  draws each verb as its word alone (a `mark` and a tick still drawn), the operator's *Menus are
-  words* ([standard](../standard.md)); the Databases control center's menus are drawn so.
-- **`VerbItems({ verbs, kind, glyphs })`** — the items alone, for a menu whose root is the caller's:
+- **`VerbMenu({ verbs, align, label, trigger })`** — the overflow menu: the ellipsis, or a
+  named `trigger` for a menu that stands alone in a header. A choice closes the menu. Each verb is
+  its word alone, with its `mark` and its tick where it has them.
+- **`VerbItems({ verbs, kind })`** — the items alone, for a menu whose root is the caller's:
   `kind="dropdown"` or `kind="context"` (one right-click root for a whole listing, say).
-  `VerbItemList({ verbs, parts, glyphs })` is the same with parts of the caller's.
+  `VerbItemList({ verbs, parts })` is the same with parts of the caller's.
 
 ## Danger
 
@@ -90,12 +100,16 @@ const verbs: VerbSpec[] = [
 
 `docker/container-actions.tsx` still carries its own copy of the verb and the menu (whose items do
 not close the menu on a choice), and Files has a second model of a verb with its own renderer
-(`files/file-actions.tsx`); seventeen pages still assemble a `DropdownMenu` and an ellipsis by hand.
+(`files/file-actions.tsx`, whose `Verb` carries no glyph at all, being drawn only into menus);
+seventeen pages still assemble a `DropdownMenu` and an ellipsis by hand.
 They are the copies still to move onto `VerbSpec` and `VerbItems`; a new page starts there.
 
 ## What enforces it
 
-- `components/verbs.test.js`: links, checks, submenus, groups, and the danger ink at rest.
+- `components/verbs.test.js`: links, checks, submenus, groups, an item drawn as its word, and the
+  danger ink at rest.
+- `components/ui/menu-words.test.js`: no menu item in `src` starts with a glyph, except the marks it
+  names.
 - `tests/browser/shared-dropdowns.spec.ts`: the open menus.
 
 **Related:** [`overlays-confirm.md`](overlays-confirm.md), [`list-row.md`](list-row.md) (where a

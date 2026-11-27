@@ -4,7 +4,6 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import {
   ChevronRight,
   Download,
-  FolderOpen,
   FolderPlus,
   MoreHorizontal,
   PlusSquareSmall,
@@ -402,12 +401,12 @@ export function FileTree({
                   setCreating({ parent: root, kind: "folder" })
                 }}
               >
-                <FolderPlus className="size-3.5" /> New folder here
+                New folder here
               </DropdownMenuItem>
             )}
             {onOpenInFiles && (
               <DropdownMenuItem className="gap-2 text-xs" onSelect={() => onOpenInFiles(root)}>
-                <FolderOpen className="size-3.5" /> Open in Files
+                Open in Files
               </DropdownMenuItem>
             )}
           </DropdownMenuContent>

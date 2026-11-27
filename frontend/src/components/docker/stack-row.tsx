@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Code, FolderOpen, MoreHorizontal, Play, Terminal } from "@/components/icons"
+import { MoreHorizontal, Play } from "@/components/icons"
 import { useAuth } from "@/hooks/use-auth"
 import { DashboardMark } from "@/components/logo"
 import { ChoiceRow } from "@/components/choice-row"
@@ -338,25 +338,16 @@ function StackMenu({ stack }: { stack: ComposeStack }) {
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="min-w-44">
         <DropdownMenuItem asChild>
-          <Link href={`/docker/stacks/${encodeURIComponent(stack.name)}`}>
-            <Code className="size-3.5" />
-            View
-          </Link>
+          <Link href={`/docker/stacks/${encodeURIComponent(stack.name)}`}>View</Link>
         </DropdownMenuItem>
         {stack.workingDir && (
           <DropdownMenuItem asChild>
-            <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>
-              <FolderOpen className="size-3.5" />
-              Files
-            </Link>
+            <Link href={`/files?path=${encodeURIComponent(stack.workingDir)}`}>Files</Link>
           </DropdownMenuItem>
         )}
         {stack.workingDir && can("terminal") && (
           <DropdownMenuItem asChild>
-            <Link href={`/terminal?cwd=${encodeURIComponent(stack.workingDir)}`}>
-              <Terminal className="size-3.5" />
-              Open shell
-            </Link>
+            <Link href={`/terminal?cwd=${encodeURIComponent(stack.workingDir)}`}>Open shell</Link>
           </DropdownMenuItem>
         )}
       </DropdownMenuContent>

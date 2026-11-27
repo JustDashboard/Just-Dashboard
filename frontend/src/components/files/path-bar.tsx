@@ -228,7 +228,6 @@ function SiblingMenu({ dir, onNavigate }: { dir: string; onNavigate: (path: stri
         {entries?.length === 0 && <DropdownMenuItem disabled>No folders here</DropdownMenuItem>}
         {entries?.map((entry) => (
           <DropdownMenuItem key={entry.path} onSelect={() => onNavigate(entry.path)}>
-            <FolderClosed className="size-3.5 fill-primary/20 text-primary" />
             <span className="truncate">{entry.name}</span>
           </DropdownMenuItem>
         ))}

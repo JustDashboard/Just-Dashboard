@@ -177,11 +177,7 @@ export function FleetCard({
               </Link>
               <span className="-my-1 -mr-1.5 flex items-center gap-1">
                 {entry.readOnly && <ProtectedTag compact className="mr-1" />}
-                <VerbMenu
-                  verbs={control.verbsFor(entry)}
-                  label={`Actions for ${entry.name}`}
-                  glyphs={false}
-                />
+                <VerbMenu verbs={control.verbsFor(entry)} label={`Actions for ${entry.name}`} />
               </span>
               <div className="col-span-2 col-start-2 flex min-w-0 items-center gap-2 text-hint text-muted-foreground">
                 {busy ? (

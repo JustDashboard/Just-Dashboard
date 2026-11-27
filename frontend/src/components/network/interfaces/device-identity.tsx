@@ -3,15 +3,7 @@
 import Link from "next/link"
 import { useState } from "react"
 import { useAuth } from "@/hooks/use-auth"
-import {
-  ArrowDown,
-  ArrowUp,
-  Layers,
-  LockClosed,
-  MagnifyingGlass,
-  MoreHorizontal,
-  Trash,
-} from "@/components/icons"
+import { ArrowUp, LockClosed, MoreHorizontal } from "@/components/icons"
 import { del, post } from "@/lib/api"
 import { notify } from "@/lib/toast"
 import type { NetworkLink } from "@/lib/types"
@@ -194,7 +186,6 @@ export function DeviceIdentity({
               <DropdownMenuContent align="end" className="min-w-52">
                 {inside && (
                   <DropdownMenuItem onSelect={() => onOpenNamespace(inside.kind, inside.name)}>
-                    <Layers className="size-3.5" />
                     {inside.kind === "named"
                       ? `Open namespace ${inside.name}`
                       : `Open ${inside.name}’s namespace`}
@@ -205,7 +196,6 @@ export function DeviceIdentity({
                     <Link
                       href={`/network/investigate?container=${encodeURIComponent(link.container)}`}
                     >
-                      <MagnifyingGlass className="size-3.5" />
                       Investigate a connection from {link.container}
                     </Link>
                   </DropdownMenuItem>
@@ -213,13 +203,11 @@ export function DeviceIdentity({
                 {inside && (canSetDown || canDelete) && <DropdownMenuSeparator />}
                 {canSetDown && (
                   <DropdownMenuItem disabled={!!link.guard} onSelect={setDown}>
-                    <ArrowDown className="size-3.5" />
                     Set down
                   </DropdownMenuItem>
                 )}
                 {canDelete && (
                   <DropdownMenuItem variant="destructive" disabled={!!link.guard} onSelect={remove}>
-                    <Trash className="size-3.5" />
                     Delete
                   </DropdownMenuItem>
                 )}
