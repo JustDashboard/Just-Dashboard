@@ -296,7 +296,18 @@ export function RequestsWorkspace({
     return (
       <>
         {bar}
-        {sentence && <WindowHeadline range={query.range} since={query.since} until={query.until} />}
+        {/* Drawn as it will be read — the phone's one line on Requests, the
+            alerts at the second line's end — so the rows do not move when
+            the window lands. */}
+        {sentence && (
+          <WindowHeadline
+            range={query.range}
+            since={query.since}
+            until={query.until}
+            aside={headlineAside}
+            dense={view === "requests"}
+          />
+        )}
         <div className="shrink-0 border-b border-hairline px-3 py-3">
           <Skeleton className="h-36 w-full" />
         </div>

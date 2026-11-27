@@ -321,6 +321,23 @@ test.describe("on a phone", () => {
     )
   })
 
+  test("the window's sentence is one height waiting and read, so the rows hold still", async ({
+    page,
+  }) => {
+    await mockProject(page)
+    const release = await held(page)
+    await page.goto("/deploy/7/logs")
+    await expect(headline(page)).toBeVisible()
+    await risen(page)
+    const waiting = (await headline(page).boundingBox())!
+    release()
+    await expect(headline(page)).toContainText("1,284 requests")
+    await risen(page)
+    const read = (await headline(page).boundingBox())!
+    expect(Math.round(read.y)).toBe(Math.round(waiting.y))
+    expect(Math.round(read.height)).toBe(Math.round(waiting.height))
+  })
+
   test("a request is the pane, with the way back to the rows", async ({ page }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
