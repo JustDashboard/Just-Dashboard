@@ -228,7 +228,11 @@ never into `docs/audits/`.
   machine fail the install intermittently. The emitted application is byte-for-byte identical
   either way. So a type error you do not catch with `bun run build` will not be caught anywhere
   later; it will ship.
-- `.github/workflows/verify.yml` runs for every pull request, as it would merge, and for every push to
+- `.github/workflows/verify.yml` (Verify) and `.github/workflows/release.yml` (Release) are the
+  project's only workflows, and neither is added to nor changed unless the operator asks for that by
+  name (`AGENTS.md`). Verify checks again what `scripts/test-changed.sh` checked before the pull request
+  was opened; it does not replace running that.
+  Verify runs for every pull request, as it would merge, and for every push to
   `main` or a `patch/*` branch. A first job, `plan`, reads the change and starts only what it reaches;
   `scripts/ci-plan.py` is the picking, and `python3 scripts/test_ci_plan.py` checks it. A Go package is
   checked when it changed or imports one that did, so a change to one handler does not run the
@@ -275,7 +279,16 @@ never into `docs/audits/`.
   `CHANGELOG.md` as its notes. The branch a release was cut on does not matter, and a merge whose
   version is already released publishes nothing. The tag is what installs wait for: a version on `main`
   with no `v<version>` tag is neither offered nor installed (`selfupdate.TagsOnly`), so a merge whose
-  Verify run fails ships to nobody until a later run is green. Release tags can also be required to be
+  Verify run fails or is cancelled ships to nobody until a later run on `main` is green, and then only
+  while `main` still names that version as latest: once a later version reaches `main`, the earlier
+  one is never published. 0.8.5 (its run failed) and 0.8.7 (its run was cancelled) went that way.
+  `scripts/release.sh` asks origin before it writes anything and refuses to cut a release while a
+  version on `main` has no tag, unless `jd_known_untagged_releases` in `scripts/release-tags.sh` names
+  it with the reason; when origin cannot be asked it stops and says so rather than passing, and
+  `python3 scripts/test_release_tags.py` checks both. A push run is cancelled by a push of the same
+  commit to another branch while it runs, because push runs share one concurrency group per commit,
+  so push a merge's commit to a new `patch/*` branch only once `main`'s run of it has finished.
+  Release tags can also be required to be
   signed (`backend/internal/selfupdate/allowed_signers`, which names no key yet, so nothing is checked);
   "Signed releases" in `docs/internal/backend/platform.md` has the order to turn it on in.
   Do not add a key to that file as part of other work. Never tag or publish a release by hand; a manual run of the
