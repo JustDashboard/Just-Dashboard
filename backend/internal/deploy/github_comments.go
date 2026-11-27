@@ -147,8 +147,8 @@ func (p *PullRequestCommenter) target(ctx context.Context, run EngineRun) (pullR
 	var owner int64
 	err := p.runs.db.QueryRowContext(ctx, `
 		SELECT pr.provider_ref, t.provider, t.config_json, e.slug, t.environment_id,
-		       COALESCE((SELECT d.resource_id FROM deploy_dependencies d WHERE d.environment_id = e.id AND d.kind = 'domain' ORDER BY d.id LIMIT 1), ''),
-		       COALESCE((SELECT d.config_json FROM deploy_dependencies d WHERE d.environment_id = e.id AND d.kind = 'domain' ORDER BY d.id LIMIT 1), '{}')
+		       COALESCE((SELECT d.resource_id FROM deploy_dependencies d WHERE d.environment_id = e.id AND d.kind = 'domain' ORDER BY (COALESCE(json_extract(d.config_json, '$.service'), '') != '' OR COALESCE(json_extract(d.config_json, '$.port'), 0) != 0), d.id LIMIT 1), ''),
+		       COALESCE((SELECT d.config_json FROM deploy_dependencies d WHERE d.environment_id = e.id AND d.kind = 'domain' ORDER BY (COALESCE(json_extract(d.config_json, '$.service'), '') != '' OR COALESCE(json_extract(d.config_json, '$.port'), 0) != 0), d.id LIMIT 1), '{}')
 		  FROM deploy_preview_refs pr
 		  JOIN deploy_triggers t ON t.id = pr.trigger_id
 		  JOIN deploy_environments e ON e.id = pr.environment_id

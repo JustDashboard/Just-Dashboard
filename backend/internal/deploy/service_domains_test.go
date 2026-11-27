@@ -709,8 +709,14 @@ func TestStackDraftCommitsAServiceDomain(t *testing.T) {
 	if _, err := fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &refused}); !errors.Is(err, ErrInvalidPlan) || !strings.Contains(err.Error(), "radarr") {
 		t.Fatalf("a service Essential does not have: %v", err)
 	}
-	configuration.Domains = append(append([]PlannedDomain(nil), configuration.Domains...),
-		PlannedDomain{Hostname: "media-requests.example.test", HTTPS: true, Ownership: OwnershipManaged, Service: "seerr"})
+	// The template plans Seerr's address itself, beside Jellyfin's name.
+	planned := false
+	for _, domain := range configuration.Domains {
+		planned = planned || (domain.Hostname == "media-requests.example.test" && domain.Service == "seerr")
+	}
+	if !planned {
+		t.Fatalf("the detected configuration does not plan Seerr's address: %+v", configuration.Domains)
+	}
 	if draft, err = fixture.plans.Save(ctx, draft.ID, 41, true, DraftSaveRequest{Revision: draft.Revision, Step: DraftConfiguration, Configuration: &configuration}); err != nil {
 		t.Fatal(err)
 	}
@@ -756,5 +762,31 @@ func TestStackDraftCommitsAServiceDomain(t *testing.T) {
 	}
 	if strings.Join(got, "\n") != strings.Join(want, "\n") {
 		t.Fatalf("committed domain rows = %q", got)
+	}
+}
+
+// Domains are stored in name order, so a stack's media-downloads.example.test
+// is written before media.example.test. The deployment's shown address is its
+// own name all the same: a service domain is another app's address.
+func TestFleetShowsTheDeploymentsOwnNameBeforeAServiceDomain(t *testing.T) {
+	t.Parallel()
+	fixture := newReleaseStoreFixture(t)
+	for _, row := range []struct{ name, config string }{
+		{"media-downloads.example.test", `{"hostname":"media-downloads.example.test","https":true,"service":"qbittorrent"}`},
+		{"media-other.example.test", `{"hostname":"media-other.example.test","https":true,"port":8081}`},
+		{"media.example.test", `{"hostname":"media.example.test","https":true}`},
+	} {
+		if _, err := fixture.base.DB.Exec(
+			"INSERT INTO deploy_dependencies(environment_id, release_id, kind, ownership, resource_kind, resource_id, config_json, created_at) VALUES(?, 0, 'domain', 'managed', 'proxy_site', ?, ?, 1)",
+			fixture.envID, row.name, row.config); err != nil {
+			t.Fatal(err)
+		}
+	}
+	fleet, err := fixture.runs.Fleet(context.Background(), QueueBudget{})
+	if err != nil || len(fleet.Deployments) != 1 {
+		t.Fatalf("fleet = %#v, %v", fleet, err)
+	}
+	if got := fleet.Deployments[0].Endpoint; got != "media.example.test" {
+		t.Fatalf("the shown address is %q, want the deployment's own name", got)
 	}
 }
