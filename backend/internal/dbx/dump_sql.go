@@ -624,7 +624,7 @@ func replayGenericSQL(ctx context.Context, driver Driver, dsn, database string, 
 	if driver == DriverMySQL {
 		dsn = mysqlOneStatementDSN(dsn)
 	}
-	db, err := openForDump(ctx, d, dsnForDatabase(driver, dsn, database))
+	db, err := openForReplay(ctx, d, driver, dsnForDatabase(driver, dsn, database), opts)
 	if err != nil {
 		return "", err
 	}

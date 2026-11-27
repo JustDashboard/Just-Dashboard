@@ -61,17 +61,30 @@ running and the transcript complete.
 **Secrets, four places, one goal.** `main.scrubSecretEnv` unsets boot secrets (`JD_` and `VPSD_`) once
 consumed. `deploy.mergeEnv` strips every `JD_*`/`VPSD_*` from a deploy child's environment — the command
 is content the repository owner controls — and is the half that keeps working when a new secret-bearing
-variable is added later. `dbx` never puts a password in argv (`/proc/*/cmdline` is world-readable):
-`PGPASSWORD` in the environment, a temporary defaults file for MySQL. `dockerx.RedactEnv` masks
+variable is added later. No package puts a password in argv: `/proc/*/cmdline` is world-readable, and a
+container's processes are the host's, so that holds for a client started with `docker exec` too. `dbx`
+uses `PGPASSWORD` in the environment and a temporary defaults file for MySQL; elsewhere a client takes the
+password in its environment (`MYSQL_PWD`, `REDISCLI_AUTH`, a variable a mongosh script reads from
+`process.env`, as the TLS reloads in `database_tls_engines.go` do) or in a statement on its standard input
+(the host account route, `handlers_db_host.go`, which keeps that statement to one line with the password
+inside a quoted literal: `psql` and `mysql` read standard input as a script, where `\!` runs a shell).
+A copy of a managed database (`prepareCopy`) hands `psql -c` the role and password it sets as session
+settings in `PGOPTIONS`, and its MySQL ping takes root's password from `MYSQL_PWD`. One known exception,
+still to change: the legacy `mongo` shell (gone since MongoDB 6.0, used only where `mongosh` is missing)
+cannot read its environment and gets the new account's password in its `--eval` script. `dockerx.RedactEnv` masks
 credential-shaped container env, because that is where deployments keep secrets and container detail is
 not a `system.admin` route.
 
 **Agent mode** (`JD_AGENT_MODE` / `-agent`) swaps the human login surface for mutual TLS: no password
-route, no session, no 2FA. `httpx.HubOnly` admits only the enrolled hub's certificate; `/agent/enrol` is
-the one route reachable before enrolment, which is why TLS *asks* every caller for a certificate without
-requiring one at the handshake and `HubOnly` enforces per route. The enrolment token is printed once per
-boot while unclaimed. Feature routes are the same program either way. Not useful standalone yet. It
-serves `JD_ADDR` itself, over TLS, so it is the named exception in
+route, no session, no 2FA. `httpx.HubOnly` admits only the enrolled hub's certificate. Two routes answer
+without one, before enrolment and after: `GET /agent/info`, which gives the agent's id, the hostname, the
+build version and the agent's public certificate, so a hub can see what it is enrolling, and
+`POST /agent/enrol`. That is why TLS *asks* every caller for a certificate without requiring one at the
+handshake and `HubOnly` enforces per route. Both are behind the allowlist and spend the login budget per
+address (`loginLim`, 10 a minute); the webhooks answer by their own signatures, as on any install. The
+enrolment token is printed once per boot while unclaimed. Feature routes are the same program either
+way, and the route walks in `api/routes_test.go` and `api/routes_gates_test.go` run over both routers
+(`testAgentServer`). Not useful standalone yet. It serves `JD_ADDR` itself, over TLS, so it is the named exception in
 [invariant 7](../security/invariants.md#invariants-that-must-not-regress) and held to the same bind rule as
 the ordinary listener: a routable address needs a `JD_ALLOWED_CIDRS` that names the hub. Under the Compose
 stack `JD_ADDR` is pinned to loopback and Caddy forwards plain HTTP, so no hub reaches an agent there.

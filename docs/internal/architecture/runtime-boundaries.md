@@ -169,7 +169,9 @@ there after Compose restarted the container, it went down again.
   recovers nothing.
 - `safego.Try(log, name, fn)` is for work that has somebody to tell: the panic comes back as `fn`'s
   error. `jobs.Manager.run` calls every job's runner through it, so a job that panics is a failed job
-  with the reason on it, not the end of the dashboard and of every other job.
+  with the reason on it, not the end of the dashboard and of every other job. The hub link's fleet
+  readings (`hublink/fleet.go`) run through it too, so a source that panics is a failed reading, left
+  out of the heartbeat and read again two minutes later.
 
 Every task is remembered by name (`safego.Tasks`); a name is a fixed phrase, never built from an id.
 `GET /dashboard/health` lists the ones that panicked in the last half hour as `tasks` and the Overview

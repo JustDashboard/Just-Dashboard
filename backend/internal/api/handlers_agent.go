@@ -14,18 +14,23 @@ import (
 
 // mountAgentRoutes exposes the two endpoints a hub needs before it can talk to
 // this agent at all. They are mounted only in agent mode, and they sit outside
-// the authenticated group because neither is reachable once the agent has a
-// hub: /info tells you nothing secret, and /enrol refuses to run twice.
+// the authenticated group because neither can ask for the hub's certificate:
+// /info is how a hub learns which certificate it is enrolling against, and
+// /enrol is where it hands over its own, once.
+//
+// Both answer anybody on the allowlisted network, so both take the login rate
+// budget per address rather than nothing. A hub's enrolment is two or three
+// calls; somebody walking the network for agents, or guessing at a token,
+// gets ten a minute.
 func (s *Server) mountAgentRoutes(r chi.Router) {
 	r.Route("/agent", func(r chi.Router) {
+		r.Use(s.loginLim.Middleware)
 		r.Method(http.MethodGet, "/info", s.handle(s.handleAgentInfo))
-		// Enrolment is the one unauthenticated write in the whole API, so it
-		// takes the login rate budget rather than the general one. It is also
+		// Enrolment is the one unauthenticated write in the whole API. It is
 		// audited: handing a machine root-equivalent access to this host is
 		// the most consequential thing that can happen to an agent, and the
 		// trail should show it even though no user was involved.
 		r.Group(func(r chi.Router) {
-			r.Use(s.loginLim.Middleware)
 			r.Use(httpx.AuditMutations(s.Audit))
 			r.Method(http.MethodPost, "/enrol", s.handle(s.handleAgentEnrol))
 		})
@@ -43,8 +48,10 @@ type agentInfoResponse struct {
 }
 
 // handleAgentInfo is how a hub discovers what it is pointed at, before and
-// after enrolment. It deliberately carries no host detail — hostname, an
-// identifier and the public certificate are all a stranger learns.
+// after enrolment. Anybody on the allowlisted network may ask, and what they
+// learn is the host's name, the build's version, the agent's identifier and
+// its public certificate: no address, no configuration, nothing about what
+// runs on the host.
 func (s *Server) handleAgentInfo(w http.ResponseWriter, r *http.Request) error {
 	id := s.Agent
 	if id == nil {

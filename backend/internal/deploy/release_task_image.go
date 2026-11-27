@@ -254,10 +254,21 @@ func releaseTaskContainerSpec(request ReleaseTaskRuntimeRequest, networks []stri
 	if request.Task.WorkingDirectory != "" {
 		// A relative directory is relative to the image's own working
 		// directory, which only the image knows; the shell resolves it.
-		quoted := "'" + strings.ReplaceAll(request.Task.WorkingDirectory, "'", `'\''`) + "'"
-		spec.Entrypoint, spec.Command = []string{"/bin/sh", "-c"}, []string{"cd " + quoted + " && " + request.Task.Command}
+		entrypoint, cmd := releaseTaskInDirectory(request.Task.Command, request.Task.WorkingDirectory)
+		spec.Entrypoint, spec.Command = entrypoint, cmd
 	}
 	return spec, nil
+}
+
+// releaseTaskInDirectory runs a task's command after changing to dir in the
+// image's shell. The directory is a positional argument, not text quoted into
+// the script, so no spelling of it is read as shell. It is shifted off before
+// the command runs, which sees no arguments and the $0 it would have without
+// a directory. A directory that cannot be entered ends the task with cd's own
+// failure: `cd dir && command` ran the rest of a command such as `a; b` in the
+// image's own directory instead.
+func releaseTaskInDirectory(command, dir string) (entrypoint, cmd []string) {
+	return []string{"/bin/sh", "-c"}, []string{"cd \"$1\" || exit\nshift\n" + command, "/bin/sh", dir}
 }
 
 // releaseTaskLabel marks a release task's one-shot container, so runtime

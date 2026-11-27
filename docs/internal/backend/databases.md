@@ -190,8 +190,15 @@ is connected by naming the instance found, not by typing its address again.
   (or `mariadb`) as root over the socket, making the account for both `localhost` and
   `127.0.0.1`; `mongosh` under the localhost exception; `clickhouse-client` as `default`. Redis
   has no accounts, so its `requirepass` is read from `/etc/redis/redis.conf` (or Valkey's).
-  The password is generated on the server unless supplied, reaches the client as one argv
-  element and never a shell, and the connection is probed over TCP before anything is saved;
+  The password is generated on the server unless supplied, and reaches the client on its standard
+  input (`psql`, `mysql`, `clickhouse-client`) or in its environment (`mongosh`, which reads it from
+  `process.env`), never as an argument, which every account on the machine can read while the client
+  runs; the legacy `mongo` shell, which has no environment to read, still gets it inside its
+  `--eval` script. No client runs under a shell. `psql` and `mysql` read standard input as a script
+  in which a backslash outside a quoted string is one of their own commands (`\!` runs a shell), so
+  the statement is one line with the password only inside its literal (the `DO` block's dollar quote
+  for `psql`), and a password with a control character is refused
+  (`TestAHostilePasswordReachesTheClientOnlyAsALiteral`). The connection is probed over TCP before anything is saved;
   an existing connection to the same server, database and account is re-sealed rather than
   duplicated, and one to the same address as another account is left as it is. Audited as
   `database.connection.host.grant` with the account and outcome, never the password.
@@ -645,7 +652,9 @@ tag floats only within that line's patch releases; Timescale is pinned to one re
   the server reads, swaps them in with one command (a failure part way leaves the old pair), and asks the
   running server to read them (`pg_reload_conf()`, `ALTER INSTANCE RELOAD TLS`, `FLUSH
   SSL`, `rotateCertificates`, `CONFIG SET tls-cert-file`), run inside the container with the
-  password already in its environment. It then connects to the server and compares the certificate it
+  password already in its environment, which hands it to the client in the client's environment
+  (`MYSQL_PWD`, `REDISCLI_AUTH`, `process.env` in the mongosh script that signs in) and never as an
+  argument (`TestTLSReloadsHandTheRootPasswordOverInTheEnvironment`). It then connects to the server and compares the certificate it
   presents with the one just issued (`dbx.ServedCertificate`: the engine's own switch to TLS, then the
   handshake, verified against the authority), because `pg_reload_conf()` returns true when PostgreSQL kept
   the old one; where the server declines or kept it, **the container is restarted** (always, on a Redis
@@ -2404,7 +2413,11 @@ the detail of each classifier is below, with the surface it guards.
   other than `\restrict`/`\unrestrict`, a mysql client command, `\connect`, or a MySQL statement that
   is a `USE` of another database (wherever on a line, and inside a conditional comment) is refused
   with the database untouched. Postgres replays as one transaction; a MySQL connection used for a
-  replay has multi-statement queries switched off, so what one statement is stays decided here. The
+  replay has multi-statement queries switched off, so what one statement is stays decided here. A
+  caller that passes `RestoreOptions.Warnings` gets a Postgres server's warnings as they are raised
+  and none of its notices: the copy a migration rehearsal, a data copy or a preview branch restores
+  (`api/deployment_rehearsal.go`) replays its SQL dump this way, over a connection to the copy, and
+  keeps the warnings in its transcript as the client's output was kept. The
   only tools a restore runs are `pg_restore` and `mongorestore`, on archives. This confines the
   session, not the script: a statement that names another database explicitly still reaches it with
   the connection's rights, as it would from the query runner.

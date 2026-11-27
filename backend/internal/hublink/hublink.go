@@ -128,6 +128,9 @@ type Options struct {
 	// sessions were revoked, so the API can close the sockets they opened at
 	// once rather than at their next check.
 	SessionsEnded func()
+	// Fleet is where the fleet fields of every heartbeat are read from
+	// (fleet.go, protocol 5.4). Nil sends none of them.
+	Fleet *FleetSources
 	// HTTP and Now are for tests.
 	HTTP     *http.Client
 	Now      func() time.Time
@@ -162,6 +165,8 @@ type Service struct {
 	beforeAllowTx func()
 	// gate remembers which address was last checked to be the hub node's.
 	gate nodeGate
+	// fleet holds the fleet fields' last readings; nil without sources.
+	fleet *fleet
 
 	mu sync.Mutex
 	// admitted holds the stored links the rule passed, once per link per
@@ -189,6 +194,7 @@ func New(o Options) *Service {
 	if s.now == nil {
 		s.now = func() time.Time { return time.Now().UTC() }
 	}
+	s.fleet = newFleet(o.Fleet, s.now)
 	s.dial = newDialer(s.tailnet, s.testOrigin)
 	s.dial.gate = s.dialGate
 	client := o.HTTP
@@ -205,9 +211,8 @@ func New(o Options) *Service {
 			OnReply:    s.onReply,
 			OnClear:    s.onClear,
 			BeforePoll: s.beforePoll,
-			// With hub sign-in on, every heartbeat names the accounts that
-			// opted in; off, it is the snapshot alone and the hub reads that
-			// as sign-in off here.
+			// The fleet fields, and with hub sign-in on the accounts that
+			// opted in; without signIn the hub reads sign-in as off here.
 			HeartbeatExtra: s.heartbeatExtra,
 		},
 	})

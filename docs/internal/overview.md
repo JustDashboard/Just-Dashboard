@@ -94,7 +94,10 @@ Integration families skip rather than fail when their dependencies are absent:
   see [terminal lifetime verification](../audits/2026-10-02-terminal-persistence/README.md).
 
 Extend these when you touch the matching surface: security — `httpx/confirm_test.go`,
-`api/routes_test.go`, `api/docker_spec_test.go`, `files/files_test.go`, `safepath/safepath_test.go`,
+`api/routes_test.go` and `api/routes_gates_test.go` (walks of the normal and the agent router: the
+allowlist, no answer without a credential, and every mutating route audited, gated and, if
+irreversible, behind `s.destructive`; the last reads middleware off the chain and never calls a
+handler), `api/docker_spec_test.go`, `files/files_test.go`, `safepath/safepath_test.go`,
 `dbx/classify_test.go`, `api/handlers_security_test.go` (signs a real admin in and drives whole routes,
 because a rule tested in its own package says nothing about which group the route was mounted in),
 `api/handlers_logs_test.go` (`TestAuthLogsNeedAnAdministrator`: every `/logs` route that reads a

@@ -261,7 +261,10 @@ func (d *Deployer) compose(ctx context.Context, p *Project, env map[string]strin
 // shell runs an operator-configured hook command. It goes through sh -c
 // intentionally: these are pipelines the operator wrote for their own project
 // ("bun install && bun run build"), and they are stored by an admin, not
-// supplied per request.
+// supplied per request. It is one of the stored shells invariant 6 names
+// (docs/internal/security/invariants.md), beside the normalized engine's
+// release tasks in runStoredReleaseTask; a deploy key cannot write a legacy
+// project at all.
 func (d *Deployer) shell(ctx context.Context, p *Project, command string, env map[string]string, logBuf io.Writer) error {
 	ctx, cancel := context.WithTimeout(ctx, 20*time.Minute)
 	defer cancel()

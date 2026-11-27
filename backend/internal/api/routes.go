@@ -44,8 +44,12 @@ func (s *Server) Routes() http.Handler {
 	r.Use(httpx.RequestLogger(s.Log))
 	r.Use(httpx.SecurityHeaders)
 
-	// Liveness is the only unauthenticated route, and it reveals nothing:
-	// a fixed body, no version, no hostname.
+	// Liveness is the only route outside the allowlist, and it reveals
+	// nothing: a fixed body, no version, no hostname. Under /api/v1, the
+	// routes that answer a caller who brings no credential at all are listed
+	// in routes_test.go (publicAPIRoutes, agentPreEnrolmentRoutes). One of
+	// them, an agent's /agent/info, does give the hostname and the version,
+	// to the hub about to enrol it (handlers_agent.go).
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`{"status":"ok"}`))

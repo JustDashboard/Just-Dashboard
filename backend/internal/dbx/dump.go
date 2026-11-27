@@ -722,6 +722,12 @@ type RestoreOptions struct {
 	// another name: its documents carry the name they came from.
 	SourceDatabase string
 	Progress       func(line string)
+	// Warnings, when set, receives each warning a PostgreSQL server raises
+	// while a SQL dump is replayed, a line at a time as psql prints it. The
+	// notices below a warning are not passed on: replayed into an empty
+	// database, a dump's DROP … IF EXISTS raises one per object, and those
+	// would bury anything worth reading.
+	Warnings func(line string)
 }
 
 func (o RestoreOptions) progress(format string, args ...any) {
