@@ -374,11 +374,65 @@ test("a change waits for Allow, runs, and says where to see it", async ({ page }
     "href",
     "/deploy/7/settings/runtime#listen",
   )
-  // And it stands in the rail beside the conversation.
-  await expect(page.locator("[data-slot='agent-activity']")).toContainText("Changes")
+  // The shortcut stands under its call in the conversation, and once: the rail
+  // beside it does not list the changes again.
+  await expect(chat(page).getByRole("link", { name: "Open Runtime" })).toHaveCount(1)
+  const rail = page.locator("[data-slot='agent-activity']")
+  await expect(rail).not.toContainText("Changes")
+  await expect(rail.getByRole("link")).toHaveCount(0)
+})
+
+test("a file it would write is read in a box, and what it changed reads as a diff", async ({
+  page,
+}) => {
+  const content = Array.from({ length: 40 }, (_, at) => `export const line${at} = ${at}`).join("\n")
+  const write = {
+    id: "w",
+    tool: "write_file",
+    label: "Write src/lines.ts in the workspace",
+    kind: "change",
+    reason: "The port is read from one place.",
+    input: { workspace: "shop", path: "src/lines.ts", content },
+  }
+  await mockAssistant(page, [
+    [start, done({ stop: "tool", pending: [write] })],
+    [
+      start,
+      {
+        type: "called",
+        id: "w",
+        tool: "write_file",
+        ok: true,
+        said: "Written",
+        output:
+          "--- a/src/lines.ts\n+++ b/src/lines.ts\n@@ -1 +1 @@\n-export const port = 8080\n+export const port = 3000",
+      },
+      { type: "text", text: "Written." },
+      done(),
+    ],
+  ])
+  await page.goto("/deploy/7/assistant")
+  await ask(page, "Fix the port in the code")
+  // The path is a line of what it sends; the file's text is a box of its own.
+  await expect(approval(page).locator("[data-slot='agent-input']")).toContainText("src/lines.ts")
+  await expect(approval(page).locator("[data-slot='agent-input']")).not.toContainText("line39")
+  const text = approval(page).locator("[data-slot='agent-file-text']")
+  await expect(text).toContainText("export const line39 = 39")
+  expect((await text.boundingBox())!.height).toBeLessThanOrEqual(161)
+  await approval(page)
+    .getByRole("button", { name: `Allow: ${write.label}` })
+    .click()
+  await expect(chat(page)).toContainText("Written.")
+  await chat(page)
+    .locator("[data-slot='agent-step'][data-tool='write_file'] button")
+    .first()
+    .click()
+  const diff = chat(page).locator("[data-slot='agent-diff']")
+  await expect(diff.getByText("+export const port = 3000")).toHaveClass(/text-success/)
+  await expect(diff.getByText("-export const port = 8080")).toHaveClass(/text-destructive/)
   await expect(
-    page.locator("[data-slot='agent-activity']").getByRole("link", { name: "Open Runtime" }),
-  ).toBeVisible()
+    chat(page).locator("[data-slot='agent-step'] [data-slot='agent-input']"),
+  ).not.toContainText("line39")
 })
 
 test("asking something else declines what waits", async ({ page }) => {
@@ -677,7 +731,7 @@ test("a role without service control is told so and asks nothing", async ({ page
   await expect(chat(page)).toHaveCount(0)
 })
 
-test("on a phone the conversation, the chats and what it did are one pane at a time", async ({
+test("on a phone the conversation, the chats and what it read are one pane at a time", async ({
   page,
 }) => {
   await mockAssistant(
@@ -714,14 +768,14 @@ test("on a phone the conversation, the chats and what it did are one pane at a t
   await ask(page, "Fix the port")
   await expect(chat(page)).toContainText("Saved.")
   await expect(page.locator("[data-slot='agent-activity']")).toBeHidden()
-  // The bar's stops are found by their word; how many changes are waiting
-  // is said beside the name, not in it.
+  // The bar's stops are found by their word. The reads' stop counts nothing:
+  // the change it made is under its call in the conversation.
   const bar = page.getByRole("navigation", { name: "Assistant panes" })
-  const did = bar.getByRole("button", { name: "What it did", exact: true })
-  await expect(did).toHaveAttribute("aria-description", "1")
-  await did.click()
-  await expect(did).toHaveAttribute("aria-current", "page")
-  await expect(page.locator("[data-slot='agent-activity']")).toBeVisible()
+  const read = bar.getByRole("button", { name: "What it read", exact: true })
+  await expect(read).not.toHaveAttribute("aria-description")
+  await read.click()
+  await expect(read).toHaveAttribute("aria-current", "page")
+  await expect(page.locator("[data-slot='agent-activity']")).toContainText("tokens in")
   await expect(chat(page)).toBeHidden()
   await bar.getByRole("button", { name: "Chats", exact: true }).click()
   await expect(page.locator("[data-slot='agent-chats-list']")).toContainText("Which database")
@@ -737,7 +791,7 @@ test("on a phone the assistant's page has one strip: its bar, edge to edge, endi
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/assistant")
   const bar = page.getByRole("navigation", { name: "Assistant panes" })
-  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats", "What it did", "Settings"])
+  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats", "What it read", "Settings"])
   // Out through the page's gutter, as every other bar runs.
   const foot = (await bar.boundingBox())!
   expect([foot.x, foot.width]).toEqual([0, 390])
@@ -1203,24 +1257,29 @@ test("the server's page is a chat over the whole server, with every chat", async
   await expect(page.getByRole("heading", { name: "Where it works" })).toBeVisible()
 })
 
-test("the mode menu says plainly what each mode lets it do", async ({ page }) => {
+test("the mode menu is a line a mode, and the settings say what each lets it do", async ({
+  page,
+}) => {
   await mockAssistant(page, [])
   await page.goto("/deploy/7/assistant")
   await page.locator("[data-slot='mode-menu']").click()
-  await expect(page.getByRole("menuitem", { name: /Full access/ })).toContainText(
-    "Runs everything without asking",
-  )
-  // Full access is also what makes access that outlasts the chat, and says so.
-  await expect(page.getByRole("menuitem", { name: /Full access/ })).toContainText(
-    "including what outlasts the chat: a new account, a key, a sudo rule",
-  )
-  await expect(page.getByRole("menuitem", { name: /Ask before changes/ })).toContainText(
-    "Every change waits for your Allow",
-  )
-  // A read that leaves the server is held like a change.
-  await expect(page.getByRole("menuitem", { name: /Ask before changes/ })).toContainText(
-    "so does a read it would send to another machine",
-  )
+  // The words are the choice: a lock, a name and the tick, nothing under it.
+  await expect(page.getByRole("menuitem")).toHaveText([
+    "Ask every time",
+    "Ask before changes",
+    "Full access",
+  ])
+  const full = await page.getByRole("menuitem", { name: "Full access" }).boundingBox()
+  const ask = await page.getByRole("menuitem", { name: "Ask every time" }).boundingBox()
+  // One line each: the item with the tick is no taller than one without.
+  expect(Math.abs(full!.height - ask!.height)).toBeLessThan(1)
+  await page.keyboard.press("Escape")
+  // What each lets it do is said once, a short line, where the default is chosen.
+  await page.goto("/assistant?view=settings")
+  const modes = page.getByRole("group", { name: "Default mode" })
+  await expect(modes).toContainText("Does anything you could do, without asking.")
+  await expect(modes).toContainText("Reads on its own. Changes wait for your Allow.")
+  await expect(modes).toContainText("Waits for your Allow on every call.")
 })
 
 /* -------------------------------------------------------- a new deployment */
@@ -1354,6 +1413,101 @@ test("a new deployment is handed to the assistant, and Deploy stays the person's
   await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
   await expect(page.getByRole("button", { name: /Deploy$/ }).first()).toBeVisible()
   await expect(panel.getByRole("button", { name: /^Deploy/ })).toHaveCount(0)
+})
+
+/**
+ * The draft's assistant streams answers the test writes a line at a time, so a turn
+ * can be held open: `fulfill` sends a whole body, which is a turn that has ended.
+ */
+async function holdSetupTurns(page: Page) {
+  await page.addInitScript(() => {
+    const held: ReadableStreamDefaultController<Uint8Array>[] = []
+    const w = window as unknown as Record<string, unknown>
+    w.__setupTurns = held
+    const original = window.fetch.bind(window)
+    window.fetch = (input, init) => {
+      const url = typeof input === "string" ? input : "url" in input ? input.url : String(input)
+      if (!new URL(url, location.href).pathname.endsWith("/deploy/drafts/setup-draft/assistant"))
+        return original(input, init)
+      const body = new ReadableStream<Uint8Array>({ start: (c) => void held.push(c) })
+      const headers = { "Content-Type": "application/x-ndjson" }
+      return Promise.resolve(new Response(body, { status: 200, headers }))
+    }
+  })
+  const turns = () =>
+    page.evaluate(() => (window as never as { __setupTurns: [] }).__setupTurns.length)
+  const send = (turn: number, events: unknown[], end = false) =>
+    page.evaluate(
+      ([turn, text, end]) => {
+        const held = (window as never as { __setupTurns: ReadableStreamDefaultController[] })
+          .__setupTurns
+        held[turn].enqueue(new TextEncoder().encode(text))
+        if (end) held[turn].close()
+      },
+      [turn, events.map((event) => JSON.stringify(event) + "\n").join(""), end] as const,
+    )
+  return { turns, send }
+}
+
+test("the page leaves the draft alone while the assistant saves it", async ({ page }) => {
+  await mockSetup(page, [])
+  const { turns, send } = await holdSetupTurns(page)
+  await page.goto("/deploy/new?draft=setup-draft")
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  const panel = page.locator("[data-slot='setup-assistant']")
+  await expect.poll(turns).toBe(1)
+  await send(0, configured, true)
+  await panel.getByRole("button", { name: "Review and deploy" }).click()
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+
+  // From here on what it saves reads back as a different plan, which is what
+  // set Review checking again over its draft.
+  await page.route("**/api/v1/deploy/drafts/setup-draft", (route) => {
+    if (route.request().method() !== "GET") return route.fallback()
+    const draft = setupDraft(9, "shop")
+    draft.data.configuration = { ...planned, runtime: { ...planned.runtime, internalPort: 8080 } }
+    return json(route, draft)
+  })
+  const writes: string[] = []
+  page.on("request", (request) => {
+    const path = new URL(request.url()).pathname
+    if (path === "/api/v1/deploy/drafts/setup-draft" && request.method() === "PUT")
+      writes.push("save")
+    if (path.endsWith("/setup-draft/preflight")) writes.push("preflight")
+  })
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  const reread = page.waitForRequest(
+    (request) =>
+      request.method() === "GET" &&
+      new URL(request.url()).pathname === "/api/v1/deploy/drafts/setup-draft",
+  )
+  await send(1, [
+    start,
+    { type: "call", call: saveDraft },
+    {
+      type: "called",
+      id: "s",
+      tool: "call_operation",
+      ok: true,
+      said: "Done",
+      change: { label: "Review", href: "/deploy/new?step=review" },
+    },
+  ])
+  await expect(panel.locator("[data-slot='agent-change']")).toHaveCount(2)
+  await reread
+  // Still answering: what it saved is read back, and nothing of the page's is sent.
+  await page.waitForTimeout(600)
+  expect(writes).toEqual([])
+  await expect(page.getByRole("button", { name: "Save only" })).toBeDisabled()
+  await expect(page.getByRole("button", { name: /Deploy$/ }).first()).toBeDisabled()
+
+  // Once it has finished, Review checks the plan it left, once.
+  await send(1, [{ type: "text", text: "Now on 8080." }, done()], true)
+  await expect(panel).toContainText("Now on 8080.")
+  await expect.poll(() => writes.filter((write) => write === "preflight").length).toBe(1)
+  await expect(page.getByRole("button", { name: "Save only" })).toBeEnabled()
 })
 
 test("the chooser offers it before there is anything to configure", async ({ page }) => {

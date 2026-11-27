@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import { Archive, Gauge, Globe, Key, Logs, Sparkles } from "@/components/icons"
+import { Archive, Gauge, Globe, Key, Rocket, Sparkles } from "@/components/icons"
 import { Notice } from "@/components/state"
 import { useProject } from "@/components/deploy/project-context"
 import type { AgentSuggestion } from "@/components/assistant/agent/chat"
@@ -10,7 +10,14 @@ import { DIAGNOSE_QUESTION } from "@/components/assistant/agent/model"
 import type { AgentScope } from "@/components/assistant/agent/sessions"
 import { SubjectAssistant } from "@/components/assistant/agent/subject-page"
 
+// Eight, which wrap to two rows under the title on a laptop: a ninth was a third.
 const SUGGESTIONS: AgentSuggestion[] = [
+  {
+    label: "Fix the failed deploy",
+    question:
+      "The last deploy failed. Find out why, and if the fix is in the code, open a workspace, fix it, push it and deploy it again.",
+    icon: Rocket,
+  },
   { label: "Diagnose it", question: DIAGNOSE_QUESTION, icon: Sparkles },
   {
     label: "Check the logs for errors",
@@ -42,11 +49,6 @@ const SUGGESTIONS: AgentSuggestion[] = [
     question:
       "What backs up this deployment's data, and when did it last run? Run a backup now if one is set up.",
     icon: Archive,
-  },
-  {
-    label: "What happened lately?",
-    question: "Summarise its last few runs and container events.",
-    icon: Logs,
   },
 ]
 
@@ -100,7 +102,7 @@ export function ProjectAssistant() {
         )
       }
       title={`Ask anything about ${record.name}`}
-      description="It can read its logs, requests and metrics, change its settings, domains and variables, take backups and deploy it, as you and under your role."
+      description="It can read its logs, requests and metrics, change its settings, domains and variables, edit its code and push it, and deploy it, as you and under your role."
       placeholder={`Ask anything about ${record.name}…`}
       sends={`what the overview shows about ${deployment.environmentName} and what it reads to answer`}
       what="it can read this deployment, answer anything about it, and change its settings for you."
