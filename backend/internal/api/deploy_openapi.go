@@ -164,7 +164,7 @@ var openapiEnums = map[reflect.Type][]string{
 	reflect.TypeOf(blueprint.InputKind("")):        {"text", "secret", "number", "boolean", "choice", "domain", "memory", "accept"},
 	reflect.TypeOf(blueprint.OperationKind("")):    {"set_variable", "write_file", "console_command", "stop_signal", "wait_for_log", "fetch_artifact"},
 	reflect.TypeOf(blueprint.CheckKind("")):        {"http", "tcp", "docker_health", "command", "game_handshake", "udp_probe"},
-	reflect.TypeOf(blueprint.AccessKind("")):       {"setup", "credentials", "token", "client", "open", "unavailable"},
+	reflect.TypeOf(blueprint.AccessKind("")):       {"setup", "credentials", "token", "client", "open", "managed", "unavailable"},
 	reflect.TypeOf(blueprint.ServiceRole("")):      {"app", "worker", "database", "cache"},
 	reflect.TypeOf(blueprint.StartCondition("")):   {"healthy", "started", "completed"},
 	reflect.TypeOf(deploy.TemplateOrigin("")):      {"compose", "deployment", "import"},

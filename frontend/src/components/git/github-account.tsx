@@ -8,8 +8,6 @@ import {
   External,
   GitHubMark,
   Key,
-  Logout,
-  RefreshClockwise,
   ShieldCheck,
   Wrench,
 } from "@/components/icons"
@@ -308,15 +306,11 @@ export function GitHubAccountControl({
           {account.profileUrl && (
             <DropdownMenuItem asChild>
               <a href={account.profileUrl} target="_blank" rel="noreferrer">
-                <External className="size-4" />
                 View profile on GitHub
               </a>
             </DropdownMenuItem>
           )}
-          <DropdownMenuItem onSelect={() => status.refresh()}>
-            <RefreshClockwise className="size-4" />
-            Re-check
-          </DropdownMenuItem>
+          <DropdownMenuItem onSelect={() => status.refresh()}>Re-check</DropdownMenuItem>
         </div>
         {canAdmin && (
           <>
@@ -346,7 +340,6 @@ export function GitHubAccountControl({
                   })
                 }
               >
-                <Logout className="size-4" />
                 Sign out
               </DropdownMenuItem>
             </div>

@@ -95,7 +95,10 @@ export type VerbSpec = {
   shortcut?: string
   /** The current one of a set of choices — a folder's colour, a sort. */
   checked?: boolean
-  /** A drawing in place of the glyph: a colour's own swatch. */
+  /**
+   * A drawing in front of the word in a menu, which otherwise draws none: a
+   * colour's own swatch. Only for what the item is, never for the verb.
+   */
   mark?: React.ReactNode
   /** Verbs one level down, behind this one. */
   submenu?: VerbSpec[]
@@ -275,20 +278,12 @@ export function VerbMenu({
   align,
   label = "More actions",
   trigger,
-  glyphs = true,
 }: {
   verbs: VerbSpec[]
   align?: "start" | "end"
   label?: string
   /** A named trigger instead of the ellipsis, for a menu that stands alone in a header. */
   trigger?: React.ReactNode
-  /**
-   * Draw each verb's glyph beside its word. Off, the menu is words alone
-   * (a `mark` and a tick are still drawn, being what the item says): the
-   * operator asked for the Databases control center's menus without them
-   * (24 Nov 2026), a glyph earning its place only where it is necessary.
-   */
-  glyphs?: boolean
 }) {
   return (
     <DropdownMenu>
@@ -306,7 +301,7 @@ export function VerbMenu({
         )}
       </DropdownMenuTrigger>
       <DropdownMenuContent align={align ?? "end"} className="min-w-44">
-        <VerbItems verbs={verbs} kind="dropdown" glyphs={glyphs} />
+        <VerbItems verbs={verbs} kind="dropdown" />
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -351,29 +346,12 @@ export type VerbMenuParts = {
  * a link, a `checked` one carries a tick, and a `submenu` opens one level
  * down.
  */
-export function VerbItems({
-  verbs,
-  kind,
-  glyphs = true,
-}: {
-  verbs: VerbSpec[]
-  kind: "dropdown" | "context"
-  /** Draw each verb's glyph beside its word (`VerbMenu`'s `glyphs`). */
-  glyphs?: boolean
-}) {
-  return <VerbItemList verbs={verbs} parts={PARTS[kind]} glyphs={glyphs} />
+export function VerbItems({ verbs, kind }: { verbs: VerbSpec[]; kind: "dropdown" | "context" }) {
+  return <VerbItemList verbs={verbs} parts={PARTS[kind]} />
 }
 
 /** `VerbItems` drawn with parts of the caller's. */
-export function VerbItemList({
-  verbs,
-  parts,
-  glyphs = true,
-}: {
-  verbs: VerbSpec[]
-  parts: VerbMenuParts
-  glyphs?: boolean
-}) {
+export function VerbItemList({ verbs, parts }: { verbs: VerbSpec[]; parts: VerbMenuParts }) {
   return verbs.map((verb, i) => {
     const previous = verbs[i - 1]
     const regroups = i > 0 && verb.group !== previous.group
@@ -381,33 +359,31 @@ export function VerbItemList({
       <Fragment key={verb.key}>
         {i > 0 && (regroups || (verb.danger && !previous.danger)) && <parts.Separator />}
         {verb.group && (i === 0 || regroups) && <parts.Label>{verb.group}</parts.Label>}
-        <VerbItem verb={verb} parts={parts} glyphs={glyphs} />
+        <VerbItem verb={verb} parts={parts} />
       </Fragment>
     )
   })
 }
 
-function VerbItem({
-  verb,
-  parts,
-  glyphs,
-}: {
-  verb: VerbSpec
-  parts: VerbMenuParts
-  glyphs: boolean
-}) {
+/**
+ * One verb as a menu item: its word, and no glyph in front of it. The operator
+ * asked for menus without them, first on the Databases control center (24 Nov
+ * 2026) and then everywhere (27 Nov 2026): a glyph beside every word was noise.
+ * A `mark` is still drawn, being what the item says (a colour's swatch), and
+ * so is the tick on the current choice.
+ */
+function VerbItem({ verb, parts }: { verb: VerbSpec; parts: VerbMenuParts }) {
   const { Item, Shortcut, Sub, SubTrigger, SubContent } = parts
-  const glyph = verb.mark ?? (glyphs ? <verb.icon className="size-3.5" /> : null)
   if (verb.submenu) {
     return (
       <Sub>
         <SubTrigger disabled={verb.disabled} className="gap-2 text-body">
-          {glyph}
+          {verb.mark}
           <span className="min-w-0 flex-1 truncate">{verb.label}</span>
         </SubTrigger>
         <SubContent className="min-w-44">
           {verb.submenu.map((inner) => (
-            <VerbItem key={inner.key} verb={inner} parts={parts} glyphs={glyphs} />
+            <VerbItem key={inner.key} verb={inner} parts={parts} />
           ))}
         </SubContent>
       </Sub>
@@ -415,7 +391,7 @@ function VerbItem({
   }
   const face = (
     <>
-      {glyph}
+      {verb.mark}
       <span className="min-w-0 flex-1 truncate">{verb.label}</span>
       {verb.checked && <Check aria-hidden className="size-3.5" />}
       {verb.shortcut && <Shortcut>{verb.shortcut}</Shortcut>}

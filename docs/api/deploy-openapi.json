@@ -3723,6 +3723,7 @@
               "token",
               "client",
               "open",
+              "managed",
               "unavailable"
             ],
             "title": "blueprint.AccessKind",

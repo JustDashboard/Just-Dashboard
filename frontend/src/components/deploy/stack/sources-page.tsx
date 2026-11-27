@@ -380,7 +380,6 @@ function CurrentSources({
                   canRemove ? (
                     <DimActions>
                       <VerbMenu
-                        glyphs={false}
                         label={`More for ${source.name}`}
                         verbs={[
                           {

@@ -11,25 +11,18 @@ import {
   ArrowLeft,
   ArrowRight,
   ArrowUp,
-  Check,
   ChevronDown,
   Clipboard,
-  CloudDownload,
   CloudUpload,
   Cross,
-  Eye,
-  EyeOff,
   FileZip,
   FolderOpen,
-  FolderPlus,
   GridSquare,
   Information,
-  Linked,
   ListUnordered,
   Location,
   MagnifyingGlass,
   Plus,
-  PlusSquareSmall,
   PreviewDocument,
   Question,
   RefreshClockwise,
@@ -1019,13 +1012,11 @@ export default function FilesPage() {
   const selectAllVerb: Verb = {
     id: "select-all",
     label: "Select all",
-    icon: Check,
     onSelect: () => setSelected(new Set(entries.map((e) => e.path))),
   }
   const refreshVerb: Verb = {
     id: "refresh",
     label: "Refresh",
-    icon: RefreshClockwise,
     onSelect: reload,
   }
   const starVerbs: Verb[] =
@@ -1034,7 +1025,6 @@ export default function FilesPage() {
           {
             id: "star",
             label: starred ? "Unstar this folder" : "Star this folder",
-            icon: starred ? StarFill : Star,
             onSelect: () => toggleStar(here.path, here.name),
           },
         ]
@@ -1044,13 +1034,12 @@ export default function FilesPage() {
   const backgroundVerbs: Verb[][] = [
     canWrite
       ? [
-          { id: "new-folder", label: "New folder", icon: FolderPlus, onSelect: newFolder },
-          { id: "new-file", label: "New file", icon: PlusSquareSmall, onSelect: newFile },
-          { id: "fetch-link", label: "From a link…", icon: CloudDownload, onSelect: fetchLink },
+          { id: "new-folder", label: "New folder", onSelect: newFolder },
+          { id: "new-file", label: "New file", onSelect: newFile },
+          { id: "fetch-link", label: "From a link…", onSelect: fetchLink },
           {
             id: "upload",
             label: "Upload files…",
-            icon: CloudUpload,
             onSelect: () => fileInput.current?.click(),
           },
         ]
@@ -1060,7 +1049,6 @@ export default function FilesPage() {
           {
             id: "paste",
             label: pasteLabel,
-            icon: Clipboard,
             onSelect: () => void paste(),
             shortcut: "⌃V",
           },
@@ -1085,14 +1073,13 @@ export default function FilesPage() {
   const moreVerbs: Verb[][] = [
     [
       ...(navigation.canForward
-        ? [{ id: "forward", label: "Forward", icon: ArrowRight, onSelect: navigation.forward }]
+        ? [{ id: "forward", label: "Forward", onSelect: navigation.forward }]
         : []),
       ...(parentReachable && parent
         ? [
             {
               id: "parent",
               label: "Parent folder",
-              icon: ArrowUp,
               onSelect: () => navigate(parent),
             },
           ]
@@ -1103,7 +1090,6 @@ export default function FilesPage() {
       {
         id: "search-inside",
         label: "Search inside files",
-        icon: PreviewDocument,
         onSelect: () => {
           setQuickMode("content")
           setQuickOpen(true)
@@ -1115,44 +1101,36 @@ export default function FilesPage() {
           {
             id: "upload",
             label: "Upload",
-            icon: CloudUpload,
             submenu: [
               {
                 id: "upload-files",
                 label: "Files…",
-                icon: CloudUpload,
                 onSelect: () => fileInput.current?.click(),
               },
               {
                 id: "upload-folder",
                 label: "Folder…",
-                icon: FolderOpen,
                 onSelect: () => folderInput.current?.click(),
               },
             ],
           },
-          ...(pasteLabel
-            ? [{ id: "paste", label: pasteLabel, icon: Clipboard, onSelect: () => void paste() }]
-            : []),
+          ...(pasteLabel ? [{ id: "paste", label: pasteLabel, onSelect: () => void paste() }] : []),
         ]
       : [],
     [
       {
         id: "view",
         label: "View",
-        icon: view === "grid" ? GridSquare : ListUnordered,
         submenu: [
           {
             id: "view-list",
             label: "List",
-            icon: ListUnordered,
             checked: view === "list",
             onSelect: () => setView("list"),
           },
           {
             id: "view-grid",
             label: "Tiles",
-            icon: GridSquare,
             checked: view === "grid",
             onSelect: () => setView("grid"),
           },
@@ -1160,7 +1138,6 @@ export default function FilesPage() {
             ? (["sm", "md", "lg"] as const).map((size) => ({
                 id: `tile-${size}`,
                 label: `${TILE_NAMES[size]} tiles`,
-                icon: GridSquare,
                 checked: tile === size,
                 onSelect: () => setTile(size),
               }))
@@ -1168,7 +1145,6 @@ export default function FilesPage() {
           {
             id: "hidden",
             label: "Hidden files",
-            icon: showHidden ? Eye : EyeOff,
             checked: showHidden,
             onSelect: () => setShowHidden(!showHidden),
           },
@@ -1177,11 +1153,9 @@ export default function FilesPage() {
       {
         id: "sort",
         label: "Sort by",
-        icon: SettingsSliders,
         submenu: SORT_KEYS.map((key) => ({
           id: `sort-${key.id}`,
           label: sort.key === key.id ? `${key.label} ${sort.dir === "asc" ? "↑" : "↓"}` : key.label,
-          icon: SettingsSliders,
           checked: sort.key === key.id,
           onSelect: () =>
             setSort({
@@ -2359,22 +2333,10 @@ function NewMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onSelect={onFolder}>
-          <FolderPlus className="size-3.5" />
-          Folder
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onFile}>
-          <PlusSquareSmall className="size-3.5" />
-          File
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onSymlink}>
-          <Linked className="size-3.5" />
-          Symlink
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onLink}>
-          <CloudDownload className="size-3.5" />
-          From a link…
-        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onFolder}>Folder</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onFile}>File</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onSymlink}>Symlink</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onLink}>From a link…</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )
@@ -2404,14 +2366,8 @@ function UploadMenu({
         </Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-44">
-        <DropdownMenuItem onSelect={onFiles}>
-          <CloudUpload className="size-3.5" />
-          Files…
-        </DropdownMenuItem>
-        <DropdownMenuItem onSelect={onFolder}>
-          <FolderOpen className="size-3.5" />
-          Folder…
-        </DropdownMenuItem>
+        <DropdownMenuItem onSelect={onFiles}>Files…</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onFolder}>Folder…</DropdownMenuItem>
       </DropdownMenuContent>
     </DropdownMenu>
   )

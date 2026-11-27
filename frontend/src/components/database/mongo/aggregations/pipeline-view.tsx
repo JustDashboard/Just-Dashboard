@@ -3,17 +3,7 @@
 import { MenuItemText } from "@/components/ui/menu-item-text"
 
 import { Fragment, useMemo, useRef, useState } from "react"
-import {
-  ChevronDown,
-  Copy,
-  Download,
-  Eye,
-  FloppyDisk,
-  Play,
-  Plus,
-  RefreshClockwise,
-  Trash,
-} from "@/components/icons"
+import { ChevronDown, Copy, FloppyDisk, Play, Plus, RefreshClockwise } from "@/components/icons"
 import { errorMessage } from "@/lib/api"
 import { copyText } from "@/lib/clipboard"
 import { plural, relativeTime } from "@/lib/format"
@@ -328,7 +318,6 @@ export function PipelineView({
                 <>
                   <DropdownMenuSeparator />
                   <DropdownMenuItem variant="destructive" onSelect={() => forget(loaded.name)}>
-                    <Trash className="size-3.5" />
                     Forget {loaded.name}
                   </DropdownMenuItem>
                 </>
@@ -356,13 +345,11 @@ export function PipelineView({
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
               <DropdownMenuItem onSelect={() => void copyText(shell, "Pipeline copied")}>
-                <Copy className="size-3.5" />
                 Copy as shell text
               </DropdownMenuItem>
               <DropdownMenuItem
                 onSelect={() => saveText(`${collection}-pipeline.js`, `${shell}\n`)}
               >
-                <Download className="size-3.5" />
                 Download as a file
               </DropdownMenuItem>
               {newCollection && engine.can("views") && info?.type !== "view" && (
@@ -375,7 +362,6 @@ export function PipelineView({
                       newCollection({ viewOn: collection, pipeline: listText(stages) })
                     }
                   >
-                    <Eye className="size-3.5" />
                     Create a view from it…
                   </DropdownMenuItem>
                 </>

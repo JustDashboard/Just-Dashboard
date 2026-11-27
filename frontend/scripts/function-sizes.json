@@ -6,7 +6,7 @@
       "Configuration": 718
     },
     "src/app/(dashboard)/files/page.tsx": {
-      "FilesPage": 1977
+      "FilesPage": 1958
     },
     "src/app/(dashboard)/logs/page.tsx": {
       "LogsScreen": 613
@@ -18,7 +18,7 @@
       "ProxyOverviewPage": 620
     },
     "src/app/(dashboard)/terminal/page.tsx": {
-      "TerminalPage": 1160
+      "TerminalPage": 1153
     },
     "src/components/backups/job-form.tsx": {
       "JobDialog": 815
@@ -36,7 +36,7 @@
       "TableWorkbench": 942
     },
     "src/components/database/diagram/er-diagram.tsx": {
-      "Canvas": 1063
+      "Canvas": 1034
     },
     "src/components/database/grid/data-grid.tsx": {
       "DataGrid": 1527
@@ -111,7 +111,7 @@
       "RepoWorkspace": 1027
     },
     "src/components/github/list-page.tsx": {
-      "GitHubListPage": 600
+      "GitHubListPage": 598
     },
     "src/components/logs/log-workspace.tsx": {
       "LogWorkspace": 576

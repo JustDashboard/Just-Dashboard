@@ -351,8 +351,10 @@ export type BlueprintAccess = {
    * `unavailable` never reaches the picker — it is legal only on a retired
    * definition — but it does reach the project overview, because a deployment
    * already running one still resolves its definition on every redeploy.
+   * `managed` is a stack's preset: the dashboard has set every application up
+   * before anyone reached it, and the login is on the stack's page.
    */
-  kind: "setup" | "credentials" | "token" | "client" | "open" | "unavailable"
+  kind: "setup" | "credentials" | "token" | "client" | "open" | "managed" | "unavailable"
   username?: string
   usernameVariable?: string
   secretVariable?: string

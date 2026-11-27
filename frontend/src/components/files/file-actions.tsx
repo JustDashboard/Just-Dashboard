@@ -2,27 +2,7 @@
 
 import { Fragment, useRef, useState } from "react"
 import Link from "next/link"
-import {
-  ArrowMove,
-  Check,
-  Clipboard,
-  Copy,
-  CornerUpRight,
-  Download,
-  Eye,
-  FileZip,
-  FolderClosed,
-  FolderOpen,
-  GitHubMark,
-  Image as ImageIcon,
-  Pencil,
-  Shield,
-  Star,
-  StarFill,
-  TerminalWindow,
-  Trash,
-  type Icon,
-} from "@/components/icons"
+import { Check } from "@/components/icons"
 import { downloadUrl } from "@/lib/api"
 import type { FileEntry } from "@/lib/types"
 import {
@@ -81,7 +61,6 @@ export type FileActions = {
 export type Verb = {
   id: string
   label: string
-  icon: Icon
   onSelect?: () => void
   /** A link rather than a handler: a download, or another page. */
   href?: string
@@ -91,7 +70,10 @@ export type Verb = {
   danger?: boolean
   /** The key that does the same thing from the keyboard. */
   shortcut?: string
-  /** A drawing in place of the glyph — a colour's own swatch. */
+  /**
+   * A drawing in front of the word, which a menu otherwise leaves out (Menus
+   * are words): a colour's own swatch, being what the item is.
+   */
   mark?: React.ReactNode
   /** The current one of a set of choices. */
   checked?: boolean
@@ -108,12 +90,10 @@ export function colourVerb(current: FolderColour, onPick: (colour: FolderColour)
   return {
     id: "colour",
     label: "Colour",
-    icon: FolderClosed,
     mark: <FolderSwatch colour={current} className="size-3.5" />,
     submenu: FOLDER_COLOURS.map((colour) => ({
       id: `colour-${colour}`,
       label: FOLDER_COLOUR_NAMES[colour],
-      icon: FolderClosed,
       mark: <FolderSwatch colour={colour} className="size-3.5" />,
       checked: colour === current,
       onSelect: () => onPick(colour),
@@ -144,7 +124,6 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
     open.push({
       id: "open",
       label: "Open",
-      icon: FolderOpen,
       onSelect: actions.onOpen,
       shortcut: "↵",
     })
@@ -152,16 +131,14 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
     open.push({
       id: "view",
       label: kind ? "View" : "Quick look",
-      icon: Eye,
       onSelect: actions.onView,
       shortcut: "Space",
     })
-    open.push({ id: "edit", label: "Open in editor", icon: Pencil, onSelect: actions.onEdit })
+    open.push({ id: "edit", label: "Open in editor", onSelect: actions.onEdit })
     if (kind === "image" && caps.write) {
       open.push({
         id: "image",
         label: "Edit image…",
-        icon: ImageIcon,
         onSelect: actions.onEditImage,
       })
     }
@@ -174,14 +151,12 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
       {
         id: "zip",
         label: "Download as .zip",
-        icon: FileZip,
         href: archiveHref(entry.path, [entry.path], "zip"),
         download: true,
       },
       {
         id: "tgz",
         label: "Download as .tar.gz",
-        icon: FileZip,
         href: archiveHref(entry.path, [entry.path], "tar.gz"),
         download: true,
       },
@@ -190,7 +165,6 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
     take.push({
       id: "download",
       label: "Download",
-      icon: Download,
       href: downloadUrl("/files/download", { path: entry.path }),
       download: true,
     })
@@ -198,7 +172,6 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
   take.push({
     id: "path",
     label: "Copy path",
-    icon: Clipboard,
     onSelect: () => void copyText(entry.path, "Path copied"),
   })
   groups.push(take)
@@ -210,14 +183,12 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
       {
         id: "shell",
         label: "Open a shell here",
-        icon: TerminalWindow,
         href: `/terminal?cwd=${encodeURIComponent(entry.path)}`,
         internal: true,
       },
       {
         id: "git",
         label: "Open in Git",
-        icon: GitHubMark,
         href: `/git?repo=${encodeURIComponent(entry.path)}`,
         internal: true,
       },
@@ -226,7 +197,6 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
       go.push({
         id: "star",
         label: actions.starred ? "Unstar folder" : "Star folder",
-        icon: actions.starred ? StarFill : Star,
         onSelect: actions.onToggleStar,
       })
       go.push(colourVerb(actions.colour, actions.onColour))
@@ -236,16 +206,15 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
 
   if (caps.write) {
     const change: Verb[] = [
-      { id: "rename", label: "Rename", icon: Pencil, onSelect: actions.onRename, shortcut: "F2" },
-      { id: "duplicate", label: "Duplicate", icon: Copy, onSelect: actions.onDuplicate },
-      { id: "copy", label: "Copy", icon: Copy, onSelect: actions.onCopy, shortcut: "⌃C" },
-      { id: "cut", label: "Cut", icon: ArrowMove, onSelect: actions.onCut, shortcut: "⌃X" },
+      { id: "rename", label: "Rename", onSelect: actions.onRename, shortcut: "F2" },
+      { id: "duplicate", label: "Duplicate", onSelect: actions.onDuplicate },
+      { id: "copy", label: "Copy", onSelect: actions.onCopy, shortcut: "⌃C" },
+      { id: "cut", label: "Cut", onSelect: actions.onCut, shortcut: "⌃X" },
     ]
     if (!entry.isDir && isArchive(entry.name)) {
       change.push({
         id: "extract",
         label: "Extract here",
-        icon: CornerUpRight,
         onSelect: actions.onExtract,
       })
     }
@@ -253,9 +222,7 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
   }
 
   if (caps.admin) {
-    groups.push([
-      { id: "permissions", label: "Permissions…", icon: Shield, onSelect: actions.onPermissions },
-    ])
+    groups.push([{ id: "permissions", label: "Permissions…", onSelect: actions.onPermissions }])
   }
 
   if (caps.destruct) {
@@ -263,7 +230,6 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
       {
         id: "delete",
         label: "Delete",
-        icon: Trash,
         onSelect: actions.onDelete,
         danger: true,
         shortcut: "Del",
@@ -273,7 +239,6 @@ export function fileVerbs(entry: FileEntry, caps: RowCaps, actions: FileActions)
             {
               id: "delete-permanently",
               label: "Delete permanently",
-              icon: Trash,
               onSelect: actions.onDeleteForGood,
               danger: true,
               shortcut: "⇧Del",
@@ -343,13 +308,12 @@ function VerbItem({
   Item: MenuItemComponent
   submenu: SubmenuComponents
 }) {
-  const mark = verb.mark ?? <verb.icon className="size-3.5" />
   if (verb.submenu) {
     const { Sub, SubTrigger, SubContent } = submenu
     return (
       <Sub>
         <SubTrigger className="text-body">
-          {mark}
+          {verb.mark}
           <span className="min-w-0 flex-1 truncate">{verb.label}</span>
         </SubTrigger>
         <SubContent className="w-44">
@@ -362,7 +326,7 @@ function VerbItem({
   }
   const body = (
     <>
-      {mark}
+      {verb.mark}
       <span className="min-w-0 flex-1 truncate">{verb.label}</span>
       {verb.checked && <Check className="size-3.5" />}
       {verb.shortcut && (

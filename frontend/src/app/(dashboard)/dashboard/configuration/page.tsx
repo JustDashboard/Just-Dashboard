@@ -890,7 +890,6 @@ function StackMenu({
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-80 max-w-[calc(100vw-2rem)]">
         <DropdownMenuItem disabled={running} onSelect={onRestart} className="items-start">
-          <ProductGlyph id="docker-compose" className="mt-0.5 size-4" />
           <MenuItemText
             hint={
               <>
@@ -903,7 +902,6 @@ function StackMenu({
           </MenuItemText>
         </DropdownMenuItem>
         <DropdownMenuItem disabled={running} onSelect={onRebuild} className="items-start">
-          <ProductGlyph id="docker" className="mt-0.5 size-4" />
           <MenuItemText
             hint={
               <>

@@ -16,11 +16,7 @@ import {
   ArrowDown,
   ArrowUp,
   ChevronDoubleDown,
-  Command,
-  Copy,
   Cross,
-  Download,
-  FolderOpen,
   Fullscreen,
   FullscreenClose,
   Lightning,
@@ -31,7 +27,6 @@ import {
   SlashForward,
   TextTitle,
   TextUppercase,
-  Trash,
 } from "@/components/icons"
 import { notify } from "@/lib/toast"
 import { wsUrl } from "@/lib/api"
@@ -1548,21 +1543,21 @@ export function XtermPane({
                   <DropdownMenuItem
                     onSelect={() => termRef.current && copySelection(termRef.current)}
                   >
-                    <Copy className="size-4" /> Copy selection
+                    Copy selection
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() => termRef.current && downloadScrollback(termRef.current)}
                   >
-                    <Download className="size-4" /> Save scrollback
+                    Save scrollback
                   </DropdownMenuItem>
                   {cwd && onOpenFiles && (
                     <DropdownMenuItem onSelect={() => onOpenFiles(cwd)}>
-                      <FolderOpen className="size-4" /> Open working folder
+                      Open working folder
                     </DropdownMenuItem>
                   )}
                   <DropdownMenuSeparator />
                   <DropdownMenuItem onSelect={() => setShortcuts(true)}>
-                    <Command className="size-4" /> Keyboard shortcuts
+                    Keyboard shortcuts
                   </DropdownMenuItem>
                   <DropdownMenuItem
                     onSelect={() => {
@@ -1570,7 +1565,7 @@ export function XtermPane({
                       termRef.current?.focus()
                     }}
                   >
-                    <Trash className="size-4" /> Clear screen
+                    Clear screen
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>

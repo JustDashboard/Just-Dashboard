@@ -66,6 +66,14 @@ configuration steps against the live release's containers and records each step'
   (below). Blank means the dashboard generates it.
 - An added template may not claim `stack` (`validateUserRules`): the adapters trust the services to
   be the images they were written and tested against.
+- **Access is `managed`** (`blueprint.AccessManaged`): the pass finishes every application's
+  first-run setup before anyone reaches it, and the login is the stack's own credential (below), not
+  a variable, so the block names none. `validateAccess` requires it on every stack preset and refuses
+  it anywhere else. The presets first said `setup`, which told the person the first visitor claims
+  the account, and the Overview's First sign-in block stood under "Do this now: nobody owns this
+  yet" for a stack someone had long since signed in to. For `managed` that block has no warning and
+  links **See the login** to the Stack page; the Stacks tab says "The dashboard sets it up and keeps
+  the login".
 
 ## Addresses
 
@@ -306,6 +314,17 @@ The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
   - Beside the apps stands the one login (`login`, revealed through `…/credentials/login/reveal`),
     with Show, Copy and **Change password**. That dialog checks the new password against the same
     rule and sends `PUT …/stack/login`; a `password_weak` refusal is said in the dialog.
+  - Under them, **Setup** is the pass as a checklist, by stage, in two columns from `md`: each
+    step one line of its mark (a tick, a live dot, a ring) and its title, with a word only for a
+    step that is not done ("Attempt 2", "Failed", "Needs you"). What a step did (`message`), its
+    error and its last report (`log`) are behind the line in a popover; a step the pass has not
+    reached has no record, so its line is no press (`stepHasRecord`). A failed step's whole
+    error is also among the next steps. Skipped steps are one line at the foot, by reason.
+- **The Overview** of a stack draws its apps as any project of many parts: the Runtime node names
+  three containers by their Compose service (`bazarr`, not `jd-e480-bazarr-1`) and counts the
+  rest into the Runtime page, and the Domains node leads with the stack's primary domain, puts
+  every app's name behind "N more", and says the certificates in one line
+  (`components/deploy/wiring-model.ts`).
 - **Media sources** (`/deploy/[id]/stack/sources`) is a page, not a sheet.
   - It lists the stack's sources, each with Remove behind its menu, confirmed.
   - Under them is Prowlarr's catalogue, searched and filtered Public or Private (semi-private

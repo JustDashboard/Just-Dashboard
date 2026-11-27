@@ -4,20 +4,12 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { useRouter, useSearchParams } from "next/navigation"
 import {
   Plus,
-  ArrowDown,
-  ArrowLeft,
-  ArrowRight,
-  ArrowUp,
-  Copy,
   Cross,
-  Download,
   External,
-  Command,
   FolderOpen,
   Fullscreen,
   FullscreenClose,
   MoreHorizontal,
-  Trash,
   Layers,
   ShieldOff,
   SidebarLeftClose,
@@ -848,20 +840,13 @@ export default function TerminalPage() {
             }}
           >
             <DropdownMenuLabel>Split focused terminal</DropdownMenuLabel>
-            {(
-              [
-                ["left", ArrowLeft],
-                ["right", ArrowRight],
-                ["up", ArrowUp],
-                ["down", ArrowDown],
-              ] as const
-            ).map(([direction, Icon]) => (
+            {(["left", "right", "up", "down"] as const).map((direction) => (
               <DropdownMenuItem
                 key={direction}
                 disabled={!canSplit(geometry.panes[activeWindow?.id ?? ""], direction)}
                 onSelect={() => void openWindow(direction)}
               >
-                <Icon className="size-4" /> Split {direction}
+                Split {direction}
               </DropdownMenuItem>
             ))}
             {tabWindows.some((window) => window.id !== activeTab) && (
@@ -914,24 +899,24 @@ export default function TerminalPage() {
           <DropdownMenuContent align="end" className="w-60">
             <DropdownMenuLabel>Terminal actions</DropdownMenuLabel>
             <DropdownMenuItem onSelect={() => actionsRef.current?.copy()}>
-              <Copy className="size-4" /> Copy selection
+              Copy selection
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => actionsRef.current?.save()}>
-              <Download className="size-4" /> Save scrollback
+              Save scrollback
             </DropdownMenuItem>
             {currentDir && (
               <DropdownMenuItem
                 onSelect={() => router.push(`/files?path=${encodeURIComponent(currentDir)}`)}
               >
-                <FolderOpen className="size-4" /> Open working folder
+                Open working folder
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => actionsRef.current?.shortcuts()}>
-              <Command className="size-4" /> Keyboard shortcuts
+              Keyboard shortcuts
             </DropdownMenuItem>
             <DropdownMenuItem onSelect={() => actionsRef.current?.clear()}>
-              <Trash className="size-4" /> Clear screen
+              Clear screen
             </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
