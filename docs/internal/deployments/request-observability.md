@@ -260,8 +260,12 @@ files and past the process.
   each route past **4,000,000 rows** (about 320 MB) is cut to 90% of it from its oldest, then all routes
   past **10,000,000 rows** (about 800 MB) give up their oldest, busiest route first. Every delete moves
   the route's loss instant to the newest request it removed. The dictionary's strings last written into
-  a row more than an hour before the retention's start go with them, and free pages past a quarter of
-  the file are returned to the disk (`auto_vacuum = INCREMENTAL`).
+  a row more than an hour before the retention's start go with them. A pass in which a cap cut rows
+  also deletes every string no kept row names (`sweepUnnamed`: the kept rows' ids marked a chunk at a
+  time, then the unmarked strings last used before the pass's hour deleted in batches), since a busy
+  route's unique queries and addresses would otherwise outlive the rows that named them by a month
+  and the caps would bound the rows but not the file (`TestACapTakesTheStringsOnlyTheRowsItCutNamed`).
+  Free pages past a quarter of the file are returned to the disk (`auto_vacuum = INCREMENTAL`).
 - **Answered with memory** (`accesslog/history.go`). With an `Archive` attached (`Store.WithArchive`),
   a window that starts before memory's first request reads the history for the part before a cut and
   memory for the rest, through one `Collector`, so every figure — summary, columns, facets, audience,

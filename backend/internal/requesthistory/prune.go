@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 )
 
@@ -45,6 +46,9 @@ func (a *Archive) prune(ctx context.Context, limit caps) error {
 		return err
 	}
 	var total int64
+	// cut says a cap took rows the retention would have kept, whose strings
+	// the retention's sweep would keep for as long again.
+	cut := false
 	for i := range routes {
 		removed, err := a.dropBefore(ctx, routes[i].id, cutoff, 0)
 		if err != nil {
@@ -59,6 +63,7 @@ func (a *Archive) prune(ctx context.Context, limit caps) error {
 				return err
 			}
 			routes[i].kept -= removed
+			cut = cut || removed > 0
 		}
 		total += routes[i].kept
 	}
@@ -82,11 +87,175 @@ func (a *Archive) prune(ctx context.Context, limit caps) error {
 		}
 		routes[busiest].kept -= removed
 		total -= removed
+		cut = true
 	}
 	if err := a.sweepStrings(ctx, now); err != nil {
 		return err
 	}
+	if cut {
+		if err := a.sweepUnnamed(ctx, now); err != nil {
+			return err
+		}
+	}
 	return a.vacuum(ctx)
+}
+
+// sweepWindow bounds the ids one marking covers: a bit each, so 16 MiB. Ids
+// are never reused, so the range between the oldest string still kept and
+// the newest grows with the years; past this a sweep marks it a window at a
+// time rather than holding a bit for every id ever given.
+const sweepWindow = 1 << 27
+
+// sweepUnnamed deletes the strings no kept row names, after a cap took rows
+// the retention would have kept. Those rows' strings were written as used
+// inside the retention, so its sweep would keep them for a month after the
+// rows naming them went, and the caps would bound the rows but not the file:
+// a busy route's unique query strings and addresses are most of what it
+// writes.
+//
+// It marks every id the kept rows name, reading them a chunk at a time on the
+// read pool, then deletes in batches the strings it did not mark that were
+// last written as used before this pass's hour. A string an append names
+// meanwhile is written as used in this hour or later, so no batch takes it,
+// and the writer's map starts again after each batch, under the write lock,
+// so no append names an id a batch took.
+func (a *Archive) sweepUnnamed(ctx context.Context, now time.Time) error {
+	hour := now.Unix() / 3600
+	var lo, hi sql.NullInt64
+	if err := a.db.Reader.QueryRowContext(ctx, `SELECT min(id), max(id) FROM strings WHERE used < ?`, hour).Scan(&lo, &hi); err != nil {
+		return err
+	}
+	if !lo.Valid {
+		return nil
+	}
+	swept := false
+	for from := lo.Int64; from <= hi.Int64; from += sweepWindow {
+		to := min(from+sweepWindow-1, hi.Int64)
+		named := make([]uint64, (to-from)/64+1)
+		if err := a.markNamed(ctx, from, to, named); err != nil {
+			return err
+		}
+		n, err := a.deleteUnmarked(ctx, from, to, hour, named)
+		if err != nil {
+			return err
+		}
+		swept = swept || n > 0
+	}
+	if swept {
+		a.names.forget()
+	}
+	return nil
+}
+
+// markNamed sets the bit of every id in [from, to] a kept row names.
+func (a *Archive) markNamed(ctx context.Context, from, to int64, named []uint64) error {
+	var route, at, seq int64
+	for first := true; ; first = false {
+		var rows *sql.Rows
+		var err error
+		if first {
+			rows, err = a.db.Reader.QueryContext(ctx, `SELECT route, at, seq, body FROM requests
+				ORDER BY route, at, seq LIMIT ?`, scanChunk)
+		} else {
+			rows, err = a.db.Reader.QueryContext(ctx, `SELECT route, at, seq, body FROM requests
+				WHERE (route, at, seq) > (?, ?, ?) ORDER BY route, at, seq LIMIT ?`, route, at, seq, scanChunk)
+		}
+		if err != nil {
+			return err
+		}
+		read := 0
+		for rows.Next() {
+			var body sql.RawBytes
+			if err := rows.Scan(&route, &at, &seq, &body); err != nil {
+				rows.Close()
+				return err
+			}
+			read++
+			// A row that cannot be read names nothing that can be read.
+			d, err := decode(at, body)
+			if err != nil {
+				continue
+			}
+			for _, id := range d.ids {
+				if id >= from && id <= to {
+					bit := id - from
+					named[bit/64] |= 1 << (bit % 64)
+				}
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return err
+		}
+		if read < scanChunk {
+			return nil
+		}
+	}
+}
+
+// deleteUnmarked deletes, in batches, the strings in [from, to] last used
+// before hour whose bit is not set, and returns how many went.
+func (a *Archive) deleteUnmarked(ctx context.Context, from, to, hour int64, named []uint64) (int64, error) {
+	const page, batch = 10_000, 500
+	var deleted int64
+	after := from - 1
+	for {
+		rows, err := a.db.Reader.QueryContext(ctx, `SELECT id FROM strings WHERE id > ? AND id <= ? AND used < ?
+			ORDER BY id LIMIT ?`, after, to, hour, page)
+		if err != nil {
+			return deleted, err
+		}
+		var gone []int64
+		read := 0
+		for rows.Next() {
+			var id int64
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				return deleted, err
+			}
+			read, after = read+1, id
+			if bit := id - from; named[bit/64]&(1<<(bit%64)) == 0 {
+				gone = append(gone, id)
+			}
+		}
+		rows.Close()
+		if err := rows.Err(); err != nil {
+			return deleted, err
+		}
+		for len(gone) > 0 {
+			n := min(len(gone), batch)
+			removed, err := a.deleteStrings(ctx, gone[:n], hour)
+			deleted += removed
+			if err != nil {
+				return deleted, err
+			}
+			gone = gone[n:]
+		}
+		if read < page {
+			return deleted, nil
+		}
+	}
+}
+
+// deleteStrings is one batch, under the write lock.
+func (a *Archive) deleteStrings(ctx context.Context, ids []int64, hour int64) (int64, error) {
+	a.write.Lock()
+	defer a.write.Unlock()
+	args := make([]any, 0, len(ids)+1)
+	args = append(args, hour)
+	for _, id := range ids {
+		args = append(args, id)
+	}
+	res, err := a.db.Writer.ExecContext(ctx, `DELETE FROM strings WHERE used < ? AND id IN (`+
+		strings.Repeat("?,", len(ids)-1)+`?)`, args...)
+	if err != nil {
+		return 0, err
+	}
+	n, _ := res.RowsAffected()
+	if n > 0 {
+		a.dict.reset()
+	}
+	return n, nil
 }
 
 // recount sets every route's count of rows from the rows themselves, once a
