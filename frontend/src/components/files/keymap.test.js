@@ -362,6 +362,10 @@ describe("typing a name", () => {
       taken({ kind: "find", typed: { query: "pi", time: NOW, dir: "/srv" }, entry: pictures }),
     )
     expect(find(press("h"), { active: pictures, typed: typed("p") }).action.entry).toBe(photos)
+    // A later name that also matches does not take it from the active entry.
+    const older = { name: "photos-old", path: "/srv/photos-old", isDir: true }
+    const both = { entries: [photos, older], active: photos, typed: typed("p") }
+    expect(find(press("h"), both).action.entry).toBe(photos)
   })
 
   test("the same letter again steps to the next name it starts", () => {
