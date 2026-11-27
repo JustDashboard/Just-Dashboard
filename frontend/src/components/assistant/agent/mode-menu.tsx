@@ -15,7 +15,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { MODE_DETAIL, MODE_LABEL, type AssistantMode } from "@/components/assistant/settings"
+import { MODE_LABEL, type AssistantMode } from "@/components/assistant/settings"
 
 const MODE_ICON: Record<AssistantMode, Icon> = {
   ask: LockClosed,
@@ -24,9 +24,10 @@ const MODE_ICON: Record<AssistantMode, Icon> = {
 }
 
 /**
- * How much it may do before it asks, chosen beside the press that asks. Full access
- * is amber on the toolbar for as long as it is on: it is the one setting here a
- * person should not lose sight of.
+ * How much it may do before it asks, chosen beside the press that asks: a line a
+ * mode, its lock and its name, the words being the choice. What each lets it do is
+ * said on the settings page's Default mode. Full access is amber on the toolbar for
+ * as long as it is on: it is the one setting here a person should not lose sight of.
  */
 export function ModeMenu({
   mode,
@@ -54,29 +55,20 @@ export function ModeMenu({
           <ChevronDown aria-hidden className="size-3" />
         </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="start" className="w-80">
+      <DropdownMenuContent align="start">
         {(Object.keys(MODE_LABEL) as AssistantMode[]).map((option) => {
           const OptionMark = MODE_ICON[option]
           return (
-            <DropdownMenuItem
-              key={option}
-              onSelect={() => onChange(option)}
-              className="items-start gap-2.5 py-2"
-            >
+            <DropdownMenuItem key={option} onSelect={() => onChange(option)} className="gap-2.5">
               <OptionMark
                 aria-hidden
                 className={cn(
-                  "mt-0.5 size-4 shrink-0",
+                  "size-4 shrink-0",
                   option === "full" ? "text-warning" : "text-muted-foreground",
                 )}
               />
-              <span className="min-w-0 flex-1">
-                <span className="block text-body font-medium">{MODE_LABEL[option]}</span>
-                <span className="block text-hint leading-relaxed text-muted-foreground">
-                  {MODE_DETAIL[option]}
-                </span>
-              </span>
-              {option === mode && <Check aria-hidden className="mt-0.5 size-3.5 shrink-0" />}
+              <span className="flex-1 whitespace-nowrap">{MODE_LABEL[option]}</span>
+              {option === mode && <Check aria-hidden className="size-3.5 shrink-0" />}
             </DropdownMenuItem>
           )
         })}

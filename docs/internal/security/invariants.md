@@ -459,7 +459,8 @@ A change that weakens any of these has to say so explicitly.
     everything the person's role allows, unseen**, which for an administrator includes what a hub session is
     refused because it outlives whoever made it (an account, a key, a sudo rule, a VPN peer, the dashboard's
     settings): holding those routes alone would not keep one from being made, since the shell and file writes
-    run unseen there too, so the mode says so where it is chosen (`MODE_DETAIL`) and
+    run unseen there too, so the mode says so where the default is chosen (`MODE_DETAIL`, "Does anything you
+    could do, without asking"; the composer's menu is the names alone, full access in amber) and
     `TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` holds that in the other two modes each of them
     that makes or changes something waits; a draft's own saves never wait, but committing it, discarding
     it, or a save that changes its source, points a variable at a saved secret or reaches the host waits unless
