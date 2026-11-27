@@ -806,3 +806,25 @@ test("a stack's Overview leads with its address and folds its apps' names behind
   )
   await page.screenshot({ path: "test-results/deploy-stack-overview-390.png" })
 })
+
+test("a step on another try says in its record what the last one met", async ({ page }) => {
+  const configuring = stackState("configuring")
+  await mockStackProject(page, {
+    state: {
+      ...configuring,
+      // The server keeps the last attempt's error on a step it tries again.
+      steps: configuring.steps.map((step) =>
+        step.status === "running"
+          ? { ...step, error: "Sonarr answered 503 to GET /api/v3/system/status" }
+          : step,
+      ),
+    },
+  })
+  await page.goto("/deploy/7/stack")
+  const running = page.locator("li[data-status='running']")
+  await expect(running).toContainText("Attempt 2")
+  await running.getByRole("button").click()
+  await expect(page.getByRole("dialog")).toContainText(
+    "Sonarr answered 503 to GET /api/v3/system/status",
+  )
+})

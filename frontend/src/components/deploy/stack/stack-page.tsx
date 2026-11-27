@@ -562,6 +562,14 @@ function StepDetail({ step }: { step: SmartStackStep }) {
           {detail}
         </p>
       )}
+      {/* A step tried again, or one a stopped pass left waiting, keeps what
+          its last attempt met: the reason behind "Attempt 2". A failed
+          step's error is its detail above. */}
+      {step.status !== "failed" && step.error && (
+        <p className="text-hint leading-relaxed break-words text-muted-foreground">
+          Last attempt: {step.error}
+        </p>
+      )}
       {step.log && step.log.length > 0 && (
         <pre className="max-h-40 overflow-auto rounded-md border border-hairline bg-surface-sunken px-2 py-1.5 font-mono text-micro leading-relaxed whitespace-pre-wrap text-muted-foreground">
           {step.log.join("\n")}
