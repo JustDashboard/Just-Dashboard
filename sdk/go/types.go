@@ -3322,9 +3322,11 @@ type PlannedDomain struct {
 	Hostname     string            `json:"hostname,omitempty"`
 	HTTPS        bool              `json:"https,omitempty"`
 	Ownership    OwnershipMode     `json:"ownership,omitempty"`
+	Port         int64             `json:"port,omitempty"`
 	Protection   *DomainProtection `json:"protection,omitempty"`
 	RedirectCode int64             `json:"redirectCode,omitempty"`
 	RedirectTo   string            `json:"redirectTo,omitempty"`
+	Service      string            `json:"service,omitempty"`
 	Tunnel       bool              `json:"tunnel,omitempty"`
 }
 

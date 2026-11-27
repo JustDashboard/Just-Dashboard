@@ -11222,6 +11222,10 @@
             "title": "deploy.OwnershipMode",
             "type": "string"
           },
+          "port": {
+            "format": "int64",
+            "type": "integer"
+          },
           "protection": {
             "oneOf": [
               {
@@ -11237,6 +11241,9 @@
             "type": "integer"
           },
           "redirectTo": {
+            "type": "string"
+          },
+          "service": {
             "type": "string"
           },
           "tunnel": {
