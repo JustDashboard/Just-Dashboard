@@ -23,6 +23,45 @@ func (r *Runner) WithSQLiteSnapshotter(snapshot SQLiteSnapshotter) *Runner {
 	return r
 }
 
+// WithLiveSQLite names the SQLite files this process writes all the time —
+// the dashboard's request history, committed every few seconds. A job whose
+// sources hold one snapshots it as it does the files it lists, whether or not
+// it lists it: copied as a file under a writer, the archive's own checks fail
+// the run (the size the header promised, the size and time after the copy),
+// and a job saved before the file existed — the dashboard's data job from
+// before the request history — cannot have listed it.
+func (r *Runner) WithLiveSQLite(paths func() []string) *Runner {
+	r.liveSQLite = paths
+	return r
+}
+
+// snapshotPaths is what a run snapshots: the job's own SQLite files, then each
+// live one inside its sources that it does not exclude.
+func (r *Runner) snapshotPaths(job *Job) []string {
+	out := append([]string(nil), job.SQLitePaths...)
+	if r.liveSQLite == nil {
+		return out
+	}
+	for _, path := range r.liveSQLite() {
+		path = filepath.Clean(path)
+		if path == "." || slices.Contains(out, path) || excluded(path, job.Excludes) {
+			continue
+		}
+		inside := false
+		for _, source := range job.Sources {
+			rel, err := filepath.Rel(filepath.Clean(source), path)
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+				inside = true
+			}
+		}
+		if info, err := os.Lstat(path); !inside || err != nil || !info.Mode().IsRegular() {
+			continue
+		}
+		out = append(out, path)
+	}
+	return out
+}
+
 func (s *Store) validateSQLitePaths(job *Job) error {
 	if len(job.SQLitePaths) > 128 {
 		return errors.New("at most 128 SQLite snapshots can be included in a backup")
@@ -57,10 +96,11 @@ func (s *Store) validateSQLitePaths(job *Job) error {
 func (r *Runner) prepareSQLiteSnapshots(ctx context.Context, job *Job, stage string) (map[string]string, []SQLiteSnapshot, error) {
 	paths := map[string]string{}
 	var evidence []SQLiteSnapshot
-	if len(job.SQLitePaths) > 0 && r.sqliteSnapshot == nil {
+	wanted := r.snapshotPaths(job)
+	if len(wanted) > 0 && r.sqliteSnapshot == nil {
 		return nil, nil, errors.New("the SQLite snapshot owner is unavailable")
 	}
-	for i, path := range job.SQLitePaths {
+	for i, path := range wanted {
 		directory := filepath.Join(stage, fmt.Sprintf("sqlite-%04d", i+1))
 		if err := os.Mkdir(directory, 0o700); err != nil {
 			return nil, nil, err

@@ -473,7 +473,8 @@ func (s *Server) initModules() {
 				return "", err
 			}
 			return dump.Path, nil
-		})
+		}).
+		WithLiveSQLite(s.liveSQLiteFiles)
 	s.modules.backupSched = backups.NewScheduler(s.modules.backupStore, s.modules.backupRunner, s.Log)
 
 	s.modules.deployStore = deploy.NewStore(s.Store, s.Sealer, s.Cfg.DeployRoots)

@@ -80,6 +80,17 @@ type backupResourceReport struct {
 	Unavailable map[string]string `json:"unavailable"`
 }
 
+// liveSQLiteFiles are the SQLite files this process writes all the time,
+// which a backup snapshots whenever its sources hold them, listed or not
+// (backups.WithLiveSQLite): the request history, which a "Dashboard data" job
+// saved before it existed archives without listing.
+func (s *Server) liveSQLiteFiles() []string {
+	if s.modules.requestHistory == nil {
+		return nil
+	}
+	return []string{s.modules.requestHistory.Path()}
+}
+
 // backupResources asks each owner what it has and folds the job list over
 // the answers. Owners that cannot answer are reported, not treated as empty.
 func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backupResourceReport {
