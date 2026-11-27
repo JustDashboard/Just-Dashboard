@@ -25,8 +25,17 @@ export const PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvw
  * user's, a proxy login's: thirty characters by default, drawn with the
  * browser's own generator. One generator, so every "Generate" in the product
  * makes the same kind of password.
+ *
+ * A draw that leaves out one of the alphabet's three kinds (upper case, lower
+ * case, digits) is drawn again, so a made password always passes the rule
+ * above: about one thirty-character draw in sixty has no digit, and the
+ * stack's login, which is held to that rule, would refuse it.
  */
 export function generatePassword(length = 30): string {
-  const bytes = crypto.getRandomValues(new Uint8Array(length))
-  return Array.from(bytes, (byte) => PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length]).join("")
+  for (;;) {
+    const bytes = crypto.getRandomValues(new Uint8Array(length))
+    const made = Array.from(bytes, (byte) => PASSWORD_ALPHABET[byte % PASSWORD_ALPHABET.length])
+    const password = made.join("")
+    if (length < 3 || passwordChecks(password).mixed) return password
+  }
 }
