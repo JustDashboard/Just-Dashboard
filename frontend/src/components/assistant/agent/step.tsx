@@ -27,6 +27,9 @@ import { useConversationRelease } from "@/components/assistant/elements/conversa
 import { stepMark } from "@/components/assistant/agent/marks"
 import { arriveAt } from "@/components/assistant/agent/arrival"
 import {
+  FILE_EDITS,
+  diffTone,
+  fileTexts,
   inputLines,
   type AgentCall,
   type AgentChange,
@@ -123,6 +126,9 @@ function askedInput(call: AgentCall): unknown {
   } else if (commandOf(call)) {
     delete rest.command
     delete rest.reason
+  } else if (FILE_EDITS.has(call.tool)) {
+    delete rest.reason
+    for (const [key] of fileTexts(call)) delete rest[key]
   } else return call.input
   return rest
 }
@@ -317,15 +323,39 @@ function StepDetails({ step }: { step: AgentStep }) {
       )}
       <InputLines input={askedInput(step.call)} flush />
       {step.terminal && <Shortcut label="Terminal" href={terminalHref(step.terminal.session)} />}
-      {step.output && (
-        <Well
-          className="max-h-56 p-2.5 text-hint whitespace-pre-wrap"
-          aria-label={command ? "What it printed" : "What it read"}
-        >
-          {step.output}
-        </Well>
+      {step.output && FILE_EDITS.has(step.call.tool) ? (
+        <DiffOutput diff={step.output} />
+      ) : (
+        step.output && (
+          <Well
+            className="max-h-56 p-2.5 text-hint whitespace-pre-wrap"
+            aria-label={command ? "What it printed" : "What it read"}
+          >
+            {step.output}
+          </Well>
+        )
       )}
     </>
+  )
+}
+
+const DIFF_TONE: Record<ReturnType<typeof diffTone>, string> = {
+  added: "text-success",
+  removed: "text-destructive",
+  head: "text-muted-foreground",
+  kept: "",
+}
+
+/** A file's change as the server answered it, a unified diff in its tones. */
+function DiffOutput({ diff }: { diff: string }) {
+  return (
+    <Well data-slot="agent-diff" className="max-h-56 p-2.5 text-hint" aria-label="What it changed">
+      {diff.split("\n").map((line, at) => (
+        <div key={at} className={cn("break-all whitespace-pre-wrap", DIFF_TONE[diffTone(line)])}>
+          {line || " "}
+        </div>
+      ))}
+    </Well>
   )
 }
 
@@ -557,6 +587,16 @@ export function ApprovalCard({
                 </p>
               )}
               <InputLines input={askedInput(step.call)} />
+              {fileTexts(step.call).map(([key, text]) => (
+                <pre
+                  key={key}
+                  data-slot="agent-file-text"
+                  aria-label={key}
+                  className="ml-8.5 max-h-40 overflow-auto rounded-md bg-card px-2.5 py-1.5 font-mono text-hint leading-relaxed whitespace-pre"
+                >
+                  {text}
+                </pre>
+              ))}
             </li>
           )
         })}

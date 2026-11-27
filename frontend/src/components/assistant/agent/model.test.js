@@ -12,7 +12,9 @@ import {
   changesOf,
   decideAll,
   decideStep,
+  diffTone,
   endTurn,
+  fileTexts,
   holdTurn,
   inputLines,
   latestTerminal,
@@ -519,4 +521,28 @@ test("a ping, or a line this page does not know, leaves the answer as it was", (
   expect(t).toBe(before)
   t = applyEvent(t, "q", { type: "something-newer", what: 1 })
   expect(t).toBe(before)
+})
+
+describe("a file call's text and its diff", () => {
+  const call = (tool, input) => ({ id: "f", tool, label: "Write a file", kind: "change", input })
+
+  test("a file's content is kept off the input's lines, its path is not", () => {
+    const content = "export const port = 3000\nexport const host = '0.0.0.0'\n"
+    expect(fileTexts(call("write_file", { path: "src/config.ts", content }))).toEqual([
+      ["content", content],
+    ])
+    expect(fileTexts(call("edit_file", { path: "a.ts", old: "3000", new: "8080" }))).toEqual([])
+    expect(fileTexts(call("read_file", { path: "a.ts", content }))).toEqual([])
+  })
+
+  test("a diff's lines read as added, removed, heads and kept", () => {
+    expect(["--- a/x", "+++ b/x", "@@ -1 +1 @@", "-old", "+new", " same"].map(diffTone)).toEqual([
+      "head",
+      "head",
+      "head",
+      "removed",
+      "added",
+      "kept",
+    ])
+  })
 })

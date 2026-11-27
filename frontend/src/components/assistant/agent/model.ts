@@ -710,6 +710,33 @@ export function inputLines(input: unknown): {
   return { lines: lines.slice(0, INPUT_LINES), more: Math.max(0, lines.length - INPUT_LINES) }
 }
 
+/** The coding tools whose answer is the file's change, as a unified diff. */
+export const FILE_EDITS = new Set(["write_file", "edit_file"])
+
+/**
+ * The text a file call would write, kept off its input's lines: a file's whole
+ * content is read in a box that scrolls, not spelt out as one value of many. Its
+ * path, and its reason, which is said as a sentence, are not text of the file.
+ */
+export function fileTexts(call: AgentCall): [string, string][] {
+  if (!FILE_EDITS.has(call.tool) || !call.input || typeof call.input !== "object") return []
+  return Object.entries(call.input as Record<string, unknown>).filter(
+    (entry): entry is [string, string] =>
+      entry[0] !== "path" &&
+      entry[0] !== "reason" &&
+      typeof entry[1] === "string" &&
+      (entry[1].includes("\n") || entry[1].length > 80),
+  )
+}
+
+/** How a line of a unified diff reads: added, removed, a file or hunk head, or kept. */
+export function diffTone(line: string): "added" | "removed" | "head" | "kept" {
+  if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("@@")) return "head"
+  if (line.startsWith("+")) return "added"
+  if (line.startsWith("-")) return "removed"
+  return "kept"
+}
+
 /** The usage line under an answer. */
 export function usageLine(turn: AgentTurn): string | undefined {
   const usage = turn.usage
