@@ -92,9 +92,21 @@ type Entry struct {
 // At is the instant this request was served.
 func (e Entry) At() time.Time { return time.Unix(0, e.at).UTC() }
 
+// UnixNano is the instant as unix nanoseconds: what a caller that keeps or
+// compares many entries holds, rather than a time.Time per row.
+func (e Entry) UnixNano() int64 { return e.at }
+
 // Duration is how long the proxy took to answer, in milliseconds, and whether
 // that was recorded at all.
 func (e Entry) Duration() (float64, bool) { return e.duration, e.timed }
+
+// Restore puts back what an entry carries outside its exported fields — the
+// instant and the duration — on one read back from where it was kept (the
+// request history), so the entry read is the entry that was written rather
+// than a copy that has lost its time.
+func (e *Entry) Restore(atUnixNano int64, durationMs float64, timed bool) {
+	e.at, e.duration, e.timed = atUnixNano, durationMs, timed
+}
 
 // MarshalJSON writes the wire shape: the instant as RFC 3339, and the duration
 // only where one was measured.

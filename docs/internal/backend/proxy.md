@@ -1323,7 +1323,12 @@
   answered) or one outside the roots answers `unavailable` with that sentence, and the stream and export
   refuse it with a 400. The name in the URL is unescaped, so a Caddy host with a colon works. A
   deployment's window carries `ingress` (the Caddy container) or `errorLog` (the nginx site's
-  `.error.log`), where the proxy says why it failed a request. The rest of the proxy's logs are read on
+  `.error.log`), where the proxy says why it failed a request. The store's request history
+  (`requests.db`, 30 days, [request-observability.md](../deployments/request-observability.md#history))
+  records deployments' routes only: a site's window that resolves to a deployment's route reads its
+  history, while a `file:` route reaches as far back as its files, and its `coverage.history` says
+  `recording: false`. `who` (`people` | `bots`) narrows a site's window, stream and export as it does
+  a deployment's. The rest of the proxy's logs are read on
   the pages they are about, through the `/logs` routes: a site's own page (its access and error files,
   nginx's shared error log narrowed to its names, the ingress container or `journal:caddy.service`),
   the overview's Engine log (nginx's two files and unit, a host Caddy's unit, and the Docker Caddy

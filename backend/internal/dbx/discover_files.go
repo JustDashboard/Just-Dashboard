@@ -145,7 +145,11 @@ type Places struct {
 	// the rest of its state.
 	StorePath string
 	DataDir   string
-	Mounts    []MountPlace
+	// OwnFiles are the dashboard's other databases, written while it runs —
+	// the request history beside the store — listed as its own and never
+	// connected, as the store is.
+	OwnFiles []string
+	Mounts   []MountPlace
 	// VolumesDir is where Docker's local driver keeps volumes, so a file in a
 	// volume no container mounts any more is still known to be in one.
 	VolumesDir string
@@ -189,6 +193,11 @@ func holderOf(file string, places Places) (holder string, mount *MountPlace, pro
 	view := HostView(file)
 	if places.StorePath != "" && (file == places.StorePath || view == places.StorePath) {
 		return HolderSelf, nil, ""
+	}
+	for _, own := range places.OwnFiles {
+		if own != "" && (file == own || view == own) {
+			return HolderSelf, nil, ""
+		}
 	}
 	if places.StorePath != "" && path.Base(view) == path.Base(places.StorePath) {
 		// The dashboard's store under its own name somewhere else: a backup

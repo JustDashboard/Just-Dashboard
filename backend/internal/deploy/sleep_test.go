@@ -86,6 +86,8 @@ func TestSleepPlanValidation(t *testing.T) {
 type sleepRecord struct {
 	mu       sync.Mutex
 	requests []time.Time
+	// asked is the start of every window asked for.
+	asked []time.Time
 }
 
 func (r *sleepRecord) add(at time.Time) {
@@ -97,6 +99,7 @@ func (r *sleepRecord) add(at time.Time) {
 func (r *sleepRecord) Window(_ context.Context, _ string, filter accesslog.Filter) (accesslog.Window, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
+	r.asked = append(r.asked, filter.Since)
 	summary := accesslog.Summary{}
 	var last time.Time
 	for _, at := range r.requests {
@@ -237,6 +240,30 @@ func (f *sleepFixture) wake(t *testing.T) *httptest.ResponseRecorder {
 	// stretch is closed and audited just after; a test reads both.
 	f.sleeper.Settle(context.Background(), f.envID)
 	return recorder
+}
+
+// The record answers a window back to the release from a month of history,
+// so a pass over a busy environment asks for the idle minutes alone: a
+// request in them settles it. A quiet one is read back to the release.
+func TestASleepPassAsksForTheIdleMinutesFirst(t *testing.T) {
+	f := newSleepFixture(t, &SleepPlan{Enabled: true, IdleMinutes: 5, WakeTimeoutSeconds: 5})
+	ctx := context.Background()
+	f.container(t)
+	f.clock = f.clock.Add(3 * time.Hour)
+	f.record.add(f.clock.Add(-2 * time.Minute))
+	f.sleeper.Tick(ctx)
+	if len(f.record.asked) != 1 || !f.record.asked[0].Equal(f.clock.Add(-5*time.Minute)) {
+		t.Fatalf("a busy pass asked for windows from %v, want the idle minutes alone", f.record.asked)
+	}
+	if decision, _ := f.sleeper.Decision(f.envID); decision.LastRequestAt == nil || !decision.LastRequestAt.Equal(f.clock.Add(-2*time.Minute)) {
+		t.Fatalf("decision = %+v, want the request two minutes ago as the last", decision)
+	}
+	f.record.asked = nil
+	f.clock = f.clock.Add(30 * time.Minute)
+	f.sleeper.Tick(ctx)
+	if len(f.record.asked) != 2 || !f.record.asked[1].Before(f.record.asked[0]) {
+		t.Fatalf("a quiet pass asked for windows from %v, want the idle minutes and then back to the release", f.record.asked)
+	}
 }
 
 // The idle decision and the wake, end to end on fakes: a release that has

@@ -131,12 +131,12 @@ func newAudienceTally() audienceTally {
 
 // feedAudience folds one request that already passed the filter into the
 // audience, so the people answer the same question every other figure does.
-// page says it was a page view and not a probe, and source is the outside site
-// that sent it, if any.
-func (c *Collector) feedAudience(e Entry, page, failed, refused bool, source string, minute *minuteBucket) {
+// page says it was a page view and not a probe, bot that its agent is a
+// program's (IsBot), and source is the outside site that sent it, if any.
+func (c *Collector) feedAudience(e Entry, page, failed, refused, bot bool, source string, minute *minuteBucket) {
 	agent := e.UserAgent
 	switch {
-	case IsBot(agent):
+	case bot:
 		c.audience.botRequests++
 		if _, seen := c.audience.bots[e.RemoteIP]; !seen && e.RemoteIP != "" {
 			if len(c.audience.bots) >= facetCap {

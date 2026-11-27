@@ -65,7 +65,10 @@ proxy records the domain's requests, so it would sleep and never wake).
 The `Sleeper` (`NewSleeper`, started after the engine) passes every minute over each unarchived
 environment with a live release whose snapshot sleeps. It counts from the latest of the release going
 live, its last wake and its last request, reading the same held request record the Logs page, the
-rollback watch and the traffic replay read (`RequestRecord.Window` on the environment's route). Every
+rollback watch and the traffic replay read (`RequestRecord.Window` on the environment's route). It
+asks for the idle minutes first and only an environment quiet for that long back to the release: the
+record answers a window that old from its month of history, which every minute would otherwise be
+days of a busy site's requests read to learn the newest. Every
 request counts — a crawler's too; a scanner's probe wakes the application like any other request, so not
 counting it would put it to sleep under one. Nothing is put to sleep while:
 

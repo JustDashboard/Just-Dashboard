@@ -448,6 +448,7 @@ func postgresClusterConfig(path string) (port int, dataDir string) {
 func (s *Server) inventoryPlaces(ctx context.Context, containers []dockerx.Container, stacks []dockerx.ComposeStack) dbx.Places {
 	places := dbx.Places{
 		StorePath:  filepath.Join(filepath.Clean(s.Cfg.DataDir), store.DatabaseFile),
+		OwnFiles:   s.dashboardOwnFiles(),
 		DataDir:    filepath.Clean(s.Cfg.DataDir),
 		VolumesDir: s.inventoryHost().volumes,
 	}

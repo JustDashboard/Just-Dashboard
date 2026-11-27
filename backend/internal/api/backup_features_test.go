@@ -103,7 +103,11 @@ func TestBackupResourcesReportCoverageAndSuggestAJob(t *testing.T) {
 	if dashboard == nil || dashboard.Protected || len(dashboard.CoveredBy) != 0 {
 		t.Fatalf("dashboard resource before any job: %+v", dashboard)
 	}
-	if len(dashboard.Suggest.Sources) != 1 || dashboard.Suggest.Sources[0] != filepath.Clean(s.Cfg.DataDir) || len(dashboard.Suggest.SQLitePaths) != 1 {
+	// The store and the request history, each snapshotted as one moment.
+	if len(dashboard.Suggest.Sources) != 1 || dashboard.Suggest.Sources[0] != filepath.Clean(s.Cfg.DataDir) ||
+		!slices.Equal(dashboard.Suggest.SQLitePaths, []string{
+			filepath.Join(filepath.Clean(s.Cfg.DataDir), "vpsd.db"), filepath.Join(filepath.Clean(s.Cfg.DataDir), "requests.db"),
+		}) {
 		t.Fatalf("dashboard suggestion: %+v", dashboard.Suggest)
 	}
 	// The copies an update takes of the store are left out, or every archive

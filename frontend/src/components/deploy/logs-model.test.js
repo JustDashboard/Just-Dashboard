@@ -93,9 +93,24 @@ describe("the query in the address", () => {
       methods: ["POST"],
       maxMs: 800,
       pages: true,
+      who: "people",
     })
     const back = queryFromParams(new URLSearchParams(queryParams(query)))
     expect(back).toEqual(query)
+  })
+
+  test("who sent them is asked of the server, and only in its two words", () => {
+    const people = completeQuery({ who: "people" })
+    expect(requestParams(people, NOW).who).toBe("people")
+    expect(requestParams(EMPTY_REQUEST_QUERY, NOW).who).toBeUndefined()
+    expect(queryFromParams(new URLSearchParams("who=bots"))?.who).toBe("bots")
+    expect(queryFromParams(new URLSearchParams("who=aliens"))?.who).toBe("")
+  })
+
+  test("thirty days is a window like the others, resolved when it is asked", () => {
+    const month = requestParams(completeQuery({ range: "30d" }), NOW)
+    expect(month.since).toBe("2026-08-28T12:00:00.000Z")
+    expect(queryFromParams(new URLSearchParams("range=30d"))?.range).toBe("30d")
   })
 
   test("what the server would refuse is dropped, not sent", () => {

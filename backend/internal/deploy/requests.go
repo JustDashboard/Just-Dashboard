@@ -238,3 +238,27 @@ func ObserveTrafficPulse(ctx context.Context, record CachedRecord, environmentID
 	pulse.Points = points
 	return pulse
 }
+
+// RecordedRoutes names the route of every environment whose requests the
+// request history keeps: each one with a live release, which is what puts a
+// route on the ingress, in a project and environment that are not archived.
+// An archived project's history stays until it ages out, and is there again
+// if the project is restored.
+func (s *OrchestrationStore) RecordedRoutes(ctx context.Context) ([]string, error) {
+	rows, err := s.reader().QueryContext(ctx, `SELECT e.id FROM deploy_environments e
+		JOIN deploy_projects p ON p.id = e.project_id
+		WHERE e.archived_at = 0 AND p.archived_at = 0 AND e.live_release_id > 0 ORDER BY e.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := []string{}
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		out = append(out, deploymentRouteName(id))
+	}
+	return out, rows.Err()
+}

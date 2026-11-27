@@ -23,15 +23,23 @@ import {
  * one row it is.
  */
 
-export type LogsView = "requests" | "insights" | "output" | "builds" | "events"
+/**
+ * What the page reads: the requests the proxy answered, what they add up to,
+ * what the containers wrote, and what Docker did to them. Builds are not one
+ * of them: a build's transcript is its run's page, a press away on
+ * Deployments, and a fifth tab of it here was a second place to read it.
+ */
+export type LogsView = "requests" | "insights" | "output" | "events"
 
-export const LOGS_VIEWS: readonly LogsView[] = [
-  "requests",
-  "insights",
-  "output",
-  "builds",
-  "events",
-]
+export const LOGS_VIEWS: readonly LogsView[] = ["requests", "insights", "output", "events"]
+
+/**
+ * Who sent a request, as the record can tell: a person's browser, or a
+ * program — a crawler, a script, a monitor, a scanner trying doors. The
+ * server decides (`who=` on the API), so the rows, the readings and the
+ * export narrow alike.
+ */
+export type RequestWho = "" | "people" | "bots"
 
 /**
  * What a deployment opens on when the address names no view. Requests answers
@@ -66,6 +74,8 @@ export type RequestQuery = {
   methods: string[]
   /** Page views only: no prefetches, scripts, icons, probes. */
   pages: boolean
+  /** People's browsers, or programs; everyone when empty. */
+  who: RequestWho
 }
 
 export const EMPTY_REQUEST_QUERY: RequestQuery = {
@@ -79,6 +89,7 @@ export const EMPTY_REQUEST_QUERY: RequestQuery = {
   classes: [],
   methods: [],
   pages: false,
+  who: "",
 }
 
 /**
@@ -101,7 +112,8 @@ export function isNarrowed(query: RequestQuery) {
     query.maxMs !== undefined ||
     query.classes.length > 0 ||
     query.methods.length > 0 ||
-    query.pages
+    query.pages ||
+    query.who !== ""
   )
 }
 
@@ -134,6 +146,7 @@ export function requestNarrowing(query: RequestQuery) {
     classes: query.classes.length ? query.classes.join(",") : undefined,
     methods: query.methods.length ? query.methods.join(",") : undefined,
     pages: query.pages ? "true" : undefined,
+    who: query.who || undefined,
     limit: 500,
   }
 }
@@ -154,6 +167,7 @@ export const QUERY_PARAMS = [
   "classes",
   "methods",
   "pages",
+  "who",
 ] as const
 
 /**
@@ -178,6 +192,7 @@ export function queryParams(query: RequestQuery): [string, string][] {
   if (query.classes.length) out.push(["classes", query.classes.join(",")])
   if (query.methods.length) out.push(["methods", query.methods.join(",")])
   if (query.pages) out.push(["pages", "true"])
+  if (query.who) out.push(["who", query.who])
   return out
 }
 
@@ -215,6 +230,8 @@ export function queryFromParams(params: URLSearchParams): RequestQuery | undefin
     .map((method) => method.toUpperCase())
     .filter((method) => /^[A-Z]{1,16}$/.test(method))
   query.pages = params.get("pages") === "true"
+  const who = params.get("who")
+  query.who = who === "people" || who === "bots" ? who : ""
   return query
 }
 

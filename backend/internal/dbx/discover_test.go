@@ -1477,3 +1477,28 @@ func TestInventoryOrderIsStable(t *testing.T) {
 		}
 	}
 }
+
+// The dashboard's other databases — the request history beside the store —
+// are its own as the store is: listed under the dashboard, never offered to
+// open, by the path it keeps them at or through /host.
+func TestTheDashboardsOwnFilesAreListedAndNeverConnected(t *testing.T) {
+	when := time.Unix(1_700_000_000, 0).UTC()
+	inv := Discover(Facts{
+		Places: Places{
+			StorePath: "/var/lib/just-dashboard/vpsd.db", DataDir: "/var/lib/just-dashboard",
+			OwnFiles: []string{"/var/lib/just-dashboard/requests.db"},
+			Mounts:   []MountPlace{{Source: "/var/lib/just-dashboard", Containers: []string{"just-dashboard-backend-1"}}},
+		},
+		Files: []FileFacts{
+			{Path: "/var/lib/just-dashboard/requests.db", Engine: "sqlite", Size: 1 << 28, Modified: when, WAL: true},
+			{Path: "/host/var/lib/just-dashboard/requests.db", Engine: "sqlite", Size: 1 << 28, Modified: when, WAL: true},
+		},
+	})
+	for _, key := range []string{"file:/var/lib/just-dashboard/requests.db", "file:/host/var/lib/just-dashboard/requests.db"} {
+		got := find(t, inv, key)
+		if got.File.Holder != HolderSelf || !got.Self || got.Connectable {
+			t.Errorf("%s: holder %q self %v connectable %v, want the dashboard's own, never connected",
+				key, got.File.Holder, got.Self, got.Connectable)
+		}
+	}
+}

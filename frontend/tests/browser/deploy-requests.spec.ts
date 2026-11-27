@@ -8,7 +8,6 @@ import {
   mockProject as mockProjectBase,
   now,
   showcaseRuntime,
-  steps,
   user,
 } from "./deploy-fixture"
 import type {
@@ -272,51 +271,34 @@ test.describe("a deployment's traffic", () => {
   // motion draws the figure itself, which is what these tests read.
   test.use({ timezoneId: "UTC", contextOptions: { reducedMotion: "reduce" } })
 
-  test("the page opens on requests, with the readings that say whether anything is wrong", async ({
+  test("the page opens on requests, with the sentence that says whether anything is wrong", async ({
     page,
   }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
 
-    // Requests first: it is the only one of the three that answers "is it
-    // working" without the reader knowing what to look for.
-    await expect(page.getByRole("button", { name: "Requests", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    // Requests first: it is the only view that answers "is it working"
+    // without the reader knowing what to look for.
+    await expect(page.getByRole("tab", { name: "Requests", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
 
-    // The Overview's reading lines, in the Overview's words, where a row of
-    // four tiles stood: a rate rather than a count, since "1,284" means
-    // nothing without the window it was counted over.
-    const hour = page.getByRole("group", { name: "The last hour" })
-    const line = (name: string) =>
-      hour.locator('[data-slot="reading-line"]').filter({ hasText: name })
-    await expect(line("Traffic")).toContainText("21.4 requests a minute")
-    await expect(line("Traffic")).toContainText("402 page views in the last hour")
-    // 13 of 1284 is about 1%, and the reading is the share, not the count.
-    await expect(line("Errors")).toContainText("1.0% of requests failed")
-    await expect(line("Errors")).toContainText("13 of 1,284 answered 5xx")
-    // The tail, not the mean: a p50 of 24ms hides a p99 of 2.8 seconds.
-    await expect(line("Response time")).toContainText("19 in 20 inside 412ms")
-    await expect(line("Response time")).toContainText("Half inside 24ms")
-    await expect(line("Served")).toContainText("39.4 MB sent")
-
-    // Each reading carries its hour: the failures as a strip of minutes, the
-    // rate and the p95 as lines, and what asked drawn as itself after the name.
-    await expect(
-      page.getByRole("img", { name: /^Last hour by minute: 1 minute with server errors/ }),
-    ).toBeVisible()
-    await expect(page.getByRole("img", { name: "Requests over the last hour" })).toBeVisible()
-    await expect(
-      page.getByRole("img", { name: "How long 19 in 20 responses took, over the last hour" }),
-    ).toBeVisible()
-    await expect(line("Traffic").locator('img[src="/logos/chrome.svg"]')).toBeVisible()
-    // Four readings, none of them the container: what it did is the Events
-    // tab's, which counts the exit. No tile is left on the page's opening.
-    await expect(hour.locator('[data-slot="reading-line"]')).toHaveCount(4)
-    await expect(line("Container")).toHaveCount(0)
+    // One sentence about the window on screen, where four tiles about the
+    // last hour stood: the count, the pages, the failures with their share,
+    // the slow tail in words and what was sent.
+    const words = page.locator("[data-slot=window-headline]")
+    await expect(words).toContainText("1,284 requests")
+    await expect(words).toContainText("402 page views")
+    await expect(words).toContainText("13 failed (1.0%)")
+    await expect(words.getByText("13", { exact: true })).toBeVisible()
+    await expect(words).toContainText("19 in 20 inside 412ms")
+    await expect(words).toContainText("39.4 MB sent")
+    await expect(words).toContainText("Over the last hour")
+    await expect(page.locator('[data-slot="reading-line"]')).toHaveCount(0)
     await expect(page.locator('[data-slot="stat-grid"]')).toHaveCount(0)
-    await expect(page.getByTitle("1 exit or restart in the last hour")).toBeVisible()
+    // What the container did is the Events tab's, which marks the exit.
+    await expect(page.getByTitle("1 exit or restart in the last hour")).toBeAttached()
   })
 
   test("a request a tailnet gate admitted names the login it let in", async ({ page }) => {
@@ -355,17 +337,13 @@ test.describe("a deployment's traffic", () => {
     await expect(failing).toBeVisible()
     await expect(page.getByText("2.84s").first()).toBeVisible()
 
-    // The row opens in place rather than into a drawer over the list: the
-    // question is asked while scanning, and a panel that covers the rows makes
-    // you close it to ask it again about the next one.
+    // The request opens in an inspector beside the rows, never under its row:
+    // the rows keep their heights and the reader walks them with ↑ and ↓.
     await failing.click()
-    // The agent is a title attribute on the row and text only in the detail,
-    // so matching it proves the disclosure opened rather than the row's own
-    // client column being visible at this width.
-    await expect(page.getByText("Mozilla/5.0 Chrome/140.0")).toBeVisible()
-    await expect(page.getByText("Referer")).toBeVisible()
+    const inspector = page.locator("[data-slot=request-inspector]")
+    await expect(inspector.getByText("Mozilla/5.0 Chrome/140.0")).toBeVisible()
     await expect(
-      page.getByRole("button", { name: "Show every request to this path" }),
+      inspector.getByRole("button", { name: "Show every request to this path" }),
     ).toBeVisible()
     // The same request, coloured the way the host's log console colours it:
     // the code by its family, a write in the method hue, the path in the path
@@ -373,6 +351,7 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByText("500", { exact: true }).first()).toHaveClass(/text-destructive/)
     await expect(page.getByText("200", { exact: true }).first()).toHaveClass(/text-success/)
     const row = page.getByRole("button", { name: /\/api\/checkout/ }).first()
+    await expect(row).toHaveAttribute("aria-pressed", "true")
     await expect(row.getByText("POST", { exact: true })).toHaveClass(/tag-blue/)
     // The method chips above the rows stay plain: selection is the chip's
     // fill, and one blue chip in a row of grey ones read as the chosen one.
@@ -381,14 +360,15 @@ test.describe("a deployment's traffic", () => {
     ).not.toHaveClass(/tag-blue/)
     await expect(failing).toHaveClass(/tag-cyan/)
     // Opened, it says who asked in the account pages' words, where the time
-    // sits in the window, and the code's word; the rest of its verbs are one
-    // menu, each with its sentence.
-    await expect(page.getByText("Chrome", { exact: true })).toBeVisible()
-    await expect(page.getByText("in the slowest tenth")).toBeVisible()
-    await expect(page.getByText("Server error", { exact: true })).toBeVisible()
-    await page.getByRole("button", { name: "More actions for this request" }).click()
+    // sits in the window, and the code's word; copying and blocking are one menu.
+    await expect(inspector.getByText("Chrome", { exact: true })).toBeVisible()
+    await expect(inspector.getByText("in the slowest tenth")).toBeVisible()
+    await expect(inspector.getByText("Server error", { exact: true })).toBeVisible()
+    await inspector.getByRole("button", { name: "More actions for this request" }).click()
     await expect(page.getByRole("menuitem", { name: /Copy as curl/ })).toBeVisible()
-    await page.getByRole("menuitem", { name: /Show every request from this client/ }).click()
+    await page.keyboard.press("Escape")
+    await expect(page.getByRole("menu")).toHaveCount(0)
+    await inspector.getByRole("button", { name: "Show every request from this client" }).click()
     await expect(page.getByRole("button", { name: "Clear the client filter" })).toBeVisible()
 
     // The Colour switch is the log console's own: off, a row is drawn as it
@@ -472,7 +452,7 @@ test.describe("a deployment's traffic", () => {
   }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
-    await page.getByRole("button", { name: "Insights", exact: true }).click()
+    await page.getByRole("tab", { name: "Insights", exact: true }).click()
 
     // The failing path carries its own 5xx count and its own p95, so "p95 is
     // 412ms" becomes "p95 is 412ms because of /api/checkout".
@@ -512,7 +492,7 @@ test.describe("a deployment's traffic", () => {
       await route.fallback()
     })
     await page.goto("/deploy/7/logs")
-    await page.getByRole("button", { name: "Insights", exact: true }).click()
+    await page.getByRole("tab", { name: "Insights", exact: true }).click()
 
     await page.getByRole("button", { name: "Show every 404" }).click()
     await expect
@@ -604,8 +584,8 @@ test.describe("a deployment's traffic", () => {
     // of this page, on History at the minute either side.
     await expect(page.getByRole("link", { name: /Container output/ })).toHaveCount(0)
     await page.getByRole("button", { name: "Open in Output", exact: true }).click()
-    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("tab", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
     await expect(page.getByRole("button", { name: "History", exact: true })).toHaveAttribute(
@@ -630,17 +610,17 @@ test.describe("a deployment's traffic", () => {
     // The output's own quick view for its request lines is "HTTP", so the
     // page's Requests view is the one button of that name.
     await expect(page.getByRole("button", { name: /^HTTP/ })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Requests", exact: true })).toHaveCount(1)
+    await expect(page.getByRole("tab", { name: "Requests", exact: true })).toHaveCount(1)
 
     // The other question a failure raises: what happened to the container then.
     await page
-      .getByRole("navigation", { name: "Log view" })
-      .getByRole("button", { name: "Requests", exact: true })
+      .getByRole("tablist", { name: "Log view" })
+      .getByRole("tab", { name: "Requests", exact: true })
       .click()
     await page.getByText("/api/checkout").first().click()
     await page.getByRole("button", { name: "Container events around this moment" }).click()
-    await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("tab", { name: "Events", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
     await expect(page.getByText("two minutes either side")).toBeVisible()
@@ -685,17 +665,17 @@ test.describe("a deployment's traffic", () => {
     // …and who it tells, in Automation's own words: a rule naming no channel
     // reaches every one of them, and with none added yet nobody hears it.
     await expect(page.getByText("no channels yet — nobody is told")).toHaveClass(/text-warning/)
-    // Page views ride on the traffic line, and served bytes have their own.
-    await expect(page.getByText("402 page views in the last hour")).toBeVisible()
-    await expect(page.getByText("Served", { exact: true })).toBeVisible()
+    // Page views and the bytes sent are the window's sentence.
+    await expect(page.locator("[data-slot=window-headline]")).toContainText("402 page views")
+    await expect(page.locator("[data-slot=window-headline]")).toContainText("39.4 MB sent")
     // The chart is the house one — stacked by status family, with the live
     // release's activation drawn as a mark inside the window.
     await expect(page.getByText("Requests", { exact: true }).first()).toBeVisible()
     await expect(page.getByText("5xx server error").first()).toBeVisible()
     // The p95 chart lives on Insights, where the readings are, not over the rows.
+    await expect(page.getByText("Response time", { exact: true })).toHaveCount(0)
+    await page.getByRole("tab", { name: "Insights", exact: true }).click()
     await expect(page.getByText("Response time", { exact: true })).toHaveCount(1)
-    await page.getByRole("button", { name: "Insights", exact: true }).click()
-    await expect(page.getByText("Response time", { exact: true })).toHaveCount(2)
     await expect.poll(() => page.locator(".recharts-reference-line").count()).toBeGreaterThan(0)
   })
 
@@ -704,28 +684,21 @@ test.describe("a deployment's traffic", () => {
     await withAudience(page)
     await page.goto("/deploy/7/logs?view=insights")
 
-    // The people first, apart from the bots and scripts the window also served.
-    const visitors = page.locator("[data-slot=stat-tile]").filter({ hasText: "Visitors" })
-    await expect(visitors).toContainText("87")
-    await expect(visitors).toContainText("people")
-    await expect(
-      page.locator("[data-slot=stat-tile]").filter({ hasText: "Bots and scripts" }),
-    ).toContainText("9")
-    await expect(
-      page.locator("[data-slot=stat-tile]").filter({ hasText: "Came from" }),
-    ).toContainText("www.google.com")
+    // The people first, apart from the bots and scripts the window also
+    // served — said in the window's sentence, not in tiles.
+    const words = page.locator("[data-slot=window-headline]")
+    await expect(words).toContainText("from 87 people and 9 bots")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await expect(page.getByRole("heading", { name: "Visitors", exact: true })).toBeVisible()
 
-    // The readings and both charts scroll with the lists, so the lists have the
+    // The sentence and both charts scroll with the lists, so the lists have the
     // pane's height rather than the strip left under two pinned charts.
     const scroller = page
       .locator(".overflow-auto")
       .filter({ has: page.getByRole("heading", { name: "Visitors", exact: true }) })
       .last()
     await expect(scroller.getByText("Response time", { exact: true })).toBeVisible()
-    await expect(
-      scroller.locator("[data-slot=stat-tile]").filter({ hasText: "Bots and scripts" }),
-    ).toHaveCount(1)
+    await expect(scroller.locator("[data-slot=window-headline]")).toHaveCount(1)
 
     // Each person as the browser on its system, with the pages they opened in order.
     const person = page.getByRole("button", { name: "Show every request from 89.28.56.43" }).first()
@@ -761,7 +734,7 @@ test.describe("a deployment's traffic", () => {
     )
     await page.goto("/deploy/7/logs")
 
-    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await page.getByRole("tab", { name: "Events", exact: true }).click()
     await expect(page.getByText("api-production-r20 exited cleanly")).toBeVisible()
     // Nothing for the Events tab to count: nothing failed.
     await expect(page.getByTitle(/exits? or restarts? in the last hour/)).toHaveCount(0)
@@ -855,10 +828,10 @@ test.describe("a deployment's traffic", () => {
     await page.goto("/deploy/7/logs")
 
     const row = page.getByRole("button", { name: /\/api\/checkout/ }).first()
-    await expect(row).toHaveAttribute("aria-expanded", "false")
+    await expect(row).toHaveAttribute("aria-pressed", "false")
     await row.focus()
     await page.keyboard.press("Enter")
-    await expect(row).toHaveAttribute("aria-expanded", "true")
+    await expect(row).toHaveAttribute("aria-pressed", "true")
     await expect(
       page.getByRole("button", { name: "Show every request to this path" }),
     ).toBeVisible()
@@ -873,8 +846,8 @@ test.describe("a deployment's traffic", () => {
     // container, and nothing else — which is a request for its output.
     await page.goto(`/deploy/7/logs?service=${DB}`)
 
-    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("tab", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
     const picker = page.getByRole("combobox", { name: "Service" })
@@ -885,7 +858,7 @@ test.describe("a deployment's traffic", () => {
     // Live and History inside the page's pane, and no second Insights: the
     // page has one, the requests', with the output's ranking at its end.
     await expect(page.getByRole("button", { name: "Live", exact: true })).toBeVisible()
-    await expect(page.getByRole("button", { name: "Insights", exact: true })).toHaveCount(1)
+    await expect(page.getByRole("tab", { name: "Insights", exact: true })).toHaveCount(1)
     await expect(
       page.locator('[data-slot="pane"] [data-slot="pane"]:not([data-flush])'),
     ).toHaveCount(0)
@@ -920,8 +893,8 @@ test.describe("a deployment's traffic", () => {
     await page.getByRole("menuitem", { name: "Logs", exact: true }).click()
 
     await expect(page).toHaveURL(new RegExp(`/deploy/7/logs\\?service=${DB}`))
-    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("tab", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
     await expect.poll(() => sockets.map((q) => q.get("source"))).toContain(`docker:${DB}`)
@@ -937,81 +910,12 @@ test.describe("a deployment's traffic", () => {
     })
     await mockOutput(page)
     await page.goto("/deploy/7/logs")
-    await expect(page.getByRole("button", { name: "Output", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("tab", { name: "Output", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
     // The default is not written into the address: the page at rest is its bare URL.
     await expect(page).toHaveURL(/\/deploy\/7\/logs$/)
-  })
-
-  test("Builds lists the runs and shows the chosen one's transcript on the page", async ({
-    page,
-  }) => {
-    await mockProject(page)
-    await page.routeWebSocket(/\/api\/v1\/deploy\/7\/runs\/84\/stream/, (socket) => {
-      socket.onClose(() => {})
-      socket.send(
-        JSON.stringify({
-          type: "snapshot",
-          data: {
-            run: {
-              id: 84,
-              runNumber: 1,
-              projectId: 7,
-              environmentId: 12,
-              state: "failed",
-              operation: "deploy",
-              trigger: "manual",
-              actor: "operator",
-              requestedAt: now,
-              claimedAt: now,
-              endedAt: now,
-              planRevision: 3,
-              metadata: {},
-            },
-            steps,
-          },
-          ts: Date.now(),
-        }),
-      )
-      socket.send(
-        JSON.stringify({
-          type: "events",
-          data: [
-            {
-              seq: 20,
-              type: "step.log",
-              runId: 84,
-              stepId: 105,
-              ts: now,
-              data: {
-                stream: "stderr",
-                text: "npm ERR! code ELIFECYCLE\nBuild failed: exit status 1\n",
-                truncated: false,
-              },
-            },
-          ],
-          ts: Date.now(),
-        }),
-      )
-    })
-    await page.goto("/deploy/7/logs")
-    await page.getByRole("button", { name: "Builds", exact: true }).click()
-
-    const rail = page.getByRole("navigation", { name: "Builds" })
-    await expect(rail.getByRole("button", { name: /#1 Deploy/ })).toHaveAttribute(
-      "aria-current",
-      "true",
-    )
-    // The transcript, inline, in the run page's own console.
-    await expect(page.getByText("Build failed: exit status 1")).toBeVisible()
-    await expect(page.getByRole("textbox", { name: "Search build logs" })).toBeVisible()
-    await expect(page.getByRole("link", { name: "Open the run" })).toHaveAttribute(
-      "href",
-      "/deploy/7/runs/84",
-    )
-    await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("builds")
   })
 
   test("a crash loop is one row, and an exit carries its last lines", async ({ page }) => {
@@ -1075,7 +979,7 @@ test.describe("a deployment's traffic", () => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
 
-    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await page.getByRole("tab", { name: "Events", exact: true }).click()
     await expect(page.getByText("api-production-r20 exited with status 137")).toBeVisible()
     // The exit code stays on the row at every width: it is the one fact that
     // changes what you do next.
@@ -1111,7 +1015,7 @@ test.describe("a deployment's traffic", () => {
     const sockets: string[] = []
     page.on("websocket", (socket) => sockets.push(socket.url()))
     await page.goto("/deploy/7/logs")
-    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await page.getByRole("tab", { name: "Events", exact: true }).click()
 
     // A deployment owns more than its containers: a database network vanishing
     // under a running release is exactly this feed's business.
@@ -1152,7 +1056,7 @@ test.describe("a deployment's traffic", () => {
       }),
     )
     await page.goto("/deploy/7/logs")
-    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await page.getByRole("tab", { name: "Events", exact: true }).click()
 
     await expect(page.getByText("Nothing has happened to these containers")).toBeVisible()
     await expect(page.getByText(/since the record began on/)).toBeVisible()
@@ -1168,10 +1072,10 @@ test.describe("a deployment's traffic", () => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
 
-    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await page.getByRole("tab", { name: "Events", exact: true }).click()
     await expect.poll(() => new URL(page.url()).searchParams.get("view")).toBe("events")
 
-    await page.getByRole("button", { name: "Requests", exact: true }).click()
+    await page.getByRole("tab", { name: "Requests", exact: true }).click()
     await page.getByText("/api/checkout").first().click()
     await page.getByRole("button", { name: "Container events around this moment" }).click()
     const scoped = new URL(page.url())
@@ -1181,8 +1085,8 @@ test.describe("a deployment's traffic", () => {
     // The point of putting it there: the link somebody pastes into a chat
     // lands on the same two minutes it was taken from.
     await page.goto(scoped.toString())
-    await expect(page.getByRole("button", { name: "Events", exact: true })).toHaveAttribute(
-      "aria-pressed",
+    await expect(page.getByRole("tab", { name: "Events", exact: true })).toHaveAttribute(
+      "aria-selected",
       "true",
     )
     await expect(page.getByText("two minutes either side")).toBeVisible()
@@ -1199,7 +1103,7 @@ test.describe("a deployment's traffic", () => {
     await expect(page.getByText("two minutes either side")).toBeVisible()
 
     // Output was never asked about that minute: it opens live.
-    await page.getByRole("button", { name: "Output", exact: true }).click()
+    await page.getByRole("tab", { name: "Output", exact: true }).click()
     await expect(page.getByRole("button", { name: "Live", exact: true })).toHaveAttribute(
       "aria-pressed",
       "true",
@@ -1209,8 +1113,8 @@ test.describe("a deployment's traffic", () => {
     // A moment Output was sent is its own, and stays with it for the tab —
     // History on those minutes, still named, after a trip away and back.
     await page
-      .getByRole("navigation", { name: "Log view" })
-      .getByRole("button", { name: "Requests", exact: true })
+      .getByRole("tablist", { name: "Log view" })
+      .getByRole("tab", { name: "Requests", exact: true })
       .click()
     await page.getByText("/api/checkout").first().click()
     await page.getByRole("button", { name: "Open in Output", exact: true }).click()
@@ -1269,13 +1173,13 @@ test.describe("a deployment's traffic", () => {
       },
     ])
 
-    await page.getByRole("button", { name: "Requests", exact: true }).click()
+    await page.getByRole("tab", { name: "Requests", exact: true }).click()
     await page.getByText("/admin", { exact: true }).click()
     await page.getByRole("button", { name: "More actions for this request" }).click()
     await expect(page.getByRole("menuitem", { name: "Deny rule saved" })).toBeDisabled()
     await page.keyboard.press("Escape")
     await page.reload()
-    await page.getByRole("button", { name: "Insights", exact: true }).click()
+    await page.getByRole("tab", { name: "Insights", exact: true }).click()
     await expect(page.getByText("Scanners", { exact: true })).toHaveCount(0)
     await expect(page.getByText("Deny saved", { exact: true })).toBeVisible()
     // The deny changes the action, not the historical traffic or the readings.
@@ -1425,7 +1329,7 @@ test.describe("a deployment's traffic", () => {
   test("only an address worth blocking is offered the verb", async ({ page }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
-    await page.getByRole("button", { name: "Insights", exact: true }).click()
+    await page.getByRole("tab", { name: "Insights", exact: true }).click()
 
     const row = (ip: string) =>
       page
@@ -1494,7 +1398,7 @@ test.describe("a deployment's traffic", () => {
     const sockets: string[] = []
     page.on("websocket", (socket) => sockets.push(socket.url()))
     await page.goto("/deploy/7/logs")
-    await expect(page.getByText("21.4")).toBeVisible()
+    await expect(page.locator("[data-slot=window-headline]")).toContainText("1,284 requests")
 
     await page.getByRole("button", { name: "Live", exact: true }).click()
     // The fixture's window ends at sequence 9917; the socket asks for what
@@ -1553,9 +1457,9 @@ test.describe("a deployment's traffic", () => {
       await route.fallback()
     })
     await page.goto("/deploy/7/logs?view=insights")
-    const tile = page.locator("[data-slot=stat-tile]").filter({ hasText: "Visitors" })
-    await expect(tile).toContainText("87")
-    await tile.evaluate((node) => node.setAttribute("data-kept", ""))
+    const words = page.locator("[data-slot=window-headline]")
+    await expect(words).toContainText("87 people")
+    await words.evaluate((node) => node.setAttribute("data-kept", ""))
 
     await page.getByRole("button", { name: "GET", exact: true }).click()
     await expect.poll(() => Boolean(hold)).toBe(true)
@@ -1570,30 +1474,14 @@ test.describe("a deployment's traffic", () => {
     await expect(page.locator("[data-kept]")).toHaveCount(1)
   })
 
-  test("the stat tiles keep their lines in a row, and a list's figures end on its head's edge", async ({
-    page,
-  }) => {
+  test("no tile on Insights, and a list's figures end on its head's edge", async ({ page }) => {
     await mockProject(page)
     await withAudience(page)
     await page.setViewportSize({ width: 1600, height: 1000 })
     await page.goto("/deploy/7/logs?view=insights")
-    const tiles = page
-      .locator("[data-slot=stat-grid]")
-      .filter({ hasText: "Bots and scripts" })
-      .locator("[data-slot=stat-tile]")
-    await expect(tiles).toHaveCount(5)
+    await expect(page.locator("[data-slot=window-headline]")).toContainText("87 people")
+    await expect(page.locator("[data-slot=stat-tile]")).toHaveCount(0)
     await risen(page)
-    // Every tile's first and last lines, its name and its hint, stand in one row.
-    const lines = await tiles.evaluateAll((all) =>
-      all.map((tile) => [
-        tile.firstElementChild!.getBoundingClientRect().top,
-        tile.lastElementChild!.getBoundingClientRect().bottom,
-      ]),
-    )
-    for (const [top, bottom] of lines) {
-      expect(Math.abs(top - lines[0][0])).toBeLessThanOrEqual(0.5)
-      expect(Math.abs(bottom - lines[0][1])).toBeLessThanOrEqual(0.5)
-    }
 
     // The facet is a section under a plain section head; the head's right edge is the header's.
     const pages = page
@@ -1636,9 +1524,9 @@ test.describe("a deployment's traffic", () => {
     const link = new URL(page.url())
     expect(link.searchParams.get("maxMs")).toBe("1000")
     // …and in the tab, so a trip to another view and back keeps it.
-    await page.getByRole("button", { name: "Events", exact: true }).click()
+    await page.getByRole("tab", { name: "Events", exact: true }).click()
     await expect.poll(() => new URL(page.url()).searchParams.get("path")).toBeNull()
-    await page.getByRole("button", { name: "Requests", exact: true }).click()
+    await page.getByRole("tab", { name: "Requests", exact: true }).click()
     await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api")
     await page.goto(link.toString())
     await expect(page.getByLabel("Filter requests by path")).toHaveValue("/api")
@@ -1915,11 +1803,13 @@ test.describe("a deployment's traffic", () => {
     for (const width of [390, 1280]) {
       await page.setViewportSize({ width, height: 900 })
       await page.goto("/deploy/7/logs")
-      // A phone picks the view on the bar at the pane's foot, a desk on the
-      // strip at its head; both are buttons, so the phone's is the bar's.
+      // A phone picks the view on the bar at the page's foot, a desk on the
+      // tabs in the strip at its head.
       const bar = page.locator("[data-slot=pane-bar]")
       const view = (name: string) =>
-        (width === 390 ? bar : page).getByRole("button", { name, exact: true })
+        width === 390
+          ? bar.getByRole("button", { name, exact: true })
+          : page.getByRole("tab", { name, exact: true })
       await expect(view("Requests")).toBeVisible()
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

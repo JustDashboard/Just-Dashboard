@@ -638,7 +638,19 @@ func (s *Sleeper) consider(ctx context.Context, candidate sleepCandidate, plan *
 	if spans, err := s.executor.store.SleepSpans(ctx, candidate.EnvironmentID, from, 1); err == nil && len(spans) > 0 && spans[0].WokeAt != nil && spans[0].WokeAt.After(from) {
 		from = *spans[0].WokeAt
 	}
-	window, err := s.record.Window(ctx, route, accesslog.Filter{Since: from, Until: now, Limit: 1})
+	// The idle minutes first: a request in them is all a busy environment's
+	// pass needs, and the record answers a window back to the release from
+	// its month of history, which every minute would be days of requests read
+	// to learn the newest. Only an environment quiet for that long is read
+	// back as far as the release.
+	recent := from
+	if line := now.Add(-plan.idle()); line.After(recent) {
+		recent = line
+	}
+	window, err := s.record.Window(ctx, route, accesslog.Filter{Since: recent, Until: now, Limit: 1})
+	if err == nil && recent.After(from) && (window.Result == nil || window.Result.Summary.Total == 0) {
+		window, err = s.record.Window(ctx, route, accesslog.Filter{Since: from, Until: now, Limit: 1})
+	}
 	if err != nil {
 		awake("The request record could not be read, so the environment is not put to sleep blind.", nil, nil)
 		return
