@@ -2328,7 +2328,8 @@
   `WriteConfig`; an edit to a file a `/var/lib/dpkg/info/nginx*.conffiles` lists is flagged `conffile`.
   `GET /proxy/lint` answers `Lint(tree)`: add_header dropping outer headers, a prefix location without `/`
   aliased to a directory with one, proxy_pass with a variable and no resolver in scope (IPs, unix sockets and
-  upstream names excepted), `$http_host`, allow without `deny all`, return where deny/auth_basic/auth_request
+  upstream names excepted, and one variable a `map` sets only to those, as a deployment route's service
+  domains and a canary's split do: `mapNamesServers`), `$http_host`, allow without `deny all`, return where deny/auth_basic/auth_request
   apply, stub_status neither guarded nor on a loopback-only server, `listen … http2`, SSLv2/3 or TLSv1/1.1,
   two servers with the same name on the same address, and `if` in a location holding anything but return or
   rewrite … last. Files `EffectiveConfig` leaves out (certbot's options, modules) are not linted.

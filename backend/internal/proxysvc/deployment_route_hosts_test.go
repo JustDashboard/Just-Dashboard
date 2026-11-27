@@ -404,3 +404,38 @@ func TestLiveNginxSendsALongServiceDomainToItsServer(t *testing.T) {
 		}
 	}
 }
+
+// The configuration check does not tell a route with service domains to
+// add a resolver: its proxy_pass names a variable that the host map sets to
+// addresses and the release's pool alone, which nginx connects to as they
+// are. A map that can give a host name still needs one.
+func TestNginxLintTakesTheHostMapsServersAsAddresses(t *testing.T) {
+	resolverFindings := func(content string) int {
+		t.Helper()
+		tree, err := NginxTree([]ConfigFile{{Path: "/etc/nginx/nginx.conf", Content: "events {}\nhttp {\n" + content + "\n}\n"}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		count := 0
+		for _, finding := range Lint(tree) {
+			if finding.Rule == "proxy-pass-resolver" {
+				count++
+			}
+		}
+		return count
+	}
+	route := nginxServiceDomainRoute()
+	content := mustRender(t, deploymentSiteSpec(route, ""))
+	if got := resolverFindings(content); got != 0 {
+		t.Fatalf("%d resolver findings for a route whose map names addresses:\n%s", got, content)
+	}
+	pool := route
+	pool.Upstream, pool.Upstreams = "", []string{"http://127.0.0.1:30080", "http://127.0.0.1:30090"}
+	if got := resolverFindings(mustRender(t, deploymentSiteSpec(pool, ""))); got != 0 {
+		t.Fatalf("%d resolver findings for a map that defaults to the release's pool", got)
+	}
+	named := strings.Replace(content, "127.0.0.1:30081;", "seerr.internal:5055;", 1)
+	if got := resolverFindings(named); got != 2 {
+		t.Fatalf("%d resolver findings for a map that names a host, want one per server", got)
+	}
+}
