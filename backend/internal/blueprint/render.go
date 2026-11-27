@@ -107,7 +107,18 @@ type Plan struct {
 	// digest a fixture pins like everything else here.
 	Services []RenderedService `json:"services,omitempty"`
 	Compose  string            `json:"compose,omitempty"`
-	Digest   string            `json:"digest"`
+	// ServiceDomains are the addresses a stack's private services get beside
+	// the domain: one per service with an Address, derived from the first
+	// domain. Empty for every other template, so no other digest moved.
+	ServiceDomains []ServiceDomain `json:"serviceDomains,omitempty"`
+	Digest         string          `json:"digest"`
+}
+
+// ServiceDomain is a hostname routed to one service of a Compose template
+// rather than to its public service.
+type ServiceDomain struct {
+	Hostname string `json:"hostname"`
+	Service  string `json:"service"`
 }
 
 // Acceptance records that the operator agreed to a specific linked document.
@@ -312,6 +323,15 @@ func Render(blueprint *Blueprint, inputs map[string]string) (*Plan, error) {
 	if blueprint.IsCompose() {
 		if err := renderComposeTemplate(blueprint, plan); err != nil {
 			return nil, err
+		}
+		if blueprint.Stack != "" && len(plan.Domains) > 0 {
+			for _, service := range blueprint.Services {
+				if service.Address != "" {
+					plan.ServiceDomains = append(plan.ServiceDomains, ServiceDomain{
+						Hostname: ServiceHostname(plan.Domains[0], service.Address), Service: service.Name,
+					})
+				}
+			}
 		}
 	}
 

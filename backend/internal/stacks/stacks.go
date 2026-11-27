@@ -172,6 +172,18 @@ type Env interface {
 	// without generating it.
 	SetCredential(ctx context.Context, name, value string) error
 	LookupCredential(ctx context.Context, name string) (string, bool, error)
+	// DeleteCredential removes one the stack no longer needs: an
+	// application's own password once it answers to the stack's one login.
+	DeleteCredential(ctx context.Context, name string) error
+
+	// PublicURL is the address the live release serves a service at
+	// ("https://media-requests.example.com"), read from its plan's domains:
+	// an HTTPS one when it has one, and the primary domain for the primary
+	// service. False when the release serves the service at no domain.
+	PublicURL(service string) (string, bool)
+	// NetworkSubnets are the subnets of the networks a service's container is
+	// on, from which the proxy in front of it reaches it.
+	NetworkSubnets(ctx context.Context, service string) ([]string, error)
 
 	// Exec runs argv in a service's container as user ("" for the image's
 	// own). No shell is involved unless argv names one.

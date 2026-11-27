@@ -988,6 +988,11 @@ type PlannedDomain struct {
 	// than at this server's public address: Cloudflare terminates its HTTPS,
 	// and the route serves it over plain HTTP to the connector alone.
 	Tunnel bool `json:"tunnel,omitempty"`
+	// Service is the Compose service this name serves; empty is the plan's
+	// primary service. Port is that service's container port; zero is its
+	// only TCP port published on 127.0.0.1.
+	Service string `json:"service,omitempty"`
+	Port    int    `json:"port,omitempty"`
 }
 
 // Redirects says whether the domain sends visitors to another rather than
@@ -1012,6 +1017,12 @@ func (d PlannedDomain) domainConfig() map[string]any {
 	// the tunnel existed keeps its bytes and its digest.
 	if d.Tunnel {
 		config["tunnel"] = true
+	}
+	if d.Service != "" {
+		config["service"] = d.Service
+	}
+	if d.Port != 0 {
+		config["port"] = d.Port
 	}
 	return config
 }

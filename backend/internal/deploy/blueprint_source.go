@@ -436,6 +436,14 @@ func blueprintDomains(rendered *blueprint.Plan) []PlannedDomain {
 	for _, domain := range rendered.Domains {
 		domains = append(domains, PlannedDomain{Hostname: domain, HTTPS: true, Ownership: OwnershipManaged})
 	}
+	// A stack's private services get an address each beside the domain:
+	// ordinary domains of the plan, which the configure step and the
+	// Domains settings show and the person may change or remove.
+	for _, domain := range rendered.ServiceDomains {
+		domains = append(domains, PlannedDomain{
+			Hostname: domain.Hostname, HTTPS: true, Ownership: OwnershipManaged, Service: domain.Service,
+		})
+	}
 	return domains
 }
 

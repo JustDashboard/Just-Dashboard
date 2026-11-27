@@ -8,7 +8,9 @@ import (
 	"math/big"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -22,6 +24,7 @@ import (
 type CredentialStore interface {
 	Get(ctx context.Context, name string) (string, bool, error)
 	Put(ctx context.Context, name, value string) error
+	Delete(ctx context.Context, name string) error
 }
 
 // DockerEnv is Env over containers this process reaches on the stack's
@@ -45,6 +48,9 @@ type DockerEnv struct {
 	Lengths map[string]int
 	// Outputs are what earlier steps reported, by step then key.
 	Outputs map[string]map[string]string
+	// PublicURLs are the addresses the live release serves services at, by
+	// service (PublicURL).
+	PublicURLs map[string]string
 	// Log receives each Logf line of a step run on this env directly, as the
 	// live tests do. Under the runner a step's lines go to its own record
 	// instead (stepEnv), so this is unset there.
@@ -206,6 +212,46 @@ func (e *DockerEnv) Redact(text string) string {
 		text = strings.ReplaceAll(text, secret, "••••••")
 	}
 	return text
+}
+
+func (e *DockerEnv) DeleteCredential(ctx context.Context, name string) error {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	return e.Credentials.Delete(ctx, name)
+}
+
+func (e *DockerEnv) PublicURL(service string) (string, bool) {
+	address, found := e.PublicURLs[service]
+	return address, found && address != ""
+}
+
+// NetworkSubnets reads each network the service's container is attached to.
+func (e *DockerEnv) NetworkSubnets(ctx context.Context, service string) ([]string, error) {
+	id, err := e.Container(ctx, service)
+	if err != nil {
+		return nil, err
+	}
+	detail, err := e.Docker.Inspect(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("could not read %s's container: %w", service, err)
+	}
+	var subnets []string
+	for _, endpoint := range detail.NetworkList {
+		network, err := e.Docker.InspectNetwork(ctx, endpoint.NetworkID)
+		if err != nil {
+			return nil, fmt.Errorf("could not read %s's network %s: %w", service, endpoint.Name, err)
+		}
+		for _, config := range network.IPAM.Config {
+			if prefix, err := netip.ParsePrefix(config.Subnet); err == nil && !slices.Contains(subnets, prefix.Masked().String()) {
+				subnets = append(subnets, prefix.Masked().String())
+			}
+		}
+	}
+	slices.Sort(subnets)
+	if len(subnets) == 0 {
+		return nil, fmt.Errorf("%s is on no network with an address range yet", service)
+	}
+	return subnets, nil
 }
 
 func (e *DockerEnv) Exec(ctx context.Context, service, user string, argv []string) (ExecResult, error) {

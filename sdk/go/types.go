@@ -3268,6 +3268,7 @@ type Plan struct {
 	Profile          Profile            `json:"profile,omitempty"`
 	PullPolicy       string             `json:"pullPolicy,omitempty"`
 	Security         Security           `json:"security,omitzero"`
+	ServiceDomains   []ServiceDomain    `json:"serviceDomains"`
 	Services         []RenderedService  `json:"services"`
 	StopCommands     []string           `json:"stopCommands"`
 	StopSignal       string             `json:"stopSignal,omitempty"`
@@ -3322,9 +3323,11 @@ type PlannedDomain struct {
 	Hostname     string            `json:"hostname,omitempty"`
 	HTTPS        bool              `json:"https,omitempty"`
 	Ownership    OwnershipMode     `json:"ownership,omitempty"`
+	Port         int64             `json:"port,omitempty"`
 	Protection   *DomainProtection `json:"protection,omitempty"`
 	RedirectCode int64             `json:"redirectCode,omitempty"`
 	RedirectTo   string            `json:"redirectTo,omitempty"`
+	Service      string            `json:"service,omitempty"`
 	Tunnel       bool              `json:"tunnel,omitempty"`
 }
 
@@ -4677,6 +4680,7 @@ type Series struct {
 
 // Service is blueprint.Service in the dashboard's source.
 type Service struct {
+	Address     string         `json:"address,omitempty"`
 	DependsOn   []Dependency   `json:"dependsOn"`
 	Egress      bool           `json:"egress,omitempty"`
 	Environment []Environment  `json:"environment"`
@@ -4688,6 +4692,12 @@ type Service struct {
 	Resources   Resources      `json:"resources,omitzero"`
 	Role        ServiceRole    `json:"role,omitempty"`
 	Volumes     []Volume       `json:"volumes"`
+}
+
+// ServiceDomain is blueprint.ServiceDomain in the dashboard's source.
+type ServiceDomain struct {
+	Hostname string `json:"hostname,omitempty"`
+	Service  string `json:"service,omitempty"`
 }
 
 // ServiceRole is one of the values of blueprint.ServiceRole.
@@ -4937,6 +4947,30 @@ const (
 	SourceModeExistingStack       SourceMode = "existing_stack"
 )
 
+// StackAddress is api.stackAddress in the dashboard's source.
+type StackAddress struct {
+	Hostname string `json:"hostname,omitempty"`
+	Service  string `json:"service,omitempty"`
+	Title    string `json:"title,omitempty"`
+}
+
+// StackAddresses is api.stackAddresses in the dashboard's source.
+type StackAddresses struct {
+	Missing []StackAddress `json:"missing"`
+	Primary string         `json:"primary,omitempty"`
+}
+
+// StackAddressesAnswer is api.stackAddressesAnswer in the dashboard's source.
+type StackAddressesAnswer struct {
+	Domains []string `json:"domains"`
+	RunID   int64    `json:"runId,omitempty"`
+}
+
+// StackAddressesRequest is api.stackAddressesRequest in the dashboard's source.
+type StackAddressesRequest struct {
+	Domain string `json:"domain,omitempty"`
+}
+
 // StackCatalogueEntry is api.stackCatalogueEntry in the dashboard's source.
 type StackCatalogueEntry struct {
 	Description string                 `json:"description,omitempty"`
@@ -4950,10 +4984,12 @@ type StackCatalogueEntry struct {
 // StackCatalogueItem is api.stackCatalogueItem in the dashboard's source.
 type StackCatalogueItem struct {
 	Access  StacksAccess `json:"access,omitempty"`
+	Address string       `json:"address,omitempty"`
 	DocsURL string       `json:"docsUrl,omitempty"`
 	Image   string       `json:"image,omitempty"`
 	Name    string       `json:"name,omitempty"`
 	Port    int64        `json:"port,omitempty"`
+	Primary bool         `json:"primary,omitempty"`
 	Purpose string       `json:"purpose,omitempty"`
 	Title   string       `json:"title,omitempty"`
 }
@@ -5000,6 +5036,17 @@ type StackCredentialReveal struct {
 	Username string `json:"username,omitempty"`
 }
 
+// StackLoginRequest is api.stackLoginRequest in the dashboard's source.
+type StackLoginRequest struct {
+	Password string `json:"password,omitempty"`
+}
+
+// StackLoginState is api.stackLoginState in the dashboard's source.
+type StackLoginState struct {
+	Stored   bool   `json:"stored,omitempty"`
+	Username string `json:"username,omitempty"`
+}
+
 // StackReadiness is api.stackReadiness in the dashboard's source.
 type StackReadiness struct {
 	Acquisition bool `json:"acquisition,omitempty"`
@@ -5026,11 +5073,13 @@ type StackServiceState struct {
 // StackState is api.stackState in the dashboard's source.
 type StackState struct {
 	Actions             []StacksAction           `json:"actions"`
+	Addresses           StackAddresses           `json:"addresses,omitzero"`
 	ConfiguredReleaseID int64                    `json:"configuredReleaseId,omitempty"`
 	Credentials         []StackCredentialListing `json:"credentials"`
 	FinishedAt          *time.Time               `json:"finishedAt,omitempty"`
 	Limitations         []string                 `json:"limitations"`
 	LiveReleaseID       int64                    `json:"liveReleaseId,omitempty"`
+	Login               StackLoginState          `json:"login,omitzero"`
 	Preset              string                   `json:"preset,omitempty"`
 	PresetTitle         string                   `json:"presetTitle,omitempty"`
 	Readiness           StackReadiness           `json:"readiness,omitzero"`

@@ -205,7 +205,7 @@ func bazarrAuth(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 		env.Logf("Bazarr's API key was read from its configuration file and stored")
 	}
 
-	password, err := env.Credential(ctx, CredentialBazarrAdmin)
+	password, err := stackLogin(ctx, env)
 	if err != nil {
 		return stacks.Result{}, err
 	}
@@ -219,6 +219,9 @@ func bazarrAuth(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 			return stacks.Result{}, err
 		}
 		if signedIn {
+			if err := forgetLegacy(ctx, env, legacyBazarrAdmin); err != nil {
+				return stacks.Result{}, err
+			}
 			return stacks.Result{Message: "Bazarr already asks for a sign-in, as " + AdminUsername}, nil
 		}
 	}
@@ -243,7 +246,10 @@ func bazarrAuth(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	if !signedIn {
 		return stacks.Result{}, fmt.Errorf("Bazarr does not let %s in with the password it was just given", AdminUsername)
 	}
-	env.Logf("Bazarr now asks for a sign-in")
+	env.Logf("Bazarr now asks for a sign-in with the stack's password")
+	if err := forgetLegacy(ctx, env, legacyBazarrAdmin); err != nil {
+		return stacks.Result{}, err
+	}
 	return stacks.Result{Message: "Bazarr asks for a sign-in, as " + AdminUsername}, nil
 }
 
@@ -613,4 +619,102 @@ func (c *bazarrClient) reachesManagers(ctx context.Context) error {
 		}
 	}
 	return fmt.Errorf("Bazarr holds the settings but cannot reach %s with them", strings.Join(unreached, " or "))
+}
+
+// bazarrProvidersOwned are the subtitle sources of Bazarr 1.6.2 that need no
+// account and are not for one language: subtitles already inside a file,
+// Gestdown and TVsubtitles for series, YIFY Subtitles for films. Each was
+// turned on against the pinned image in the live test.
+var bazarrProvidersOwned = []string{"embeddedsubtitles", "gestdown", "tvsubtitles", "yifysubtitles"}
+
+// bazarrProviders turns on the subtitle sources that need no account, once:
+// one that was on and the person turned off again stays off (the step's
+// output remembers which were on), and a source the person set
+// up is never read past its name.
+func bazarrProviders(ctx context.Context, env stacks.Env) (stacks.Result, error) {
+	key, found, err := env.LookupCredential(ctx, CredentialBazarrAPIKey)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	if !found || key == "" {
+		return stacks.Result{}, errors.New("the stack has no Bazarr API key yet")
+	}
+	client, err := newBazarrClient(ctx, env, key)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	settings, err := client.settings(ctx)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	enabled := bazarrEnabledProviders(settings)
+	before := strings.Split(env.Output("bazarr.providers", "turnedOn"), ",")
+	var add, off []string
+	for _, provider := range bazarrProvidersOwned {
+		switch {
+		case slices.Contains(enabled, provider):
+		case slices.Contains(before, provider):
+			off = append(off, provider)
+		default:
+			add = append(add, provider)
+		}
+	}
+	if len(add) > 0 {
+		// Saving the list replaces it, so the person's go back with the
+		// stack's.
+		form := url.Values{}
+		for _, provider := range append(slices.Clone(enabled), add...) {
+			form.Add("settings-general-enabled_providers", provider)
+		}
+		if err := client.saveSettings(ctx, form); err != nil {
+			return stacks.Result{}, err
+		}
+		if settings, err = client.settings(ctx); err != nil {
+			return stacks.Result{}, err
+		}
+		enabled = bazarrEnabledProviders(settings)
+		for _, provider := range add {
+			if !slices.Contains(enabled, provider) {
+				return stacks.Result{}, fmt.Errorf("Bazarr did not keep the subtitle source %s turned on", provider)
+			}
+		}
+		env.Logf("turned on the subtitle sources %s", strings.Join(add, ", "))
+	}
+	var on []string
+	for _, provider := range bazarrProvidersOwned {
+		if slices.Contains(enabled, provider) {
+			on = append(on, provider)
+		}
+	}
+	// Every one of the stack's that is on now counts as turned on once,
+	// whoever did it: turned off later, it stays off.
+	turnedOn := slices.Clone(on)
+	for _, provider := range before {
+		if provider != "" && !slices.Contains(turnedOn, provider) {
+			turnedOn = append(turnedOn, provider)
+		}
+	}
+	slices.Sort(turnedOn)
+	message := "Subtitles come from " + strings.Join(on, ", ")
+	if len(on) == 0 {
+		message = "None of the subtitle sources that need no account is on"
+	}
+	if len(off) > 0 {
+		message += "; " + strings.Join(off, ", ") + " stay off, as you set them"
+	}
+	if others := len(enabled) - len(on); others > 0 {
+		message += fmt.Sprintf(", and %d source%s of your own", others, map[bool]string{true: "", false: "s"}[others == 1])
+	}
+	return stacks.Result{Message: message, Outputs: map[string]string{"turnedOn": strings.Join(turnedOn, ",")}}, nil
+}
+
+func bazarrEnabledProviders(settings bazarrSettings) []string {
+	listed, _ := settings["general"]["enabled_providers"].([]any)
+	var enabled []string
+	for _, entry := range listed {
+		if name, ok := entry.(string); ok && name != "" {
+			enabled = append(enabled, name)
+		}
+	}
+	return enabled
 }

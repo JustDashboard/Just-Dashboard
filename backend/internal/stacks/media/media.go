@@ -18,7 +18,7 @@ import (
 // changes in a way an existing stack should be configured again for.
 const (
 	ID      = "media"
-	Version = "1.0.0"
+	Version = "1.1.0"
 )
 
 // Template ids of the presets: reviewed Compose templates in
@@ -65,6 +65,10 @@ const (
 	VariableRadarrAPIKey   = "RADARR_API_KEY"
 	VariableSonarrAPIKey   = "SONARR_API_KEY"
 	VariableProwlarrAPIKey = "PROWLARR_API_KEY"
+	// VariableLoginPassword is the password the person chose for every app
+	// when deploying (the templates' login-password input). It seeds the
+	// stack's login only while the stack has none.
+	VariableLoginPassword = "MEDIA_LOGIN_PASSWORD"
 )
 
 // Option names and the variables that hold them.
@@ -74,15 +78,12 @@ const (
 	OptionRequestApproval   = "requestApproval"
 )
 
-// Credential names.
+// Credential names. Login is the one account every application signs in
+// with; the others are tokens the applications hand back, never revealed.
 const (
-	CredentialJellyfinAdmin   = "jellyfin-admin"
+	CredentialLogin           = stacks.CredentialLogin
+	CredentialLoginPrevious   = stacks.CredentialLoginPrevious
 	CredentialJellyfinAPIKey  = "jellyfin-api-key"
-	CredentialQBittorrent     = "qbittorrent-admin"
-	CredentialRadarrAdmin     = "radarr-admin"
-	CredentialSonarrAdmin     = "sonarr-admin"
-	CredentialProwlarrAdmin   = "prowlarr-admin"
-	CredentialBazarrAdmin     = "bazarr-admin"
 	CredentialBazarrAPIKey    = "bazarr-api-key"
 	CredentialSeerrAPIKey     = "seerr-api-key"
 	AdminUsername             = "admin"
@@ -91,6 +92,18 @@ const (
 	actionJellyfinTakenOver   = "jellyfin-owner"
 	actionSeerrTakenOver      = "seerr-owner"
 	actionQBittorrentPassword = "qbittorrent-password"
+)
+
+// The accounts a stack made before the one login (manifest 1.0.0) kept,
+// one per application. Each is read once more, to bring its application to
+// the login, and removed once that application answers to it.
+const (
+	legacyJellyfinAdmin = "jellyfin-admin"
+	legacyQBittorrent   = "qbittorrent-admin"
+	legacyRadarrAdmin   = "radarr-admin"
+	legacySonarrAdmin   = "sonarr-admin"
+	legacyProwlarrAdmin = "prowlarr-admin"
+	legacyBazarrAdmin   = "bazarr-admin"
 )
 
 // Manifest is the media stack.
@@ -148,12 +161,8 @@ func Manifest() *stacks.Manifest {
 			{Name: OptionRequestApproval, Variable: "MEDIA_REQUEST_APPROVAL", Default: "admin"},
 		},
 		Credentials: []stacks.CredentialSpec{
-			{Name: CredentialJellyfinAdmin, Service: "jellyfin", Label: "Jellyfin administrator (also signs in to Seerr)", Username: AdminUsername, Length: generatedPasswordLength},
-			{Name: CredentialQBittorrent, Service: "qbittorrent", Label: "qBittorrent web interface", Username: AdminUsername, Length: generatedPasswordLength},
-			{Name: CredentialRadarrAdmin, Service: "radarr", Label: "Radarr", Username: AdminUsername, Length: generatedPasswordLength},
-			{Name: CredentialSonarrAdmin, Service: "sonarr", Label: "Sonarr", Username: AdminUsername, Length: generatedPasswordLength},
-			{Name: CredentialProwlarrAdmin, Service: "prowlarr", Label: "Prowlarr", Username: AdminUsername, Length: generatedPasswordLength},
-			{Name: CredentialBazarrAdmin, Service: "bazarr", Label: "Bazarr", Username: AdminUsername, Length: generatedPasswordLength},
+			{Name: CredentialLogin, Label: "Every app", Username: AdminUsername, Length: generatedPasswordLength},
+			{Name: CredentialLoginPrevious, Label: "The login before the last change, until every app takes the new one", Internal: true},
 			{Name: CredentialJellyfinAPIKey, Service: "jellyfin", Label: "Jellyfin API key the stack uses", Internal: true},
 			{Name: CredentialBazarrAPIKey, Service: "bazarr", Label: "Bazarr API key the stack uses", Internal: true},
 			{Name: CredentialSeerrAPIKey, Service: "seerr", Label: "Seerr API key the stack uses", Internal: true},
@@ -181,19 +190,23 @@ func steps() []stacks.Step {
 			After: []string{"jellyfin.setup", "storage.folders"}, Timeout: short, Attempts: 5, Run: jellyfinLibraries},
 		{ID: "qbittorrent.auth", Service: "qbittorrent", Title: "Give qBittorrent's web interface its own password", Stage: stacks.StageInitialize,
 			Timeout: short, Attempts: 8, Run: qbittorrentAuth},
+		{ID: "jellyfin.proxy", Service: "jellyfin", Title: "Have Jellyfin see each visitor's own address behind the proxy", Stage: stacks.StageInitialize,
+			After: []string{"jellyfin.setup"}, Timeout: short, Attempts: 5, Run: jellyfinProxy},
 		{ID: "qbittorrent.categories", Service: "qbittorrent", Title: "Set download folders and the movies and tv categories", Stage: stacks.StageInitialize,
 			After: []string{"qbittorrent.auth", "storage.folders"}, Timeout: short, Attempts: 5, Run: qbittorrentCategories},
-		{ID: "radarr.auth", Service: "radarr", Title: "Secure Radarr with its own sign-in", Stage: stacks.StageInitialize,
+		{ID: "qbittorrent.address", Service: "qbittorrent", Title: "Let qBittorrent's web interface answer at its address", Stage: stacks.StageInitialize,
+			After: []string{"qbittorrent.auth"}, Timeout: short, Attempts: 5, Run: qbittorrentAddress},
+		{ID: "radarr.auth", Service: "radarr", Title: "Secure Radarr with the stack's sign-in at its address", Stage: stacks.StageInitialize,
 			Timeout: long, Attempts: 8, Run: radarrAuth},
 		{ID: "radarr.rootfolder", Service: "radarr", Title: "Point Radarr at the Movies library", Stage: stacks.StageInitialize,
 			After: []string{"radarr.auth", "storage.folders"}, Timeout: short, Attempts: 5, Run: radarrRootFolder},
-		{ID: "sonarr.auth", Service: "sonarr", Title: "Secure Sonarr with its own sign-in", Stage: stacks.StageInitialize,
+		{ID: "sonarr.auth", Service: "sonarr", Title: "Secure Sonarr with the stack's sign-in at its address", Stage: stacks.StageInitialize,
 			Timeout: long, Attempts: 8, Run: sonarrAuth},
 		{ID: "sonarr.rootfolder", Service: "sonarr", Title: "Point Sonarr at the Shows library", Stage: stacks.StageInitialize,
 			After: []string{"sonarr.auth", "storage.folders"}, Timeout: short, Attempts: 5, Run: sonarrRootFolder},
-		{ID: "prowlarr.auth", Service: "prowlarr", Title: "Secure Prowlarr with its own sign-in", Stage: stacks.StageInitialize,
+		{ID: "prowlarr.auth", Service: "prowlarr", Title: "Secure Prowlarr with the stack's sign-in at its address", Stage: stacks.StageInitialize,
 			Timeout: long, Attempts: 8, Run: prowlarrAuth},
-		{ID: "bazarr.auth", Service: "bazarr", Title: "Secure Bazarr with its own sign-in", Stage: stacks.StageInitialize,
+		{ID: "bazarr.auth", Service: "bazarr", Title: "Secure Bazarr with the stack's sign-in", Stage: stacks.StageInitialize,
 			Timeout: long, Attempts: 8, Run: bazarrAuth},
 
 		// Link: quality profiles first, since Seerr is told which one to use.
@@ -207,8 +220,12 @@ func steps() []stacks.Step {
 			Needs: []string{"radarr", "sonarr"}, After: []string{"prowlarr.auth", "radarr.auth", "sonarr.auth"}, Timeout: short, Attempts: 5, Run: prowlarrApps},
 		{ID: "bazarr.link", Service: "bazarr", Title: "Connect Bazarr to Radarr and Sonarr in your subtitle languages", Stage: stacks.StageLink,
 			Needs: []string{"radarr", "sonarr"}, After: []string{"bazarr.auth", "radarr.rootfolder", "sonarr.rootfolder"}, Timeout: short, Attempts: 5, Run: bazarrLink},
+		{ID: "bazarr.providers", Service: "bazarr", Title: "Turn on the subtitle sources that need no account", Stage: stacks.StageLink,
+			After: []string{"bazarr.auth"}, Timeout: short, Attempts: 5, Run: bazarrProviders},
 		{ID: "seerr.setup", Service: "seerr", Title: "Sign Seerr in to Jellyfin and sync its libraries", Stage: stacks.StageLink,
 			After: []string{"jellyfin.libraries"}, Timeout: long, Attempts: 8, Run: seerrSetup},
+		{ID: "seerr.address", Service: "seerr", Title: "Give Seerr its address and Jellyfin's", Stage: stacks.StageLink,
+			After: []string{"seerr.setup"}, Timeout: short, Attempts: 5, Run: seerrAddress},
 		{ID: "seerr.managers", Service: "seerr", Title: "Connect Seerr to Radarr and Sonarr", Stage: stacks.StageLink,
 			Needs: []string{"radarr", "sonarr"}, After: []string{"seerr.setup", "radarr.rootfolder", "sonarr.rootfolder", "recyclarr.sync"},
 			Timeout: short, Attempts: 5, Run: seerrManagers},
@@ -222,5 +239,7 @@ func steps() []stacks.Step {
 			After: []string{"seerr.managers", "seerr.policy"}, Timeout: short, Attempts: 3, Run: seerrVerify},
 		{ID: "prowlarr.sources", Service: "prowlarr", Title: "Check for a media source", Stage: stacks.StageVerify,
 			After: []string{"prowlarr.apps"}, Timeout: short, Attempts: 3, Run: prowlarrSources},
+		{ID: "login.verify", Service: "jellyfin", Title: "Check every app signs in with the one login", Stage: stacks.StageVerify,
+			After: loginSteps, Timeout: short, Attempts: 3, Run: loginVerify},
 	}
 }

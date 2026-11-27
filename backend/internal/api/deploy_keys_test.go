@@ -51,7 +51,7 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/environments/{env}/variables/import", "DELETE /deploy/{id}/environments/{env}/variables/{name}",
 	"PUT /deploy/{id}/environments/{env}/variables/{name}", "POST /deploy/{id}/environments/{env}/variables/{name}/generate",
 	"GET /deploy/{id}/environments/{env}/variables/{name}/reveal", "POST /deploy/{id}/environments/{env}/variables/{name}/rotate",
-	"GET /deploy/{id}/stack/credentials/{name}/reveal",
+	"GET /deploy/{id}/stack/credentials/{name}/reveal", "PUT /deploy/{id}/stack/login",
 	"POST /deploy/{id}/environments/{env}/watch-paths/simulate",
 	"PUT /deploy/{id}/game/properties",
 	"POST /deploy/{id}/previews/approvals/{approval}/approve", "POST /deploy/{id}/previews/approvals/{approval}/reject",
@@ -69,6 +69,9 @@ var sessionOnlyBefore = []string{
 	"POST /deploy/{id}/assistant",
 	"POST /deploy/drafts/{draft}/assistant",
 	"PUT /deploy/{id}/environments/{env}/vulnerabilities",
+	// A stack's apps given their addresses: a domain change, on a
+	// configuration save's terms.
+	"POST /deploy/{id}/stack/addresses",
 	// A copy of a release's data: asked for, read, kept and removed in a
 	// session, whatever the key.
 	"POST /deploy/{id}/environments/{env}/releases/{release}/data-copies",

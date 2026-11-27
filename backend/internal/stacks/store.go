@@ -330,6 +330,11 @@ func (c *storeCredentials) Put(ctx context.Context, name, value string) error {
 	return err
 }
 
+func (c *storeCredentials) Delete(ctx context.Context, name string) error {
+	_, err := c.store.db.ExecContext(ctx, `DELETE FROM deploy_stack_credentials WHERE project_id = ? AND name = ?`, c.projectID, name)
+	return err
+}
+
 // SetPreset records that the stack now runs another preset: its source was
 // changed to that preset's template.
 func (s *Store) SetPreset(ctx context.Context, projectID int64, preset string) error {

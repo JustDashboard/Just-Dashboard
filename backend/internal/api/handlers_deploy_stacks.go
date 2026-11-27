@@ -47,6 +47,11 @@ type stackCataloguePreset struct {
 type stackCatalogueItem struct {
 	stacks.ServiceInfo
 	Image string `json:"image"`
+	// Address is the label the service's own address is made with beside
+	// the domain (blueprint.ServiceHostname); empty for the primary service,
+	// which is the domain itself, and for one with no web interface.
+	Address string `json:"address,omitempty"`
+	Primary bool   `json:"primary,omitempty"`
 }
 
 func (s *Server) handleStackCatalogue(w http.ResponseWriter, _ *http.Request) error {
@@ -54,7 +59,7 @@ func (s *Server) handleStackCatalogue(w http.ResponseWriter, _ *http.Request) er
 	for _, manifest := range catalog.All() {
 		entry := stackCatalogueEntry{ID: manifest.ID, Version: manifest.Version, Title: manifest.Title,
 			Description: manifest.Description, Presets: []stackCataloguePreset{}, Services: []stackCatalogueItem{}}
-		images := map[string]string{}
+		images, labels := map[string]string{}, map[string]string{}
 		for _, preset := range manifest.Presets {
 			definition, err := blueprint.Get(preset.Template)
 			if err != nil {
@@ -66,12 +71,16 @@ func (s *Server) handleStackCatalogue(w http.ResponseWriter, _ *http.Request) er
 				if images[service.Name] == "" {
 					images[service.Name] = service.Image.Reference
 				}
+				if labels[service.Name] == "" {
+					labels[service.Name] = service.Address
+				}
 			}
 			entry.Presets = append(entry.Presets, stackCataloguePreset{Preset: preset,
 				TemplateVersion: definition.Version, MemoryMB: memory})
 		}
 		for _, service := range manifest.Services {
-			entry.Services = append(entry.Services, stackCatalogueItem{ServiceInfo: service, Image: images[service.Name]})
+			entry.Services = append(entry.Services, stackCatalogueItem{ServiceInfo: service, Image: images[service.Name],
+				Address: labels[service.Name], Primary: service.Access == stacks.AccessPublic})
 		}
 		out = append(out, entry)
 	}
@@ -81,24 +90,29 @@ func (s *Server) handleStackCatalogue(w http.ResponseWriter, _ *http.Request) er
 
 // stackState is GET /deploy/{id}/stack.
 type stackState struct {
-	StackID             string                   `json:"stackId"`
-	Title               string                   `json:"title"`
-	Version             string                   `json:"version"`
-	Preset              string                   `json:"preset"`
-	PresetTitle         string                   `json:"presetTitle"`
-	Status              stacks.Status            `json:"status"`
-	Summary             string                   `json:"summary"`
-	Readiness           stackReadiness           `json:"readiness"`
-	Services            []stackServiceState      `json:"services"`
-	Steps               []stackStepState         `json:"steps"`
-	Actions             []stacks.Action          `json:"actions"`
-	Credentials         []stackCredentialListing `json:"credentials"`
-	Limitations         []string                 `json:"limitations"`
-	LiveReleaseID       int64                    `json:"liveReleaseId,omitempty"`
-	ConfiguredReleaseID int64                    `json:"configuredReleaseId,omitempty"`
-	StartedAt           *time.Time               `json:"startedAt,omitempty"`
-	FinishedAt          *time.Time               `json:"finishedAt,omitempty"`
-	UpdatedAt           time.Time                `json:"updatedAt,omitzero"`
+	StackID     string                   `json:"stackId"`
+	Title       string                   `json:"title"`
+	Version     string                   `json:"version"`
+	Preset      string                   `json:"preset"`
+	PresetTitle string                   `json:"presetTitle"`
+	Status      stacks.Status            `json:"status"`
+	Summary     string                   `json:"summary"`
+	Readiness   stackReadiness           `json:"readiness"`
+	Services    []stackServiceState      `json:"services"`
+	Steps       []stackStepState         `json:"steps"`
+	Actions     []stacks.Action          `json:"actions"`
+	Credentials []stackCredentialListing `json:"credentials"`
+	// Login is the one account every application signs in with.
+	Login stackLoginState `json:"login"`
+	// Addresses are the service domains the deployment's configuration does
+	// not have yet, for "Give every app its address".
+	Addresses           stackAddresses `json:"addresses"`
+	Limitations         []string       `json:"limitations"`
+	LiveReleaseID       int64          `json:"liveReleaseId,omitempty"`
+	ConfiguredReleaseID int64          `json:"configuredReleaseId,omitempty"`
+	StartedAt           *time.Time     `json:"startedAt,omitempty"`
+	FinishedAt          *time.Time     `json:"finishedAt,omitempty"`
+	UpdatedAt           time.Time      `json:"updatedAt,omitzero"`
 }
 
 type stackReadiness struct {
@@ -120,6 +134,43 @@ type stackServiceState struct {
 	URL       string               `json:"url,omitempty"`
 	Container *stackContainerState `json:"container,omitempty"`
 	Status    string               `json:"status"`
+}
+
+type stackLoginState struct {
+	Username string `json:"username"`
+	Stored   bool   `json:"stored"`
+}
+
+// stackAddresses is the deployment's primary domain and the address each
+// service of the preset with a label would get beside it but has not got.
+// Primary is empty when the deployment has no primary domain; the
+// hostnames are then empty too, until one is given.
+type stackAddresses struct {
+	Primary string         `json:"primary"`
+	Missing []stackAddress `json:"missing"`
+}
+
+type stackAddress struct {
+	Service  string `json:"service"`
+	Title    string `json:"title"`
+	Hostname string `json:"hostname"`
+}
+
+// stackLoginRequest changes the stack's one password.
+type stackLoginRequest struct {
+	Password string `json:"password"`
+}
+
+// stackAddressesRequest names the primary domain when the deployment has
+// none; it is ignored otherwise.
+type stackAddressesRequest struct {
+	Domain string `json:"domain,omitempty"`
+}
+
+// stackAddressesAnswer is the release started with the added domains.
+type stackAddressesAnswer struct {
+	RunID   int64    `json:"runId"`
+	Domains []string `json:"domains"`
 }
 
 type stackContainerState struct {
@@ -236,6 +287,7 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		StackID: manifest.ID, Title: manifest.Title, Version: manifest.Version, Preset: preset.ID,
 		PresetTitle: preset.Title, Status: record.Status, Services: []stackServiceState{}, Steps: []stackStepState{},
 		Actions: []stacks.Action{}, Credentials: []stackCredentialListing{}, Limitations: preset.Limitations,
+		Addresses:     stackAddresses{Missing: []stackAddress{}},
 		LiveReleaseID: record.LiveReleaseID, ConfiguredReleaseID: record.ConfiguredReleaseID,
 		StartedAt: timePointer(record.StartedAt), FinishedAt: timePointer(record.FinishedAt), UpdatedAt: record.UpdatedAt,
 	}
@@ -304,9 +356,9 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		}
 	}
 	healthy := liveErr == nil
-	publicURL := ""
+	urls := map[string]string{}
 	if liveErr == nil {
-		publicURL = s.stackPublicURL(ctx, record.EnvironmentID)
+		urls = s.stackServiceURLs(ctx, manifest, record.EnvironmentID, live.ReleaseID)
 	}
 	images := map[string]string{}
 	if definition, err := blueprint.Get(preset.Template); err == nil {
@@ -320,9 +372,7 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		}
 		service := stackServiceState{Name: info.Name, Title: info.Title, Purpose: info.Purpose, Access: info.Access,
 			Image: images[info.Name], DocsURL: info.DocsURL, Status: serviceStatus(state.Status, byService[info.Name])}
-		if info.Access == stacks.AccessPublic {
-			service.URL = publicURL
-		}
+		service.URL = urls[info.Name]
 		if container, found := containers[info.Name]; found {
 			service.Container = &stackContainerState{Name: container.Name, State: container.State, Health: container.Health}
 			if container.Image != "" {
@@ -357,14 +407,83 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 		status["downloads.verify"] == stacks.StepDone
 
 	for _, credential := range manifest.Credentials {
-		if credential.Internal || !inPreset[credential.Service] {
+		if credential.Internal || (credential.Service != "" && !inPreset[credential.Service]) {
 			continue
 		}
 		state.Credentials = append(state.Credentials, stackCredentialListing{Name: credential.Name, Service: credential.Service,
 			Label: credential.Label, Username: credential.Username, Stored: stored[credential.Name]})
 	}
+	if login, found := manifest.CredentialByName(stacks.CredentialLogin); found {
+		state.Login = stackLoginState{Username: login.Username, Stored: stored[login.Name]}
+	}
+	if configuration, err := s.stackConfiguration(ctx, record); err == nil {
+		state.Addresses = stackMissingAddresses(manifest, preset, configuration.Domains, "")
+	}
 	state.Summary = stackSummary(state)
 	return state, nil
+}
+
+// stackConfiguration is the deployment's configuration as its Domains
+// settings read and save it.
+func (s *Server) stackConfiguration(ctx context.Context, record *stacks.Record) (*deploy.EnvironmentConfiguration, error) {
+	if s.modules.deployPlanning == nil {
+		return nil, errors.New("deployment planning is not running on this dashboard")
+	}
+	return s.modules.deployPlanning.EnvironmentConfiguration(ctx, record.ProjectID, record.EnvironmentID)
+}
+
+// stackPrimaryDomain is the domain the primary service is served at: the
+// first that names no other service and sends nobody elsewhere.
+func stackPrimaryDomain(domains []deploy.PlannedDomain) (deploy.PlannedDomain, bool) {
+	for _, domain := range domains {
+		if domain.Service == "" && !domain.Redirects() {
+			return domain, true
+		}
+	}
+	return deploy.PlannedDomain{}, false
+}
+
+// stackMissingAddresses is, for every service of the preset that has an
+// address label, the address it would get beside the primary domain when no
+// domain of the configuration serves it yet. The labels are the shipped
+// template's, whatever version the deployment runs: the 1.0.0 templates
+// already published those interfaces on loopback, where the route reaches
+// them. primary stands in for a deployment without a primary domain.
+func stackMissingAddresses(manifest *stacks.Manifest, preset stacks.Preset, domains []deploy.PlannedDomain, primary string) stackAddresses {
+	out := stackAddresses{Missing: []stackAddress{}}
+	if domain, found := stackPrimaryDomain(domains); found {
+		out.Primary = domain.Hostname
+	} else {
+		out.Primary = primary
+	}
+	served := map[string]bool{}
+	for _, domain := range domains {
+		if domain.Service != "" {
+			served[domain.Service] = true
+		}
+	}
+	labels := map[string]string{}
+	if definition, err := blueprint.Get(preset.Template); err == nil {
+		for _, service := range definition.Services {
+			labels[service.Name] = service.Address
+		}
+	}
+	inPreset := map[string]bool{}
+	for _, service := range preset.Services {
+		inPreset[service] = true
+	}
+	for _, info := range manifest.Services {
+		label := labels[info.Name]
+		if !inPreset[info.Name] || label == "" || served[info.Name] {
+			continue
+		}
+		hostname := ""
+		if out.Primary != "" {
+			hostname = blueprint.ServiceHostname(out.Primary, label)
+		}
+		out.Missing = append(out.Missing, stackAddress{Service: info.Name, Title: info.Title, Hostname: hostname})
+	}
+	return out
 }
 
 func serviceStatus(stack stacks.Status, steps []stacks.StepStatus) string {
@@ -497,6 +616,132 @@ func (s *Server) handleStackCredentialReveal(w http.ResponseWriter, r *http.Requ
 	return nil
 }
 
+// handleStackLoginUpdate changes the stack's one password: stored at once,
+// the one before kept until every application answers to it, and a pass
+// asked for that brings each application to it.
+func (s *Server) handleStackLoginUpdate(w http.ResponseWriter, r *http.Request) error {
+	record, _, err := s.stackRecord(r)
+	if err != nil {
+		return err
+	}
+	var request stackLoginRequest
+	if err := httpx.DecodeJSON(r, &request); err != nil {
+		return err
+	}
+	if err := stacks.ValidateLogin(request.Password); err != nil {
+		return httpx.Err(http.StatusUnprocessableEntity, "password_weak", err.Error())
+	}
+	if s.modules.stacks == nil {
+		return httpx.Err(http.StatusServiceUnavailable, "stacks_unavailable", "stack configuration is not running on this dashboard")
+	}
+	// A pass under way has read the password it is giving the applications;
+	// changing it under that pass could leave qBittorrent on a password the
+	// stack no longer holds.
+	if s.modules.stacks.Running(record.ProjectID) {
+		return httpx.Err(http.StatusConflict, "stack_busy", "the stack is being configured; change the password once this pass finishes")
+	}
+	if err := stacks.ChangeLogin(r.Context(), s.modules.stackStore.Credentials(record.ProjectID), request.Password); err != nil {
+		return err
+	}
+	status := stacks.StatusConfiguring
+	switch err := s.modules.stacks.Request(r.Context(), record.ProjectID); {
+	case errors.Is(err, stacks.ErrWaiting), errors.Is(err, stacks.ErrNotAPreset):
+		// Stored for the first pass there is, which reads it.
+		status = stacks.StatusWaiting
+	case errors.Is(err, stacks.ErrBusy):
+		// A pass started between the check and the change: ask for another,
+		// which runs once it ends.
+		if err := s.modules.stackStore.RequestPass(r.Context(), record.ProjectID); err != nil {
+			return err
+		}
+	case err != nil:
+		return err
+	}
+	httpx.SetAudit(r, "deploy.stack.login.update", strconv.FormatInt(record.ProjectID, 10), map[string]any{
+		"stack": record.StackID, "preset": record.Preset,
+	})
+	httpx.JSON(w, http.StatusAccepted, stackConfigureAnswer{Status: status})
+	return nil
+}
+
+// handleStackAddresses gives every service of the preset that has an address
+// label and no domain its address beside the primary domain: the domains are
+// saved as a Domains settings save saves them, with its checks and its audit,
+// and a release is started as "Deploy changes" starts one.
+func (s *Server) handleStackAddresses(w http.ResponseWriter, r *http.Request) error {
+	record, manifest, err := s.stackRecord(r)
+	if err != nil {
+		return err
+	}
+	var request stackAddressesRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := httpx.DecodeJSON(r, &request); err != nil {
+			return err
+		}
+	}
+	preset, found := manifest.PresetByID(record.Preset)
+	if !found {
+		return httpx.Err(http.StatusConflict, "stack_not_preset", "the stack's preset is not one this dashboard ships")
+	}
+	configuration, err := s.stackConfiguration(r.Context(), record)
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	domains := append([]deploy.PlannedDomain(nil), configuration.Domains...)
+	primary, hasPrimary := stackPrimaryDomain(domains)
+	added := []string{}
+	if !hasPrimary {
+		hostname := strings.TrimSuffix(strings.ToLower(strings.TrimSpace(request.Domain)), ".")
+		if hostname == "" {
+			return httpx.Err(http.StatusUnprocessableEntity, "stack_no_domain", "the deployment has no domain to put the apps' addresses beside; give one")
+		}
+		primary = deploy.PlannedDomain{Hostname: hostname, HTTPS: true, Ownership: deploy.OwnershipManaged}
+		domains = append(domains, primary)
+		added = append(added, hostname)
+	}
+	missing := stackMissingAddresses(manifest, preset, domains, "")
+	if len(missing.Missing) == 0 {
+		return httpx.Err(http.StatusConflict, "stack_addresses_present", "every app of the stack already has an address")
+	}
+	for _, address := range missing.Missing {
+		// Served as the primary is: over HTTPS when it is, and through the
+		// tunnel when it is, since a server behind one may take no traffic
+		// of its own.
+		domains = append(domains, deploy.PlannedDomain{
+			Hostname: address.Hostname, HTTPS: primary.HTTPS, Tunnel: primary.Tunnel,
+			Ownership: deploy.OwnershipManaged, Service: address.Service,
+		})
+		added = append(added, address.Hostname)
+	}
+	saved, detail, err := s.saveDeploymentConfiguration(r, record.ProjectID, record.EnvironmentID, deploy.ConfigurationWriteRequest{
+		Revision: configuration.Revision, Build: configuration.Build, Runtime: configuration.Runtime,
+		Dependencies: configuration.Dependencies, Checks: configuration.Checks, Domains: domains,
+	})
+	if err != nil {
+		return err
+	}
+	s.recordAudit(r, "deploy.configuration.update", strconv.FormatInt(record.EnvironmentID, 10), detail)
+	project, err := s.modules.deployStore.Get(r.Context(), record.ProjectID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	principal := httpx.MustPrincipal(r)
+	run, err := s.enqueueNormalizedDeploymentAtSource(r.Context(), project, record.EnvironmentID,
+		deploy.OperationDeploy, 0, deploy.TriggerManual, principal.Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		nil, "", "", saved.Revision)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	s.recordAudit(r, "deploy.run.request", fmt.Sprint(run.ID), map[string]any{
+		"deploymentId": record.ProjectID, "environmentId": record.EnvironmentID, "operation": deploy.OperationDeploy,
+	})
+	httpx.SetAudit(r, "deploy.stack.addresses", strconv.FormatInt(record.ProjectID, 10), map[string]any{
+		"stack": record.StackID, "domains": added, "runId": run.ID,
+	})
+	httpx.JSON(w, http.StatusAccepted, stackAddressesAnswer{RunID: run.ID, Domains: added})
+	return nil
+}
+
 // registerStack records a deployment made from a stack's preset, in the
 // request that committed it, so its first release is configured as soon as
 // it is live.
@@ -546,16 +791,69 @@ func (s *Server) stackLiveRelease(ctx context.Context, environmentID int64) (sta
 	return live, err
 }
 
+// stackServiceURLs are the addresses the live release serves each service
+// at, from the domains its runtime snapshot records: an HTTPS one when a
+// service has one, the primary domain for the public service. A release
+// whose snapshot cannot be read, and a tailnet-only one, fall back to the
+// address the fleet gives the deployment, for the public service.
+func (s *Server) stackServiceURLs(ctx context.Context, manifest *stacks.Manifest, environmentID, releaseID int64) map[string]string {
+	public := ""
+	for _, service := range manifest.Services {
+		if service.Access == stacks.AccessPublic && public == "" {
+			public = service.Name
+		}
+	}
+	var domains []deploy.PlannedDomain
+	if s.modules.deployRuns != nil && releaseID > 0 {
+		domains, _ = s.modules.deployRuns.ReleaseDomains(ctx, releaseID)
+	}
+	urls := stackURLsOf(public, domains)
+	if urls[public] == "" {
+		if address := s.stackPublicURL(ctx, environmentID); address != "" {
+			urls[public] = address
+		}
+	}
+	return urls
+}
+
+// stackURLsOf is each service's address among a release's domains: an HTTPS
+// one (or one through the tunnel, which Cloudflare serves over HTTPS) when it
+// has one, else the first; a domain with no service is the public one's.
+func stackURLsOf(public string, domains []deploy.PlannedDomain) map[string]string {
+	urls := map[string]string{}
+	secure := map[string]bool{}
+	for _, domain := range domains {
+		if domain.Redirects() || domain.Hostname == "" {
+			continue
+		}
+		service := domain.Service
+		if service == "" {
+			service = public
+		}
+		https := domain.HTTPS || domain.Tunnel
+		if _, found := urls[service]; found && (secure[service] || !https) {
+			continue
+		}
+		scheme := "http://"
+		if https {
+			scheme = "https://"
+		}
+		urls[service], secure[service] = scheme+domain.Hostname, https
+	}
+	return urls
+}
+
 // stackPublicURL is the address the deployment's domain gives its public
 // service, read as the fleet reads a deployment's endpoint: the
-// environment's first domain, else a tailnet-only environment's address.
-// "" when it has neither.
+// environment's first domain that serves the primary service, else a
+// tailnet-only environment's address. "" when it has neither.
 func (s *Server) stackPublicURL(ctx context.Context, environmentID int64) string {
 	var endpoint string
 	if err := s.Store.DB.QueryRowContext(ctx, `
 		SELECT COALESCE(NULLIF((
 		         SELECT d.resource_id FROM deploy_dependencies d
 		          WHERE d.environment_id = ? AND d.kind = 'domain'
+		            AND COALESCE(json_extract(d.config_json, '$.service'), '') = ''
 		          ORDER BY d.id LIMIT 1
 		       ), ''), (
 		         SELECT x.url FROM deploy_preview_addresses x
@@ -586,6 +884,7 @@ func (s *Server) newStackService() *stacks.Service {
 		Variables: func(ctx context.Context, projectID, environmentID int64) (map[string]string, error) {
 			return s.modules.deployPlanning.LiteralVariableValues(ctx, projectID, environmentID)
 		},
-		Log: s.Log,
+		PublicURLs: s.stackServiceURLs,
+		Log:        s.Log,
 	})
 }

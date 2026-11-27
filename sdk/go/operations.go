@@ -2748,6 +2748,23 @@ func (c *Client) SharedVariables(ctx context.Context, opts ...RequestOption) ([]
 	return out, nil
 }
 
+// StackAddresses is POST /deploy/{id}/stack/addresses: give every app of the stack its own address
+// beside the primary domain: the missing domains are saved as the Domains settings save them and a
+// release is started; the body's domain is used, as the primary, only when the deployment has
+// none.
+//
+// 409 stack_addresses_present when every app has one, 422 stack_no_domain when there is no primary
+// domain and none was given.
+//
+// A deploy key: allowed.
+func (c *Client) StackAddresses(ctx context.Context, id int64, body StackAddressesRequest, opts ...RequestOption) (*StackAddressesAnswer, error) {
+	var out StackAddressesAnswer
+	if err := c.do(ctx, "POST", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/addresses", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // StackCatalogue is GET /deploy/stacks: list the smart stacks: each preset with the template it
 // deploys, its memory and disk estimate and what it cannot do, and the services.
 //
@@ -2775,8 +2792,9 @@ func (c *Client) StackConfigure(ctx context.Context, id int64, opts ...RequestOp
 	return &out, nil
 }
 
-// StackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal an account the
-// stack created; audited without its value.
+// StackCredentialReveal is GET /deploy/{id}/stack/credentials/{name}/reveal: reveal the stack's
+// one login (name login), which every application signs in with as admin; audited without its
+// value.
 //
 // Only an interactive session may call it; no key reaches it.
 func (c *Client) StackCredentialReveal(ctx context.Context, id int64, name string, opts ...RequestOption) (*StackCredentialReveal, error) {
@@ -2787,10 +2805,26 @@ func (c *Client) StackCredentialReveal(ctx context.Context, id int64, name strin
 	return &out, nil
 }
 
+// StackLoginUpdate is PUT /deploy/{id}/stack/login: change the password every application of the
+// stack signs in with; the previous one is kept until every application takes the new one, and a
+// configuration pass is asked for; audited without the value.
+//
+// 422 password_weak when the password breaks the dashboard's password rule, 409 stack_busy while a
+// pass runs.
+//
+// Only an interactive session may call it; no key reaches it.
+func (c *Client) StackLoginUpdate(ctx context.Context, id int64, body StackLoginRequest, opts ...RequestOption) (*StackConfigureAnswer, error) {
+	var out StackConfigureAnswer
+	if err := c.do(ctx, "PUT", "/deploy/"+strconv.FormatInt(id, 10)+"/stack/login", nil, body, &out, opts); err != nil {
+		return nil, err
+	}
+	return &out, nil
+}
+
 // StackState is GET /deploy/{id}/stack: read a stack deployment's state: whether it is installed,
-// healthy, connected and able to play and to acquire, each service's container and private
-// address, each configuration step, the actions only a person can take, and the accounts it
-// created.
+// healthy, connected and able to play and to acquire, each service's container, public address and
+// loopback address, each configuration step, the actions only a person can take, the one login,
+// and the apps' addresses the configuration does not have yet.
 //
 // 404 stack_not_found when the deployment is not a stack.
 //

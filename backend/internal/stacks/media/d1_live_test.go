@@ -286,7 +286,7 @@ func (s *liveStack) snapshot(ctx context.Context) string {
 	}
 	if s.containers["qbittorrent"] != "" {
 		base, _ := s.env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
-		password, _, _ := s.env.LookupCredential(ctx, CredentialQBittorrent)
+		password, _, _ := s.env.LookupCredential(ctx, CredentialLogin)
 		api := &qbittorrentAPI{env: s.env, base: base}
 		if outcome, err := api.signIn(ctx, password); err != nil || outcome != qbittorrentAccepted {
 			s.t.Fatalf("snapshot qbittorrent sign-in: %v %d", err, outcome)
@@ -324,7 +324,7 @@ func (s *liveStack) snapshot(ctx context.Context) string {
 	slices.Sort(lines)
 	state["folders"] = lines
 	secrets := []string{liveRadarrKey, liveSonarrKey}
-	for _, name := range []string{CredentialJellyfinAdmin, CredentialJellyfinAPIKey, CredentialQBittorrent, CredentialSeerrAPIKey} {
+	for _, name := range []string{CredentialLogin, CredentialJellyfinAPIKey, CredentialLogin, CredentialSeerrAPIKey} {
 		value, _, _ := s.env.LookupCredential(ctx, name)
 		state["credential "+name] = value
 		secrets = append(secrets, value)
@@ -522,7 +522,7 @@ func TestLiveCompleteStepsConfigureOnceAndThenChangeNothing(t *testing.T) {
 
 	t.Run("a qBittorrent password somebody changed is an action, without a sign-in", func(t *testing.T) {
 		base, _ := stack.env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
-		password, _, _ := stack.env.LookupCredential(ctx, CredentialQBittorrent)
+		password, _, _ := stack.env.LookupCredential(ctx, CredentialLogin)
 		api := &qbittorrentAPI{env: stack.env, base: base}
 		if outcome, err := api.signIn(ctx, password); err != nil || outcome != qbittorrentAccepted {
 			t.Fatalf("sign-in: %v %d", err, outcome)
@@ -634,7 +634,7 @@ func TestLiveJellyfinSetUpBySomeoneElseIsAnAction(t *testing.T) {
 			t.Fatalf("pass %d: sign-in tried = %v", pass, tried)
 		}
 	}
-	if _, found, _ := stack.env.LookupCredential(ctx, CredentialJellyfinAdmin); !found {
+	if _, found, _ := stack.env.LookupCredential(ctx, CredentialLogin); !found {
 		t.Fatal("no password was made for the person to set")
 	}
 	if _, found, _ := stack.env.LookupCredential(ctx, CredentialJellyfinAPIKey); found {

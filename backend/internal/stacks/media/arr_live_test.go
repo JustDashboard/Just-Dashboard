@@ -241,7 +241,7 @@ func liveArrDrift(ctx context.Context, t *testing.T, env *stacks.DockerEnv, step
 	if err := radarr.call(ctx, http.MethodPut, "config/host/1", host, nil); err != nil {
 		t.Fatal(err)
 	}
-	password, _ := env.Credential(ctx, CredentialRadarrAdmin)
+	password, _ := env.Credential(ctx, CredentialLogin)
 	if signedIn, err := radarr.signIn(ctx, AdminUsername, password); err != nil || signedIn {
 		t.Fatalf("the password change by hand did not take: %v %v", signedIn, err)
 	}
@@ -454,7 +454,7 @@ func liveArrWait(ctx context.Context, t *testing.T, env *stacks.DockerEnv, servi
 // categories.
 func liveArrPrepareQBittorrent(ctx context.Context, t *testing.T, env *stacks.DockerEnv) {
 	t.Helper()
-	password, err := env.Credential(ctx, CredentialQBittorrent)
+	password, err := env.Credential(ctx, CredentialLogin)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -607,7 +607,7 @@ func liveArrSecrets(ctx context.Context, t *testing.T, env *stacks.DockerEnv, va
 	for _, value := range variables {
 		secrets = append(secrets, value)
 	}
-	for _, name := range []string{CredentialRadarrAdmin, CredentialSonarrAdmin, CredentialProwlarrAdmin, CredentialBazarrAdmin, CredentialQBittorrent, CredentialBazarrAPIKey} {
+	for _, name := range []string{CredentialLogin, CredentialLogin, CredentialLogin, CredentialLogin, CredentialLogin, CredentialBazarrAPIKey} {
 		if value, found, err := env.LookupCredential(ctx, name); err == nil && found {
 			secrets = append(secrets, value)
 		}

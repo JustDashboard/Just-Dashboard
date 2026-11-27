@@ -381,29 +381,44 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 	if err := httpx.DecodeJSON(r, &request); err != nil {
 		return err
 	}
+	configuration, detail, err := s.saveDeploymentConfiguration(r, projectID, environmentID, request)
+	if err != nil {
+		return err
+	}
+	httpx.SetAudit(r, "deploy.configuration.update", strconv.FormatInt(environmentID, 10), detail)
+	httpx.JSON(w, http.StatusOK, configuration)
+	return nil
+}
+
+// saveDeploymentConfiguration is a configuration save with every check the
+// settings' save makes, and the detail its audit records. A stack's "Give
+// every app its address" saves its domains through it.
+func (s *Server) saveDeploymentConfiguration(
+	r *http.Request, projectID, environmentID int64, request deploy.ConfigurationWriteRequest,
+) (*deploy.EnvironmentConfiguration, map[string]any, error) {
 	if httpx.MustPrincipal(r).DeployKey() {
 		current, err := s.keyEnvironmentGuard(r.Context(), projectID, environmentID)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
 		if reasons := hostAuthority(current.Source, request.Build, request.Runtime); len(reasons) > 0 {
-			return refuseHostAuthority("this configuration", reasons)
+			return nil, nil, refuseHostAuthority("this configuration", reasons)
 		}
 		// Who may open a tailnet-only deployment is a person's decision: a
 		// key that could change it could let anyone on the tailnet in, or
 		// take the deployment off its public route.
 		if !sameTailnetPublication(current.Runtime.Tailnet, request.Runtime.Tailnet) {
-			return refuseForDeployKey("a deploy key cannot change whether a deployment is tailnet-only or who on the tailnet may open it")
+			return nil, nil, refuseForDeployKey("a deploy key cannot change whether a deployment is tailnet-only or who on the tailnet may open it")
 		}
 	}
 	if err := s.refuseSleepWithContainerSchedules(r.Context(), projectID, environmentID, request.Runtime); err != nil {
-		return err
+		return nil, nil, err
 	}
 	configuration, err := s.modules.deployPlanning.SaveEnvironmentConfiguration(
 		r.Context(), projectID, environmentID, request,
 	)
 	if err != nil {
-		return mapDeploymentPlanningError(err)
+		return nil, nil, mapDeploymentPlanningError(err)
 	}
 	detail := map[string]any{
 		"deploymentId": projectID, "environmentId": environmentID, "revision": configuration.Revision,
@@ -414,9 +429,7 @@ func (s *Server) handleDeploymentConfigurationSave(w http.ResponseWriter, r *htt
 		// The list itself, so the trail says who was let in and when.
 		detail["tailnet"] = map[string]any{"allow": append([]string{}, tailnet.Allow...)}
 	}
-	httpx.SetAudit(r, "deploy.configuration.update", strconv.FormatInt(environmentID, 10), detail)
-	httpx.JSON(w, http.StatusOK, configuration)
-	return nil
+	return configuration, detail, nil
 }
 
 // withholdGeneratedValue keeps a generated secret from a deploy key: variables

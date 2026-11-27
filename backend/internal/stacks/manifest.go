@@ -72,7 +72,8 @@ type Option struct {
 
 // CredentialSpec is a secret the stack keeps for itself. Internal ones are
 // tokens an application handed back for the stack's own use; the others are
-// accounts a person signs in with and may reveal.
+// accounts a person signs in with and may reveal. One with no service is the
+// whole stack's: the one login every application signs in with.
 type CredentialSpec struct {
 	Name     string `json:"name"`
 	Service  string `json:"service"`
@@ -152,7 +153,7 @@ func (m *Manifest) Validate() error {
 	}
 	credentials := map[string]bool{}
 	for _, credential := range m.Credentials {
-		if credential.Name == "" || credentials[credential.Name] || !services[credential.Service] {
+		if credential.Name == "" || credentials[credential.Name] || (credential.Service != "" && !services[credential.Service]) {
 			return fmt.Errorf("stack %s: credential %q is empty, repeated or for no service", m.ID, credential.Name)
 		}
 		credentials[credential.Name] = true

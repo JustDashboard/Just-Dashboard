@@ -12,7 +12,9 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"slices"
 	"strings"
+	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 )
@@ -117,8 +119,14 @@ func (q *qbittorrentAPI) signOut(ctx context.Context) {
 var errQBittorrentBanned = stacks.Permanent(errors.New("qBittorrent is refusing sign-ins from the dashboard for an hour after too many wrong passwords; run the setup again after that"))
 
 // qbittorrentAuth replaces the temporary password the image prints with the
-// stack's own. Authentication stays as the image has it: on for every
-// address, this one included.
+// stack's one login, and brings a qBittorrent on an older password of the
+// stack's (its own from before the one login, or the login before its last
+// change) to the login. Authentication stays as the image has it: on for
+// every address, this one included.
+//
+// Five refused sign-ins shut an address out for an hour, so the password is
+// first matched offline against the settings file, and only the one it holds
+// is ever tried.
 func qbittorrentAuth(ctx context.Context, env stacks.Env) (stacks.Result, error) {
 	base, err := env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
 	if err != nil {
@@ -136,51 +144,65 @@ func qbittorrentAuth(ctx context.Context, env stacks.Env) (stacks.Result, error)
 		return stacks.Result{}, reply.unexpected("qBittorrent's web interface is not ready")
 	}
 
-	stored, haveStored, err := env.LookupCredential(ctx, CredentialQBittorrent)
+	login, older, err := loginCandidates(ctx, env, legacyQBittorrent)
 	if err != nil {
 		return stacks.Result{}, err
 	}
 	config, configErr := env.ReadFile(ctx, "qbittorrent", qbittorrentConfigFile)
-	passwordSet, matches := false, false
+	passwordSet, current := false, ""
 	if configErr == nil {
-		passwordSet, matches = qbittorrentPasswordState(config, stored)
+		for _, candidate := range append([]string{login}, older...) {
+			set, matches := qbittorrentPasswordState(config, candidate)
+			passwordSet = set
+			if matches {
+				current = candidate
+				break
+			}
+		}
+	} else if _, haveLegacy, err := env.LookupCredential(ctx, legacyQBittorrent); err != nil {
+		return stacks.Result{}, err
+	} else {
+		// Without the file, one try: the password this stack set last.
+		passwordSet, current = true, login
+		if haveLegacy && len(older) > 0 {
+			current = older[len(older)-1]
+		}
 	}
 
-	// The settings file says whether a password is set and whether it is the
-	// stack's, without spending one of the five tries. Without the file the
-	// stored password is tried once.
-	if haveStored && stored != "" && (matches || configErr != nil) {
-		outcome, err := api.signIn(ctx, stored)
+	if current != "" {
+		outcome, err := api.signIn(ctx, current)
 		if err != nil {
 			return stacks.Result{}, err
 		}
 		switch outcome {
-		case qbittorrentAccepted:
-			api.signOut(ctx)
-			return stacks.Result{Message: "qBittorrent's web interface signs in with the stack's password"}, nil
 		case qbittorrentBanned:
 			return stacks.Result{}, errQBittorrentBanned
+		case qbittorrentRefused:
+			if configErr == nil {
+				// Not retried: every refusal is one of five.
+				return stacks.Result{}, stacks.Permanent(errors.New("qBittorrent refused the password its own settings hold"))
+			}
+			return stacks.Result{}, qbittorrentPasswordAction()
 		}
-		if matches {
-			// Not retried: every refusal is one of five.
-			return stacks.Result{}, stacks.Permanent(errors.New("qBittorrent refused the password its own settings hold"))
+		if current == login {
+			api.signOut(ctx)
+			if err := forgetLegacy(ctx, env, legacyQBittorrent); err != nil {
+				return stacks.Result{}, err
+			}
+			return stacks.Result{Message: "qBittorrent's web interface signs in with the stack's password"}, nil
 		}
-	}
-	if passwordSet || (configErr != nil && haveStored) {
-		// A password the stack did not set. The stack's is made now so the
-		// page can show what to set.
-		if _, err := env.Credential(ctx, CredentialQBittorrent); err != nil {
+		defer api.signOut(ctx)
+		if err := qbittorrentSetPassword(ctx, env, api, login, current); err != nil {
 			return stacks.Result{}, err
 		}
-		return stacks.Result{}, stacks.NeedsAction(stacks.Action{
-			ID:      actionQBittorrentPassword,
-			Service: "qbittorrent",
-			Title:   "qBittorrent has a password this stack did not set",
-			Description: "Nothing was changed. Sign in to qBittorrent as " + AdminUsername + " and, under Tools, Options, WebUI, " +
-				"set the password to the qBittorrent one shown under this stack's credentials, then run the setup again. " +
-				"Radarr and Sonarr cannot hand it downloads until then.",
-			Blocking: true,
-		})
+		if err := forgetLegacy(ctx, env, legacyQBittorrent); err != nil {
+			return stacks.Result{}, err
+		}
+		env.Logf("changed qBittorrent's password to the stack's one login")
+		return stacks.Result{Message: "qBittorrent's web interface now signs in with the stack's password"}, nil
+	}
+	if passwordSet {
+		return stacks.Result{}, qbittorrentPasswordAction()
 	}
 
 	logs, err := env.Logs(ctx, "qbittorrent", 5000)
@@ -205,38 +227,72 @@ func qbittorrentAuth(ctx context.Context, env stacks.Env) (stacks.Result, error)
 		return stacks.Result{}, stacks.Permanent(errors.New("qBittorrent refused the temporary password from its log; restart the qbittorrent service so it prints a new one, then run the setup again"))
 	}
 	defer api.signOut(ctx)
-
-	password, err := env.Credential(ctx, CredentialQBittorrent)
-	if err != nil {
+	if err := qbittorrentSetPassword(ctx, env, api, login, temporary); err != nil {
 		return stacks.Result{}, err
-	}
-	preferences, err := json.Marshal(map[string]any{"web_ui_password": password})
-	if err != nil {
-		return stacks.Result{}, stacks.Permanent(err)
-	}
-	reply, err = api.call(ctx, http.MethodPost, "/api/v2/app/setPreferences", url.Values{"json": {string(preferences)}})
-	if err != nil {
-		return stacks.Result{}, err
-	}
-	if reply.Status != http.StatusOK {
-		return stacks.Result{}, reply.unexpected("qBittorrent did not take the new password", password, temporary)
-	}
-	api.signOut(ctx)
-
-	// Read back the only way a password can be: by signing in with it.
-	outcome, err = api.signIn(ctx, password)
-	if err != nil {
-		return stacks.Result{}, err
-	}
-	switch outcome {
-	case qbittorrentBanned:
-		return stacks.Result{}, errQBittorrentBanned
-	case qbittorrentRefused:
-		return stacks.Result{}, errors.New("qBittorrent took the new password but does not sign in with it yet")
 	}
 	env.Logf("replaced qBittorrent's temporary password with the stack's own")
 	return stacks.Result{Message: "Replaced qBittorrent's temporary password; " + AdminUsername + " signs in with the stack's"}, nil
 }
+
+func qbittorrentPasswordAction() error {
+	return stacks.NeedsAction(stacks.Action{
+		ID:      actionQBittorrentPassword,
+		Service: "qbittorrent",
+		Title:   "qBittorrent has a password this stack did not set",
+		Description: "Nothing was changed. Sign in to qBittorrent as " + AdminUsername + " and, under Tools, Options, WebUI, " +
+			"set the password to the stack's password shown on this page, then run the setup again. " +
+			"Radarr and Sonarr cannot hand it downloads until then.",
+		Blocking: true,
+	})
+}
+
+// qbittorrentSetPassword gives the signed-in web interface the login, reads
+// it back the only way a password can be (by signing in with it), and waits
+// for qBittorrent to write it to its settings file, which it does a moment
+// later: the next pass matches the file before it signs in.
+func qbittorrentSetPassword(ctx context.Context, env stacks.Env, api *qbittorrentAPI, login, old string) error {
+	preferences, err := json.Marshal(map[string]any{"web_ui_password": login})
+	if err != nil {
+		return stacks.Permanent(err)
+	}
+	reply, err := api.call(ctx, http.MethodPost, "/api/v2/app/setPreferences", url.Values{"json": {string(preferences)}})
+	if err != nil {
+		return err
+	}
+	if reply.Status != http.StatusOK {
+		return reply.unexpected("qBittorrent did not take the new password", login, old)
+	}
+	api.signOut(ctx)
+	outcome, err := api.signIn(ctx, login)
+	if err != nil {
+		return err
+	}
+	switch outcome {
+	case qbittorrentBanned:
+		return errQBittorrentBanned
+	case qbittorrentRefused:
+		return errors.New("qBittorrent took the new password but does not sign in with it yet")
+	}
+	for wait := 0; wait < 30; wait++ {
+		config, err := env.ReadFile(ctx, "qbittorrent", qbittorrentConfigFile)
+		if err == nil {
+			if _, matches := qbittorrentPasswordState(config, login); matches {
+				return nil
+			}
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(qbittorrentSaveWait):
+		}
+	}
+	env.Logf("qBittorrent signs in with the new password but has not written it to its settings file yet")
+	return nil
+}
+
+// qbittorrentSaveWait is how often the settings file is read back after a
+// change. A variable so tests need not wait.
+var qbittorrentSaveWait = time.Second
 
 // qbittorrentWebSettings is the web interface's part of the settings file.
 // 5.x keeps it in a [WebUI] section; versions before kept the same keys in
@@ -316,12 +372,9 @@ func qbittorrentCategories(ctx context.Context, env stacks.Env) (stacks.Result, 
 	if err != nil {
 		return stacks.Result{}, err
 	}
-	password, found, err := env.LookupCredential(ctx, CredentialQBittorrent)
+	password, err := stackLogin(ctx, env)
 	if err != nil {
 		return stacks.Result{}, err
-	}
-	if !found || password == "" {
-		return stacks.Result{}, errors.New("the stack has no qBittorrent password yet")
 	}
 	api := &qbittorrentAPI{env: env, base: base}
 	outcome, err := api.signIn(ctx, password)
@@ -440,4 +493,132 @@ func qbittorrentReadCategories(ctx context.Context, api *qbittorrentAPI) (map[st
 	}
 	categories := map[string]qbittorrentCategory{}
 	return categories, reply.decode(&categories)
+}
+
+// qbittorrentAddress lets the web interface be used at its public address
+// behind the proxy: reverse proxy support on, with the networks its
+// container is on as the trusted proxies, so the refused sign-ins it counts
+// towards a ban are the visitor's and not the proxy's; and, when it checks
+// the Host header against a list, its address on that list. Entries the
+// person added to either list stay.
+func qbittorrentAddress(ctx context.Context, env stacks.Env) (stacks.Result, error) {
+	base, err := env.BaseURL(ctx, "qbittorrent", PortQBittorrent)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	password, err := stackLogin(ctx, env)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	subnets, err := env.NetworkSubnets(ctx, "qbittorrent")
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	api := &qbittorrentAPI{env: env, base: base}
+	outcome, err := api.signIn(ctx, password)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	switch outcome {
+	case qbittorrentBanned:
+		return stacks.Result{}, errQBittorrentBanned
+	case qbittorrentRefused:
+		return stacks.Result{}, stacks.Permanent(errors.New("qBittorrent refused the stack's password"))
+	}
+	defer api.signOut(ctx)
+
+	read := func() (map[string]any, error) {
+		reply, err := api.call(ctx, http.MethodGet, "/api/v2/app/preferences", nil)
+		if err != nil {
+			return nil, err
+		}
+		if reply.Status != http.StatusOK {
+			return nil, reply.unexpected("qBittorrent did not give its settings")
+		}
+		preferences := map[string]any{}
+		return preferences, reply.decode(&preferences)
+	}
+	preferences, err := read()
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	if _, known := preferences["web_ui_reverse_proxy_enabled"]; !known {
+		return stacks.Result{}, stacks.Permanent(errors.New("this qBittorrent has no reverse proxy settings"))
+	}
+	host := ""
+	if address, found := env.PublicURL("qbittorrent"); found {
+		if parsed, err := url.Parse(address); err == nil {
+			host = parsed.Hostname()
+		}
+	}
+	change := qbittorrentAddressChange(preferences, subnets, host)
+	if len(change) > 0 {
+		encoded, err := json.Marshal(change)
+		if err != nil {
+			return stacks.Result{}, stacks.Permanent(err)
+		}
+		reply, err := api.call(ctx, http.MethodPost, "/api/v2/app/setPreferences", url.Values{"json": {string(encoded)}})
+		if err != nil {
+			return stacks.Result{}, err
+		}
+		if reply.Status != http.StatusOK {
+			return stacks.Result{}, reply.unexpected("qBittorrent did not take its reverse proxy settings", password)
+		}
+		if preferences, err = read(); err != nil {
+			return stacks.Result{}, err
+		}
+		if again := qbittorrentAddressChange(preferences, subnets, host); len(again) > 0 {
+			return stacks.Result{}, fmt.Errorf("qBittorrent's reverse proxy settings read back different from what was saved: %v", again)
+		}
+		env.Logf("qBittorrent trusts the proxy at %s", strings.Join(subnets, ", "))
+	}
+	message := "qBittorrent works behind the proxy and counts each visitor's own address"
+	if host != "" {
+		message += "; its address is " + host
+	}
+	return stacks.Result{Message: message}, nil
+}
+
+// qbittorrentAddressChange is what differs from the reverse proxy settings
+// the stack wants.
+func qbittorrentAddressChange(preferences map[string]any, subnets []string, host string) map[string]any {
+	change := map[string]any{}
+	if enabled, _ := preferences["web_ui_reverse_proxy_enabled"].(bool); !enabled {
+		change["web_ui_reverse_proxy_enabled"] = true
+	}
+	proxies, _ := preferences["web_ui_reverse_proxies_list"].(string)
+	if merged, grew := qbittorrentList(proxies, subnets); grew {
+		change["web_ui_reverse_proxies_list"] = merged
+	}
+	if checks, _ := preferences["web_ui_host_header_validation_enabled"].(bool); checks && host != "" {
+		domains, _ := preferences["web_ui_domain_list"].(string)
+		if merged, grew := qbittorrentList(domains, []string{host}); grew && !slices.Contains(qbittorrentListItems(domains), "*") {
+			change["web_ui_domain_list"] = merged
+		}
+	}
+	return change
+}
+
+// qbittorrentList adds entries to one of qBittorrent's semicolon lists,
+// keeping what is there.
+func qbittorrentList(current string, add []string) (string, bool) {
+	items := qbittorrentListItems(current)
+	grew := false
+	for _, entry := range add {
+		if !slices.Contains(items, entry) {
+			items = append(items, entry)
+			grew = true
+		}
+	}
+	return strings.Join(items, ";"), grew
+}
+
+func qbittorrentListItems(list string) []string {
+	var items []string
+	for _, item := range strings.FieldsFunc(list, func(r rune) bool { return r == ';' || r == ',' }) {
+		if item = strings.TrimSpace(item); item != "" {
+			items = append(items, item)
+		}
+	}
+	return items
 }
