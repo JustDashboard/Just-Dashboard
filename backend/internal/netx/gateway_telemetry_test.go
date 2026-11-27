@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // Totals that survive table replacement. The table's kernel handle names a
@@ -103,7 +103,7 @@ func TestAVanishedRuleOrTableIsCarriedIntoItsTotal(t *testing.T) {
 }
 
 func TestCounterTotalsPersistAndSeriesRecordDeltasAndGauges(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

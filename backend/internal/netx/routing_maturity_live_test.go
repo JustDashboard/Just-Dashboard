@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // TestLiveRoutingMaturity drives multipath routes, the extended rule
@@ -32,7 +32,7 @@ func TestLiveRoutingMaturity(t *testing.T) {
 	tunnelAnchorTargets = func(context.Context) []anchorTarget {
 		return []anchorTarget{{label: "the WireGuard endpoint 198.18.0.7 of a peer on wg0", args: []string{"-j", "route", "get", "198.18.0.7"}}}
 	}
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

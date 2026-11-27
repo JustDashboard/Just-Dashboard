@@ -10,7 +10,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 // egressHost answers every read an egress change makes, from the shared link
@@ -278,7 +278,7 @@ func TestEgressEditsAndAutomationAreGated(t *testing.T) {
 // A switch whose process died is settled from the decision the recovery
 // journal left in the spec, in the durable record.
 func TestEgressMonitorSettlesSwitchesAStoppedProcessLeft(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

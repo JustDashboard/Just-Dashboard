@@ -200,10 +200,13 @@ func normaliseBSON(v any) any {
 		return t.Hex()
 	case primitive.DateTime:
 		return t.Time().UTC().Format(time.RFC3339Nano)
+	case time.Time:
+		// Ahead of primitiveStringer, which a time.Time also is: its String
+		// is Go's debugging form, with the zone's name and a monotonic
+		// reading, not a date a grid can sort or an edit can send back.
+		return t.UTC().Format(time.RFC3339Nano)
 	case primitiveStringer:
 		return t.String()
-	case time.Time:
-		return t.UTC().Format(time.RFC3339Nano)
 	case float64:
 		// JSON has no NaN and no infinity; encoding one fails the whole
 		// response after its status line has gone out.
