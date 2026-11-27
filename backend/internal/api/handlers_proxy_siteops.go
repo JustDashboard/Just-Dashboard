@@ -162,7 +162,9 @@ func (s *Server) handleSiteDownload(w http.ResponseWriter, r *http.Request) erro
 	if err != nil {
 		return mapProxyError(err)
 	}
-	httpx.SetAudit(r, "proxy.site.download", name, map[string]any{"bytes": len(content)})
+	// A GET passes the audit middleware by, so a download that hands over
+	// what a site's file holds is recorded here or not at all.
+	s.recordAudit(r, "proxy.site.download", name, map[string]any{"bytes": len(content)})
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": file}))
 	_, _ = w.Write(content)
@@ -177,7 +179,7 @@ func (s *Server) handleSitesExport(w http.ResponseWriter, r *http.Request) error
 		return httpx.Internal(err)
 	}
 	name := fmt.Sprintf("nginx-sites-%s.tar.gz", at.UTC().Format("2006-01-02"))
-	httpx.SetAudit(r, "proxy.sites.export", "", map[string]any{"bytes": len(archive)})
+	s.recordAudit(r, "proxy.sites.export", "", map[string]any{"bytes": len(archive)})
 	w.Header().Set("Content-Type", "application/gzip")
 	w.Header().Set("Content-Disposition", mime.FormatMediaType("attachment", map[string]string{"filename": name}))
 	_, _ = w.Write(archive)

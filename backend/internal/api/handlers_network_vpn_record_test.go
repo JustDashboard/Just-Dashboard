@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/netx"
 )
 
@@ -55,32 +56,37 @@ func TestWireGuardSiteEditSpendsTheBudgetOnlyToWithdraw(t *testing.T) {
 	c, s := newClient(t)
 	dir := vpnRecordNetwork(t, s)
 	vpnWriteTunnel(t, dir, "wgsite", vpnPeerBlock(7, "Office", "site", "YicDMDytoyQTCDwFpZnM8lW9ToZcS06e6XJIV6YGdo0=", "10.8.0.3/32, 198.18.1.0/24, 198.18.2.0/24", "PersistentKeepalive = 25\n"))
+	// A budget that never refills, so what is counted below is the same
+	// however slowly the calls run. The server's own refills one every two
+	// seconds, and on a loaded machine that kept pace with slow calls: no
+	// withdrawal was ever refused.
+	const budget = 3
+	s.destrLim = httpx.NewLimiter(0, budget)
 	const path = "/api/v1/network/vpn/wireguard/wgsite/peers/7"
-	for i := 1; i <= 30; i++ {
+	const renames = 3 * budget
+	for i := 1; i <= renames; i++ {
 		w := c.do(http.MethodPatch, path, `{"name":"Office `+strconv.Itoa(i)+`"}`, nil)
 		if w.Code != http.StatusOK {
-			t.Fatalf("a rename: %d %s", w.Code, w.Body.String())
+			t.Fatalf("rename %d, with a budget of %d: %d %s", i, budget, w.Code, w.Body.String())
 		}
 	}
-	limited := 0
-	for i := 1; i <= 40 && limited == 0; i++ {
+	for i := 1; i <= budget+1; i++ {
 		w := c.do(http.MethodPatch, path, `{"remoteNetworks":["198.18.1.0/24"]}`, nil)
-		switch w.Code {
-		case http.StatusTooManyRequests:
-			limited = i
-		case http.StatusOK:
-		default:
-			t.Fatalf("a withdrawal: %d %s", w.Code, w.Body.String())
+		want := http.StatusOK
+		if i > budget {
+			want = http.StatusTooManyRequests
 		}
+		if w.Code != want {
+			t.Fatalf("withdrawal %d, with a budget of %d: %d, want %d: %s", i, budget, w.Code, want, w.Body.String())
+		}
+		// Adding the network back withdraws nothing, so it goes through with
+		// the budget spent too.
 		if w := c.do(http.MethodPatch, path, `{"remoteNetworks":["198.18.1.0/24","198.18.2.0/24"]}`, nil); w.Code != http.StatusOK {
-			t.Fatalf("adding it back: %d %s", w.Code, w.Body.String())
+			t.Fatalf("adding it back after withdrawal %d: %d %s", i, w.Code, w.Body.String())
 		}
-	}
-	if limited == 0 || limited > 15 {
-		t.Fatalf("withdrawing a site's network was limited after %d calls, want it to spend the destructive budget", limited)
 	}
 	text, _ := os.ReadFile(filepath.Join(dir, "wgsite.conf"))
-	if !strings.Contains(string(text), "# jd:name=Office 30\n") || !strings.Contains(string(text), "AllowedIPs = 10.8.0.3/32, 198.18.1.0/24, 198.18.2.0/24\n") {
+	if !strings.Contains(string(text), "# jd:name=Office "+strconv.Itoa(renames)+"\n") || !strings.Contains(string(text), "AllowedIPs = 10.8.0.3/32, 198.18.1.0/24, 198.18.2.0/24\n") {
 		t.Fatalf("file:\n%s", text)
 	}
 	var action, detail string

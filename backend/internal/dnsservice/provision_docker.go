@@ -11,12 +11,12 @@ import (
 	"strings"
 	"time"
 
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -123,14 +123,14 @@ func (d *dockerRuntime) Prepare(ctx context.Context, s provisionSpec, r Provisio
 	if err != nil || image != s.ImageID {
 		return r, errors.New("reviewed cached image changed before resource creation")
 	}
-	if _, err = d.cli.ContainerInspect(ctx, r.ContainerName); !errdefs.IsNotFound(err) {
+	if _, err = d.cli.ContainerInspect(ctx, r.ContainerName); !cerrdefs.IsNotFound(err) {
 		return r, errors.New("DNS container name is already present or cannot be inspected")
 	}
-	if _, err = d.cli.NetworkInspect(ctx, r.NetworkName, network.InspectOptions{}); !errdefs.IsNotFound(err) {
+	if _, err = d.cli.NetworkInspect(ctx, r.NetworkName, network.InspectOptions{}); !cerrdefs.IsNotFound(err) {
 		return r, errors.New("DNS network name is already present or cannot be inspected")
 	}
 	for _, name := range r.Volumes {
-		if _, err = d.cli.VolumeInspect(ctx, name); !errdefs.IsNotFound(err) {
+		if _, err = d.cli.VolumeInspect(ctx, name); !cerrdefs.IsNotFound(err) {
 			return r, errors.New("DNS volume name is already present or cannot be inspected")
 		}
 	}
@@ -328,12 +328,12 @@ func (d *dockerRuntime) Destroy(ctx context.Context, s provisionSpec, r Provisio
 	}
 	info, err := d.containerIdentity(ctx, s, r)
 	exists := err == nil
-	if err != nil && !errdefs.IsNotFound(err) {
+	if err != nil && !cerrdefs.IsNotFound(err) {
 		return errors.New("DNS cleanup refuses an unreadable or changed container identity")
 	}
 	for _, name := range r.Volumes {
 		v, e := d.cli.VolumeInspect(ctx, name)
-		if e != nil && !errdefs.IsNotFound(e) {
+		if e != nil && !cerrdefs.IsNotFound(e) {
 			return errors.New("DNS cleanup volume identity is unreadable")
 		}
 		if e == nil && (v.Name != name || v.Driver != "local" || !owned(v.Labels, s) || len(v.Options) != 0) {
@@ -342,7 +342,7 @@ func (d *dockerRuntime) Destroy(ctx context.Context, s provisionSpec, r Provisio
 	}
 	nw, e := d.cli.NetworkInspect(ctx, r.NetworkName, network.InspectOptions{})
 	networkExists := e == nil
-	if e != nil && !errdefs.IsNotFound(e) {
+	if e != nil && !cerrdefs.IsNotFound(e) {
 		return errors.New("DNS cleanup bridge identity is unreadable")
 	}
 	if networkExists {
@@ -365,7 +365,7 @@ func (d *dockerRuntime) Destroy(ctx context.Context, s provisionSpec, r Provisio
 		}
 	}
 	for _, name := range r.Volumes {
-		if err = d.cli.VolumeRemove(ctx, name, false); err != nil && !errdefs.IsNotFound(err) {
+		if err = d.cli.VolumeRemove(ctx, name, false); err != nil && !cerrdefs.IsNotFound(err) {
 			return errors.New("owned DNS volume could not be removed")
 		}
 	}

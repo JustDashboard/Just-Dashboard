@@ -6,6 +6,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +19,8 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dbx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
+	"github.com/go-sql-driver/mysql"
 )
 
 // migrationRehearser is the Databases owner's side of a migration rehearsal
@@ -29,9 +32,12 @@ import (
 // and on a network of its own that Docker gives no route out of, answering by
 // the production database's own names there. It is restored from the
 // point-in-time archive when the server has one, otherwise from the newest
-// native dump a backup job took of the database. Nothing is published, and
-// the dashboard reaches the copy only through `docker exec`, so the copy has
-// no address anything else on the host could use.
+// native dump a backup job took of the database. Nothing is published: the
+// copy's one address is on its own network, which Docker routes nothing from
+// another machine into. This process, on the host's network, reaches it there
+// to replay a SQL dump into it and to give its accounts passwords, both over
+// a connection (restoreDump, setCopyPassword); for everything else it goes
+// through `docker exec` and the server's own socket.
 type migrationRehearser struct {
 	server *Server
 }
@@ -138,6 +144,9 @@ type madeCopy struct {
 	dsn    string
 	info   *dbx.ConnInfo
 	engine rehearsalEngine
+	// port is the one the server listens on in its container, and so the
+	// copy's on its network.
+	port int
 	// recoveredTo is the moment a point-in-time recovery reached.
 	recoveredTo time.Time
 }
@@ -159,7 +168,7 @@ func (m *migrationRehearser) prepareCopy(ctx context.Context, plan copyPlan, emi
 	if err != nil {
 		return nil, rehearsalUnavailable("%s's address could not be read", conn.Name)
 	}
-	detail, _, err := s.databaseContainer(ctx, conn, info)
+	detail, port, err := s.databaseContainer(ctx, conn, info)
 	if err != nil {
 		return nil, rehearsalUnavailable("%s is not a database this dashboard runs in a container, so there is no server configuration to copy", conn.Name)
 	}
@@ -172,7 +181,7 @@ func (m *migrationRehearser) prepareCopy(ctx context.Context, plan copyPlan, emi
 		return nil, err
 	}
 	made := &madeCopy{
-		conn: conn, dsn: dsn, info: info, engine: engine,
+		conn: conn, dsn: dsn, info: info, engine: engine, port: port,
 		copy: deploy.RehearsalCopy{
 			Network: plan.network, Container: plan.container,
 			Database: deploy.RehearsalTarget{ConnectionID: conn.ID, Name: conn.Name, Engine: engine.name, Database: info.Database, Image: spec.Image},
@@ -259,15 +268,8 @@ func (m *migrationRehearser) prepareCopy(ctx context.Context, plan copyPlan, emi
 	if err := m.waitForCopy(ctx, plan.container, engine); err != nil {
 		return nil, rehearsalUnavailable("the copy did not start: %v", err)
 	}
-	if engine.name == "postgres" && info.User != "" && info.User != engine.user {
-		// A dump holds one database, not the accounts: the one the
-		// application signs in as is made with the password it signs in with.
-		if err := m.execSQL(ctx, plan.container, engine, info.Database, fmt.Sprintf(
-			`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = %s) THEN CREATE ROLE %s LOGIN PASSWORD %s; END IF; END $$; GRANT ALL ON DATABASE %s TO %s; ALTER DATABASE %s OWNER TO %s`,
-			sqlLiteral(info.User), sqlIdentifier(info.User), sqlLiteral(info.Password), sqlIdentifier(info.Database),
-			sqlIdentifier(info.User), sqlIdentifier(info.Database), sqlIdentifier(info.User))); err != nil {
-			return nil, rehearsalUnavailable("the application's account could not be made in the copy: %v", err)
-		}
+	if err := m.copyApplicationRole(ctx, plan.container, engine, info); err != nil {
+		return nil, rehearsalUnavailable("the application's account could not be made in the copy: %v", err)
 	}
 	staging, err := os.MkdirTemp(filepath.Join(s.Cfg.DataDir, "staging"), "rehearsal-*")
 	if err != nil {
@@ -283,7 +285,7 @@ func (m *migrationRehearser) prepareCopy(ctx context.Context, plan copyPlan, emi
 	if err != nil {
 		return nil, rehearsalUnavailable("the dump could not be read out of backup run %d: %v", runID, err)
 	}
-	if err := m.restoreDump(ctx, plan.container, engine, info, path, emit); err != nil {
+	if err := m.restoreDump(ctx, made, path, emit); err != nil {
 		return nil, rehearsalUnavailable("the dump could not be restored into the copy: %v", err)
 	}
 	made.copy.Source, made.copy.RestoreMS = source, time.Since(started).Milliseconds()
@@ -342,15 +344,19 @@ func copyCommand(command []string) []string {
 }
 
 // waitForCopy waits until the copy answers on its own TCP port, which the
-// images' entrypoints open only once initialisation is over.
+// images' entrypoints open only once initialisation is over. The ping's
+// password goes in through MYSQL_PWD, which mysqladmin and mariadb-admin read
+// (MySQL 8.4 and 9, MariaDB 11), so that it is on no command line; a ping
+// answers 0 once the server is up whether or not it signs in.
 func (m *migrationRehearser) waitForCopy(ctx context.Context, container string, engine rehearsalEngine) error {
-	check := []string{"pg_isready", "-h", "127.0.0.1", "-U", engine.user}
+	check, env := []string{"pg_isready", "-h", "127.0.0.1", "-U", engine.user}, []string(nil)
 	if engine.name != "postgres" {
-		check = []string{"sh", "-c", `mysqladmin ping -h 127.0.0.1 -uroot --password="$REHEARSAL_PASSWORD" --silent || mariadb-admin ping -h 127.0.0.1 -uroot --password="$REHEARSAL_PASSWORD" --silent`}
+		check = []string{"sh", "-c", `mysqladmin ping -h 127.0.0.1 -uroot --silent || mariadb-admin ping -h 127.0.0.1 -uroot --silent`}
+		env = []string{"MYSQL_PWD=" + engine.password}
 	}
 	last := ""
 	for {
-		code, err := m.server.modules.docker.ExecStream(ctx, container, check, "", []string{"REHEARSAL_PASSWORD=" + engine.password}, func(line dockerx.LogLine) { last = line.Text })
+		code, err := m.server.modules.docker.ExecStream(ctx, container, check, "", env, func(line dockerx.LogLine) { last = line.Text })
 		if err == nil && code == 0 {
 			return nil
 		}
@@ -368,46 +374,56 @@ func (m *migrationRehearser) waitForCopy(ctx context.Context, container string, 
 	}
 }
 
-// restoreDump copies the dump into the copy and replays it there with the
-// server's own tools, so the restore never depends on a client of another
-// release in the dashboard's image.
-func (m *migrationRehearser) restoreDump(ctx context.Context, container string, engine rehearsalEngine, info *dbx.ConnInfo, path string, emit func(deploy.BuildLog) error) error {
+// copyApplicationRole makes, in a PostgreSQL copy about to be restored from a
+// dump, the account the application signs in as, with the password it signs
+// in with, and gives it the database. A dump holds one database, not the
+// accounts; a copy recovered from an archive has them already.
+func (m *migrationRehearser) copyApplicationRole(ctx context.Context, container string, engine rehearsalEngine, info *dbx.ConnInfo) error {
+	if engine.name != "postgres" || info.User == "" || info.User == engine.user {
+		return nil
+	}
+	return m.execSQL(ctx, container, engine, info.Database,
+		`DO $$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = `+copyRoleSQL+`) THEN `+
+			`EXECUTE format('CREATE ROLE %I LOGIN PASSWORD %L', `+copyRoleSQL+`, `+copySecretSQL+`); END IF; END $$; `+
+			fmt.Sprintf(`GRANT ALL ON DATABASE %[1]s TO %[2]s; ALTER DATABASE %[1]s OWNER TO %[2]s`, sqlIdentifier(info.Database), sqlIdentifier(info.User)),
+		info.User, info.Password)
+}
+
+// restoreDump restores the dump into the copy.
+//
+// A SQL dump — a plain pg_dump, a mysqldump, the dashboard's own SQL — is
+// replayed by dbx over a connection to the copy, as a restore from the
+// Databases page is (dump_script.go), and never handed to psql or mysql:
+// each of those runs a shell for a line of what it is fed (`\!`, `system`),
+// and a backup holds whatever the database held (invariant 6). A pg_dump
+// archive is not a script, and is read by the copy's own pg_restore inside
+// it, so that restore never depends on a client of another release in the
+// dashboard's image.
+func (m *migrationRehearser) restoreDump(ctx context.Context, made *madeCopy, path string, emit func(deploy.BuildLog) error) error {
+	engine, info := made.engine, made.info
 	kind := dbx.DumpKind(path)
+	switch {
+	case kind == "SQL" || kind == "compressed SQL":
+		return m.replayDump(ctx, made, path, emit)
+	case engine.name == "postgres" && kind == "pg_dump archive":
+	default:
+		return fmt.Errorf("a %s dump of %s is not one a copy can be restored from", kind, engine.name)
+	}
 	target := "/tmp/rehearsal-dump"
-	if err := copyFileInto(ctx, m.server.modules.docker, container, path, "/tmp", "rehearsal-dump"); err != nil {
+	if err := copyFileInto(ctx, m.server.modules.docker, made.copy.Container, path, "/tmp", "rehearsal-dump"); err != nil {
 		return err
 	}
-	var command []string
-	switch {
-	case engine.name == "postgres" && kind == "pg_dump archive":
-		args := []string{"pg_restore", "--no-owner", "--no-privileges", "--exit-on-error", "-U", engine.user, "-d", info.Database}
-		if info.User != "" && info.User != engine.user {
-			args = append(args, "--role="+info.User)
-		}
-		command = append(args, target)
-	case engine.name == "postgres" && kind == "SQL":
-		// The rows a dump's SELECTs return (setval's) are not the run's to
-		// read; errors still are.
-		command = []string{"psql", "-v", "ON_ERROR_STOP=1", "-q", "-o", "/dev/null", "-U", engine.user, "-d", info.Database, "-f", target}
-	case engine.name == "postgres" && kind == "compressed SQL":
-		command = []string{"sh", "-c", `gunzip -c "$1" | psql -v ON_ERROR_STOP=1 -q -o /dev/null -U "$2" -d "$3"`, "sh", target, engine.user, info.Database}
-	case engine.name != "postgres" && (kind == "SQL" || kind == "compressed SQL"):
-		reader := `cat "$1"`
-		if kind == "compressed SQL" {
-			reader = `gunzip -c "$1"`
-		}
-		// MariaDB's images from 11 on carry only the mariadb client, MySQL's
-		// only mysql.
-		command = []string{"sh", "-c", `client=mysql; command -v mysql >/dev/null 2>&1 || client=mariadb; ` +
-			reader + ` | "$client" -uroot --password="$REHEARSAL_PASSWORD" "$2" 2>&1`, "sh", target, info.Database}
-	default:
-		return fmt.Errorf("a %s dump of %s is not one a rehearsal can replay", kind, engine.name)
+	command := []string{"pg_restore", "--no-owner", "--no-privileges", "--exit-on-error", "-U", engine.user, "-d", info.Database}
+	if info.User != "" && info.User != engine.user {
+		command = append(command, "--role="+info.User)
 	}
+	command = append(command, target)
 	var lastLine string
-	// A dump's DROP … IF EXISTS on an empty copy is a NOTICE per table:
-	// warnings and errors are what the transcript keeps.
-	env := []string{"REHEARSAL_PASSWORD=" + engine.password, "PGOPTIONS=-c client_min_messages=warning"}
-	code, err := m.server.modules.docker.ExecStream(ctx, container, command, "", env,
+	// The archive is restored over the server's socket, which the image's
+	// rules let its own account into without a password. A dump's DROP … IF
+	// EXISTS on an empty copy is a NOTICE per table: warnings and errors are
+	// what the transcript keeps.
+	code, err := m.server.modules.docker.ExecStream(ctx, made.copy.Container, command, "", []string{"PGOPTIONS=-c client_min_messages=warning"},
 		func(line dockerx.LogLine) {
 			lastLine = line.Text
 			_ = emit(deploy.BuildLog{Stream: line.Stream, Text: line.Text})
@@ -424,10 +440,108 @@ func (m *migrationRehearser) restoreDump(ctx context.Context, container string, 
 	return nil
 }
 
-func (m *migrationRehearser) execSQL(ctx context.Context, container string, engine rehearsalEngine, database, statement string) error {
+// replayDump replays a SQL dump into the copy over a connection, as the
+// server's superuser. dbx's progress goes to the transcript as the client's
+// output did, with the server's warnings and without its notices; a failure
+// names the statement and the line it began on.
+func (m *migrationRehearser) replayDump(ctx context.Context, made *madeCopy, path string, emit func(deploy.BuildLog) error) error {
+	dsn, err := m.copySuperuserDSN(ctx, made)
+	if err != nil {
+		return err
+	}
+	lines := func(stream string) func(string) {
+		return func(text string) { _ = emit(deploy.BuildLog{Stream: stream, Text: text}) }
+	}
+	_, err = dbx.RestoreWith(ctx, made.conn.Driver, dsn, path, dbx.RestoreOptions{
+		Database: made.info.Database, Progress: lines("stdout"), Warnings: lines("stderr"),
+	})
+	if err == nil {
+		return nil
+	}
+	err = withoutSecrets(dsn, err)
+	if made.engine.password == "" {
+		err = fmt.Errorf("%w (the server's container gives %s no password in its environment, and a SQL dump is replayed signed in as that account)", err, made.engine.user)
+	}
+	for _, text := range strings.Split(err.Error(), "\n") {
+		lines("stderr")(text)
+	}
+	return err
+}
+
+// copySuperuserDSN is how this process signs in to a copy as the server's
+// superuser: at the copy's address on its network, which this process — on
+// the host's network — reaches directly, as it reaches a data copy, with the
+// password the server's container was started with. TLS is taken when the
+// server offers it, unverified: a copy of a server that requires it refuses
+// anything else, and the certificate it serves names production, not the
+// copy's address.
+func (m *migrationRehearser) copySuperuserDSN(ctx context.Context, made *madeCopy) (string, error) {
+	address, err := containerAddress(ctx, m.server.modules.docker, made.copy.Container, made.copy.Network)
+	if err != nil {
+		return "", err
+	}
+	if made.port <= 0 {
+		return "", errors.New("the port the copy's server listens on is not known")
+	}
+	host := net.JoinHostPort(address, strconv.Itoa(made.port))
+	if made.conn.Driver == dbx.DriverMySQL {
+		cfg := mysql.NewConfig()
+		cfg.User, cfg.Passwd, cfg.Net, cfg.Addr, cfg.DBName = made.engine.user, made.engine.password, "tcp", host, made.info.Database
+		cfg.TLSConfig = "preferred"
+		return cfg.FormatDSN(), nil
+	}
+	u := url.URL{
+		Scheme: "postgres", User: url.UserPassword(made.engine.user, made.engine.password),
+		Host: host, Path: "/" + made.info.Database, RawQuery: "sslmode=prefer",
+	}
+	return u.String(), nil
+}
+
+// containerAddress is a container's address on one network, which this
+// process, on the host's network, reaches directly.
+func containerAddress(ctx context.Context, docker *dockerx.Client, container, network string) (string, error) {
+	if docker == nil {
+		return "", errors.New("this host has no Docker socket")
+	}
+	detail, err := docker.Inspect(ctx, container)
+	if cerrdefs.IsNotFound(err) {
+		return "", errors.New("the copy's container is gone")
+	}
+	if err != nil {
+		return "", err
+	}
+	for _, endpoint := range detail.NetworkList {
+		if endpoint.Name == network && endpoint.IPAddress != "" {
+			return endpoint.IPAddress, nil
+		}
+	}
+	return "", fmt.Errorf("the copy is not on its network (%s)", network)
+}
+
+// The two values a statement run by execSQL is handed, read as settings of
+// its session.
+const (
+	copyRoleSQL   = "current_setting('jd.role')"
+	copySecretSQL = "current_setting('jd.secret')"
+)
+
+// execSQL runs statements in a PostgreSQL copy as its superuser, through the
+// server's socket, which the image's rules let that account into without a
+// password, so that this works for a copy recovered from an archive as for
+// one restored from a dump.
+//
+// The role the statements act on and the password they give it are not
+// written into them. They go in through the client's environment, as
+// settings of the session (PGOPTIONS), and the statements read them as
+// copyRoleSQL and copySecretSQL: a command line is readable by every account
+// on the host (/proc/<pid>/cmdline), an environment only by the process's
+// own; and a statement whose text is a constant has no name in it that could
+// end the quoting around a DO block's body.
+func (m *migrationRehearser) execSQL(ctx context.Context, container string, engine rehearsalEngine, database, statement, role, secret string) error {
+	env := []string{"PGOPTIONS=-c jd.role=" + pgOptionsValue(role) + " -c jd.secret=" + pgOptionsValue(secret)}
 	var last string
 	code, err := m.server.modules.docker.ExecStream(ctx, container,
-		[]string{"psql", "-v", "ON_ERROR_STOP=1", "-q", "-U", engine.user, "-d", database, "-c", statement}, "", nil,
+		[]string{"psql", "-v", "ON_ERROR_STOP=1", "-q", "-U", engine.user, "-d", database, "-c", statement}, "", env,
 		func(line dockerx.LogLine) { last = line.Text })
 	if err != nil {
 		return err
@@ -436,6 +550,25 @@ func (m *migrationRehearser) execSQL(ctx context.Context, container string, engi
 		return errors.New(last)
 	}
 	return nil
+}
+
+// pgOptionsValue escapes a value for PGOPTIONS, which the server cuts into
+// options at white space and in which a backslash makes the byte after it
+// part of the value whatever it is. Every ASCII byte but a letter or a digit
+// is escaped, so nothing in a password can end the option or start another.
+// The bytes of a character beyond ASCII are left as they are: none of them is
+// white space, and a backslash between them would make the variable invalid
+// UTF-8, which the Engine API's JSON turns into U+FFFD.
+func pgOptionsValue(value string) string {
+	var b strings.Builder
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c < 0x80 && !('a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' || '0' <= c && c <= '9') {
+			b.WriteByte('\\')
+		}
+		b.WriteByte(c)
+	}
+	return b.String()
 }
 
 // rehearsalLockQuery reads the sessions waiting for a lock, and the locks
@@ -536,7 +669,7 @@ func (m *migrationRehearser) removeRehearsals(ctx context.Context, match map[str
 		if item.Labels[rehearsalLabel] == "" || keep[item.Labels[rehearsalLabel]] {
 			continue
 		}
-		if err := docker.RemoveContainer(ctx, item.ID, true, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.RemoveContainer(ctx, item.ID, true, true); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -548,7 +681,7 @@ func (m *migrationRehearser) removeRehearsals(ctx context.Context, match map[str
 		if volume.Labels[rehearsalLabel] == "" || keep[volume.Labels[rehearsalLabel]] || (match != nil && volume.Labels[rehearsalLabel] != match[rehearsalLabel]) {
 			continue
 		}
-		if err := docker.RemoveVolume(ctx, volume.Name, true); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.RemoveVolume(ctx, volume.Name, true); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -560,7 +693,7 @@ func (m *migrationRehearser) removeRehearsals(ctx context.Context, match map[str
 		if network.Labels[rehearsalLabel] == "" || keep[network.Labels[rehearsalLabel]] || (match != nil && network.Labels[rehearsalLabel] != match[rehearsalLabel]) {
 			continue
 		}
-		if err := docker.RemoveNetwork(ctx, network.ID); err != nil && !errdefs.IsNotFound(err) {
+		if err := docker.RemoveNetwork(ctx, network.ID); err != nil && !cerrdefs.IsNotFound(err) {
 			failures = append(failures, err)
 		}
 	}
@@ -699,7 +832,7 @@ func (m *migrationRehearser) recoverPITRCopy(ctx context.Context, srv *pitrServe
 	if err := docker.RemoveContainer(ctx, created, true, true); err != nil {
 		return source, time.Time{}, err
 	}
-	if err := docker.RemoveVolume(ctx, toolVolume, true); err != nil && !errdefs.IsNotFound(err) {
+	if err := docker.RemoveVolume(ctx, toolVolume, true); err != nil && !cerrdefs.IsNotFound(err) {
 		return source, time.Time{}, err
 	}
 	started, err := docker.Create(ctx, *copySpec, nil)

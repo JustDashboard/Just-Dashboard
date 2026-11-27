@@ -8,11 +8,11 @@ import (
 	"testing"
 	"unicode/utf8"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 )
 
 func TestRecordOutlivesACanceledRequest(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -29,7 +29,7 @@ func TestRecordOutlivesACanceledRequest(t *testing.T) {
 
 // A field a request chose is written twice, and bounded in both.
 func TestRecordBoundsTheFieldsARequestChooses(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

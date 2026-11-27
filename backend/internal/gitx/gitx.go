@@ -246,7 +246,7 @@ func (s *Service) Discover(ctx context.Context) ([]Repo, error) {
 		rootDepth := strings.Count(root, string(os.PathSeparator))
 		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
 			if err != nil || ctx.Err() != nil {
-				return nil //nolint:nilerr // an unreadable subtree is skipped, not fatal
+				return nil // an unreadable subtree is skipped, not fatal
 			}
 			if !d.IsDir() {
 				if d.Name() == ".git" {

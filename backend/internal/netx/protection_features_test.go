@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/store/storetest"
 	"golang.org/x/sys/unix"
 )
 
@@ -187,7 +187,7 @@ func containsPrefix(ps []netip.Prefix, want string) bool {
 }
 
 func TestOperatorActivityReadsSessionsAndSignIns(t *testing.T) {
-	st, err := store.Open(t.TempDir())
+	st, err := storetest.Open(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
 	}

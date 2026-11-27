@@ -193,13 +193,8 @@ func (c versionClause) allows(version languageVersion) bool {
 	case "<=":
 		return !c.version.less(version)
 	case "~>":
-		upper := c.version
-		switch {
-		case c.parts <= 1:
-			upper = languageVersion{c.version[0] + 1, 0, 0}
-		case c.parts == 2:
-			upper = languageVersion{c.version[0] + 1, 0, 0}
-		default:
+		upper := languageVersion{c.version[0] + 1, 0, 0}
+		if c.parts > 2 {
 			upper = languageVersion{c.version[0], c.version[1] + 1, 0}
 		}
 		return !version.less(c.version) && version.less(upper)

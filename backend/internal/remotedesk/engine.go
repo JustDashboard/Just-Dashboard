@@ -13,13 +13,13 @@ import (
 	"time"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/portalloc"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/mount"
 	"github.com/docker/docker/api/types/network"
 	"github.com/docker/docker/api/types/volume"
 	"github.com/docker/docker/client"
-	"github.com/docker/docker/errdefs"
 	"github.com/docker/go-connections/nat"
 )
 
@@ -171,7 +171,7 @@ func (d *dockerEngine) Status(ctx context.Context) EngineStatus {
 	}
 	st.Pulled = d.imagePinned(ctx) == nil
 	c, err := d.cli.ContainerInspect(ctx, d.spec.name)
-	if errdefs.IsNotFound(err) {
+	if cerrdefs.IsNotFound(err) {
 		return st
 	}
 	if err != nil {
@@ -495,7 +495,7 @@ func (d *dockerEngine) ensureNetwork(ctx context.Context, progress func(string))
 		}
 		return nil
 	}
-	if !errdefs.IsNotFound(err) {
+	if !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	progress("Creating the engine's bridge network")
@@ -511,7 +511,7 @@ func (d *dockerEngine) ensureVolume(ctx context.Context, progress func(string)) 
 		}
 		return nil
 	}
-	if !errdefs.IsNotFound(err) {
+	if !cerrdefs.IsNotFound(err) {
 		return err
 	}
 	progress("Creating the volume " + d.spec.volume)
@@ -528,7 +528,7 @@ func (d *dockerEngine) Remove(ctx context.Context) error {
 	}
 	c, err := d.cli.ContainerInspect(ctx, d.spec.name)
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 	case err != nil:
 		return err
 	case c.Config == nil || !d.mine(c.Config.Labels):

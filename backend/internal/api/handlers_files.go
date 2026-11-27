@@ -295,10 +295,8 @@ func uploadError(err error) error {
 		return httpx.Err(http.StatusRequestEntityTooLarge, "too_large",
 			fmt.Sprintf("the upload exceeds the %s limit for one request; a larger file is sent in pieces", files.HumanBytes(maxUploadBytes)))
 	}
-	if mapped := mapFileError(err); mapped != nil {
-		if apiErr, ok := mapped.(*httpx.APIError); ok && apiErr.Code != "unknown" && apiErr.Status != http.StatusBadRequest {
-			return mapped
-		}
+	if mapped, ok := mapFileError(err).(*httpx.APIError); ok && mapped.Status != http.StatusBadRequest {
+		return mapped
 	}
 	return httpx.BadRequest("upload failed: %v", err)
 }

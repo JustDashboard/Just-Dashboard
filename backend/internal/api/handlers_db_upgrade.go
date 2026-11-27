@@ -15,7 +15,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/jobs"
-	"github.com/docker/docker/errdefs"
+	cerrdefs "github.com/containerd/errdefs"
 	"github.com/go-chi/chi/v5"
 )
 
@@ -182,7 +182,7 @@ func (s *Server) previousState(ctx context.Context, rec *dbUpgradeRecord) string
 	}
 	detail, err := s.modules.docker.Inspect(ctx, rec.previousRef())
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		return "missing"
 	case err != nil:
 		return ""
@@ -477,7 +477,7 @@ func (s *Server) handleDBUpgradeComplete(w http.ResponseWriter, r *http.Request)
 	removed, warnings := []string{}, []string{}
 	previous, err := s.modules.docker.Inspect(ctx, rec.previousRef())
 	switch {
-	case errdefs.IsNotFound(err):
+	case cerrdefs.IsNotFound(err):
 		warnings = append(warnings, rec.Previous+" was already removed")
 	case err != nil:
 		return s.dockerErr(err)
