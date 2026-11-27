@@ -226,7 +226,7 @@ A Complete stack ends with one thing only the person may choose: a source they a
 The source routes let them pick and add it on the stack's Sources page; everything after the choice
 is the dashboard's.
 
-- **The catalogue** is Prowlarr's own `GET /api/v1/indexer/schema` (6.3 MB and 662 definitions at
+- **The catalogue** is Prowlarr's own indexer schema (its `indexer/schema` endpoint) (6.3 MB and 662 definitions at
   Prowlarr 3.1.0), read with a 32 MiB bound (a longer answer is an error, never a list cut short) and
   kept ten minutes per project and live release (`media.SourceCache`, about 6 MB each in memory, for
   at most four projects at once; requests at once share one read). Only torrent definitions are listed, since the stack downloads with qBittorrent, sorted by
@@ -437,6 +437,30 @@ on containers, networks and volumes of its own:
 - `TestLiveServarrBazarrRecyclarrSteps`: Radarr, Sonarr and Prowlarr report their addresses as the
   application URL; Bazarr reports the four sources it turned on as `Good` and holds none back.
   Whether each finds subtitles for a film was not tried: the test's library is empty.
+
+On 27 Nov 2026 the whole of this version was run on the same Docker-in-Docker dashboard, its Caddy
+ingress inside that daemon and every name plain HTTP (made-up names get no certificate there):
+
+- **The upgrade a stack made before it takes.** A Complete stack was deployed from template 1.0.0
+  by a dashboard of the base branch and left at `action_required`, then the dashboard was replaced
+  by this one on the same store. The first pass made Jellyfin's password the one login, moved the
+  other five applications to it, and `login.verify` finished; the revealed login signed in to
+  Jellyfin through its public route. "Give every app its address" saved six service domains and
+  started a release.
+- **That release found its predecessor's Compose files gone**, taken by the workspace sweep of
+  22 Nov (see [run workspaces](implementation.md)): it stopped the old release by its containers
+  and went live. Each of the seven names then answered through the ingress (Jellyfin, Seerr's sign-in,
+  the three managers' sign-in, qBittorrent's and Bazarr's pages), and every application took the
+  login at its own address; a wrong password was refused.
+- **The source picker:** a Generic Torznab source pointed at a Torznab server of the test's own on
+  the stack's network. An unreachable address answered `source_test_failed` with Prowlarr's reason;
+  the right one was tested, saved and synced in 15 s, appeared in Radarr and in Sonarr pointing at
+  Prowlarr's new indexer, and the stack turned `ready` with all five readiness facts. Removing it
+  and adding it again left one entry in each.
+- **The Stacks tab, in the real UI:** an Essential stack with a password typed into "Password for
+  every app" went through Configure and Review and was deployed; the login was that password, and
+  Jellyfin and Seerr took it at their addresses. A change of the login on the Complete stack reached
+  all seven applications.
 
 ## Not done yet
 
