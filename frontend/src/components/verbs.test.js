@@ -59,9 +59,35 @@ describe("VerbItems", () => {
     ])
     expect(html).toMatch(/role="menuitemcheckbox" aria-checked="true"[^>]*>.*Name/)
     expect(html).toMatch(/role="menuitemcheckbox" aria-checked="false"[^>]*>.*Size/)
-    // The tick is drawn for the current one only.
-    expect(html.match(/data-glyph/g)?.length).toBe(2)
-    expect(html.match(/<svg/g)?.length).toBe(3)
+    // The tick is drawn for the current one only, and is the only drawing.
+    expect(html).not.toContain("data-glyph")
+    expect(html.match(/<svg/g)?.length).toBe(1)
+  })
+
+  test("an item is its word, with no glyph in front of it, and a mark where it has one", () => {
+    const html = items([
+      { key: "restart", label: "Restart", icon: Glyph, run: () => {} },
+      { key: "rm", label: "Remove", icon: Glyph, danger: true, run: () => {} },
+      {
+        key: "colour",
+        label: "Colour",
+        icon: Glyph,
+        submenu: [
+          {
+            key: "red",
+            label: "Red",
+            icon: Glyph,
+            mark: h("span", { "data-swatch": "red" }),
+            run: () => {},
+          },
+        ],
+      },
+    ])
+    // Menus are words (standard.md): the operator asked for menus without a
+    // glyph beside every word. A swatch is what its item is, so it stays.
+    expect(html).not.toContain("data-glyph")
+    expect(html).toMatch(/data-part="item"[^>]*><span[^>]*>Restart<\/span>/)
+    expect(html).toMatch(/data-swatch="red".*Red/)
   })
 
   test("a verb with a submenu opens one level down with its verbs inside", () => {

@@ -13,6 +13,7 @@ import { ProductLogo } from "@/components/product-logo"
 import { Notice } from "@/components/state"
 import { Tag } from "@/components/tag"
 import { Button } from "@/components/ui/button"
+import { useStackState } from "@/components/deploy/stack/use-stack"
 import {
   InputGroup,
   InputGroupAddon,
@@ -39,6 +40,7 @@ const ACCESS_TAG: Record<BlueprintAccess["kind"], { label: string; tone?: "warni
   token: { label: "token generated here" },
   client: { label: "no sign-in page" },
   open: { label: "no sign-in at all", tone: "warning" },
+  managed: { label: "set up by the dashboard" },
   unavailable: { label: "no credential to hand over", tone: "warning" },
 }
 
@@ -48,6 +50,7 @@ const ACCESS_TITLE: Record<BlueprintAccess["kind"], string> = {
   token: "Sign in with the token generated here",
   client: "Nothing signs in through a browser",
   open: "This has no sign-in of its own",
+  managed: "The dashboard sets it up and keeps the login",
   unavailable: "There is no first credential this dashboard can give you",
 }
 
@@ -94,6 +97,11 @@ type Revealed = { username?: string; secret?: string }
  *
  * It is a plain block like every other on the Overview: a sign-in is a
  * reading of the project, not a card standing in front of it.
+ *
+ * A stack's preset (`managed`) has nothing left to claim: the dashboard set
+ * every application up before anyone could reach it, and its one login is the
+ * stack's own credential, revealed and changed on the Stack page. So the block
+ * links there instead of warning that the first visitor owns the account.
  */
 export function FirstSignIn({
   access,
@@ -119,6 +127,11 @@ export function FirstSignIn({
 }) {
   const [revealed, setRevealed] = useState<Revealed>()
   const [busy, setBusy] = useState(false)
+  // Whether there is a Stack page to send the reader to is the server's to
+  // say, as it is for the rail's row (one shared read): a preset's project
+  // the server does not call a stack has no login there to see.
+  const stack = useStackState(projectId, access.kind === "managed")
+  const stackPage = access.kind === "managed" && Boolean(stack.data)
   const target = url && access.path ? new URL(access.path, url).toString() : url
   const variables = `/deploy/${projectId}/settings/variables`
 
@@ -213,12 +226,21 @@ export function FirstSignIn({
         // looking for a login page that does not exist.
         title={access.kind === "client" ? "How to connect" : "First sign-in"}
         actions={
-          target && (
-            <Button variant="outline" size="sm" asChild>
-              <a href={target} target="_blank" rel="noreferrer noopener">
-                Open it <External className="size-3.5" />
-              </a>
-            </Button>
+          (target || stackPage) && (
+            <>
+              {stackPage && (
+                <Button variant="outline" size="sm" asChild>
+                  <Link href={`/deploy/${projectId}/stack`}>See the login</Link>
+                </Button>
+              )}
+              {target && (
+                <Button variant="outline" size="sm" asChild>
+                  <a href={target} target="_blank" rel="noreferrer noopener">
+                    Open it <External className="size-3.5" />
+                  </a>
+                </Button>
+              )}
+            </>
           )
         }
       />
@@ -243,6 +265,9 @@ export function FirstSignIn({
           </div>
         </div>
 
+        {/* Only an application that asks its first visitor to make the
+            account: a stack's (`managed`) was made by the dashboard before
+            the address answered anyone. */}
         {access.kind === "setup" && (
           <Notice title="Do this now" icon={Warning} tone="warning">
             Nobody owns this yet. The first person to open the address creates the account, so open

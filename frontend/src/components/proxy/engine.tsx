@@ -650,7 +650,6 @@ export function EngineMenu({
           <MenuVerb key={verb.key} verb={verb} />
         ))}
         <DropdownMenuItem disabled={refresh.refreshing} onSelect={() => refresh.run()}>
-          <RefreshClockwise className="size-3.5" />
           Refresh
           <DropdownMenuShortcut className="pl-4 tracking-normal">
             <PageAge at={refresh.at} refreshing={refresh.refreshing} />
@@ -676,7 +675,6 @@ function MenuVerb({ verb }: { verb: Verb }) {
       disabled={verb.disabled}
       onSelect={() => verb.run()}
     >
-      <verb.icon className="size-3.5" />
       {verb.label}
     </DropdownMenuItem>
   )

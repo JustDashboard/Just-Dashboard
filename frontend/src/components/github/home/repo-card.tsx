@@ -146,7 +146,7 @@ export function RepoCard({
                   )}
                 </span>
                 <DimActions className="-my-2 -mr-1.5 self-end">
-                  <VerbMenu glyphs={false} verbs={verbs} label={`Actions for ${repo.fullName}`} />
+                  <VerbMenu verbs={verbs} label={`Actions for ${repo.fullName}`} />
                 </DimActions>
                 <span
                   className="col-span-2 col-start-2 flex min-w-0 items-center gap-1.5 self-start text-hint text-muted-foreground"

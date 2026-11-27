@@ -505,9 +505,7 @@ export function GitHubListPage() {
       command={command}
       menu={
         <>
-          {menu.length > 0 && (
-            <VerbMenu verbs={menu} glyphs={false} label="More actions for GitHub" />
-          )}
+          {menu.length > 0 && <VerbMenu verbs={menu} label="More actions for GitHub" />}
           <span className="max-sm:hidden">
             <WorkspaceHelp compact />
           </span>
