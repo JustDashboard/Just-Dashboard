@@ -81,7 +81,7 @@
       "DatabasesBody": 939
     },
     "src/components/deploy/settings/domains.tsx": {
-      "DomainRow": 566
+      "DomainRow": 533
     },
     "src/components/deploy/settings/runtime.tsx": {
       "RuntimeForm": 1154

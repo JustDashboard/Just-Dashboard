@@ -2,7 +2,7 @@
 
 import { get } from "@/lib/api"
 import { usePoll } from "@/hooks/use-poll"
-import type { BlueprintDetail, SmartStackState } from "@/lib/types"
+import type { BlueprintDetail, SmartStackCatalogueEntry, SmartStackState } from "@/lib/types"
 
 /**
  * The reads a stack project makes, shared by its page, the project's rail and
@@ -42,4 +42,25 @@ export function useStackState(projectId: number, enabled: boolean, intervalMs = 
     [projectId],
     { enabled, key: `/deploy/${projectId}/stack` },
   )
+}
+
+/**
+ * A stack service's title by its Compose name ("seerr" is "Seerr"), for a
+ * domain row that says which app it routes to. The catalogue is read only
+ * where some name routes to a service of its own; without it, or for a name
+ * it does not list, the service's own name is said.
+ */
+export function useServiceTitles(enabled: boolean): (service: string) => string {
+  const catalogue = usePoll(
+    (signal) => get<SmartStackCatalogueEntry[]>("/deploy/stacks", undefined, signal),
+    0,
+    [],
+    { enabled, key: "/deploy/stacks" },
+  )
+  const titles = new Map(
+    (catalogue.data ?? []).flatMap((entry) =>
+      entry.services.map((service) => [service.name, service.title] as const),
+    ),
+  )
+  return (service) => titles.get(service) ?? service
 }

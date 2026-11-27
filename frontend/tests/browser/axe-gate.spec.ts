@@ -15,7 +15,7 @@ import {
   project,
 } from "./deploy-fixture"
 import { mockSections } from "./deploy-section-fixture"
-import { mockNewStack, mockStackProject } from "./deploy-stack-fixture"
+import { mockNewStack, mockStackProject, mockStackSources } from "./deploy-stack-fixture"
 import { mockEvents } from "./docker-events-fixture"
 import { mockDockerHost } from "./docker-fixture"
 import { mockImages } from "./docker-images-fixture"
@@ -317,6 +317,14 @@ const ROUTES: [name: string, url: string, mock: Mock][] = [
     SHOWCASE,
   ]),
   ["deploy__id__stack", "/deploy/7/stack", (page) => mockStackProject(page)],
+  [
+    "deploy__id__stack__sources",
+    "/deploy/7/stack/sources?definition=torznab",
+    async (page) => {
+      await mockStackProject(page)
+      await mockStackSources(page)
+    },
+  ],
   ["deploy__credentials", "/deploy/credentials", SHOWCASE],
   ["deploy__drains", "/deploy/drains", (page) => mockSections(page)],
   ["deploy__new", "/deploy/new", (page) => mockNewProject(page)],

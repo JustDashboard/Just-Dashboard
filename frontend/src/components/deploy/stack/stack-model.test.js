@@ -1,25 +1,31 @@
 import { expect, test } from "bun:test"
 import {
-  accessCounts,
-  accessSentence,
-  addressPort,
+  addressSentence,
+  addressesRefusal,
+  addressesSentence,
+  appReach,
   canConfigure,
   chosenPreset,
   configureRefusal,
   configureVerb,
   failedSteps,
   footprintWords,
+  isSourceAction,
+  listWords,
+  loginPasswordProblem,
   memoryWords,
+  missingHostnames,
+  nextSteps,
   orderedActions,
+  plannedAddresses,
   presetServices,
   readinessLines,
+  serviceHostname,
   serviceState,
   skippedLine,
-  splitCredentials,
   stackPollInterval,
   stageGroups,
   stepDetail,
-  tunnelFor,
 } from "./stack-model"
 
 const entry = {
@@ -34,10 +40,10 @@ const entry = {
     },
   ],
   services: [
-    { name: "radarr", access: "private" },
-    { name: "jellyfin", access: "public" },
-    { name: "seerr", access: "private" },
-    { name: "recyclarr", access: "worker" },
+    { name: "radarr", title: "Radarr", access: "private", address: "radarr" },
+    { name: "jellyfin", title: "Jellyfin", access: "public", primary: true },
+    { name: "seerr", title: "Seerr", access: "private", address: "requests" },
+    { name: "recyclarr", title: "Recyclarr", access: "worker" },
   ],
 }
 
@@ -49,13 +55,62 @@ test("a preset's services come in its own order, and one the catalogue does not 
     "radarr",
     "recyclarr",
   ])
-  expect(accessCounts(services)).toBe("1 public, 2 private, 1 background")
-  expect(accessCounts(presetServices(entry, entry.presets[0]))).toBe("1 public, 1 private")
-  expect(accessSentence(presetServices(entry, entry.presets[0]))).toBe(
-    "1 public, 1 private: public is on the project's address, private is on this server only (127.0.0.1).",
+  expect(addressSentence(presetServices(entry, entry.presets[0]))).toBe(
+    "Every app answers at its own HTTPS address beside the domain, and they all sign in with one password.",
   )
-  expect(accessSentence(services)).toMatch(/background has no web interface\.$/)
-  expect(accessSentence([])).toBe("")
+  expect(addressSentence(services)).toMatch(
+    /one password\. Recyclarr runs in the background with no web interface\.$/,
+  )
+  expect(addressSentence([{ title: "Jellyfin", access: "public" }])).toBe(
+    "Jellyfin answers at its own HTTPS address and signs in with the stack's one password.",
+  )
+  expect(addressSentence([{ title: "Recyclarr", access: "worker" }])).toBe("")
+  expect(addressSentence([])).toBe("")
+})
+
+test("an app's address is a sibling of the domain's first label, as the server makes it", () => {
+  expect(serviceHostname("media.example.com", "requests")).toBe("media-requests.example.com")
+  expect(serviceHostname("Media.Example.com.", "radarr")).toBe("media-radarr.example.com")
+  expect(serviceHostname("  media.home.example.co.uk ", "sonarr")).toBe(
+    "media-sonarr.home.example.co.uk",
+  )
+  // An apex has no first label to join: the label goes in front.
+  expect(serviceHostname("example.com", "requests")).toBe("requests.example.com")
+  expect(serviceHostname("localhost", "requests")).toBe("requests.localhost")
+  // The just-dashboard.com name and sslip.io are covered the same way.
+  expect(serviceHostname("media.acme.just-dashboard.com", "downloads")).toBe(
+    "media-downloads.acme.just-dashboard.com",
+  )
+  expect(serviceHostname("media-server-a1b2.203-0-113-7.sslip.io", "subtitles")).toBe(
+    "media-server-a1b2-subtitles.203-0-113-7.sslip.io",
+  )
+  // A first label that would make one longer than 63 is cut from its end.
+  const long = `${"a".repeat(60)}.example.com`
+  const cut = serviceHostname(long, "requests")
+  expect(cut.split(".")[0]).toBe(`${"a".repeat(54)}-requests`)
+  expect(cut.split(".")[0]).toHaveLength(63)
+  expect(serviceHostname(`${"b".repeat(54)}.example.com`, "requests").split(".")[0]).toHaveLength(
+    63,
+  )
+  expect(serviceHostname("", "requests")).toBe("")
+  expect(serviceHostname("media.example.com", "")).toBe("")
+})
+
+test("the Stacks tab shows the address each app gets, the primary on the domain itself", () => {
+  const services = presetServices(entry, entry.presets[1])
+  expect(plannedAddresses(services, "media.example.com")).toEqual([
+    { service: "jellyfin", title: "Jellyfin", hostname: "media.example.com" },
+    { service: "seerr", title: "Seerr", hostname: "media-requests.example.com" },
+    { service: "radarr", title: "Radarr", hostname: "media-radarr.example.com" },
+  ])
+  expect(plannedAddresses(services, "  ")).toEqual([])
+})
+
+test("lists of names read as a sentence", () => {
+  expect(listWords([])).toBe("")
+  expect(listWords(["Seerr"])).toBe("Seerr")
+  expect(listWords(["Seerr", "Radarr"])).toBe("Seerr and Radarr")
+  expect(listWords(["Seerr", "Radarr", "Sonarr"])).toBe("Seerr, Radarr and Sonarr")
 })
 
 test("the tab opens on the preset asked for, else the recommended one", () => {
@@ -220,30 +275,97 @@ test("a service's state is its setup's when that needs saying, else its containe
   })
 })
 
-test("a private address becomes a tunnel to its own port, and nothing without a port", () => {
-  expect(addressPort("127.0.0.1:23950")).toBe(23950)
-  expect(addressPort("[::1]:8080")).toBe(8080)
-  expect(addressPort("127.0.0.1")).toBeUndefined()
-  expect(addressPort("127.0.0.1:99999")).toBeUndefined()
-  expect(addressPort(undefined)).toBeUndefined()
-  expect(tunnelFor("127.0.0.1:23950", "dash.example.test")).toEqual({
-    command: "ssh -L 23950:127.0.0.1:23950 user@dash.example.test",
-    url: "http://127.0.0.1:23950",
+test("an app is opened at its address, a worker runs in the background, and none is not a link", () => {
+  expect(appReach({ access: "public", url: "https://media.example.com" })).toEqual({
+    kind: "open",
+    url: "https://media.example.com",
   })
-  expect(tunnelFor("127.0.0.1:23950", "").command).toBe(
-    "ssh -L 23950:127.0.0.1:23950 user@your-server",
-  )
-  expect(tunnelFor(undefined, "dash.example.test")).toBeUndefined()
+  expect(
+    appReach({
+      access: "private",
+      url: "https://media-requests.example.com",
+      address: "127.0.0.1:28055",
+    }),
+  ).toEqual({ kind: "open", url: "https://media-requests.example.com" })
+  expect(appReach({ access: "private", address: "127.0.0.1:28055" })).toEqual({
+    kind: "none",
+    detail: "Published on this server at 127.0.0.1:28055",
+  })
+  expect(appReach({ access: "private" })).toEqual({ kind: "none", detail: undefined })
+  expect(appReach({ access: "worker", address: "127.0.0.1:1" })).toEqual({ kind: "background" })
 })
 
-test("only an account that exists can be revealed", () => {
-  const { stored, pending } = splitCredentials([
-    { name: "jellyfin-admin", stored: true },
-    { name: "radarr-admin", stored: false },
-    { name: "sonarr-admin", stored: false },
+const missing = {
+  primary: "media.example.com",
+  missing: [
+    { service: "seerr", title: "Seerr", hostname: "media-requests.example.com" },
+    { service: "radarr", title: "Radarr", hostname: "media-radarr.example.com" },
+  ],
+}
+
+test("the next steps are what holds the stack from ready, then the apps with no address, then the rest", () => {
+  const actions = [
+    { id: "seerr-people", blocking: false },
+    { id: "media-source", blocking: true },
+  ]
+  expect(
+    nextSteps({ status: "action_required", actions, addresses: missing }).map((step) =>
+      step.kind === "action" ? step.action.id : step.kind,
+    ),
+  ).toEqual(["media-source", "addresses", "seerr-people"])
+  // Every app has its address: nothing to give.
+  expect(
+    nextSteps({
+      status: "ready",
+      actions: [],
+      addresses: { primary: "m.example.com", missing: [] },
+    }),
+  ).toEqual([])
+  // Before a release is live nothing is offered for the addresses.
+  expect(nextSteps({ status: "waiting", actions: [], addresses: missing })).toEqual([])
+  // A server older than the addresses says nothing of them.
+  expect(nextSteps({ status: "ready", actions: [] })).toEqual([])
+  expect(isSourceAction({ id: "media-source" })).toBe(true)
+  expect(isSourceAction({ id: "seerr-people" })).toBe(false)
+})
+
+test("the apps with no address are named, with where theirs go", () => {
+  expect(addressesSentence(missing)).toBe(
+    "Seerr and Radarr have no address yet. Each gets one beside media.example.com, and a deployment starts to serve them.",
+  )
+  expect(addressesSentence({ ...missing, missing: missing.missing.slice(0, 1) })).toBe(
+    "Seerr has no address yet. It gets one beside media.example.com, and a deployment starts to serve it.",
+  )
+  expect(addressesSentence({ primary: "", missing: missing.missing })).toMatch(
+    /^Seerr and Radarr have no address yet, and neither has the stack: give it a domain/,
+  )
+  // With no primary, the names are made from the domain typed in the dialog.
+  expect(
+    missingHostnames(
+      [
+        { service: "seerr", title: "Seerr", hostname: "" },
+        { service: "bazarr", title: "Bazarr", hostname: "" },
+        { service: "radarr", title: "Radarr", hostname: "media-radarr.example.com" },
+      ],
+      { seerr: "requests" },
+      "tv.example.org",
+    ),
+  ).toEqual([
+    { service: "seerr", title: "Seerr", hostname: "tv-requests.example.org" },
+    { service: "bazarr", title: "Bazarr", hostname: "" },
+    { service: "radarr", title: "Radarr", hostname: "media-radarr.example.com" },
   ])
-  expect(stored.map((credential) => credential.name)).toEqual(["jellyfin-admin"])
-  expect(pending).toBe(2)
+  expect(addressesRefusal("stack_addresses_present")).toBe("Every app already has its address.")
+  expect(addressesRefusal("stack_no_domain")).toMatch(/no domain yet/)
+  expect(addressesRefusal("forbidden")).toBeUndefined()
+})
+
+test("a new password for every app is held to the dashboard's own rule", () => {
+  expect(loginPasswordProblem("")).toBe("Type the new password.")
+  expect(loginPasswordProblem("Short1!")).toBe("Use at least 12 characters.")
+  expect(loginPasswordProblem("alllowercaseletters")).toMatch(/^Mix three/)
+  expect(loginPasswordProblem("Lower-and-UPPER")).toBeUndefined()
+  expect(loginPasswordProblem("fixture-Every-app-0001")).toBeUndefined()
 })
 
 test("a refused pass is said in words, and the button's verb follows the state", () => {

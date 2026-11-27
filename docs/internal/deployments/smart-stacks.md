@@ -264,6 +264,49 @@ is the dashboard's.
   is `403 source_needs_person`: what the assistant sends has passed through the model's provider,
   which is kept from every secret, so the person types it into the form, as a terminal's password is.
 
+## The Stacks tab and the Stack page
+
+The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
+`components/deploy/stack/` (the project's pages), its words and reads in the unit-tested
+`stack-model.ts` and `sources-model.ts`.
+
+- **The Stacks tab.** The domain input is filled with the server's hostname suggestion and is
+  required. Under it is the address each app will get, made in the browser by `serviceHostname`, a
+  copy of `blueprint.ServiceHostname` with the catalogue's `address` labels and `primary`. The two
+  must agree; `stack-model.test.js` holds the TS copy to the rule. The optional secret input
+  `login-password` is a password field held in memory only (`useMemoryState`, never the tab's
+  storage or `blueprintInputs`). A typed one is held to the dashboard's own rule (`passwordChecks`)
+  and handed to Configure as an environment row named by the input's variable
+  (`MEDIA_LOGIN_PASSWORD`), so it is sent with the draft's other typed variables and nowhere else.
+- **The Stack page** (`/deploy/[id]/stack`) is a launcher. It opens with the lead and the five facts,
+  then the one next step when something is left, then the apps and the login.
+  - Next steps come in this order: a blocking action, then "Give every app its address" when
+    `addresses.missing` is not empty, then the optional actions, then each failed step with its
+    error. The first one's command wears the brand.
+  - The `media-source` action links to the source picker.
+  - "Give every app its address" names the apps and their hostnames, confirms in a dialog and posts
+    `POST …/stack/addresses`. Without a primary domain the dialog asks for one, prefilled with the
+    hostname suggestion, and makes the names from the catalogue's labels. It then links to the run
+    it started.
+  - Each app is one row: what it is for, its address (`services[].url`), its state and **Open** in
+    a new tab. A worker says it runs in the background. An app with no address says so, with its
+    loopback address only as the line's tooltip; there is no tunnel or SSH anywhere.
+  - Beside the apps stands the one login (`login`, revealed through `…/credentials/login/reveal`),
+    with Show, Copy and **Change password**. That dialog checks the new password against the same
+    rule and sends `PUT …/stack/login`; a `password_weak` refusal is said in the dialog.
+- **Media sources** (`/deploy/[id]/stack/sources`) is a page, not a sheet.
+  - It lists the stack's sources, each with Remove behind its menu, confirmed.
+  - Under them is Prowlarr's catalogue, searched and filtered Public or Private (semi-private
+    counts as private). The list is cut to its first 60, with a line saying so.
+  - A source opens on the page's own address (`?definition=`): its fields as a form, then **Add**,
+    then what came of it in words. A password field is masked, the advanced fields sit behind More
+    settings, and a `source_test_failed` refusal is shown with Prowlarr's reason.
+  - From `xl` the catalogue stands beside the form as a rail; on a phone the page is one pane.
+  - Values typed here stay in the form: never in the address or the tab's storage.
+- **Domain rows.** A planned domain with a `service` says the app it routes to ("→ Seerr"), on the
+  configure step's extra hostnames and on Domains settings, with the title from the stack catalogue.
+  Every edit keeps `service` and `port` as they are.
+
 ## What the manager, subtitle and quality steps make
 
 What these steps own in each application, by the name they find it again with. Anything under
@@ -404,8 +447,8 @@ Said here so nobody builds on it by mistake:
 - Seerr's proxy support and Jellyfin's known proxies apply from each one's next start, which is the
   next deploy; the stack does not restart either.
 - Mounting an existing library folder from the host; media goes into the stack's own volume.
-- Hardware transcoding, and the Ultimate preset's optional modules. Subtitle sources that need an
-  account are added in Bazarr itself.
+- Hardware transcoding and the Ultimate preset's optional modules. Media sources are added from the
+  dashboard's source picker; a subtitle provider that needs an account is still set up in Bazarr.
 - Jellyfin is reachable at the deployment's domain from the moment the release is live, and its
   wizard is finished by the stack within seconds of that, as the single Jellyfin template has always
   left it to the first visitor. A deployment without a domain has no such window.
