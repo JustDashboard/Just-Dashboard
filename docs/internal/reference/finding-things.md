@@ -229,7 +229,8 @@ Each is a checklist. The linked document owns the rule; this only says which fil
 1. Mount it in the area's `mount<Area>Routes` (`api/handlers_<area>.go`) with `r.Method(…,
    s.handle(…))`, inside the group whose capability it needs.
 2. Write the handler beside it: decode with `httpx.DecodeJSON`, name the audit action with
-   `httpx.SetAudit`, return `httpx` errors.
+   `httpx.SetAudit`, return `httpx` errors. A GET records nothing through `SetAudit`; one worth a trail
+   writes its own entry with `s.recordAudit`.
 3. Add the response type to `lib/types.ts` and call it through `lib/api.ts`.
 4. A route under `/deploy` also needs a line in `deployOperations` (`api/deploy_openapi.go`) and
    the regenerated description and clients: [`../backend/deploy-api.md`](../backend/deploy-api.md).

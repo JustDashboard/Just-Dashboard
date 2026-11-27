@@ -129,6 +129,9 @@ instead, and credentials that fail are counted per address (below).
   handler writing an entry of its own), so `AuditRead`, `s.recordAudit` and the handlers' own entries
   record the same. WebSocket routes are GET and
   long-lived, so they call `s.recordAudit(...)` at open time — the event is "a terminal was opened".
+  `httpx.SetAudit` only names the entry this middleware writes, and it lets every GET by, so a GET
+  worth a trail (a download, an export) writes its own entry with `s.recordAudit` or `AuditRead`;
+  `TestNoGETHandlerOnlyLabelsAnAuditEntry` fails a GET handler that calls `SetAudit`.
 - **`httpx.RequireCSRF`** requires `X-JD-CSRF: 1` on every browser-session mutation, including login
   and partial 2FA sessions. The header makes a same-site sibling origin preflight, and this application
   grants no cross-origin browser access. Bearer tokens, agent mTLS and the HMAC webhook do not use
