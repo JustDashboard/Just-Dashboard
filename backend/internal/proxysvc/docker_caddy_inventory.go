@@ -65,7 +65,12 @@ func (c *dockerCaddy) vhosts(ctx context.Context) ([]VHost, error) {
 		if json.Unmarshal(adapted, &own) != nil {
 			return nil, ErrInvalidConf
 		}
-		names := caddyHostnames(own)
+		// Once each: a service domain is named by its site block and again
+		// by the matcher that sends it to its service.
+		names := []string{}
+		for _, name := range caddyHostnames(own) {
+			names = appendNew(names, name)
+		}
 		enabled := len(names) > 0
 		for _, name := range names {
 			enabled = enabled && hosts[name]

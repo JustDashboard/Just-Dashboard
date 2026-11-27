@@ -314,7 +314,10 @@ func (e *NormalizedStepExecutor) promotionRoute(ctx context.Context, parties *ca
 
 // liveOnlyRoute is the live release's route with nobody beside it.
 func (e *NormalizedStepExecutor) liveOnlyRoute(ctx context.Context, parties *canaryParties) (proxysvc.DeploymentRoute, error) {
-	route := publicRoute(parties.live.Release.EnvironmentID, parties.liveSnapshot, *parties.liveRuntime)
+	route, err := releaseRoute(parties.live.Release.EnvironmentID, parties.liveSnapshot, *parties.liveRuntime)
+	if err != nil {
+		return route, err
+	}
 	if route.TLS {
 		resolver, ok := e.proxy.(interface {
 			ResolveDeploymentCertificate(context.Context, []string) (string, string, error)

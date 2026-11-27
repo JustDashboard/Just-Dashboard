@@ -223,6 +223,10 @@ type SiteSpec struct {
 	// dropCookies are the deployment route's DropCookies: taken out of the
 	// Cookie header every forwarding location and the sign-in check send.
 	dropCookies []string
+	// hostUpstreams are the names a deployment route sends to servers of
+	// their own (deployment_route_hosts.go): a map on the request's name
+	// picks the catch-all's server, and nothing else of the site differs.
+	hostUpstreams []siteHostUpstream
 	// edgeRules, crowdSecList and limitRetryAfter are a deployment route's
 	// edge rules, the CrowdSec list it includes, and the Retry-After its
 	// rate limit answers 429 with (deployment_edge.go). They are set from a
@@ -576,6 +580,9 @@ func ValidateSpec(spec *SiteSpec) error {
 		return err
 	}
 	if err := validateSplit(spec); err != nil {
+		return err
+	}
+	if err := validateSiteHostUpstreams(spec); err != nil {
 		return err
 	}
 	if err := validTLSOptions(spec); err != nil {

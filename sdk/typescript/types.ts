@@ -3348,9 +3348,11 @@ export interface PlannedDomain {
   hostname?: string
   https?: boolean
   ownership?: OwnershipMode
+  port?: number
   protection?: DomainProtection | null
   redirectCode?: number
   redirectTo?: string
+  service?: string
   tunnel?: boolean
 }
 

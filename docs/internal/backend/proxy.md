@@ -1642,7 +1642,9 @@
   sites-available); a conf.d file on a Debian host or a file only in sites-enabled would be saved beside
   itself under the same names, so it gets the raw editor. `confdPath` stops `app.conf` becoming
   `app.conf.conf`. Names, listens and upstreams are listed once each (a forced-HTTPS site is two server
-  blocks with the same names); `CertPaths` holds every `ssl_certificate`, unquoted, including one in a
+  blocks with the same names); a deployment route with service domains forwards through a map on
+  `$host`, and its upstreams are the servers that map names (`hostMapUpstreams`, the release's first;
+  [service domains](../deployments/implementation.md#service-domains)); `CertPaths` holds every `ssl_certificate`, unquoted, including one in a
   snippet the site includes (one level, only files the editor would show), with `CertPath` the first;
   and a `listen … ssl` or `quic` is TLS whether or not the certificate is named in the file. The
   listing **skips backups** in sites-available and conf.d (`isBackupFile`: `.bak`, `~`, `.dpkg-old`,

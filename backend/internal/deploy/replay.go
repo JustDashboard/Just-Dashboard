@@ -307,11 +307,11 @@ type replayAnswer struct {
 
 // servedDomains are the plan's domains that serve the application: a
 // redirecting name's record is redirects, which say nothing about either
-// release.
+// release, and a service domain's is another service's answers.
 func servedDomains(domains []PlannedDomain) []PlannedDomain {
 	served := []PlannedDomain{}
 	for _, domain := range domains {
-		if domain.Redirects() || strings.TrimSpace(domain.Hostname) == "" {
+		if domain.Redirects() || domain.ServiceDomain() || strings.TrimSpace(domain.Hostname) == "" {
 			continue
 		}
 		served = append(served, domain)

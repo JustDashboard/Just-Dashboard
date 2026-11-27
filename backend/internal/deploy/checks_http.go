@@ -132,6 +132,9 @@ func (r *CheckRunner) httpAttempt(
 	if config.AcceptAnyAnswer {
 		accepted = answeredHTTPStatus(result.StatusCode)
 	}
+	if target.ServiceRoute {
+		accepted = result.StatusCode >= 100 && result.StatusCode < 500
+	}
 	if accepted {
 		result.Outcome, result.Code, result.RedirectOrigin = HealthPassed, "", ""
 	} else if result.Code == "" {

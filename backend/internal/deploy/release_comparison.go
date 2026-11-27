@@ -267,6 +267,16 @@ func domainPairs(domains []PlannedDomain) map[string]string {
 			}
 			pairs[domain.Hostname] += fmt.Sprintf(" · redirects to %s (%d)", domain.RedirectTo, code)
 		}
+		// A service domain says which service answers it, so moving a name
+		// to another service reads as the change it is.
+		switch {
+		case domain.Service != "" && domain.Port != 0:
+			pairs[domain.Hostname] += fmt.Sprintf(" · %s:%d", domain.Service, domain.Port)
+		case domain.Service != "":
+			pairs[domain.Hostname] += " · " + domain.Service
+		case domain.Port != 0:
+			pairs[domain.Hostname] += fmt.Sprintf(" · port %d", domain.Port)
+		}
 	}
 	return pairs
 }

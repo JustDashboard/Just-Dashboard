@@ -67,6 +67,7 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 - An address for every app under just-dashboard.com, `shop.acme.just-dashboard.com`, from a handle the linked server holds: one wildcard record and one wildcard certificate, nothing to create per app ([app domains](../guides/linking-and-usage.md#app-domains))
 - A domain's DNS record created from its settings with those same credentials: the A and AAAA to this server, or a tunnel's CNAME, written into its zone at Cloudflare, Route 53, DigitalOcean, Google Cloud DNS, Linode, OVH, Gandi or your own RFC 2136 server, shown as a dry run first and never deleting a record
 - Domains served through Cloudflare Tunnel from a server with no public address or open port: the connector runs as a container, and its routes and DNS records are set as each release goes live
+- A Compose stack's other services at addresses of their own: a domain that names a service is sent to it, with the certificate, the password and every other rule of the deployment's domains
 - Edge rules per deployment: block, answer or redirect by path, method, user agent or address, a rate limit per visitor, and CrowdSec's bans refused at the route
 - Sign-in in front of an app or only its previews through Authelia, Authentik or oauth2-proxy
 - Apps that exist only on your tailnet, opened only by the Tailscale logins and tags you list, with no public domain, no sign-in server and no certificate to order
