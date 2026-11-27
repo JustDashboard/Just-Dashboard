@@ -33,8 +33,8 @@ The page additionally works out that intersection first (`githubrepos.ComputeAbi
 with the reason before asking GitHub (403 `github_permission`), so a disabled control says *which* of
 the three is missing. GitHub keeps the last word; its own refusal is shown as it is.
 
-The one place the App's own key is used is a clone's credential (below), and that token can only read
-one repository's contents.
+The one place the App's own key is used is a credential for git (below): a clone's, which can only
+read one repository's contents, and a push of the assistant's workspace, which can only write them.
 
 ## The manifest
 
@@ -389,6 +389,12 @@ GitHub states the merge settings only to people who may change them; they are ab
    (`hostexec.AsOwner`) as every other git the Git page runs. Git's carriage-return progress is kept to
    one line a second per phase plus the phase's last. A failure ends the job with git's own last line.
 8. The token is revoked when the clone ends (`DELETE /installation/token`), whatever the outcome.
+
+The assistant's push from a workspace ([working on code](../deployments/operator.md#working-on-code))
+mints the same kind of token with `permissions: {"contents": "write"}` (`githubrepos.PushToken`), only
+when the person's own connection may push to the repository (`Repository.Can.Push`) and the App was
+granted Contents: write on the installation, carries it the same way for that one `git push`, and revokes
+it when the push ends.
 
 The checkout is then an ordinary checkout under the Git roots, so Local Git's discovery lists it;
 later fetches, pulls and pushes use its owner's own git credentials, as every other checkout's do. The

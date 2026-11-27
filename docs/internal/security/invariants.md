@@ -444,7 +444,14 @@ A change that weakens any of these has to say so explicitly.
     backups, Docker, files, the firewall, users and the rest, including what runs commands on the host
     (scheduled tasks, services, a container's command) — through `api_request`, `find_routes`, a deployment's
     `call_operation` and its shaped reads, and runs a shell line on the host as the terminal would
-    (`run_command`, invariant 6), which takes the terminal capability. What stays out of its reach is a closed list in
+    (`run_command`, invariant 6), which takes the terminal capability. It works on a deployment's code as a
+    developer would (`open_workspace`, `read_file`, `edit_file`, `write_file`, `push_changes`): the files through
+    the Files routes as the person, the checkout made and pushed by Local Git's service under `JD_GIT_ROOTS` as the
+    folder's owner (the terminal's account, whose home holds `jd-workspaces/`), and a credential only in git's
+    environment for one fetch or push, never its arguments or a file: the deployment's own saved token, or for a
+    push to GitHub a token of the GitHub page's App narrowed to that one repository and `contents: write`, minted
+    only when the person's own connection may push there and revoked after the push. A write that would put a
+    masked value (`[REDACTED]`) over the real one is refused. What stays out of its reach is a closed list in
     `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
     and those that ask the model; sign-in, password, second factor, passkeys, sessions, letting Just Hub sign the
     account in and minting an API key;
@@ -459,7 +466,9 @@ A change that weakens any of these has to say so explicitly.
     everything the person's role allows, unseen**, which for an administrator includes what a hub session is
     refused because it outlives whoever made it (an account, a key, a sudo rule, a VPN peer, the dashboard's
     settings): holding those routes alone would not keep one from being made, since the shell and file writes
-    run unseen there too, so the mode says so where it is chosen (`MODE_DETAIL`) and
+    run unseen there too, so the mode says so where the install's default is chosen (`MODE_DETAIL` on the
+    assistant's settings page; the chat's own mode menu is one line a mode, at the operator's request on
+    27 November 2026, and full access is amber on it while it is on) and
     `TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` holds that in the other two modes each of them
     that makes or changes something waits; a draft's own saves never wait, but committing it, discarding
     it, or a save that changes its source, points a variable at a saved secret or reaches the host waits unless

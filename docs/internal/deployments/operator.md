@@ -6,7 +6,7 @@ editor's column) is the same assistant asked about one connection, and the serve
 (`POST /assistant/chat`) is the same assistant asked about the whole server — reached from `/assistant`, and from
 **Ask** in the top bar of every page, which opens a chat that knows the page it was opened from. It answers anything and does what it is asked: it reads a project's code, logs,
 requests, metrics and a database's rows, sets variables, domains and limits, runs a backup, deploys and rolls
-back, and reaches the rest of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users —
+back, changes a deployment's code in a workspace of its own and pushes it ([working on code](#working-on-code)), and reaches the rest of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users —
 through the dashboard's own API, and the host itself: a shell command run to its end (`run_command`), or a
 real terminal window of the chat's own that it types into and reads, for what runs long, asks a question or
 wants a password ([the terminal](#the-terminal)). It is meant to be talked to as any general assistant is, and to look at the
@@ -81,11 +81,14 @@ instead, unless they chose full access. What still holds it is below, and
   mitigation and not a guarantee, and it is why **Ask before changes** is the default: a change waits for a
   person unless someone chose otherwise. Full access is a person choosing to let everything their role allows
   run unseen, including what runs commands on the host.
-- **It is bounded.** A press takes at most `agentSteps` (32) answers; past that, whatever it asks next waits for
-  the person in any mode, so a loop spends nothing more without somebody looking. Each step and each press waits
-  for the install's budget of model calls, and a press whose budget stays spent for 20 seconds is refused. A
-  press's deadline is 20 minutes and a call's is two: a route that has not answered by then is not waited for
-  (`errDispatchTimeout`), and the model is told it may still finish.
+- **It is bounded.** A press takes at most `agentSteps` (32) answers, or `agentStepsFull` (200) in full access,
+  where a change to a deployment's code — reading, editing, building, pushing, following the run and fixing what
+  it found — takes many more steps than a question; past that, whatever it asks next waits for the person in any
+  mode, so a loop spends nothing more without somebody looking. Each step and each press waits for the install's
+  budget of model calls, and a press whose budget stays spent for 20 seconds is refused. A press's deadline is
+  20 minutes (60 in full access) and a call's is two (`open_workspace`'s ten, for a large repository's first
+  clone): a route that has not answered by then is not waited for (`errDispatchTimeout`), and the model is told
+  it may still finish.
 
 ## The modes
 
@@ -93,7 +96,7 @@ instead, unless they chose full access. What still holds it is below, and
 | --- | --- | --- |
 | Ask every time (`ask`) | Looking up an operation or a route, offering a shortcut | Every read and every change |
 | Ask before changes (`changes`, the default) | Reads that stay on the server, including a SQL statement and a shell command that only read | Every change, and every read that is sent to another machine |
-| Full access (`full`) | Everything the person's role allows | Anything past `agentSteps` |
+| Full access (`full`) | Everything the person's role allows | Anything past `agentStepsFull` |
 
 The page sends the mode on every press; left out, it is the install's default, which an administrator
 sets on `/assistant` (`PUT /assistant/preferences`). Anyone asking may change it for their conversation.
@@ -301,6 +304,11 @@ call with no id, two under one) is refused, as `assistant.ErrUnreadableAnswer`.
 | `terminal_send` | Deployment, server, database | Types `text` (with Enter unless `enter` is false) and presses `keys` by name (`ctrl-c`, `up`, `enter`…) into the chat's window, and answers as `terminal_run` does. A masked value is refused | `change` |
 | `terminal_read` | Deployment, server, database | Waits up to `wait` seconds (30 by default, at most 300) and reads what the window printed since the last call | `read` |
 | `open_page` | Deployment, server, database | Offers a shortcut to a page from a closed list (`AgentPages`, `ServerPages`, `DatabasePages` under `/databases/{id}`) | `free` |
+| `open_workspace` | Deployment, server | Makes a working checkout of a deployment's repository, or fetches the one already there keeping what changed in it, and answers with its folder, branch, commit, changes, how a push will authenticate and whether a push deploys ([working on code](#working-on-code)). A deployment's chat opens its own unless it names another `deployment`; the server's must name one | `change` |
+| `read_file` | Deployment, server, database | Reads a text file by its absolute path through `GET /files/read` as the person, numbered, `limit` lines (400 by default, at most 2,000) from `offset`, masked | `read` |
+| `edit_file` | Deployment, server, database | Replaces `old_text` with `new_text` (once, or every time with `replace_all`) through `PUT /files/write` at the revision it read, and answers with the diff | `change` |
+| `write_file` | Deployment, server, database | Writes a whole file (at most 1 MB) through `PUT /files/write`, making its folders through `POST /files/mkdir`, and answers with the diff | `change` |
+| `push_changes` | Deployment, server | Stages and commits everything changed in a workspace with `message`, then pushes it to its branch, or to `branch` on the remote; never forced | `change` |
 
 An answer to the model is its JSON, masked and cut at 24,000 bytes.
 
@@ -362,6 +370,48 @@ windows are not held, runs on its own as before.
   0, a terminal call once its window is back at the prompt — carries a `change` like a route's (`commandChange`),
   so it is in the chat's list of what it did: a terminal's goes to its window, and a line run to its end to the
   audit log, which lists it.
+
+## Working on code
+
+A deployment's and the server's chats work on a deployment's code as a developer would: a checkout of its own,
+its files read and changed, a build or a test run in it, and a push that deploys. `assistant/workspace.go` holds
+the tools and `api/handlers_assistant_workspace.go` what they do; the prompt (`writeCode`) gives the order and
+says to follow the run a push starts and fix what it finds.
+
+- **The workspace.** `open_workspace` reads where the environment's code lives
+  (`deploy.DeploymentChecker.WorkspaceSource`, from its saved plan). A remote repository is cloned by Local Git's
+  service (`gitx.PrepareClone`, `CloneStreaming`) into `jd-workspaces/<name>` in the terminal account's home —
+  `<name>` is the deployment's, with its environment's when that is not production — on the branch the
+  deployment builds unless the call names another. The folder is made and handed to that account the first
+  time, so the checkout is the account's, `run_command` builds in it as that account, and Local Git lists it
+  with the server's other checkouts. A folder of that name that is already a checkout of the same remote is
+  fetched (`gitx.FetchWith`), keeping what changed in it; one that is something else gives way to
+  `<name>-<environment id>`. A deployment built from a folder on the server works in that folder, since it
+  builds that folder's committed state. `.git/jd-deployment` records which deployment and environment a
+  workspace is for, so a push in a later press knows whose it is.
+- **The files.** `read_file`, `edit_file` and `write_file` go through `GET /files/read`, `PUT /files/write`
+  (at the revision read, so a file changed since is refused, not overwritten) and `POST /files/mkdir`, as the
+  person: their role's `file.read` and `file.write`, the Files page's roots, its kept versions and the audit log
+  apply, and a new file is owned as the folder it is made in. What they read is masked like every other read, so
+  a write that would put `[REDACTED]` over the real value is refused, and an edit whose text holds it is told to
+  change around the secret. An edit's text has to occur once, or `replace_all`; a miss or several matches say
+  where. Each change answers with its diff (`lineDiff`), which the page draws under the call.
+- **The push.** `push_changes` stages and commits everything changed (`gitx.CommitAs`: the account's own name
+  for commits, or, when it has none, the GitHub login a push goes through or the person's username, for that
+  commit only) and pushes the branch, or `HEAD` to `branch` on the remote, never forced (`gitx.PushWith`). It
+  authenticates, in order: with a token of the person's own GitHub connection (the GitHub page's App,
+  [`githubrepos.PushToken`](../backend/github-page.md#clone-to-server)) narrowed to that one repository and
+  `contents: write`, minted only when that connection may push there and revoked after the push; with the
+  deployment's saved credential when it is a token that can push (the deploy App's is read-only); or with the
+  account's own Git credentials. A credential reaches git only in its environment for that one process
+  (`deploy.GitHeaderEnvironment`: the account's credential helper off, the header sent to that exact remote),
+  never its arguments, the checkout's `.git/config` or the model. A clone and a fetch authenticate with the
+  deployment's own credential, which is what its deploys fetch with. The answer says whether the deployment
+  deploys the push on its own (its Git policy: automatic, not promotion-only, the branch it builds, its path
+  filters) or needs a deploy started.
+- **Audited.** Each route a file tool calls has its own entry as the person with actor `assistant`; what the
+  workspace did (opened, pushed and where) is listed under `git` in the press's entry, as `run_command`'s lines
+  are under `commands`.
 
 ## What it begins knowing
 
@@ -461,8 +511,12 @@ a privileged container, a host path) waits for the person in "ask" and "changes"
 
 `/deploy/new` offers it twice: the switch above the sources, which carries through once a source is chosen,
 and an offer at the head of the plan once one is. It sets up in a column beside the form, the whole screen on
-a phone. What it saves is read back into the form (`SetupAssistant`), and Deploy waits while it works, because
-the page's revision is behind the server's until it stops.
+a phone. What it saves is read back into the form (`SetupAssistant`), and Deploy, Continue, Save only and
+Review's own check wait while it works, because the page's revision is behind the server's until it stops: the
+check used to save and preflight on its own the moment the assistant's save was read back, and every call of the
+assistant's after it was refused as a stale revision. The prompt says how a revision is carried from one call to
+the next and what a planned variable is made of, and the draft routes' refusals name the current revision and
+the values a variable's fields take, so a call that was wrong is put right on the next step.
 
 ## <a id="providers"></a>The assistant's providers
 
@@ -508,7 +562,8 @@ The usage line under an answer and in the rail counts every token the model read
 counts what it read from and wrote to its cache apart from `input`, so a long chat once read "6 tokens in".
 `components/assistant/elements/` is AI Elements (vercel/ai-elements, Apache-2.0, see its `NOTICE`), adapted to
 this product's marks. `components/deploy/project-assistant.tsx` is the project's page: the conversation, and
-beside it its chats and what it did with a shortcut to each change; `?chat=<id>` opens a saved chat there.
+beside it its chats and what it read; a change's shortcut is under its call in the conversation; `?chat=<id>`
+opens a saved chat there.
 `components/assistant/assistant-page.tsx` is `/assistant`: a chat over the whole server, every chat of the
 person's listed beside it (a deployment's opens on that deployment's page), and the settings under
 `?view=settings`. A chat another tab is answering offers Take over, which stops that press and carries the
@@ -527,6 +582,12 @@ are the new deployment's.
 - `assistant/keyring_test.go`: an earlier setup as a keyring of one, a hosted preset keeping its address, a key
   staying with its address, and no key in any view. `assistant/openai_test.go`: tools sent only when set up,
   streamed calls gathered whole, results answering each by id.
+- `assistant/workspace_test.go` and `api/handlers_assistant_workspace_test.go`: the code tools' calls read as
+  models write them and offered where there is code; a deployment's code changed and pushed end to end against
+  a bare repository (a file made with its folder, an edit's diff, a numbered read, the commit on the remote, the
+  audit entry); a workspace cloned and pushed over HTTPS with the deployment's saved token, nothing of it kept in
+  the checkout or told to the model, and opened again fetched with what changed kept; a masked secret never
+  written back; an edit that matches twice saying where; the code tools waiting in "changes".
 - `httpx/delegate_test.go`: the assistant admitted as the person by every group, marked for the trail, and a key's
   principal not carried.
 - `api/handlers_assistant_turn_test.go` and `api/handlers_assistant_chats_test.go`, against the fake provider with
