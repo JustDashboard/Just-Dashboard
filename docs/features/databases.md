@@ -54,7 +54,7 @@ A control center for every database on the server, even the ones nothing has con
 
 ## AI clients
 
-- An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the databases you choose, read-only unless you allow changes, never a protected one, and the deployments only if you allow it — every one or the ones you pick — through 117 tools in all, 104 tools generated from the deployment API; every call audited
+- An MCP server for AI clients such as Claude Code, Cursor and VS Code: keys that reach only the databases you choose, read-only unless you allow changes, never a protected one, and the deployments only if you allow it — every one or the ones you pick — through 122 tools in all, 109 tools generated from the deployment API; every call audited
 
 <table>
 <tr>
