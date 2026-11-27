@@ -102,6 +102,11 @@ func startCopyEngine(t *testing.T) (*migrationRehearser, *copyEngine, int) {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]string{"Id": fmt.Sprintf("exec-%d", id)})
 		case r.Method == http.MethodPost && strings.HasPrefix(path, "/exec/") && strings.HasSuffix(path, "/start"):
+			// The start's body is read before the connection is taken over, and
+			// the stream is ended with a half-close the client reads as EOF:
+			// closing a socket that still holds unread bytes resets it instead,
+			// which the client sees as a failed exec and retries.
+			_, _ = io.Copy(io.Discard, r.Body)
 			conn, buffered, err := w.(http.Hijacker).Hijack()
 			if err != nil {
 				t.Error(err)
@@ -109,6 +114,11 @@ func startCopyEngine(t *testing.T) (*migrationRehearser, *copyEngine, int) {
 			}
 			_, _ = buffered.WriteString("HTTP/1.1 101 UPGRADED\r\nContent-Type: application/vnd.docker.raw-stream\r\nConnection: Upgrade\r\nUpgrade: tcp\r\n\r\n")
 			_ = buffered.Flush()
+			if tcp, ok := conn.(*net.TCPConn); ok {
+				_ = tcp.CloseWrite()
+				_ = conn.SetReadDeadline(time.Now().Add(5 * time.Second))
+				_, _ = io.Copy(io.Discard, buffered)
+			}
 			_ = conn.Close()
 		case r.Method == http.MethodGet && strings.HasPrefix(path, "/exec/") && strings.HasSuffix(path, "/json"):
 			w.Header().Set("Content-Type", "application/json")
