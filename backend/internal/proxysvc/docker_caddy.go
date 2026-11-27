@@ -854,25 +854,6 @@ func caddyUpstreams(upstreams []string) ([]string, error) {
 	return servers, nil
 }
 
-// caddyReleases is a route that picks between releases on the Caddy
-// ingress: the live release, a canary's candidate, and with skew protection
-// the releases still answering the visitors they answered first.
-//
-// A canary gives each request a release at random from its own
-// {http.request.uuid} — Caddy draws a version-4 UUID per request, so its
-// first two hex digits are 256 equal buckets and the candidate's share is the
-// run of buckets the matcher names (canaryUUIDPattern) — and each release
-// keeps its own replicas, balancing and passive health in a handle of its
-// own. Caddy 2.11's weighted_round_robin would share the requests too, but
-// over the two releases' containers as one pool, losing least connections
-// between a release's own replicas, and its record would name a container
-// address rather than a release.
-//
-// Skew protection routes first by the jd_release cookie: a request whose
-// cookie names a release the route serves is answered by it, unchanged, and
-// every other one is drawn as above and told its release in a cookie of the
-// warm window's lifetime, Secure on the HTTPS names. A route whose answers
-// are recorded says which release gave each one (log_append).
 // caddyHostHandles are the handles a site block's service domains are
 // answered by, in the order the route lists its host upstreams, each naming
 // the block's own names it serves. A matcher is numbered after its host
@@ -899,6 +880,25 @@ func caddyHostHandles(entries []HostUpstream, names []string, proxy func([]strin
 	return handles
 }
 
+// caddyReleases is a route that picks between releases on the Caddy
+// ingress: the live release, a canary's candidate, and with skew protection
+// the releases still answering the visitors they answered first.
+//
+// A canary gives each request a release at random from its own
+// {http.request.uuid} — Caddy draws a version-4 UUID per request, so its
+// first two hex digits are 256 equal buckets and the candidate's share is the
+// run of buckets the matcher names (canaryUUIDPattern) — and each release
+// keeps its own replicas, balancing and passive health in a handle of its
+// own. Caddy 2.11's weighted_round_robin would share the requests too, but
+// over the two releases' containers as one pool, losing least connections
+// between a release's own replicas, and its record would name a container
+// address rather than a release.
+//
+// Skew protection routes first by the jd_release cookie: a request whose
+// cookie names a release the route serves is answered by it, unchanged, and
+// every other one is drawn as above and told its release in a cookie of the
+// warm window's lifetime, Secure on the HTTPS names. A route whose answers
+// are recorded says which release gave each one (log_append).
 type caddyReleases struct {
 	live      string
 	liveLabel string
