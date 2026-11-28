@@ -64,7 +64,7 @@ it and the sheet's own head closes it; Ctrl/Cmd+B still toggles it. A page opene
 puts it away: `SidebarProvider` closes it when the pathname changes, and a page's row closes it on
 the press, so the row of the page you are already on closes it too. A row that only drills into a
 panel (the way back out, a group) leaves it open. Below `md` the sheet's rows, the way back out,
-Search and the close control are 44px, and so are the strip's three controls (sidebar, Ask,
+Search and the close control are 44px, and so are the strip's two controls (sidebar and
 Search) in its 48px. The strip is a `<header>` beside `<main>`, so it is the phone's banner, as
 the rail's head is the desk's. `shell-phone.spec.ts` holds all of it.
 
