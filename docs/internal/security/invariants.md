@@ -557,7 +557,9 @@ A change that weakens any of these has to say so explicitly.
     name, its error messages) is shown as plain text attributed to the hub, never as this dashboard's own
     prompt or where the dashboard speaks for itself (the tab's title and the rail's wordmark name the server by
     its own host name, not the hub's name for it), and an address it hands over (another server's endpoint, a
-    notice's link) opens only in a new tab with `noopener noreferrer`, never in this dashboard's own. While the
+    notice's link) is opened only by a link with `noopener noreferrer`, so no opener and no referrer go with
+    it: the switcher's links open in this tab (a new one on a modified click), the palette and a notice's link
+    in a new tab. While the
     link is idle nothing links to the stored hub address at all, since it may answer on the machine that was
     refused. See [hub link](../backend/hub-link.md) and its [protocol](../backend/hub-link-protocol.md).
 18. A build reaches no more than its release will. A build whose values name a linked database runs on

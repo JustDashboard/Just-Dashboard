@@ -1476,8 +1476,8 @@ dashboard's own prompt ("your session expired, sign in again"). So:
 - It is never styled like the dashboard's own sign-in, session, password or two-factor prompts, and never shown
   in the place those prompts use.
 - A notice link shows its host next to its text and opens in a new tab with `rel="noopener noreferrer"`.
-- The fleet switcher shows names as text and opens endpoints in a new tab; it never sends a credential or a
-  ticket to one.
+- The fleet switcher shows names as text and opens an endpoint as a plain link with `rel="noopener noreferrer"`
+  (in the same tab, or a new one on a modified click); it never sends a credential or a ticket to one.
 
 ## 9. Hub sign-in (version 1, off by default)
 

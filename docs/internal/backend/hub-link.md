@@ -213,9 +213,9 @@ and `owner.label` are structured fields and stay raw in the API; the pages rende
 name: every notice, in the rail's card and on Settings → Hub, is headed "Just Hub (<name>) says" before its words,
 and its link names the host it opens (`hubSays`, `hub-notice.tsx`, `HubNotices`); the hub's name is said as
 "Just Hub (<name>)" (`hubLabel`) on the Settings page, in its picture, in the palette and in the toast that
-announces a link; the switcher's menu says "Listed by Just Hub (<name>)" under its label and each palette server
-says who listed it. Another server's endpoint, and the hub, open from the switcher and the palette in a new tab
-with `noopener noreferrer`, never in the dashboard's own tab. The Settings page calls `check` as an address is
+announces a link; the switcher's menu is headed "Servers" over the hub's list, with Just Hub as its last row (its
+"Listed by" line was cut on 28 Nov 2026), and each palette server says who listed it. Another server's endpoint, and the hub, open from the switcher as plain links with
+`noopener noreferrer` (this tab, or a new one on a modified click), and from the palette in a new tab. The Settings page calls `check` as an address is
 typed or filled and shows the machine under it, shows `hubMachine` on the request and the link (or that the test
 origin checks none) with the hub key's fingerprint to compare with the hub's Settings page, and leaves the scope
 unchosen after a `?connect=` link ([feature map](../frontend/features/README.md)).
