@@ -15,6 +15,8 @@ import {
   shownSteps,
   totalUsage,
   type AgentStep,
+  type AgentTranscript,
+  type AgentUsage,
 } from "@/components/assistant/agent/model"
 import { agentWorking, type AgentSession } from "@/components/assistant/agent/sessions"
 import { PaneSection } from "@/components/panel"
@@ -48,7 +50,15 @@ export function AgentWorkspace({
   onSettings?: () => void
   className?: string
 }) {
-  const [pane, setPane] = useState<AgentPane>("chat")
+  const [picked, setPicked] = useState<AgentPane>("chat")
+  // A chat that has read nothing and cost nothing has nothing for the phone's
+  // "What it read" stop to open, so the bar leaves it out until it has (a fresh
+  // chat's pane was its status line alone); one left on it goes back to the chat.
+  const reads = useMemo(() => readsOf(session.transcript), [session.transcript])
+  const usage = totalUsage(session.transcript)
+  const tokens = inputTokens(usage) + usage.output
+  const hasActivity = reads.length > 0 || tokens > 0
+  const pane: AgentPane = picked === "activity" && !hasActivity ? "chat" : picked
   return (
     <MotionConfig reducedMotion="user">
       <div
@@ -77,7 +87,8 @@ export function AgentWorkspace({
             {chats}
           </div>
           <Activity
-            session={session}
+            reads={reads}
+            usage={usage}
             className={cn("flex-1", pane === "chats" && "max-lg:hidden")}
           />
         </aside>
@@ -86,16 +97,14 @@ export function AgentWorkspace({
         <PaneBar<AgentPane | "settings">
           label="Assistant panes"
           active={pane}
-          onPick={(key) => (key === "settings" ? onSettings?.() : setPane(key))}
+          onPick={(key) => (key === "settings" ? onSettings?.() : setPicked(key))}
           className="-mx-(--page-inset)"
           stops={[
             { key: "chat", label: "Chat", icon: <Sparkles /> },
             { key: "chats", label: "Chats", icon: <ChatBubble /> },
-            {
-              key: "activity",
-              label: "What it read",
-              icon: <Logs />,
-            },
+            ...(hasActivity
+              ? [{ key: "activity" as const, label: "What it read", icon: <Logs /> }]
+              : []),
             ...(onSettings
               ? [{ key: "settings" as const, label: "Settings", icon: <SettingsGear /> }]
               : []),
@@ -146,20 +155,28 @@ function RailHead({ session, product }: { session: AgentSession; product: string
 // groups are spaced rather than ruled.
 const ACTIVITY_GROUP = "space-y-2 border-b-0 p-0"
 
+/** What a chat has read, one row a label, newest first. */
+function readsOf(transcript: AgentTranscript): AgentStep[] {
+  const seen = new Map<string, AgentStep>()
+  for (const turn of transcript.turns)
+    for (const step of shownSteps(turn))
+      if (step.call.kind === "read" && step.state !== "waiting") seen.set(step.call.label, step)
+  return [...seen.values()].reverse()
+}
+
 /**
  * What this chat has read, and what it cost. Its changes are not listed again
  * here: each one's shortcut stands under its call in the conversation.
  */
-function Activity({ session, className }: { session: AgentSession; className?: string }) {
-  const { transcript } = session
-  const reads = useMemo(() => {
-    const seen = new Map<string, AgentStep>()
-    for (const turn of transcript.turns)
-      for (const step of shownSteps(turn))
-        if (step.call.kind === "read" && step.state !== "waiting") seen.set(step.call.label, step)
-    return [...seen.values()].reverse()
-  }, [transcript])
-  const usage = totalUsage(transcript)
+function Activity({
+  reads,
+  usage,
+  className,
+}: {
+  reads: AgentStep[]
+  usage: AgentUsage
+  className?: string
+}) {
   return (
     <div data-slot="agent-activity" className={cn("flex min-h-0 flex-col gap-6", className)}>
       {reads.length > 0 && (

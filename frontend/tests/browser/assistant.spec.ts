@@ -445,6 +445,43 @@ test("a file it would write is read in a box, and what it changed reads as a dif
   ).not.toContainText("line39")
 })
 
+test("what a push answers is named as git's answer, not as something it read", async ({ page }) => {
+  const push = {
+    id: "p",
+    tool: "push_changes",
+    label: "Commit and push shop",
+    kind: "change",
+    reason: "So the fix is on main.",
+    input: { folder: "shop", message: "Read the port from one place" },
+  }
+  await mockAssistant(page, [
+    [start, done({ stop: "tool", pending: [push] })],
+    [
+      start,
+      {
+        type: "called",
+        id: "p",
+        tool: "push_changes",
+        ok: true,
+        said: "Pushed to main",
+        output: "Pushed main.\nTo example.com:acme/shop.git\n   1a2b3c4..5d6e7f8  main -> main",
+      },
+      { type: "text", text: "Pushed." },
+      done(),
+    ],
+  ])
+  await page.goto("/deploy/7/assistant")
+  await ask(page, "Push the fix")
+  await approval(page)
+    .getByRole("button", { name: `Allow: ${push.label}` })
+    .click()
+  await expect(chat(page)).toContainText("Pushed.")
+  const step = chat(page).locator("[data-slot='agent-step'][data-tool='push_changes']")
+  await step.locator("button").first().click()
+  await expect(step.getByLabel("What git answered to the push")).toContainText("main -> main")
+  await expect(step.getByLabel("What it read")).toHaveCount(0)
+})
+
 test("an edit waiting for Allow says which text goes and which takes its place", async ({
   page,
 }) => {
@@ -803,13 +840,15 @@ test("on a phone the conversation, the chats and what it read are one pane at a 
       return scroller.scrollHeight - scroller.clientHeight
     }),
   ).toBeLessThanOrEqual(0)
+  // Before anything is read or spent, the reads' stop would open a bare pane.
+  const bar = page.getByRole("navigation", { name: "Assistant panes" })
+  const read = bar.getByRole("button", { name: "What it read", exact: true })
+  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats"])
   await ask(page, "Fix the port")
   await expect(chat(page)).toContainText("Saved.")
   await expect(page.locator("[data-slot='agent-activity']")).toBeHidden()
   // The bar's stops are found by their word. The reads' stop counts nothing:
   // the change it made is under its call in the conversation.
-  const bar = page.getByRole("navigation", { name: "Assistant panes" })
-  const read = bar.getByRole("button", { name: "What it read", exact: true })
   await expect(read).not.toHaveAttribute("aria-description")
   await read.click()
   await expect(read).toHaveAttribute("aria-current", "page")
@@ -829,7 +868,8 @@ test("on a phone the assistant's page has one strip: its bar, edge to edge, endi
   await page.setViewportSize({ width: 390, height: 844 })
   await page.goto("/assistant")
   const bar = page.getByRole("navigation", { name: "Assistant panes" })
-  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats", "What it read", "Settings"])
+  // A fresh chat has read nothing, so there is no "What it read" stop to open.
+  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats", "Settings"])
   // Out through the page's gutter, as every other bar runs.
   const foot = (await bar.boundingBox())!
   expect([foot.x, foot.width]).toEqual([0, 390])

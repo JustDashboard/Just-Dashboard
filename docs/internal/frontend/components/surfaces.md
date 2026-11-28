@@ -230,7 +230,10 @@ box — a breathing dot, *This chat is running in another tab*, and **Take over*
 *Continued somewhere else* and stops. Below the chats, what it has read, once it has read something, and the
 tokens it took; a change is not listed again there, since its shortcut stands under its call in the conversation.
 On a phone the chat, the chats and what it read are one full-height pane at a time with a bar at the foot
-(`phone-panes.tsx`, shared by every page that shows one pane at a time: `patterns/keyboard-and-place.md` lists them).
+(`phone-panes.tsx`, shared by every page that shows one pane at a time: `patterns/keyboard-and-place.md` lists them);
+the bar has no *What it read* stop until the chat has read something or spent a token, since a fresh chat's pane
+would be its status line alone. A step's well is named for what it holds: what a command printed, git's answer to a
+push, the workspace it opened, or what it read.
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in

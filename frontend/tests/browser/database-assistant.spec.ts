@@ -832,14 +832,15 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   const bar = page.getByRole("navigation", { name: "Assistant panes" })
   await expect(bar).toBeVisible()
   // The shared bar (`phone-panes.tsx`) is the one this page drew by hand:
-  // three stops of one width across it, at the foot of the screen.
+  // stops of one width across it, at the foot of the screen. A fresh chat has
+  // read nothing, so it has no "What it read" stop yet.
+  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats"])
   const stops = await bar
     .getByRole("button")
     .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().width)))
   const foot = await bar.boundingBox()
-  expect(stops).toHaveLength(3)
   expect(new Set(stops).size).toBe(1)
-  expect(Math.abs(stops[0] * 3 - foot!.width)).toBeLessThanOrEqual(2)
+  expect(Math.abs(stops[0] * 2 - foot!.width)).toBeLessThanOrEqual(2)
   expect(Math.round(foot!.y + foot!.height)).toBe(844)
   expect(Math.round(foot!.height)).toBe(57)
   await expect(page.locator("[data-slot=agent-rail]")).toBeHidden()
