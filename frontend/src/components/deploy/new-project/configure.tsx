@@ -948,27 +948,31 @@ export function Configure({
   }, [created, assistantSession])
   // It starts from what the person sees, so what the page holds is saved first. A
   // plan that does not save yet is no reason to refuse: it reads the detection.
+  // It reads the flow as it is when the panel opens, not as it was when the draft
+  // was first loaded: Review's check has moved the revision on by then, and a save
+  // at the first one was refused 409 and saved nothing the person had typed since.
+  const latest = useRef({ flow, text, retainedKeys })
+  useEffect(() => {
+    latest.current = { flow, text, retainedKeys }
+  })
   const prepareAssistant = useCallback(async () => {
+    const { flow: now, text: dotenvText, retainedKeys: kept } = latest.current
     try {
-      let working = flow.draft
-      if (
-        working.data.intent?.name !== flow.name ||
-        working.data.intent?.profile !== flow.profile
-      ) {
-        working = await saveIntent(working, { name: flow.name, profile: flow.profile })
+      let working = now.draft
+      if (working.data.intent?.name !== now.name || working.data.intent?.profile !== now.profile) {
+        working = await saveIntent(working, { name: now.name, profile: now.profile })
       }
       const saved = await saveConfiguration(
         working,
-        configurationForSave(flow.configuration, flow.source),
-        text,
-        retainedKeys,
+        configurationForSave(now.configuration, now.source),
+        dotenvText,
+        kept,
       )
       onFlowChange((current) => (current ? { ...current, draft: saved } : current))
     } catch {
       // Told to the assistant by what it reads; the form keeps what was typed.
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [flow.draft.id])
+  }, [onFlowChange])
   /* The plan read down, beside the fields from `xl` and after them below it:
      stacked on a phone, the drawing came first and the question's first field
      started two-thirds of the way down every step — the same summary scrolled

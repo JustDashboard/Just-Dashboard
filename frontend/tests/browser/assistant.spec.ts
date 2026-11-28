@@ -1754,6 +1754,21 @@ test("what it saves with its panel closed is read back, and Deploy keeps it", as
   expect(state.configuration.runtime.internalPort).toBe(9090)
 })
 
+test("handed over on Review, what the page holds is saved at the draft's revision", async ({
+  page,
+}) => {
+  await mockSetup(page, [])
+  const { state, assistantSaves, turns } = await draftServer(page)
+  turns.push((route) => (assistantSaves(3000), stream(route, configured)))
+  await page.goto("/deploy/new?draft=setup-draft")
+  // The draft opens on Review, whose check moves its revision on.
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  await expect.poll(() => state.log).toEqual(["save", "preflight"])
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  await expect(page.locator("[data-slot='setup-assistant']")).toContainText("Chose Next.js")
+  expect(state.log).toEqual(["save", "preflight", "save", "assistant save"])
+})
+
 test("the chooser offers it before there is anything to configure", async ({ page }) => {
   await mockSetup(page, configured)
   await page.goto("/deploy/new")
