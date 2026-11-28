@@ -427,6 +427,7 @@ test("a file it would write is read in a box, and what it changed reads as a dif
   await expect(approval(page).locator("[data-slot='agent-input']")).not.toContainText("line39")
   const text = approval(page).locator("[data-slot='agent-file-text']")
   await expect(text).toContainText("export const line39 = 39")
+  await expect(approval(page).getByLabel("What it writes")).toContainText("line39")
   expect((await text.boundingBox())!.height).toBeLessThanOrEqual(161)
   await approval(page)
     .getByRole("button", { name: `Allow: ${write.label}` })
@@ -442,6 +443,34 @@ test("a file it would write is read in a box, and what it changed reads as a dif
   await expect(
     chat(page).locator("[data-slot='agent-step'] [data-slot='agent-input']"),
   ).not.toContainText("line39")
+})
+
+test("an edit waiting for Allow says which text goes and which takes its place", async ({
+  page,
+}) => {
+  const lines = (word: string) =>
+    Array.from({ length: 3 }, (_, at) => `const ${word}${at} = ${at}`).join("\n")
+  const edit = {
+    id: "e",
+    tool: "edit_file",
+    label: "Edit src/port.ts in the workspace",
+    kind: "change",
+    reason: "The port is read from one place.",
+    input: {
+      workspace: "shop",
+      path: "src/port.ts",
+      old_text: lines("old"),
+      new_text: lines("new"),
+    },
+  }
+  await mockAssistant(page, [[start, done({ stop: "tool", pending: [edit] })]])
+  await page.goto("/deploy/7/assistant")
+  await ask(page, "Fix the port in the code")
+  await expect(approval(page).getByLabel("The text it replaces")).toContainText("const old2 = 2")
+  await expect(approval(page).getByLabel("What it puts in its place")).toContainText(
+    "const new2 = 2",
+  )
+  await expect(approval(page)).toContainText("The text it replaces")
 })
 
 test("asking something else declines what waits", async ({ page }) => {

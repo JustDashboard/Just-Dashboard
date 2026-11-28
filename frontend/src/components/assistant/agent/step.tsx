@@ -339,6 +339,14 @@ function StepDetails({ step }: { step: AgentStep }) {
   )
 }
 
+// What each of a file call's texts is, said over its box: an edit's two boxes
+// are otherwise the same box twice, and which one goes is what Allow decides.
+const FILE_TEXT_WORDS: Record<string, string> = {
+  content: "What it writes",
+  old_text: "The text it replaces",
+  new_text: "What it puts in its place",
+}
+
 const DIFF_TONE: Record<ReturnType<typeof diffTone>, string> = {
   added: "text-success",
   removed: "text-destructive",
@@ -588,14 +596,16 @@ export function ApprovalCard({
               )}
               <InputLines input={askedInput(step.call)} />
               {fileTexts(step.call).map(([key, text]) => (
-                <pre
-                  key={key}
-                  data-slot="agent-file-text"
-                  aria-label={key}
-                  className="ml-8.5 max-h-40 overflow-auto rounded-md bg-card px-2.5 py-1.5 font-mono text-hint leading-relaxed whitespace-pre"
-                >
-                  {text}
-                </pre>
+                <div key={key} className="ml-8.5 space-y-1">
+                  <p className="text-hint text-muted-foreground">{FILE_TEXT_WORDS[key] ?? key}</p>
+                  <pre
+                    data-slot="agent-file-text"
+                    aria-label={FILE_TEXT_WORDS[key] ?? key}
+                    className="max-h-40 overflow-auto rounded-md bg-card px-2.5 py-1.5 font-mono text-hint leading-relaxed whitespace-pre"
+                  >
+                    {text}
+                  </pre>
+                </div>
               ))}
             </li>
           )
