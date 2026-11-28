@@ -91,8 +91,9 @@ func relayCredential(remote string) map[string]string {
 	}
 }
 
-// logEveryGit puts a git first on PATH that writes, for each run, whether its
-// environment holds an Authorization, its folder and its GIT_DIR, then runs git.
+// logEveryGit puts a git (and a git-lfs) first on PATH that writes, for each
+// run, whether its environment holds an Authorization, its folder and its
+// GIT_DIR, then runs the real one.
 func logEveryGit(t *testing.T) string {
 	t.Helper()
 	real, err := exec.LookPath("git")
@@ -105,6 +106,13 @@ func logEveryGit(t *testing.T) string {
 		"printf '%s|%s|%s\\n' \"$cred\" \"$(pwd -P)\" \"$GIT_DIR\" >> " + log + "\nexec " + real + " \"$@\"\n"
 	if err := os.WriteFile(filepath.Join(dir, "git"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
+	}
+	// And git-lfs, which git runs from PATH as a filter or a subcommand.
+	if lfs, err := exec.LookPath("git-lfs"); err == nil {
+		wrapped := strings.ReplaceAll(script, "exec "+real, "exec "+lfs)
+		if err := os.WriteFile(filepath.Join(dir, "git-lfs"), []byte(wrapped), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	t.Setenv("PATH", dir+string(os.PathListSeparator)+os.Getenv("PATH"))
 	return log

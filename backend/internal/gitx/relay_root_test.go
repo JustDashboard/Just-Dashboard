@@ -2,12 +2,16 @@ package gitx
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 )
@@ -259,5 +263,53 @@ func TestTheWorkspacesGitNeverRunsAsRootThroughALink(t *testing.T) {
 	// Local Git's own view is unchanged (its root fallback is the page's).
 	if _, err := s.HeadCommit(ctx, link); err != nil && strings.Contains(err.Error(), "not a folder of one account's") {
 		t.Fatal("Local Git's own view refused")
+	}
+}
+
+// A root dashboard's relay hands a repository's Git LFS files to the account
+// and takes a new one back from it: what lands in the checkout is the
+// account's, and the upload reaches the server.
+func TestARootRelayCarriesTheAccountsGitLFSFiles(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("needs root")
+	}
+	_, remote, _, lfs := lfsRemote(t)
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	ctx := context.Background()
+	home := accountHome(t)
+	s := New([]string{home})
+	relay, err := s.OpenRelay(ctx, filepath.Join(t.TempDir(), "workspace-git"), remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	extra := relayCredential(remote)
+	folder, err := s.CloneThrough(ctx, relay, home, "shop", RelayCloneOptions{}, extra)
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, err := os.Lstat(filepath.Join(folder, "big.bin"))
+	if raw, _ := os.ReadFile(filepath.Join(folder, "big.bin")); err != nil || string(raw) != "the first large file\n" || !ownedBy(info, relayTestAccount) {
+		t.Fatalf("big.bin = %q, %v", raw, err)
+	}
+	if info, err := os.Lstat(filepath.Join(folder, ".git", "lfs", "objects")); err != nil || !ownedBy(info, relayTestAccount) {
+		t.Fatalf("the checkout's LFS store is not the account's: %v", err)
+	}
+	// The account's own commit of a new LFS file (its git, as itself).
+	write(t, folder, "made.bin", "made by the account\n")
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=a", "-c", "user.email=a@example.test", "commit", "-q", "-m", "Made"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = folder
+		cmd.Env = append(os.Environ(), "HOME="+home)
+		cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &syscall.Credential{Uid: relayTestAccount, Gid: relayTestAccount}}
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v as the account: %v\n%s", args, err, out)
+		}
+	}
+	if _, err := s.PushThrough(ctx, relay, folder, "", extra); err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256([]byte("made by the account\n"))
+	if content, ok := lfs.has(hex.EncodeToString(sum[:])); !ok || string(content) != "made by the account\n" {
+		t.Fatalf("the account's LFS object did not reach the server: %q %v", content, ok)
 	}
 }

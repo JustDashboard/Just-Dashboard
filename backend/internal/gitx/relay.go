@@ -534,7 +534,9 @@ func (r *Relay) fetch(ctx context.Context, extra map[string]string, depth int, r
 		args = append(args, "--quiet")
 	}
 	if len(refspecs) == 0 {
-		refspecs = []string{"+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"}
+		// The remote's branches twice: as the relay's own, and as origin's,
+		// which is where git-lfs looks for what the remote has.
+		refspecs = []string{"+refs/heads/*:refs/heads/*", "+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*"}
 	}
 	args = append(append(args, r.Remote), refspecs...)
 	if line == nil {
@@ -681,6 +683,18 @@ type RelayCloneOptions struct {
 	Branch string
 	Depth  int
 	Line   func(stream, text string)
+	// Note is handed what the clone says beside git's output (its Git LFS
+	// files); Line is, when there is no Note.
+	Note func(text string)
+}
+
+func (o RelayCloneOptions) say(text string) {
+	switch {
+	case o.Note != nil:
+		o.Note(text)
+	case o.Line != nil:
+		o.Line("stdout", text)
+	}
 }
 
 // CloneThrough makes a checkout of the relay's remote at parent/name, as the
@@ -804,17 +818,42 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 	if defaultBranch != "" && refs["refs/heads/"+defaultBranch] != "" {
 		_, _ = runGit(ctx, checkout, time.Minute, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+defaultBranch)
 	}
+	// The checkout leaves LFS files as pointers: an account's own git-lfs has
+	// no credential to fetch them with. They come through the relay after.
+	plain := withEnv(checkout, "GIT_LFS_SKIP_SMUDGE=1")
+	rev := ""
 	switch kind {
 	case "branch":
-		if _, err := runGit(ctx, checkout, 5*time.Minute, "", "checkout", "-q", "-b", branch, "refs/remotes/origin/"+branch, "--"); err != nil {
+		if _, err := runGit(ctx, plain, 5*time.Minute, "", "checkout", "-q", "-b", branch, "refs/remotes/origin/"+branch, "--"); err != nil {
 			return "", err
 		}
 		if err := setUpstream(ctx, checkout, branch); err != nil {
 			return "", err
 		}
+		rev = "refs/heads/" + branch
 	case "tag":
-		if _, err := runGit(ctx, checkout, 5*time.Minute, "", "checkout", "-q", "--detach", "refs/tags/"+branch, "--"); err != nil {
+		if _, err := runGit(ctx, plain, 5*time.Minute, "", "checkout", "-q", "--detach", "refs/tags/"+branch, "--"); err != nil {
 			return "", err
+		}
+		rev = "refs/tags/" + branch
+	}
+	if rev != "" {
+		switch {
+		case !lfsInstalled():
+			if r.usesLFS(ctx, rev) {
+				options.say(lfsNotInstalled)
+			}
+		default:
+			given, err := r.lfsIntoCheckout(ctx, checkout, plan.Target, extra, []string{rev})
+			if err != nil {
+				return "", fmt.Errorf("its Git LFS files could not be fetched: %w", err)
+			}
+			if given > 0 {
+				if err := lfsCheckout(ctx, checkout); err != nil {
+					return "", fmt.Errorf("its Git LFS files could not be checked out: %w", err)
+				}
+				options.say(plural(given, "Git LFS file was", "Git LFS files were") + " fetched through the relay and checked out.")
+			}
 		}
 	}
 	done = true
@@ -939,6 +978,10 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	s = s.ForAccounts()
 	unlock := s.Lock(r.Dir)
 	defer unlock()
+	before, err := r.refs(ctx)
+	if err != nil {
+		return nil, err
+	}
 	if err := r.Fetch(ctx, extra); err != nil {
 		return nil, err
 	}
@@ -953,7 +996,38 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	if err := r.intoCheckout(ctx, checkout, refs); err != nil {
 		return nil, err
 	}
-	return &Result{Command: "git fetch --prune origin", Output: "Done.", OK: true}, nil
+	res := &Result{Command: "git fetch --prune origin", Output: "Done.", OK: true}
+	// The LFS files of each branch the fetch moved, so a checkout or merge of
+	// one finds them in the checkout without a credential.
+	var moved []string
+	for ref, id := range refs {
+		if strings.HasPrefix(ref, "refs/heads/") && before[ref] != id {
+			moved = append(moved, ref)
+		}
+	}
+	sort.Strings(moved)
+	switch {
+	case len(moved) == 0:
+	case !lfsInstalled():
+		for _, ref := range moved {
+			if r.usesLFS(ctx, ref) {
+				res.Output = lfsNotInstalled
+				break
+			}
+		}
+	default:
+		given, err := r.lfsIntoCheckout(ctx, checkout, path, extra, moved)
+		if err != nil {
+			return nil, fmt.Errorf("the fetch's Git LFS files could not be fetched: %w", err)
+		}
+		if given > 0 {
+			if lfsConfigured(ctx, checkout) {
+				_, _ = runGit(ctx, checkout, 10*time.Minute, "", "lfs", "checkout")
+			}
+			res.Output = plural(given, "Git LFS file was", "Git LFS files were") + " fetched through the relay."
+		}
+	}
+	return res, nil
 }
 
 // PushThrough pushes the checkout at path through the relay, as PushOrigin
@@ -993,11 +1067,22 @@ func (s *Service) PushThrough(ctx context.Context, r *Relay, path, branch string
 	if err := transfer(ctx, checkout, r.runner(nil), []string{head}); err != nil {
 		return nil, err
 	}
+	// The LFS objects the commit carries go first, as git-lfs's pre-push hook
+	// sends them, so the remote never holds a pointer it has no object for.
+	uploaded := 0
+	if lfsInstalled() {
+		if uploaded, err = r.lfsUploaded(ctx, checkout, path, head, target, extra); err != nil {
+			return nil, fmt.Errorf("its Git LFS objects could not be uploaded, so nothing was pushed: %w", err)
+		}
+	}
 	refspec := head + ":refs/heads/" + target
 	args := []string{"push", "--porcelain", r.Remote, refspec}
 	res := &Result{Command: "git push --porcelain origin HEAD:refs/heads/" + target}
 	output, err := runGit(ctx, r.runner(extra), 3*time.Minute, "", args...)
 	res.Output = strings.TrimSpace(output)
+	if uploaded > 0 {
+		res.Output = strings.TrimSpace(res.Output + "\n" + plural(uploaded, "Git LFS object was", "Git LFS objects were") + " uploaded through the relay.")
+	}
 	if err != nil {
 		res.Output = strings.TrimPrefix(err.Error(), "git push: ")
 		return res, err

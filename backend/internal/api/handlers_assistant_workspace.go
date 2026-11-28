@@ -148,15 +148,19 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 			}
 			unlock := s.workspaceGit().Lock(folder)
 			defer unlock()
+			fetched := ""
 			if relay != nil {
-				_, err = s.workspaceGit().FetchThrough(ctx, relay, folder, env)
+				var res *gitx.Result
+				if res, err = s.workspaceGit().FetchThrough(ctx, relay, folder, env); err == nil && res.Output != "Done." {
+					fetched = " " + res.Output
+				}
 			} else {
 				_, err = s.workspaceGit().FetchOrigin(ctx, folder)
 			}
 			if err != nil {
 				return "", "", fmt.Errorf("The workspace %s is there, but fetching it failed: %v", folder, err)
 			}
-			said := "The workspace was already there; it was fetched again, and what was changed in it is kept."
+			said := "The workspace was already there; it was fetched again, and what was changed in it is kept." + fetched
 			if branch != "" {
 				if current, _ := s.workspaceGit().CurrentBranch(ctx, folder); current != branch {
 					if _, err := s.workspaceGit().Checkout(ctx, folder, branch); err != nil {
@@ -167,11 +171,13 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 			return folder, said, nil
 		}
 		if relay != nil {
-			folder, err := s.workspaceGit().CloneThrough(ctx, relay, parent, name, gitx.RelayCloneOptions{Branch: branch}, env)
+			said := "The repository was cloned into a new workspace."
+			options := gitx.RelayCloneOptions{Branch: branch, Note: func(text string) { said += " " + text }}
+			folder, err := s.workspaceGit().CloneThrough(ctx, relay, parent, name, options, env)
 			if err != nil {
 				return "", "", fmt.Errorf("Cloning %s failed: %v", source.Remote, err)
 			}
-			return folder, "The repository was cloned into a new workspace.", nil
+			return folder, said, nil
 		}
 		plan, err := s.workspaceGit().PrepareClone(parent, source.Remote, name, gitx.CloneOptions{Branch: branch})
 		if err != nil {

@@ -396,7 +396,10 @@ GitHub states the merge settings only to people who may change them; they are ab
    A shallow clone (`depth`) is fetched, that one branch or tag, into a relay of its own for that clone
    (`once/` beside the relays), removed when it ends, and its boundary is written into the new
    checkout's `.git/shallow` as the dashboard writes a workspace's marker: inside the checkout without
-   following a link, a new file, handed to the owner by descriptor. A company or self-signed CA for the
+   following a link, a new file, handed to the owner by descriptor. A repository's Git LFS files come
+   through the relay as well (git-lfs as the dashboard with the token, the objects handed to the owner's
+   own git-lfs through a pipe), so they are real files in the checkout; without git-lfs on the server
+   they stay pointers and the console says so. A company or self-signed CA for the
    Git host is set in the dashboard's own `gitconfig` there, not the account's.
 7. A public repository's `git clone --progress` runs as the folder's owner through
    `gitx.CloneStreaming`: the same environment and owner switch (`hostexec.AsOwner`) as every other git
