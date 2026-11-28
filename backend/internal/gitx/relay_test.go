@@ -136,7 +136,7 @@ func TestARelayClonesFetchesAndPushesWithTheCredentialOnlyInItsOwnGit(t *testing
 	}
 	extra := relayCredential(remote)
 
-	folder, err := s.CloneThrough(ctx, relay, root, "shop", "", extra)
+	folder, err := s.CloneThrough(ctx, relay, root, "shop", RelayCloneOptions{}, extra)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -229,7 +229,7 @@ func TestARelayPushNeverForces(t *testing.T) {
 		t.Fatal(err)
 	}
 	extra := relayCredential(remote)
-	folder, err := s.CloneThrough(ctx, relay, root, "shop", "main", extra)
+	folder, err := s.CloneThrough(ctx, relay, root, "shop", RelayCloneOptions{Branch: "main"}, extra)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -270,7 +270,7 @@ func TestARelayPushFromNoBranchGoesToTheBranchNamed(t *testing.T) {
 		t.Fatal(err)
 	}
 	extra := relayCredential(remote)
-	folder, err := s.CloneThrough(ctx, relay, root, "shop", "v1", extra)
+	folder, err := s.CloneThrough(ctx, relay, root, "shop", RelayCloneOptions{Branch: "v1"}, extra)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -328,7 +328,7 @@ func TestAWorkspaceCloneThatFailsLeavesNothing(t *testing.T) {
 	if err := os.WriteFile(os.Getenv("GIT_CONFIG_GLOBAL"), []byte("[init]\n\ttemplateDir = "+templates+"\n"), 0o644); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := s.CloneThrough(ctx, relay, root, "shop", "main", relayCredential(remote)); err == nil {
+	if _, err := s.CloneThrough(ctx, relay, root, "shop", RelayCloneOptions{Branch: "main"}, relayCredential(remote)); err == nil {
 		t.Fatal("the clone whose checkout failed succeeded")
 	}
 	if _, err := os.Lstat(filepath.Join(root, "shop")); err == nil {

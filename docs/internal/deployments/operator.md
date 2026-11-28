@@ -443,7 +443,8 @@ says to follow the run a push starts and fix what it finds.
   or in the backend's trust store, as for deploys; a setting in the account's or the checkout's configuration
   is not read with a credential. A commit runs the checkout's hooks as usual; it carries no credential. The
   workspace's checkout is never the folder git runs in with a credential, and nothing of one is kept in the
-  checkout or told to the model.
+  checkout or told to the model. The GitHub page's clone of a private repository goes through the same
+  relays ([clone to server](../backend/github-page.md#clone-to-server)).
 - **Audited.** Each route a file tool calls has its own entry as the person with actor `assistant`; what the
   workspace did (opened, pushed and where) is listed under `git` in the press's entry, as `run_command`'s lines
   are under `commands`.

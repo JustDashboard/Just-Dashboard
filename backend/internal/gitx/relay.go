@@ -14,7 +14,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -390,9 +392,76 @@ func orErr(said string, err error) string {
 // has them now. It is the relay's own copy, so it follows the remote's forced
 // updates; nothing here is ever pushed back but a commit a push names.
 func (r *Relay) Fetch(ctx context.Context, extra map[string]string) error {
-	_, err := runGit(ctx, r.runner(extra), 10*time.Minute, "", "fetch", "--prune", "--no-tags", "--quiet", r.Remote,
-		"+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*")
-	return err
+	return r.fetch(ctx, extra, 0, nil, nil)
+}
+
+// fetch is Fetch of refspecs (every branch and tag when none), as deep as depth
+// when it is more than 0, with git's progress handed to line when there is one.
+func (r *Relay) fetch(ctx context.Context, extra map[string]string, depth int, refspecs []string, line func(stream, text string)) error {
+	args := []string{"fetch", "--prune", "--no-tags"}
+	if depth > 0 {
+		args = append(args, "--depth="+strconv.Itoa(depth))
+	}
+	if line != nil {
+		args = append(args, "--progress")
+	} else {
+		args = append(args, "--quiet")
+	}
+	if len(refspecs) == 0 {
+		refspecs = []string{"+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"}
+	}
+	args = append(append(args, r.Remote), refspecs...)
+	if line == nil {
+		_, err := runGit(ctx, r.runner(extra), 10*time.Minute, "", args...)
+		return err
+	}
+	return runGitStreaming(ctx, r.runner(extra), 10*time.Minute, line, args...)
+}
+
+// runGitStreaming runs one command and hands its output to line as it comes,
+// git's progress redraws collapsed as a clone's console shows them.
+func runGitStreaming(ctx context.Context, run gitRunner, timeout time.Duration, line func(stream, text string), args ...string) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := run(ctx, args...)
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return err
+	}
+	stderr, err := cmd.StderrPipe()
+	if err != nil {
+		return err
+	}
+	var mu sync.Mutex
+	last := ""
+	emit := func(stream string) func(string) {
+		return func(text string) {
+			mu.Lock()
+			defer mu.Unlock()
+			if stream == "stderr" && strings.TrimSpace(text) != "" {
+				last = strings.TrimSpace(text)
+			}
+			line(stream, text)
+		}
+	}
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("git could not be started: %w", err)
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() { defer wg.Done(); collapseProgress(stdout, time.Now, emit("stdout")) }()
+	go func() { defer wg.Done(); collapseProgress(stderr, time.Now, emit("stderr")) }()
+	wg.Wait()
+	if err := cmd.Wait(); err != nil {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if last != "" {
+			return fmt.Errorf("git %s: %s", args[0], last)
+		}
+		return fmt.Errorf("git %s: %w", args[0], err)
+	}
+	return nil
 }
 
 // defaultBranch is the branch the remote's HEAD names, or a guess from the
@@ -478,41 +547,79 @@ func (r *Relay) intoCheckout(ctx context.Context, checkout gitRunner, refs map[s
 	return nil
 }
 
+// RelayCloneOptions are what a clone through the relay takes: the branch or
+// tag to check out (the remote's default when empty), a depth for a shallow
+// clone of that one branch, and line, which is handed git's progress for a
+// console.
+type RelayCloneOptions struct {
+	Branch string
+	Depth  int
+	Line   func(stream, text string)
+}
+
 // CloneThrough makes a checkout of the relay's remote at parent/name, as the
 // parent's owner, from what the relay fetched with extra: origin is the real
-// remote, its branches are the checkout's remote-tracking refs, and branch (the
-// remote's default when empty; a tag leaves HEAD on no branch, as git's clone
-// does) is checked out. A clone that fails or is stopped part of the way
-// leaves nothing of what it made.
-func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, branch string, extra map[string]string) (string, error) {
-	plan, err := s.PrepareClone(parent, r.Remote, name, CloneOptions{})
+// remote, its branches are the checkout's remote-tracking refs, and the branch
+// (a tag leaves HEAD on no branch, as git's clone does) is checked out. A
+// shallow clone is fetched into a relay of its own for that one clone, removed
+// after it, so the remote's shared relay stays whole. A clone that fails or is
+// stopped part of the way leaves nothing of what it made.
+func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name string, options RelayCloneOptions, extra map[string]string) (string, error) {
+	plan, err := s.PrepareClone(parent, r.Remote, name, CloneOptions{Branch: options.Branch, Depth: options.Depth})
 	if err != nil {
 		return "", err
 	}
 	unlock := s.Lock(plan.Target)
 	defer unlock()
-	if err := r.Fetch(ctx, extra); err != nil {
+	branch := options.Branch
+	if branch != "" {
+		if err := ValidateRef(branch); err != nil {
+			return "", err
+		}
+	}
+	var refspecs []string
+	if options.Depth > 0 {
+		once, remove, err := s.onceRelay(ctx, r)
+		if err != nil {
+			return "", err
+		}
+		defer remove()
+		r = once
+		if branch == "" {
+			branch = r.defaultBranch(ctx, extra, nil)
+		}
+		if branch == "" {
+			return "", fmt.Errorf("%w: the remote names no default branch to clone shallow; name one", ErrInvalidRef)
+		}
+		// One branch or tag, as git's clone --depth fetches.
+		refspecs = []string{"+refs/heads/" + branch + ":refs/heads/" + branch}
+		if out, err := runGit(ctx, r.runner(extra), time.Minute, "", "ls-remote", "--heads", "--tags", r.Remote, "refs/heads/"+branch, "refs/tags/"+branch); err == nil &&
+			!strings.Contains(out, "refs/heads/"+branch+"\n") && strings.Contains(out, "refs/tags/"+branch) {
+			refspecs = []string{"+refs/tags/" + branch + ":refs/tags/" + branch}
+		}
+	}
+	if err := r.fetch(ctx, extra, options.Depth, refspecs, options.Line); err != nil {
 		return "", err
 	}
 	refs, err := r.refs(ctx)
 	if err != nil {
 		return "", err
 	}
-	defaultBranch := r.defaultBranch(ctx, extra, refs)
-	if branch == "" {
-		branch = defaultBranch
+	defaultBranch := ""
+	if options.Depth == 0 {
+		defaultBranch = r.defaultBranch(ctx, extra, refs)
+		if branch == "" {
+			branch = defaultBranch
+		}
 	}
 	kind := ""
 	if branch != "" {
-		if err := ValidateRef(branch); err != nil {
-			return "", err
-		}
 		switch {
 		case refs["refs/heads/"+branch] != "":
 			kind = "branch"
 		case refs["refs/tags/"+branch] != "":
 			kind = "tag"
-		case len(refs) > 0:
+		case len(refs) > 0 || options.Depth > 0:
 			return "", fmt.Errorf("%w: the remote has no branch or tag %s", ErrInvalidRef, branch)
 		}
 	}
@@ -520,7 +627,7 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, bran
 		return "", fmt.Errorf("%w: %s already exists", ErrInvalidRef, plan.Target)
 	}
 	// The account makes the folder itself, in its own folder, as git clone
-	// would: the dashboard never makes or writes in a folder of the account's.
+	// would: the dashboard never makes a folder of the account's.
 	inParent := accountRunner(plan.Dir, plan.Dir)
 	initArgs := []string{"init", "-q"}
 	if kind == "" && branch != "" {
@@ -540,11 +647,20 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, bran
 		}
 	}()
 	checkout := accountRunner(plan.Target, plan.Dir)
-	if _, err := runGit(ctx, checkout, time.Minute, "", "remote", "add", "origin", r.Remote); err != nil {
+	remoteArgs := []string{"remote", "add"}
+	if options.Depth > 0 && kind == "branch" {
+		remoteArgs = append(remoteArgs, "-t", branch)
+	}
+	if _, err := runGit(ctx, checkout, time.Minute, "", append(remoteArgs, "origin", r.Remote)...); err != nil {
 		return "", err
 	}
 	if err := r.intoCheckout(ctx, checkout, refs); err != nil {
 		return "", err
+	}
+	if options.Depth > 0 {
+		if err := r.shallowInto(plan.Target, plan.Dir); err != nil {
+			return "", err
+		}
 	}
 	if defaultBranch != "" && refs["refs/heads/"+defaultBranch] != "" {
 		_, _ = runGit(ctx, checkout, time.Minute, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+defaultBranch)
@@ -564,6 +680,70 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, bran
 	}
 	done = true
 	return plan.Target, nil
+}
+
+// onceRelay is a relay of r's remote for one shallow clone, and what removes it.
+func (s *Service) onceRelay(ctx context.Context, r *Relay) (*Relay, func(), error) {
+	once := filepath.Join(r.home, "once")
+	if err := os.Mkdir(once, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
+		return nil, nil, err
+	}
+	if err := ownedDirectory(once); err != nil {
+		return nil, nil, err
+	}
+	dir, err := os.MkdirTemp(once, "clone-*.git")
+	if err != nil {
+		return nil, nil, err
+	}
+	remove := func() { _ = os.RemoveAll(dir) }
+	relay := &Relay{Dir: dir, Remote: r.Remote, home: r.home, config: r.config}
+	if _, err := runGit(ctx, relay.runner(nil), time.Minute, "", "init", "--bare", "-q"); err != nil {
+		remove()
+		return nil, nil, err
+	}
+	return relay, remove, nil
+}
+
+// shallowInto gives a checkout just made the relay's shallow boundary, the
+// commits whose parents a shallow clone does not have. git writes it only in a
+// fetch, which would read the relay as the account, so the dashboard writes it,
+// as the marker is written: inside the checkout without following a link out
+// of it, made new (never one that was there), and handed to the folder's owner
+// through its descriptor.
+func (r *Relay) shallowInto(target, ownerDir string) error {
+	raw, err := os.ReadFile(filepath.Join(r.Dir, "shallow"))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return nil
+		}
+		return err
+	}
+	var lines []string
+	for _, line := range strings.Split(string(raw), "\n") {
+		if objectIDPattern.MatchString(strings.TrimSpace(line)) {
+			lines = append(lines, strings.TrimSpace(line))
+		}
+	}
+	root, err := os.OpenRoot(target)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	if info, err := root.Lstat(".git"); err != nil || !info.IsDir() {
+		return fmt.Errorf("the checkout %s has no .git folder", target)
+	}
+	file, err := root.OpenFile(filepath.Join(".git", "shallow"), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o644)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+	if _, err := file.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
+		return err
+	}
+	if owner, ok := hostexec.OwnerOf(ownerDir); ok {
+		return file.Chown(int(owner.UID), int(owner.GID))
+	}
+	return nil
 }
 
 // removeMade removes a checkout a clone made and could not finish, and only

@@ -164,7 +164,7 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 			return folder, said, nil
 		}
 		if relay != nil {
-			folder, err := s.modules.git.CloneThrough(ctx, relay, parent, name, branch, env)
+			folder, err := s.modules.git.CloneThrough(ctx, relay, parent, name, gitx.RelayCloneOptions{Branch: branch}, env)
 			if err != nil {
 				return "", "", fmt.Errorf("Cloning %s failed: %v", source.Remote, err)
 			}
@@ -191,14 +191,15 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 	return "", "", fmt.Errorf("%s holds other folders of that name; there is no free name for a workspace", parent)
 }
 
-// workspaceRelayFolder, in the dashboard's data folder, holds the relays a
-// workspace's credentialed fetch and push go through, and gitconfig, the only
-// Git settings they read.
-const workspaceRelayFolder = "workspace-git"
+// gitRelayFolder, in the dashboard's data folder, holds the relays a
+// credentialed clone, fetch or push goes through (a workspace's, and the GitHub
+// page's clone of a private repository), and gitconfig, the only Git settings
+// they read.
+const gitRelayFolder = "workspace-git"
 
 // workspaceRelay is the dashboard's relay for remote.
 func (s *Server) workspaceRelay(ctx context.Context, remote string) (*gitx.Relay, error) {
-	return s.modules.git.OpenRelay(ctx, filepath.Join(s.Cfg.DataDir, workspaceRelayFolder), remote)
+	return s.modules.git.OpenRelay(ctx, filepath.Join(s.Cfg.DataDir, gitRelayFolder), remote)
 }
 
 // workspaceParent is the folder that holds the workspaces: in the terminal

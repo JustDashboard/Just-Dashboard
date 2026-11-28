@@ -171,7 +171,7 @@ func TestAWorkspacesConfigurationNeverSeesTheCredential(t *testing.T) {
 		t.Fatalf("origin/main = %s after the push, the remote's is %s", got, want)
 	}
 	// The relay is the dashboard's own, in its data folder.
-	if entries, err := os.ReadDir(filepath.Join(f.s.Cfg.DataDir, workspaceRelayFolder, "relays")); err != nil || len(entries) != 1 {
+	if entries, err := os.ReadDir(filepath.Join(f.s.Cfg.DataDir, gitRelayFolder, "relays")); err != nil || len(entries) != 1 {
 		t.Fatalf("the relays = %v, %v", entries, err)
 	}
 }

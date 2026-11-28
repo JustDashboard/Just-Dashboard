@@ -35,6 +35,7 @@ the three is missing. GitHub keeps the last word; its own refusal is shown as it
 
 The one place the App's own key is used is a credential for git (below): a clone's, which can only
 read one repository's contents, and a push of the assistant's workspace, which can only write them.
+Either is given only to git running as the dashboard, in a repository of its own (`gitx.Relay`).
 
 ## The manifest
 
@@ -380,13 +381,26 @@ GitHub states the merge settings only to people who may change them; they are ab
    `permissions: {"contents": "read"}`). A public repository is cloned with no credential. The person's
    own token is never given to git.
 6. The token reaches git only through its environment: `GIT_CONFIG_COUNT/KEY/VALUE` set
-   `credential.helper` to empty (no helper of the checkout owner's is asked, or told to store,
-   anything) and `http.https://github.com/<owner>/<name>.git.extraHeader` to
+   `credential.helper` to empty (no helper is asked, or told to store, anything) and
+   `http.https://github.com/<owner>/<name>.git.extraHeader` to
    `Authorization: Basic base64("x-access-token:" + token)`, which git sends only to that repository's
    address. It is never in the argv (`ps`), the console, the job's record or the checkout's
-   `.git/config`, whose remote is the plain HTTPS address.
-7. `git clone --progress` runs through `gitx.CloneStreaming`: the same environment and owner switch
-   (`hostexec.AsOwner`) as every other git the Git page runs. Git's carriage-return progress is kept to
+   `.git/config`, whose remote is the plain HTTPS address. And it is given only to git of the
+   dashboard's own, never to a git of the folder's account: that git would read the account's
+   `~/.gitconfig` (an `http.proxy` with `http.sslVerify` off, an `http.sslCAInfo` of the account's, a
+   `url.<base>.insteadOf`), and the account could read its environment in `/proc`. So a private
+   repository is fetched by the dashboard into its relay for that address (`gitx.CloneThrough`, the
+   assistant workspace's relay: a bare repository in `<data dir>/workspace-git/relays/` with only the
+   dashboard's own Git settings, [working on code](../deployments/operator.md#working-on-code)), and the
+   folder's owner makes the checkout and takes the objects from it through a pipe, with no credential.
+   A shallow clone (`depth`) is fetched, that one branch or tag, into a relay of its own for that clone
+   (`once/` beside the relays), removed when it ends, and its boundary is written into the new
+   checkout's `.git/shallow` as the dashboard writes a workspace's marker: inside the checkout without
+   following a link, a new file, handed to the owner by descriptor. A company or self-signed CA for the
+   Git host is set in the dashboard's own `gitconfig` there, not the account's.
+7. A public repository's `git clone --progress` runs as the folder's owner through
+   `gitx.CloneStreaming`: the same environment and owner switch (`hostexec.AsOwner`) as every other git
+   the Git page runs; it carries no credential. Either way git's carriage-return progress is kept to
    one line a second per phase plus the phase's last. A failure ends the job with git's own last line,
    and the folder the clone made is removed, as git removes it itself, even when git was killed (one
    clone into a place at a time, so it is the one this clone made).
