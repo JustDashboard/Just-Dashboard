@@ -141,11 +141,7 @@ test.describe("on a phone", () => {
     await expect(strip(page)).toBeVisible()
 
     const controls = await boxes(page, "header button")
-    expect(controls.map((control) => control.name)).toEqual([
-      "Toggle the sidebar",
-      "Ask the assistant about this page",
-      "Search",
-    ])
+    expect(controls.map((control) => control.name)).toEqual(["Toggle the sidebar", "Search"])
     for (const control of controls)
       expect(control.side, `${control.name} in the strip`).toBeGreaterThanOrEqual(44)
 

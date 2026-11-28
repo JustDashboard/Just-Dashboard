@@ -34,7 +34,6 @@ import {
 } from "@/components/database/shell/nav-groups"
 import { databaseIdFrom } from "@/components/database/shell/routes"
 import { askAboutHref, isAssistantPage } from "@/components/assistant/agent/about"
-import { pageTitle } from "@/components/assistant/ask-about"
 import { useSearchInventory } from "@/components/command-search/use-inventory"
 import { COMMAND_ICONS, KINDS, PAGE_PRODUCTS, ResultMark } from "@/components/command-search/marks"
 import { KEYCAP, Keycaps } from "@/components/command-search/keycaps"
@@ -81,6 +80,16 @@ type PaletteItem = PreviewItem & {
   run?: () => void
   /** Listed only once something is typed: a command that acts, or a page the account hid. */
   explicit?: boolean
+}
+
+/**
+ * The page's own name as it names itself for assistive technology — "shop · Logs",
+ * a project's name — read when the palette's Ask is run, since the shell cannot know
+ * it otherwise; the rail's name for the address where a page names nothing.
+ */
+function pageTitle(pathname: string) {
+  const named = document.querySelector('[data-slot="page"] h1')?.textContent?.trim()
+  return named || navLocation(pathname)?.title || ""
 }
 
 /** What the page's own commands do, for the preview: their labels say only what they are called. */
