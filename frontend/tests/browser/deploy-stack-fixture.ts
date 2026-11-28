@@ -789,16 +789,6 @@ function refuse(route: Route, status: number, code: string, message: string) {
   })
 }
 
-/**
- * Project 7 as a media stack, over `mockProject`: a Compose project made
- * from the stack's template, its stack state and domains, the pass a press
- * starts, the login's reveal and change, and "give every app its address".
- *
- * `state` may be replaced while the page is open (`set`), which is how a
- * spec watches a pass move. `configure` decides what a press is answered
- * with: 202 and a state that follows, or one of the two refusals; `login`
- * and `addresses` do the same for their routes.
- */
 /** FlareSolverr, as the state names it to a stack made before it came with the template. */
 export const FLARESOLVERR_UPGRADE = {
   template: "media-complete",
@@ -814,6 +804,16 @@ export const FLARESOLVERR_UPGRADE = {
   saved: false,
 }
 
+/**
+ * Project 7 as a media stack, over `mockProject`: a Compose project made
+ * from the stack's template, its stack state and domains, the pass a press
+ * starts, the login's reveal and change, and "give every app its address".
+ *
+ * `state` may be replaced while the page is open (`set`), which is how a
+ * spec watches a pass move. `configure` decides what a press is answered
+ * with: 202 and a state that follows, or one of the two refusals; `login`,
+ * `addresses` and `upgrade` do the same for their routes.
+ */
 export async function mockStackProject(
   page: Page,
   options: {
