@@ -64,7 +64,7 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           type="button"
           data-slot="server-switcher"
           className={cn(
-            "group/switcher flex h-8 min-w-0 items-center gap-2 rounded-lg px-1.5 text-left focus-ring transition-colors hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
+            "group/switcher flex h-8 min-w-0 items-center gap-2 rounded-lg px-1.5 text-left focus-ring transition-[color,background-color] hover:bg-sidebar-accent data-[state=open]:bg-sidebar-accent",
             strip
               ? "max-w-[min(18rem,100%)] flex-1"
               : // In the rail, 8px in from the head's edge, as the wordmark it stands

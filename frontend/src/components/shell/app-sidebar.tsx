@@ -517,7 +517,7 @@ function SearchButton({ onOpen }: { onOpen: () => void }) {
     // shortcut is said. The button's `::after` covers the whole well, so a
     // press anywhere on it, the caps included, is a press on Search, and the
     // well draws the ring for the button inside it.
-    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-md border border-transparent border-t-edge bg-control pr-1.5 text-body text-muted-foreground focus-ring-within transition-colors duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-control-hover hover:text-secondary-foreground md:h-8">
+    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-md border border-transparent border-t-edge bg-control pr-1.5 text-body text-muted-foreground focus-ring-within transition-[color,background-color] duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-control-hover hover:text-secondary-foreground md:h-8">
       <button
         type="button"
         onClick={onOpen}
@@ -811,7 +811,7 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
           // Just Hub's account row: no frame of its own, the rows' hover, and
           // the face, the name and the role on the rows' glyph line. 48px, so
           // it is a finger's box on a phone as well.
-          className="group/account flex h-12 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left focus-ring transition-colors duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-control active:bg-control-active data-[state=open]:bg-control"
+          className="group/account flex h-12 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left focus-ring transition-[color,background-color] duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-control active:bg-control-active data-[state=open]:bg-control"
         >
           {user ? (
             <UserAvatar user={user} size="sm" />

@@ -357,6 +357,15 @@ test("the rail is drawn as Just Hub's: one line, a named panel, faint labels, ic
       faint: ink("text-faint"),
       brand: ink("text-brand"),
       muted: ink("text-muted-foreground"),
+      // What each control with a focus ring eases: its ink and its fill.
+      eases: Object.fromEntries(
+        Object.entries({
+          search: root.querySelector('button[aria-label="Search"]')?.parentElement,
+          back,
+          row: current,
+          account: root.querySelector('button[aria-label$="account menu"]'),
+        }).map(([part, el]) => [part, el ? getComputedStyle(el).transitionProperty : "missing"]),
+      ),
     }
   })
 
@@ -386,6 +395,13 @@ test("the rail is drawn as Just Hub's: one line, a named panel, faint labels, ic
   // Here is the mark's ice; every other glyph is muted.
   expect(read.currentGlyph).toBe(read.brand)
   expect(read.restingGlyph).toBe(read.muted)
+  // A control with a focus ring eases its ink and fill, never the ring:
+  // `transition-colors` eases `outline-color` too, so the ring faded in after
+  // a Tab instead of being there at once (states.md).
+  for (const [part, eased] of Object.entries(read.eases)) {
+    expect(eased, `${part} is in the rail`).not.toBe("missing")
+    expect(eased, `${part} eases ${eased}`).not.toMatch(/outline|\ball\b/)
+  }
 })
 
 test("a deep link opens with the rail already inside the section", async ({ page }) => {
