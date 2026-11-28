@@ -11,6 +11,7 @@ import {
   askAgentFirst,
   carryAgentQueue,
   decideAgent,
+  deployedDraftScope,
   holdAgentTurns,
   editQueued,
   newAgentChat,
@@ -535,6 +536,24 @@ describe("a draft deployed with something waiting", () => {
     environmentId,
     name: "shop",
     environmentName: "production",
+  })
+
+  test("what waits lands in that deployment's own chat, by its environment, and no other", async () => {
+    turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-where", name: "shop" })
+    holdAgentTurns(draft, "draft-save", true)
+    askAgent(draft, "and add a volume")
+    // What the commit answered, as the page passes it.
+    const scope = deployedDraftScope({ projectId: 90, environmentId: 91 }, "shop")
+    carryAgentQueue(draft, scope)
+    holdAgentTurns(draft, "draft-save", false)
+    expect(agentScopeKey(scope)).toBe("deploy.91")
+    expect(agentPageOf(scope)).toBe("/deploy/90/assistant")
+    // The chat the deployment's page opens, keyed by its environment, holds it; no
+    // other environment's does.
+    const page = { ...deployment(91), name: "shop (renamed)", environmentName: "Production" }
+    expect(newAgentChat(page).returned.map((one) => one.question)).toEqual(["and add a volume"])
+    expect(newAgentChat(deployment(92)).returned).toEqual([])
   })
 
   test("a question held for Take over is carried first, with its images, and its turn goes", async () => {

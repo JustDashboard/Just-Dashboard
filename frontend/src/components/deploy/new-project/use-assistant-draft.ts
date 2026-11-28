@@ -5,6 +5,7 @@ import { ApiError } from "@/lib/api"
 import {
   agentBusy,
   carryAgentQueue,
+  deployedDraftScope,
   dismissAgent,
   holdAgentTurns,
   useAgentSession,
@@ -327,13 +328,7 @@ export function useAssistantDraft({
    * new deployment's own chat, in its box and unsent (`carryAgentQueue`).
    */
   const committed = (commit: { projectId: number; environmentId: number }) =>
-    carryAgentQueue(session, {
-      kind: "deployment",
-      projectId: commit.projectId,
-      environmentId: commit.environmentId,
-      name: latest.current.flow.name,
-      environmentName: "production",
-    })
+    carryAgentQueue(session, deployedDraftScope(commit, latest.current.flow.name))
 
   return {
     session,

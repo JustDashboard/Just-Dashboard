@@ -1628,6 +1628,13 @@ async function holdSetupTurns(page: Page) {
       if (!new URL(url, location.href).pathname.endsWith("/deploy/drafts/setup-draft/assistant"))
         return original(input, init)
       bodies.push(JSON.parse(String(init?.body ?? "{}")))
+      // `__setupBusy` presses are refused as another tab's answer refuses them.
+      if (Number(w.__setupBusy ?? 0) > 0) {
+        w.__setupBusy = Number(w.__setupBusy) - 1
+        const error = { code: "chat_busy", message: "This chat is answering in another tab." }
+        const headers = { "Content-Type": "application/json" }
+        return Promise.resolve(new Response(JSON.stringify({ error }), { status: 409, headers }))
+      }
       const body = new ReadableStream<Uint8Array>({ start: (c) => void held.push(c) })
       const headers = { "Content-Type": "application/x-ndjson" }
       return Promise.resolve(new Response(body, { status: 200, headers }))
@@ -2251,6 +2258,36 @@ test("the panel closed and opened again while its first save is out asks its que
   await page.waitForTimeout(600)
   expect(await questions()).toHaveLength(1)
   await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(0)
+})
+
+test("Take over pressed while the page saves says it waits, and goes once the save is done", async ({
+  page,
+}) => {
+  const { turns, send, panel, questions } = await onReviewWithHeldTurns(page)
+  // Another tab answers the chat: the next question is held for Take over.
+  await page.evaluate(() => ((window as never as { __setupBusy: number }).__setupBusy = 1))
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  const bar = panel.locator("[data-slot='agent-elsewhere']")
+  await expect(bar).toContainText("This chat is running in another tab.")
+  // The page's own save is held, to press Take over over it.
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/deploy/drafts/setup-draft", async (route) => {
+    if (route.request().method() === "PUT") await gate
+    return route.fallback()
+  })
+  await page.getByRole("button", { name: "Save only" }).click()
+  await bar.getByRole("button", { name: "Take over" }).click()
+  await expect(bar).toContainText("Taking it over once the page has saved your changes.")
+  await page.waitForTimeout(300)
+  expect(await turns()).toBe(1)
+  release()
+  // Once the save has answered, the held question goes, taking the chat over.
+  await expect.poll(turns).toBe(2)
+  expect((await questions()).at(-1)).toBe("Use 8080")
+  await send(1, [start, { type: "text", text: "On 8080." }, done()], true)
+  await expect(panel).toContainText("On 8080.")
 })
 
 test("a question sent while Deploy is out is carried off the deployed draft, unsent", async ({

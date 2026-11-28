@@ -137,6 +137,23 @@ export function agentScopeKey(scope: AgentScope) {
   }
 }
 
+/**
+ * The chat of the deployment a draft became once committed: its production
+ * environment, the one `ProjectAssistant` opens, keyed as it keys it.
+ */
+export function deployedDraftScope(
+  commit: { projectId: number; environmentId: number },
+  name: string,
+): AgentScope {
+  return {
+    kind: "deployment",
+    projectId: commit.projectId,
+    environmentId: commit.environmentId,
+    name,
+    environmentName: "production",
+  }
+}
+
 export function agentPageOf(scope: AgentScope) {
   switch (scope.kind) {
     case "draft":
