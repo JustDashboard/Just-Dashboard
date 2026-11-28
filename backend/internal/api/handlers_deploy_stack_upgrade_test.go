@@ -231,3 +231,31 @@ func TestStackReleaseServicesAreTheReleasesComposeFile(t *testing.T) {
 		t.Fatalf("a release of the shipped version: %v %v", running, err)
 	}
 }
+
+// The dashboard's own stack loop reads the live release's Compose file: a
+// pass over a stack deployed before FlareSolverr came with it runs no step of
+// FlareSolverr's, and every other app's as before.
+func TestTheStackPassOfAnOlderStackLeavesOutWhatItsReleaseDoesNotRun(t *testing.T) {
+	s := testServer(t)
+	wireDeployPlanningAndSources(t, s, []string{t.TempDir()})
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	s.modules.stacks = s.newStackService()
+	projectID, environmentID, _ := seedOlderStack(t, s)
+	record, err := s.modules.stackStore.Get(t.Context(), projectID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	live, err := s.stackLiveRelease(t.Context(), environmentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	manifest := media.Manifest()
+	preset, _ := manifest.PresetByID("complete")
+	env, err := s.modules.stacks.Env(t.Context(), manifest, preset, *record, live)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if env.Has("flaresolverr") || !env.Has("prowlarr") || !env.Has("recyclarr") {
+		t.Fatalf("the pass runs %v", env.Running)
+	}
+}
