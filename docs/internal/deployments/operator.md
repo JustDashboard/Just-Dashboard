@@ -412,7 +412,10 @@ says to follow the run a push starts and fix what it finds.
   relay's checkout side, `accountRunner`) runs as root only in a folder of root's that no other account can
   point elsewhere (every folder from `/` root's, no link, none writable by others without the sticky bit:
   `rootsAllTheWay`), and is refused anywhere else; a clone's owner is fixed once, and a failed clone removes
-  only a folder of the account its git ran as, through the parent opened once (`removeMade`). A deployment
+  only a folder of the account its git ran as, through the parent opened once (`removeMade`). A git that
+  reaches its deadline is stopped with everything it started (`stoppedWhole`: its own process group, killed
+  whole, and a five-second `WaitDelay`), so a remote that never answers holds neither the relay's lock nor the
+  workspace's past the call's deadline. A deployment
   built from a folder on the server is worked on in that folder as its owner under the same rule; #635 makes
   no folder for it.
 - **The files.** `read_file`, `edit_file` and `write_file` go through `GET /files/read`, `PUT /files/write`

@@ -1012,7 +1012,7 @@ func (s *Service) executeInput(ctx context.Context, dir string, timeout time.Dur
 func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Duration, input string, extra map[string]string, args ...string) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := gitCommand(ctx, dir, extra, args...)
+	cmd := stoppedWhole(gitCommand(ctx, dir, extra, args...))
 	if err := s.refuseRoot(cmd); err != nil {
 		return []byte(err.Error()), err
 	}

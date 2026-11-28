@@ -103,7 +103,7 @@ func (s *Service) opEnv(ctx context.Context, path string, timeout time.Duration,
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := run(ctx, args...)
+	cmd := stoppedWhole(run(ctx, args...))
 	for key, value := range extra {
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}

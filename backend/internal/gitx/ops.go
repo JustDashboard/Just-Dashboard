@@ -775,6 +775,7 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 			line(stream, text)
 		}
 	}
+	stoppedWhole(cmd)
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("git could not be started: %w", err)
 	}

@@ -326,12 +326,27 @@ func rootsAllTheWay(path string) bool {
 	}
 }
 
+// stoppedWhole makes cmd's cancellation stop git and every helper it started
+// (git-remote-https, fetch-pack, index-pack): those hold its output, and
+// killing git alone left Wait waiting on them for as long as the remote kept
+// them waiting, past every deadline, with the relay's lock and the checkout's
+// held. WaitDelay is the backstop for one that leaves the group.
+func stoppedWhole(cmd *exec.Cmd) *exec.Cmd {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second
+	return cmd
+}
+
 // runGit runs one command and answers what it wrote to its output; a failure
 // carries what git said.
 func runGit(ctx context.Context, run gitRunner, timeout time.Duration, input string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := run(ctx, args...)
+	cmd := stoppedWhole(run(ctx, args...))
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
@@ -460,7 +475,7 @@ func pipePack(ctx context.Context, from, to gitRunner, want, exclude []string) e
 	for _, id := range exclude {
 		input.WriteString("^" + id + "\n")
 	}
-	pack, index := from(ctx, packArgs...), to(ctx, indexArgs...)
+	pack, index := stoppedWhole(from(ctx, packArgs...)), stoppedWhole(to(ctx, indexArgs...))
 	pack.Stdin = strings.NewReader(input.String())
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -534,7 +549,7 @@ func (r *Relay) fetch(ctx context.Context, extra map[string]string, depth int, r
 func runGitStreaming(ctx context.Context, run gitRunner, timeout time.Duration, line func(stream, text string), args ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := run(ctx, args...)
+	cmd := stoppedWhole(run(ctx, args...))
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
