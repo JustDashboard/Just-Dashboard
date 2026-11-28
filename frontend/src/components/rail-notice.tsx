@@ -25,25 +25,27 @@ const TILE: Record<RailNoticeTone, string> = {
   danger: "bg-plot-danger text-destructive hover:bg-plot-danger-hover",
 }
 
-/** The mark in front of the words. */
-const MARK: Record<RailNoticeTone, string> = {
-  brand: "border-rule-brand bg-wash-brand text-brand",
-  success: "border-rule-success bg-wash-success text-success",
-  warning: "border-rule-warning bg-wash-warning text-warning",
-  danger: "border-rule-danger bg-wash-danger text-destructive",
+/** The mark's ink: the tone says itself in the glyph, never in a tile behind it. */
+const INK: Record<RailNoticeTone, string> = {
+  brand: "text-signal",
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-destructive",
 }
 
 /**
  * A notice in the rail, above the account card: the dashboard's own update,
- * what a linked hub has to say. Both were the same shell written twice — a
- * card in the notice's tone, a tinted tile with a tooltip when the rail is
- * collapsed, a dismiss on a 16px target — and this is that shell once, with
- * the dismiss at the 24px a target needs.
+ * what a linked hub has to say. Drawn as Just Hub's own rail notices are
+ * (Spoke's `BannerCard`): a compact card in the notice's tone, a 16px glyph in
+ * the tone's ink at the start of its first line, the words in one column
+ * beside it, and the dismiss at that line's end.
+ *
+ * `head` is the first line, which shares its row with the dismiss; `children`
+ * are the lines under it, which take the column's whole width back.
  *
  * Collapsed, it is the tile alone, a link to where the notice is read in
- * full, named and tipped by `label`. Open, it is the card, and `children` are
- * its contents: a `RailNoticeHead` first, then the notice's own lines.
- * `beam` runs a light round the edge while something is under way.
+ * full, named and tipped by `label`. `beam` runs a light round the edge while
+ * something is under way.
  */
 export function RailNotice({
   tone,
@@ -51,6 +53,10 @@ export function RailNotice({
   label,
   href,
   glyph,
+  mark,
+  head,
+  onDismiss,
+  dismissLabel = "Dismiss",
   section,
   slot,
   contentKey,
@@ -66,6 +72,13 @@ export function RailNotice({
   href: string
   /** What the collapsed tile shows. */
   glyph: React.ReactNode
+  /** The open card's 16px glyph, drawn in the tone's ink. Defaults to `glyph`. */
+  mark?: React.ReactNode
+  /** The open card's first line. */
+  head?: React.ReactNode
+  /** For a notice that can be put away: a 24px target at the first line's end. */
+  onDismiss?: () => void
+  dismissLabel?: string
   /** The open card's landmark name: "Dashboard update". */
   section: string
   slot?: string
@@ -73,7 +86,7 @@ export function RailNotice({
   contentKey?: string
   beam?: boolean
   className?: string
-  /** The open card's contents; a collapsed notice draws none. */
+  /** The lines under the head; a collapsed notice draws none. */
   children?: React.ReactNode
 }) {
   if (collapsed) {
@@ -108,55 +121,44 @@ export function RailNotice({
       )}
     >
       {beam && <BorderBeam size={72} duration={4} />}
-      <div key={contentKey} className="space-y-3 p-3">
-        {children}
+      <div
+        key={contentKey}
+        className="grid min-w-0 grid-cols-[1rem_minmax(0,1fr)_auto] gap-x-2.5 gap-y-2 py-2.5 pr-2 pl-3"
+      >
+        {/* As tall as the head's first line, so the glyph sits on it whatever its size. */}
+        <span
+          aria-hidden
+          className={cn("flex h-4 items-center [&_svg]:size-4 [&_svg]:shrink-0", INK[tone])}
+        >
+          {mark ?? glyph}
+        </span>
+        <div className="min-w-0 self-center">{head}</div>
+        {onDismiss ? (
+          <IconAction
+            label={dismissLabel}
+            size="icon-xs"
+            onClick={onDismiss}
+            className="-my-1 text-muted-foreground"
+          >
+            <Cross />
+          </IconAction>
+        ) : (
+          <span className="pr-1" />
+        )}
+        {children && (
+          <div className="col-span-2 col-start-2 min-w-0 space-y-2 pr-1">{children}</div>
+        )}
       </div>
     </section>
   )
 }
 
 /**
- * The first line of a `RailNotice`: its mark on a tile in the notice's tone,
- * what it is and who says it, and — for a notice that can be put away — the
- * dismiss, a 24px target at the line's end.
+ * A line of a `RailNotice` that goes somewhere: words in the secondary ink
+ * that turn primary under the pointer (hover is colour only, motion.md), at
+ * the rail's hint size, its glyph after them. Not a button: a notice's way
+ * on is a line of it, as in Just Hub's rail, and the one command a notice may
+ * carry (Update now) is the only button in it.
  */
-export function RailNoticeHead({
-  tone,
-  mark,
-  onDismiss,
-  dismissLabel = "Dismiss",
-  className,
-  children,
-}: {
-  tone: RailNoticeTone
-  mark: React.ReactNode
-  onDismiss?: () => void
-  dismissLabel?: string
-  className?: string
-  children: React.ReactNode
-}) {
-  return (
-    <div className={cn("flex min-w-0 items-start gap-2.5", className)}>
-      <span
-        aria-hidden
-        className={cn(
-          "flex size-8 shrink-0 items-center justify-center rounded-lg border",
-          MARK[tone],
-        )}
-      >
-        {mark}
-      </span>
-      <div className="min-w-0 flex-1 space-y-1 self-center">{children}</div>
-      {onDismiss && (
-        <IconAction
-          label={dismissLabel}
-          size="icon-xs"
-          onClick={onDismiss}
-          className="-mt-0.5 -mr-1 text-muted-foreground"
-        >
-          <Cross />
-        </IconAction>
-      )}
-    </div>
-  )
-}
+export const RAIL_NOTICE_LINK =
+  "group/notice-link flex w-fit max-w-full min-w-0 items-center gap-1 rounded-sm text-hint font-medium text-secondary-foreground focus-ring transition-[color,background-color] duration-fast hover:text-foreground [&_svg]:size-3 [&_svg]:shrink-0 [&_svg]:text-muted-foreground"

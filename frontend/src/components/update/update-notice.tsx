@@ -12,7 +12,7 @@ import { Segment } from "@/components/deploy/run-pipeline"
 import { KindBand, UpdateWire } from "@/components/update/update-art"
 import { useUpdateDialog } from "@/components/update/update-dialog"
 import { updatePhases } from "@/components/update/update-progress"
-import { RailNotice, RailNoticeHead } from "@/components/rail-notice"
+import { RAIL_NOTICE_LINK, RailNotice } from "@/components/rail-notice"
 import { BlurFade } from "@/components/ui/blur-fade"
 import { Button } from "@/components/ui/button"
 import { Confetti, type ConfettiRef } from "@/components/ui/confetti"
@@ -148,19 +148,16 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
         // "updating" into "updated" arrives again each time it says
         // something new, rather than swapping its words in place.
         contentKey={mode}
-      >
-        <BlurFade>
-          <RailNoticeHead
-            tone={tone}
-            mark={<Mark mode={mode} />}
-            // Dismissal is for a run that has finished and been read. An
-            // update that is merely available has nothing to dismiss — it is
-            // still available tomorrow, and a notice that can be silenced is
-            // one an install is silently three versions behind on.
-            onDismiss={
-              mode === "success" || mode === "failed" ? () => dismiss().catch(() => {}) : undefined
-            }
-          >
+        mark={<Mark mode={mode} />}
+        // Dismissal is for a run that has finished and been read. An update
+        // that is merely available has nothing to dismiss — it is still
+        // available tomorrow, and a notice that can be silenced is one an
+        // install is silently three versions behind on.
+        onDismiss={
+          mode === "success" || mode === "failed" ? () => dismiss().catch(() => {}) : undefined
+        }
+        head={
+          <BlurFade className="space-y-1.5">
             <p
               className={cn(
                 "eyebrow leading-none",
@@ -186,9 +183,9 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
                 {run && mode !== "available" ? run.toVersion : target}
               </span>
             </p>
-          </RailNoticeHead>
-        </BlurFade>
-
+          </BlurFade>
+        }
+      >
         <BlurFade delay={0.06} className="space-y-2.5">
           {mode === "running" ? (
             <>
@@ -216,7 +213,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
           {mode !== "running" && mode !== "failed" && <KindBand releases={delivered} />}
         </BlurFade>
 
-        <BlurFade delay={0.12} className="flex flex-col gap-1">
+        <BlurFade delay={0.12} className="flex flex-col gap-2">
           {mode === "available" && canInstall && (
             <Button size="sm" className="w-full" onClick={openUpdate}>
               <ArrowCircleUp />
@@ -228,22 +225,20 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
                 a binary or an unrecognised directory is a fine install, and
                 hiding the notice would leave its operator never finding out. */}
           {mode === "available" && !report.install.supported && (
-            <p className="pb-1 text-hint leading-snug text-muted-foreground">
+            <p className="text-hint leading-snug text-muted-foreground">
               This install updates by hand — {report.install.reason}
             </p>
           )}
-          <Button asChild size="sm" variant="ghost" className="w-full justify-between">
-            <Link href="/dashboard">
-              {mode === "running"
-                ? "View progress"
-                : mode === "failed"
-                  ? "See what went wrong"
-                  : mode === "success"
-                    ? "See what's new"
-                    : "View patch notes"}
-              <ArrowRight />
-            </Link>
-          </Button>
+          <Link href="/dashboard" className={RAIL_NOTICE_LINK}>
+            {mode === "running"
+              ? "View progress"
+              : mode === "failed"
+                ? "See what went wrong"
+                : mode === "success"
+                  ? "See what's new"
+                  : "View patch notes"}
+            <ArrowRight aria-hidden />
+          </Link>
         </BlurFade>
       </RailNotice>
       {dialog}
@@ -253,7 +248,7 @@ export function UpdateNotice({ collapsed }: { collapsed: boolean }) {
 
 /** The notice's mark: the dashboard's own J while it is on its way, the outcome once it lands. */
 function Mark({ mode }: { mode: "available" | "running" | "success" | "failed" }) {
-  if (mode === "success") return <Sparkles className="size-4" />
-  if (mode === "failed") return <CrossCircle className="size-4" />
-  return <LogoGlyph small className="h-4 w-auto" />
+  if (mode === "success") return <Sparkles />
+  if (mode === "failed") return <CrossCircle />
+  return <LogoGlyph small />
 }

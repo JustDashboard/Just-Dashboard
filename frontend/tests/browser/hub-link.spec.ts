@@ -1109,8 +1109,11 @@ test("linked: the hub's notices, newest first, as text, dismissed per browser", 
 
   const card = page.locator("[data-slot=hub-notice]")
   await expect(card).toContainText("Update ready on 1 server")
-  // Who says it comes first: the hub's words are the hub's (§8.10).
-  await expect(card).toContainText(/Just Hub \(hub\) says · 2m/)
+  // Who says it comes first: the hub's words are the hub's (§8.10). When is at that line's end.
+  await expect(card).toContainText(/Just Hub \(hub\) says/)
+  await expect(card.locator("time")).toHaveText("2m")
+  // Its title is the full time, as every other time on the dashboard's is.
+  await expect(card.locator("time")).toHaveAttribute("title", /\d{4}|\d{1,2}:\d{2}/)
   // The body came from another machine: it is text, never markup.
   await expect(card).toContainText("0.8.6 is out. <b>vmi3690758</b> can install it")
   await expect(card.locator("b")).toHaveCount(0)
@@ -1128,9 +1131,24 @@ test("linked: the hub's notices, newest first, as text, dismissed per browser", 
   expect(await filledPills(page)).toEqual([])
   expect(await unnamedControls(page)).toEqual([])
 
+  // An info notice carries the hub's J and names no level.
+  const J = "38.1 12 179.8 232"
+  await expect(card.locator("svg").first()).toHaveAttribute("viewBox", J)
+  await expect(card.locator("p", { hasText: "Update ready on 1 server" })).toHaveText(
+    "Update ready on 1 server",
+  )
+
   await card.getByRole("button", { name: "Dismiss Update ready on 1 server" }).click()
   await expect(card).toContainText("atlas is offline")
   await expect(card).toHaveClass(/border-rule-danger/)
+  // A critical notice says so with its glyph, which is drawn and never read, so a screen reader
+  // hears the level in words, after who says it (§8.10) and before the hub's title.
+  await expect(card.locator("svg").first()).not.toHaveAttribute("viewBox", J)
+  await expect(card.locator("p", { hasText: "atlas is offline" })).toHaveText(
+    "Critical: atlas is offline",
+  )
+  const read = await card.innerText()
+  expect(read.indexOf("Just Hub (hub) says")).toBeLessThan(read.indexOf("Critical"))
   // A link off the hub's origin is dropped (§6.2).
   await expect(card.getByRole("link", { name: "Open in Just Hub" })).toHaveCount(0)
 
@@ -1166,7 +1184,7 @@ test("a long hub name is what the notice card clips, never who says it or the li
     if (width < 768) await page.locator("[data-slot=sidebar-trigger]:visible").click()
     await expect(card).toContainText("Update ready on 1 server")
     await expect(card).toContainText(/\) says/)
-    await expect(card).toContainText(/· 2m/)
+    await expect(card.locator("time")).toHaveText("2m")
     // Only the name may be cut, and then it is its own title.
     for (const text of await clipped()) expect(text, `clipped at ${width}`).toBe(name)
     await expect(card.getByTitle(name)).toHaveText(name)
