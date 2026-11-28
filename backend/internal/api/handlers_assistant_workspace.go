@@ -697,9 +697,9 @@ func (pr *agentPress) editFile(ctx context.Context, p *httpx.Principal, in assis
 		return refuse(fmt.Sprintf("There is no file %s; write_file makes one.", in.Path))
 	case read.Binary:
 		return refuse(fmt.Sprintf("%s is a binary file, which edit_file does not change.", in.Path))
-	case strings.Contains(in.OldText, masked) && !strings.Contains(read.Content, masked):
+	case strings.Contains(in.OldText, maskedMark) && !strings.Contains(read.Content, maskedMark):
 		return refuse("old_text holds " + masked + ", a secret masked for you, so it cannot match the file: choose text beside the secret instead.")
-	case strings.Contains(in.NewText, masked) && !strings.Contains(read.Content, masked):
+	case strings.Contains(in.NewText, maskedMark) && !strings.Contains(read.Content, maskedMark):
 		return refuse("new_text holds " + masked + ", a secret masked for you, which would replace the real value: leave that text out of the change.")
 	}
 	count := strings.Count(read.Content, in.OldText)
@@ -720,8 +720,12 @@ func (pr *agentPress) editFile(ctx context.Context, p *httpx.Principal, in assis
 	return pr.saveFile(ctx, p, in.Path, read, next, masker)
 }
 
-// masked is how a secret value reaches the model.
-const masked = "[REDACTED]"
+// masked is how a secret value reaches the model, and maskedMark what every
+// mask begins with: a key block reaches it as "[REDACTED PRIVATE KEY]".
+const (
+	masked     = "[REDACTED]"
+	maskedMark = "[REDACTED"
+)
 
 // writeFile writes a whole file.
 func (pr *agentPress) writeFile(ctx context.Context, p *httpx.Principal, in assistant.FileInput) agentResult {
@@ -736,7 +740,7 @@ func (pr *agentPress) writeFile(ctx context.Context, p *httpx.Principal, in assi
 		return *failed
 	case read.Binary:
 		return refuse(fmt.Sprintf("%s is a binary file, which write_file does not replace.", in.Path))
-	case strings.Contains(in.Content, masked) && !strings.Contains(read.Content, masked):
+	case strings.Contains(in.Content, maskedMark) && !strings.Contains(read.Content, maskedMark):
 		return refuse("content holds " + masked + ", a secret masked for you, which would replace the real value: change the file with edit_file around the secret instead.")
 	}
 	if read.missing {
@@ -764,6 +768,11 @@ func (pr *agentPress) saveFile(ctx context.Context, p *httpx.Principal, path str
 	}
 	if !read.missing && read.Content == next {
 		return agentResult{text: path + " already reads that way; nothing was changed.", ok: true, said: "Unchanged"}
+	}
+	// More masks than the file holds is a masked value about to be written over
+	// a real one, even where the file also holds the mask's words as they are.
+	if strings.Count(next, maskedMark) > strings.Count(read.Content, maskedMark) {
+		return agentResult{text: "The change holds " + masked + ", a secret masked for you, which would replace the real value: change the file around the secret instead.", said: "Not written"}
 	}
 	rec, err := pr.s.assistantDispatch(ctx, pr.r, p, http.MethodPut, mcp.RouteRequest{Path: "/files/write", Body: workspaceBody(map[string]any{
 		"path": path, "content": next, "expectedRevision": expected,
