@@ -20,11 +20,13 @@ func (s *Service) FetchWith(ctx context.Context, path string, extra map[string]s
 
 // PushWith pushes the current branch to origin, as branch on the remote when one
 // is named and as itself otherwise, setting the upstream when the branch has
-// none. It never forces: a push the remote refuses because it moved is answered
-// with git's own words, and nothing on the remote is lost.
+// none. A checkout on no branch (a deployment that builds a tag) pushes HEAD to
+// the branch named, and needs one. It never forces: a push the remote refuses
+// because it moved is answered with git's own words, and nothing on the remote
+// is lost.
 func (s *Service) PushWith(ctx context.Context, path, branch string, extra map[string]string) (*Result, error) {
 	current, err := s.CurrentBranch(ctx, path)
-	if err != nil {
+	if err != nil && branch == "" {
 		return nil, err
 	}
 	target := current

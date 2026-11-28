@@ -385,6 +385,12 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	if status.Operation != "" {
 		return refuse(fmt.Sprintf("A %s stopped halfway in %s; finish or abort it (run_command with git) before pushing.", status.Operation, folder))
 	}
+	branch := in.Branch
+	if branch == "" {
+		if branch, err = s.modules.git.CurrentBranch(ctx, folder); err != nil {
+			return refuse(fmt.Sprintf("%s is on no branch (its deployment builds a tag or a commit), so it has nowhere to push as it is: name branch to push it to, a new one if need be.", folder))
+		}
+	}
 	ws := s.workspaceOf(ctx, p, folder, pr.scope)
 	source := ws.source
 	if source == nil {
@@ -416,10 +422,6 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	env, revoke, err := s.pushEnvironment(ctx, auth)
 	if err != nil {
 		return refuse("No credential to push with could be made: " + agentMaskText(err.Error(), masker))
-	}
-	branch, _ := s.modules.git.CurrentBranch(ctx, folder)
-	if in.Branch != "" {
-		branch = in.Branch
 	}
 	result, err := s.modules.git.PushWith(ctx, folder, in.Branch, env)
 	revoke()

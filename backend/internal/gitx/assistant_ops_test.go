@@ -44,3 +44,27 @@ func TestPushWithNeverForcesThroughABranchsName(t *testing.T) {
 		t.Fatalf("feature tracks %q", got)
 	}
 }
+
+// A checkout on no branch, as a clone of a deployment that builds a tag is,
+// pushes its HEAD to the branch named, and without one says it needs one.
+func TestAPushFromNoBranchGoesToTheBranchNamed(t *testing.T) {
+	dir, git := tempRepo(t)
+	bare := filepath.Join(t.TempDir(), "remote.git")
+	if out, err := exec.Command("git", "init", "-q", "--bare", bare).CombinedOutput(); err != nil {
+		t.Fatalf("git init --bare: %v: %s", err, out)
+	}
+	git("remote", "add", "origin", bare)
+	git("checkout", "-q", "--detach")
+	s := New([]string{dir, filepath.Dir(bare)})
+	ctx := context.Background()
+	if _, err := s.PushWith(ctx, dir, "", nil); err == nil || !strings.Contains(err.Error(), "not on a branch") {
+		t.Fatalf("a push from no branch, naming none = %v", err)
+	}
+	if _, err := s.PushWith(ctx, dir, "fix-it", nil); err != nil {
+		t.Fatalf("a push from no branch to fix-it: %v", err)
+	}
+	head := strings.TrimSpace(git("rev-parse", "HEAD"))
+	if got := strings.TrimSpace(git("ls-remote", "origin", "refs/heads/fix-it")); !strings.HasPrefix(got, head) {
+		t.Fatalf("the remote's fix-it = %q, want %s", got, head)
+	}
+}

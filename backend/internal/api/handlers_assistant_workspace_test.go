@@ -232,6 +232,34 @@ func TestLineDiffShowsTheOneRegionThatChanged(t *testing.T) {
 	}
 }
 
+// A checkout on no branch is refused before anything is committed in it, rather
+// than committed and then refused at the push.
+func TestAPushFromNoBranchCommitsNothingWithoutABranch(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	projectID, repo, _ := workspaceDeployment(t, f)
+	gitIn(t, repo, "checkout", "-q", "--detach")
+	head := gitIn(t, repo, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(repo, "README.md"), []byte("# app\n\nChanged.\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	f.provider.queue(
+		claudeCalls("Pushing.", [2]any{"push_changes", map[string]any{"folder": repo, "message": "Change it", "reason": "ship"}}),
+		claudeAnswer("It is on no branch."),
+	)
+	events := lines(t, f.do(http.MethodPost, fmt.Sprintf("/deploy/%d/assistant", projectID), `{"question":"Push it","mode":"full"}`))
+	if called := calledLines(events); len(called) != 1 || called[0]["ok"] == true {
+		t.Fatalf("the push = %v", called)
+	}
+	if got := f.provider.lastToolResults(t); !strings.Contains(got, "name branch") {
+		t.Fatalf("the model was told: %s", got)
+	}
+	if now := gitIn(t, repo, "rev-parse", "HEAD"); now != head {
+		t.Fatalf("a commit was made before the push was refused: %s", now)
+	}
+}
+
 func TestWorkspaceNamesAndRemotes(t *testing.T) {
 	if got := workspaceName(&deploy.DeploymentSummary{ID: 3, Name: "My Shop", EnvironmentKind: deploy.EnvironmentProduction, EnvironmentName: "production"}); got != "my-shop" {
 		t.Fatalf("production's workspace = %q", got)
