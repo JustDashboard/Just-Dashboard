@@ -887,6 +887,44 @@ func TestTheCloneTokenIsDownscopedAndRevoked(t *testing.T) {
 	}
 }
 
+// The assistant's push from a workspace mints a token that can write one
+// repository's contents and nothing else, only for a person who may push there,
+// and revokes it after.
+func TestThePushTokenWritesOneRepositoryAndIsRevoked(t *testing.T) {
+	h := newHarness(t)
+	h.createApp()
+	h.standardRepos()
+	connection := h.connect(h.alice, 1001)
+	access, _ := h.s.Access(context.Background(), h.alice, connection.ID, "octo-dev", "app")
+	token, revoke, err := h.s.PushToken(context.Background(), access)
+	if err != nil || !strings.HasPrefix(token, "ghs_") {
+		t.Fatalf("token = %q %v", token, err)
+	}
+	encoded, _ := json.Marshal(h.fake.InstallationTokens()[token])
+	if string(encoded) != `{"permissions":{"contents":"write"},"repository_ids":[1]}` {
+		t.Fatalf("mint body = %s", encoded)
+	}
+	revoke()
+	if _, ok := h.fake.InstallationTokens()[token]; ok {
+		t.Fatal("the token was not revoked")
+	}
+	// A public repository still needs the token to push.
+	site, _ := h.s.Access(context.Background(), h.alice, connection.ID, "octo-dev", "site")
+	if token, _, err := h.s.PushToken(context.Background(), site); err != nil || token == "" {
+		t.Fatalf("public repository push token = %q %v", token, err)
+	}
+	// Nobody who cannot push there is given one.
+	api, _ := h.s.Access(context.Background(), h.alice, connection.ID, "acme-org", "api")
+	before := len(h.fake.InstallationTokens())
+	var refused *githubrepos.NotPermittedError
+	if token, _, err := h.s.PushToken(context.Background(), api); !errors.As(err, &refused) || token != "" {
+		t.Fatalf("read-only repository push token = %q %v", token, err)
+	}
+	if len(h.fake.InstallationTokens()) != before {
+		t.Fatal("a token was minted for a repository the person cannot push to")
+	}
+}
+
 func TestTheCloneEnvironmentScopesTheTokenToTheRemote(t *testing.T) {
 	env := githubrepos.CloneEnvironment("https://github.com/octo-dev/app.git", "ghs_secret")
 	if env["GIT_CONFIG_COUNT"] != "2" || env["GIT_CONFIG_KEY_0"] != "credential.helper" || env["GIT_CONFIG_VALUE_0"] != "" ||

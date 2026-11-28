@@ -67,8 +67,9 @@ machine, so it is built to sit behind a VPN or an SSH tunnel — and that is enf
   and each connection's access and refresh tokens are sealed under the master key, never sent to a
   browser, a log or the audit trail. A sign-in carries a single-use state bound to the account that
   started it, and PKCE. A private clone gets a one-repository, read-only token through git's
-  environment, never its arguments or the checkout's configuration, and the token is revoked when the
-  clone ends. See [Connecting GitHub](docs/guides/github.md).
+  environment, never its arguments or the checkout's configuration, given only to git running as the
+  dashboard in a repository of its own (never to a git of the folder's account, whose own Git settings
+  could send it elsewhere), and the token is revoked when the clone ends. See [Connecting GitHub](docs/guides/github.md).
 - Every state-changing request lands in the audit log.
 - The Files page keeps the earlier contents of each file it saves over, so a save can be undone. They
   are copies of whatever those files held, `.env` files and keys included, kept under the data

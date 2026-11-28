@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"time"
@@ -489,7 +490,8 @@ type githubCloneRequest struct {
 // by the same code; the address is built from GitHub's spelling of the
 // repository, not from the request. A private repository is fetched with an
 // installation token that can only read it, minted for this clone and
-// revoked when it ends, and handed to git only in its environment.
+// revoked when it ends, and handed only to git of the dashboard's own, in its
+// relay (gitx.CloneThrough), only in its environment.
 func (s *Server) handleGitHubRepositoryClone(w http.ResponseWriter, r *http.Request) error {
 	var request githubCloneRequest
 	if err := httpx.DecodeJSON(r, &request); err != nil {
@@ -510,6 +512,7 @@ func (s *Server) handleGitHubRepositoryClone(w http.ResponseWriter, r *http.Requ
 	fullName := access.Repository.FullName
 	repos := s.modules.githubRepos
 	git := s.modules.git
+	relays := filepath.Join(s.Cfg.DataDir, gitRelayFolder)
 	job := s.modules.jobs.Start(jobs.Spec{
 		Kind: "github.clone", Title: "Clone " + fullName, Target: plan.Target, StartedBy: httpx.MustPrincipal(r).Username(),
 		Capability: auth.CapServiceControl, Timeout: 15 * time.Minute,
@@ -525,9 +528,25 @@ func (s *Server) handleGitHubRepositoryClone(w http.ResponseWriter, r *http.Requ
 		} else {
 			out.Status("%s is public: it is fetched without a credential.", fullName)
 		}
-		out.Status("$ %s", plan.Command())
-		if err := git.CloneStreaming(ctx, plan, githubrepos.CloneEnvironment(remote, token), out.Line); err != nil {
-			return err
+		if token == "" {
+			out.Status("$ %s", plan.Command())
+			if err := git.CloneStreaming(ctx, plan, githubrepos.CloneEnvironment(remote, ""), out.Line); err != nil {
+				return err
+			}
+		} else {
+			// The token is given only to git of the dashboard's own, in its
+			// relay for this remote, never to a git of the folder's account,
+			// which reads that account's configuration (a proxy, a CA, a URL
+			// rewrite) and whose environment that account can read.
+			relay, err := git.OpenRelay(ctx, relays, remote)
+			if err != nil {
+				return err
+			}
+			out.Status("$ git fetch --progress %s (as the dashboard, into a repository of its own), then the checkout %s is made from it as the folder's owner", remote, plan.Target)
+			options := gitx.RelayCloneOptions{Branch: request.Branch, Depth: request.Depth, Line: out.Line}
+			if _, err := git.CloneThrough(ctx, relay, plan.Dir, plan.Name, options, githubrepos.CloneEnvironment(remote, token)); err != nil {
+				return err
+			}
 		}
 		out.Status("Cloned into %s. Local Git lists it with the server's other checkouts.", plan.Target)
 		return nil

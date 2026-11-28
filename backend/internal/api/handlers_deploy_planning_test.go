@@ -67,6 +67,15 @@ func TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying(t *testing.T)
 		t.Fatalf("stale draft save = %d %s", stale.Code, stale.Body.String())
 	}
 
+	// A detect or preflight at an old revision says which one is current, so
+	// the caller (the assistant among them) can read the draft again and retry.
+	staleDetect := doPlanningJSON(t, client, http.MethodPost,
+		"/api/v1/deploy/drafts/"+draft.ID+"/detect", map[string]int{"revision": draft.Revision - 1})
+	if want := fmt.Sprintf("current revision is %d", draft.Revision); staleDetect.Code != http.StatusConflict ||
+		!strings.Contains(staleDetect.Body.String(), `"code":"draft_revision_conflict"`) || !strings.Contains(staleDetect.Body.String(), want) {
+		t.Fatalf("stale detect = %d %s, want 409 saying %q", staleDetect.Code, staleDetect.Body.String(), want)
+	}
+
 	detected := doPlanningJSON(t, client, http.MethodPost,
 		"/api/v1/deploy/drafts/"+draft.ID+"/detect", map[string]int{"revision": draft.Revision})
 	if detected.Code != http.StatusOK {
@@ -97,6 +106,13 @@ func TestDeploymentPlanningSignedInJourneyPersistsWithoutDeploying(t *testing.T)
 	draft = saveDraftThroughAPI(t, client, draft, deploy.DraftSaveRequest{
 		Revision: draft.Revision, Step: deploy.DraftConfiguration, Configuration: &configuration,
 	})
+
+	stalePreflight := doPlanningJSON(t, client, http.MethodPost,
+		"/api/v1/deploy/drafts/"+draft.ID+"/preflight", map[string]int{"revision": draft.Revision - 1})
+	if want := fmt.Sprintf("current revision is %d", draft.Revision); stalePreflight.Code != http.StatusConflict ||
+		!strings.Contains(stalePreflight.Body.String(), `"code":"draft_revision_conflict"`) || !strings.Contains(stalePreflight.Body.String(), want) {
+		t.Fatalf("stale preflight = %d %s, want 409 saying %q", stalePreflight.Code, stalePreflight.Body.String(), want)
+	}
 
 	preflighted := doPlanningJSON(t, client, http.MethodPost,
 		"/api/v1/deploy/drafts/"+draft.ID+"/preflight", map[string]int{"revision": draft.Revision})

@@ -396,6 +396,11 @@ func TestReleaseThatDoesNotGoLivePutsTheLeftoverRouteBack(t *testing.T) {
 			if result.State != test.state || result.ErrorCode != test.code {
 				t.Fatalf("activation = %s/%s, want %s/%s", result.State, result.ErrorCode, test.state, test.code)
 			}
+			// The proxy's own reason is in the step's message, so the screen has
+			// something to go on.
+			if test.refuseVerify && !strings.Contains(result.ErrorMessage, "the proxy cutover could not be verified: the route answers something else") {
+				t.Fatalf("message = %q", result.ErrorMessage)
+			}
 			if strings.Join(proxy.removed, ",") != "just-dashboard-env-450.conf" {
 				t.Fatalf("removed = %v", proxy.removed)
 			}

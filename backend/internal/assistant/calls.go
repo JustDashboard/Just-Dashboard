@@ -91,6 +91,10 @@ func readCall(b Block, offered, pages []string) ToolCall {
 		value = readCommandInput(in)
 	case ToolTerminalRun, ToolTerminalSend, ToolTerminalRead:
 		value = readTerminalInput(b.ToolName, in)
+	case ToolOpenWorkspace, ToolPushChanges:
+		value = readWorkspaceInput(b.ToolName, in)
+	case ToolReadFile, ToolEditFile, ToolWriteFile:
+		value = readFileInput(b.ToolName, in)
 	default:
 		value = readOperatorInput(b.ToolName, in)
 	}
@@ -130,6 +134,9 @@ func takes(tool string) string {
 		ToolTerminalSend:      fmt.Sprintf("It takes text (what to type), enter (true unless false), keys (a list of key names such as ctrl-c, up, enter), wait (1–%d seconds) and reason.", TerminalWaitMax),
 		ToolTerminalRead:      fmt.Sprintf("It takes wait (1–%d seconds).", TerminalReadMax),
 		ToolRunCommand:        fmt.Sprintf("It takes command (the line to run, as typed into a shell), timeout (1–%d seconds) and reason.", CommandWaitMax),
+	}
+	if line, ok := workspaceTakes[tool]; ok {
+		return line
 	}
 	return what[tool]
 }

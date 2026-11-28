@@ -33,8 +33,9 @@ The page additionally works out that intersection first (`githubrepos.ComputeAbi
 with the reason before asking GitHub (403 `github_permission`), so a disabled control says *which* of
 the three is missing. GitHub keeps the last word; its own refusal is shown as it is.
 
-The one place the App's own key is used is a clone's credential (below), and that token can only read
-one repository's contents.
+The one place the App's own key is used is a credential for git (below): a clone's, which can only
+read one repository's contents, and a push of the assistant's workspace, which can only write them.
+Either is given only to git running as the dashboard, in a repository of its own (`gitx.Relay`).
 
 ## The manifest
 
@@ -380,15 +381,43 @@ GitHub states the merge settings only to people who may change them; they are ab
    `permissions: {"contents": "read"}`). A public repository is cloned with no credential. The person's
    own token is never given to git.
 6. The token reaches git only through its environment: `GIT_CONFIG_COUNT/KEY/VALUE` set
-   `credential.helper` to empty (no helper of the checkout owner's is asked, or told to store,
-   anything) and `http.https://github.com/<owner>/<name>.git.extraHeader` to
+   `credential.helper` to empty (no helper is asked, or told to store, anything) and
+   `http.https://github.com/<owner>/<name>.git.extraHeader` to
    `Authorization: Basic base64("x-access-token:" + token)`, which git sends only to that repository's
    address. It is never in the argv (`ps`), the console, the job's record or the checkout's
-   `.git/config`, whose remote is the plain HTTPS address.
-7. `git clone --progress` runs through `gitx.CloneStreaming`: the same environment and owner switch
-   (`hostexec.AsOwner`) as every other git the Git page runs. Git's carriage-return progress is kept to
-   one line a second per phase plus the phase's last. A failure ends the job with git's own last line.
+   `.git/config`, whose remote is the plain HTTPS address. And it is given only to git of the
+   dashboard's own, never to a git of the folder's account: that git would read the account's
+   `~/.gitconfig` (an `http.proxy` with `http.sslVerify` off, an `http.sslCAInfo` of the account's, a
+   `url.<base>.insteadOf`), and the account could read its environment in `/proc`. So a private
+   repository is fetched by the dashboard into its relay for that address (`gitx.CloneThrough`, the
+   assistant workspace's relay: a bare repository in `<data dir>/workspace-git/relays/` with only the
+   dashboard's own Git settings, [working on code](../deployments/operator.md#working-on-code)), and the
+   folder's owner makes the checkout and takes the objects from it through a pipe, with no credential.
+   A shallow clone (`depth`) is fetched, that one branch or tag, into a relay of its own for that clone
+   (`once/` beside the relays), removed when it ends, and its boundary is written into the new
+   checkout's `.git/shallow` as the dashboard writes a workspace's marker: inside the checkout without
+   following a link, a new file, handed to the owner by descriptor. A repository's Git LFS files come
+   through the relay as well (git-lfs as the dashboard with the token, the objects handed to the owner's
+   own git-lfs through a pipe), so they are real files in the checkout; without git-lfs on the server
+   they stay pointers and the console says so. A company or self-signed CA for the
+   Git host is set in the dashboard's own `gitconfig` there, not the account's.
+7. A public repository's `git clone --progress` runs as the folder's owner through
+   `gitx.CloneStreaming`: the same environment and owner switch (`hostexec.AsOwner`) as every other git
+   the Git page runs; it carries no credential. Either way git's carriage-return progress is kept to
+   one line a second per phase plus the phase's last. A failure ends the job with git's own last line,
+   and the folder the clone made is removed, as git removes it itself, even when git was killed (one
+   clone into a place at a time, so it is the one this clone made).
 8. The token is revoked when the clone ends (`DELETE /installation/token`), whatever the outcome.
+
+The assistant's push from a workspace ([working on code](../deployments/operator.md#working-on-code))
+mints the same kind of token with `permissions: {"contents": "write"}` (`githubrepos.PushToken`), only
+when the person's own connection may push to the repository (`Repository.Can.Push`) and the App was
+granted Contents: write on the installation, carries it the same way for that one `git push`, and revokes
+it when the push ends. That push is not the checkout's: the token is given only to git running as the
+dashboard in a bare repository of its own for that remote (`gitx.Relay`, `PushThrough`), with only the
+dashboard's own Git settings, after the checkout's account has handed it the commit through a pipe, so
+nothing the account or the checkout configures (a proxy, a CA, a URL rewrite, a hook) is read with it
+and no process of that account holds it.
 
 The checkout is then an ordinary checkout under the Git roots, so Local Git's discovery lists it;
 later fetches, pulls and pushes use its owner's own git credentials, as every other checkout's do. The
