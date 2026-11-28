@@ -22,6 +22,7 @@ request. The frontend's build helpers are in `frontend/scripts/`, and the change
 | `pin-images.py` | Moves the image digests the Dockerfiles and the compose file are held to; `--check` verifies them offline | Release |
 | `test-changed.sh` | Runs the checks, Go tests and browser specs the diff can reach, and nothing else | Contributor |
 | `e2e-deployments.py` | Deployment acceptance against a real backend and a real Docker daemon | Contributor, for deployment changes |
+| `verify-distros/run.sh` | Installs the dashboard on a fresh machine of every release in `verify-distros/distros.txt`, uses it, restarts it and uses it again; `compare` lists what differs from the Ubuntu 24.04 baseline. The README's Supported distributions table is its result | Contributor and release, for installer changes |
 | `ci-plan.py` | Decides which jobs one run of the Verify workflow needs, and deals the browser specs into them by the tests each runs | CI; `test-changed.sh` asks it which Go packages a change reaches |
 | `go-test-race.sh` | Runs Go packages under the race detector, split across processes | CI |
 | `check-live-test-results.py` | Fails a run whose required live fixture was skipped, absent or did not pass | CI |
