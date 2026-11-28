@@ -1005,7 +1005,7 @@ export function Configure({
                     : "Deploy"}
               </Button>
             ) : (
-              <Button onClick={advance} disabled={Boolean(busy) || assistant.working}>
+              <Button onClick={advance} disabled={Boolean(busy)}>
                 <ArrowRight className="size-4" />
                 Continue
               </Button>

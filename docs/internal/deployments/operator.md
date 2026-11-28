@@ -532,8 +532,8 @@ then; a 409 reads the draft again and runs over that. From the first kept edit o
 saved, and through every save of the page's own (Review's check, Save only, Deploy, a read of the source), the
 chat's next turn is held (`holdAgentTurns`): a question sent then, or one waiting in its queue, is asked once that
 write has answered, and a save of the page's starts only while no turn is under way.
-Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
-back, because the page's revision is behind the server's until then: the check used to save and preflight on its
+Deploy, Save only and Review's own check wait while it works and until its last save is read
+back (Continue only moves to the next step, so it stays the person's to press, like Back and the step tabs), because the page's revision is behind the server's until then: the check used to save and preflight on its
 own the moment the assistant's save was read back, and every call of the assistant's after it was refused as a
 stale revision, and a check or a Deploy that went first was refused 409 and then saved the page's older plan over
 the assistant's. Review's check also waits while an answer waits on the person's Allow, since the waiting call

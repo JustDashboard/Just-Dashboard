@@ -2007,6 +2007,8 @@ test("what the person types while it saves is kept over its read-back, and saved
   await back.click()
   const name = page.getByLabel("Project name")
   await name.fill("shop-two")
+  // Continue only moves on a step, so it is not held either.
+  await expect(page.getByRole("button", { name: "Continue", exact: true })).toBeEnabled()
   // It saves another field, and the page reads its draft back.
   assistantSaves(8080)
   const read = readBack(page)
