@@ -72,6 +72,9 @@ var sessionOnlyBefore = []string{
 	// A stack's apps given their addresses: a domain change, on a
 	// configuration save's terms.
 	"POST /deploy/{id}/stack/addresses",
+	// The apps a stack's template gained: a source change, on a source
+	// save's terms.
+	"POST /deploy/{id}/stack/upgrade",
 	// A copy of a release's data: asked for, read, kept and removed in a
 	// session, whatever the key.
 	"POST /deploy/{id}/environments/{env}/releases/{release}/data-copies",
