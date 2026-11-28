@@ -153,9 +153,11 @@ Complete 1.1.0 therefore runs eight apps after the dashboard ships 1.2.0 with ni
   leaves its steps out (`ServiceDeps.ReleaseServices`, which makes `Env.Has` false for it), so an
   older stack is never shown a FlareSolverr that is failing.
 - **`upgrade`** in the state names those services (`added`, with each one's title and purpose), the
-  shipped version (`version`) and the one the deployment's source names (`from`), when the source is
-  still the preset's template. `saved` is a source already at the shipped version whose live release is
-  older: the release that was to bring them failed, has not run or is still running.
+  shipped version (`version`) and the one the stack runs (`from`: the one the deployment's source
+  names, or with `saved` the live release's), when the source is still the preset's template. `saved`
+  is a source already at the shipped version whose live release is older: the release that was to
+  bring them failed, has not run or is still running. The Stack page's lead names `from` while there
+  is an upgrade ("Complete · v1.1.0"), so its header never claims the version its own step offers.
 - `POST /deploy/{id}/stack/upgrade` saves the source at the shipped version through what the Source
   settings' save runs (`saveStackSourceVersion`: the render, `ValidateForDeployment`, a deploy key's
   guards, the read-only inspection, the revision guard; audited `deploy.source.update`), then starts

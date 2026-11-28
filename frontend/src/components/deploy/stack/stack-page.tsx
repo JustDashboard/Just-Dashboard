@@ -268,7 +268,9 @@ function Lead({
     <Panel plain data-slot="stack-lead">
       <PanelHeader
         title={state.title}
-        count={`${state.presetTitle} · v${state.version}`}
+        // A stack made from an older template runs that one until it adds
+        // what the newer one brings; the version beside it is the one it runs.
+        count={`${state.presetTitle} · v${state.upgrade?.from || state.version}`}
         actions={
           <>
             {stale}

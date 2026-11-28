@@ -906,6 +906,17 @@ test("a stack made before an app came with it offers to add the app, then links 
   await expect(step.getByRole("button")).toHaveCount(0)
 })
 
+test("an older stack's version is the one it runs, not the one it is offered", async ({ page }) => {
+  await mockStackProject(page, {
+    state: { ...stackState("ready"), version: "1.2.0", upgrade: FLARESOLVERR_UPGRADE },
+  })
+  await page.goto("/deploy/7/stack")
+  await expect(page.locator("[data-slot='stack-upgrade']")).toContainText(
+    "New in the stack: FlareSolverr",
+  )
+  await expect(lead(page)).toContainText("Complete · v1.1.0")
+})
+
 test("new apps saved but not live wait for the deployment under way, else offer Deploy again", async ({
   page,
 }) => {
