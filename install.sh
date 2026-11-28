@@ -201,11 +201,13 @@ jd_install_dependencies || die "Required host tools could not be provisioned. Se
 # without them, and a re-run installs whatever is still missing.
 step "Dashboard host tools"
 if jd_install_host_tools; then
-	ok "git, git-lfs, gh, whois and traceroute are ready"
+	ok "git, git-lfs, gh, whois, traceroute, ip, ss, tc, tcpdump and last are ready"
 else
 	warn "Some host tools could not be installed (named above). The dashboard runs without them,"
 	warn "but a push from the web terminal or ssh over HTTPS needs gh for the Git page's GitHub"
-	warn "sign-in, and Security → Tools needs whois and traceroute. Re-run this to try again."
+	warn "sign-in, Security → Tools needs whois and traceroute, the Network pages need ip, ss"
+	warn "and tc, a packet capture needs tcpdump and the login history needs last. Re-run this"
+	warn "to try again."
 fi
 
 step "Docker and Compose"
@@ -234,12 +236,11 @@ ok "curl, openssl and certbot are ready"
 
 if [ "$need_docker" -eq 1 ]; then
 	say ""
-	if yes_no "Install Docker now using the official get.docker.com script?" y; then
+	if yes_no "Install Docker now from $(jd_docker_source)?" y; then
 		step "Installing Docker"
-		curl -fsSL https://get.docker.com | sh
-		systemctl enable --now docker || true
-		docker compose version >/dev/null 2>&1 && COMPOSE="docker compose"
-		ok "docker installed"
+		jd_install_docker || die "Docker could not be installed; the reason is above. Install Docker Engine with its Compose and Buildx plugins and run this again."
+		COMPOSE="docker compose"
+		ok "docker $(docker --version | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1) with compose $(docker compose version --short 2>/dev/null)"
 	else
 		die "Docker is required. Install it and re-run this script."
 	fi
