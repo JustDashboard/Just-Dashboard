@@ -2220,6 +2220,39 @@ test("a question sent while the panel's first save is out goes after the job's o
   expect((await questions())[1]).toBe("Use port 9090")
 })
 
+test("the panel closed and opened again while its first save is out asks its question once", async ({
+  page,
+}) => {
+  await mockSetup(page, [])
+  const { turns, send, questions } = await holdSetupTurns(page)
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  let saving = false
+  await page.route("**/api/v1/deploy/drafts/setup-draft", async (route) => {
+    if (route.request().method() === "PUT" && saving) await gate
+    return route.fallback()
+  })
+  await page.goto("/deploy/new?draft=setup-draft")
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  await page.waitForTimeout(600)
+  saving = true
+  const offer = page.locator("[data-slot='setup-assistant-offer']")
+  const panel = page.locator("[data-slot='setup-assistant']")
+  await offer.click()
+  await panel.getByRole("button", { name: "Back to the form" }).click()
+  await expect(panel).toHaveCount(0)
+  await offer.click()
+  await expect(panel).toBeVisible()
+  release()
+  await expect.poll(turns).toBe(1)
+  await send(0, configured, true)
+  await expect(panel).toContainText("Press Deploy when you are ready.")
+  // The job is asked once: opening the panel again is not a second job.
+  await page.waitForTimeout(600)
+  expect(await questions()).toHaveLength(1)
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(0)
+})
+
 test("a question sent while Deploy is out is carried off the deployed draft, unsent", async ({
   page,
 }) => {
