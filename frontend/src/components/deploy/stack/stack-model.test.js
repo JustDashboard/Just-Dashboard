@@ -28,6 +28,8 @@ import {
   stageGroups,
   stepDetail,
   stepHasRecord,
+  upgradeRefusal,
+  upgradeSentence,
 } from "./stack-model"
 
 const entry = {
@@ -426,4 +428,46 @@ test("addresses saved but not served are offered again, in words", () => {
   expect(addressesSentence({ ...saved, unpublished: missing.missing.slice(0, 1) })).toBe(
     "Seerr has its address saved, but the release that was to publish it did not finish. Deploying again publishes it.",
   )
+})
+
+const upgrade = {
+  template: "media-complete",
+  version: "1.2.0",
+  from: "1.1.0",
+  added: [
+    {
+      service: "flaresolverr",
+      title: "FlareSolverr",
+      purpose: "Opens the sources behind Cloudflare",
+    },
+  ],
+  saved: false,
+}
+
+test("the apps the template gained come after what holds the stack, before the addresses", () => {
+  const actions = [
+    { id: "seerr-people", blocking: false },
+    { id: "media-source", blocking: true },
+  ]
+  expect(
+    nextSteps({ status: "action_required", actions, addresses: missing, upgrade }).map((step) =>
+      step.kind === "action" ? step.action.id : step.kind,
+    ),
+  ).toEqual(["media-source", "upgrade", "addresses", "seerr-people"])
+  // Nothing new, or before a release is live: nothing is offered.
+  expect(nextSteps({ status: "ready", actions: [], upgrade: { ...upgrade, added: [] } })).toEqual(
+    [],
+  )
+  expect(nextSteps({ status: "waiting", actions: [], upgrade })).toEqual([])
+})
+
+test("the new apps are named, with what stays, and a saved one is deployed again", () => {
+  expect(upgradeSentence(upgrade)).toBe(
+    "The stack now comes with FlareSolverr. Adding it deploys the stack again with it beside the other apps; your library, settings, domains and login stay, and the dashboard sets it up and connects it once the release is live.",
+  )
+  expect(upgradeSentence({ ...upgrade, saved: true })).toBe(
+    "FlareSolverr is part of the stack now, but the release that was to bring it did not finish. Deploying again starts it.",
+  )
+  expect(upgradeRefusal("stack_upgrade_none")).toBe("The stack already runs every app.")
+  expect(upgradeRefusal("something_else")).toBeUndefined()
 })

@@ -201,6 +201,7 @@ var deployKeyRoutes = map[string]deployKeyRule{
 	"POST /deploy/{id}/environments/{env}/runs":     keyOpen,
 	"POST /deploy/{id}/stack/configure":             keyOpen,
 	"POST /deploy/{id}/stack/addresses":             keyOpen,
+	"POST /deploy/{id}/stack/upgrade":               keyOpen,
 	"POST /deploy/{id}/runs/{run}/cancel":           keyOpen,
 	"POST /deploy/{id}/runs/{run}/retry":            keyOpen,
 	"POST /deploy/{id}/runs/{run}/diagnosis":        keyOpen,

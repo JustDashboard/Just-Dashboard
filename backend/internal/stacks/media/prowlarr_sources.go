@@ -763,6 +763,16 @@ func addSource(ctx context.Context, env stacks.Env, prepared *PreparedSource) (A
 		return AddOutcome{}, errors.New("Prowlarr has no app profile to put the source in")
 	}
 	resource := prepared.resourceFor(profile)
+	// With the stack's FlareSolverr, the source carries its tag, so a site
+	// that answers with Cloudflare's check is opened through it; one that
+	// answers directly never is.
+	tag, through, err := client.flareSolverrProxyTag(ctx)
+	if err != nil {
+		return AddOutcome{}, err
+	}
+	if through {
+		resource["tags"] = []int{tag}
+	}
 	if err := client.call(ctx, http.MethodPost, "indexer/test", resource, nil); err != nil {
 		return AddOutcome{}, prepared.testFailure(err)
 	}

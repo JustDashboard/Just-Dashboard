@@ -196,6 +196,9 @@ func (s *Server) mountDeployRoutes(r chi.Router) {
 				// Giving a stack's apps their addresses is a domain change, on
 				// a configuration save's terms, and the deploy that applies it.
 				r.Method(http.MethodPost, "/{id}/stack/addresses", s.handle(s.handleStackAddresses))
+				// Adding the apps a stack's template gained is a source change,
+				// on the Source settings' terms, and the deploy that applies it.
+				r.Method(http.MethodPost, "/{id}/stack/upgrade", s.handle(s.handleStackUpgrade))
 				r.Method(http.MethodPut, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariablePut))
 				r.Method(http.MethodDelete, "/{id}/environments/{env}/variables/{name}", s.handle(s.handleDeploymentVariableDelete))
 				r.Method(http.MethodPost, "/{id}/environments/{env}/variables/import", s.handle(s.handleDeploymentDotenvImport))

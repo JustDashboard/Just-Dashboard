@@ -5199,6 +5199,7 @@ export interface StackState {
   summary?: string
   title?: string
   updatedAt?: string
+  upgrade?: StackUpgrade | null
   version?: string
 }
 
@@ -5214,6 +5215,29 @@ export interface StackStepState {
   stage?: Stage
   startedAt?: string | null
   status?: StepStatus
+  title?: string
+}
+
+/** api.stackUpgrade in the dashboard's source. */
+export interface StackUpgrade {
+  added?: StackUpgradeService[] | null
+  from?: string
+  saved?: boolean
+  template?: string
+  version?: string
+}
+
+/** api.stackUpgradeAnswer in the dashboard's source. */
+export interface StackUpgradeAnswer {
+  added?: string[] | null
+  runId?: number
+  version?: string
+}
+
+/** api.stackUpgradeService in the dashboard's source. */
+export interface StackUpgradeService {
+  purpose?: string
+  service?: string
   title?: string
 }
 

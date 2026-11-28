@@ -8,7 +8,12 @@ import { plural, relativeTime } from "@/lib/format"
 import { notify } from "@/lib/toast"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/use-auth"
-import type { SmartStackAddressesStarted, SmartStackState, SmartStackStep } from "@/lib/types"
+import type {
+  SmartStackAddressesStarted,
+  SmartStackState,
+  SmartStackStep,
+  SmartStackUpgradeStarted,
+} from "@/lib/types"
 import { INLINE_LINK } from "@/components/inline-link"
 import { LoadingPanel } from "@/components/loading"
 import { Panel, PanelBody, PanelHeader } from "@/components/panel"
@@ -24,6 +29,7 @@ import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { AddressesStarted, AddressesStep } from "@/components/deploy/stack/stack-addresses"
 import { StackApps, StackAppsSkeleton } from "@/components/deploy/stack/stack-apps"
 import { StackLogin } from "@/components/deploy/stack/stack-login"
+import { UpgradeStarted, UpgradeStep } from "@/components/deploy/stack/stack-upgrade"
 import {
   STACK_STATUS,
   STEP_STATUS,
@@ -32,6 +38,7 @@ import {
   configureVerb,
   failedSteps,
   isSourceAction,
+  listWords,
   nextSteps,
   onlyUnpublished,
   readinessLines,
@@ -78,6 +85,9 @@ export function StackPage() {
   // The release "Give every app its address" started, kept past the read
   // that no longer lists the apps as missing theirs.
   const [addressRun, setAddressRun] = useState<SmartStackAddressesStarted>()
+  // The release "Add the new apps" started, with the apps it brings in words,
+  // kept past the read that no longer lists them as new.
+  const [upgradeRun, setUpgradeRun] = useState<{ runId: number; titles: string }>()
   const absent =
     stack.error instanceof ApiError &&
     (stack.error.code === "stack_not_found" || stack.error.status === 404)
@@ -125,6 +135,18 @@ export function StackPage() {
         addressRun={addressRun}
         onAddressesStarted={(answer) => {
           setAddressRun(answer)
+          stack.refresh()
+        }}
+        upgradeRun={upgradeRun}
+        onUpgradeStarted={(answer: SmartStackUpgradeStarted) => {
+          setUpgradeRun({
+            runId: answer.runId,
+            titles: listWords(
+              (state.upgrade?.added ?? [])
+                .filter((service) => answer.added.includes(service.service))
+                .map((service) => service.title),
+            ),
+          })
           stack.refresh()
         }}
         onChanged={stack.refresh}
@@ -307,6 +329,8 @@ function NextSteps({
   canChangeDomains,
   addressRun,
   onAddressesStarted,
+  upgradeRun,
+  onUpgradeStarted,
   onChanged,
 }: {
   state: SmartStackState
@@ -318,12 +342,24 @@ function NextSteps({
   canChangeDomains: boolean
   addressRun?: SmartStackAddressesStarted
   onAddressesStarted: (answer: SmartStackAddressesStarted) => void
+  upgradeRun?: { runId: number; titles: string }
+  onUpgradeStarted: (answer: SmartStackUpgradeStarted) => void
   onChanged: () => void
 }) {
-  // Once the addresses are on their way, their step is the run that brings them.
-  const steps = nextSteps(state).filter((step) => !addressRun || step.kind !== "addresses")
+  // Once the addresses or the new apps are on their way, their step is the
+  // run that brings them.
+  const steps = nextSteps(state).filter(
+    (step) =>
+      !(addressRun && step.kind === "addresses") && !(upgradeRun && step.kind === "upgrade"),
+  )
   const failures = failedSteps(state.steps)
-  if (state.status !== "waiting" && steps.length === 0 && failures.length === 0 && !addressRun)
+  if (
+    state.status !== "waiting" &&
+    steps.length === 0 &&
+    failures.length === 0 &&
+    !addressRun &&
+    !upgradeRun
+  )
     return null
   const base = `/deploy/${projectId}`
   return (
@@ -339,8 +375,34 @@ function NextSteps({
           </p>
         </Notice>
       )}
+      {upgradeRun && (
+        <UpgradeStarted started={upgradeRun} titles={upgradeRun.titles} projectId={projectId} />
+      )}
       {addressRun && <AddressesStarted started={addressRun} projectId={projectId} />}
       {steps.map((step, index) => {
+        // Saved but not live, with a deployment under way: that run starts
+        // the new apps when it goes live.
+        if (step.kind === "upgrade" && activeRunId && step.upgrade.saved)
+          return (
+            <UpgradeStarted
+              key="upgrade"
+              started={{ runId: activeRunId }}
+              titles={listWords(step.upgrade.added.map((service) => service.title))}
+              projectId={projectId}
+            />
+          )
+        if (step.kind === "upgrade")
+          return (
+            <UpgradeStep
+              key="upgrade"
+              upgrade={step.upgrade}
+              projectId={projectId}
+              canChange={canChangeDomains}
+              first={index === 0}
+              onStarted={onUpgradeStarted}
+              onSettled={onChanged}
+            />
+          )
         // Saved but not served yet, with a deployment under way: that run
         // publishes them when it goes live, so it is the step, not another.
         if (step.kind === "addresses" && activeRunId && onlyUnpublished(step.addresses))

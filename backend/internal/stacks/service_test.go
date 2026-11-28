@@ -15,12 +15,14 @@ import (
 )
 
 type serviceFixture struct {
-	db       *sql.DB
-	store    *stacks.Store
-	service  *stacks.Service
-	mu       sync.Mutex
-	live     stacks.Live
-	liveErr  error
+	db      *sql.DB
+	store   *stacks.Store
+	service *stacks.Service
+	mu      sync.Mutex
+	live    stacks.Live
+	liveErr error
+	// released is what ReleaseServices answers: nil, every service.
+	released map[string]bool
 	passes   int
 	project  int64
 	manifest *stacks.Manifest
@@ -81,6 +83,11 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		},
 		Variables: func(context.Context, int64, int64) (map[string]string, error) {
 			return map[string]string{"MEDIA_QUALITY": "2160p"}, nil
+		},
+		ReleaseServices: func(context.Context, stacks.Preset, stacks.Live) (map[string]bool, error) {
+			fixture.mu.Lock()
+			defer fixture.mu.Unlock()
+			return fixture.released, nil
 		},
 		Runner: runner,
 	})
@@ -253,5 +260,33 @@ func TestServiceRefusesAPassForAReleaseThatIsNotAPreset(t *testing.T) {
 	f.goLive(42, "test-small")
 	if err := f.service.Request(ctx, f.project); err != nil {
 		t.Fatalf("Retry on a preset's release = %v", err)
+	}
+}
+
+// A release that does not run every service of the preset (one of an older
+// version of the template, from before a service was added to it) leaves
+// that service's steps out of the pass; the release that runs it sets it up.
+func TestServiceLeavesOutAServiceTheReleaseDoesNotRun(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	f.mu.Lock()
+	f.released = map[string]bool{"a": true}
+	f.mu.Unlock()
+	f.goLive(21, "test-large")
+	record := f.settle(t)
+	steps, _ := f.store.Steps(ctx, f.project)
+	if record.Status != stacks.StatusReady || steps["a.setup"].Status != stacks.StepDone ||
+		steps["b.link"].Status != stacks.StepSkipped || steps["b.link"].Message != stacks.AbsentMessage {
+		t.Fatalf("a release without b: %+v %+v", record, steps)
+	}
+
+	f.mu.Lock()
+	f.released = nil
+	f.mu.Unlock()
+	f.goLive(22, "test-large")
+	f.settle(t)
+	steps, _ = f.store.Steps(ctx, f.project)
+	if steps["b.link"].Status != stacks.StepDone {
+		t.Fatalf("the release that runs b: %+v", steps["b.link"])
 	}
 }

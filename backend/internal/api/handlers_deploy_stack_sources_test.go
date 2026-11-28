@@ -99,6 +99,9 @@ func newStackSourcesProwlarr(t *testing.T) *stackSourcesProwlarr {
 			body["id"] = 20 + len(fake.listed)
 			fake.listed = append(fake.listed, body)
 			answer(http.StatusCreated, body)
+		case path == "tag":
+			// A stack without FlareSolverr: Prowlarr has no tags.
+			answer(http.StatusOK, []any{})
 		case path == "command":
 			answer(http.StatusCreated, map[string]any{"id": 3, "status": "completed"})
 		case strings.HasPrefix(path, "indexer/"):

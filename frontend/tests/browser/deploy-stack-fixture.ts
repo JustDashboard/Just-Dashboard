@@ -799,6 +799,21 @@ function refuse(route: Route, status: number, code: string, message: string) {
  * with: 202 and a state that follows, or one of the two refusals; `login`
  * and `addresses` do the same for their routes.
  */
+/** FlareSolverr, as the state names it to a stack made before it came with the template. */
+export const FLARESOLVERR_UPGRADE = {
+  template: "media-complete",
+  version: "1.2.0",
+  from: "1.1.0",
+  added: [
+    {
+      service: "flaresolverr",
+      title: "FlareSolverr",
+      purpose: "Opens the sources behind Cloudflare's browser check for Prowlarr",
+    },
+  ],
+  saved: false,
+}
+
 export async function mockStackProject(
   page: Page,
   options: {
@@ -810,6 +825,8 @@ export async function mockStackProject(
     login?: "accepted" | "password_weak"
     /** What `POST …/stack/addresses` answers. Default: 202 with run 91, and every app has its address. */
     addresses?: "accepted" | "stack_addresses_present" | "stack_no_domain"
+    /** What `POST …/stack/upgrade` answers. Default: 202 with run 92, and the stack has nothing new. */
+    upgrade?: "accepted" | "stack_upgrade_none"
     /** A deployment run (84) is in flight whatever the stack's state; by default only while waiting. */
     running?: boolean
   } = {},
@@ -822,6 +839,7 @@ export async function mockStackProject(
   const reveals: string[] = []
   const logins: unknown[] = []
   const addressRequests: unknown[] = []
+  const upgradeRequests: unknown[] = []
   const template = () =>
     state?.preset === "essential" ? mediaEssentialDefinition : mediaCompleteDefinition
   // The plan's own domains, which the Domains page reads and saves.
@@ -921,6 +939,27 @@ export async function mockStackProject(
       body: JSON.stringify({ runId: 91, domains }),
     })
   })
+  await page.route("**/api/v1/deploy/7/stack/upgrade", (route) => {
+    if (route.request().method() !== "POST") return route.fallback()
+    upgradeRequests.push(route.request().postDataJSON() ?? {})
+    if (options.upgrade === "stack_upgrade_none") {
+      if (state) state = { ...state, upgrade: undefined }
+      return refuse(
+        route,
+        409,
+        "stack_upgrade_none",
+        "the deployment already runs every app of the stack",
+      )
+    }
+    const added = state?.upgrade?.added.map((service) => service.service) ?? []
+    const version = state?.upgrade?.version ?? "1.2.0"
+    if (state) state = { ...state, upgrade: undefined }
+    return route.fulfill({
+      status: 202,
+      contentType: "application/json",
+      body: JSON.stringify({ runId: 92, version, added }),
+    })
+  })
   await page.route("**/api/v1/deploy/7/stack/credentials/*/reveal", (route) => {
     const name = new URL(route.request().url()).pathname.split("/").at(-2) ?? ""
     reveals.push(name)
@@ -936,6 +975,7 @@ export async function mockStackProject(
     reveals: () => reveals,
     logins: () => logins,
     addressRequests: () => addressRequests,
+    upgradeRequests: () => upgradeRequests,
     containerId: container,
   }
 }

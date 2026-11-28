@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
 import { json, mockProject } from "./deploy-fixture"
 import {
+  FLARESOLVERR_UPGRADE,
   STACK_PASSWORD,
   mediaCompleteDefinition,
   mockStackProject,
@@ -871,4 +872,64 @@ test("a step on another try says in its record what the last one met", async ({ 
   await expect(page.getByRole("dialog")).toContainText(
     "Sonarr answered 503 to GET /api/v3/system/status",
   )
+})
+
+test("a stack made before an app came with it offers to add the app, then links the run", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+  })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await expect(step).toContainText("New in the stack: FlareSolverr")
+  await expect(step).toContainText(
+    "The stack now comes with FlareSolverr. Adding it deploys the stack again with it beside the other apps; your library, settings, domains and login stay",
+  )
+  // The page's one next step, so its command wears the brand.
+  const add = step.getByRole("button", { name: "Add FlareSolverr" })
+  await expect(add).toHaveAttribute("data-variant", "default")
+  await add.click()
+  const dialog = page.getByRole("dialog", { name: "Add FlareSolverr" })
+  await expect(dialog.getByRole("list", { name: "The apps added" })).toContainText(
+    "Opens the sources behind Cloudflare",
+  )
+  await expect(dialog).toContainText("version 1.2.0")
+  await dialog.getByRole("button", { name: "Add and deploy" }).click()
+  await expect(dialog).toBeHidden()
+  expect(stack.upgradeRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/92",
+  )
+  await expect(step.getByRole("button")).toHaveCount(0)
+})
+
+test("new apps saved but not live wait for the deployment under way, else offer Deploy again", async ({
+  page,
+}) => {
+  const saved = { ...stackState("ready"), upgrade: { ...FLARESOLVERR_UPGRADE, saved: true } }
+  const stack = await mockStackProject(page, { state: saved, running: true })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/84",
+  )
+  await expect(step.getByRole("button")).toHaveCount(0)
+  expect(stack.upgradeRequests()).toEqual([])
+
+  const idle = await mockStackProject(page, { state: saved })
+  await page.goto("/deploy/7/stack")
+  await expect(step).toContainText("Start FlareSolverr")
+  await expect(step).toContainText("did not finish. Deploying again starts it.")
+  await step.getByRole("button", { name: "Deploy again" }).click()
+  await page
+    .getByRole("dialog", { name: "Start FlareSolverr" })
+    .getByRole("button", { name: "Deploy again" })
+    .click()
+  expect(idle.upgradeRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
 })

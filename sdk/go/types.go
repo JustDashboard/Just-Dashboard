@@ -5197,6 +5197,7 @@ type StackState struct {
 	Summary             string                   `json:"summary,omitempty"`
 	Title               string                   `json:"title,omitempty"`
 	UpdatedAt           time.Time                `json:"updatedAt,omitzero"`
+	Upgrade             *StackUpgrade            `json:"upgrade,omitempty"`
 	Version             string                   `json:"version,omitempty"`
 }
 
@@ -5213,6 +5214,29 @@ type StackStepState struct {
 	StartedAt  *time.Time `json:"startedAt,omitempty"`
 	Status     StepStatus `json:"status,omitempty"`
 	Title      string     `json:"title,omitempty"`
+}
+
+// StackUpgrade is api.stackUpgrade in the dashboard's source.
+type StackUpgrade struct {
+	Added    []StackUpgradeService `json:"added"`
+	From     string                `json:"from,omitempty"`
+	Saved    bool                  `json:"saved,omitempty"`
+	Template string                `json:"template,omitempty"`
+	Version  string                `json:"version,omitempty"`
+}
+
+// StackUpgradeAnswer is api.stackUpgradeAnswer in the dashboard's source.
+type StackUpgradeAnswer struct {
+	Added   []string `json:"added"`
+	RunID   int64    `json:"runId,omitempty"`
+	Version string   `json:"version,omitempty"`
+}
+
+// StackUpgradeService is api.stackUpgradeService in the dashboard's source.
+type StackUpgradeService struct {
+	Purpose string `json:"purpose,omitempty"`
+	Service string `json:"service,omitempty"`
+	Title   string `json:"title,omitempty"`
 }
 
 // StacksAccess is one of the values of stacks.Access.

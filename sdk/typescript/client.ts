@@ -185,6 +185,7 @@ import type {
   StackSourceAddRequest,
   StackSourcesAnswer,
   StackState,
+  StackUpgradeAnswer,
   StagingCopy,
   StagingCreateRequest,
   StagingRemoveRequest,
@@ -5208,6 +5209,33 @@ export function stackState(
     {
       method: "GET",
       path: `/deploy/${pathParam(id)}/stack`,
+      accept: "json",
+    },
+    options,
+  )
+}
+
+/**
+ * stackUpgrade is POST /deploy/{id}/stack/upgrade: add the apps the stack's template gained since
+ * the deployment was made: the source is saved at the template version this dashboard ships, as
+ * the Source settings save it, and a release is started; inputs, variables, domains and volumes
+ * stay.
+ *
+ * With the source already at that version but the live release older, it starts the release again.
+ * 409 stack_upgrade_none when the deployment runs every app of the stack, 409 stack_not_preset
+ * when its source is no longer the stack's template.
+ *
+ * A deploy key: allowed.
+ */
+export function stackUpgrade(
+  client: Client,
+  id: number,
+  options?: RequestOptions,
+): Promise<StackUpgradeAnswer> {
+  return client.request<StackUpgradeAnswer>(
+    {
+      method: "POST",
+      path: `/deploy/${pathParam(id)}/stack/upgrade`,
       accept: "json",
     },
     options,

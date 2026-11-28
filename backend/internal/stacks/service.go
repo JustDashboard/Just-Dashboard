@@ -19,8 +19,10 @@ type Live struct {
 	// Compose project its containers are labelled with.
 	Kind      string
 	RuntimeID string
-	// TemplateID is the blueprint the release was rendered from.
-	TemplateID string
+	// TemplateID is the blueprint the release was rendered from, and
+	// TemplateVersion the version of it ("" when the release does not say).
+	TemplateID      string
+	TemplateVersion string
 }
 
 // ErrNoLiveRelease is an environment that serves nothing yet.
@@ -51,7 +53,12 @@ type ServiceDeps struct {
 	// by service (Env.PublicURL). Nil, or a service missing, is one served at
 	// no domain.
 	PublicURLs func(ctx context.Context, manifest *Manifest, environmentID, releaseID int64) map[string]string
-	Log        *slog.Logger
+	// ReleaseServices are the services of the preset a live release runs,
+	// when that is fewer than the preset's: a release of an older version of
+	// the template, from before a service was added to it. Nil, or a nil
+	// answer, is every service of the preset.
+	ReleaseServices func(ctx context.Context, preset Preset, live Live) (map[string]bool, error)
+	Log             *slog.Logger
 	// Interval is how often every stack is looked at; Kick looks at once.
 	Interval time.Duration
 	Runner   *Runner
@@ -289,9 +296,19 @@ func (s *Service) Env(ctx context.Context, manifest *Manifest, preset Preset, re
 			options[option.Name] = value
 		}
 	}
+	var released map[string]bool
+	if s.deps.ReleaseServices != nil {
+		if released, err = s.deps.ReleaseServices(ctx, preset, live); err != nil {
+			return nil, fmt.Errorf("could not read the services the release runs: %w", err)
+		}
+	}
 	running := map[string]bool{}
 	for _, service := range preset.Services {
-		running[service] = true
+		// A service the release does not run yet has no step of its own in
+		// this pass: it is the stack's next change, which the page offers.
+		if released == nil || released[service] {
+			running[service] = true
+		}
 	}
 	previous, err := s.deps.Store.Steps(ctx, record.ProjectID)
 	if err != nil {

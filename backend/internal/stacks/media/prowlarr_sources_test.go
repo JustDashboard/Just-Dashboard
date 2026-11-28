@@ -38,6 +38,10 @@ type sourcesFake struct {
 	// failTest answers the test with Prowlarr's refusal, echoing the body's
 	// apiKey back as a site's error would.
 	failTest bool
+	// tags and proxies are GET tag's and GET indexerproxy's: a stack with
+	// FlareSolverr has the flaresolverr tag and the stack's proxy.
+	tags    []map[string]any
+	proxies []map[string]any
 	// fail answers a request ("DELETE indexer/4") with a status instead.
 	fail     map[string]int
 	calls    []string
@@ -108,6 +112,10 @@ func (f *sourcesFake) serve(w http.ResponseWriter, r *http.Request) {
 	}
 	parts := strings.Split(path, "/")
 	switch {
+	case call == "GET tag":
+		f.answer(w, http.StatusOK, append([]map[string]any{}, f.tags...))
+	case call == "GET indexerproxy":
+		f.answer(w, http.StatusOK, append([]map[string]any{}, f.proxies...))
 	case call == "GET appprofile":
 		f.answer(w, http.StatusOK, []map[string]any{{"id": 3, "name": "Another"}, {"id": 1, "name": "Standard"}})
 	case call == "GET indexer":
@@ -498,7 +506,7 @@ func TestAddSourceTestsSavesAndSyncs(t *testing.T) {
 		outcome.Source.Protocol != "torrent" || !outcome.Source.Enabled {
 		t.Fatalf("outcome = %+v", outcome)
 	}
-	want := []string{"GET indexer", "GET appprofile", "POST indexer/test", "POST indexer", "POST command", "GET command/7"}
+	want := []string{"GET indexer", "GET appprofile", "GET tag", "POST indexer/test", "POST indexer", "POST command", "GET command/7"}
 	if !slices.Equal(fake.calls, want) {
 		t.Fatalf("calls = %q; want %q", fake.calls, want)
 	}
@@ -511,6 +519,9 @@ func TestAddSourceTestsSavesAndSyncs(t *testing.T) {
 	}
 	if _, sent := saved["capabilities"]; sent {
 		t.Error("the save sent the schema's capabilities")
+	}
+	if tags, _ := saved["tags"].([]any); len(tags) != 0 {
+		t.Errorf("a stack without FlareSolverr tagged the source: %v", saved["tags"])
 	}
 
 	// The same source again is refused before Prowlarr is asked anything.
@@ -730,5 +741,37 @@ func TestSourceCacheBoundHoldsWhileReadsAreUnderWay(t *testing.T) {
 	wg.Wait()
 	if kept := len(cache.slots); kept > sourceCacheSize {
 		t.Fatalf("%d catalogues kept after %d were read at once", kept, sourceCacheSize+2)
+	}
+}
+
+// With the stack's FlareSolverr, an added source carries its tag, in the test
+// and the save, so Prowlarr opens it through FlareSolverr when the site
+// answers with Cloudflare's check. A tag of that name without the stack's
+// proxy is the person's own and is not given.
+func TestAddSourceGivesTheFlareSolverrTag(t *testing.T) {
+	fake, env := newSourcesFake(t)
+	fake.tags = []map[string]any{{"id": 2, "label": "movies"}, {"id": 5, "label": "FlareSolverr"}}
+	catalogue := sourcesCatalogue(t, env)
+	prepared, err := catalogue.Prepare("Torznab:Generic Torznab", map[string]any{"baseUrl": "http://torznab:8080", "apiKey": "torznab-key-value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddSource(context.Background(), env, prepared); err != nil {
+		t.Fatal(err)
+	}
+	if tags, _ := fake.saved[0]["tags"].([]any); len(tags) != 0 {
+		t.Fatalf("a tag without the stack's proxy was given: %v", fake.saved[0]["tags"])
+	}
+
+	fake.indexers, fake.saved, fake.calls = nil, nil, nil
+	fake.proxies = []map[string]any{{"id": 1, "name": "FlareSolverr (Just Dashboard)", "tags": []int{5}}}
+	if _, err := AddSource(context.Background(), env, prepared); err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(fake.calls, "GET indexerproxy") {
+		t.Errorf("calls = %q", fake.calls)
+	}
+	if tags, _ := fake.saved[0]["tags"].([]any); len(tags) != 1 || tags[0] != float64(5) {
+		t.Fatalf("saved tags = %v; want [5]", fake.saved[0]["tags"])
 	}
 }

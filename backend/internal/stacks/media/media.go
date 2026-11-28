@@ -18,7 +18,7 @@ import (
 // changes in a way an existing stack should be configured again for.
 const (
 	ID      = "media"
-	Version = "1.1.0"
+	Version = "1.2.0"
 )
 
 // Template ids of the presets: reviewed Compose templates in
@@ -58,6 +58,7 @@ const (
 	PortProwlarr    = 9696
 	PortQBittorrent = 8080
 	PortBazarr      = 6767
+	PortFlareSolver = 8191
 )
 
 // Variables the templates generate and hand the services as environment.
@@ -120,10 +121,10 @@ func Manifest() *stacks.Manifest {
 				ID:    "complete",
 				Title: "Complete",
 				Description: "Everything connected: requests in Seerr are searched for by Radarr and Sonarr " +
-					"through the sources you add to Prowlarr, downloaded by qBittorrent, given subtitles " +
+					"through the sources you add to Prowlarr (FlareSolverr opening the ones behind Cloudflare), downloaded by qBittorrent, given subtitles " +
 					"by Bazarr and quality profiles by Recyclarr, and land in Jellyfin.",
 				Template:    TemplateComplete,
-				Services:    []string{"jellyfin", "seerr", "radarr", "sonarr", "prowlarr", "qbittorrent", "bazarr", "recyclarr"},
+				Services:    []string{"jellyfin", "seerr", "radarr", "sonarr", "prowlarr", "flaresolverr", "qbittorrent", "bazarr", "recyclarr"},
 				Recommended: true,
 				DiskGB:      8,
 				Limitations: []string{
@@ -151,6 +152,7 @@ func Manifest() *stacks.Manifest {
 			{Name: "radarr", Title: "Radarr", Purpose: "Finds, downloads and files films", Port: PortRadarr, Access: stacks.AccessPrivate, DocsURL: "https://wiki.servarr.com/radarr"},
 			{Name: "sonarr", Title: "Sonarr", Purpose: "Finds, downloads and files series", Port: PortSonarr, Access: stacks.AccessPrivate, DocsURL: "https://wiki.servarr.com/sonarr"},
 			{Name: "prowlarr", Title: "Prowlarr", Purpose: "Keeps the sources you add and shares them with Radarr and Sonarr", Port: PortProwlarr, Access: stacks.AccessPrivate, DocsURL: "https://wiki.servarr.com/prowlarr"},
+			{Name: "flaresolverr", Title: "FlareSolverr", Purpose: "Opens the sources behind Cloudflare's browser check for Prowlarr", Port: PortFlareSolver, Access: stacks.AccessWorker, DocsURL: "https://github.com/FlareSolverr/FlareSolverr"},
 			{Name: "qbittorrent", Title: "qBittorrent", Purpose: "Downloads what Radarr and Sonarr send it", Port: PortQBittorrent, Access: stacks.AccessPrivate, DocsURL: "https://github.com/qbittorrent/qBittorrent/wiki"},
 			{Name: "bazarr", Title: "Bazarr", Purpose: "Fetches subtitles in your languages", Port: PortBazarr, Access: stacks.AccessPrivate, DocsURL: "https://wiki.bazarr.media/"},
 			{Name: "recyclarr", Title: "Recyclarr", Purpose: "Keeps Radarr's and Sonarr's quality profiles in step with your choice", Access: stacks.AccessWorker, DocsURL: "https://recyclarr.dev/"},
@@ -218,6 +220,8 @@ func steps() []stacks.Step {
 			Needs: []string{"qbittorrent"}, After: []string{"sonarr.auth", "qbittorrent.categories"}, Timeout: short, Attempts: 5, Run: sonarrDownloadClient},
 		{ID: "prowlarr.apps", Service: "prowlarr", Title: "Share Prowlarr's sources with Radarr and Sonarr", Stage: stacks.StageLink,
 			Needs: []string{"radarr", "sonarr"}, After: []string{"prowlarr.auth", "radarr.auth", "sonarr.auth"}, Timeout: short, Attempts: 5, Run: prowlarrApps},
+		{ID: "prowlarr.flaresolverr", Service: "flaresolverr", Title: "Have Prowlarr open the sources behind Cloudflare through FlareSolverr", Stage: stacks.StageLink,
+			Needs: []string{"prowlarr"}, After: []string{"prowlarr.auth"}, Timeout: short, Attempts: 5, Run: prowlarrFlareSolverr},
 		{ID: "bazarr.link", Service: "bazarr", Title: "Connect Bazarr to Radarr and Sonarr in your subtitle languages", Stage: stacks.StageLink,
 			Needs: []string{"radarr", "sonarr"}, After: []string{"bazarr.auth", "radarr.rootfolder", "sonarr.rootfolder"}, Timeout: short, Attempts: 5, Run: bazarrLink},
 		{ID: "bazarr.providers", Service: "bazarr", Title: "Turn on the subtitle sources that need no account", Stage: stacks.StageLink,

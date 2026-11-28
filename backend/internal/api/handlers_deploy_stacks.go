@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
+	"gopkg.in/yaml.v3"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
@@ -107,13 +108,16 @@ type stackState struct {
 	Login stackLoginState `json:"login"`
 	// Addresses are the service domains the deployment's configuration does
 	// not have yet, for "Give every app its address".
-	Addresses           stackAddresses `json:"addresses"`
-	Limitations         []string       `json:"limitations"`
-	LiveReleaseID       int64          `json:"liveReleaseId,omitempty"`
-	ConfiguredReleaseID int64          `json:"configuredReleaseId,omitempty"`
-	StartedAt           *time.Time     `json:"startedAt,omitempty"`
-	FinishedAt          *time.Time     `json:"finishedAt,omitempty"`
-	UpdatedAt           time.Time      `json:"updatedAt,omitzero"`
+	Addresses stackAddresses `json:"addresses"`
+	// Upgrade is the apps the shipped template has that the deployment does
+	// not run yet, for "Add the new apps"; nil when there are none.
+	Upgrade             *stackUpgrade `json:"upgrade,omitempty"`
+	Limitations         []string      `json:"limitations"`
+	LiveReleaseID       int64         `json:"liveReleaseId,omitempty"`
+	ConfiguredReleaseID int64         `json:"configuredReleaseId,omitempty"`
+	StartedAt           *time.Time    `json:"startedAt,omitempty"`
+	FinishedAt          *time.Time    `json:"finishedAt,omitempty"`
+	UpdatedAt           time.Time     `json:"updatedAt,omitzero"`
 }
 
 type stackReadiness struct {
@@ -160,6 +164,36 @@ type stackAddress struct {
 	Service  string `json:"service"`
 	Title    string `json:"title"`
 	Hostname string `json:"hostname"`
+}
+
+// stackUpgrade is what the stack's template gained since the deployment's
+// source was saved: the apps the dashboard now ships with it and the live
+// release does not run.
+type stackUpgrade struct {
+	// Template is the shipped template, at Version; From is the version the
+	// deployment's source names.
+	Template string `json:"template"`
+	Version  string `json:"version"`
+	From     string `json:"from"`
+	// Added are the apps the live release does not run.
+	Added []stackUpgradeService `json:"added"`
+	// Saved: the source already names Version, but the live release is
+	// older (the release that was to bring the apps failed, has not run, or
+	// is still running). Pressing the same button deploys again.
+	Saved bool `json:"saved"`
+}
+
+type stackUpgradeService struct {
+	Service string `json:"service"`
+	Title   string `json:"title"`
+	Purpose string `json:"purpose"`
+}
+
+// stackUpgradeAnswer is the release started with the new apps.
+type stackUpgradeAnswer struct {
+	RunID   int64    `json:"runId"`
+	Version string   `json:"version"`
+	Added   []string `json:"added"`
 }
 
 // stackLoginRequest changes the stack's one password.
@@ -305,6 +339,24 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 	}
 	live, liveErr := s.stackLiveRelease(ctx, record.EnvironmentID)
 	state.Readiness.Installed = liveErr == nil
+	// Containers of the live release, by service.
+	containers := map[string]dockerx.Container{}
+	if liveErr == nil && live.RuntimeID != "" && s.modules.docker != nil {
+		listed, err := s.modules.docker.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": live.RuntimeID})
+		if err == nil {
+			containers = stackContainersByService(listed)
+		}
+	}
+	// A service the template gained after the live release was made is not
+	// the deployment's yet: it is left out of the apps and steps, and named
+	// in the upgrade instead.
+	notYet := map[string]bool{}
+	if liveErr == nil {
+		for service := range s.stackServicesNotReleased(ctx, preset, live) {
+			notYet[service] = true
+			delete(inPreset, service)
+		}
+	}
 	if liveErr == nil && state.Status != stacks.StatusConfiguring && record.Status == stacks.StatusWaiting {
 		// Live, and the loop has not picked it up yet.
 		state.Status = stacks.StatusConfiguring
@@ -345,22 +397,6 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 	}
 	sort.SliceStable(state.Actions, func(i, j int) bool { return state.Actions[i].Blocking && !state.Actions[j].Blocking })
 
-	// Containers of the live release, by service.
-	containers := map[string]dockerx.Container{}
-	if liveErr == nil && live.RuntimeID != "" && s.modules.docker != nil {
-		listed, err := s.modules.docker.ListContainersWithLabels(ctx, map[string]string{"com.docker.compose.project": live.RuntimeID})
-		if err == nil {
-			for _, container := range listed {
-				service := container.Labels["com.docker.compose.service"]
-				if service == "" || container.Labels["com.docker.compose.oneoff"] == "True" {
-					continue
-				}
-				if previous, found := containers[service]; !found || (previous.State != "running" && container.State == "running") {
-					containers[service] = container
-				}
-			}
-		}
-	}
 	healthy := liveErr == nil
 	urls := map[string]string{}
 	if liveErr == nil {
@@ -428,8 +464,135 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 			state.Addresses.Unpublished = stackUnpublishedAddresses(manifest, domains, state.Services)
 		}
 	}
+	if liveErr == nil {
+		state.Upgrade = s.stackUpgradeOf(ctx, manifest, preset, record, live, notYet)
+	}
 	state.Summary = stackSummary(state)
 	return state, nil
+}
+
+// stackContainersByService is a Compose project's containers by service:
+// the running one when there are several, never a one-off run.
+func stackContainersByService(listed []dockerx.Container) map[string]dockerx.Container {
+	containers := map[string]dockerx.Container{}
+	for _, container := range listed {
+		service := container.Labels["com.docker.compose.service"]
+		if service == "" || container.Labels["com.docker.compose.oneoff"] == "True" {
+			continue
+		}
+		if previous, found := containers[service]; !found || (previous.State != "running" && container.State == "running") {
+			containers[service] = container
+		}
+	}
+	return containers
+}
+
+// stackServicesNotReleased are the preset's services a live release does
+// not run: the ones its own Compose file (the source it was made from) does
+// not declare, because it was made from a version of the template from
+// before they were added. A release whose file cannot be read runs them all,
+// as far as this knows.
+func (s *Server) stackServicesNotReleased(ctx context.Context, preset stacks.Preset, live stacks.Live) map[string]bool {
+	out := map[string]bool{}
+	if live.TemplateID != preset.Template {
+		return out
+	}
+	released, known := s.stackReleaseComposeServices(ctx, live.ReleaseID)
+	if !known {
+		return out
+	}
+	for _, service := range preset.Services {
+		if !released[service] {
+			out[service] = true
+		}
+	}
+	return out
+}
+
+// stackReleaseComposeServices are the services a release's Compose file
+// declares, read from the source revision it was made from.
+func (s *Server) stackReleaseComposeServices(ctx context.Context, releaseID int64) (map[string]bool, bool) {
+	var config string
+	if err := s.Store.DB.QueryRowContext(ctx, `
+		SELECT src.config_json FROM deploy_releases r JOIN deploy_sources src ON src.id = r.source_id
+		 WHERE r.id = ?`, releaseID).Scan(&config); err != nil {
+		return nil, false
+	}
+	var source deploy.DraftSourceConfig
+	if err := json.Unmarshal([]byte(config), &source); err != nil || len(source.ComposeFiles) == 0 {
+		return nil, false
+	}
+	services := map[string]bool{}
+	for _, document := range source.ComposeFiles {
+		var file struct {
+			Services map[string]any `yaml:"services"`
+		}
+		if err := yaml.Unmarshal([]byte(document.Content), &file); err != nil {
+			return nil, false
+		}
+		for name := range file.Services {
+			services[name] = true
+		}
+	}
+	return services, len(services) > 0
+}
+
+// stackReleaseServices is the stack loop's view of the same: the preset's
+// services a live release runs, nil when it runs them all.
+func (s *Server) stackReleaseServices(ctx context.Context, preset stacks.Preset, live stacks.Live) (map[string]bool, error) {
+	missing := s.stackServicesNotReleased(ctx, preset, live)
+	if len(missing) == 0 {
+		return nil, nil
+	}
+	running := map[string]bool{}
+	for _, service := range preset.Services {
+		if !missing[service] {
+			running[service] = true
+		}
+	}
+	return running, nil
+}
+
+// stackSourceTemplate is the template the deployment's saved source names,
+// read without the rest of the configuration (the page polls the state).
+func (s *Server) stackSourceTemplate(ctx context.Context, environmentID int64) (string, string, error) {
+	var id, version string
+	err := s.Store.DB.QueryRowContext(ctx, `
+		SELECT COALESCE(json_extract(src.config_json, '$.blueprintId'), ''),
+		       COALESCE(json_extract(src.config_json, '$.blueprintVersion'), '')
+		  FROM deploy_environments e
+		  JOIN deploy_sources src ON src.environment_id = e.id AND src.revision = e.desired_revision
+		 WHERE e.id = ?`, environmentID).Scan(&id, &version)
+	return id, version, err
+}
+
+// stackUpgradeOf is the upgrade the page offers: the apps of the shipped
+// template the live release does not run, when the deployment's source is
+// still the preset's template. Nil when there is nothing to add.
+func (s *Server) stackUpgradeOf(ctx context.Context, manifest *stacks.Manifest, preset stacks.Preset, record *stacks.Record,
+	live stacks.Live, notYet map[string]bool) *stackUpgrade {
+	if len(notYet) == 0 {
+		return nil
+	}
+	definition, err := blueprint.Get(preset.Template)
+	if err != nil {
+		return nil
+	}
+	sourceID, sourceVersion, err := s.stackSourceTemplate(ctx, record.EnvironmentID)
+	if err != nil || sourceID != preset.Template {
+		return nil
+	}
+	upgrade := &stackUpgrade{Template: definition.ID, Version: definition.Version, From: sourceVersion,
+		Added: []stackUpgradeService{}, Saved: sourceVersion == definition.Version}
+	if upgrade.Saved {
+		upgrade.From = live.TemplateVersion
+	}
+	for _, info := range manifest.Services {
+		if notYet[info.Name] {
+			upgrade.Added = append(upgrade.Added, stackUpgradeService{Service: info.Name, Title: info.Title, Purpose: info.Purpose})
+		}
+	}
+	return upgrade
 }
 
 // stackConfiguration is the deployment's configuration as its Domains
@@ -821,6 +984,120 @@ func (s *Server) deployStackAddresses(w http.ResponseWriter, r *http.Request, re
 	return nil
 }
 
+// handleStackUpgrade brings a deployment to the version of its preset's
+// template this dashboard ships, which runs the apps the template gained
+// since it was deployed: the source is saved at that version as the Source
+// settings save it, with its checks and its audit, and a release is started
+// as "Deploy changes" starts one. Every input, variable, domain and volume
+// stays; the new apps start with volumes of their own, and the pass after
+// the release sets them up and connects them.
+func (s *Server) handleStackUpgrade(w http.ResponseWriter, r *http.Request) error {
+	record, manifest, err := s.stackRecord(r)
+	if err != nil {
+		return err
+	}
+	preset, found := manifest.PresetByID(record.Preset)
+	if !found {
+		return httpx.Err(http.StatusConflict, "stack_not_preset", "the stack's preset is not one this dashboard ships")
+	}
+	definition, err := blueprint.Get(preset.Template)
+	if err != nil {
+		return err
+	}
+	configuration, err := s.stackConfiguration(r.Context(), record)
+	if err != nil {
+		return mapDeploymentPlanningError(err)
+	}
+	if configuration.Source == nil || configuration.Source.Mode != deploy.SourceModeBlueprint ||
+		configuration.Source.BlueprintID != preset.Template {
+		return httpx.Err(http.StatusConflict, "stack_not_preset", "the deployment's source is no longer the stack's template, so there is nothing of the stack's to add")
+	}
+	state, err := s.stackStateOf(r.Context(), record, manifest)
+	if err != nil {
+		return err
+	}
+	if state.Upgrade == nil || len(state.Upgrade.Added) == 0 {
+		return httpx.Err(http.StatusConflict, "stack_upgrade_none", "the deployment already runs every app of the stack")
+	}
+	added := []string{}
+	for _, service := range state.Upgrade.Added {
+		added = append(added, service.Service)
+	}
+	revision := configuration.Revision
+	if configuration.Source.BlueprintVersion != definition.Version {
+		saved, err := s.saveStackSourceVersion(r, record, configuration, definition.Version)
+		if err != nil {
+			return err
+		}
+		revision = saved
+	}
+	project, err := s.modules.deployStore.Get(r.Context(), record.ProjectID)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	run, err := s.enqueueNormalizedDeploymentAtSource(r.Context(), project, record.EnvironmentID,
+		deploy.OperationDeploy, 0, deploy.TriggerManual, httpx.MustPrincipal(r).Username(), strings.TrimSpace(r.Header.Get("Idempotency-Key")),
+		nil, "", "", revision)
+	if err != nil {
+		return mapDeployError(err)
+	}
+	s.recordAudit(r, "deploy.run.request", fmt.Sprint(run.ID), map[string]any{
+		"deploymentId": record.ProjectID, "environmentId": record.EnvironmentID, "operation": deploy.OperationDeploy,
+	})
+	httpx.SetAudit(r, "deploy.stack.upgrade", strconv.FormatInt(record.ProjectID, 10), map[string]any{
+		"stack": record.StackID, "template": definition.ID, "version": definition.Version, "added": added, "runId": run.ID,
+	})
+	httpx.JSON(w, http.StatusAccepted, stackUpgradeAnswer{RunID: run.ID, Version: definition.Version, Added: added})
+	return nil
+}
+
+// saveStackSourceVersion saves the deployment's source at another version of
+// its template, through what the Source settings' save runs: the render of
+// that version, its validation, a deploy key's guards, the read-only
+// inspection and the revision guard. It answers the new revision.
+func (s *Server) saveStackSourceVersion(r *http.Request, record *stacks.Record, configuration *deploy.EnvironmentConfiguration, version string) (int, error) {
+	source := *configuration.Source
+	source.BlueprintVersion = version
+	source, err := s.modules.deployPlanning.WithUserTemplate(r.Context(), source)
+	if err != nil {
+		return 0, mapDeploymentPlanningError(err)
+	}
+	source, err = source.WithTemplateDocuments()
+	if err != nil {
+		return 0, mapDeploymentPlanningError(err)
+	}
+	if err := source.ValidateForDeployment(); err != nil {
+		return 0, mapDeploymentPlanningError(err)
+	}
+	if httpx.MustPrincipal(r).DeployKey() {
+		current, err := s.keyEnvironmentGuard(r.Context(), record.ProjectID, record.EnvironmentID)
+		if err != nil {
+			return 0, err
+		}
+		if err := keySourceGuard(source, current.Source); err != nil {
+			return 0, err
+		}
+		if reasons := hostAuthority(&source, current.Build, current.Runtime); len(reasons) > 0 {
+			return 0, refuseHostAuthority("this source", reasons)
+		}
+	}
+	detection, err := s.modules.deploySources.Analyze(r.Context(), source)
+	if err != nil {
+		return 0, mapDeploymentPlanningError(err)
+	}
+	saved, _, err := s.modules.deployPlanning.SaveEnvironmentSourceDetection(
+		r.Context(), record.ProjectID, record.EnvironmentID, configuration.Revision, source, detection,
+	)
+	if err != nil {
+		return 0, mapDeploymentPlanningError(err)
+	}
+	s.recordAudit(r, "deploy.source.update", strconv.FormatInt(record.EnvironmentID, 10), map[string]any{
+		"deploymentId": record.ProjectID, "environmentId": record.EnvironmentID,
+		"revision": saved.Revision, "kind": source.Kind,
+	})
+	return saved.Revision, nil
+}
+
 // registerStack records a deployment made from a stack's preset, in the
 // request that committed it, so its first release is configured as soon as
 // it is live.
@@ -864,8 +1141,8 @@ func (s *Server) stackLiveRelease(ctx context.Context, environmentID int64) (sta
 		return stacks.Live{}, stacks.ErrNoLiveRelease
 	}
 	live.TemplateID = blueprintID
-	if id, _, found := strings.Cut(template, "@"); found && id != "" {
-		live.TemplateID = id
+	if id, version, found := strings.Cut(template, "@"); found && id != "" {
+		live.TemplateID, live.TemplateVersion = id, version
 	}
 	return live, err
 }
@@ -966,7 +1243,8 @@ func (s *Server) newStackService() *stacks.Service {
 		Variables: func(ctx context.Context, projectID, environmentID int64) (map[string]string, error) {
 			return s.modules.deployPlanning.LiteralVariableValues(ctx, projectID, environmentID)
 		},
-		PublicURLs: s.stackServiceURLs,
-		Log:        s.Log,
+		PublicURLs:      s.stackServiceURLs,
+		ReleaseServices: s.stackReleaseServices,
+		Log:             s.Log,
 	})
 }
