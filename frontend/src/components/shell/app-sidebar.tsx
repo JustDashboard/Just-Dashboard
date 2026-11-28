@@ -72,7 +72,6 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import { heldHref, useHeldSessions } from "@/components/remote-desktop/held-sessions"
-import { AskAboutPage } from "@/components/assistant/ask-about"
 import { REMOTE_DESKTOP_HREF } from "@/lib/remote-desktop"
 
 /**
@@ -124,6 +123,8 @@ type Panel = {
    */
   named?: boolean
   mark?: React.ReactNode
+  /** A section's own glyph, drawn before its name where a named scope draws its mark. */
+  icon?: NavEntry["icon"]
   /** The top-level list is never titled and has nothing to go back to. */
   root?: boolean
   groups: { label?: string; pending?: boolean; items: Row[] }[]
@@ -139,6 +140,7 @@ function fromSection(section: NavEntry): Panel {
   return {
     key: `section:${section.href ?? section.title}`,
     title: section.title,
+    icon: section.icon,
     // A section whose pages name a heading is drawn under them; one that
     // names none is the single unlabelled list it always was.
     groups: groupedChildren(section.children ?? []).map((group) => ({
@@ -334,7 +336,14 @@ export function AppSidebar() {
       {/* The product's name, its version and search are the page's banner:
           outside any landmark, the version beside the wordmark was text a
           screen reader met between regions on every page. */}
-      <SidebarHeader role="banner" className="gap-3 p-3 group-data-[collapsible=icon]:p-2">
+      {/* Just Hub's head: 12px in from the rail's edge, as the list under it
+          is, and everything in it starts 8px further in again, so the
+          wordmark, the search glass, the panel's name, the group labels and
+          every row's glyph stand on one line down the rail. */}
+      <SidebarHeader
+        role="banner"
+        className="gap-3 px-3 pt-3 pb-2 group-data-[collapsible=icon]:p-2"
+      >
         {/* The wordmark alone: no tile, and no "Control panel" strapline under
             it. The strapline named the product category to somebody already
             inside the product, and the tile spent a third of the header's
@@ -345,7 +354,7 @@ export function AppSidebar() {
             thing it affects. Collapsed there is no room beside the mark, so
             the two stack — the trigger stays reachable in the icon rail, which
             is the state you most need it in. */}
-        <div className="flex min-w-0 items-center gap-2 group-data-[collapsible=icon]:flex-col">
+        <div className="flex h-9 min-w-0 items-center gap-2 group-data-[collapsible=icon]:h-auto group-data-[collapsible=icon]:flex-col">
           {/* On a server linked to a Just Hub the row names this server and
               opens the others; unlinked it is the wordmark, untouched. */}
           {hub ? (
@@ -358,7 +367,7 @@ export function AppSidebar() {
             <Link
               href="/"
               onClick={() => setOpenMobile(false)}
-              className="flex h-8 min-w-0 flex-1 items-center rounded-lg focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center pointer-coarse:-my-1.5 pointer-coarse:h-11"
+              className="flex h-8 min-w-0 flex-1 items-center rounded-md px-2 focus-ring group-data-[collapsible=icon]:w-8 group-data-[collapsible=icon]:flex-none group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 pointer-coarse:-my-1.5 pointer-coarse:h-11"
             >
               <Logo className="group-data-[collapsible=icon]:hidden" />
               <LogoMark className="hidden group-data-[collapsible=icon]:block" />
@@ -369,18 +378,13 @@ export function AppSidebar() {
           <SidebarTrigger className="-my-1.5 -mr-1.5 size-11 shrink-0 rounded-lg text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground md:hidden" />
         </div>
 
-        {/* Ask stands beside Search because it is the other thing a person may
-            want from any page; the phone's strip carries its own. */}
-        <div className="flex min-w-0 items-center gap-1.5">
-          <SearchButton onOpen={palette.open} />
-          <AskAboutPage className="h-9 group-data-[collapsible=icon]:hidden max-md:hidden" />
-        </div>
+        <SearchButton onOpen={palette.open} />
       </SidebarHeader>
 
       {/* `overflow-x-hidden` is what makes the slide a slide: the panel arrives
           from ten pixels outside the rail, and without it those ten pixels are
           a horizontal scrollbar for the length of the animation. */}
-      <SidebarContent className="gap-0 overflow-x-hidden px-2">
+      <SidebarContent className="gap-0 overflow-x-hidden px-3 pb-4">
         {/* The rail is the product's navigation and had no landmark: a screen
             reader met fifty links with nothing saying what list they were. One
             name for every panel, since the panel that is showing says its own
@@ -407,21 +411,28 @@ export function AppSidebar() {
             )
             if (items.length === 0) return null
             return (
-              <SidebarGroup key={group.label ?? index} className="px-0 py-1.5">
+              // A labelled group stands 20px below the one before it, as the
+              // Hub's do, so the gap says where one shelf ends before the label
+              // says what the next one is. A panel's unlabelled first shelf (a
+              // section's landing page) sits closer under the panel's name.
+              <SidebarGroup
+                key={group.label ?? index}
+                className={cn("p-0", group.label ? "pt-5" : "pt-3")}
+              >
                 {group.label && (
-                  <SidebarGroupLabel className="eyebrow h-6 gap-1.5 px-2">
+                  <SidebarGroupLabel className="gap-1.5">
                     {group.label}
                     {group.pending && (
                       <span
                         role="img"
                         aria-label="Changes pending"
-                        className="size-1.5 shrink-0 rounded-full bg-warning"
+                        className="mt-1 size-1.5 shrink-0 rounded-full bg-warning"
                       />
                     )}
                   </SidebarGroupLabel>
                 )}
                 <SidebarGroupContent>
-                  <SidebarMenu className="gap-0.5">
+                  <SidebarMenu className="gap-px">
                     {items.map((item) =>
                       "section" in item ? (
                         <NavRow
@@ -456,7 +467,7 @@ export function AppSidebar() {
         </nav>
       </SidebarContent>
 
-      <SidebarFooter className="gap-2 p-2">
+      <SidebarFooter className="gap-2 px-3 pt-2 pb-3 group-data-[collapsible=icon]:p-2">
         {/* Above the account card, not below it and not in the nav. It is the
             one thing in this shell that is about the dashboard rather than
             about the server, and it has to be seen without being looked for —
@@ -468,6 +479,9 @@ export function AppSidebar() {
         {/* What a linked hub has to say, nearest the account card, and
             nothing at all without one. */}
         <HubNotice collapsed={collapsed} />
+        {/* A hairline, not a box, between what the rail lists and who is
+            using it: the account is a row like the ones above it. */}
+        <div aria-hidden className="mx-2 h-px bg-hairline group-data-[collapsible=icon]:hidden" />
         <UserCard collapsed={collapsed} />
       </SidebarFooter>
       <SidebarRail />
@@ -480,10 +494,11 @@ export function AppSidebar() {
  * pages and every container, site and database on the box, and the one thing
  * that still sees them all at once now that the rail shows one section at a
  * time — so it is drawn as the search field it opens rather than as one more
- * grey row: a raised face with the mark's blue glass and the shortcut in caps
- * set into it (the lit top edge of `--edge`, as Just Hub draws its search),
- * which is what the eye looks for when it wants to type. Collapsed, it keeps
- * its place in the icon rail as the glass alone.
+ * grey row: Just Hub's 32px control face with the lit top edge of `--edge`,
+ * the glass and "Search…" in the muted ink and the shortcut in caps set into
+ * it, which is what the eye looks for when it wants to type. The glass is not
+ * the mark's ice: in the rail that colour says which page you are on.
+ * Collapsed, it keeps its place in the icon rail as the glass alone.
  */
 function SearchButton({ onOpen }: { onOpen: () => void }) {
   const keys = useLauncherKeys()
@@ -496,7 +511,7 @@ function SearchButton({ onOpen }: { onOpen: () => void }) {
     // shortcut is said. The button's `::after` covers the whole well, so a
     // press anywhere on it, the caps included, is a press on Search, and the
     // well draws the ring for the button inside it.
-    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-lg border border-transparent border-t-edge bg-control pr-1.5 text-body text-muted-foreground focus-ring-within transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-control-hover hover:text-sidebar-accent-foreground md:h-9">
+    <div className="group/search relative flex h-11 w-full min-w-0 items-center gap-2 rounded-md border border-transparent border-t-edge bg-control pr-1.5 text-body text-muted-foreground focus-ring-within transition-[color,background-color] duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-control-hover hover:text-secondary-foreground md:h-8">
       <button
         type="button"
         onClick={onOpen}
@@ -504,9 +519,11 @@ function SearchButton({ onOpen }: { onOpen: () => void }) {
         aria-keyshortcuts={keys.replace("⌘", "Meta")}
         // Stretched over the well's own border, so the button's box is the
         // well's height: 44px under a finger, not 42.
-        className="-my-px flex min-w-0 flex-1 items-center gap-2 self-stretch pl-2.5 text-left outline-hidden group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0 after:absolute after:-inset-px after:rounded-lg"
+        // 7px of its own after the well's 1px border: the glass lands on the
+        // rows' glyph line, 8px in from the well's edge.
+        className="-my-px flex min-w-0 flex-1 items-center gap-2.5 self-stretch pl-1.75 text-left outline-hidden group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:pl-0 after:absolute after:-inset-px after:rounded-md"
       >
-        <MagnifyingGlass className="size-4 shrink-0 text-brand" />
+        <MagnifyingGlass className="size-4 shrink-0" />
         <span className="flex-1 truncate group-data-[collapsible=icon]:hidden">Search…</span>
       </button>
       <span aria-hidden="true" className="flex gap-0.5 group-data-[collapsible=icon]:hidden">
@@ -541,19 +558,20 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
       type="button"
       onClick={onBack}
       aria-label={`Back to ${label}`}
-      // The same height, inset, icon size and type as the rows under it: it
-      // is a row in the list, one that goes out instead of in. Muted rather
-      // than the rows' foreground so it does not compete with the page you
+      // The same height, inset, glyph, weight and hover as the rows under it:
+      // it is a row in the list, one that goes out instead of in. Muted rather
+      // than the rows' secondary ink so it does not compete with the page you
       // are on for "where am I".
-      className="flex h-11 w-full min-w-0 items-center gap-2 rounded-md px-2 text-left text-body text-muted-foreground focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-menu-hover hover:text-sidebar-accent-foreground md:h-8"
+      className="flex h-11 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left text-body font-medium text-muted-foreground focus-ring transition-[color,background-color] duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:px-0 hover:bg-control hover:text-foreground md:h-8"
     >
       <ChevronLeft className="size-4 shrink-0" />
       <span className="truncate group-data-[collapsible=icon]:hidden">{label}</span>
     </button>
   )
+  const Icon = panel.icon
 
   return (
-    <div className="flex flex-col gap-0.5 pt-1.5 group-data-[collapsible=icon]:items-center">
+    <div className="flex flex-col gap-3 pt-5 group-data-[collapsible=icon]:items-center">
       {collapsed ? (
         // Expanded the button says where it goes, so a tooltip repeating it is
         // noise; in the icon rail the words are gone and it is the only label.
@@ -570,29 +588,32 @@ function PanelHead({ panel, parent, onBack }: { panel: Panel; parent: Panel; onB
 
       {/* Where you are, as a heading rather than a link: the panel under it is
           the section, so a control here would only ever go where you already
-          are. A section is drawn as an eyebrow — the rail's label voice, the
-          one "Settings" above a group speaks in — and not as icon-plus-name in
-          the row slot, which is exactly what a row looks like and so read as a
-          button that did nothing when pressed. A project or a connection is a
-          name somebody typed, and small caps turned "api-production" into
-          API-PRODUCTION (§4), so it is printed as written, after its own mark
-          at the line's height rather than in a row's icon slot. Collapsed, the
-          icon rail is too narrow for it and the section is named by the back
-          button's tooltip instead. */}
-      <div className="min-w-0 px-2 pt-3 pb-1.5 group-data-[collapsible=icon]:hidden">
+          are. It is drawn as Just Hub draws its Settings: the name in Title
+          semibold and the primary ink, a step above the rows, after the
+          section's glyph in the muted ink, on the rows' glyph line. Until
+          0.9.1 a section's name was an eyebrow, the voice of the group labels
+          under it, so "NETWORK" over "SETUP" and "ACTIVITY" did not say which
+          was the panel and which its shelves, and at 11px it read as a
+          caption rather than as where you are. The size is what keeps it from
+          reading as one more row to press: 16px semibold beside 14px rows.
+          A project or a connection is a name somebody typed and is printed as
+          written, after its own mark (§4). Collapsed, the icon rail is too
+          narrow for it and the section is named by the back button's tooltip
+          instead. */}
+      <div className="flex h-5.5 min-w-0 items-center gap-2.5 px-2 text-title font-semibold text-foreground group-data-[collapsible=icon]:hidden">
         {!panel.title ? (
-          <Skeleton className="h-2.5 w-24" />
-        ) : panel.named ? (
-          <p className="flex min-w-0 items-center gap-2 text-title leading-tight font-semibold text-foreground">
-            {panel.mark && (
+          <Skeleton className="h-3.5 w-28" />
+        ) : (
+          <>
+            {panel.mark ? (
               <span aria-hidden="true" className="flex shrink-0">
                 {panel.mark}
               </span>
+            ) : (
+              Icon && <Icon className="size-4 shrink-0 text-muted-foreground" />
             )}
             <span className="truncate">{panel.title}</span>
-          </p>
-        ) : (
-          <p className="eyebrow truncate leading-tight">{panel.title}</p>
+          </>
         )}
       </div>
     </div>
@@ -630,7 +651,7 @@ function HiddenHere({ section }: { section: SectionKey }) {
   return (
     <div
       data-slot="hidden-section-note"
-      className="mt-1.5 flex min-w-0 items-start gap-2 rounded-md border border-hairline px-2 py-1.5 text-hint leading-snug text-muted-foreground group-data-[collapsible=icon]:hidden"
+      className="mt-3 flex min-w-0 items-start gap-2 rounded-md border border-hairline px-2 py-1.5 text-hint leading-snug text-muted-foreground group-data-[collapsible=icon]:hidden"
     >
       <EyeOff aria-hidden className="mt-px size-3.5 shrink-0" />
       <p className="min-w-0 flex-1">
@@ -672,7 +693,9 @@ function NavRow({
   const current = active ? ("section" in item ? "true" : "page") : undefined
   const content = (
     <>
-      <Icon className="size-4" />
+      {/* The row's own glyph: muted at rest, the mark's ice on the current
+          row (`ui/sidebar.tsx` colours the first glyph only). */}
+      <Icon />
       <span className="flex-1 truncate">{item.title}</span>
       {item.pending && (
         <span
@@ -682,9 +705,10 @@ function NavRow({
         />
       )}
       {"section" in item && (
-        // No explicit colour — inherits the row's, so it follows the hover
-        // and active states instead of staying one flat grey.
-        <ChevronRight className="size-4 shrink-0 opacity-70" />
+        // Faint, as the Hub's: it says the rail goes in, and the row's label
+        // is what it is. It steps up to the muted ink with the row's hover,
+        // colour only (motion.md: nothing translates on hover).
+        <ChevronRight className="-mr-0.5 text-faint transition-colors duration-fast group-hover/menu-button:text-muted-foreground" />
       )}
     </>
   )
@@ -696,19 +720,12 @@ function NavRow({
           isActive={active}
           tooltip={item.title}
           aria-current={current}
-          className="text-body"
           onClick={enter}
         >
           {content}
         </SidebarMenuButton>
       ) : (
-        <SidebarMenuButton
-          asChild
-          isActive={active}
-          tooltip={item.title}
-          aria-current={current}
-          className="text-body"
-        >
+        <SidebarMenuButton asChild isActive={active} tooltip={item.title} aria-current={current}>
           <Link
             href={href ?? item.href}
             // A press that opens a page puts the phone's drawer away at once,
@@ -785,23 +802,26 @@ function UserCard({ collapsed }: { collapsed: boolean }) {
           // says what they see ("click Operator") reaches it; what the card
           // opens comes after them.
           aria-label={[name, user?.role, "account menu"].filter(Boolean).join(", ")}
-          className="group/account flex min-h-14 w-full min-w-0 items-center gap-3 rounded-lg border border-sidebar-border bg-card px-2.5 py-2 text-left focus-ring transition-colors group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:min-h-0 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:border-transparent group-data-[collapsible=icon]:bg-transparent group-data-[collapsible=icon]:p-0 hover:bg-sidebar-accent active:bg-sidebar-accent data-[state=open]:bg-sidebar-accent"
+          // Just Hub's account row: no frame of its own, the rows' hover, and
+          // the face, the name and the role on the rows' glyph line. 48px, so
+          // it is a finger's box on a phone as well.
+          className="group/account flex h-12 w-full min-w-0 items-center gap-2.5 rounded-md px-2 text-left focus-ring transition-[color,background-color] duration-fast group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:justify-center group-data-[collapsible=icon]:p-0 hover:bg-control active:bg-control-active data-[state=open]:bg-control"
         >
           {user ? (
-            <UserAvatar user={user} size="md" className="group-data-[collapsible=icon]:size-7" />
+            <UserAvatar user={user} size="sm" />
           ) : (
             <span
               data-slot="user-avatar"
-              className="flex size-9 shrink-0 items-center justify-center rounded-full bg-plot-brand text-xs font-semibold text-brand group-data-[collapsible=icon]:size-7"
+              className="flex size-7 shrink-0 items-center justify-center rounded-full bg-plot-brand text-xs font-semibold text-brand"
             >
               ?
             </span>
           )}
           {/* The space between the two lines is for whoever reads them as
               one run of text: without it the card says "Operatoradmin". */}
-          <span className="grid min-w-0 flex-1 gap-0.5 group-data-[collapsible=icon]:hidden">
-            <span className="truncate text-body leading-tight font-semibold">{name}</span>{" "}
-            <span className="truncate text-hint leading-tight text-muted-foreground capitalize">
+          <span className="grid min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
+            <span className="truncate text-body font-medium text-foreground">{name}</span>{" "}
+            <span className="truncate text-hint text-muted-foreground capitalize">
               {user?.role ?? "—"}
             </span>
           </span>

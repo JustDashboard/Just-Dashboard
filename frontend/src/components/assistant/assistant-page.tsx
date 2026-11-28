@@ -90,7 +90,7 @@ const PLACES: { title: string; detail: string; href: string; icon: Icon }[] = [
   },
   {
     title: "Ask from any page",
-    detail: "Ask beside Search begins a chat about the page you are on",
+    detail: "In Search, Ask the assistant about this page begins a chat about it",
     href: "/assistant",
     icon: Question,
   },

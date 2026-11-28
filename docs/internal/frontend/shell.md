@@ -64,7 +64,7 @@ it and the sheet's own head closes it; Ctrl/Cmd+B still toggles it. A page opene
 puts it away: `SidebarProvider` closes it when the pathname changes, and a page's row closes it on
 the press, so the row of the page you are already on closes it too. A row that only drills into a
 panel (the way back out, a group) leaves it open. Below `md` the sheet's rows, the way back out,
-Search and the close control are 44px, and so are the strip's three controls (sidebar, Ask,
+Search and the close control are 44px, and so are the strip's two controls (sidebar and
 Search) in its 48px. The strip is a `<header>` beside `<main>`, so it is the phone's banner, as
 the rail's head is the desk's. `shell-phone.spec.ts` holds all of it.
 
@@ -131,6 +131,26 @@ over could make read "Session expired - sign in", and a title has no room to say
 ([protocol](../backend/hub-link-protocol.md) §8.10). The root layout declares no title, and `login/` and
 `welcome/` have small layouts that do. Next's metadata writes over `document.title` when it resolves, and
 beside a second `<title>` it would come first.
+
+### How the rail is drawn
+
+The rail is drawn as Just Hub's (27 Nov 2026), on the window's ground with no edge of its own. Everything
+in it stands on one line 20px in from its edge: the wordmark (or the server switcher), the search
+field's glass, the way back, the panel's name, the group labels and every row's glyph. The header and
+the list are 12px in, and each of them starts 8px further in again.
+
+- **Rows** (`SidebarMenuButton`, `ui/sidebar.tsx`) are 32px, 44px below `md`, with 8px corners, a
+  16px glyph in the muted ink and the label in body 500 in the secondary ink, 1px apart. Every row is
+  the same weight, so the current one does not widen as it lights. The pointer's fill is `--control`,
+  the search field's face. The current row is the selection fill (`--accent`), primary text and its
+  glyph in the mark's ice, and nothing at its edge. A row that goes in ends on a faint chevron that
+  takes the muted ink with the row's hover; nothing moves on hover.
+- **Group labels** are the eyebrow's caps in the faint ink, 14px of label and 6px to the first row,
+  and a labelled group stands 20px below the one before it. A panel's unlabelled first shelf sits
+  12px under the panel's name.
+- **The search field** is a 32px control face with the lit top edge, the glass and "Search…" in the
+  muted ink. The mark's ice is kept for the current row.
+- **The foot** holds the notices, then a hairline, then the account row.
 
 ### The rail drills in
 
@@ -360,15 +380,17 @@ not a number is read by `legacyDatabasesHref` and replaced, not pushed: `overvie
 with `schema`, `table`, `sql`, `source` and `view` carried over, and `/databases/topology` is the
 map. An old page with no valid `conn` opens the control center rather than a guess.
 
-A scope's head is not a section's. A section's name is one of this product's words and is drawn as an
-eyebrow, the rail's label voice; a project or a connection is a name somebody typed, and small caps
-turned `api-production` into API-PRODUCTION, so a scope's head (`named` in `app-sidebar.tsx`) is printed
-as written at `text-title` semibold — a step above the rows, so the name reads as what the rows belong
-to rather than as one of them — after the scope's `mark`, the thing drawn as itself at the rows' icon
-size, a project's favicon or product (`ProjectMark size="xs"`), a connection's engine
-(`ProductGlyph`). The mark rides along with the rest of the scope but is not what decides a republish,
-so it is derived from the same data as the title. A scope carries no `icon`: a glyph in a
-row's slot made the heading read as one more row to press.
+A panel's head is its name at `text-title` semibold in the primary ink, a step above the rows, so the
+name reads as what the rows belong to rather than as one of them, as Just Hub draws its Settings.
+Before the name stands the thing's own picture on the rows' glyph line: a section's or a group's glyph
+in the muted ink (`icon` on the panel, from its `NavEntry`), or a scope's `mark`, the thing drawn as
+itself at the rows' icon size, a project's favicon or product (`ProjectMark size="xs"`), a
+connection's engine (`ProductGlyph`). Until 0.9.1 a section's name was an eyebrow, the voice of the
+group labels under it, so Network's head and its Setup, Activity and Diagnostics shelves said the same
+thing at the same 11px; the 16px semibold name is also what keeps the head from reading as one more
+row to press. A project or a connection is a name somebody typed and is printed as written (small
+caps turned `api-production` into API-PRODUCTION). The mark rides along with the rest of the scope but
+is not what decides a republish, so it is derived from the same data as the title.
 
 The groups run in the order a day on the server runs, and the rail names each group:
 **Server** (Overview, and Monitoring: Metrics, Processes, Logs), **Apps** (Deployments first,
@@ -477,8 +499,8 @@ neighbour's preview. Nothing moved to another section. `nav.test.js` holds the r
 `PERSONAL_NAV` is a flat list of leaves — Profile (`/account`), Security, Sessions, API keys, Workspace
 and, for `system.admin`, Users — drawn three times from the one array: `ACCOUNT_SECTION`, which is that list as a
 panel the rail drills into once you are inside `/account`; the palette's Account group; and the menu on
-the rail's foot. Its button is a neutral control with a circular picture, display name and role,
-with no chevron. Above the card the menu is exactly the card's width (Radix's trigger width),
+the rail's foot. Its button is a row like the rail's, 48px and unframed under a hairline, with a
+circular picture, display name and role on the rows' glyph line, and no chevron. Above the card the menu is exactly the card's width (Radix's trigger width),
 so it reads as the card opening rather than a panel overhanging the rail. It
 opens with a small picture, display name, sign-in name and a role `Tag`, then the six pages
 (Security carries a `Status` for two-factor) and a separate neutral Sign out row. It grows out of the
@@ -530,15 +552,15 @@ scenes are outside this index; URL userinfo, queries and fragments are excluded 
 
 ### Ask about this page
 
-Beside the rail's search field, and in the phone's strip beside its search button, **Ask**
-(`components/assistant/ask-about.tsx`) begins a new chat on `/assistant` about the page it was
-pressed on: `/assistant?about=<path and query>&title=<the page's own h1>`, which the page reads
-once, begins the chat with, and lets go of (`agent/about.ts` bounds both as the server does and
-refuses an address that is not the dashboard's own, since it is drawn as a link back). It is not
-drawn on the assistant's own pages, for a role without `service.control`, or — except to an
-administrator, who is asked there to turn it on — while the assistant is off. The palette offers
-the same as *Ask the assistant about this page* once something is typed. There is no keyboard
-shortcut for it: the shell has no registry of global keys beyond the palette's own.
+The palette's *Ask the assistant about this page* (`command:ask` in `shell/command-palette.tsx`,
+listed once something is typed) begins a new chat on `/assistant` about the page it was run on:
+`/assistant?about=<path and query>&title=<the page's own h1>`, which the page reads once, begins
+the chat with, and lets go of (`agent/about.ts` bounds both as the server does and refuses an
+address that is not the dashboard's own, since it is drawn as a link back). It is not offered on
+the assistant's own pages or to a role without `service.control`. Search stands alone in the
+rail's head and in the phone's strip: the **Ask** button that stood beside it on every page was
+removed in 0.9.1. There is no keyboard shortcut for it: the shell has no registry of global keys
+beyond the palette's own.
 
 `model.ts` supplies scope aliases, AND matching of query terms, accent/punctuation normalization,
 ranking (exact name/address, prefix, substring, one-edit typo), result limits and recent-history

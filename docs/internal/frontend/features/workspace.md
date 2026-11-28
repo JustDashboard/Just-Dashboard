@@ -503,7 +503,7 @@ and who set it up as a line of facts, the picker at its end), Providers (a `Choi
 with their real logos, the one in use lit), Default mode (three cards; written the moment one is
 pressed, one write at a time) and Where it works, then Ask about a deployment ([the deployment
 assistant](../../deployments/operator.md#providers)). `?about=`
-and `?title=`, from **Ask** beside Search on any page (`assistant/ask-about.tsx`, `agent/about.ts`,
+and `?title=`, from the palette's *Ask the assistant about this page* on any page (`agent/about.ts`,
 unit-tested), begin a new chat told which page it came from, with a chip back to it;
 `tests/browser/assistant.spec.ts`, `tests/browser/assistant-settings.spec.ts` and
 `tests/browser/database-assistant.spec.ts`.

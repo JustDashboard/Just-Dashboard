@@ -381,6 +381,20 @@ async function ask(scope: ReturnType<Page["locator"]>, words: string) {
   await scope.getByRole("button", { name: "Ask", exact: true }).click()
 }
 
+/**
+ * The palette's commands with the one that asks about the page among them, or
+ * not: the palette is the way in from any page, since Search stands alone in
+ * the rail. Sign out is every role's on every page, so it says the commands
+ * have been drawn before an absent Ask is believed.
+ */
+async function paletteAsk(page: Page) {
+  await page.keyboard.press("ControlOrMeta+k")
+  const palette = page.getByRole("dialog", { name: "Command palette" })
+  await palette.getByRole("combobox", { name: "Search dashboard" }).fill("command: ")
+  await expect(palette.getByRole("option", { name: /Sign out/ })).toBeVisible()
+  return palette.getByRole("option", { name: /Ask the assistant about this page/ })
+}
+
 /* ------------------------------------------------------------- setting up */
 
 test("the editor's column is off until an administrator sets a provider up", async ({ page }) => {
@@ -775,7 +789,9 @@ test("a saved chat of the connection is read back with what it carried, and carr
 
 /* ------------------------------------------------------- Ask from any page */
 
-test("Ask beside Search begins a chat told which page it came from", async ({ page }) => {
+test("Ask about this page in the palette begins a chat told which page it came from", async ({
+  page,
+}) => {
   const sent = await mockAssistant(page, {
     settings: ON,
     answers: [
@@ -785,7 +801,7 @@ test("Ask beside Search begins a chat told which page it came from", async ({ pa
   })
   await page.goto("/databases/1/logs")
   await expect(page.locator("[data-slot=page] h1")).toHaveText("shop · Logs")
-  await page.getByRole("button", { name: "Ask the assistant about this page" }).click()
+  await (await paletteAsk(page)).click()
   await expect(page).toHaveURL(/\/assistant$/)
   const about = chat(page).locator("[data-slot=agent-about]")
   await expect(about).toContainText("About shop · Logs")
@@ -801,9 +817,7 @@ test("Ask beside Search begins a chat told which page it came from", async ({ pa
   expect(sent.asked[1].conversation).toBe("s1")
 
   // Not offered on the assistant's own pages.
-  await expect(page.getByRole("button", { name: "Ask the assistant about this page" })).toHaveCount(
-    0,
-  )
+  await expect(await paletteAsk(page)).toHaveCount(0)
 })
 
 /* ------------------------------------------------------- who has it, where */
@@ -817,9 +831,8 @@ test("a role that only reads is offered no assistant", async ({ page }) => {
   const rail = page.getByRole("navigation", { name: "Sidebar" })
   await expect(rail.getByRole("link", { name: "Home", exact: true })).toBeVisible()
   await expect(rail.getByRole("link", { name: "Assistant", exact: true })).toHaveCount(0)
-  await expect(page.getByRole("button", { name: "Ask the assistant about this page" })).toHaveCount(
-    0,
-  )
+  await expect(await paletteAsk(page)).toHaveCount(0)
+  await page.keyboard.press("Escape")
   await page.goto("/databases/1/assistant")
   await expect(page.getByText("Your role does not ask the assistant")).toBeVisible()
 })
@@ -937,7 +950,7 @@ test("the database's assistant, for the pull request @shots", async ({ page }) =
   await shot("database-assistant-command.png")
 
   await page.goto("/databases/1/logs")
-  await page.getByRole("button", { name: "Ask the assistant about this page" }).click()
+  await (await paletteAsk(page)).click()
   await expect(chat(page).locator("[data-slot=agent-about]")).toBeVisible()
   await page.waitForTimeout(600)
   await shot("assistant-ask-about.png")
