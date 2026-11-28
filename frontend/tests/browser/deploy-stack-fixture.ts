@@ -829,6 +829,8 @@ export async function mockStackProject(
     upgrade?: "accepted" | "stack_upgrade_none"
     /** A deployment run (84) is in flight whatever the stack's state; by default only while waiting. */
     running?: boolean
+    /** The deployment has changes saved but not deployed. Default: none. */
+    pendingChanges?: boolean
   } = {},
 ) {
   const base = await mockProject(page, { showcase: options.showcase })
@@ -870,7 +872,7 @@ export async function mockStackProject(
               internalPort: 8096,
               health: state?.status === "waiting" ? "unavailable" : "healthy",
               serviceCount: state?.services.length ?? 8,
-              pendingChanges: false,
+              pendingChanges: options.pendingChanges ?? false,
               liveReleaseId: state?.status === "waiting" ? undefined : 20,
               // Only a stack still waiting for its release has a run in flight,
               // unless the spec puts one there.

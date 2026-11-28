@@ -116,3 +116,30 @@ test("on a phone the new app's step and its dialog fit the width", async ({ page
   expect(Math.round((await row.boundingBox())!.height)).toBe(36)
   await expect(dialog.getByRole("button", { name: "Add and deploy" })).toBeInViewport()
 })
+
+test("with changes saved but not deployed, Add FlareSolverr says they go out with it", async ({
+  page,
+}) => {
+  const note = "Every change saved to the deployment but not deployed yet goes out with it."
+  await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+    pendingChanges: true,
+  })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await expect(step).toContainText(`your library, settings, domains and login stay`)
+  await expect(step).toContainText(note)
+  await step.getByRole("button", { name: "Add FlareSolverr" }).click()
+  const dialog = page.getByRole("dialog", { name: "Add FlareSolverr" })
+  await expect(dialog).toContainText("version 1.2.0")
+  await expect(dialog).toContainText(note)
+
+  // With nothing saved and not deployed, neither says it.
+  await mockStackProject(page, { state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE } })
+  await page.goto("/deploy/7/stack")
+  await expect(step).toContainText("New in the stack: FlareSolverr")
+  await expect(step).not.toContainText(note)
+  await step.getByRole("button", { name: "Add FlareSolverr" }).click()
+  await expect(dialog).toContainText("version 1.2.0")
+  await expect(dialog).not.toContainText(note)
+})

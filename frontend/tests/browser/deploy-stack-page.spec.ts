@@ -1065,3 +1065,26 @@ test("a run that gave every app its address leaves no step behind", async ({ pag
   await expect(step).toHaveCount(0, { timeout: 20000 })
   await expect(left(page)).toHaveCount(0)
 })
+
+test("with changes saved but not deployed, giving the apps their addresses says they go out too", async ({
+  page,
+}) => {
+  const note = "Every change saved to the deployment but not deployed yet goes out with it."
+  await mockStackProject(page, {
+    state: stackState("ready", { addressless: true }),
+    pendingChanges: true,
+  })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("have no address yet")
+  await expect(step).toContainText(note)
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  await expect(dialog).toContainText("The names are added to the deployment's domains")
+  await expect(dialog).toContainText(note)
+
+  await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  await page.goto("/deploy/7/stack")
+  await expect(step).toContainText("have no address yet")
+  await expect(step).not.toContainText(note)
+})

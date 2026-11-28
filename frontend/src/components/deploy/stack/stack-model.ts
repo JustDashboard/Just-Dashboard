@@ -426,6 +426,14 @@ export function upgradeSentence(upgrade: SmartStackUpgrade): string {
   return `The stack now comes with ${titles}. Adding ${one ? "it" : "them"} deploys the stack again with ${one ? "it" : "them"} beside the other apps; your library, settings, domains and login stay, and the dashboard sets ${one ? "it" : "them"} up and connects ${one ? "it" : "them"} once the release is live.`
 }
 
+/**
+ * Said beside a press that deploys (the new apps, the apps' addresses) while
+ * the deployment has changes saved but not deployed: the release it starts
+ * is of the saved configuration, so they go out with it, whatever they are.
+ */
+export const PENDING_CHANGES_NOTE =
+  "Every change saved to the deployment but not deployed yet goes out with it."
+
 /** A refusal of "Add the new apps", in words; anything else is the caller's error. */
 export function upgradeRefusal(code: string | undefined): string | undefined {
   if (code === "stack_upgrade_none") return "The stack already runs every app."

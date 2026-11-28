@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { hostnameFromInput, hostnameProblem } from "@/components/deploy/settings/domain-rows"
 import {
+  PENDING_CHANGES_NOTE,
   addressesRefusal,
   addressesSentence,
   missingHostnames,
@@ -35,7 +36,9 @@ import {
  * The press is a domain change and a deploy, so it is an administrator's;
  * anyone else reads the sentence and who can do it. What the press started
  * is the page's to keep (`AddressesStarted`): the next read has no app
- * missing its address, and this step is gone with it.
+ * missing its address, and this step is gone with it. The release it starts
+ * is of the saved configuration, so with changes saved but not deployed the
+ * step and the dialog say those go out with it.
  */
 export function AddressesStep({
   addresses,
@@ -43,6 +46,7 @@ export function AddressesStep({
   projectName,
   stackId,
   canChange,
+  pendingChanges,
   first,
   onStarted,
   onSettled,
@@ -52,6 +56,8 @@ export function AddressesStep({
   projectName: string
   stackId: string
   canChange: boolean
+  /** The deployment has changes saved but not deployed, which the release takes with it. */
+  pendingChanges: boolean
   /** The page's one next step, so its command wears the brand. */
   first: boolean
   onStarted: (answer: SmartStackAddressesStarted) => void
@@ -65,7 +71,10 @@ export function AddressesStep({
       data-slot="stack-addresses"
       title={republish ? "Publish the apps' addresses" : "Give every app its address"}
     >
-      <p>{addressesSentence(addresses)}</p>
+      <p>
+        {addressesSentence(addresses)}
+        {pendingChanges && ` ${PENDING_CHANGES_NOTE}`}
+      </p>
       {canChange ? (
         <div className="pt-1">
           <Button size="sm" variant={first ? "default" : "outline"} onClick={() => setOpen(true)}>
@@ -83,6 +92,7 @@ export function AddressesStep({
         projectId={projectId}
         projectName={projectName}
         stackId={stackId}
+        pendingChanges={pendingChanges}
         onStarted={onStarted}
         onSettled={onSettled}
       />
@@ -123,6 +133,7 @@ function AddressesDialog({
   projectId,
   projectName,
   stackId,
+  pendingChanges,
   onStarted,
   onSettled,
 }: {
@@ -132,6 +143,7 @@ function AddressesDialog({
   projectId: number
   projectName: string
   stackId: string
+  pendingChanges: boolean
   onStarted: (answer: SmartStackAddressesStarted) => void
   /** Nothing was missing after all: the page reads the stack again. */
   onSettled: () => void
@@ -272,6 +284,7 @@ function AddressesDialog({
             ? "The names are already among the deployment's domains; a deployment starts to serve them."
             : "The names are added to the deployment's domains, each with its certificate, and a deployment starts to serve them. They can be changed or removed on the Domains page afterwards."}
         </FormNote>
+        {pendingChanges && <FormNote>{PENDING_CHANGES_NOTE}</FormNote>}
         {refusal && (
           <Notice tone="warning" title="Nothing was added">
             {refusal}

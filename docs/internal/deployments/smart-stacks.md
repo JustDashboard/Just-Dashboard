@@ -381,6 +381,11 @@ The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
     stack has been read since (`useStartedRun` in `stack-page.tsx`, which reads the stack again the
     moment it sees the end). From then the server's state says the rest: nothing once the release is
     live, **Deploy again** when it failed.
+  - Both presses that deploy ("Add FlareSolverr", "Give every app its address", and their **Deploy
+    again**) start a release of the saved configuration, so with `deployment.pendingChanges` set the
+    step's sentence and the dialog add "Every change saved to the deployment but not deployed yet goes
+    out with it." (`PENDING_CHANGES_NOTE`). With `saved` (or `addresses.unpublished`) that is always
+    so, since the press's own change is among them.
   - The `media-source` action links to the source picker.
   - "Give every app its address" names the apps and their hostnames, confirms in a dialog and posts
     `POST …/stack/addresses`. Without a primary domain the dialog asks for one, prefilled with the

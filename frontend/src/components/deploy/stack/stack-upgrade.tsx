@@ -10,7 +10,12 @@ import { INLINE_LINK } from "@/components/inline-link"
 import { Modal } from "@/components/modal"
 import { Notice } from "@/components/state"
 import { Button } from "@/components/ui/button"
-import { listWords, upgradeRefusal, upgradeSentence } from "@/components/deploy/stack/stack-model"
+import {
+  PENDING_CHANGES_NOTE,
+  listWords,
+  upgradeRefusal,
+  upgradeSentence,
+} from "@/components/deploy/stack/stack-model"
 
 /**
  * "Add the new apps", for a stack whose template gained apps after it was
@@ -20,12 +25,15 @@ import { listWords, upgradeRefusal, upgradeSentence } from "@/components/deploy/
  * it does every app.
  *
  * The press is a source change and a deploy, so it is an administrator's;
- * anyone else reads the sentence and who can do it.
+ * anyone else reads the sentence and who can do it. The release it starts is
+ * of the saved configuration, so with changes saved but not deployed the step
+ * and the dialog say those go out with it.
  */
 export function UpgradeStep({
   upgrade,
   projectId,
   canChange,
+  pendingChanges,
   first,
   onStarted,
   onSettled,
@@ -33,6 +41,8 @@ export function UpgradeStep({
   upgrade: SmartStackUpgrade
   projectId: number
   canChange: boolean
+  /** The deployment has changes saved but not deployed, which the release takes with it. */
+  pendingChanges: boolean
   /** The page's one next step, so its command wears the brand. */
   first: boolean
   onStarted: (answer: SmartStackUpgradeStarted) => void
@@ -46,7 +56,10 @@ export function UpgradeStep({
       data-slot="stack-upgrade"
       title={upgrade.saved ? `Start ${titles}` : `New in the stack: ${titles}`}
     >
-      <p>{upgradeSentence(upgrade)}</p>
+      <p>
+        {upgradeSentence(upgrade)}
+        {pendingChanges && ` ${PENDING_CHANGES_NOTE}`}
+      </p>
       {canChange ? (
         <div className="pt-1">
           <Button size="sm" variant={first ? "default" : "outline"} onClick={() => setOpen(true)}>
@@ -61,6 +74,7 @@ export function UpgradeStep({
         onOpenChange={setOpen}
         upgrade={upgrade}
         projectId={projectId}
+        pendingChanges={pendingChanges}
         onStarted={onStarted}
         onSettled={onSettled}
       />
@@ -96,6 +110,7 @@ function UpgradeDialog({
   onOpenChange,
   upgrade,
   projectId,
+  pendingChanges,
   onStarted,
   onSettled,
 }: {
@@ -103,6 +118,7 @@ function UpgradeDialog({
   onOpenChange: (open: boolean) => void
   upgrade: SmartStackUpgrade
   projectId: number
+  pendingChanges: boolean
   onStarted: (answer: SmartStackUpgradeStarted) => void
   onSettled: () => void
 }) {
@@ -176,6 +192,7 @@ function UpgradeDialog({
             ? "The deployment already names them; a deployment starts them."
             : `The deployment moves to version ${upgrade.version} of the stack's template and deploys. Nothing it has is removed: the library, every app's settings, the domains and the login stay.`}
         </FormNote>
+        {pendingChanges && <FormNote>{PENDING_CHANGES_NOTE}</FormNote>}
         {refusal && (
           <Notice tone="warning" title="Nothing was added">
             {refusal}

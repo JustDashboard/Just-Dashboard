@@ -84,10 +84,7 @@ export function StackPage() {
   const stack = useStackState(project.projectId, named, pace)
   // The release "Give every app its address" started, kept past the read
   // that no longer lists the apps as missing theirs.
-  const [addressRun, setAddressRun] = useStartedRun<SmartStackAddressesStarted>(
-    project.runs,
-    stack,
-  )
+  const [addressRun, setAddressRun] = useStartedRun<SmartStackAddressesStarted>(project.runs, stack)
   // The release "Add the new apps" started, with the apps it brings in words,
   // kept past the read that no longer lists them as new.
   const [upgradeRun, setUpgradeRun] = useStartedRun<{ runId: number; titles: string }>(
@@ -138,6 +135,7 @@ export function StackPage() {
         runHref={runHref(base, deployment.activeRun?.id)}
         activeRunId={deployment.activeRun?.id}
         canChangeDomains={can("system.admin") && !project.archived}
+        pendingChanges={Boolean(deployment.pendingChanges)}
         addressRun={addressRun}
         onAddressesStarted={(answer) => {
           setAddressRun(answer)
@@ -362,6 +360,7 @@ function NextSteps({
   runHref,
   activeRunId,
   canChangeDomains,
+  pendingChanges,
   addressRun,
   onAddressesStarted,
   upgradeRun,
@@ -375,6 +374,8 @@ function NextSteps({
   /** The deployment's run in flight, which publishes saved addresses when it goes live. */
   activeRunId?: number
   canChangeDomains: boolean
+  /** The deployment has changes saved but not deployed: a press that deploys takes them too. */
+  pendingChanges: boolean
   addressRun?: SmartStackAddressesStarted
   onAddressesStarted: (answer: SmartStackAddressesStarted) => void
   upgradeRun?: { runId: number; titles: string }
@@ -433,6 +434,7 @@ function NextSteps({
               upgrade={step.upgrade}
               projectId={projectId}
               canChange={canChangeDomains}
+              pendingChanges={pendingChanges}
               first={index === 0}
               onStarted={onUpgradeStarted}
               onSettled={onChanged}
@@ -457,6 +459,7 @@ function NextSteps({
               projectName={projectName}
               stackId={state.stackId}
               canChange={canChangeDomains}
+              pendingChanges={pendingChanges}
               first={index === 0}
               onStarted={onAddressesStarted}
               onSettled={onChanged}
