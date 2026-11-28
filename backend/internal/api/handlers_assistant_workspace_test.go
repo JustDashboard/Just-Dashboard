@@ -182,6 +182,40 @@ func TestCodeChangesWaitForThePersonInTheDefaultMode(t *testing.T) {
 	}
 }
 
+// Every code tool that changes something waits in the default mode, and nothing
+// it would do is done before the person answers: the clone, the edit and the push.
+func TestEveryCodeChangeWaitsForThePersonInTheDefaultMode(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	projectID, repo, bare := workspaceDeployment(t, f)
+	readme := filepath.Join(repo, "README.md")
+	before := gitIn(t, bare, "rev-parse", "main")
+	for _, call := range [][2]any{
+		{"open_workspace", map[string]any{"reason": "x"}},
+		{"edit_file", map[string]any{"path": readme, "old_text": "The first version.", "new_text": "Another.", "reason": "x"}},
+		{"push_changes", map[string]any{"folder": repo, "message": "x", "reason": "x"}},
+	} {
+		f.provider.queue(claudeCalls("Working.", call))
+		events := lines(t, f.do(http.MethodPost, fmt.Sprintf("/deploy/%d/assistant", projectID), `{"question":"Go on","mode":"changes"}`))
+		pending, _ := doneOf(t, events)["pending"].([]any)
+		if len(pending) != 1 || len(calledLines(events)) != 0 {
+			t.Fatalf("%s did not wait: %v", call[0], events)
+		}
+		if view, _ := json.Marshal(pending[0]); !strings.Contains(string(view), `"kind":"change"`) {
+			t.Fatalf("%s waits as %s", call[0], view)
+		}
+	}
+	if raw, _ := os.ReadFile(readme); !strings.Contains(string(raw), "The first version.") {
+		t.Fatalf("README.md was changed before the person allowed it: %q", raw)
+	}
+	if after := gitIn(t, bare, "rev-parse", "main"); after != before {
+		t.Fatal("the remote moved before the person allowed the push")
+	}
+	if _, err := os.Stat(filepath.Join(repo, ".git", workspaceMarker)); err == nil {
+		t.Fatal("the workspace was opened before the person allowed it")
+	}
+}
+
 func TestLineDiffShowsTheOneRegionThatChanged(t *testing.T) {
 	before := "1\n2\n3\n4\n5\n6\n7\n8\n"
 	after := "1\n2\n3\n4\nfive\n6\n7\n8\n"
