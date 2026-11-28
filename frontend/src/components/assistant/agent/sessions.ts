@@ -488,6 +488,24 @@ export function askAgentFirst(session: AgentSession, question: string) {
 }
 
 /**
+ * The chat's subject became another, as a draft does once it is deployed: what
+ * waited to be asked there, and what was handed back to its box, is carried into
+ * the new subject's chat, into its box and unsent. Asked of the draft, it would go
+ * to a plan that no longer changes anything; asked of the new chat at once, it
+ * would go without the conversation it was written in.
+ */
+export function carryAgentQueue(from: AgentSession, scope: AgentScope) {
+  const waiting = [...from.returned, ...from.queue]
+  from.queue = []
+  from.returned = []
+  if (waiting.length > 0) {
+    const to = currentFor(scope)
+    to.returned = [...to.returned, ...waiting]
+  }
+  publish()
+}
+
+/**
  * One question, with what goes with it: images pasted into the box, and what the
  * page let the person attach — the statement in the editor, a result — of which
  * the chat draws only the labels.

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ApiError } from "@/lib/api"
 import {
   agentBusy,
+  carryAgentQueue,
   dismissAgent,
   holdAgentTurns,
   useAgentSession,
@@ -320,6 +321,20 @@ export function useAssistantDraft({
     }
   }, [onFlowChange])
 
+  /**
+   * The draft is deployed: a question waiting in its chat, held by the page's save,
+   * would go to a draft that no longer changes anything, so it is carried into the
+   * new deployment's own chat, in its box and unsent (`carryAgentQueue`).
+   */
+  const committed = (commit: { projectId: number; environmentId: number }) =>
+    carryAgentQueue(session, {
+      kind: "deployment",
+      projectId: commit.projectId,
+      environmentId: commit.environmentId,
+      name: latest.current.flow.name,
+      environmentName: "production",
+    })
+
   return {
     session,
     /** Answering, a save of its not yet read back, or the person's edits and presses not yet saved. */
@@ -333,6 +348,7 @@ export function useAssistantDraft({
     whenFree,
     atRevision,
     holdTurns,
+    committed,
   }
 }
 

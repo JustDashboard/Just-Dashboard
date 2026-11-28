@@ -2220,6 +2220,43 @@ test("a question sent while the panel's first save is out goes after the job's o
   expect((await questions())[1]).toBe("Use port 9090")
 })
 
+test("a question sent while Deploy is out is carried off the deployed draft, unsent", async ({
+  page,
+}) => {
+  await mockSetup(page, [])
+  await draftServer(page)
+  const { turns, send } = await holdSetupTurns(page)
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  const committed = { count: 0 }
+  await page.route("**/api/v1/deploy/drafts/setup-draft/commit", async (route) => {
+    committed.count += 1
+    await gate
+    return json(route, { projectId: 7, environmentId: 12, planRevision: 3, created: true })
+  })
+  await page.route("**/api/v1/deploy/7/environments/12/runs", (route) => json(route, { id: 5 }))
+  await page.goto("/deploy/new?draft=setup-draft")
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  const panel = page.locator("[data-slot='setup-assistant']")
+  await expect.poll(turns).toBe(1)
+  await send(0, configured, true)
+  await expect(panel).toContainText("Press Deploy when you are ready.")
+  const deploy = page.getByRole("button", { name: /Deploy$/ }).first()
+  await expect(deploy).toBeEnabled()
+  await deploy.click()
+  await expect.poll(() => committed.count).toBe(1)
+  // Sent while the draft is being deployed, it waits for the deploy.
+  const box = panel.getByRole("textbox", { name: "Ask the assistant" })
+  await box.fill("And add a volume")
+  await box.press("Enter")
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(1)
+  release()
+  await expect(page).toHaveURL(/\/deploy\/7\/runs\/5$/)
+  // Nothing goes to the draft that was deployed.
+  await page.waitForTimeout(600)
+  expect(await turns()).toBe(1)
+})
+
 test("handed over on Review, what the page holds is saved at the draft's revision", async ({
   page,
 }) => {

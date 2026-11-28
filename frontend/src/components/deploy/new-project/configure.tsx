@@ -685,10 +685,9 @@ export function Configure({
         isGitSource ? gitPolicy : undefined,
       )
       onStepChange("done")
-      setCreated({
-        projectId: commit.projectId,
-        environmentId: commit.environmentId,
-      })
+      setCreated({ projectId: commit.projectId, environmentId: commit.environmentId })
+      // What waited to be asked of the draft is the new deployment's now.
+      assistant.committed(commit)
 
       if (operation === "deploy") {
         const run = await enqueueDeploy(

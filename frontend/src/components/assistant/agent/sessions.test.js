@@ -9,6 +9,7 @@ import {
   agentScopeKey,
   askAgent,
   askAgentFirst,
+  carryAgentQueue,
   decideAgent,
   holdAgentTurns,
   editQueued,
@@ -394,5 +395,29 @@ describe("what the page's hold keeps back besides a question", () => {
     calls[0].answer([start, done()])
     await settle()
     expect(calls.map((call) => call.body.question)).toEqual(["configure it", "the person's"])
+  })
+
+  test("a subject that became another carries what waits into the new one's box, unsent", async () => {
+    const { calls } = turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-carry", name: "shop" })
+    holdAgentTurns(draft, "draft-save", true)
+    askAgent(draft, "and add a volume", [image], [], [])
+    expect(draft.queue).toHaveLength(1)
+    const deployment = {
+      kind: "deployment",
+      projectId: 70,
+      environmentId: 71,
+      name: "shop",
+      environmentName: "production",
+    }
+    carryAgentQueue(draft, deployment)
+    holdAgentTurns(draft, "draft-save", false)
+    await settle()
+    expect(calls).toHaveLength(0)
+    expect(draft.queue).toEqual([])
+    const front = newAgentChat(deployment)
+    expect(front.returned.map((one) => [one.question, one.images.length])).toEqual([
+      ["and add a volume", 1],
+    ])
   })
 })
