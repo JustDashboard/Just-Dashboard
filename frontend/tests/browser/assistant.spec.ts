@@ -985,6 +985,100 @@ test("the Ask press turns into Stop while it works, and back", async ({ page }) 
   await expect(send).toHaveAttribute("data-state", "ask")
 })
 
+/** The deployment's chat with its first answer held open until `release`. */
+async function holdFirstAnswer(page: Page) {
+  let release: () => void = () => {}
+  const held = new Promise<void>((resolve) => (release = resolve))
+  await mockAssistant(page, [])
+  const sent: Record<string, unknown>[] = []
+  await page.route("**/api/v1/deploy/7/assistant", async (route) => {
+    const body = route.request().postDataJSON()
+    sent.push(body)
+    if (sent.length === 1) {
+      await held
+      return stream(route, [start, { type: "text", text: "Here is the first." }, done()]).catch(
+        () => undefined,
+      )
+    }
+    return stream(route, [start, { type: "text", text: `Answered: ${body.question}` }, done()])
+  })
+  return { sent, release: () => release() }
+}
+
+test("what is sent while it answers waits under the answer, and goes once it ends", async ({
+  page,
+}) => {
+  const { sent, release } = await holdFirstAnswer(page)
+  await page.goto("/deploy/7/assistant")
+  const box = chat(page).getByRole("textbox", { name: "Ask the assistant" })
+  const send = chat(page).locator("[data-slot='prompt-send']")
+  await ask(page, "Take your time")
+  await expect(send).toHaveAttribute("data-state", "stop")
+  // The box still takes a question; its arrow joins Stop, which keeps its corner.
+  const corner = (await send.boundingBox())!
+  await box.fill("And then the logs")
+  const later = chat(page).getByRole("button", { name: "Ask when it finishes" })
+  await expect(later).toBeVisible()
+  expect((await send.boundingBox())!.x).toBe(corner.x)
+  await later.click()
+  await box.fill("Then the disk")
+  await box.press("Enter")
+  await box.fill("Then the memory")
+  await box.press("Enter")
+  await expect(box).toHaveValue("")
+  const rows = chat(page).locator("[data-slot='agent-queued']")
+  await expect(rows).toHaveCount(3)
+  await expect(rows.first()).toContainText("Waiting")
+  await expect(rows.first()).toContainText("And then the logs")
+  // One height each, whatever they say, and nothing under them.
+  const heights = await rows.evaluateAll((all) =>
+    all.map((row) => row.getBoundingClientRect().height),
+  )
+  expect(new Set(heights).size).toBe(1)
+  expect(heights[0]).toBe(36)
+  await expect(chat(page).getByRole("button", { name: "Stop", exact: true })).toBeVisible()
+  expect(sent).toHaveLength(1)
+
+  // One is taken back into the box to change, one is let go.
+  await rows.filter({ hasText: "Then the disk" }).getByRole("button", { name: /^Edit/ }).click()
+  await expect(box).toHaveValue("Then the disk")
+  await rows
+    .filter({ hasText: "Then the memory" })
+    .getByRole("button", { name: /^Remove/ })
+    .click()
+  await expect(rows).toHaveCount(1)
+
+  // The answer ends, and what waited is asked next, as its own turn.
+  release()
+  await expect(chat(page)).toContainText("Here is the first.")
+  await expect(chat(page)).toContainText("Answered: And then the logs")
+  await expect(rows).toHaveCount(0)
+  expect(sent.map((body) => body.question)).toEqual(["Take your time", "And then the logs"])
+  await expect(chat(page).locator("[data-slot='agent-question']")).toHaveText([
+    "Take your time",
+    "And then the logs",
+  ])
+  // What was being changed is still in the box, the person's to send.
+  await expect(box).toHaveValue("Then the disk")
+  await expect(send).toHaveAttribute("data-state", "ask")
+})
+
+test("Stop sends nothing more: what waited goes back into the box", async ({ page }) => {
+  const { sent } = await holdFirstAnswer(page)
+  await page.goto("/deploy/7/assistant")
+  const box = chat(page).getByRole("textbox", { name: "Ask the assistant" })
+  await ask(page, "Take your time")
+  await box.fill("And then the logs")
+  await box.press("Enter")
+  await expect(chat(page).locator("[data-slot='agent-queued']")).toHaveCount(1)
+  await chat(page).getByRole("button", { name: "Stop", exact: true }).click()
+  await expect(chat(page)).toContainText("Stopped.")
+  await expect(chat(page).locator("[data-slot='agent-queued']")).toHaveCount(0)
+  await expect(box).toHaveValue("And then the logs")
+  await page.waitForTimeout(300)
+  expect(sent).toHaveLength(1)
+})
+
 /* --------------------------------------------------------------- the page */
 
 test("the chat fills the window: only the conversation scrolls", async ({ page }) => {

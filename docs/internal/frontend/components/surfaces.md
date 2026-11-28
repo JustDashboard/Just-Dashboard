@@ -208,7 +208,22 @@ suggestions in the column. The composer draws no focus at all — no ring, no li
 page's one place to type and the blinking caret is the whole answer to "is it ready"; a press anywhere on its frame puts
 the caret in it, and the buttons in its toolbar keep the ring for the keyboard. Its send is one round button
 at the box's corner, as the chat apps people know draw it: an arrow up on the command's blue to ask, turning in
-place into a square on the text's own colour to stop while it answers, its name the word since there is none. An image waiting in it, or asked with a
+place into a square on the text's own colour to stop while it answers, its name the word since there is none.
+While it answers the box still takes a question: Enter, or a second round arrow that joins Stop on its left
+(*Ask when it finishes*; Stop keeps its corner), sends it to wait its turn (`AgentSession.queue` in
+`agent/sessions.ts`, the same for every chat: a deployment's, a connection's, the server's and a draft's). Each one
+waits under the answer as a dashed row of one height — *Waiting*, the question cut to the line, what goes with it in
+words (*with 2 images, statement*), and **Edit**, which puts it back in the box with its images and what was pressed
+for it, and **Remove** — and nothing opens under a row. What decides when it goes: an answer that ends as an answer
+(done, cut at its length, or declined by the model) asks the first one, and the next after that answer, in order.
+An answer that waits on an Allow keeps them waiting (the box says *What waits is asked once you answer what it is
+waiting on*), and the answer after the Allow or Decline asks the first; with nothing waiting, a question sent then
+still declines what waits, as before. A password the chat's terminal asks for holds them too: typing it carries the
+chat on first (*I've typed the password.*), and what waits goes after that answer. Stop, an answer that fails, and
+one carried on in another tab (`taken_over`) send nothing more: every waiting question goes back into the box,
+unsent, to send again or change. A question refused because another tab is answering the chat (`chat_busy`,
+`conversation_busy`) is held for **Take over** as before, and the rest wait behind it; Take over sends the held
+one, and what waits goes after its answer. Each one carries the images and attachments it was sent with. An image waiting in it, or asked with a
 question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
 and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
 from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a

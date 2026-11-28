@@ -16,6 +16,7 @@ import {
   parseEvent,
   readLines,
   readyDecisions,
+  latestTerminal,
   replayLines,
   sendDecisions,
   takeOverTurn,
@@ -64,6 +65,20 @@ export type AgentScope =
    */
   | { kind: "server"; name: string }
 
+/**
+ * A question sent while the chat was answering, waiting for its turn: what the box
+ * held when it was sent, images and attachments with it, so it goes exactly as it
+ * would have gone then.
+ */
+export interface AgentQueued {
+  id: string
+  question: string
+  images: PastedImage[]
+  attached: AgentAttachment[]
+  /** The page's attachments pressed for it, by id: pressed again if it goes back to the box. */
+  pressed: string[]
+}
+
 export interface AgentSession {
   /** This tab's own name for it, which never changes. */
   key: string
@@ -90,6 +105,12 @@ export interface AgentSession {
   elsewhere: boolean
   /** Another tab took it over, so this one stopped. */
   moved: boolean
+  /** What was sent while it answered, in order, each asked once the answer before ends. */
+  queue: AgentQueued[]
+  /** Questions handed back to the box (edited, or the answer stopped), for it to take. */
+  returned: AgentQueued[]
+  /** The terminal call whose password the person has typed, which no longer holds the queue. */
+  typedFor?: string
 }
 
 export function agentScopeKey(scope: AgentScope) {
@@ -192,6 +213,8 @@ function blank(scope: AgentScope, mode?: AssistantMode, about?: AgentAbout): Age
     loading: false,
     elsewhere: false,
     moved: false,
+    queue: [],
+    returned: [],
   }
 }
 
@@ -340,10 +363,84 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
     }
   } finally {
     if (session.flight === controller) session.flight = null
+    // Before anything is drawn of the end, so the next waiting question is under
+    // way by the time a page reads the chat as quiet.
+    if (session.flight === null) afterTurn(session)
     publish()
     chatsChanged()
   }
 }
+
+/** Answers that ended as answers: what waits is asked after them. */
+const ENDED = ["done", "cut", "refused"]
+/** Answers that did not end as answers: what waits goes back to the box. */
+const BROKEN = ["stopped", "failed", "moved"]
+
+/**
+ * Whether the newest answer left the chat's terminal waiting for a password the
+ * person has not typed. What waits is held for it: the password, and the answer
+ * that carries on from it, come first.
+ */
+function awaitsPassword(session: AgentSession) {
+  const last = session.transcript.turns.at(-1)
+  const step = latestTerminal(session.transcript)
+  return (
+    step?.terminal?.state === "password" &&
+    step.call.id !== session.typedFor &&
+    Boolean(last?.parts.includes(step))
+  )
+}
+
+/**
+ * What holds the waiting questions back, when something does: an answer under way
+ * here or in another tab, calls waiting on the person's Allow, or a password the
+ * terminal asks for.
+ */
+export function agentQueueHeld(
+  session: AgentSession,
+): "answering" | "allow" | "password" | "elsewhere" | undefined {
+  if (session.flight) return "answering"
+  if (session.elsewhere || session.held) return "elsewhere"
+  const last = session.transcript.turns.at(-1)
+  if (!last) return undefined
+  if (last.phase === "asking") return "allow"
+  if (answering(last)) return "answering"
+  if (awaitsPassword(session)) return "password"
+  return undefined
+}
+
+/** The first waiting question, asked if nothing holds it back. */
+function pumpQueue(session: AgentSession) {
+  if (session.queue.length === 0 || agentQueueHeld(session)) return
+  const [next, ...rest] = session.queue
+  session.queue = rest
+  send(session, next.question, next.images, next.attached)
+}
+
+/**
+ * An answer ended. One that ended as an answer has the first waiting question
+ * asked next; one stopped, failed or carried on in another tab hands every waiting
+ * question back to the box, unsent, for the person to send again or change. One
+ * left waiting on an Allow, or held for another tab, keeps them waiting.
+ */
+function afterTurn(session: AgentSession) {
+  if (session.queue.length === 0) return
+  const last = session.transcript.turns.at(-1)
+  if (last && BROKEN.includes(last.phase)) {
+    session.returned = [...session.returned, ...session.queue]
+    session.queue = []
+    return
+  }
+  if (!last || ENDED.includes(last.phase)) pumpQueue(session)
+}
+
+/**
+ * Whether what is sent now waits: while it answers here, and behind anything
+ * already waiting. Otherwise a question goes at once, as it always has: while an
+ * answer waits on an Allow it declines what waits, and while another tab has the
+ * chat it is held for Take over.
+ */
+export const agentQueues = (session: AgentSession) => agentBusy(session) || session.queue.length > 0
 
 /**
  * One question, with what goes with it: images pasted into the box, and what the
@@ -355,8 +452,26 @@ export function askAgent(
   question: string,
   images: PastedImage[] = [],
   attached: AgentAttachment[] = [],
+  pressed: string[] = [],
 ) {
-  if (session.flight) return
+  if (agentQueues(session)) {
+    const waiting = { id: crypto.randomUUID(), question, images, attached, pressed }
+    session.queue = [...session.queue, waiting]
+    session.dismissed = false
+    publish()
+    pumpQueue(session)
+    return
+  }
+  send(session, question, images, attached)
+}
+
+/** A question asked now. */
+function send(
+  session: AgentSession,
+  question: string,
+  images: PastedImage[],
+  attached: AgentAttachment[],
+) {
   // Asking something else lets go of a press that was waiting to take over.
   session.held = undefined
   const turn = crypto.randomUUID()
@@ -441,6 +556,46 @@ export function stopAgent(session: AgentSession) {
   session.flight?.abort()
 }
 
+/** A waiting question taken back into the box, to be changed and sent again. */
+export function editQueued(session: AgentSession, id: string) {
+  const waiting = session.queue.find((one) => one.id === id)
+  if (!waiting) return
+  session.queue = session.queue.filter((one) => one !== waiting)
+  session.returned = [...session.returned, waiting]
+  publish()
+  // What waited behind it may be free to go: a question goes only behind others.
+  pumpQueue(session)
+}
+
+/** A waiting question let go, unsent. */
+export function removeQueued(session: AgentSession, id: string) {
+  session.queue = session.queue.filter((one) => one.id !== id)
+  publish()
+}
+
+/** What was handed back to the box, taken by the box that draws this chat. */
+export function takeReturned(session: AgentSession): AgentQueued[] {
+  const back = session.returned
+  if (back.length === 0) return back
+  session.returned = []
+  publish()
+  return back
+}
+
+/**
+ * The person typed the password the chat's terminal asked for. That is their
+ * go-ahead: a chat that has stopped answering carries on at once, ahead of what
+ * waits, and what waits is no longer held for it.
+ */
+export function agentPasswordTyped(session: AgentSession) {
+  session.typedFor = latestTerminal(session.transcript)?.call.id
+  if (agentBusy(session)) {
+    publish()
+    return
+  }
+  send(session, "I've typed the password.", [], [])
+}
+
 /**
  * A new chat in front for the subject. The one before goes on if it is answering,
  * and stays in the history either way.
@@ -515,6 +670,7 @@ function follow(session: AgentSession) {
       if (!session.elsewhere || session.flight || session.held) return
       session.transcript = readBack(read, id)
       session.elsewhere = read.chat.running
+      if (!read.chat.running) pumpQueue(session)
       publish()
       if (!read.chat.running) chatsChanged()
     } catch (err) {
