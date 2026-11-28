@@ -475,6 +475,19 @@ export function holdAgentTurns(session: AgentSession, reason: string, on: boolea
 }
 
 /**
+ * A question that goes before anything already waiting: the one a page asks on
+ * opening the chat (a new deployment's "Configure this deployment"), which a
+ * question the person sent while the page was still getting ready waits behind.
+ */
+export function askAgentFirst(session: AgentSession, question: string) {
+  if (!agentQueues(session)) return send(session, question, [], [])
+  const first = { id: crypto.randomUUID(), question, images: [], attached: [], pressed: [] }
+  session.queue = [first, ...session.queue]
+  publish()
+  pumpQueue(session)
+}
+
+/**
  * One question, with what goes with it: images pasted into the box, and what the
  * page let the person attach — the statement in the editor, a result — of which
  * the chat draws only the labels.

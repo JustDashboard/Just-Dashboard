@@ -8,6 +8,7 @@ import {
   agentQueues,
   agentScopeKey,
   askAgent,
+  askAgentFirst,
   decideAgent,
   holdAgentTurns,
   editQueued,
@@ -376,5 +377,22 @@ describe("a page holds the chat's next turn while it writes what the chat works 
     holdAgentTurns(session, "draft-save", false)
     await settle()
     expect(calls.map((call) => call.body.question)).toEqual(["first", "second"])
+  })
+})
+
+describe("what the page's hold keeps back besides a question", () => {
+  test("the page's own first question goes ahead of one the person sent while it held", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    holdAgentTurns(session, "draft-prepare", true)
+    askAgent(session, "the person's")
+    askAgentFirst(session, "configure it")
+    expect(calls).toHaveLength(0)
+    holdAgentTurns(session, "draft-prepare", false)
+    await settle()
+    expect(calls.map((call) => call.body.question)).toEqual(["configure it"])
+    calls[0].answer([start, done()])
+    await settle()
+    expect(calls.map((call) => call.body.question)).toEqual(["configure it", "the person's"])
   })
 })

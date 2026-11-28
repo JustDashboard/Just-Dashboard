@@ -1618,13 +1618,16 @@ test("a new deployment is handed to the assistant, and Deploy stays the person's
 async function holdSetupTurns(page: Page) {
   await page.addInitScript(() => {
     const held: ReadableStreamDefaultController<Uint8Array>[] = []
+    const bodies: unknown[] = []
     const w = window as unknown as Record<string, unknown>
     w.__setupTurns = held
+    w.__setupBodies = bodies
     const original = window.fetch.bind(window)
     window.fetch = (input, init) => {
       const url = typeof input === "string" ? input : "url" in input ? input.url : String(input)
       if (!new URL(url, location.href).pathname.endsWith("/deploy/drafts/setup-draft/assistant"))
         return original(input, init)
+      bodies.push(JSON.parse(String(init?.body ?? "{}")))
       const body = new ReadableStream<Uint8Array>({ start: (c) => void held.push(c) })
       const headers = { "Content-Type": "application/x-ndjson" }
       return Promise.resolve(new Response(body, { status: 200, headers }))
@@ -1642,7 +1645,13 @@ async function holdSetupTurns(page: Page) {
       },
       [turn, events.map((event) => JSON.stringify(event) + "\n").join(""), end] as const,
     )
-  return { turns, send }
+  const questions = () =>
+    page.evaluate(() =>
+      (window as never as { __setupBodies: { question?: string }[] }).__setupBodies.map(
+        (body) => body.question,
+      ),
+    )
+  return { turns, send, questions }
 }
 
 test("the page leaves the draft alone while the assistant saves it", async ({ page }) => {
@@ -2174,6 +2183,41 @@ test("a question waiting in the queue goes only once the person's edits are save
   expect(state.log.slice(before)).toEqual(["assistant save", "save name", "save"])
   expect(state.name).toBe("shop-two")
   await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(0)
+})
+
+test("a question sent while the panel's first save is out goes after the job's own", async ({
+  page,
+}) => {
+  await mockSetup(page, [])
+  const { turns, send, questions } = await holdSetupTurns(page)
+  // The save made as the panel opens is held, to send a question over it.
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  let saving = false
+  await page.route("**/api/v1/deploy/drafts/setup-draft", async (route) => {
+    if (route.request().method() === "PUT" && saving) await gate
+    return route.fallback()
+  })
+  await page.goto("/deploy/new?draft=setup-draft")
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  await page.waitForTimeout(600)
+  saving = true
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  const panel = page.locator("[data-slot='setup-assistant']")
+  const box = panel.getByRole("textbox", { name: "Ask the assistant" })
+  await box.fill("Use port 9090")
+  await box.press("Enter")
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(1)
+  await page.waitForTimeout(300)
+  expect(await turns()).toBe(0)
+  release()
+  // The job's own question goes first; the person's waits for its answer.
+  await expect.poll(turns).toBe(1)
+  expect((await questions())[0]).toContain("Configure this deployment")
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(1)
+  await send(0, configured, true)
+  await expect.poll(turns).toBe(2)
+  expect((await questions())[1]).toBe("Use port 9090")
 })
 
 test("handed over on Review, what the page holds is saved at the draft's revision", async ({

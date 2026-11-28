@@ -12,7 +12,8 @@ import { AgentChat } from "@/components/assistant/agent/chat"
 import { SETUP_QUESTION, agentStatus } from "@/components/assistant/agent/model"
 import {
   agentBusy,
-  askAgent,
+  askAgentFirst,
+  holdAgentTurns,
   useAgentSession,
   type AgentScope,
 } from "@/components/assistant/agent/sessions"
@@ -54,12 +55,18 @@ export function SetupAssistant({
   const status = agentStatus(session.transcript)
   const product = assistantProduct(view)
 
-  // It begins on being handed the job, from the plan as it stands.
+  // It begins on being handed the job, from the plan as it stands. The page's save
+  // of that plan holds the chat's turn, so a question the person sends meanwhile
+  // waits, and goes after the job's own question.
   const begun = useRef(false)
   useEffect(() => {
     if (begun.current || !view?.configured || session.transcript.turns.length > 0) return
     begun.current = true
-    void onPrepare().finally(() => askAgent(session, SETUP_QUESTION))
+    holdAgentTurns(session, "draft-prepare", true)
+    void onPrepare().finally(() => {
+      askAgentFirst(session, SETUP_QUESTION)
+      holdAgentTurns(session, "draft-prepare", false)
+    })
   }, [view?.configured, session, onPrepare])
 
   return (
