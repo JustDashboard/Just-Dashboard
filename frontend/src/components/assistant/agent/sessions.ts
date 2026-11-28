@@ -477,7 +477,9 @@ export function holdAgentTurns(session: AgentSession, reason: string, on: boolea
   session.holds = on ? [...session.holds, reason] : session.holds.filter((held) => held !== reason)
   const owed = session.holds.length === 0 ? session.owed : undefined
   session.owed = owed ? undefined : session.owed
-  if (owed === "takeOver") takeOverAgent(session)
+  // A Take over is owed only while another tab still has the chat: one that has
+  // finished meanwhile leaves nothing to take, and the queue goes as it would.
+  if (owed === "takeOver" && (session.elsewhere || session.held)) takeOverAgent(session)
   else if (owed === "password") agentPasswordTyped(session)
   else if (!on) pumpQueue(session)
   publish()

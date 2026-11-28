@@ -14,6 +14,7 @@ import {
   holdAgentTurns,
   editQueued,
   newAgentChat,
+  openAgentChat,
   removeQueued,
   stopAgent,
   takeOverAgent,
@@ -466,4 +467,40 @@ describe("what the page's hold keeps back besides a question", () => {
     await settle()
     expect(calls[2].body.question).toBe("then reboot")
   })
+
+  test("a Take over the page held goes nowhere once the other tab has finished", async () => {
+    const { calls } = turnServer()
+    const turns = globalThis.fetch
+    let running = true
+    globalThis.fetch = async (url, init) => {
+      if (init?.method === "POST") return turns(url, init)
+      const lines = [{ type: "question", text: "check it" }, start]
+      return Response.json({
+        chat: { id: "c1", title: "", running, scope: { kind: "database" } },
+        lines: running ? lines : [...lines, done()],
+      })
+    }
+    const session = freshChat()
+    askAgent(session, "check it")
+    await settle()
+    calls[0].answer([start, done()])
+    await settle()
+    // Read again while another tab answers it: it is followed until that ends.
+    const hadWindow = "window" in globalThis
+    if (!hadWindow) globalThis.window = globalThis
+    await openAgentChat(session.scope, "c1")
+    expect(session.elsewhere).toBe(true)
+    holdAgentTurns(session, "draft-save", true)
+    takeOverAgent(session)
+    expect(session.owed).toBe("takeOver")
+    running = false
+    await new Promise((resolve) => setTimeout(resolve, 2700))
+    expect(session.elsewhere).toBe(false)
+    if (!hadWindow) delete globalThis.window
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    // Nothing runs elsewhere any more: taking it over would answer the last turn again.
+    expect(calls).toHaveLength(1)
+    expect(session.owed).toBeUndefined()
+  }, 8000)
 })
