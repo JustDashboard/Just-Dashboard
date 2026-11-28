@@ -240,7 +240,7 @@ lit `signal` dot that breathes while a tab is answering it, and a warning `Tag` 
 Rename turns the row's own line into the field; delete asks first through `useConfirm`; nothing unfolds under a row.
 The deployment's page lists that deployment's chats and a connection's page that connection's; `/assistant` is a
 chat about the whole server and lists every chat under what each is about, and a deployment's or a connection's chat
-opens on its own page (`?chat=`). A server chat begun by **Ask** from another page carries that page
+opens on its own page (`?chat=`). A server chat begun by the palette's *Ask the assistant about this page* carries that page
 (`AgentTranscript.about`): a small square chip at the head of the column, *About shop · Logs*, is the way back to it,
 the empty chat offers questions about the page rather than the server, and the server is told the page with the press
 that begins the chat and never again. A chat opened

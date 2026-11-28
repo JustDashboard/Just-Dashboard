@@ -4,7 +4,7 @@ A project's **Assistant** page (`/deploy/{id}/assistant`) is the dashboard's ass
 environment of one deployment, a database connection's **Assistant** page (`/databases/{id}/assistant`, and the SQL
 editor's column) is the same assistant asked about one connection, and the server's own chat
 (`POST /assistant/chat`) is the same assistant asked about the whole server — reached from `/assistant`, and from
-**Ask** in the top bar of every page, which opens a chat that knows the page it was opened from. It answers anything and does what it is asked: it reads a project's code, logs,
+*Ask the assistant about this page* in Search (Ctrl/⌘K) on every page, which opens a chat that knows the page it was opened from. It answers anything and does what it is asked: it reads a project's code, logs,
 requests, metrics and a database's rows, sets variables, domains and limits, runs a backup, deploys and rolls
 back, changes a deployment's code in a workspace of its own and pushes it ([working on code](#working-on-code)), and reaches the rest of the dashboard — databases, backups, Docker, files, the firewall, the proxy, users —
 through the dashboard's own API, and the host itself: a shell command run to its end (`run_command`), or a
@@ -494,7 +494,7 @@ says to follow the run a push starts and fix what it finds.
 — the server's hostname, the deployment and environment, the source, the build, the address, the health,
 the live release, the run in progress and the last run, masked — and how to work, and it lists the
 deployment's operations, grouped by what they do. `assistant.ServerSystemPrompt` is told the server's hostname
-and its deployments by id, name and last run, and, for a chat opened with **Ask** on a page, that page's title and
+and its deployments by id, name and last run, and, for a chat opened with *Ask the assistant about this page*, that page's title and
 address, with "this" most likely meaning what it shows. `assistant.DatabaseSystemPrompt` is told the connection —
 its name and id, engine and version, host, database, what it serves and the operator's notes — and, for a SQL
 engine that answers within eight seconds, the structure of its schema in focus, never a row
