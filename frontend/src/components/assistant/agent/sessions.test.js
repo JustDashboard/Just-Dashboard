@@ -211,6 +211,36 @@ describe("a question sent while it answers waits its turn", () => {
     expect(session.queue.map((one) => one.question)).toEqual(["third"])
   })
 
+  test("Stop, or a failure, on the answer after an Allow hands what waits back too", async () => {
+    for (const end of ["stop", "fail"]) {
+      const { calls } = turnServer()
+      const session = freshChat()
+      askAgent(session, "first")
+      await settle()
+      askAgent(session, "second")
+      calls[0].answer([start, done({ stop: "tool", pending: [change] })])
+      await settle()
+      decideAgent(session, "x", true)
+      await settle()
+      if (end === "stop") stopAgent(session)
+      else
+        calls[1].answer([
+          start,
+          { type: "error", error: { code: "provider_error", message: "No." } },
+        ])
+      await settle()
+      // The calls it had not run are asked for again; nothing waits behind them.
+      expect(session.transcript.turns.at(-1).phase).toBe("asking")
+      expect(session.queue).toEqual([])
+      expect(session.returned.map((one) => one.question)).toEqual(["second"])
+      decideAgent(session, "x", false)
+      await settle()
+      calls[2].answer([start, done()])
+      await settle()
+      expect(calls).toHaveLength(3)
+    }
+  })
+
   test("with nothing waiting, a question sent while it waits on Allow still declines it", async () => {
     const { calls } = turnServer()
     const session = freshChat()

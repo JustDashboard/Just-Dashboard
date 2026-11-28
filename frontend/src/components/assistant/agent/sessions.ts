@@ -305,7 +305,11 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
   const sent = session.mode ? { ...body, mode: session.mode } : body
   let ended = false
   let begun = false
+  // Stopped, failed or carried on elsewhere: what waits goes back to the box, even
+  // when the turn is left asking again for the calls it had not yet run.
+  let broken = false
   const apply = (event: AgentEvent) => {
+    if (event.type === "error") broken = true
     if (event.type === "called" && event.ok && wrote(session.transcript, event.id)) {
       session.changes += 1
     }
@@ -349,10 +353,12 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
     }
     take(readLines(held, "\n").lines)
     if (!ended) {
+      broken = true
       update(session, (t) => endTurn(t, turn, "failed", "The answer stopped before it finished."))
     }
   } catch (err) {
     if (controller.signal.aborted) {
+      broken = true
       update(session, (t) => endTurn(t, turn, "stopped"))
     } else if (err instanceof ApiError && BUSY.includes(err.code)) {
       // Nothing was sent: the press waits for the person to take the chat over.
@@ -364,15 +370,17 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
       ["conversation_gone", "conversation_ended"].includes(err.code)
     ) {
       // The next question begins a conversation of its own.
+      broken = true
       update(session, (t) => ({ ...endTurn(t, turn, "failed", err.message), conversation: "" }))
     } else if (!ended) {
+      broken = true
       update(session, (t) => endTurn(t, turn, "failed", errorMessage(err)))
     }
   } finally {
     if (session.flight === controller) session.flight = null
     // Before anything is drawn of the end, so the next waiting question is under
     // way by the time a page reads the chat as quiet.
-    if (session.flight === null) afterTurn(session)
+    if (session.flight === null) afterTurn(session, broken)
     publish()
     chatsChanged()
   }
@@ -428,13 +436,15 @@ function pumpQueue(session: AgentSession) {
 /**
  * An answer ended. One that ended as an answer has the first waiting question
  * asked next; one stopped, failed or carried on in another tab hands every waiting
- * question back to the box, unsent, for the person to send again or change. One
- * left waiting on an Allow, or held for another tab, keeps them waiting.
+ * question back to the box, unsent, for the person to send again or change — also
+ * one stopped or failed after an Allow, which `endTurn` leaves asking for the calls
+ * it had not run yet. One left waiting on an Allow, or held for another tab, keeps
+ * them waiting.
  */
-function afterTurn(session: AgentSession) {
+function afterTurn(session: AgentSession, broken: boolean) {
   if (session.queue.length === 0) return
   const last = session.transcript.turns.at(-1)
-  if (last && BROKEN.includes(last.phase)) {
+  if (broken || (last && BROKEN.includes(last.phase))) {
     session.returned = [...session.returned, ...session.queue]
     session.queue = []
     return
