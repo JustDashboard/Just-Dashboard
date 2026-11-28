@@ -100,7 +100,7 @@ export interface AgentSession {
   loading: boolean
   loadError?: string
   /** A press another tab's answer kept from going, sent again on Take over. */
-  held?: { turn: string; body: Record<string, unknown> }
+  held?: { turn: string; body: Record<string, unknown>; asked?: AgentQueued }
   /** Another tab is answering it; it is followed until that ends. */
   elsewhere: boolean
   /** Another tab took it over, so this one stopped. */
@@ -294,7 +294,13 @@ function turnPath(scope: AgentScope) {
 /** The chat is answering a press in another tab: the server's word for it. */
 const BUSY = ["chat_busy", "conversation_busy"]
 
-async function stream(session: AgentSession, turn: string, body: Record<string, unknown>) {
+async function stream(
+  session: AgentSession,
+  turn: string,
+  body: Record<string, unknown>,
+  /** The question as the box held it, kept with a press held for Take over. */
+  asked?: AgentQueued,
+) {
   const controller = new AbortController()
   session.flight = controller
   session.dismissed = false
@@ -367,7 +373,7 @@ async function stream(session: AgentSession, turn: string, body: Record<string, 
       update(session, (t) => endTurn(t, turn, "stopped"))
     } else if (err instanceof ApiError && BUSY.includes(err.code)) {
       // Nothing was sent: the press waits for the person to take the chat over.
-      session.held = { turn, body }
+      session.held = { turn, body, asked }
       session.elsewhere = true
       update(session, (t) => holdTurn(t, turn))
     } else if (
@@ -436,7 +442,7 @@ function pumpQueue(session: AgentSession) {
   if (session.queue.length === 0 || agentQueueHeld(session)) return
   const [next, ...rest] = session.queue
   session.queue = rest
-  send(session, next.question, next.images, next.attached)
+  send(session, next.question, next.images, next.attached, next)
 }
 
 /**
@@ -503,11 +509,22 @@ export function askAgentFirst(session: AgentSession, question: string) {
  * waited to be asked there, and what was handed back to its box, is carried into
  * the new subject's chat, into its box and unsent. Asked of the draft, it would go
  * to a plan that no longer changes anything; asked of the new chat at once, it
- * would go without the conversation it was written in. A Take over the page was
- * holding is let go for the same reason.
+ * would go without the conversation it was written in. A question held for Take
+ * over, refused because another tab had the chat, is carried first; the Take over
+ * itself, and an Allow held for it, are let go for the same reason.
  */
 export function carryAgentQueue(from: AgentSession, scope: AgentScope) {
-  const waiting = [...from.returned, ...from.queue]
+  // A question another tab's answer kept from going was asked before what waits.
+  const kept = from.held?.asked
+  const waiting = [...(kept ? [kept] : []), ...from.returned, ...from.queue]
+  if (from.held) {
+    // Its "not sent" turn goes with it; an Allow held for Take over is let go,
+    // since the calls it answers would change the deployed draft.
+    const last = from.transcript.turns.at(-1)
+    if (kept && last?.phase === "held")
+      from.transcript = { ...from.transcript, turns: from.transcript.turns.slice(0, -1) }
+    from.held = undefined
+  }
   from.queue = []
   from.returned = []
   // A Take over pressed meanwhile would go to the old subject once the page lets go.
@@ -539,7 +556,7 @@ export function askAgent(
     pumpQueue(session)
     return
   }
-  send(session, question, images, attached)
+  send(session, question, images, attached, { id: "", question, images, attached, pressed })
 }
 
 /** A question asked now. */
@@ -548,6 +565,7 @@ function send(
   question: string,
   images: PastedImage[],
   attached: AgentAttachment[],
+  asked?: AgentQueued,
 ) {
   // Asking something else lets go of a press that was waiting to take over.
   session.held = undefined
@@ -576,7 +594,7 @@ function send(
   if (!body.conversation && session.scope.kind === "server" && session.transcript.about) {
     body.about = session.transcript.about
   }
-  void stream(session, turn, body)
+  void stream(session, turn, body, asked && { ...asked, id: turn })
 }
 
 /**
@@ -600,7 +618,7 @@ export function takeOverAgent(session: AgentSession) {
       ? sendDecisions(session.transcript)
       : takeOverTurn(session.transcript, held.turn)
     publish()
-    void stream(session, held.turn, { ...held.body, takeOver: true })
+    void stream(session, held.turn, { ...held.body, takeOver: true }, held.asked)
     return
   }
   // Nothing of their own to ask: the last turn, which the other tab was answering,

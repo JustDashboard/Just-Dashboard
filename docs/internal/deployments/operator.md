@@ -535,7 +535,8 @@ write has answered, and a save of the page's starts only while no turn is under 
 opens holds it too, and its own question (*Configure this deployment*) goes ahead of one the person sent meanwhile
 (`askAgentFirst`). A question waiting when Deploy or Save only commits the draft is not asked of it: the draft no
 longer changes anything, so it is carried into the new deployment's own chat, in its box and unsent
-(`carryAgentQueue`), to send there or change once that chat is opened.
+(`carryAgentQueue`), to send there or change once that chat is opened; one refused because another tab had the
+chat (`chat_busy`) goes first, with its images and attachments, and a Take over or an Allow held for it is let go.
 Deploy, Save only and Review's own check wait while it works and until its last save is read
 back (Continue only moves to the next step, so it stays the person's to press, like Back and the step tabs), because the page's revision is behind the server's until then: the check used to save and preflight on its
 own the moment the assistant's save was read back, and every call of the assistant's after it was refused as a

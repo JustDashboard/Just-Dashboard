@@ -527,3 +527,37 @@ describe("what the page's hold keeps back besides a question", () => {
     expect(session.owed).toBeUndefined()
   }, 8000)
 })
+
+describe("a draft deployed with something waiting", () => {
+  const deployment = (environmentId) => ({
+    kind: "deployment",
+    projectId: 90,
+    environmentId,
+    name: "shop",
+    environmentName: "production",
+  })
+
+  test("a question held for Take over is carried first, with its images, and its turn goes", async () => {
+    const { calls, refusals } = turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-held", name: "shop" })
+    refusals.push("chat_busy")
+    askAgent(draft, "first", [image], [{ label: "statement", text: "SELECT 1" }], ["sql"])
+    await settle()
+    expect(draft.held?.body.question).toBe("first")
+    holdAgentTurns(draft, "draft-save", true)
+    askAgent(draft, "second")
+    carryAgentQueue(draft, deployment(93))
+    holdAgentTurns(draft, "draft-save", false)
+    takeOverAgent(draft)
+    await settle()
+    // Nothing more goes to the deployed draft, and its "not sent" turn is gone.
+    expect(calls).toHaveLength(1)
+    expect(draft.held).toBeUndefined()
+    expect(draft.transcript.turns).toEqual([])
+    const carried = newAgentChat(deployment(93)).returned
+    expect(carried.map((one) => one.question)).toEqual(["first", "second"])
+    expect(carried[0].images).toEqual([image])
+    expect(carried[0].attached).toEqual([{ label: "statement", text: "SELECT 1" }])
+    expect(carried[0].pressed).toEqual(["sql"])
+  })
+})
