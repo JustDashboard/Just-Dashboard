@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { AnimatePresence, MotionConfig, motion } from "motion/react"
+import { AnimatePresence, MotionConfig, motion, useIsPresent } from "motion/react"
 import { useReducedMotion } from "@/components/shell/motion-pause"
 import { ChevronRight, CornerUpLeft, Plus, Sparkles } from "@/components/icons"
 import {
@@ -939,6 +939,9 @@ function StepGroup({
  * lit while it thinks, and how long it has been at it, counted from the first second.
  */
 function Thinking({ label = "Thinking…" }: { label?: string }) {
+  // While it fades out it is no longer the chat's status: a line leaving after an
+  // answer ended is neither announced nor found as the one that is thinking now.
+  const present = useIsPresent()
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
     const started = Date.now()
@@ -950,8 +953,9 @@ function Thinking({ label = "Thinking…" }: { label?: string }) {
   }, [])
   return (
     <motion.p
-      role="status"
-      data-slot="agent-thinking"
+      role={present ? "status" : undefined}
+      data-slot={present ? "agent-thinking" : undefined}
+      aria-hidden={present ? undefined : true}
       className="flex items-center gap-2 text-body"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
