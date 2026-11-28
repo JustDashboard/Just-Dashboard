@@ -151,7 +151,14 @@ Complete 1.1.0 therefore runs eight apps after the dashboard ships 1.2.0 with ni
   was made from (`deploy_releases.source_id`), its documents' `services`. A preset's service missing
   from it is not the deployment's yet. The state leaves it out of the apps and the steps, and the pass
   leaves its steps out (`ServiceDeps.ReleaseServices`, which makes `Env.Has` false for it), so an
-  older stack is never shown a FlareSolverr that is failing.
+  older stack is never shown a FlareSolverr that is failing. A release with no source row or no
+  Compose file, or a file that does not parse, counts as running every app. A read the store fails
+  to answer is an error, never "every app": the state's read answers it (the page keeps its last
+  reading), and the pass ends before any step runs, is not recorded as configured and is asked for
+  again, so the next look (ten seconds) runs it once the read works. Taking the error as "every app"
+  would have an older stack's pass run, and fail, FlareSolverr's step against a container its
+  release does not have; leaving out what the older template lacked instead would need every old
+  version's list of apps, which the dashboard does not keep.
 - **`upgrade`** in the state names those services (`added`, with each one's title and purpose), the
   shipped version (`version`) and the one the stack runs (`from`: the one the deployment's source
   names, or with `saved` the live release's), when the source is still the preset's template. `saved`
@@ -174,7 +181,8 @@ Complete 1.1.0 therefore runs eight apps after the dashboard ships 1.2.0 with ni
 templates and either the release is not the one last configured, the manifest version changed, or
 a pass was requested. At most two stacks are configured at once, one pass per stack. A pass for a
 release that stopped being live is cancelled, and so is one for a deployment that was removed; one a
-restart cut short is queued again (`ResetInterrupted`). Changing the source to the other preset's template moves the stack to that
+restart cut short is queued again (`ResetInterrupted`), and so is one whose environment could not
+be built (a read of the variables or of what the release runs that failed): it ran nothing. Changing the source to the other preset's template moves the stack to that
 preset. A deployment whose source is no longer a preset is left alone, and Retry on it is refused
 (`stack_not_preset`) rather than recorded for a pass that would never run.
 

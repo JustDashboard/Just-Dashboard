@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -257,5 +258,30 @@ func TestTheStackPassOfAnOlderStackLeavesOutWhatItsReleaseDoesNotRun(t *testing.
 	}
 	if env.Has("flaresolverr") || !env.Has("prowlarr") || !env.Has("recyclarr") {
 		t.Fatalf("the pass runs %v", env.Running)
+	}
+}
+
+// A read of the live release's Compose file that failed is an error, never
+// "the release runs every app": taken so, an older stack's pass would run,
+// and fail, FlareSolverr's step, and its state would list an app it has not
+// got. A release with no Compose file of its own still runs every app.
+func TestStackReleaseServicesThatCannotBeReadAreAnError(t *testing.T) {
+	s := testServer(t)
+	wireDeployPlanningAndSources(t, s, []string{t.TempDir()})
+	s.modules.stackStore = stacks.NewStore(s.Store.DB, s.Sealer)
+	_, _, releaseID := seedOlderStack(t, s)
+	preset, _ := media.Manifest().PresetByID("complete")
+	live := stacks.Live{ReleaseID: releaseID, Kind: "compose", RuntimeID: "jd-media", TemplateID: media.TemplateComplete, TemplateVersion: "1.1.0"}
+	cancelled, cancel := context.WithCancel(t.Context())
+	cancel()
+	if running, err := s.stackReleaseServices(cancelled, preset, live); err == nil {
+		t.Fatalf("a read that failed answered %v and no error", running)
+	}
+	if _, err := s.stackServicesNotReleased(cancelled, preset, live); err == nil {
+		t.Fatal("the state's read of the same answered no error")
+	}
+	live.ReleaseID = releaseID + 1000
+	if running, err := s.stackReleaseServices(t.Context(), preset, live); err != nil || running != nil {
+		t.Fatalf("a release with no source of its own: %v %v", running, err)
 	}
 }

@@ -352,7 +352,11 @@ func (s *Server) stackStateOf(ctx context.Context, record *stacks.Record, manife
 	// in the upgrade instead.
 	notYet := map[string]bool{}
 	if liveErr == nil {
-		for service := range s.stackServicesNotReleased(ctx, preset, live) {
+		missing, err := s.stackServicesNotReleased(ctx, preset, live)
+		if err != nil {
+			return nil, err
+		}
+		for service := range missing {
 			notYet[service] = true
 			delete(inPreset, service)
 		}
@@ -490,37 +494,45 @@ func stackContainersByService(listed []dockerx.Container) map[string]dockerx.Con
 // stackServicesNotReleased are the preset's services a live release does
 // not run: the ones its own Compose file (the source it was made from) does
 // not declare, because it was made from a version of the template from
-// before they were added. A release whose file cannot be read runs them all,
-// as far as this knows.
-func (s *Server) stackServicesNotReleased(ctx context.Context, preset stacks.Preset, live stacks.Live) map[string]bool {
+// before they were added. A release with no such file, or one that does not
+// parse, runs them all as far as this knows; a read that failed is an error,
+// never "all": taken so, an older stack's pass would run, and fail, the step
+// of an app its release does not have.
+func (s *Server) stackServicesNotReleased(ctx context.Context, preset stacks.Preset, live stacks.Live) (map[string]bool, error) {
 	out := map[string]bool{}
 	if live.TemplateID != preset.Template {
-		return out
+		return out, nil
 	}
-	released, known := s.stackReleaseComposeServices(ctx, live.ReleaseID)
-	if !known {
-		return out
+	released, known, err := s.stackReleaseComposeServices(ctx, live.ReleaseID)
+	if err != nil || !known {
+		return out, err
 	}
 	for _, service := range preset.Services {
 		if !released[service] {
 			out[service] = true
 		}
 	}
-	return out
+	return out, nil
 }
 
 // stackReleaseComposeServices are the services a release's Compose file
-// declares, read from the source revision it was made from.
-func (s *Server) stackReleaseComposeServices(ctx context.Context, releaseID int64) (map[string]bool, bool) {
+// declares, read from the source revision it was made from. Known is false
+// for a release with no source row or no Compose file, or a file that does
+// not parse; the error is only the store failing to answer.
+func (s *Server) stackReleaseComposeServices(ctx context.Context, releaseID int64) (map[string]bool, bool, error) {
 	var config string
-	if err := s.Store.DB.QueryRowContext(ctx, `
+	err := s.Store.DB.QueryRowContext(ctx, `
 		SELECT src.config_json FROM deploy_releases r JOIN deploy_sources src ON src.id = r.source_id
-		 WHERE r.id = ?`, releaseID).Scan(&config); err != nil {
-		return nil, false
+		 WHERE r.id = ?`, releaseID).Scan(&config)
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, false, nil
+	}
+	if err != nil {
+		return nil, false, fmt.Errorf("could not read the live release's Compose file: %w", err)
 	}
 	var source deploy.DraftSourceConfig
 	if err := json.Unmarshal([]byte(config), &source); err != nil || len(source.ComposeFiles) == 0 {
-		return nil, false
+		return nil, false, nil
 	}
 	services := map[string]bool{}
 	for _, document := range source.ComposeFiles {
@@ -528,19 +540,23 @@ func (s *Server) stackReleaseComposeServices(ctx context.Context, releaseID int6
 			Services map[string]any `yaml:"services"`
 		}
 		if err := yaml.Unmarshal([]byte(document.Content), &file); err != nil {
-			return nil, false
+			return nil, false, nil
 		}
 		for name := range file.Services {
 			services[name] = true
 		}
 	}
-	return services, len(services) > 0
+	return services, len(services) > 0, nil
 }
 
 // stackReleaseServices is the stack loop's view of the same: the preset's
-// services a live release runs, nil when it runs them all.
+// services a live release runs, nil when it runs them all. A read that
+// failed ends the pass before any step runs, and the loop tries it again.
 func (s *Server) stackReleaseServices(ctx context.Context, preset stacks.Preset, live stacks.Live) (map[string]bool, error) {
-	missing := s.stackServicesNotReleased(ctx, preset, live)
+	missing, err := s.stackServicesNotReleased(ctx, preset, live)
+	if err != nil {
+		return nil, err
+	}
 	if len(missing) == 0 {
 		return nil, nil
 	}

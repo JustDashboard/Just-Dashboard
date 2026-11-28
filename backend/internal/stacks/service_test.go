@@ -21,11 +21,13 @@ type serviceFixture struct {
 	mu      sync.Mutex
 	live    stacks.Live
 	liveErr error
-	// released is what ReleaseServices answers: nil, every service.
-	released map[string]bool
-	passes   int
-	project  int64
-	manifest *stacks.Manifest
+	// released is what ReleaseServices answers: nil, every service;
+	// releasedErr is a read of it that failed.
+	released    map[string]bool
+	releasedErr error
+	passes      int
+	project     int64
+	manifest    *stacks.Manifest
 }
 
 func newServiceFixture(t *testing.T) *serviceFixture {
@@ -87,7 +89,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		ReleaseServices: func(context.Context, stacks.Preset, stacks.Live) (map[string]bool, error) {
 			fixture.mu.Lock()
 			defer fixture.mu.Unlock()
-			return fixture.released, nil
+			return fixture.released, fixture.releasedErr
 		},
 		Runner: runner,
 	})
@@ -288,5 +290,36 @@ func TestServiceLeavesOutAServiceTheReleaseDoesNotRun(t *testing.T) {
 	steps, _ = f.store.Steps(ctx, f.project)
 	if steps["b.link"].Status != stacks.StepDone {
 		t.Fatalf("the release that runs b: %+v", steps["b.link"])
+	}
+}
+
+// A pass that cannot read what the release runs runs nothing: it is not
+// recorded as configured and is asked for again, so it runs once the read
+// works, even when what made it due was a Retry that no longer stands.
+func TestServiceRunsNothingWhenWhatTheReleaseRunsCannotBeRead(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	f.goLive(51, "test-large")
+	f.settle(t)
+	if f.passCount() != 1 {
+		t.Fatalf("%d passes over the first release", f.passCount())
+	}
+	f.mu.Lock()
+	f.releasedErr = errors.New("database is locked")
+	f.mu.Unlock()
+	if err := f.service.Request(ctx, f.project); err != nil {
+		t.Fatal(err)
+	}
+	record := f.settle(t)
+	if f.passCount() != 1 || record.Status != stacks.StatusFailed || record.RequestedAt.IsZero() {
+		t.Fatalf("a pass whose release could not be read: %d passes, %+v", f.passCount(), record)
+	}
+
+	f.mu.Lock()
+	f.releasedErr = nil
+	f.mu.Unlock()
+	record = f.settle(t)
+	if f.passCount() != 2 || record.Status != stacks.StatusReady || !record.RequestedAt.IsZero() {
+		t.Fatalf("once it reads: %d passes, %+v", f.passCount(), record)
 	}
 }

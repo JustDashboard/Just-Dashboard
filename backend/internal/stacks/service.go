@@ -259,7 +259,12 @@ func (s *Service) runPass(ctx context.Context, manifest *Manifest, preset Preset
 	persist := context.WithoutCancel(ctx)
 	env, err := s.Env(ctx, manifest, preset, record, live)
 	if err != nil {
+		// Nothing ran. The pass is not recorded as configured and is asked
+		// for again, so a read that failed for a moment (the store busy, say)
+		// is tried at the next look, whatever made this one due; it is never
+		// run with a guess at what the release runs.
 		_ = store.FinishPass(persist, record.ProjectID, live.ReleaseID, manifest.Version, StatusFailed, false)
+		_ = store.RequestPass(persist, record.ProjectID)
 		if s.deps.Log != nil {
 			s.deps.Log.Warn("a smart stack could not be prepared for configuration", "project", record.ProjectID, "error", err)
 		}
