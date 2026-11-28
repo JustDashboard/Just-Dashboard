@@ -79,7 +79,9 @@ machine_image() {
 	mkdir -p "$dir"
 	local prepare init='CMD ["/usr/lib/systemd/systemd"]'
 	case "$family" in
-	apt) prepare='apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus git ca-certificates && apt-get clean && rm -rf /var/lib/apt/lists/*' ;;
+	# Debian's, Ubuntu's, Kali's and Mint's images carry a policy-rc.d that stops
+	# packages starting their services; no installed system has one.
+	apt) prepare='apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus git ca-certificates && apt-get clean && rm -rf /var/lib/apt/lists/* /usr/sbin/policy-rc.d' ;;
 	dnf) prepare='dnf install -y systemd dbus git ca-certificates && dnf clean all' ;;
 	zypper) prepare='zypper --non-interactive install systemd dbus-1 git-core ca-certificates && zypper clean -a' ;;
 	pacman) prepare='pacman -Syu --noconfirm --needed systemd dbus git ca-certificates && pacman -Scc --noconfirm' ;;
