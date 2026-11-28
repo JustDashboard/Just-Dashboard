@@ -390,7 +390,10 @@ says to follow the run a push starts and fix what it finds.
   fetched (`gitx.FetchWith`), keeping what changed in it; one that is something else gives way to
   `<name>-<environment id>`. A deployment built from a folder on the server works in that folder, since it
   builds that folder's committed state. `.git/jd-deployment` records which deployment and environment a
-  workspace is for, so a push in a later press knows whose it is.
+  workspace is for, so a push in a later press knows whose it is. Nothing removes a workspace: deleting or
+  renaming the deployment leaves its folder in place, for the account or Local Git to delete. With no terminal
+  account the folder is made under the first Git root (`JD_GIT_ROOTS`, `/opt` by default) and git runs as the
+  dashboard's own account there.
 - **The files.** `read_file`, `edit_file` and `write_file` go through `GET /files/read`, `PUT /files/write`
   (at the revision read, so a file changed since is refused, not overwritten) and `POST /files/mkdir`, as the
   person: their role's `file.read` and `file.write`, the Files page's roots, its kept versions and the audit log

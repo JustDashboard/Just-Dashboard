@@ -567,8 +567,8 @@ func (s *Server) pushEnvironment(ctx context.Context, auth pushAuth) (map[string
 }
 
 // fetchCredential is what a clone or fetch of source authenticates with: the
-// deployment's own credential, which is what its deploys fetch with, or a
-// read-only token of the person's GitHub connection for a private repository.
+// deployment's own credential, which is what its deploys fetch with, or else the
+// server account's own Git credentials.
 func (s *Server) fetchCredential(ctx context.Context, p *httpx.Principal, source *deploy.WorkspaceSource) (map[string]string, string) {
 	if source.CredentialID > 0 && s.modules.deployPlanning != nil {
 		if credential, err := s.modules.deployPlanning.WorkspaceCredential(ctx, source.CredentialID, source.Remote); err == nil {
