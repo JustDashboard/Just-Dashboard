@@ -382,13 +382,15 @@ says to follow the run a push starts and fix what it finds.
 
 - **The workspace.** `open_workspace` reads where the environment's code lives
   (`deploy.DeploymentChecker.WorkspaceSource`, from its saved plan). A remote repository is cloned by Local Git's
-  service (`gitx.PrepareClone`, `CloneStreaming`) into `jd-workspaces/<name>` in the terminal account's home —
+  service into `jd-workspaces/<name>` in the terminal account's home —
   `<name>` is the deployment's, with its environment's when that is not production — on the branch the
   deployment builds unless the call names another. The folder is made and handed to that account the first
   time, so the checkout is the account's, `run_command` builds in it as that account, and Local Git lists it
   with the server's other checkouts. A folder of that name that is already a checkout of the same remote is
-  fetched (`gitx.FetchWith`), keeping what changed in it; one that is something else gives way to
-  `<name>-<environment id>`. A deployment built from a folder on the server works in that folder, since it
+  fetched, keeping what changed in it; one that is something else gives way to
+  `<name>-<environment id>`. With the deployment's saved credential the clone and the fetch go through the
+  relay (below: `gitx.CloneThrough`, `FetchThrough`); without one they are the account's own
+  (`gitx.PrepareClone`, `CloneStreaming`, `FetchOrigin`). A deployment built from a folder on the server works in that folder, since it
   builds that folder's committed state. `.git/jd-deployment` records which deployment and environment a
   workspace is for, so a push in a later press knows whose it is. Nothing removes a workspace: deleting or
   renaming the deployment leaves its folder in place, for the account or Local Git to delete. With no terminal
@@ -403,19 +405,40 @@ says to follow the run a push starts and fix what it finds.
   where. Each change answers with its diff (`lineDiff`), which the page draws under the call.
 - **The push.** `push_changes` stages and commits everything changed (`gitx.CommitAs`: the account's own name
   for commits, or, when it has none, the GitHub login a push goes through or the person's username, for that
-  commit only) and pushes the branch, or `HEAD` to `branch` on the remote, never forced (`gitx.PushWith`). It
+  commit only) and pushes the branch, or `HEAD` to `branch` on the remote, never forced: every refspec is a
+  commit or a whole branch name, so a branch called `+main` is a name, and a push the remote refuses because it
+  moved is answered with git's words. A branch with no upstream is set to track what it was pushed to. It
   authenticates, in order: with a token of the person's own GitHub connection (the GitHub page's App,
   [`githubrepos.PushToken`](../backend/github-page.md#clone-to-server)) narrowed to that one repository and
   `contents: write`, minted only when that connection may push there and revoked after the push; with the
-  deployment's saved credential when it is a token that can push (the deploy App's is read-only); or with the
-  account's own Git credentials. A credential reaches git only in its environment for that one process
-  (`deploy.GitHeaderEnvironment`: the account's credential helper off, the header sent to that exact remote,
-  and no hook or file-system monitor of the checkout's run beside it, since those would inherit the
-  environment and whoever can write the checkout chooses them), never its arguments, the checkout's
-  `.git/config` or the model. A commit runs the checkout's hooks as usual; it carries no credential. A clone and a fetch authenticate with the
-  deployment's own credential, which is what its deploys fetch with. The answer says whether the deployment
+  deployment's saved credential when it is a token that can push (the deploy App's is read-only,
+  `WorkspaceCredential.ReadOnly`, and only ever fetches); or with the account's own Git credentials, which
+  push as the account from the checkout (`gitx.PushOrigin`). The answer says whether the deployment
   deploys the push on its own (its Git policy: automatic, not promotion-only, the branch it builds, its path
   filters) or needs a deploy started.
+- **The relay.** A credential of the dashboard's (the minted token, the deployment's saved one, which may be a
+  token wider than one repository) never reaches a git process of the checkout's account or one that reads the
+  checkout's configuration: whoever can write `.git/config` or the account's `~/.gitconfig` (the account,
+  anything it runs, a role that can write the folder through the Files page) could otherwise send the header
+  through an `http.proxy` with `http.sslVerify` off or an `http.sslCAInfo` of theirs, rewrite the remote with
+  `url.<base>.insteadOf`, run a hook or a file-system monitor beside it, or read `/proc/<pid>/environ` of a
+  process of their own. So every credentialed clone, fetch and push runs as the dashboard in a bare repository
+  of its own for that remote (`gitx.Relay`, in `<data dir>/workspace-git/relays/`, 0700), with the credential
+  in that one process's environment (`deploy.GitHeaderEnvironment`: the credential helper off, the header sent
+  to that exact remote, no hook or file-system monitor), only `https` allowed (`GIT_ALLOW_PROTOCOL`), and no
+  Git settings but the dashboard's own: `GIT_CONFIG_NOSYSTEM`, and `<data dir>/workspace-git/gitconfig` as its
+  global configuration and `HOME`. The checkout's account takes what the relay fetched, and gives it the commit
+  to push, as objects and ref names alone: a pack written by one side's `git pack-objects` and read by the
+  other's `git index-pack` through a pipe, each side running as itself in its own repository, so neither reads
+  the other's configuration. After a fetch the checkout's `origin/<branch>` refs, pruned, and the tags it lacks
+  are set as `git fetch --prune` would set them, and after a push its `origin/<branch>` is; its `origin` stays
+  the real remote, so the account's own git can fetch and push it with its own credentials. A host behind a
+  company or self-signed CA (or reached through a proxy) is set in the dashboard's own Git settings, that
+  `gitconfig` (`[http "https://git.example.com/"] sslCAInfo = /var/lib/just-dashboard/workspace-git/ca.pem`),
+  or in the backend's trust store, as for deploys; a setting in the account's or the checkout's configuration
+  is not read with a credential. A commit runs the checkout's hooks as usual; it carries no credential. The
+  workspace's checkout is never the folder git runs in with a credential, and nothing of one is kept in the
+  checkout or told to the model.
 - **Audited.** Each route a file tool calls has its own entry as the person with actor `assistant`; what the
   workspace did (opened, pushed and where) is listed under `git` in the press's entry, as `run_command`'s lines
   are under `commands`.

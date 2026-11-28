@@ -394,7 +394,11 @@ The assistant's push from a workspace ([working on code](../deployments/operator
 mints the same kind of token with `permissions: {"contents": "write"}` (`githubrepos.PushToken`), only
 when the person's own connection may push to the repository (`Repository.Can.Push`) and the App was
 granted Contents: write on the installation, carries it the same way for that one `git push`, and revokes
-it when the push ends.
+it when the push ends. That push is not the checkout's: the token is given only to git running as the
+dashboard in a bare repository of its own for that remote (`gitx.Relay`, `PushThrough`), with only the
+dashboard's own Git settings, after the checkout's account has handed it the commit through a pipe, so
+nothing the account or the checkout configures (a proxy, a CA, a URL rewrite, a hook) is read with it
+and no process of that account holds it.
 
 The checkout is then an ordinary checkout under the Git roots, so Local Git's discovery lists it;
 later fetches, pulls and pushes use its owner's own git credentials, as every other checkout's do. The

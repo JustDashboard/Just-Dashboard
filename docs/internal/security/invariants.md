@@ -447,10 +447,16 @@ A change that weakens any of these has to say so explicitly.
     (`run_command`, invariant 6), which takes the terminal capability. It works on a deployment's code as a
     developer would (`open_workspace`, `read_file`, `edit_file`, `write_file`, `push_changes`): the files through
     the Files routes as the person, the checkout made and pushed by Local Git's service under `JD_GIT_ROOTS` as the
-    folder's owner (the terminal's account, whose home holds `jd-workspaces/`), and a credential only in git's
-    environment for one fetch or push, with the checkout's hooks off for it, never its arguments or a file: the deployment's own saved token, or for a
+    folder's owner (the terminal's account, whose home holds `jd-workspaces/`), and a credential of the dashboard's
+    only in git's environment for one fetch or push, never its arguments or a file, and **never in a git process
+    of the checkout's account or one that reads the checkout's or that account's configuration**: a credentialed
+    clone, fetch and push run as the dashboard in a bare repository of its own (`gitx.Relay`, in the data
+    folder), with only the dashboard's own Git settings and no hook, and the checkout's account takes or gives
+    objects and ref names through a pipe, with no credential, each side as itself in its own repository. The
+    credential is the deployment's own saved token, or for a
     push to GitHub a token of the GitHub page's App narrowed to that one repository and `contents: write`, minted
-    only when the person's own connection may push there and revoked after the push. A write that would put a
+    only when the person's own connection may push there and revoked after the push; without either the
+    account's own Git credentials fetch and push, as the account. A write that would put a
     masked value (`[REDACTED]`) over the real one is refused. What stays out of its reach is a closed list in
     `api/handlers_assistant_routes.go` (`agentExclusion`), each line something no role changes: its own routes
     and those that ask the model; sign-in, password, second factor, passkeys, sessions, letting Just Hub sign the
