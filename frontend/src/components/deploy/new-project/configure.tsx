@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   DeploymentDraft,
-  DeploymentDraftSource,
   DeploymentPreflight,
   DeploymentPreflightFinding,
   WorkloadProfile,
@@ -25,7 +24,6 @@ import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
   checksForRuntime,
-  composeSourceForCandidate,
   discoveredEnvironmentRows,
   environmentRowsToSend,
   mergeDiscoveredRows,
@@ -39,6 +37,8 @@ import {
   SetupAssistantOffer,
 } from "@/components/deploy/new-project/setup-assistant"
 import { useAssistantDraft } from "@/components/deploy/new-project/use-assistant-draft"
+import { useSourceActions } from "@/components/deploy/new-project/use-source-actions"
+import { FormNote } from "@/components/form"
 import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
@@ -61,11 +61,8 @@ import {
   loadDraft,
   preflightDraft,
   firstDeployRevision,
-  reinspect,
-  redetectedConfiguration,
   saveConfiguration,
   saveIntent,
-  selectCandidate,
   stepAfter,
   stepBefore,
   fetchHostnameSuggestion,
@@ -350,6 +347,20 @@ export function Configure({
     idle: !busy && !branchBusy,
     mutatingRef: mutating,
   })
+  const autoChecked = useRef<string | undefined>(undefined)
+  // What reads the source again waits for the assistant too (`use-source-actions.ts`).
+  const source = useSourceActions({
+    assistant,
+    onFlowChange,
+    mutatingRef: mutating,
+    setFailure,
+    setBusy,
+    setBranchBusy,
+    onInspected: () => {
+      setReview(null)
+      autoChecked.current = undefined
+    },
+  })
 
   // Debounced, because it runs on every keystroke of the name field, and
   // never fatal: an unanswered question leaves the commit to refuse as before.
@@ -390,57 +401,11 @@ export function Configure({
   // the environment lives in memory and the step in the session store, so a
   // reload used to land back on Review reading "3 values" with none to send.
 
-  // A branch or a clone option is part of the saved source, so changing one
-  // saves it again and detects again.
-  const resaveSource = async (nextSource: DeploymentDraftSource) => {
-    if (mutating.current) return
-    mutating.current = true
-    setBranchBusy(true)
-    setFailure(undefined)
-    try {
-      const result = await reinspect(flow.draft, flow.profile, nextSource)
-      const profile =
-        flow.profile === flow.candidate?.profile
-          ? (result.candidate?.profile ?? flow.profile)
-          : flow.profile
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              source: nextSource,
-              profile,
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              configuration: redetectedConfiguration(flow, result, profile),
-            }
-          : current,
-      )
-    } catch (error) {
-      // Saving the source may have succeeded before detection failed.
-      try {
-        const fresh = await loadDraft(draftId)
-        onFlowChange((current) => (current ? { ...current, draft: fresh } : current))
-      } catch {
-        /* The original inspection error is the useful one. */
-      }
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBranchBusy(false)
-    }
-  }
-
-  const changeBranch = async (nextRef: string) => {
+  const changeBranch = (nextRef: string) => {
     const ref = nextRef.trim()
     setBranch(ref)
-    if (!ref || ref === flow.source.ref) return
-    await resaveSource({ ...flow.source, ref })
+    if (ref && ref !== flow.source.ref) source.resaveSource({ ref })
   }
-
-  const changeCloneOptions = (
-    options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs">,
-  ) => void resaveSource({ ...flow.source, ...options })
 
   const changeProfile = (profile: WorkloadProfile) => {
     const internalPort =
@@ -484,67 +449,6 @@ export function Configure({
         },
       },
     })
-  }
-
-  // `detection_ambiguous`'s only remedy — /detect has always accepted a
-  // `selectedId`, but nothing sent one, so the finding blocked every ambiguous
-  // plan with no way to resolve it from this screen.
-  const pickCandidate = async (id: string) => {
-    if (mutating.current) return
-    mutating.current = true
-    setFailure(undefined)
-    setBusy("detect")
-    try {
-      const result = await selectCandidate(flow.draft, flow.profile, flow.source, id)
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              profile: result.candidate?.profile ?? current.profile,
-              configuration: redetectedConfiguration(flow, result),
-            }
-          : current,
-      )
-    } catch (error) {
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBusy("")
-    }
-  }
-
-  // `compose_analysis_missing`'s remedy: the same repository, branch and
-  // files, read as a Compose source so its services are analysed and built.
-  const deployAsCompose = async () => {
-    const nextSource = composeSourceForCandidate(flow.source, flow.candidate)
-    if (!nextSource || mutating.current) return
-    mutating.current = true
-    setFailure(undefined)
-    setBusy("detect")
-    try {
-      const result = await reinspect(flow.draft, "compose", nextSource)
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              source: nextSource,
-              profile: "compose",
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              configuration: result.configuration,
-            }
-          : current,
-      )
-    } catch (error) {
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBusy("")
-    }
   }
 
   const current: ConfigureStepKey = created ? "done" : step === "done" ? "review" : step
@@ -839,7 +743,6 @@ export function Configure({
    */
   const assistantWorking = assistant.working
   const assistantWaiting = assistant.waiting
-  const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
     const plan = `${draftId}:${planSignature}`
     if (current !== "review" || preflight || busy || created) return
@@ -866,46 +769,6 @@ export function Configure({
     draftId,
     planSignature,
   ])
-
-  /**
-   * `source_moved`'s remedy: the branch has moved past the commit Review
-   * checked, so detection reads the newer one — keeping the candidate the
-   * reader chose where it still exists — and Review asks again. The plan may
-   * come out the same, so the answer about the old commit is dropped rather
-   * than left standing for an unchanged signature.
-   */
-  const inspectAgain = async () => {
-    if (mutating.current) return
-    mutating.current = true
-    setFailure(undefined)
-    setBusy("detect")
-    try {
-      const selected = flow.detection?.selectedId
-      const result = selected
-        ? await selectCandidate(flow.draft, flow.profile, flow.source, selected).catch(() =>
-            reinspect(flow.draft, flow.profile, flow.source),
-          )
-        : await reinspect(flow.draft, flow.profile, flow.source)
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              configuration: redetectedConfiguration(flow, result),
-            }
-          : current,
-      )
-      setReview(null)
-      autoChecked.current = undefined
-    } catch (error) {
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBusy("")
-    }
-  }
 
   const errors = validateConfiguration(configuration, flow.profile)
   const blockers = preflight ? blockingFindings(preflight.findings) : []
@@ -1023,6 +886,11 @@ export function Configure({
             className="animate-rise space-y-6 xl:min-h-0 xl:overflow-y-auto"
           >
             {failure && <ErrorState error={failure} />}
+            {assistant.deferred && (
+              <FormNote>
+                The assistant is working on this draft. Your change is read once it has finished.
+              </FormNote>
+            )}
 
             {current === "project" && (
               <StepProject
@@ -1032,11 +900,11 @@ export function Configure({
                 branch={branch}
                 branchBusy={branchBusy}
                 branches={branches.data ?? []}
-                onChangeBranch={(ref) => void changeBranch(ref)}
-                onChangeCloneOptions={changeCloneOptions}
+                onChangeBranch={changeBranch}
+                onChangeCloneOptions={source.resaveSource}
                 onEditBranch={setBranch}
-                onPickCandidate={(id) => void pickCandidate(id)}
-                onDeployAsCompose={() => void deployAsCompose()}
+                onPickCandidate={source.pickCandidate}
+                onDeployAsCompose={source.deployAsCompose}
                 busy={busy}
                 nameTouched={nameTouched}
                 onNameTouched={() => setNameTouched(true)}
@@ -1086,7 +954,7 @@ export function Configure({
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
                 onApplyFix={applyFindingFix}
-                onInspectAgain={() => void inspectAgain()}
+                onInspectAgain={source.inspectAgain}
               />
             )}
           </FlowPanelBody>

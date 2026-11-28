@@ -25,6 +25,12 @@ import {
   type KeptEdits,
 } from "@/components/deploy/new-project/kept-edits"
 
+/**
+ * A press of the page's that asks the server to read the source again, run on the
+ * page as it is when it runs; it answers what the flow became, when it changed it.
+ */
+export type SourceAction = (now: ConfigureFlow) => Promise<ConfigureFlow | undefined>
+
 /** Saves a flow's name, type and plan at the revision its draft holds. */
 async function savePlan(flow: ConfigureFlow, text: string, retainedKeys: string[]) {
   let working = flow.draft
@@ -54,6 +60,10 @@ async function savePlan(flow: ConfigureFlow, text: string, retainedKeys: string[
  *   on a 409 over the draft read again with the edits laid over it, never over
  *   what it saved. `working` stays up while they wait to be saved, so Review checks
  *   the plan that has them.
+ * - **A press that reads the source again waits too** (`whenFree`, for
+ *   `use-source-actions.ts`): it cannot be kept as a field, since what it changes is
+ *   the server's answer, so it runs once the edits are saved, at the current
+ *   revision, and `atRevision` reads the draft again on a 409 and runs over that.
  * - **It starts from what the person sees**: `prepare` saves the page as it is when
  *   the panel opens, read through a ref, not as it was when the draft was loaded.
  */
@@ -148,6 +158,7 @@ export function useAssistantDraft({
   // Once it is done, what the person typed meanwhile is saved, once.
   const pending = hasKeptEdits(ownEdits)
   const saveKept = () => {
+    if (mutatingRef.current) return
     mutatingRef.current = true
     setSaving(true)
     const edits = editsFor(draftId)
@@ -195,14 +206,65 @@ export function useAssistantDraft({
     if (engaged || !pending || created || !idle) return
     // Scheduled rather than run: raising `saving` in the effect's own body is a
     // cascading render. The cleanup drops a save nobody is waiting for any more.
-    const timer = setTimeout(() => {
-      if (mutatingRef.current) return
-      saveKept()
-    }, 0)
+    const timer = setTimeout(saveKept, 0)
     return () => clearTimeout(timer)
     // `saveKept` reads the page through refs when it runs.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [engaged, pending, created, idle, draftId])
+
+  // Presses that read the source again, waiting for the assistant to be done.
+  const deferredRef = useRef<SourceAction[]>([])
+  const [deferred, setDeferred] = useState(0)
+  const [running, setRunning] = useState(false)
+  const run = async (actions: SourceAction[]) => {
+    setRunning(true)
+    try {
+      // Each runs on the page as the one before left it.
+      let now = latest.current.flow
+      for (const action of actions) now = (await action(now)) ?? now
+    } finally {
+      setRunning(false)
+    }
+  }
+  /** A press that reads the source: now, or once the assistant is done and its edits saved. */
+  const whenFree = (action: SourceAction) => {
+    const free =
+      !engaged && !pending && !saving && !running && idle && deferredRef.current.length === 0
+    if (free && !agentBusy(session)) return void run([action])
+    deferredRef.current = [...deferredRef.current, action]
+    setDeferred(deferredRef.current.length)
+  }
+  useEffect(() => {
+    if (engaged || pending || saving || running || !idle || deferred === 0 || created) return
+    const timer = setTimeout(() => {
+      if (mutatingRef.current || agentBusy(session)) return
+      const actions = deferredRef.current
+      deferredRef.current = []
+      setDeferred(0)
+      void run(actions)
+    }, 0)
+    return () => clearTimeout(timer)
+    // `run` reads the page through refs when it runs.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [engaged, pending, saving, running, idle, deferred, created])
+
+  /**
+   * `run` on the page as it is, at its draft's revision; a 409 means something
+   * saved the draft since, so it is read again and `run` goes over that. `base` is
+   * the page it ran on.
+   */
+  const atRevision = async <T>(now: ConfigureFlow, step: (flow: ConfigureFlow) => Promise<T>) => {
+    try {
+      return { result: await step(now), base: now }
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.code !== "draft_revision_conflict") throw error
+      const fresh = await resumeFlow(await loadDraft(now.draft.id))
+      const base = { ...fresh, sourceLabel: now.sourceLabel, githubRepo: now.githubRepo }
+      return { result: await step(base), base }
+    }
+  }
+
+  const owed = pending || saving || running || deferred > 0
 
   // Once it is deployed there is no setup to go back to, so the dock lets it go.
   useEffect(() => {
@@ -226,11 +288,17 @@ export function useAssistantDraft({
 
   return {
     session,
-    /** Answering, a save of its not yet read back, or the person's edits not yet saved. */
-    working: answering || pending || saving,
+    /** Answering, a save of its not yet read back, or the person's edits and presses not yet saved. */
+    working: answering || owed,
+    /** A press that reads the source waits for the assistant to be done. */
+    deferred: deferred > 0,
     /** An answer waits on the person's Allow, holding the revision it read. */
     waiting,
     editFlow,
     prepare,
+    whenFree,
+    atRevision,
   }
 }
+
+export type AssistantDraft = ReturnType<typeof useAssistantDraft>

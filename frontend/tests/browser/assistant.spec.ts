@@ -1739,12 +1739,14 @@ async function draftServer(page: Page) {
   const state = {
     revision: 2,
     name: "shop",
+    ref: "main",
     configuration: structuredClone(planned),
     log: [] as string[],
   }
   const current = () => {
     const draft = setupDraft(state.revision, state.name)
     draft.data.configuration = structuredClone(state.configuration)
+    draft.data.source = { ...draft.data.source, ref: state.ref }
     return draft
   }
   const refuse = (route: Route) =>
@@ -1770,7 +1772,17 @@ async function draftServer(page: Page) {
     state.revision += 1
     if (body.configuration) state.configuration = structuredClone(body.configuration)
     if (body.intent?.name) state.name = body.intent.name
-    state.log.push(body.intent ? "save name" : "save")
+    if (body.source) state.ref = body.source.ref
+    state.log.push(body.intent ? "save name" : body.source ? "save source" : "save")
+    return json(route, current())
+  })
+  await page.route("**/api/v1/deploy/drafts/setup-draft/detect", (route) => {
+    if (route.request().postDataJSON().revision !== state.revision) {
+      state.log.push("detect 409")
+      return refuse(route)
+    }
+    state.revision += 1
+    state.log.push("detect")
     return json(route, current())
   })
   await page.route("**/api/v1/deploy/drafts/setup-draft/preflight", (route) => {
@@ -1892,10 +1904,11 @@ test("an answer waiting on the person's Allow holds Review's check as well", asy
 })
 
 /** On Review with the plan the assistant chose first checked, its turns held open. */
-async function onReviewWithHeldTurns(page: Page) {
+async function onReviewWithHeldTurns(page: Page, routes?: () => Promise<unknown>) {
   await mockSetup(page, [])
   const server = await draftServer(page)
   const held = await holdSetupTurns(page)
+  await routes?.()
   await page.goto("/deploy/new?draft=setup-draft")
   await page.locator("[data-slot='setup-assistant-offer']").click()
   const panel = page.locator("[data-slot='setup-assistant']")
@@ -2013,6 +2026,57 @@ test("what the person types while it saves is kept over its read-back, and saved
   expect(state.log.slice(before)).toEqual(["assistant save", "save name", "save"])
   expect(state.configuration.runtime.internalPort).toBe(8080)
   await expect(name).toHaveValue("shop-two")
+})
+
+test("a branch changed while it works is read once it is done, at the draft's revision", async ({
+  page,
+}) => {
+  const { state, assistantSaves, turns, send, panel, before } = await onReviewWithHeldTurns(
+    page,
+    () =>
+      page.route("**/api/v1/git/github/branches?**", (route) =>
+        json(route, [{ name: "main", default: true }, { name: "next" }]),
+      ),
+  )
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  // Its call holds the revision it read when the answer began.
+  const holds = state.revision
+  const back = page.getByRole("button", { name: "Back", exact: true })
+  await back.click()
+  await back.click()
+  await back.click()
+  const branch = page.getByRole("combobox", { name: "Branch" })
+  await branch.click()
+  await page.getByRole("option", { name: "next" }).click()
+  // The new branch waits for it: saving the source now would take its revision.
+  await expect(page.getByText("Your change is read once it has finished.")).toBeVisible()
+  await page.waitForTimeout(400)
+  expect(state.log.slice(before)).toEqual([])
+  await expect(branch).toBeEnabled()
+
+  expect(assistantSaves(8080, holds)).toBe(true)
+  const read = readBack(page)
+  await send(
+    1,
+    [
+      start,
+      { type: "call", call: saveDraft },
+      savedDraft("s"),
+      { type: "text", text: "Now on 8080." },
+      done(),
+    ],
+    true,
+  )
+  await read
+  // Then the branch is saved and read at the revision its save left.
+  await expect.poll(() => state.ref).toBe("next")
+  await page.waitForTimeout(600)
+  expect(state.log.slice(before)).toEqual(["assistant save", "save source", "detect"])
+  expect(state.configuration.runtime.internalPort).toBe(8080)
+  await expect(page.getByText("Your change is read once it has finished.")).toHaveCount(0)
+  await expect(branch).toHaveText("next")
 })
 
 test("handed over on Review, what the page holds is saved at the draft's revision", async ({
