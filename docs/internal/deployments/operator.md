@@ -410,8 +410,9 @@ says to follow the run a push starts and fix what it finds.
   workspaces and can swap one, or `jd-workspaces`, for a link at any moment, to a folder of root's that holds
   a repository of its own (one in `/tmp`): so every git the workspace tools run (`gitx.ForAccounts`, and the
   relay's checkout side, `accountRunner`) runs as root only in a folder of root's that no other account can
-  point elsewhere (every folder from `/` root's, no link, none writable by others without the sticky bit:
-  `rootsAllTheWay`), and is refused anywhere else; a clone's owner is fixed once, and a failed clone removes
+  point elsewhere (every folder from `/` root's, no link, none writable by others without the sticky bit, and
+  the folder git runs in writable by root alone, since in a sticky one such as `/tmp` another account can make
+  a bare repository beside an empty `.git`: `rootsAllTheWay`), and is refused anywhere else; a clone's owner is fixed once, and a failed clone removes
   only a folder of the account its git ran as, through the parent opened once (`removeMade`). A git that
   reaches its deadline is stopped with everything it started (`stoppedWhole`: its own process group, killed
   whole, and a five-second `WaitDelay`), so a remote that never answers holds neither the relay's lock nor the
@@ -464,12 +465,14 @@ says to follow the run a push starts and fix what it finds.
   is not read with a credential. A commit runs the checkout's hooks as usual; it carries no credential. The
   workspace's checkout is never the folder git runs in with a credential, and nothing of one is kept in the
   checkout or told to the model. Git LFS goes the same way (`relay_lfs.go`): git-lfs fetches and uploads with the credential only as the
-  dashboard, in the relay, its endpoint pinned to the remote's (`lfs.url` at command scope, which a
-  repository's `.lfsconfig` cannot override), and the objects cross as content alone. After a clone's checkout
+  dashboard, in the relay, its endpoint pinned to the remote's, beside `<remote>.git` as git-lfs finds it (`lfs.url` and
+  `lfs.pushurl` at command scope, which a repository's `.lfsconfig`, read from the relay's `HEAD`, cannot
+  override), and the objects cross as content alone. After a clone's checkout
   (made with `GIT_LFS_SKIP_SMUDGE=1`) the relay fetches the checked-out commit's LFS files, the account's
   `git lfs clean` stores each in its own `.git/lfs/objects` from a pipe, and the account sets git-lfs up for
-  that checkout (`git lfs install --local --skip-repo`) and runs `git lfs checkout`, so the files are real and
-  git reads them back as their pointers. A fetch brings the LFS files of every branch it moved into the
+  that checkout (`git lfs install --local --skip-repo`, with `lfs.skipdownloaderrors`, since its git-lfs has
+  no credential: a branch whose LFS files it was never given checks out with those as pointers rather than
+  failing) and runs `git lfs checkout`, so the files are real and git reads them back as their pointers. A fetch brings the LFS files of every branch it moved into the
   checkout's store the same way. A push asks git-lfs in the relay which objects the commits carry
   (`git lfs pre-push --dry-run`), takes those the relay lacks from the account's `git lfs smudge` through a
   pipe, keeps each only when its content hashes to its id, and uploads them before the commit

@@ -305,7 +305,10 @@ func accountRunner(dir, ownerDir string) (gitRunner, uint32, error) {
 // rootsAllTheWay is whether every folder from / to path is root's, none is a
 // link, and none is one another account may rename entries in (writable by
 // group or others without the sticky bit): a path no other account can point
-// anywhere else.
+// anywhere else. path itself is writable by root alone, sticky or not: in a
+// folder anyone may write in (/tmp), another account can make a bare
+// repository of its own beside an empty .git, and git as root takes the
+// folder for that repository.
 func rootsAllTheWay(path string) bool {
 	path = filepath.Clean(path)
 	if !filepath.IsAbs(path) {
@@ -317,7 +320,8 @@ func rootsAllTheWay(path string) bool {
 			return false
 		}
 		st, ok := info.Sys().(*syscall.Stat_t)
-		if !ok || st.Uid != 0 || (info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0) {
+		writable := info.Mode().Perm()&0o022 != 0
+		if !ok || st.Uid != 0 || (writable && (at == path || info.Mode()&os.ModeSticky == 0)) {
 			return false
 		}
 		if at == filepath.Dir(at) {
@@ -341,6 +345,16 @@ func stoppedWhole(cmd *exec.Cmd) *exec.Cmd {
 	return cmd
 }
 
+// stillOK is err, except that a git that exited 0 while something it started
+// (a hook's process in the background) kept its output open past WaitDelay is
+// a success: what git did is done, and only the reading was cut short.
+func stillOK(err error) error {
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil
+	}
+	return err
+}
+
 // runGit runs one command and answers what it wrote to its output; a failure
 // carries what git said.
 func runGit(ctx context.Context, run gitRunner, timeout time.Duration, input string, args ...string) (string, error) {
@@ -352,7 +366,7 @@ func runGit(ctx context.Context, run gitRunner, timeout time.Duration, input str
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	if err := stillOK(cmd.Run()); err != nil {
 		said := strings.TrimSpace(stderr.String() + "\n" + stdout.String())
 		if said == "" {
 			said = err.Error()
@@ -496,8 +510,8 @@ func pipePack(ctx context.Context, from, to gitRunner, want, exclude []string) e
 		return fmt.Errorf("git index-pack could not be started: %w", err)
 	}
 	_ = reader.Close()
-	indexErr := index.Wait()
-	packErr := pack.Wait()
+	indexErr := stillOK(index.Wait())
+	packErr := stillOK(pack.Wait())
 	switch {
 	case packErr != nil:
 		return fmt.Errorf("git pack-objects: %s", orErr(packSaid.String(), packErr))
@@ -552,14 +566,6 @@ func runGitStreaming(ctx context.Context, run gitRunner, timeout time.Duration, 
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := stoppedWhole(run(ctx, args...))
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
 	var mu sync.Mutex
 	last := ""
 	emit := func(stream string) func(string) {
@@ -572,15 +578,11 @@ func runGitStreaming(ctx context.Context, run gitRunner, timeout time.Duration, 
 			line(stream, text)
 		}
 	}
-	if err := cmd.Start(); err != nil {
+	started, err := streamOutput(cmd, emit)
+	if !started {
 		return fmt.Errorf("git could not be started: %w", err)
 	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); collapseProgress(stdout, time.Now, emit("stdout")) }()
-	go func() { defer wg.Done(); collapseProgress(stderr, time.Now, emit("stderr")) }()
-	wg.Wait()
-	if err := cmd.Wait(); err != nil {
+	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -844,7 +846,10 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 				options.say(lfsNotInstalled)
 			}
 		default:
-			given, err := r.lfsIntoCheckout(ctx, checkout, plan.Target, extra, []string{rev})
+			given, unfetched, err := r.lfsIntoCheckout(ctx, checkout, plan.Target, extra, []string{rev})
+			if err == nil {
+				err = unfetched
+			}
 			if err != nil {
 				return "", fmt.Errorf("its Git LFS files could not be fetched: %w", err)
 			}
@@ -978,10 +983,6 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	s = s.ForAccounts()
 	unlock := s.Lock(r.Dir)
 	defer unlock()
-	before, err := r.refs(ctx)
-	if err != nil {
-		return nil, err
-	}
 	if err := r.Fetch(ctx, extra); err != nil {
 		return nil, err
 	}
@@ -993,6 +994,14 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	if err != nil {
 		return nil, err
 	}
+	// What the checkout had of origin before this fetch, not what the relay
+	// had: the relay is every checkout's of this remote (another workspace,
+	// the GitHub page's clone, a push's own fetch), and a branch it moved for
+	// one of them is still new to this one.
+	tracked, err := refsOf(ctx, checkout, "refs/remotes/origin")
+	if err != nil {
+		return nil, err
+	}
 	if err := r.intoCheckout(ctx, checkout, refs); err != nil {
 		return nil, err
 	}
@@ -1001,7 +1010,7 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	// one finds them in the checkout without a credential.
 	var moved []string
 	for ref, id := range refs {
-		if strings.HasPrefix(ref, "refs/heads/") && before[ref] != id {
+		if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok && tracked["refs/remotes/origin/"+branch] != id {
 			moved = append(moved, ref)
 		}
 	}
@@ -1016,15 +1025,24 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 			}
 		}
 	default:
-		given, err := r.lfsIntoCheckout(ctx, checkout, path, extra, moved)
+		// The fetch itself is done: an LFS object the server no longer has, on
+		// any branch it moved, is said, not a failure of the fetch.
+		given, unfetched, err := r.lfsIntoCheckout(ctx, checkout, path, extra, moved)
 		if err != nil {
 			return nil, fmt.Errorf("the fetch's Git LFS files could not be fetched: %w", err)
 		}
+		said := []string{}
 		if given > 0 {
 			if lfsConfigured(ctx, checkout) {
 				_, _ = runGit(ctx, checkout, 10*time.Minute, "", "lfs", "checkout")
 			}
-			res.Output = plural(given, "Git LFS file was", "Git LFS files were") + " fetched through the relay."
+			said = append(said, plural(given, "Git LFS file was", "Git LFS files were")+" fetched through the relay.")
+		}
+		if unfetched != nil {
+			said = append(said, "Some of its Git LFS files could not be fetched: "+strings.TrimPrefix(unfetched.Error(), "git lfs: "))
+		}
+		if len(said) > 0 {
+			res.Output = strings.Join(said, "\n")
 		}
 	}
 	return res, nil

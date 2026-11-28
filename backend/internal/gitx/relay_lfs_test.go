@@ -57,6 +57,9 @@ func (l *lfsServer) serve(w http.ResponseWriter, r *http.Request, base string) {
 	l.mu.Unlock()
 	objects := base + "/acme/shop.git/info/lfs/objects/"
 	switch {
+	case !strings.Contains(r.URL.Path, ".git/info/lfs/"):
+		// As GitHub and GitLab answer: the LFS API is beside <repository>.git.
+		http.Error(w, "unprocessable", http.StatusUnprocessableEntity)
 	case r.Method == http.MethodPost && strings.HasSuffix(r.URL.Path, "/info/lfs/objects/batch"):
 		var batch struct {
 			Operation string `json:"operation"`

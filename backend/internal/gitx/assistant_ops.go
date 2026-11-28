@@ -108,6 +108,7 @@ func (s *Service) opEnv(ctx context.Context, path string, timeout time.Duration,
 		cmd.Env = append(cmd.Env, key+"="+value)
 	}
 	out, err := cmd.CombinedOutput()
+	err = stillOK(err)
 	res := &Result{Command: "git " + strings.Join(args, " "), Output: strings.TrimSpace(string(out)), OK: err == nil}
 	if err != nil {
 		return res, fmt.Errorf("git %s: %s", args[0], res.Output)

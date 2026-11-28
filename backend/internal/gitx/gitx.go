@@ -1019,7 +1019,8 @@ func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Durat
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
-	return cmd.CombinedOutput()
+	out, err := cmd.CombinedOutput()
+	return out, stillOK(err)
 }
 
 // refuseRoot is ForAccounts' refusal of a git that would run as root in a

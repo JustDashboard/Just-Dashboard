@@ -22,9 +22,10 @@ import (
 // by git-lfs's own HTTP client, which takes the same credential git does
 // (http.<remote>.extraHeader), so like git it runs only as the dashboard, in
 // the relay, with the dashboard's own settings and the credential in that one
-// process's environment. The LFS endpoint is pinned to the remote's
-// (lfs.url, at command scope, which wins over a repository's .lfsconfig), so
-// what a repository's files say cannot send the header anywhere else.
+// process's environment. The LFS endpoint is pinned to the remote's both ways
+// (lfs.url and lfs.pushurl, at command scope, which win over a repository's
+// .lfsconfig), so what a repository's files say cannot send the header or an
+// upload anywhere else.
 //
 // The objects cross to and from the checkout's account as content alone, each
 // side running git-lfs as itself in its own repository: the account's
@@ -70,16 +71,32 @@ func withConfig(extra map[string]string, pairs ...string) map[string]string {
 }
 
 // lfsRunner is the relay's git for git-lfs: origin is the remote, the LFS
-// endpoint is the remote's alone, a push of a commit whose older objects the
-// relay never held carries what it has (the remote has the rest: they came
-// from it), and no lock is checked.
+// endpoint is the remote's alone both ways (lfs.url and lfs.pushurl: a
+// repository's .lfsconfig, which git-lfs reads from the relay's HEAD, may set
+// either, and lfs.pushurl wins over lfs.url for an upload), a push of a commit
+// whose objects the relay never held (older ones, a tag's) goes when the
+// remote has them, which git-lfs asks it, and is refused when it lacks one
+// that neither side holds, as git-lfs's own hook refuses it
+// (lfs.allowincompletepush off), and no lock is checked.
 func (r *Relay) lfsRunner(extra map[string]string) gitRunner {
+	endpoint := lfsEndpoint(r.Remote)
 	return r.runner(withConfig(extra,
 		"remote.origin.url", r.Remote,
-		"lfs.url", strings.TrimSuffix(r.Remote, "/")+"/info/lfs",
-		"lfs.allowincompletepush", "true",
+		"lfs.url", endpoint,
+		"lfs.pushurl", endpoint,
+		"lfs.allowincompletepush", "false",
 		"lfs.locksverify", "false",
 	))
+}
+
+// lfsEndpoint is remote's Git LFS API as git-lfs finds it on its own: beside
+// <repository>.git, the only place GitHub and GitLab answer it.
+func lfsEndpoint(remote string) string {
+	base := strings.TrimSuffix(remote, "/")
+	if !strings.HasSuffix(base, ".git") {
+		base += ".git"
+	}
+	return base + "/info/lfs"
 }
 
 // lfsAt is the LFS files of rev in the relay.
@@ -111,13 +128,15 @@ func lfsPath(store, oid string) string {
 
 // lfsIntoCheckout fetches the LFS files of revs into the relay with extra and
 // gives the checkout's account those it lacks, and answers how many it gave.
-func (r *Relay) lfsIntoCheckout(ctx context.Context, checkout gitRunner, path string, extra map[string]string, revs []string) (int, error) {
+// A fetch that brought only some (an object the server no longer has) still
+// gives those it brought, and answers what git-lfs said as unfetched.
+func (r *Relay) lfsIntoCheckout(ctx context.Context, checkout gitRunner, path string, extra map[string]string, revs []string) (given int, unfetched, err error) {
 	seen := map[string]bool{}
 	var objects []lfsObject
 	for _, rev := range revs {
 		at, err := r.lfsAt(ctx, rev)
 		if err != nil {
-			return 0, err
+			return 0, nil, err
 		}
 		for _, object := range at {
 			if !seen[object.OID] {
@@ -135,13 +154,13 @@ func (r *Relay) lfsIntoCheckout(ctx context.Context, checkout gitRunner, path st
 		}
 	}
 	if len(missing) == 0 {
-		return 0, nil
+		return 0, nil, nil
 	}
-	if _, err := runGit(ctx, r.lfsRunner(extra), 30*time.Minute, "", append([]string{"lfs", "fetch", "origin"}, revs...)...); err != nil {
-		return 0, err
+	_, unfetched = runGit(ctx, r.lfsRunner(extra), 30*time.Minute, "", append([]string{"lfs", "fetch", "origin"}, revs...)...)
+	if unfetched != nil && ctx.Err() != nil {
+		return 0, nil, unfetched
 	}
 	store := filepath.Join(r.Dir, "lfs", "objects")
-	given := 0
 	for _, object := range missing {
 		file, err := os.Open(lfsPath(store, object.OID))
 		if err != nil {
@@ -150,11 +169,11 @@ func (r *Relay) lfsIntoCheckout(ctx context.Context, checkout gitRunner, path st
 		err = runGitWithInput(ctx, checkout, 10*time.Minute, file, io.Discard, "lfs", "clean", "--", object.Path)
 		_ = file.Close()
 		if err != nil {
-			return given, err
+			return given, unfetched, err
 		}
 		given++
 	}
-	return given, nil
+	return given, unfetched, nil
 }
 
 // runGitWithInput runs one command with input as its standard input and its
@@ -165,7 +184,7 @@ func runGitWithInput(ctx context.Context, run gitRunner, timeout time.Duration, 
 	cmd := stoppedWhole(run(ctx, args...))
 	var said bytes.Buffer
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = input, output, &said
-	if err := cmd.Run(); err != nil {
+	if err := stillOK(cmd.Run()); err != nil {
 		return fmt.Errorf("git %s: %s", strings.Join(args[:min(2, len(args))], " "), orErr(said.String(), err))
 	}
 	return nil
@@ -174,11 +193,19 @@ func runGitWithInput(ctx context.Context, run gitRunner, timeout time.Duration, 
 // lfsCheckout makes the checkout's LFS files real from what it holds, as its
 // account, with no credential: git-lfs set up for that one checkout (so git
 // reads them back as the pointers it committed), then its files checked out.
+// A download its smudge cannot make leaves the pointer
+// (lfs.skipdownloaderrors): the account's git-lfs has no credential, so a
+// checkout of a branch whose LFS files it was never given (one the fetch did
+// not move, one the account switches to itself) is made with those as
+// pointers instead of failing; those it holds are real.
 func lfsCheckout(ctx context.Context, checkout gitRunner) error {
 	if _, err := runGit(ctx, checkout, time.Minute, "", "lfs", "install", "--local", "--skip-repo"); err != nil {
 		if _, err := runGit(ctx, checkout, time.Minute, "", "lfs", "install", "--local"); err != nil {
 			return err
 		}
+	}
+	if _, err := runGit(ctx, checkout, time.Minute, "", "config", "--local", "lfs.skipdownloaderrors", "true"); err != nil {
+		return err
 	}
 	_, err := runGit(ctx, checkout, 10*time.Minute, "", "lfs", "checkout")
 	return err
@@ -187,7 +214,9 @@ func lfsCheckout(ctx context.Context, checkout gitRunner) error {
 // lfsUploaded uploads, through the relay, the LFS objects a push of head to
 // target carries that the remote may not have: the relay asks git-lfs which,
 // the checkout's account hands over those the relay lacks, and git-lfs uploads
-// them with extra before the commit is pushed, as its pre-push hook does.
+// them with extra before the commit is pushed, as its pre-push hook does. It
+// answers how many the checkout handed over: those are the ones made there,
+// which the remote cannot have had.
 func (r *Relay) lfsUploaded(ctx context.Context, checkout gitRunner, path, head, target string, extra map[string]string) (int, error) {
 	remoteSHA := strings.Repeat("0", len(head))
 	if out, err := runGit(ctx, r.runner(nil), 30*time.Second, "", "rev-parse", "--verify", "-q", "refs/remotes/origin/"+target); err == nil && objectIDPattern.MatchString(strings.TrimSpace(out)) {
@@ -210,6 +239,7 @@ func (r *Relay) lfsUploaded(ctx context.Context, checkout gitRunner, path, head,
 	if len(oids) == 0 {
 		return 0, nil
 	}
+	taken := 0
 	for _, oid := range oids {
 		if info, err := os.Lstat(lfsPath(store, oid)); err == nil && info.Mode().IsRegular() {
 			continue
@@ -217,11 +247,14 @@ func (r *Relay) lfsUploaded(ctx context.Context, checkout gitRunner, path, head,
 		if err := r.lfsFromCheckout(ctx, checkout, path, store, oid); err != nil {
 			return 0, err
 		}
+		if info, err := os.Lstat(lfsPath(store, oid)); err == nil && info.Mode().IsRegular() {
+			taken++
+		}
 	}
 	if _, err := runGit(ctx, r.lfsRunner(extra), 30*time.Minute, line, "lfs", "pre-push", "origin", r.Remote); err != nil {
 		return 0, err
 	}
-	return len(oids), nil
+	return taken, nil
 }
 
 // lfsFromCheckout takes one LFS object from the checkout's account into the
@@ -244,9 +277,15 @@ func (r *Relay) lfsFromCheckout(ctx context.Context, checkout gitRunner, path, s
 	}
 	defer os.Remove(file.Name())
 	hash := sha256.New()
-	smudged := runGitWithInput(ctx, checkout, 10*time.Minute, strings.NewReader(pointer), io.MultiWriter(file, hash), "lfs", "smudge", "--", "object")
+	// No more than the object's size is kept: what the account's git-lfs
+	// writes is the account's, and the relay's store is the dashboard's disk.
+	bounded := &sizeBound{w: io.MultiWriter(file, hash), left: held.Size()}
+	smudged := runGitWithInput(ctx, checkout, 10*time.Minute, strings.NewReader(pointer), bounded, "lfs", "smudge", "--", "object")
 	if err := file.Close(); err != nil {
 		return err
+	}
+	if bounded.over {
+		return fmt.Errorf("the checkout's Git LFS object %s is larger than its size", oid)
 	}
 	if smudged != nil {
 		return smudged
@@ -262,6 +301,22 @@ func (r *Relay) lfsFromCheckout(ctx context.Context, checkout gitRunner, path, s
 		return err
 	}
 	return nil
+}
+
+// sizeBound writes to w no more than left bytes, and fails a write past them.
+type sizeBound struct {
+	w    io.Writer
+	left int64
+	over bool
+}
+
+func (b *sizeBound) Write(p []byte) (int, error) {
+	if int64(len(p)) > b.left {
+		b.over = true
+		return 0, errors.New("larger than its size")
+	}
+	b.left -= int64(len(p))
+	return b.w.Write(p)
 }
 
 // lfsConfigured is whether the checkout's git sends files through git-lfs, so
