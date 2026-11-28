@@ -34,9 +34,11 @@ func (s *Service) PushWith(ctx context.Context, path, branch string, extra map[s
 		}
 		target = branch
 	}
+	// Every refspec is written out whole: a branch may be called "+main", and a
+	// bare name that begins with + is git's mark for a forced update.
 	args := []string{"push", "--porcelain", "origin", "HEAD:refs/heads/" + target}
 	if target == current && !s.hasUpstream(ctx, path) {
-		args = []string{"push", "--porcelain", "--set-upstream", "origin", current}
+		args = []string{"push", "--porcelain", "--set-upstream", "origin", "refs/heads/" + current + ":refs/heads/" + current}
 	}
 	return s.opEnv(ctx, path, 3*time.Minute, extra, args...)
 }
