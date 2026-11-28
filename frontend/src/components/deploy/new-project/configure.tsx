@@ -404,7 +404,7 @@ export function Configure({
   const changeBranch = (nextRef: string) => {
     const ref = nextRef.trim()
     setBranch(ref)
-    if (ref && ref !== flow.source.ref) source.resaveSource({ ref })
+    if (ref && (ref !== flow.source.ref || assistant.deferred)) source.resaveSource({ ref })
   }
 
   const changeProfile = (profile: WorkloadProfile) => {
@@ -685,10 +685,9 @@ export function Configure({
         isGitSource ? gitPolicy : undefined,
       )
       onStepChange("done")
-      setCreated({
-        projectId: commit.projectId,
-        environmentId: commit.environmentId,
-      })
+      setCreated({ projectId: commit.projectId, environmentId: commit.environmentId })
+      // What waited to be asked of the draft is the new deployment's now.
+      assistant.committed(commit)
 
       if (operation === "deploy") {
         const run = await enqueueDeploy(
@@ -1005,7 +1004,7 @@ export function Configure({
                     : "Deploy"}
               </Button>
             ) : (
-              <Button onClick={advance} disabled={Boolean(busy) || assistant.working}>
+              <Button onClick={advance} disabled={Boolean(busy)}>
                 <ArrowRight className="size-4" />
                 Continue
               </Button>

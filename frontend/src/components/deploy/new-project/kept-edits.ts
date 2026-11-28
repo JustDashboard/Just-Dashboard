@@ -58,6 +58,9 @@ function valueAt(source: unknown, path: string[]): unknown {
 function withValue<T>(target: T, path: string[], value: unknown): T {
   if (path.length === 0) return value as T
   const [key, ...rest] = path
+  // A field taken out of a part the read-back no longer has is out already: laying
+  // it over must not bring the part back empty (a canary or a rate limit as {}).
+  if (value === undefined && !(isRecord(target) && key in target)) return target
   const base: Record<string, unknown> = isRecord(target) ? { ...target } : {}
   const next = withValue(base[key], rest, value)
   if (next === undefined) delete base[key]

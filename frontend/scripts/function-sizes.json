@@ -54,7 +54,7 @@
       "TableView": 662
     },
     "src/components/deploy/new-project/configure.tsx": {
-      "Configure": 914
+      "Configure": 913
     },
     "src/components/deploy/new-project/source-git.tsx": {
       "SourceGit": 586

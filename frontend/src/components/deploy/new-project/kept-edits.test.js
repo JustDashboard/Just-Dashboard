@@ -106,6 +106,26 @@ describe("kept edits over a read-back", () => {
     expect("buildCommand" in withKeptEdits(flow(), kept).configuration.build).toBe(false)
   })
 
+  test("a field taken out of a part the read-back took out brings nothing back", () => {
+    const seen = withConfig(flow(), (c) => {
+      c.runtime.canary = { percent: 10, durationSeconds: 300, autoPromote: true }
+      return c
+    })
+    const typed = withConfig(seen, (c) => {
+      delete c.runtime.canary.autoPromote
+      return c
+    })
+    const kept = keepEdits(NO_KEPT_EDITS, editedPaths(seen, typed), typed)
+    // The assistant turned the canary off meanwhile.
+    const merged = withKeptEdits(flow(), kept)
+    expect("canary" in merged.configuration.runtime).toBe(false)
+    // Over a read-back that still has it, the field stays out.
+    expect(withKeptEdits(seen, kept).configuration.runtime.canary).toEqual({
+      percent: 10,
+      durationSeconds: 300,
+    })
+  })
+
   test("nothing kept is nothing to save", () => {
     expect(hasKeptEdits(NO_KEPT_EDITS)).toBe(false)
     const seen = flow()

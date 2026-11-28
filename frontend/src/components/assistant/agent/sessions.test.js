@@ -8,10 +8,14 @@ import {
   agentQueues,
   agentScopeKey,
   askAgent,
+  askAgentFirst,
+  carryAgentQueue,
   decideAgent,
+  deployedDraftScope,
   holdAgentTurns,
   editQueued,
   newAgentChat,
+  openAgentChat,
   removeQueued,
   stopAgent,
   takeOverAgent,
@@ -211,6 +215,36 @@ describe("a question sent while it answers waits its turn", () => {
     expect(session.queue.map((one) => one.question)).toEqual(["third"])
   })
 
+  test("Stop, or a failure, on the answer after an Allow hands what waits back too", async () => {
+    for (const end of ["stop", "fail"]) {
+      const { calls } = turnServer()
+      const session = freshChat()
+      askAgent(session, "first")
+      await settle()
+      askAgent(session, "second")
+      calls[0].answer([start, done({ stop: "tool", pending: [change] })])
+      await settle()
+      decideAgent(session, "x", true)
+      await settle()
+      if (end === "stop") stopAgent(session)
+      else
+        calls[1].answer([
+          start,
+          { type: "error", error: { code: "provider_error", message: "No." } },
+        ])
+      await settle()
+      // The calls it had not run are asked for again; nothing waits behind them.
+      expect(session.transcript.turns.at(-1).phase).toBe("asking")
+      expect(session.queue).toEqual([])
+      expect(session.returned.map((one) => one.question)).toEqual(["second"])
+      decideAgent(session, "x", false)
+      await settle()
+      calls[2].answer([start, done()])
+      await settle()
+      expect(calls).toHaveLength(3)
+    }
+  })
+
   test("with nothing waiting, a question sent while it waits on Allow still declines it", async () => {
     const { calls } = turnServer()
     const session = freshChat()
@@ -304,6 +338,29 @@ describe("a page holds the chat's next turn while it writes what the chat works 
     expect(calls.map((call) => call.body.question)).toEqual(["first"])
   })
 
+  test("held by the page while an answer waits on Allow, the Allow is what it names", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    askAgent(session, "first")
+    await settle()
+    calls[0].answer([start, done({ stop: "tool", pending: [change] })])
+    await settle()
+    // The person typed into the form meanwhile: the page holds for that save,
+    // which it makes only once the Allow is answered.
+    holdAgentTurns(session, "draft-edits", true)
+    askAgent(session, "second")
+    expect(calls).toHaveLength(1)
+    expect(agentQueueHeld(session)).toBe("allow")
+    decideAgent(session, "x", true)
+    await settle()
+    calls[1].answer([start, done()])
+    await settle()
+    expect(agentQueueHeld(session)).toBe("page")
+    holdAgentTurns(session, "draft-edits", false)
+    await settle()
+    expect(calls[2].body.question).toBe("second")
+  })
+
   test("a question waiting in the queue is not asked at the end of an answer while it holds", async () => {
     const { calls } = turnServer()
     const session = freshChat()
@@ -323,5 +380,203 @@ describe("a page holds the chat's next turn while it writes what the chat works 
     holdAgentTurns(session, "draft-save", false)
     await settle()
     expect(calls.map((call) => call.body.question)).toEqual(["first", "second"])
+  })
+})
+
+describe("what the page's hold keeps back besides a question", () => {
+  test("the page's own first question goes ahead of one the person sent while it held", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    holdAgentTurns(session, "draft-prepare", true)
+    askAgent(session, "the person's")
+    askAgentFirst(session, "configure it")
+    expect(calls).toHaveLength(0)
+    holdAgentTurns(session, "draft-prepare", false)
+    await settle()
+    expect(calls.map((call) => call.body.question)).toEqual(["configure it"])
+    calls[0].answer([start, done()])
+    await settle()
+    expect(calls.map((call) => call.body.question)).toEqual(["configure it", "the person's"])
+  })
+
+  test("a subject that became another carries what waits into the new one's box, unsent", async () => {
+    const { calls } = turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-carry", name: "shop" })
+    holdAgentTurns(draft, "draft-save", true)
+    askAgent(draft, "and add a volume", [image], [], [])
+    expect(draft.queue).toHaveLength(1)
+    const deployment = {
+      kind: "deployment",
+      projectId: 70,
+      environmentId: 71,
+      name: "shop",
+      environmentName: "production",
+    }
+    carryAgentQueue(draft, deployment)
+    holdAgentTurns(draft, "draft-save", false)
+    await settle()
+    expect(calls).toHaveLength(0)
+    expect(draft.queue).toEqual([])
+    const front = newAgentChat(deployment)
+    expect(front.returned.map((one) => [one.question, one.images.length])).toEqual([
+      ["and add a volume", 1],
+    ])
+  })
+
+  test("a Take over the page held is not made of a draft deployed meanwhile", async () => {
+    const { calls, refusals } = turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-owed", name: "shop" })
+    refusals.push("chat_busy")
+    askAgent(draft, "first")
+    await settle()
+    expect(draft.held?.body.question).toBe("first")
+    holdAgentTurns(draft, "draft-save", true)
+    takeOverAgent(draft)
+    expect(draft.owed).toBe("takeOver")
+    carryAgentQueue(draft, {
+      kind: "deployment",
+      projectId: 80,
+      environmentId: 81,
+      name: "shop",
+      environmentName: "production",
+    })
+    holdAgentTurns(draft, "draft-save", false)
+    await settle()
+    // Deploy let go of the hold after the commit: nothing goes to the deployed draft.
+    expect(calls).toHaveLength(1)
+  })
+
+  test("Take over pressed while the page holds goes once it lets go", async () => {
+    const { calls, refusals } = turnServer()
+    const session = freshChat()
+    refusals.push("chat_busy")
+    askAgent(session, "first")
+    await settle()
+    expect(session.held?.body.question).toBe("first")
+    holdAgentTurns(session, "draft-save", true)
+    takeOverAgent(session)
+    expect(calls).toHaveLength(1)
+    expect(session.owed).toBe("takeOver")
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    expect(calls[1].body).toMatchObject({ question: "first", takeOver: true })
+  })
+
+  test("a password typed while the page holds carries on once it lets go, ahead of what waits", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    askAgent(session, "update")
+    await settle()
+    calls[0].answer([
+      start,
+      { type: "call", call: { ...change, id: "t", tool: "terminal_run" } },
+      {
+        type: "called",
+        id: "t",
+        tool: "terminal_run",
+        ok: true,
+        terminal: { session: "w", state: "password", prompt: "[sudo] password:" },
+      },
+      done(),
+    ])
+    await settle()
+    holdAgentTurns(session, "draft-save", true)
+    askAgent(session, "then reboot")
+    agentPasswordTyped(session)
+    expect(calls).toHaveLength(1)
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    expect(calls[1].body.question).toBe("I've typed the password.")
+    calls[1].answer([start, done()])
+    await settle()
+    expect(calls[2].body.question).toBe("then reboot")
+  })
+
+  test("a Take over the page held goes nowhere once the other tab has finished", async () => {
+    const { calls } = turnServer()
+    const turns = globalThis.fetch
+    let running = true
+    globalThis.fetch = async (url, init) => {
+      if (init?.method === "POST") return turns(url, init)
+      const lines = [{ type: "question", text: "check it" }, start]
+      return Response.json({
+        chat: { id: "c1", title: "", running, scope: { kind: "database" } },
+        lines: running ? lines : [...lines, done()],
+      })
+    }
+    const session = freshChat()
+    askAgent(session, "check it")
+    await settle()
+    calls[0].answer([start, done()])
+    await settle()
+    // Read again while another tab answers it: it is followed until that ends.
+    const hadWindow = "window" in globalThis
+    if (!hadWindow) globalThis.window = globalThis
+    await openAgentChat(session.scope, "c1")
+    expect(session.elsewhere).toBe(true)
+    holdAgentTurns(session, "draft-save", true)
+    takeOverAgent(session)
+    expect(session.owed).toBe("takeOver")
+    running = false
+    await new Promise((resolve) => setTimeout(resolve, 2700))
+    expect(session.elsewhere).toBe(false)
+    if (!hadWindow) delete globalThis.window
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    // Nothing runs elsewhere any more: taking it over would answer the last turn again.
+    expect(calls).toHaveLength(1)
+    expect(session.owed).toBeUndefined()
+  }, 8000)
+})
+
+describe("a draft deployed with something waiting", () => {
+  const deployment = (environmentId) => ({
+    kind: "deployment",
+    projectId: 90,
+    environmentId,
+    name: "shop",
+    environmentName: "production",
+  })
+
+  test("what waits lands in that deployment's own chat, by its environment, and no other", async () => {
+    turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-where", name: "shop" })
+    holdAgentTurns(draft, "draft-save", true)
+    askAgent(draft, "and add a volume")
+    // What the commit answered, as the page passes it.
+    const scope = deployedDraftScope({ projectId: 90, environmentId: 91 }, "shop")
+    carryAgentQueue(draft, scope)
+    holdAgentTurns(draft, "draft-save", false)
+    expect(agentScopeKey(scope)).toBe("deploy.91")
+    expect(agentPageOf(scope)).toBe("/deploy/90/assistant")
+    // The chat the deployment's page opens, keyed by its environment, holds it; no
+    // other environment's does.
+    const page = { ...deployment(91), name: "shop (renamed)", environmentName: "Production" }
+    expect(newAgentChat(page).returned.map((one) => one.question)).toEqual(["and add a volume"])
+    expect(newAgentChat(deployment(92)).returned).toEqual([])
+  })
+
+  test("a question held for Take over is carried first, with its images, and its turn goes", async () => {
+    const { calls, refusals } = turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-held", name: "shop" })
+    refusals.push("chat_busy")
+    askAgent(draft, "first", [image], [{ label: "statement", text: "SELECT 1" }], ["sql"])
+    await settle()
+    expect(draft.held?.body.question).toBe("first")
+    holdAgentTurns(draft, "draft-save", true)
+    askAgent(draft, "second")
+    carryAgentQueue(draft, deployment(93))
+    holdAgentTurns(draft, "draft-save", false)
+    takeOverAgent(draft)
+    await settle()
+    // Nothing more goes to the deployed draft, and its "not sent" turn is gone.
+    expect(calls).toHaveLength(1)
+    expect(draft.held).toBeUndefined()
+    expect(draft.transcript.turns).toEqual([])
+    const carried = newAgentChat(deployment(93)).returned
+    expect(carried.map((one) => one.question)).toEqual(["first", "second"])
+    expect(carried[0].images).toEqual([image])
+    expect(carried[0].attached).toEqual([{ label: "statement", text: "SELECT 1" }])
+    expect(carried[0].pressed).toEqual(["sql"])
   })
 })

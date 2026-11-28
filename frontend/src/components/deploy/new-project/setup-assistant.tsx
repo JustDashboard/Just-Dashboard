@@ -12,12 +12,19 @@ import { AgentChat } from "@/components/assistant/agent/chat"
 import { SETUP_QUESTION, agentStatus } from "@/components/assistant/agent/model"
 import {
   agentBusy,
-  askAgent,
+  askAgentFirst,
+  holdAgentTurns,
   useAgentSession,
   type AgentScope,
 } from "@/components/assistant/agent/sessions"
 import { assistantProduct, useAssistantSettings } from "@/components/assistant/settings"
 import type { ConfigureFlow } from "@/components/deploy/new-project/draft"
+
+/**
+ * Why the chat's first turn waits: the page saving the plan it starts from. The
+ * page keeps what the person types meanwhile as it does while the assistant works.
+ */
+export const PREPARE = "draft-prepare"
 
 /** The conversation about a draft, which the page holds Deploy back for while it works. */
 export function draftScope(flow: ConfigureFlow): AgentScope {
@@ -54,12 +61,22 @@ export function SetupAssistant({
   const status = agentStatus(session.transcript)
   const product = assistantProduct(view)
 
-  // It begins on being handed the job, from the plan as it stands.
+  // It begins on being handed the job, from the plan as it stands. The page's save
+  // of that plan holds the chat's turn, so a question the person sends meanwhile
+  // waits, and goes after the job's own question.
+  // A panel closed and opened again before that question went has begun already:
+  // its save is still out, or its question waits in the queue.
   const begun = useRef(false)
   useEffect(() => {
     if (begun.current || !view?.configured || session.transcript.turns.length > 0) return
+    if (session.holds.includes(PREPARE)) return
+    if (session.queue.some((one) => one.question === SETUP_QUESTION)) return
     begun.current = true
-    void onPrepare().finally(() => askAgent(session, SETUP_QUESTION))
+    holdAgentTurns(session, PREPARE, true)
+    void onPrepare().finally(() => {
+      askAgentFirst(session, SETUP_QUESTION)
+      holdAgentTurns(session, PREPARE, false)
+    })
   }, [view?.configured, session, onPrepare])
 
   return (
