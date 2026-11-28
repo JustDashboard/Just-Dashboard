@@ -575,10 +575,11 @@ on a control with a face, the accent wash on a ghost — so nothing translates a
 to say it was pressed. Since 0.9.1 a control's face carries one lit pixel along its top (`--edge`) in
 place of its border, which is the whole of the height it claims ([`../foundations/surfaces.md`](../foundations/surfaces.md#2-nothing-lifts)).
 
-The nav's own treatment did not change with it, because it never used the lift: the current destination
-takes the sidebar accent fill, a brand-blue icon and a `font-medium` label against the `font-normal` of
-the rest. The rail is the one surface dense enough to need three weights, and the group labels above the
-entries are the third. `SidebarMenu`/`SidebarMenuSub` ship at `gap-0.5`.
+The nav's own treatment never used the lift. Since 27 Nov 2026 it is Just Hub's: every entry is a
+`font-medium` label in the secondary ink after a muted glyph, the current destination takes the accent
+fill, primary text and its glyph in the brand's ice, and the group labels above the entries are the
+eyebrow's caps in the faint ink. `SidebarMenuButton` carries the whole recipe; `AppSidebar` sets the
+rows 1px apart (`gap-px`) and the groups 20px apart (shell.md, *How the rail is drawn*).
 
 The brand ships as files in `public/brand-logo/`: the J mark (`just-mark*.svg`, with a `-small` cut
 for 16px and under), the horizontal and stacked lockups of the mark with "Just Dashboard"
