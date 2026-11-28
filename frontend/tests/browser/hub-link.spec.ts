@@ -1022,9 +1022,12 @@ test("linked: the switcher lists the fleet as the hub's, this one first, and ano
   ).toBe(true)
   await expect(page).toHaveURL(/\/account$/)
 
-  // A plain press goes there in this tab, as any link does.
-  await page.keyboard.press("Escape")
+  // A plain press goes there in this tab, as any link does. The pick closed the menu; it is
+  // opened again only once it has gone, since a closing menu hands focus back to its trigger
+  // after its exit and a press before that lands on the menu on its way out.
+  await expect(servers(page)).toHaveCount(0)
   await switcher(page).click()
+  await expect(servers(page)).toBeVisible()
   await servers(page)
     .getByRole("menuitem", { name: /^vmi3690758/ })
     .click()
