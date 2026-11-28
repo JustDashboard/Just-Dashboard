@@ -292,6 +292,118 @@ test("the Network panel groups its pages under headings", async ({ page }) => {
   expect(new Set(boxes.map((box) => Math.round(box!.x))).size).toBe(1)
 })
 
+// The rail is drawn as Just Hub's (27 Nov 2026). Its panel's name was an 11px
+// eyebrow in the voice of the group labels under it, so nothing said which was
+// the panel and which its shelves, and the wordmark, the search glass, the
+// labels and the rows' glyphs each started at a different inset.
+test("the rail is drawn as Just Hub's: one line, a named panel, faint labels, ice for here", async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 1440, height: 900 })
+  await mockShell(page)
+  await page.goto("/network/traffic")
+  const nav = rail(page)
+  await expect(nav.getByRole("link", { name: "Traffic", exact: true })).toHaveAttribute(
+    "aria-current",
+    "page",
+  )
+  const sidebar = page.locator('[data-slot="sidebar"][data-state]')
+  await sidebar.evaluate(async (el) => {
+    await Promise.all(el.getAnimations({ subtree: true }).map((animation) => animation.finished))
+  })
+
+  const read = await sidebar.evaluate((root) => {
+    const ink = (className: string) => {
+      const probe = document.createElement("span")
+      probe.className = className
+      root.append(probe)
+      const color = getComputedStyle(probe).color
+      probe.remove()
+      return color
+    }
+    const left = (el: Element | null | undefined) => (el ? el.getBoundingClientRect().left : NaN)
+    const rows = [...root.querySelectorAll<HTMLElement>('[data-sidebar="menu-button"]')]
+    const glyph = (row: Element) => row.querySelector(":scope > svg")
+    const labels = [...root.querySelectorAll<HTMLElement>('[data-sidebar="group-label"]')]
+    const back = root.querySelector<HTMLElement>('button[aria-label^="Back to"]')
+    const head = back?.nextElementSibling
+    const name = head?.querySelector("span.truncate")
+    const current = rows.find((row) => row.getAttribute("aria-current") === "page")
+    const resting = rows.find((row) => row !== current)
+    return {
+      line: {
+        wordmark: left(root.querySelector('[data-sidebar="header"] a[href="/"] svg')),
+        search: left(root.querySelector('button[aria-label="Search"] svg')),
+        back: left(back?.querySelector("svg")),
+        head: left(head?.querySelector("svg")),
+        labels: labels.map(
+          (label) => left(label) + parseFloat(getComputedStyle(label).paddingLeft),
+        ),
+        rows: rows.map((row) => left(glyph(row))),
+        account: left(
+          root.querySelector('button[aria-label$="account menu"] [data-slot="user-avatar"]'),
+        ),
+      },
+      head: name && {
+        size: parseFloat(getComputedStyle(name).fontSize),
+        weight: Number(getComputedStyle(name).fontWeight),
+        caps: getComputedStyle(name).textTransform,
+      },
+      rowSize: Math.max(...rows.map((row) => parseFloat(getComputedStyle(row).fontSize))),
+      rowWeights: [...new Set(rows.map((row) => getComputedStyle(row).fontWeight))],
+      labelInk: [...new Set(labels.map((label) => getComputedStyle(label).color))],
+      currentGlyph: current && getComputedStyle(glyph(current)!).color,
+      restingGlyph: resting && getComputedStyle(glyph(resting)!).color,
+      faint: ink("text-faint"),
+      brand: ink("text-brand"),
+      muted: ink("text-muted-foreground"),
+      // What each control with a focus ring eases: its ink and its fill.
+      eases: Object.fromEntries(
+        Object.entries({
+          search: root.querySelector('button[aria-label="Search"]')?.parentElement,
+          back,
+          row: current,
+          account: root.querySelector('button[aria-label$="account menu"]'),
+        }).map(([part, el]) => [part, el ? getComputedStyle(el).transitionProperty : "missing"]),
+      ),
+    }
+  })
+
+  // One line down the rail, whatever stands on it.
+  const { line } = read
+  const at = line.rows[0]
+  expect(line.labels.length, "Network's shelves are labelled").toBeGreaterThanOrEqual(3)
+  for (const [part, x] of Object.entries({
+    wordmark: line.wordmark,
+    search: line.search,
+    back: line.back,
+    head: line.head,
+    account: line.account,
+    ...Object.fromEntries(line.labels.map((x, i) => [`label ${i}`, x])),
+    ...Object.fromEntries(line.rows.map((x, i) => [`row ${i}`, x])),
+  }))
+    expect(Math.abs(x - at), `${part} starts at ${x}, the rows' glyphs at ${at}`).toBeLessThan(0.5)
+
+  // The panel's name is a size above its rows, in its own words, not in caps.
+  expect(read.head).toBeTruthy()
+  expect(read.head!.size).toBeGreaterThan(read.rowSize)
+  expect(read.head!.weight).toBeGreaterThanOrEqual(600)
+  expect(read.head!.caps).toBe("none")
+  // The labels step back in the faint ink; every row is one weight, the current one too.
+  expect(read.labelInk).toEqual([read.faint])
+  expect(read.rowWeights).toHaveLength(1)
+  // Here is the mark's ice; every other glyph is muted.
+  expect(read.currentGlyph).toBe(read.brand)
+  expect(read.restingGlyph).toBe(read.muted)
+  // A control with a focus ring eases its ink and fill, never the ring:
+  // `transition-colors` eases `outline-color` too, so the ring faded in after
+  // a Tab instead of being there at once (states.md).
+  for (const [part, eased] of Object.entries(read.eases)) {
+    expect(eased, `${part} is in the rail`).not.toBe("missing")
+    expect(eased, `${part} eases ${eased}`).not.toMatch(/outline|\ball\b/)
+  }
+})
+
 test("a deep link opens with the rail already inside the section", async ({ page }) => {
   await mockShell(page)
   await page.goto("/network/firewall")
