@@ -461,7 +461,9 @@ A change that weakens any of these has to say so explicitly.
     process of the checkout's account or one that reads the checkout's or that account's configuration** —
     this for the assistant's clone, fetch and push and the GitHub page's private clone, the git and git-lfs
     that carry it: they run as the dashboard in a bare repository of its own (`gitx.Relay`, in the data
-    folder), with only the dashboard's own Git settings and no hook, and the checkout's account takes or gives
+    folder), with only the dashboard's own Git settings and no hook (git-lfs there also reads the fetched
+    commit's `.lfsconfig`, but its endpoints are pinned to the remote's, so nothing in it moves where an object
+    or the credential goes or runs a program), and the checkout's account takes or gives
     objects, LFS objects and ref names through a pipe, with no credential, each side as itself in its own
     repository. The Local Git page's own fetch, pull and push carry no credential of the dashboard's: they
     use the account's own. The
