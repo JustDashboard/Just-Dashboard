@@ -20,8 +20,11 @@ import {
 import { assistantProduct, useAssistantSettings } from "@/components/assistant/settings"
 import type { ConfigureFlow } from "@/components/deploy/new-project/draft"
 
-/** Why the chat's first turn waits: the page saving the plan it starts from. */
-const PREPARE = "draft-prepare"
+/**
+ * Why the chat's first turn waits: the page saving the plan it starts from. The
+ * page keeps what the person types meanwhile as it does while the assistant works.
+ */
+export const PREPARE = "draft-prepare"
 
 /** The conversation about a draft, which the page holds Deploy back for while it works. */
 export function draftScope(flow: ConfigureFlow): AgentScope {

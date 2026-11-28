@@ -533,7 +533,8 @@ saved, and through every save of the page's own (Review's check, Save only, Depl
 chat's next turn is held (`holdAgentTurns`): a question sent then, or one waiting in its queue, is asked once that
 write has answered, and a save of the page's starts only while no turn is under way. The save made as the panel
 opens holds it too, and its own question (*Configure this deployment*) goes ahead of one the person sent meanwhile
-(`askAgentFirst`). A question waiting when Deploy or Save only commits the draft is not asked of it: the draft no
+(`askAgentFirst`). What the person types while that save is out is kept like any edit made while it works, so
+the first read-back never puts the older plan back over it. A question waiting when Deploy or Save only commits the draft is not asked of it: the draft no
 longer changes anything, so it is carried into the new deployment's own chat, in its box and unsent
 (`carryAgentQueue`), to send there or change once that chat is opened; one refused because another tab had the
 chat (`chat_busy`) goes first, with its images and attachments, and a Take over or an Allow held for it is let go.

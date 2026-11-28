@@ -2227,6 +2227,50 @@ test("a question sent while the panel's first save is out goes after the job's o
   expect((await questions())[1]).toBe("Use port 9090")
 })
 
+test("what is typed while the panel's first save is out is kept over the first read-back", async ({
+  page,
+}) => {
+  await mockSetup(page, [])
+  const { state, assistantSaves } = await draftServer(page)
+  const { turns, send } = await holdSetupTurns(page)
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  let saving = false
+  await page.route("**/api/v1/deploy/drafts/setup-draft", async (route) => {
+    if (route.request().method() === "PUT" && saving) {
+      saving = false
+      await gate
+    }
+    return route.fallback()
+  })
+  await page.goto("/deploy/new?draft=setup-draft")
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  await expect.poll(() => state.log).toContain("preflight")
+  await page.waitForTimeout(600)
+  saving = true
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  const panel = page.locator("[data-slot='setup-assistant']")
+  // The panel's first save is out; the person goes to the name and changes it.
+  const back = page.getByRole("button", { name: "Back", exact: true })
+  await back.click()
+  await back.click()
+  await back.click()
+  const name = page.getByLabel("Project name")
+  await name.fill("shop-two")
+  release()
+  // The edit is saved before the job's question goes, and the read-back of the
+  // assistant's first save keeps it.
+  await expect.poll(() => state.name).toBe("shop-two")
+  await expect.poll(turns).toBe(1)
+  assistantSaves(3000)
+  const read = readBack(page)
+  await send(0, configured, true)
+  await read
+  await expect(panel).toContainText("Press Deploy when you are ready.")
+  await page.waitForTimeout(300)
+  await expect(name).toHaveValue("shop-two")
+})
+
 test("the panel closed and opened again while its first save is out asks its question once", async ({
   page,
 }) => {

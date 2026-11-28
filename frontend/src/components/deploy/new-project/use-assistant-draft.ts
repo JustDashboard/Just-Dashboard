@@ -11,7 +11,7 @@ import {
   useAgentSession,
 } from "@/components/assistant/agent/sessions"
 import { pendingSteps } from "@/components/assistant/agent/model"
-import { draftScope } from "@/components/deploy/new-project/setup-assistant"
+import { PREPARE, draftScope } from "@/components/deploy/new-project/setup-assistant"
 import {
   configurationForSave,
   loadDraft,
@@ -65,7 +65,7 @@ async function savePlan(flow: ConfigureFlow, text: string, retainedKeys: string[
  *   read too; until the last one is in, the page is still behind it, and a check
  *   that went first would 409 and then save the page's older plan over its save.
  * - **The person's edits are kept.** The form stays editable while it works (Back
- *   and the step tabs too). Each edit made then is kept as the fields it touched
+ *   and the step tabs too), from the panel's first save on. Each edit made then is kept as the fields it touched
  *   (`kept-edits.ts`), laid over every read-back, and saved once nothing of the
  *   assistant's is under way or waiting on an Allow: at the draft's revision, and
  *   on a 409 over the draft read again with the edits laid over it, never over
@@ -109,7 +109,11 @@ export function useAssistantDraft({
   const [readBack, setReadBack] = useState(changes)
   const answering = agentBusy(session) || changes !== readBack
   const waiting = pendingSteps(session.transcript).length > 0
-  const engaged = answering || waiting
+  // The panel's first save is the assistant's start: what is typed over it is kept
+  // too, or the first read-back would put back the plan that save sent, and the
+  // page's own saves wait for it.
+  const preparing = session.holds.includes(PREPARE)
+  const engaged = answering || waiting || preparing
 
   const [kept, setKeptState] = useState<{ draftId: string; edits: KeptEdits }>({
     draftId,
@@ -333,7 +337,7 @@ export function useAssistantDraft({
   return {
     session,
     /** Answering, a save of its not yet read back, or the person's edits and presses not yet saved. */
-    working: answering || owed,
+    working: answering || preparing || owed,
     /** A press that reads the source waits for the assistant to be done. */
     deferred: deferred > 0,
     /** An answer waits on the person's Allow, holding the revision it read. */
