@@ -594,15 +594,50 @@ for account operations and Compose for status/logs/recreation; see
 [terminal tools](../operations/terminal-tools.md) for behavior, privilege boundaries and verification.
 It installs only missing curl/OpenSSL/Certbot packages using apt, dnf, yum, apk, zypper or pacman, validates
 Certbot's HTTP authenticators and enables an existing packaged renewal timer. Package failures stop setup.
+On Red Hat Enterprise Linux and its rebuilds (`jd_rhel_family`: Rocky, Alma, CentOS Stream, Oracle, and
+any `ID_LIKE` naming rhel or centos) Certbot lives in EPEL, so `jd_enable_epel` turns EPEL on first, each
+distribution its own way (`epel-release`, `oracle-epel-release-el<N>`, the Fedora project's rpm on RHEL),
+with the CodeReady Builder repository EPEL builds against. Fedora and Amazon Linux package Certbot
+themselves. openSUSE ships Certbot's renewal schedule apart from it, in `certbot-systemd-timer`
+(`certbot-renew.timer`), which setup installs when no timer exists, so a certificate it issues renews.
+
+When Docker or its Compose plugin is missing, `jd_install_docker` installs it the way `jd_docker_plan`
+picks from `/etc/os-release`, and the question names that source (`jd_docker_source`). get.docker.com
+refuses every distribution it does not name, so it is used only for those it does (Ubuntu, Debian,
+Raspbian, Fedora, CentOS, RHEL, Rocky, Alma, Oracle). An apt derivative takes Docker's apt repository for
+the release it is built on (`UBUNTU_CODENAME`, else `DEBIAN_CODENAME` or `/etc/debian_version`: Mint,
+Pop!_OS, Parrot, deepin), falling back to its own `docker.io`, `docker-compose` and `docker-buildx` when
+Docker publishes nothing for that release or it names none (Kali), with `docker-cli` where the archive
+has split the client out of `docker.io` (Debian testing and Kali, `jd_apt_docker_packages`). Arch, Manjaro and openSUSE take their
+own `docker`, `docker-compose` and `docker-buildx`; Amazon Linux its own engine with Compose and Buildx
+from Docker's GitHub releases, each checked against the checksum the release publishes
+(`jd_install_docker_plugins`); another dnf distribution Docker's rpm repository for the CentOS or Fedora
+its `ID_LIKE` names. Whichever way, a missing Compose or a Buildx older than 0.17 (`jd_buildx_recent`;
+"compose build requires buildx 0.17.0 or later", and Amazon Linux's engine carries an older one) is then
+fetched from Docker's releases into `/usr/local/lib/docker/cli-plugins`, which the CLI reads before the
+packages' own directories, and setup stops with a sentence naming which is missing if either still is.
 The same `jd_pkg_install` dispatch (one `apt-get update` per run) backs `jd_install_terminal_extras`,
 which `install.sh` runs when the terminal is enabled: it installs `zsh`, `zsh-autosuggestions` and
 `zsh-syntax-highlighting` where missing and, on success, appends `JD_TERMINAL_SHELL=<zsh path>` to a fresh
 `.env`. A re-run that kept its `.env` asks first, and never touches a file that already names a shell.
+Where the manager has zsh but neither plugin (Amazon Linux, openSUSE), zsh is installed on its own and
+each plugin cloned from github.com/zsh-users at a release tag into `/usr/share/<plugin>/`, where a
+package would put it (`jd_clone_zsh_plugins`).
 That install is best effort: a failure is a warning, and the terminal opens the account's own shell.
 `jd_install_host_tools` runs on every install and re-run, before any question: the web terminal is a host
-shell, so its git and the Git page's GitHub sign-in need host packages, and Network → Tools runs `whois`
-and `traceroute` on the host. It installs whichever of `git`, `git-lfs`, `whois` and `traceroute` are
-missing one package at a time, so an unavailable one costs only itself, and `gh` through `jd_install_gh`:
+shell, so its git and the Git page's GitHub sign-in need host packages, Network → Tools runs `whois`
+and `traceroute` on the host, the Network pages read its `ip` and `ss`, and a packet capture runs its
+`tcpdump`, and Security's login history its `last`. It installs whichever of `git`, `git-lfs`, `whois`,
+`traceroute`, `ip`, `ss`, `tc`, `tcpdump` and `last` are missing, one package at a time, so an
+unavailable one costs only itself, under the package `jd_host_tool_package` names: `iproute2` for `ip`,
+`ss` and `tc` (`iproute` and `iproute-tc` in the Red Hat family), and `wtmpdb` for `last`, since Debian
+13, Ubuntu 26.04 and openSUSE dropped util-linux's in its favour. Every server install has `ip` and `ss`,
+a minimal or container image may not. Where setup adds `wtmpdb`, `jd_enable_login_record` also installs
+`libpam-wtmpdb` (a recommendation apt was told to skip, without which no login is written) and enables
+`wtmpdb-update-boot.service` (which Kali presets off), so the history starts at once. Those releases,
+and Kali, have no `lastb` either, so Security's failed-login
+record (`/logins/failed`, `/logins/attackers`) answers `503 login_history_unavailable` there; reading
+sshd's failures from the journal instead is not built yet. `gh` comes through `jd_install_gh`:
 GitHub's signed apt repository on Debian and Ubuntu (their packaged gh is years behind on an LTS release;
 the image uses the same repository), the distribution's package on dnf, yum and zypper with GitHub's RPM
 repository as the fallback, and `github-cli` on apk and pacman. Failures are named and warned about, never
@@ -610,7 +645,10 @@ fatal. Firewalls, fail2ban and cron are deliberately absent: the dashboard manag
 installing one changes the host's security or scheduling rather than supplying a tool.
 The backend image still includes Certbot for container execution; host installation supplies host tooling
 and the distribution renewal schedule. `python3 scripts/test_install_dependencies.py` verifies the
-installer with fake package commands, without changing host packages. Hostname readiness returns
+installer with fake package commands and the `os-release` of each distribution above, without changing
+host packages. `scripts/verify-distros/run.sh` is the real thing: it installs on a fresh machine of every
+release in `scripts/verify-distros/distros.txt` and uses the result, which is what the README's
+Supported distributions table states. Hostname readiness returns
 `certificateIssue` alongside `certificateMethod`, preserving listener/plugin errors for Quick Deploy.
 Quick Deploy keeps HTTPS selected when readiness fails, presenting the actual blocker instead of
 silently switching the initial configuration to plain HTTP.

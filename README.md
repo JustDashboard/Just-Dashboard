@@ -31,7 +31,7 @@ browser. It needs no fleet, no cloud account and no paid tier: **every feature i
 
 You need a Linux server you have root on:
 
-- **x86_64 or arm64**, running **systemd**. It is tested on Debian and Ubuntu.
+- **x86_64 or arm64**, running **systemd**: one of the [supported distributions](#supported-distributions).
 - **2 GB of memory with 2 GB of swap, or 3 GB of memory.** Running the dashboard takes far less; building
   it during setup and every update is what needs the room.
 - **10 GB of free disk** for the images.
@@ -51,6 +51,50 @@ The installer asks how you will reach the dashboard, then does the rest and prin
 - **SSH tunnel:** the dashboard is served on loopback only.
 
 Upgrade with **Update now** in the dashboard. [Everything about installing →](docs/guides/install.md)
+
+## Supported distributions
+
+Each release below was installed from scratch and then used, on 28 November 2026, at commit
+`286fb9504`. On a fresh machine of each one, `sudo ./install.sh` ran with the answers a person gives.
+Then the run signed in, opened the data behind every page (each of the 331 read-only API routes), ran
+a command in the web terminal, restarted the machine and did all of it again. Nothing was fixed by hand
+along the way. [`scripts/verify-distros/run.sh`](scripts/verify-distros/run.sh) is the run, and
+anyone can repeat it.
+
+| Distribution | Releases |
+| --- | --- |
+| **Ubuntu** | 22.04 LTS, 24.04 LTS, 26.04 LTS |
+| **Debian** | 12, 13 |
+| **Linux Mint** | 22.3 |
+| **Kali Linux** | Rolling |
+| **Parrot Security** | 7 |
+| **deepin** | 25 |
+| **Fedora** | 44, 45 |
+| **CentOS Stream** | 9, 10 |
+| **Rocky Linux** | 9, 10 |
+| **AlmaLinux** | 9, 10 |
+| **Oracle Linux** | 9, 10 |
+| **Amazon Linux** | 2023 |
+| **openSUSE** | Leap 16.0, Tumbleweed |
+| **Arch Linux** | Rolling |
+| **Manjaro** | Rolling |
+
+- **Desktop or server makes no difference.** A desktop edition is the same release with a desktop on
+  top, so Ubuntu's flavours, Fedora Workstation and the like are covered by their row.
+- **One thing is missing on the newest releases.** Debian 13, Ubuntu 26.04, Kali, Parrot, deepin and
+  openSUSE no longer keep the record of failed sign-ins that Security → Logins reads, so that list stays
+  empty there. Login history and everything else work.
+- **Without systemd, setup refuses.** On Alpine, Devuan, Void and the like, the installer stops before it
+  changes anything (checked on Alpine and Devuan).
+- **Not checked yet:** arm64, which the installer accepts but the run had no machine for; Red Hat
+  Enterprise Linux itself, which needs a subscription (Rocky, AlmaLinux and Oracle Linux are rebuilds of
+  it); Pop!_OS, Zorin OS and elementary OS, which have no image to test from and install the way Linux
+  Mint does; Raspberry Pi OS, NixOS and Gentoo.
+- **How the machines were made:** each was the release's official image booting its own systemd, with its
+  own Docker inside. They ran on one x86_64 host with Linux 6.8, so the run covers each distribution's
+  packages, init and tools, not its kernel. Docker Hub was reached through a local cache of the same
+  images, and Tumbleweed's packages through openSUSE's own CDN, after one of the mirrors its redirector
+  picks at random stalled two runs.
 
 ## Documentation
 

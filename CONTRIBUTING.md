@@ -225,6 +225,17 @@ never into `docs/audits/`.
   `python3 scripts/test_install_dependencies.py`, `python3 scripts/test_dotenv.py` and
   `bash -n install.sh scripts/manage.sh scripts/create-user.sh scripts/reset-password.sh`. The fixtures
   use fake host commands and temporary state rather than modifying an installed dashboard.
+- A change to how setup installs packages or Docker (`install.sh`, `scripts/install-dependencies.sh`,
+  `scripts/preflight.sh`), to a Dockerfile, or to what the backend runs on the host, is checked on the
+  distributions themselves before it ships: `scripts/verify-distros/run.sh` installs on a fresh machine
+  of each release in `scripts/verify-distros/distros.txt`, signs in, opens every GET route that takes no
+  parameter, runs a command in the web terminal, restarts the machine and does it again (its header
+  says how the machines are made, and what they share with the host). Run one release while working
+  (`run.sh one rocky-10`) and all of them before a release whose installer changed; `run.sh compare`
+  then lists each page that answers differently from the Ubuntu 24.04 baseline. The README's
+  Supported distributions table is the result, with the date and commit of the run it states. A full
+  run takes about two hours three at a time, 10 GB of disk per machine running at once and 3 GB of
+  memory per build.
 - A change to `docker-compose.yml` runs `python3 scripts/test_compose_binds.py` (`scripts/test-changed.sh`
   picks it), which holds the stack's half of invariant 7: the backend's `JD_ADDR` pinned to loopback,
   every published port on `127.0.0.1`, and nothing on the host's network but the backend and Caddy. A

@@ -21,7 +21,7 @@ contributor checks compare a change with the branch it started from.
 | --- | --- |
 | Architecture | x86_64 (amd64) or arm64 (aarch64). Nothing else can build the images. |
 | Init system | systemd. The dashboard manages services and timers through it and uses it to uninstall itself. |
-| Distribution | Tested on Debian and Ubuntu. Others with systemd and a package manager the installer knows (`apt`, `dnf`, `yum`, `zypper`) usually work; Docker's own installer does not support Alpine or Arch. |
+| Distribution | One with systemd. The releases installed and used end to end are listed under [Supported distributions](../../README.md#supported-distributions); see [Docker on each distribution](#docker-on-each-distribution) for how setup gets Docker on them. Without systemd (Alpine, Devuan, Void) setup stops before changing anything. |
 | Memory | 2 GB of memory with 2 GB of swap, or 3 GB of memory. |
 | Disk | 10 GB free where Docker keeps its images (`/var/lib/docker`). |
 | Access | root, and outbound HTTPS to GitHub, Docker Hub and your distribution's packages. |
@@ -53,7 +53,7 @@ rest in four labelled stages:
   The password is removed from `.env` once the dashboard has answered, so a password you generated
   is shown only that once.
 - It installs the host tools the terminal and pages rely on — `gh`, `git-lfs`, `whois`,
-  `traceroute` — where they are missing.
+  `traceroute`, `ip`, `ss` and `tc`, `tcpdump`, `last` — and Docker, where they are missing.
 
 Use `./install.sh --help` to preview the steps, or `sudo NO_COLOR=1 ./install.sh` for plain output.
 Everything it asked is editable afterwards under **Settings → Configuration**.
@@ -74,3 +74,21 @@ that existed before 0.7.3 are not asked and keep every section.
 **Upgrading:** use **Update now** in the dashboard, run `sudo ./install.sh` again, or `git pull`
 followed by `docker compose up -d --build`. All three keep your `.env`, database, accounts and
 sessions.
+
+### Docker on each distribution
+
+When Docker is missing, setup asks before installing it and names where it will come from:
+
+| Distribution | Docker comes from |
+| --- | --- |
+| Ubuntu, Debian, Raspberry Pi OS, Fedora, CentOS Stream, RHEL, Rocky, AlmaLinux, Oracle Linux | Docker's own install script, get.docker.com |
+| Linux Mint, Pop!_OS and other Ubuntu-based releases | Docker's repository for the Ubuntu release it is built on |
+| Parrot, deepin and other Debian-based releases | Docker's repository for the Debian release it is built on, or the distribution's own packages when Docker publishes none |
+| Kali | Kali's own `docker.io`, `docker-cli`, `docker-compose` and `docker-buildx` |
+| Arch, Manjaro, openSUSE Leap and Tumbleweed | The distribution's own `docker`, `docker-compose` and `docker-buildx` |
+| Amazon Linux 2023 | Amazon's `docker`, with Compose and Buildx from Docker's releases (checksums checked) |
+
+Whichever way, setup needs `docker compose` and a `docker buildx` of 0.17 or later, and fetches either
+from Docker's releases when the distribution's is missing or older. Where certbot is kept in EPEL
+(Rocky, AlmaLinux, CentOS Stream, Oracle Linux, RHEL), setup turns EPEL on first; on openSUSE it adds
+certbot's renewal timer, which openSUSE packages separately.
