@@ -408,12 +408,16 @@ function SidebarGroupLabel({
 }: React.ComponentProps<"div"> & { asChild?: boolean }) {
   const Comp = asChild ? Slot.Root : "div"
 
+  // Just Hub's group label: the eyebrow's caps in the faint ink, 14px of label
+  // and 6px to the first row. It names the rows under it and steps back from
+  // them; in the muted ink it was as bright as the glyphs and competed with the
+  // rows it heads.
   return (
     <Comp
       data-slot="sidebar-group-label"
       data-sidebar="group-label"
       className={cn(
-        "flex h-8 shrink-0 items-center rounded-md px-2 text-xs font-medium text-sidebar-foreground/70 focus-ring transition-[margin,opacity] duration-200 ease-linear [&>svg]:size-4 [&>svg]:shrink-0",
+        "eyebrow flex h-5 shrink-0 items-start truncate px-2 text-faint transition-[margin,opacity] duration-200 ease-linear select-none",
         "group-data-[collapsible=icon]:-mt-8 group-data-[collapsible=icon]:opacity-0",
         className,
       )}
@@ -479,22 +483,27 @@ function SidebarMenuItem({ className, ...props }: React.ComponentProps<"li">) {
 }
 
 const sidebarMenuButtonVariants = cva(
-  // Where you are, said three ways at once, because a nav is a list and one
-  // cue in a list of forty-nine rows is easy to lose: the selection fill, the
-  // brand bar on the row's leading edge, and a medium label against the normal
-  // weight of the rest. The icon stays the row's own colour: the brand hue on
-  // it made the current row read as a warning badge rather than as a position.
+  // Just Hub's row (its `ui/sidebar.tsx`). The rail reads in four steps of ink
+  // rather than three weights: the group label faint, the glyph muted, the
+  // label secondary at 500, and the page you are on primary. Every row is the
+  // same weight, so the current one does not widen as it lights, and a row's
+  // words lead its glyph instead of the glyph out-shouting them.
   //
-  // The pointer gets the menu's hover fill, not the selection's (§6): they
-  // were one colour, so the page you are on and the row under the pointer
-  // looked the same. A current row keeps its fill under the pointer.
+  // Where you are is the selection fill, primary text and the glyph in the
+  // mark's ice, and nothing at the row's edge (No colour bars). The glyph was
+  // kept in the row's colour while the brand was orange (Sep 2026), when it
+  // read as a warning badge; ice reads as lit. Only the first glyph takes it: a
+  // chevron or a dot after the label keeps its own.
   //
-  // The rail is also where the type does most of its work. A resting entry is
-  // `font-normal` so the column reads as a list rather than as forty-nine
-  // headings; the group labels above them are the eyebrow's small caps, and
-  // the current entry steps up to medium. Three weights, in the one place on
-  // screen dense enough to need them.
-  "peer/menu-button relative flex w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm font-normal focus-ring transition-[width,height,padding,color,background-color] group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-menu-hover hover:text-sidebar-accent-foreground active:bg-menu-hover active:text-sidebar-accent-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:font-medium data-[active=true]:text-sidebar-accent-foreground data-[active=true]:hover:bg-accent data-[active=true]:hover:text-sidebar-accent-foreground data-[active=true]:active:bg-accent data-[active=true]:active:text-sidebar-accent-foreground data-[state=open]:hover:bg-menu-hover data-[state=open]:hover:text-sidebar-accent-foreground [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&[data-active=true]>svg]:text-sidebar-accent-foreground",
+  // The pointer gets the control fill, as the search field above the rows
+  // has, not the selection's (§6): they were one colour, so the page you are
+  // on and the row under the pointer looked the same. A current row keeps its
+  // fill under the pointer.
+  //
+  // Only the ink and the fill ease. `transition-colors` would ease the focus
+  // ring's colour too, so the ring faded in after a Tab rather than being
+  // there at once (states.md), and a read straight after focus saw it halfway.
+  "group/menu-button peer/menu-button relative flex w-full min-w-0 items-center gap-2.5 overflow-hidden rounded-md px-2 text-left text-body font-medium text-secondary-foreground focus-ring transition-[color,background-color] duration-fast select-none group-has-data-[sidebar=menu-action]/menu-item:pr-8 group-data-[collapsible=icon]:size-8! group-data-[collapsible=icon]:p-2! hover:bg-control hover:text-foreground active:bg-control-active active:text-foreground disabled:pointer-events-none disabled:opacity-50 aria-disabled:pointer-events-none aria-disabled:opacity-50 data-[active=true]:bg-accent data-[active=true]:text-foreground data-[active=true]:hover:bg-accent data-[active=true]:active:bg-accent data-[state=open]:hover:bg-control [&>span:last-child]:truncate [&>svg]:size-4 [&>svg]:shrink-0 [&>svg:first-child]:text-muted-foreground [&>svg:first-child]:transition-colors data-[active=true]:[&>svg:first-child]:text-brand",
   {
     variants: {
       variant: {
@@ -506,9 +515,9 @@ const sidebarMenuButtonVariants = cva(
       // way between sections, so a row there is a finger tall, as the account
       // menu's rows under it are. From `md` it is the 32px row of the column.
       size: {
-        default: "h-11 text-sm md:h-8",
-        sm: "h-11 text-xs md:h-7",
-        lg: "h-12 text-sm group-data-[collapsible=icon]:p-0!",
+        default: "h-11 md:h-8",
+        sm: "h-11 text-hint md:h-7",
+        lg: "h-12 group-data-[collapsible=icon]:p-0!",
       },
     },
     defaultVariants: {

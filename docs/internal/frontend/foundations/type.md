@@ -87,14 +87,15 @@ ranks run a flow question (24, `text-2xl`) or a reading (24) → section and sur
 0.6.7, then left the visual layout when the rail became the visible page location. A `StatTile`'s
 figure stays at 24 because a headline number is what a reader finds without reading.
 
-Weight carries hierarchy where size cannot. The sidebar is the one surface dense enough to need
-three: group labels in the eyebrow's small caps, resting entries `font-normal` so the column reads as
-a list rather than as forty-nine headings, and the current entry `font-medium` alongside its accent
-fill and brand-blue icon. A panel's head speaks in the eyebrow when it names one of this product's
-sections, and not when it names something the reader called — a project, a database connection:
-small caps turned `api-production` into API-PRODUCTION, which is the corruption §4 keeps literal
-strings out of caps for, so a scope's head is printed as written at `text-hint` semibold, after its
-own mark (the project's favicon or product, the connection's engine) at the line's height.
+The sidebar, the densest surface, reads in steps of ink rather than of weight, as Just Hub's does
+(0.9.1): group labels in the eyebrow's caps and the faint ink, each row's glyph muted, every row's
+label `font-medium` in the secondary ink, and the current row primary with its glyph in the mark's
+ice on the accent fill. One weight for every row means the current one does not widen as it lights.
+A panel's head is a size above the rows, `text-title` semibold after the section's glyph or the
+scope's own mark (a project's favicon or product, a connection's engine), so it says what the rows
+belong to. It is never in caps: a section's name in the eyebrow spoke in its own group labels' voice,
+and small caps turned a name the reader typed, `api-production`, into API-PRODUCTION, the corruption
+§4 keeps literal strings out of caps for.
 
 A menu reads the same way at a smaller size: a `DropdownMenuLabel` or `SelectLabel` is an
 eyebrow over the group it names, and every option and action is `text-body`. Selects, action menus,
