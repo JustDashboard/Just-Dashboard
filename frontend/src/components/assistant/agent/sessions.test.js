@@ -334,6 +334,29 @@ describe("a page holds the chat's next turn while it writes what the chat works 
     expect(calls.map((call) => call.body.question)).toEqual(["first"])
   })
 
+  test("held by the page while an answer waits on Allow, the Allow is what it names", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    askAgent(session, "first")
+    await settle()
+    calls[0].answer([start, done({ stop: "tool", pending: [change] })])
+    await settle()
+    // The person typed into the form meanwhile: the page holds for that save,
+    // which it makes only once the Allow is answered.
+    holdAgentTurns(session, "draft-edits", true)
+    askAgent(session, "second")
+    expect(calls).toHaveLength(1)
+    expect(agentQueueHeld(session)).toBe("allow")
+    decideAgent(session, "x", true)
+    await settle()
+    calls[1].answer([start, done()])
+    await settle()
+    expect(agentQueueHeld(session)).toBe("page")
+    holdAgentTurns(session, "draft-edits", false)
+    await settle()
+    expect(calls[2].body.question).toBe("second")
+  })
+
   test("a question waiting in the queue is not asked at the end of an answer while it holds", async () => {
     const { calls } = turnServer()
     const session = freshChat()

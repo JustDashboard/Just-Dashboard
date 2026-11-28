@@ -408,20 +408,21 @@ function awaitsPassword(session: AgentSession) {
 
 /**
  * What holds the waiting questions back, when something does: an answer under way
- * here or in another tab, calls waiting on the person's Allow, or a password the
- * terminal asks for.
+ * here or in another tab, calls waiting on the person's Allow, the page writing
+ * what the chat works on, or a password the terminal asks for. An Allow is named
+ * before the page: a page holding for edits it saves once the answer is done waits
+ * on that Allow too, so it is the person's press that lets them go.
  */
 export function agentQueueHeld(
   session: AgentSession,
 ): "answering" | "page" | "allow" | "password" | "elsewhere" | undefined {
   if (session.flight) return "answering"
-  if (session.holds.length > 0) return "page"
   if (session.elsewhere || session.held) return "elsewhere"
   const last = session.transcript.turns.at(-1)
-  if (!last) return undefined
-  if (last.phase === "asking") return "allow"
+  if (last?.phase === "asking") return "allow"
   if (answering(last)) return "answering"
-  if (awaitsPassword(session)) return "password"
+  if (session.holds.length > 0) return "page"
+  if (last && awaitsPassword(session)) return "password"
   return undefined
 }
 
