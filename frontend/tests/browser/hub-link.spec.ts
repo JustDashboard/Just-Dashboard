@@ -984,6 +984,8 @@ test("linked: the switcher lists the fleet as the hub's, this one first, and ano
   await expect(items.nth(0)).toHaveAttribute("href", "/")
   await expect(items.nth(0)).toHaveAttribute("aria-current", "page")
   await expect(items.nth(1)).toHaveAttribute("aria-disabled", "true")
+  // The state that is news is in words beside the name on a row with no address too.
+  await expect(items.nth(1).getByText(/^, Offline$/)).toBeVisible()
   // An address the hub handed over is a plain link, with no opener and no referrer, and no arrow.
   for (const [n, href] of [
     [2, OTHER],
@@ -998,13 +1000,27 @@ test("linked: the switcher lists the fleet as the hub's, this one first, and ano
   // A state is a dot and a word (§4), never a filled pill.
   expect(await filledPills(page)).toEqual([])
 
-  // A modified click opens it in a tab of its own, and this one stays on this server.
-  const tab = await newTab(page, () => items.nth(2).click({ modifiers: ["ControlOrMeta"] }))
-  await expect(tab).toHaveURL(`${OTHER}/`)
-  await expect(tab).toHaveTitle("elsewhere")
-  expect(await tab.evaluate(() => window.opener)).toBeNull()
+  // A modified click is left to the browser, which opens a plain link with `noopener` in a tab of
+  // its own: nothing on the page cancels it, and this tab stays on this server. The tab itself is
+  // not opened here: headless Chromium crashes a tab a modified click opens behind this one before
+  // it loads ("Target crashed"), which says nothing of the page. The last listener on the way out
+  // reads whether anything cancelled the click, then keeps the browser from opening it.
+  await page.evaluate(() => {
+    window.addEventListener(
+      "click",
+      (event) => {
+        ;(window as unknown as { leftToBrowser?: boolean }).leftToBrowser =
+          !event.defaultPrevented && (event.ctrlKey || event.metaKey)
+        event.preventDefault()
+      },
+      { once: true },
+    )
+  })
+  await items.nth(2).click({ modifiers: ["ControlOrMeta"] })
+  expect(
+    await page.evaluate(() => (window as unknown as { leftToBrowser?: boolean }).leftToBrowser),
+  ).toBe(true)
   await expect(page).toHaveURL(/\/account$/)
-  await tab.close()
 
   // A plain press goes there in this tab, as any link does.
   await page.keyboard.press("Escape")

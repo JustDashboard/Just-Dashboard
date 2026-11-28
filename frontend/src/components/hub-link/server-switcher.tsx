@@ -172,7 +172,12 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
               <DropdownMenuItem key={server.serverId} disabled className="gap-2.5">
                 {dot}
                 {label}
-                {word && <span className="sr-only">, {word}</span>}
+                {word && (
+                  <span className="shrink-0 text-hint text-muted-foreground">
+                    <span className="sr-only">, </span>
+                    {word}
+                  </span>
+                )}
                 <span className="shrink-0 text-hint text-muted-foreground">
                   <span className="sr-only">, </span>No address
                 </span>
