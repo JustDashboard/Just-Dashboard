@@ -408,11 +408,11 @@ poll and fetches the notice's code when `updateHasNews` says there is something 
 its progress and its confetti are in no route's chunks until then. The deployment vocabulary it draws
 with still loads with the shell, through the command palette's inventory
 (`command-search/inventory.ts`). It is the account card's container (the same edge and ground, tinted green or red only
-once a run has finished) with the dashboard's J,
+once a run has finished) with the dashboard's J as a 16px glyph in the notice's ink at its first line,
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
 an install that updates in place gets *Update now*, which opens the update's own dialog
-(`update-dialog.tsx`: the two versions, *Not now* and *Update*, nothing else); everyone gets a link to the Version page (`/dashboard`) for the notes. While an
+(`update-dialog.tsx`: the two versions, *Not now* and *Update*, nothing else); everyone gets a text line to the Version page (`/dashboard`) for the notes. While an
 update runs the card carries the border beam, the stage it is at and *View progress*; afterwards it
 turns green with *See what's new*, or red with the updater's error and *See what went wrong*, and only
 then can it be dismissed. In the icon rail it is one tile in the same tone that links to the Version
@@ -465,17 +465,20 @@ offers *Open in Just Hub*.
   origin, `localDestination`), and **Just Hub (hub)** is the last entry.
 - **The host in the tab's title**, above.
 - **The hub notice** (`components/hub-link/hub-notice.tsx`), between the update notice and the account
-  card, built the way the update notice is and rendering nothing when there is nothing to say: the newest
-  notice this browser has not dismissed: who says it, *Just Hub (hub) says*, and when, then its title and
-  its body as plain text (it came from another machine, so it is never markup and never reads as the
-  dashboard's own words, [protocol](../backend/hub-link-protocol.md) §8.10), *Open in Just Hub* with the
-  host it opens on a line of its own, in a new tab with `noopener noreferrer`, when its link is on the hub's
-  own origin, and
-  *N more from Just Hub* leading to Settings → Hub's `#notices`. The account card's container, tinted
-  amber or red only for a warning or critical notice. The rail is narrow and a hub's name may be 64
-  characters, so the attribution wraps, the time going to a second line, and only the name is ever cut,
-  with the whole name as its title: *says* is what marks the words below as the hub's and is never the
-  part that is lost. Dismissals are kept in `localStorage` per browser and forgotten once the hub stops
+  card, built the way the update notice is (`RailNotice`, drawn as Just Hub's own rail notices: a compact
+  card, a 16px glyph in the tone's ink at its first line, the words in one column beside it) and rendering
+  nothing when there is nothing to say: the newest notice this browser has not dismissed. Its first line is
+  who says it, *Just Hub (hub) says*, with when at its end in the largest unit (*2m*, the full time as its
+  title) and the dismiss after it; then its title, the card's one strong line, and its body as plain text
+  (it came from another machine, so it is never markup and never reads as the dashboard's own words,
+  [protocol](../backend/hub-link-protocol.md) §8.10); then *Open in Just Hub* with the host it opens on a
+  line of its own, in a new tab with `noopener noreferrer`, when its link is on the hub's own origin, and
+  *N more from Just Hub* leading to Settings → Hub's `#notices`, both as text lines rather than buttons. The
+  account card's container, tinted amber or red only for a warning or critical notice, whose glyph is then
+  the warning triangle or the crossed circle; an info notice carries the hub's J. The rail is narrow and a
+  hub's name may be 64 characters, so only the name is ever cut, and only when it does not fit, with the
+  whole name as its title: *says* is what marks the words below as the hub's and is never the part that is
+  lost. Dismissals are kept in `localStorage` per browser and forgotten once the hub stops
   carrying the notice.
 
 Settings → Hub (`/dashboard/hub`) is a `hubLink` entry in `nav.ts`: `shownFor` draws it only while the

@@ -1075,8 +1075,9 @@ test("linked: the hub's notices, newest first, as text, dismissed per browser", 
 
   const card = page.locator("[data-slot=hub-notice]")
   await expect(card).toContainText("Update ready on 1 server")
-  // Who says it comes first: the hub's words are the hub's (§8.10).
-  await expect(card).toContainText(/Just Hub \(hub\) says · 2m/)
+  // Who says it comes first: the hub's words are the hub's (§8.10). When is at that line's end.
+  await expect(card).toContainText(/Just Hub \(hub\) says/)
+  await expect(card.locator("time")).toHaveText("2m")
   // The body came from another machine: it is text, never markup.
   await expect(card).toContainText("0.8.6 is out. <b>vmi3690758</b> can install it")
   await expect(card.locator("b")).toHaveCount(0)
@@ -1132,7 +1133,7 @@ test("a long hub name is what the notice card clips, never who says it or the li
     if (width < 768) await page.locator("[data-slot=sidebar-trigger]:visible").click()
     await expect(card).toContainText("Update ready on 1 server")
     await expect(card).toContainText(/\) says/)
-    await expect(card).toContainText(/· 2m/)
+    await expect(card.locator("time")).toHaveText("2m")
     // Only the name may be cut, and then it is its own title.
     for (const text of await clipped()) expect(text, `clipped at ${width}`).toBe(name)
     await expect(card.getByTitle(name)).toHaveText(name)
