@@ -12,17 +12,19 @@ import { AgentChat } from "@/components/assistant/agent/chat"
 import { SETUP_QUESTION, agentStatus } from "@/components/assistant/agent/model"
 import {
   agentBusy,
-  askAgent,
+  askAgentFirst,
+  holdAgentTurns,
   useAgentSession,
   type AgentScope,
 } from "@/components/assistant/agent/sessions"
 import { assistantProduct, useAssistantSettings } from "@/components/assistant/settings"
-import {
-  loadDraft,
-  resumeFlow,
-  type ConfigureFlow,
-  type FlowUpdate,
-} from "@/components/deploy/new-project/draft"
+import type { ConfigureFlow } from "@/components/deploy/new-project/draft"
+
+/**
+ * Why the chat's first turn waits: the page saving the plan it starts from. The
+ * page keeps what the person types meanwhile as it does while the assistant works.
+ */
+export const PREPARE = "draft-prepare"
 
 /** The conversation about a draft, which the page holds Deploy back for while it works. */
 export function draftScope(flow: ConfigureFlow): AgentScope {
@@ -40,13 +42,11 @@ export function draftScope(flow: ConfigureFlow): AgentScope {
  */
 export function SetupAssistant({
   flow,
-  onFlowChange,
   onClose,
   onPrepare,
   onReview,
 }: {
   flow: ConfigureFlow
-  onFlowChange: (next: FlowUpdate) => void
   onClose: () => void
   /** Saves what the page holds, so the assistant starts from what the person sees. */
   onPrepare: () => Promise<void>
@@ -55,37 +55,29 @@ export function SetupAssistant({
   const router = useRouter()
   const settings = useAssistantSettings(true)
   const view = settings.data
-  const draftId = flow.draft.id
   const scope = useMemo(() => draftScope(flow), [flow])
   const session = useAgentSession(scope)
   const busy = agentBusy(session)
   const status = agentStatus(session.transcript)
   const product = assistantProduct(view)
 
-  // It begins on being handed the job, from the plan as it stands.
+  // It begins on being handed the job, from the plan as it stands. The page's save
+  // of that plan holds the chat's turn, so a question the person sends meanwhile
+  // waits, and goes after the job's own question.
+  // A panel closed and opened again before that question went has begun already:
+  // its save is still out, or its question waits in the queue.
   const begun = useRef(false)
   useEffect(() => {
     if (begun.current || !view?.configured || session.transcript.turns.length > 0) return
+    if (session.holds.includes(PREPARE)) return
+    if (session.queue.some((one) => one.question === SETUP_QUESTION)) return
     begun.current = true
-    void onPrepare().finally(() => askAgent(session, SETUP_QUESTION))
+    holdAgentTurns(session, PREPARE, true)
+    void onPrepare().finally(() => {
+      askAgentFirst(session, SETUP_QUESTION)
+      holdAgentTurns(session, PREPARE, false)
+    })
   }, [view?.configured, session, onPrepare])
-
-  // What it saved, the page reads back, so the fields and the plan say the same.
-  const seen = useRef(session.changes)
-  useEffect(() => {
-    if (session.changes === seen.current) return
-    seen.current = session.changes
-    void loadDraft(draftId)
-      .then(resumeFlow)
-      .then((next) =>
-        onFlowChange((current) =>
-          current?.draft.id === draftId
-            ? { ...next, sourceLabel: current.sourceLabel, githubRepo: current.githubRepo }
-            : current,
-        ),
-      )
-      .catch(() => undefined)
-  }, [session.changes, draftId, onFlowChange])
 
   return (
     <aside

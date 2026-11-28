@@ -499,7 +499,9 @@ func gitHTTPServer(t *testing.T, root string) (*httptest.Server, func() []string
 	var mu sync.Mutex
 	var seen []string
 	handler := &cgi.Handler{Path: backend, Env: []string{"GIT_PROJECT_ROOT=" + root, "GIT_HTTP_EXPORT_ALL=1"}, Stderr: os.Stderr}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	// Over TLS, as github.com is: a token goes only to an HTTPS address. The
+	// test server's certificate is its own, so its callers set GIT_SSL_NO_VERIFY.
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		mu.Lock()
 		seen = append(seen, r.Header.Get("Authorization"))
 		mu.Unlock()
@@ -539,6 +541,8 @@ func waitForGitHubClone(t *testing.T, s *Server, id string) (jobs.Job, []jobs.Li
 }
 
 func TestCloneToServerFetchesWithAReadOnlyTokenItNeverShows(t *testing.T) {
+	t.Setenv("GIT_SSL_NO_VERIFY", "1")
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 	e := newGHEnv(t)
 	e.createApp()
 	base := "/api/v1/github/connections/" + e.connect(e.admin, 1001)
@@ -611,7 +615,7 @@ func TestCloneToServerFetchesWithAReadOnlyTokenItNeverShows(t *testing.T) {
 	if !strings.Contains(string(config), "url = "+gitServer.URL+"/octo-dev/app.git") {
 		t.Fatalf(".git/config = %s", config)
 	}
-	if !strings.Contains(strings.Join(text, "\n"), "$ git clone -- "+gitServer.URL+"/octo-dev/app.git app") {
+	if !strings.Contains(strings.Join(text, "\n"), "$ git fetch --progress "+gitServer.URL+"/octo-dev/app.git (as the dashboard") {
 		t.Fatalf("console = %s", strings.Join(text, "\n"))
 	}
 	// Local Git finds it.

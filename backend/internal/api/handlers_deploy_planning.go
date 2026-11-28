@@ -130,7 +130,7 @@ func (s *Server) handleDeploymentDraftDetect(w http.ResponseWriter, r *http.Requ
 		return err
 	}
 	if request.Revision != draft.Revision {
-		return mapDeploymentPlanningError(deploy.ErrDraftRevision)
+		return mapDeploymentPlanningError(fmt.Errorf("%w: current revision is %d", deploy.ErrDraftRevision, draft.Revision))
 	}
 	if draft.Data.Source == nil {
 		return mapDeploymentPlanningError(deploy.ErrDraftIncomplete)
@@ -187,7 +187,7 @@ func (s *Server) handleDeploymentDraftPreflight(w http.ResponseWriter, r *http.R
 		return err
 	}
 	if request.Revision != draft.Revision {
-		return mapDeploymentPlanningError(deploy.ErrDraftRevision)
+		return mapDeploymentPlanningError(fmt.Errorf("%w: current revision is %d", deploy.ErrDraftRevision, draft.Revision))
 	}
 	principal := httpx.MustPrincipal(r)
 	if principal.DeployKey() && draft.Data.Source != nil {
