@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/url"
 	"os"
@@ -187,7 +188,9 @@ func (s *Server) workspaceParent() (string, error) {
 			return "", fmt.Errorf("the folder for workspaces, %s, could not be made: %v", parent, err)
 		}
 		if uid >= 0 && os.Geteuid() == 0 {
-			_ = os.Chown(parent, uid, gid)
+			// Lchown: the home is the account's, which could put a link where
+			// the folder was made before it is handed over.
+			_ = os.Lchown(parent, uid, gid)
 		}
 	}
 	dir, err := s.modules.git.ResolveDir(parent)
@@ -222,39 +225,71 @@ func sameRemote(a, b string) bool {
 }
 
 // markWorkspace writes which deployment a workspace was opened for into its .git.
+// The dashboard writes it as root into a folder another account owns, so no link
+// in it is followed: a .git that is a link, or a marker that is one, is left as
+// it is (os.Root and O_NOFOLLOW), and the marker is handed to the folder's owner
+// through its own descriptor rather than by name.
 func (s *Server) markWorkspace(ws *agentWorkspace) {
-	dir := filepath.Join(ws.folder, ".git")
-	if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+	root, err := os.OpenRoot(ws.folder)
+	if err != nil {
 		return
 	}
-	marker := filepath.Join(dir, workspaceMarker)
-	line := fmt.Sprintf("%d %d\n", ws.summary.ID, ws.summary.EnvironmentID)
-	if err := os.WriteFile(marker, []byte(line), 0o644); err != nil {
+	defer root.Close()
+	if info, err := root.Lstat(".git"); err != nil || !info.IsDir() {
 		return
 	}
-	if info, err := os.Stat(ws.folder); err == nil && os.Geteuid() == 0 {
+	file, err := root.OpenFile(filepath.Join(".git", workspaceMarker), os.O_WRONLY|os.O_CREATE|os.O_TRUNC|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o644)
+	if err != nil {
+		return
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+		return
+	}
+	if _, err := fmt.Fprintf(file, "%d %d\n", ws.summary.ID, ws.summary.EnvironmentID); err != nil {
+		return
+	}
+	if info, err := root.Stat("."); err == nil && os.Geteuid() == 0 {
 		if st, ok := info.Sys().(*syscall.Stat_t); ok {
-			_ = os.Chown(marker, int(st.Uid), int(st.Gid))
+			_ = file.Chown(int(st.Uid), int(st.Gid))
 		}
 	}
+}
+
+// readWorkspaceMarker reads a workspace's marker without following a link, and
+// no more of it than a marker holds.
+func readWorkspaceMarker(folder string) []string {
+	root, err := os.OpenRoot(folder)
+	if err != nil {
+		return nil
+	}
+	defer root.Close()
+	file, err := root.OpenFile(filepath.Join(".git", workspaceMarker), os.O_RDONLY|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil
+	}
+	defer file.Close()
+	if info, err := file.Stat(); err != nil || !info.Mode().IsRegular() {
+		return nil
+	}
+	raw := make([]byte, 64)
+	n, _ := io.ReadFull(file, raw)
+	return strings.Fields(string(raw[:n]))
 }
 
 // workspaceOf finds the deployment a folder was opened for, from its marker,
 // or the conversation's own deployment when its source is that folder's.
 func (s *Server) workspaceOf(ctx context.Context, p *httpx.Principal, folder string, scope *agentScope) *agentWorkspace {
 	ws := &agentWorkspace{folder: folder}
-	if raw, err := os.ReadFile(filepath.Join(folder, ".git", workspaceMarker)); err == nil {
-		fields := strings.Fields(string(raw))
-		if len(fields) == 2 {
-			id, _ := strconv.ParseInt(fields[0], 10, 64)
-			env, _ := strconv.ParseInt(fields[1], 10, 64)
-			if scope.deployment != nil && scope.deployment.ID == id && scope.deployment.EnvironmentID == env {
-				ws.summary = scope.deployment
-			} else if summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(ctx, id, env, deploy.QueueBudget{
-				Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
-			}); err == nil && summary != nil && p.Can(auth.CapServiceControl) {
-				ws.summary = summary
-			}
+	if fields := readWorkspaceMarker(folder); len(fields) == 2 {
+		id, _ := strconv.ParseInt(fields[0], 10, 64)
+		env, _ := strconv.ParseInt(fields[1], 10, 64)
+		if scope.deployment != nil && scope.deployment.ID == id && scope.deployment.EnvironmentID == env {
+			ws.summary = scope.deployment
+		} else if summary, err := s.modules.deployRuns.EnvironmentDeploymentSummary(ctx, id, env, deploy.QueueBudget{
+			Heavy: s.Cfg.DeployHeavySlots, Light: s.Cfg.DeployLightSlots,
+		}); err == nil && summary != nil && p.Can(auth.CapServiceControl) {
+			ws.summary = summary
 		}
 	}
 	if ws.summary == nil && scope.deployment != nil {
