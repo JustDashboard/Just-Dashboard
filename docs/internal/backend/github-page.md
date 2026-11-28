@@ -387,7 +387,9 @@ GitHub states the merge settings only to people who may change them; they are ab
    `.git/config`, whose remote is the plain HTTPS address.
 7. `git clone --progress` runs through `gitx.CloneStreaming`: the same environment and owner switch
    (`hostexec.AsOwner`) as every other git the Git page runs. Git's carriage-return progress is kept to
-   one line a second per phase plus the phase's last. A failure ends the job with git's own last line.
+   one line a second per phase plus the phase's last. A failure ends the job with git's own last line,
+   and the folder the clone made is removed, as git removes it itself, even when git was killed (one
+   clone into a place at a time, so it is the one this clone made).
 8. The token is revoked when the clone ends (`DELETE /installation/token`), whatever the outcome.
 
 The assistant's push from a workspace ([working on code](../deployments/operator.md#working-on-code))

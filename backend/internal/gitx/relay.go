@@ -482,7 +482,8 @@ func (r *Relay) intoCheckout(ctx context.Context, checkout gitRunner, refs map[s
 // parent's owner, from what the relay fetched with extra: origin is the real
 // remote, its branches are the checkout's remote-tracking refs, and branch (the
 // remote's default when empty; a tag leaves HEAD on no branch, as git's clone
-// does) is checked out.
+// does) is checked out. A clone that fails or is stopped part of the way
+// leaves nothing of what it made.
 func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, branch string, extra map[string]string) (string, error) {
 	plan, err := s.PrepareClone(parent, r.Remote, name, CloneOptions{})
 	if err != nil {
@@ -528,6 +529,16 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, bran
 	if _, err := runGit(ctx, inParent, time.Minute, "", append(initArgs, "--", plan.Name)...); err != nil {
 		return "", err
 	}
+	made, err := os.Lstat(plan.Target)
+	if err != nil || !made.IsDir() {
+		return "", fmt.Errorf("the checkout %s was not made", plan.Target)
+	}
+	done := false
+	defer func() {
+		if !done {
+			removeMade(plan.Target, made)
+		}
+	}()
 	checkout := accountRunner(plan.Target, plan.Dir)
 	if _, err := runGit(ctx, checkout, time.Minute, "", "remote", "add", "origin", r.Remote); err != nil {
 		return "", err
@@ -551,7 +562,19 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name, bran
 			return "", err
 		}
 	}
+	done = true
 	return plan.Target, nil
+}
+
+// removeMade removes a checkout a clone made and could not finish, and only
+// that one: a folder at its place that is not the one made (made, when known)
+// is left. os.RemoveAll opens nothing through a link.
+func removeMade(target string, made os.FileInfo) {
+	now, err := os.Lstat(target)
+	if err != nil || !now.IsDir() || (made != nil && !os.SameFile(made, now)) {
+		return
+	}
+	_ = os.RemoveAll(target)
 }
 
 // setUpstream makes branch track origin's branch of its name, as push

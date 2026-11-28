@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 // The relay, against a repository served over HTTPS that answers 401 without
@@ -302,5 +303,54 @@ func TestARelayIsOnlyForHTTPS(t *testing.T) {
 	}
 	if _, err := s.OpenRelay(context.Background(), base, "https://example.com/acme/shop.git"); err == nil {
 		t.Fatal("a relay was opened through a link")
+	}
+}
+
+// A clone that fails part of the way, through the relay or by the account's own
+// git (killed at its deadline), leaves nothing at its place for the next one to
+// call "already there".
+func TestAWorkspaceCloneThatFailsLeavesNothing(t *testing.T) {
+	_, remote, _ := relayRemote(t)
+	ctx := context.Background()
+	root := t.TempDir()
+	s := New([]string{root})
+	relay, err := s.OpenRelay(ctx, filepath.Join(t.TempDir(), "workspace-git"), remote)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The account's own configuration gives every new checkout a hook that
+	// fails its checkout.
+	templates := filepath.Join(t.TempDir(), "templates")
+	write(t, templates, "hooks/post-checkout", "#!/bin/sh\nexit 1\n")
+	if err := os.Chmod(filepath.Join(templates, "hooks", "post-checkout"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("GIT_CONFIG_GLOBAL"), []byte("[init]\n\ttemplateDir = "+templates+"\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.CloneThrough(ctx, relay, root, "shop", "main", relayCredential(remote)); err == nil {
+		t.Fatal("the clone whose checkout failed succeeded")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "shop")); err == nil {
+		t.Fatal("the failed clone through the relay left its folder")
+	}
+
+	// A remote that answers nothing for longer than the clone may take.
+	slow := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		time.Sleep(3 * time.Second)
+		http.Error(w, "late", http.StatusServiceUnavailable)
+	}))
+	defer slow.Close()
+	plan, err := s.PrepareClone(root, slow.URL+"/acme/shop.git", "slow", CloneOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	short, cancel := context.WithTimeout(ctx, time.Second)
+	defer cancel()
+	if err := s.CloneStreaming(short, plan, nil, func(string, string) {}); err == nil {
+		t.Fatal("the clone outlived its deadline")
+	}
+	if _, err := os.Lstat(plan.Target); err == nil {
+		t.Fatal("the clone killed at its deadline left its folder")
 	}
 }

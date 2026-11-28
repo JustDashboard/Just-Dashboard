@@ -390,7 +390,10 @@ says to follow the run a push starts and fix what it finds.
   fetched, keeping what changed in it; one that is something else gives way to
   `<name>-<environment id>`. With the deployment's saved credential the clone and the fetch go through the
   relay (below: `gitx.CloneThrough`, `FetchThrough`); without one they are the account's own
-  (`gitx.PrepareClone`, `CloneStreaming`, `FetchOrigin`). A deployment built from a folder on the server works in that folder, since it
+  (`gitx.PrepareClone`, `CloneStreaming`, `FetchOrigin`). A clone that fails, or is killed at the call's
+  ten-minute deadline, removes the folder it made (and only that one: one clone into a place at a time, and
+  the relay's checks that the folder is still the one its `git init` made), so the next `open_workspace` does
+  not take a half-made checkout for one that is there. A deployment built from a folder on the server works in that folder, since it
   builds that folder's committed state. `.git/jd-deployment` records which deployment and environment a
   workspace is for, so a push in a later press knows whose it is. Nothing removes a workspace: deleting or
   renaming the deployment leaves its folder in place, for the account or Local Git to delete. With no terminal
