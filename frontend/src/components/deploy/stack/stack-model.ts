@@ -15,6 +15,7 @@ import type {
   SmartStackStatus,
   SmartStackStep,
   SmartStackStepStatus,
+  SmartStackUpgrade,
 } from "@/lib/types"
 
 /**
@@ -334,9 +335,10 @@ export function appReach(service: Pick<SmartStackService, "access" | "url" | "ad
 export type NextStep =
   | { kind: "action"; action: SmartStackAction }
   | { kind: "addresses"; addresses: SmartStackAddresses }
+  | { kind: "upgrade"; upgrade: SmartStackUpgrade }
 
 export function nextSteps(
-  state: Pick<SmartStackState, "actions" | "addresses" | "status">,
+  state: Pick<SmartStackState, "actions" | "addresses" | "status" | "upgrade">,
 ): NextStep[] {
   const actions = orderedActions(state.actions)
   const blocking = actions.filter((action) => action.blocking)
@@ -347,8 +349,15 @@ export function nextSteps(
     (state.addresses.missing.length > 0 || (state.addresses.unpublished?.length ?? 0) > 0)
       ? [{ kind: "addresses" as const, addresses: state.addresses }]
       : []
+  // The apps the template gained come before the addresses: they are part of
+  // the stack the rest is set up for.
+  const upgrade =
+    state.status !== "waiting" && state.upgrade && state.upgrade.added.length > 0
+      ? [{ kind: "upgrade" as const, upgrade: state.upgrade }]
+      : []
   return [
     ...blocking.map((action) => ({ kind: "action" as const, action })),
+    ...upgrade,
     ...missing,
     ...optional.map((action) => ({ kind: "action" as const, action })),
   ]
@@ -402,6 +411,35 @@ export function missingHostnames(
     const label = labels[entry.service]
     return { ...entry, hostname: label ? serviceHostname(domain, label) : "" }
   })
+}
+
+/**
+ * The sentence over "Add the new apps": what the stack gained, and that
+ * everything the deployment has stays. Saved but not live, the release that
+ * was to bring them did not finish, and deploying again does.
+ */
+export function upgradeSentence(upgrade: SmartStackUpgrade): string {
+  const titles = listWords(upgrade.added.map((service) => service.title))
+  const one = upgrade.added.length === 1
+  if (upgrade.saved)
+    return `${titles} ${one ? "is" : "are"} part of the stack now, but the release that was to bring ${one ? "it" : "them"} did not finish. Deploying again starts ${one ? "it" : "them"}.`
+  return `The stack now comes with ${titles}. Adding ${one ? "it" : "them"} deploys the stack again with ${one ? "it" : "them"} beside the other apps; your library, settings, domains and login stay, and the dashboard sets ${one ? "it" : "them"} up and connects ${one ? "it" : "them"} once the release is live.`
+}
+
+/**
+ * Said beside a press that deploys (the new apps, the apps' addresses) while
+ * the deployment has changes saved but not deployed: the release it starts
+ * is of the saved configuration, so they go out with it, whatever they are.
+ */
+export const PENDING_CHANGES_NOTE =
+  "Every change saved to the deployment but not deployed yet goes out with it."
+
+/** A refusal of "Add the new apps", in words; anything else is the caller's error. */
+export function upgradeRefusal(code: string | undefined): string | undefined {
+  if (code === "stack_upgrade_none") return "The stack already runs every app."
+  if (code === "stack_not_preset")
+    return "The deployment's source is no longer the stack's template, so there is nothing of the stack's to add."
+  return undefined
 }
 
 /** A refusal of "Give every app its address", in words; anything else is the caller's error. */

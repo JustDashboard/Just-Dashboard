@@ -69,6 +69,52 @@ func TestMinimalComposeTemplateIsValid(t *testing.T) {
 	}
 }
 
+// withWorkers adds workers until the template runs count services.
+func withWorkers(b *Blueprint, count int) {
+	for index := len(b.Services); index < count; index++ {
+		b.Services = append(b.Services, Service{
+			Name: fmt.Sprintf("worker-%d", index), Role: RoleWorker, Purpose: "A worker",
+			Image:       Image{Reference: "example/worker:1.0.0", TagPolicy: "pinned"},
+			Resources:   Resources{MemoryMB: 64},
+			Healthcheck: Healthcheck{Test: []string{"true"}, IntervalSeconds: 10, TimeoutSeconds: 5, Retries: 3},
+		})
+	}
+}
+
+// A stack's reviewed template may run ten services, any other Compose
+// template eight: a template with nine is refused unless it is a stack's,
+// and a stack's with eleven is refused.
+func TestAStacksTemplateMayRunTenServicesAndAnyOtherEight(t *testing.T) {
+	t.Parallel()
+	for _, testCase := range []struct {
+		name     string
+		stack    bool
+		services int
+		want     string
+	}{
+		{"eight outside a stack", false, 8, ""},
+		{"nine outside a stack", false, 9, "runs 2-8 services; this one declares 9"},
+		{"ten in a stack", true, 10, ""},
+		{"eleven in a stack", true, 11, "runs 2-10 services; this one declares 11"},
+	} {
+		t.Run(testCase.name, func(t *testing.T) {
+			t.Parallel()
+			candidate := minimalComposeTemplate()
+			if testCase.stack {
+				asStack(candidate, "media")
+			}
+			withWorkers(candidate, testCase.services)
+			err := Validate(candidate)
+			switch {
+			case testCase.want == "" && err != nil:
+				t.Fatalf("refused %d services: %v", testCase.services, err)
+			case testCase.want != "" && (err == nil || !strings.Contains(err.Error(), testCase.want)):
+				t.Fatalf("error %v does not say %q", err, testCase.want)
+			}
+		})
+	}
+}
+
 // Each mutation is one way a stack could be unsafe or simply broken, and each
 // is refused when the catalogue loads — that is, at build time — rather than
 // when an operator presses Deploy.

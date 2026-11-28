@@ -69,6 +69,10 @@ type arrFake struct {
 	health   []byte
 	profiles []map[string]any
 	indexers []map[string]any
+	// tags are Prowlarr's tags; refuse answers a PUT indexer/N with 400, as
+	// Prowlarr does for a source whose site is down.
+	tags   []map[string]any
+	refuse map[int]bool
 	// fail answers a request ("GET rootfolder") with a status instead.
 	fail map[string]int
 
@@ -85,7 +89,7 @@ func newArrFake(t *testing.T, app arrApp) *arrFake {
 		t: t, app: app, key: strings.Repeat(app.service[:1], 32),
 		absent: map[string]bool{}, lists: map[string][]map[string]any{}, secrets: map[string]string{}, nextID: 1,
 		passes: func(string, map[string]any, map[string]any) bool { return true },
-		health: []byte("[]"), fail: map[string]int{},
+		health: []byte("[]"), fail: map[string]int{}, refuse: map[int]bool{},
 	}
 	if err := json.Unmarshal(arrFixture(t, app.service+"-config-host.json"), &fake.host); err != nil {
 		t.Fatal(err)
@@ -206,7 +210,34 @@ func (f *arrFake) serve(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		f.answer(w, http.StatusOK, f.indexers)
-	case parts[0] == "downloadclient" || parts[0] == "applications":
+	case call == "GET tag":
+		f.answer(w, http.StatusOK, append([]map[string]any{}, f.tags...))
+	case call == "POST tag":
+		f.writes = append(f.writes, call)
+		tag := map[string]any{"id": f.nextID, "label": body["label"]}
+		f.nextID++
+		f.tags = append(f.tags, tag)
+		f.answer(w, http.StatusCreated, tag)
+	case r.Method == http.MethodPut && parts[0] == "indexer" && len(parts) == 2:
+		id, _ := strconv.Atoi(parts[1])
+		if r.URL.Query().Get("forceSave") != "true" {
+			f.t.Errorf("a source was saved without forceSave: %s", r.URL.RawQuery)
+		}
+		if f.refuse[id] {
+			f.answer(w, http.StatusBadRequest, []map[string]any{{"isWarning": false, "propertyName": "", "errorMessage": "Unable to connect to indexer", "severity": "error"}})
+			return
+		}
+		for index, indexer := range f.indexers {
+			if arrFakeID(indexer) == id {
+				f.writes = append(f.writes, call)
+				body["id"] = id
+				f.indexers[index] = body
+				f.answer(w, http.StatusAccepted, body)
+				return
+			}
+		}
+		f.answer(w, http.StatusNotFound, map[string]string{"message": "NotFound"})
+	case parts[0] == "downloadclient" || parts[0] == "applications" || parts[0] == "indexerproxy":
 		f.provider(w, r.Method, parts, body)
 	default:
 		f.t.Errorf("%s: unexpected request %s", f.app.title, call)
@@ -260,6 +291,7 @@ func (f *arrFake) provider(w http.ResponseWriter, method string, parts []string,
 		if !f.passes(resource, body, f.settings(resource, id, body)) {
 			f.answer(w, http.StatusBadRequest, arrFixture(f.t, map[string]string{
 				"downloadclient": "radarr-downloadclient-test-failed.json", "applications": "prowlarr-applications-test-failed.json",
+				"indexerproxy": "prowlarr-indexerproxy-test-failed.json",
 			}[resource]))
 			return
 		}
@@ -277,6 +309,16 @@ func (f *arrFake) provider(w http.ResponseWriter, method string, parts []string,
 		f.keep(resource, body)
 		f.lists[resource] = append(f.lists[resource], body)
 		f.answer(w, http.StatusCreated, f.masked(resource, body))
+	case method == http.MethodDelete && len(parts) == 2:
+		id, _ := strconv.Atoi(parts[1])
+		index := find(id)
+		if index < 0 {
+			f.answer(w, http.StatusNotFound, map[string]string{"message": "NotFound"})
+			return
+		}
+		f.writes = append(f.writes, call)
+		f.lists[resource] = append(f.lists[resource][:index:index], f.lists[resource][index+1:]...)
+		f.answer(w, http.StatusOK, nil)
 	case method == http.MethodPut && len(parts) == 2:
 		id, _ := strconv.Atoi(parts[1])
 		index := find(id)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -15,15 +16,31 @@ import (
 )
 
 type serviceFixture struct {
-	db       *sql.DB
-	store    *stacks.Store
-	service  *stacks.Service
-	mu       sync.Mutex
-	live     stacks.Live
-	liveErr  error
-	passes   int
-	project  int64
-	manifest *stacks.Manifest
+	db      *sql.DB
+	store   *stacks.Store
+	service *stacks.Service
+	mu      sync.Mutex
+	live    stacks.Live
+	liveErr error
+	// released is what ReleaseServices answers: nil, every service;
+	// releasedErr is a read of it that failed.
+	released    map[string]bool
+	releasedErr error
+	passes      int
+	project     int64
+	manifest    *stacks.Manifest
+	// warned counts the service's warnings that a pass could not be prepared.
+	warned int
+}
+
+// Write counts the service's log lines that say a pass could not be prepared.
+func (f *serviceFixture) Write(line []byte) (int, error) {
+	if strings.Contains(string(line), "could not be prepared") {
+		f.mu.Lock()
+		f.warned++
+		f.mu.Unlock()
+	}
+	return len(line), nil
 }
 
 func newServiceFixture(t *testing.T) *serviceFixture {
@@ -82,7 +99,13 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 		Variables: func(context.Context, int64, int64) (map[string]string, error) {
 			return map[string]string{"MEDIA_QUALITY": "2160p"}, nil
 		},
+		ReleaseServices: func(context.Context, stacks.Preset, stacks.Live) (map[string]bool, error) {
+			fixture.mu.Lock()
+			defer fixture.mu.Unlock()
+			return fixture.released, fixture.releasedErr
+		},
 		Runner: runner,
+		Log:    slog.New(slog.NewTextHandler(fixture, nil)),
 	})
 	if err := fixture.store.Register(context.Background(), project, 7, "test", "small", "tester"); err != nil {
 		t.Fatal(err)
@@ -253,5 +276,106 @@ func TestServiceRefusesAPassForAReleaseThatIsNotAPreset(t *testing.T) {
 	f.goLive(42, "test-small")
 	if err := f.service.Request(ctx, f.project); err != nil {
 		t.Fatalf("Retry on a preset's release = %v", err)
+	}
+}
+
+// A release that does not run every service of the preset (one of an older
+// version of the template, from before a service was added to it) leaves
+// that service's steps out of the pass; the release that runs it sets it up.
+func TestServiceLeavesOutAServiceTheReleaseDoesNotRun(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	f.mu.Lock()
+	f.released = map[string]bool{"a": true}
+	f.mu.Unlock()
+	f.goLive(21, "test-large")
+	record := f.settle(t)
+	steps, _ := f.store.Steps(ctx, f.project)
+	if record.Status != stacks.StatusReady || steps["a.setup"].Status != stacks.StepDone ||
+		steps["b.link"].Status != stacks.StepSkipped || steps["b.link"].Message != stacks.AbsentMessage {
+		t.Fatalf("a release without b: %+v %+v", record, steps)
+	}
+
+	f.mu.Lock()
+	f.released = nil
+	f.mu.Unlock()
+	f.goLive(22, "test-large")
+	f.settle(t)
+	steps, _ = f.store.Steps(ctx, f.project)
+	if steps["b.link"].Status != stacks.StepDone {
+		t.Fatalf("the release that runs b: %+v", steps["b.link"])
+	}
+}
+
+// A pass that cannot read what the release runs runs nothing: it is not
+// recorded as configured and is asked for again, so it runs once the read
+// works, even when what made it due was a Retry that no longer stands.
+func TestServiceRunsNothingWhenWhatTheReleaseRunsCannotBeRead(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	f.goLive(51, "test-large")
+	f.settle(t)
+	if f.passCount() != 1 {
+		t.Fatalf("%d passes over the first release", f.passCount())
+	}
+	f.mu.Lock()
+	f.releasedErr = errors.New("database is locked")
+	f.mu.Unlock()
+	if err := f.service.Request(ctx, f.project); err != nil {
+		t.Fatal(err)
+	}
+	record := f.settle(t)
+	if f.passCount() != 1 || record.Status != stacks.StatusFailed || record.RequestedAt.IsZero() {
+		t.Fatalf("a pass whose release could not be read: %d passes, %+v", f.passCount(), record)
+	}
+
+	// It is asked for again at every look while the read fails, and says so once.
+	for range 3 {
+		f.settle(t)
+	}
+	f.mu.Lock()
+	warned := f.warned
+	f.releasedErr = nil
+	f.mu.Unlock()
+	if warned != 1 {
+		t.Fatalf("a reason that stands was logged %d times over four looks", warned)
+	}
+	record = f.settle(t)
+	if f.passCount() != 2 || record.Status != stacks.StatusReady || !record.RequestedAt.IsZero() {
+		t.Fatalf("once it reads: %d passes, %+v", f.passCount(), record)
+	}
+}
+
+// A rollback to a release that does not run a service the last one did is a
+// new live release, so a pass runs over it, and the step of that service
+// takes back what it made in the apps that stay.
+func TestServiceWithdrawsAServiceARollbackLeftOut(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	withdrawn := 0
+	f.manifest.Steps[1].Withdraw = func(context.Context, stacks.Env) (stacks.Result, error) {
+		f.mu.Lock()
+		withdrawn++
+		f.mu.Unlock()
+		return stacks.Result{Message: "taken back"}, nil
+	}
+	f.goLive(61, "test-large")
+	f.settle(t)
+	steps, _ := f.store.Steps(ctx, f.project)
+	if steps["b.link"].Status != stacks.StepDone || withdrawn != 0 {
+		t.Fatalf("the release that runs b: %+v, %d withdrawn", steps["b.link"], withdrawn)
+	}
+
+	f.mu.Lock()
+	f.released = map[string]bool{"a": true}
+	f.mu.Unlock()
+	f.goLive(60, "test-large")
+	record := f.settle(t)
+	steps, _ = f.store.Steps(ctx, f.project)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if record.ConfiguredReleaseID != 60 || record.Status != stacks.StatusReady || withdrawn != 1 ||
+		steps["b.link"].Status != stacks.StepSkipped || steps["b.link"].Message != stacks.AbsentMessage {
+		t.Fatalf("after the rollback: %+v %+v, %d withdrawn", record, steps["b.link"], withdrawn)
 	}
 }

@@ -1030,9 +1030,11 @@ test("what is sent while it answers waits under the answer, and goes once it end
   await expect(rows).toHaveCount(3)
   await expect(rows.first()).toContainText("Waiting")
   await expect(rows.first()).toContainText("And then the logs")
-  // One height each, whatever they say, and nothing under them.
+  // One height each, whatever they say, and nothing under them. The layout's
+  // height, not the drawn box: a row still rising, or the column still settling,
+  // draws a box a few thousandths of a pixel off while the rows are all one height.
   const heights = await rows.evaluateAll((all) =>
-    all.map((row) => row.getBoundingClientRect().height),
+    all.map((row) => (row as HTMLElement).offsetHeight),
   )
   expect(new Set(heights).size).toBe(1)
   expect(heights[0]).toBe(36)

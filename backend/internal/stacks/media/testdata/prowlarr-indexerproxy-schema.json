@@ -1,0 +1,197 @@
+[
+  {
+    "onHealthIssue": false,
+    "supportsOnHealthIssue": false,
+    "includeHealthWarnings": false,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "value": "http://localhost:8191/",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "requestTimeout",
+        "label": "Request Timeout",
+        "unit": "seconds",
+        "helpText": "FlareSolverr maxTimeout Request Parameter",
+        "value": 60,
+        "type": "textbox",
+        "advanced": true,
+        "privacy": "normal",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "FlareSolverr",
+    "implementation": "FlareSolverr",
+    "configContract": "FlareSolverrSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported#flaresolverr",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "onHealthIssue": false,
+    "supportsOnHealthIssue": false,
+    "includeHealthWarnings": false,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 0,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "username",
+        "label": "Username",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "password",
+        "label": "Password",
+        "value": "",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Http",
+    "implementation": "Http",
+    "configContract": "HttpSettings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported#http",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "onHealthIssue": false,
+    "supportsOnHealthIssue": false,
+    "includeHealthWarnings": false,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 0,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "username",
+        "label": "Username",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "password",
+        "label": "Password",
+        "value": "",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Socks4",
+    "implementation": "Socks4",
+    "configContract": "Socks4Settings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported#socks4",
+    "tags": [],
+    "presets": []
+  },
+  {
+    "onHealthIssue": false,
+    "supportsOnHealthIssue": false,
+    "includeHealthWarnings": false,
+    "name": "",
+    "fields": [
+      {
+        "order": 0,
+        "name": "host",
+        "label": "Host",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 1,
+        "name": "port",
+        "label": "Port",
+        "value": 0,
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "normal",
+        "isFloat": false
+      },
+      {
+        "order": 2,
+        "name": "username",
+        "label": "Username",
+        "value": "",
+        "type": "textbox",
+        "advanced": false,
+        "privacy": "userName",
+        "isFloat": false
+      },
+      {
+        "order": 3,
+        "name": "password",
+        "label": "Password",
+        "value": "",
+        "type": "password",
+        "advanced": false,
+        "privacy": "password",
+        "isFloat": false
+      }
+    ],
+    "implementationName": "Socks5",
+    "implementation": "Socks5",
+    "configContract": "Socks5Settings",
+    "infoLink": "https://wiki.servarr.com/prowlarr/supported#socks5",
+    "tags": [],
+    "presets": []
+  }
+]

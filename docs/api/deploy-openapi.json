@@ -3428,6 +3428,16 @@
             "format": "date-time",
             "type": "string"
           },
+          "upgrade": {
+            "oneOf": [
+              {
+                "$ref": "#/components/schemas/api.stackUpgrade"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
           "version": {
             "type": "string"
           }
@@ -3503,6 +3513,70 @@
           }
         },
         "title": "api.stackStepState",
+        "type": "object"
+      },
+      "api.stackUpgrade": {
+        "properties": {
+          "added": {
+            "items": {
+              "$ref": "#/components/schemas/api.stackUpgradeService"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "from": {
+            "type": "string"
+          },
+          "saved": {
+            "type": "boolean"
+          },
+          "template": {
+            "type": "string"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackUpgrade",
+        "type": "object"
+      },
+      "api.stackUpgradeAnswer": {
+        "properties": {
+          "added": {
+            "items": {
+              "type": "string"
+            },
+            "type": [
+              "array",
+              "null"
+            ]
+          },
+          "runId": {
+            "format": "int64",
+            "type": "integer"
+          },
+          "version": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackUpgradeAnswer",
+        "type": "object"
+      },
+      "api.stackUpgradeService": {
+        "properties": {
+          "purpose": {
+            "type": "string"
+          },
+          "service": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          }
+        },
+        "title": "api.stackUpgradeService",
         "type": "object"
       },
       "api.stagingCreateRequest": {
@@ -29699,6 +29773,52 @@
           }
         }
       ]
+    },
+    "/deploy/{id}/stack/upgrade": {
+      "parameters": [
+        {
+          "description": "The deployment's id.",
+          "in": "path",
+          "name": "id",
+          "required": true,
+          "schema": {
+            "format": "int64",
+            "type": "integer"
+          }
+        }
+      ],
+      "post": {
+        "description": "With the source already at that version but the live release older, it starts the release again. 409 stack_upgrade_none when the deployment runs every app of the stack, 409 stack_not_preset when its source is no longer the stack's template.",
+        "operationId": "stackUpgrade",
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/api.stackUpgradeAnswer"
+                }
+              }
+            },
+            "description": "Accepted"
+          },
+          "default": {
+            "$ref": "#/components/responses/Error"
+          }
+        },
+        "security": [
+          {
+            "session": []
+          },
+          {
+            "deployKey": []
+          }
+        ],
+        "summary": "Add the apps the stack's template gained since the deployment was made: the source is saved at the template version this dashboard ships, as the Source settings save it, and a release is started; inputs, variables, domains and volumes stay.",
+        "tags": [
+          "stacks"
+        ],
+        "x-deploy-key": "allowed"
+      }
     },
     "/deploy/{id}/unarchive": {
       "parameters": [

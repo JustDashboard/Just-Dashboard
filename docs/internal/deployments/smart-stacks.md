@@ -3,7 +3,7 @@
 A smart stack is several applications deployed as one Compose template and then set up and connected
 to each other by the dashboard, so the person does not open six web interfaces to copy API keys
 between them. The first is the media server stack (Jellyfin, Seerr, Radarr, Sonarr, Prowlarr,
-qBittorrent, Bazarr, Recyclarr). It is offered on the **Stacks** tab of `/deploy/new` and reported
+FlareSolverr, qBittorrent, Bazarr, Recyclarr). It is offered on the **Stacks** tab of `/deploy/new` and reported
 on a project's **Stack** page (`/deploy/[id]/stack`).
 
 ## What is new and what is not
@@ -33,7 +33,8 @@ configuration steps against the live release's containers and records each step'
 
 ## The templates
 
-- **Complete** (eight services, the Compose template cap) and **Essential** (Jellyfin and Seerr).
+- **Complete** (nine services; a stack's template may run ten, an added template eight) and
+  **Essential** (Jellyfin and Seerr).
   Images are pinned to exact upstream releases (linuxserver.io builds for the managers, the
   download client and Bazarr; Jellyfin's and Seerr's own images; Recyclarr's from Docker Hub).
 - **Jellyfin is the public service**: the deployment's domain routes to it, as any template's
@@ -118,6 +119,72 @@ allowed only on a stack's service with a loopback port and unique in the templat
   not run or is still running), it starts the release again without adding a domain
   (`202 {runId, domains: []}`); with neither it answers `409 stack_addresses_present`.
 
+## FlareSolverr
+
+Complete (template 1.2.0) runs FlareSolverr (`ghcr.io/flaresolverr/flaresolverr`, pinned), a worker
+with no web interface: its API (8191) is `internal`, never published, and it declares `egress`, since
+it opens the sites itself in a headless browser.
+
+- `prowlarr.flaresolverr` (`media/flaresolverr.go`, the FlareSolverr row's step, after
+  `prowlarr.auth`) makes Prowlarr's tag `flaresolverr` (one the person made under that name, in any
+  case, is the same tag) and the indexer proxy **FlareSolverr (Just Dashboard)** at
+  `http://flaresolverr:8191/` with Prowlarr's 60-second request timeout and that tag, after Prowlarr's
+  own test of it (which asks FlareSolverr for its version).
+- **Every source gets the tag**, the person's own included, keeping its other tags. Prowlarr applies
+  a proxy only to a source that shares its tag, and FlareSolverr's only to a request whose answer is
+  Cloudflare's check: a site that answers directly is never sent through it, so the tag costs a source
+  nothing. A source is saved back with `PUT indexer/{id}?forceSave=true` as `GET indexer` gave it;
+  a secret Prowlarr answers as `********` keeps its stored value when sent back so (checked against
+  Prowlarr 3.1.0). One Prowlarr will not save now (its site is down) is named in the step's message
+  and tried again on the next pass, never a failure.
+- **A rollback** to a release from before FlareSolverr (from a 1.2.0 release to a 1.1.0 one) is a new
+  live release, so a pass runs over it, and its Compose file runs no FlareSolverr. The step's
+  `Withdraw` (`prowlarrFlareSolverrWithdraw`) then deletes the proxy named **FlareSolverr (Just
+  Dashboard)** of FlareSolverr's kind, which would point Prowlarr at a container that is gone (and
+  show in Prowlarr's health check); a proxy the person made, under any other name, stays. The tag
+  stays on the sources: without a proxy it does nothing, and the step finds it again when FlareSolverr
+  comes back. With the proxy gone an add carries no tag. The state offers the upgrade again
+  (`saved`, **Deploy again**), since the source still names 1.2.0.
+- **An add** from the Sources page carries the tag in the test and the save when Prowlarr has both
+  the tag and the stack's proxy; a stack without FlareSolverr (Essential, or a release from before it)
+  sends none. One saved without it looks for the proxy again once it is saved and, if the proxy is
+  there now, gives the source the tag before the sync (`tagAddedSource`). That closes the first pass
+  after an upgrade: the step saves the proxy and then lists the sources, so an add that looked before
+  the proxy and saved after the list either finds the proxy on its second look or is in the list.
+
+## When the template gains an app
+
+A deployment's source is this dashboard's render of the template version it names, and it stays that
+render whatever a later dashboard ships ([deployments](implementation.md)). A stack deployed from
+Complete 1.1.0 therefore runs eight apps after the dashboard ships 1.2.0 with nine.
+
+- **What the release runs** is read from its own Compose file: the source revision the live release
+  was made from (`deploy_releases.source_id`), its documents' `services`. A preset's service missing
+  from it is not the deployment's yet. The state leaves it out of the apps and the steps, and the pass
+  leaves its steps out (`ServiceDeps.ReleaseServices`, which makes `Env.Has` false for it), so an
+  older stack is never shown a FlareSolverr that is failing. A release with no source row or no
+  Compose file, or a file that does not parse, counts as running every app. A read the store fails
+  to answer is an error, never "every app": the state's read answers it (the page keeps its last
+  reading), and the pass ends before any step runs, is not recorded as configured and is asked for
+  again, so the next look (ten seconds) runs it once the read works. Taking the error as "every app"
+  would have an older stack's pass run, and fail, FlareSolverr's step against a container its
+  release does not have; leaving out what the older template lacked instead would need every old
+  version's list of apps, which the dashboard does not keep.
+- **`upgrade`** in the state names those services (`added`, with each one's title and purpose), the
+  shipped version (`version`) and the one the stack runs (`from`: the one the deployment's source
+  names, or with `saved` the live release's), when the source is still the preset's template. `saved`
+  is a source already at the shipped version whose live release is older: the release that was to
+  bring them failed, has not run or is still running. The Stack page's lead names `from` while there
+  is an upgrade ("Complete · v1.1.0"), so its header never claims the version its own step offers.
+- `POST /deploy/{id}/stack/upgrade` saves the source at the shipped version through what the Source
+  settings' save runs (`saveStackSourceVersion`: the render, `ValidateForDeployment`, a deploy key's
+  guards, the read-only inspection, the revision guard; audited `deploy.source.update`), then starts
+  the release at that revision as "Deploy changes" does (`deploy.run.request`), and answers
+  `202 {runId, version, added}` (audited `deploy.stack.upgrade`). Inputs, variables, domains and
+  volumes stay; a new service starts with volumes of its own. With `saved` it deploys again without a
+  new source revision. `409 stack_upgrade_none` when nothing is missing; `409 stack_not_preset` when the
+  source left the stack's template. The pass after the release sets the new apps up as any pass does.
+
 ## When a pass runs
 
 `stacks.Service` looks at every stack every ten seconds and at once after a commit or a Retry
@@ -125,7 +192,8 @@ allowed only on a stack's service with a loopback port and unique in the templat
 templates and either the release is not the one last configured, the manifest version changed, or
 a pass was requested. At most two stacks are configured at once, one pass per stack. A pass for a
 release that stopped being live is cancelled, and so is one for a deployment that was removed; one a
-restart cut short is queued again (`ResetInterrupted`). Changing the source to the other preset's template moves the stack to that
+restart cut short is queued again (`ResetInterrupted`), and so is one whose environment could not
+be built (a read of the variables or of what the release runs that failed): it ran nothing. Changing the source to the other preset's template moves the stack to that
 preset. A deployment whose source is no longer a preset is left alone, and Retry on it is refused
 (`stack_not_preset`) rather than recorded for a pass that would never run.
 
@@ -137,6 +205,11 @@ by project; its rows cascade with the project's.
 - A step runs when every step in its `After` is done, or skipped because its service is not in the
   preset (such steps are left out of the page). A step after one that failed, needs the person, or
   was itself held back is skipped with a sentence naming which.
+- A step with a `Withdraw` whose own service has left the pass while every service it `Needs` is
+  still there (a rollback to a release from before the service came with the template) runs
+  `Withdraw` in `Run`'s place, after the same `After` and with the same timeout and attempts, to take
+  back what it made in the apps that stay. It is recorded as absent all the same, whatever came of
+  it: left out of the page and holding nothing; what it did, or its error, stays in its record.
 - Three steps at once. Each attempt is bounded by the step's timeout; up to its attempts with
   5, 10, 20, 40, 60 s between them. `stacks.Permanent` stops retrying; `stacks.NeedsAction` records
   `action_required` with an action the page lists. A panic in an adapter fails that step only.
@@ -204,11 +277,12 @@ Bazarr's) are kept there too and are never revealed.
 | Route | Who | What |
 |---|---|---|
 | `GET /deploy/stacks` | any signed-in account, any key | the catalogue: presets with their template, memory and disk estimate, limitations, services with their address label (`address`) and Jellyfin as `primary` |
-| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, each one's public `url` once the live release serves it (Jellyfin's is the primary domain) and a private one's loopback `address`, steps, actions, `login {username, stored}`, `credentials` (the one login), `addresses {primary, missing, unpublished}`; `404 stack_not_found` otherwise |
+| `GET /deploy/{id}/stack` | whoever reads the project | state, readiness, services with container state, each one's public `url` once the live release serves it (Jellyfin's is the primary domain) and a private one's loopback `address`, steps, actions, `login {username, stored}`, `credentials` (the one login), `addresses {primary, missing, unpublished}`, `upgrade {template, version, from, added, saved}` when the template gained apps the live release does not run; `404 stack_not_found` otherwise |
 | `POST /deploy/{id}/stack/configure` | the deploy control capability | run a pass now; `409 stack_waiting` before a live release, `409 stack_busy` during a pass, `409 stack_not_preset` when the live release is not one of the stack's presets (no pass would ever run); audited |
 | `GET /deploy/{id}/stack/credentials/{name}/reveal` | administrator, session, not Hub | the login's password (`name` is `login`); audited |
 | `PUT /deploy/{id}/stack/login` | administrator, session, not Hub, not the assistant | change the login; a pass follows; audited without the value |
 | `POST /deploy/{id}/stack/addresses` | a configuration save's terms (an administrator in a session, or a deploy key) | give every app without one its address and deploy, or deploy again for addresses saved but not live; audited |
+| `POST /deploy/{id}/stack/upgrade` | a source save's terms (an administrator in a session, or a deploy key) | move the source to the shipped template version, which runs the apps it gained, and deploy; or deploy again when saved but not live; audited |
 | `GET /deploy/{id}/stack/sources` | whoever reads the project | the sources Prowlarr has, whoever added them |
 | `GET /deploy/{id}/stack/sources/catalogue` | whoever reads the project | the torrent sources Prowlarr can add, each with `needsInput`, and `fetchedAt` |
 | `GET /deploy/{id}/stack/sources/catalogue/{definition}` | whoever reads the project | one of them with its form |
@@ -295,9 +369,23 @@ The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
   (`MEDIA_LOGIN_PASSWORD`), so it is sent with the draft's other typed variables and nowhere else.
 - **The Stack page** (`/deploy/[id]/stack`) is a launcher. It opens with the lead and the five facts,
   then the one next step when something is left, then the apps and the login.
-  - Next steps come in this order: a blocking action, then "Give every app its address" when
+  - Next steps come in this order: a blocking action, then the apps the template gained
+    ("New in the stack: FlareSolverr", `stack-upgrade.tsx`: names them, confirms, posts
+    `POST …/stack/upgrade` and links the run; with `saved`, **Deploy again**, or the run under way),
+    then "Give every app its address" when
     `addresses.missing` or `addresses.unpublished` is not empty, then the optional actions, then
     each failed step with its error. The first one's command wears the brand.
+  - What the upgrade's or the addresses' press started ("A deployment is adding FlareSolverr", "A
+    deployment is giving every app its address", with its run) is the page's to keep past the read
+    that no longer offers the press, but only until the project's runs show that run ended and the
+    stack has been read since (`useStartedRun` in `stack-page.tsx`, which reads the stack again the
+    moment it sees the end). From then the server's state says the rest: nothing once the release is
+    live, **Deploy again** when it failed.
+  - Both presses that deploy ("Add FlareSolverr", "Give every app its address", and their **Deploy
+    again**) start a release of the saved configuration, so with `deployment.pendingChanges` set the
+    step's sentence and the dialog add "Every change saved to the deployment but not deployed yet goes
+    out with it." (`PENDING_CHANGES_NOTE`). With `saved` (or `addresses.unpublished`) that is always
+    so, since the press's own change is among them.
   - The `media-source` action links to the source picker.
   - "Give every app its address" names the apps and their hostnames, confirms in a dialog and posts
     `POST …/stack/addresses`. Without a primary domain the dialog asks for one, prefilled with the

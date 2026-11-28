@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/blueprint"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/stacks/media"
@@ -22,13 +23,29 @@ import (
 // the apps had addresses (only the primary) or one made without a domain.
 func seedStackDeployment(t *testing.T, s *Server, name, template, preset string, keep func(deploy.PlannedDomain) bool) (int64, int64) {
 	t.Helper()
+	return seedStackDeploymentFrom(t, s, name, template, preset, keep, nil)
+}
+
+// seedStackDeploymentFrom is seedStackDeployment with the source changed
+// before it is stored (source revisions are immutable): a stack made from an
+// older version of the template.
+func seedStackDeploymentFrom(t *testing.T, s *Server, name, template, preset string, keep func(deploy.PlannedDomain) bool,
+	change func(*deploy.DraftSourceConfig)) (int64, int64) {
+	t.Helper()
+	shipped, err := blueprint.Get(template)
+	if err != nil {
+		t.Fatal(err)
+	}
 	source := deploy.DraftSourceConfig{Kind: deploy.SourceCompose, Mode: deploy.SourceModeBlueprint,
-		BlueprintID: template, BlueprintVersion: "1.1.0", BlueprintInputs: map[string]string{"domain": "media.example.test"}}
+		BlueprintID: template, BlueprintVersion: shipped.Version, BlueprintInputs: map[string]string{"domain": "media.example.test"}}
 	plan, err := deploy.RenderBlueprintPlan(source, name)
 	if err != nil {
 		t.Fatal(err)
 	}
 	source.ComposeFiles = plan.ComposeFiles
+	if change != nil {
+		change(&source)
+	}
 	configuration := plan.Configuration
 	db := s.Store.DB
 	now := time.Now().Unix()

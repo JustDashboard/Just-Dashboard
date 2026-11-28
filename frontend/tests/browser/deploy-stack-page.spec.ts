@@ -1,6 +1,7 @@
 import { expect, test, type Page } from "@playwright/test"
-import { json, mockProject } from "./deploy-fixture"
+import { json, mockProject, run } from "./deploy-fixture"
 import {
+  FLARESOLVERR_UPGRADE,
   STACK_PASSWORD,
   mediaCompleteDefinition,
   mockStackProject,
@@ -871,4 +872,219 @@ test("a step on another try says in its record what the last one met", async ({ 
   await expect(page.getByRole("dialog")).toContainText(
     "Sonarr answered 503 to GET /api/v3/system/status",
   )
+})
+
+test("a stack made before an app came with it offers to add the app, then links the run", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+  })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await expect(step).toContainText("New in the stack: FlareSolverr")
+  await expect(step).toContainText(
+    "The stack now comes with FlareSolverr. Adding it deploys the stack again with it beside the other apps; your library, settings, domains and login stay",
+  )
+  // The page's one next step, so its command wears the brand.
+  const add = step.getByRole("button", { name: "Add FlareSolverr" })
+  await expect(add).toHaveAttribute("data-variant", "default")
+  await add.click()
+  const dialog = page.getByRole("dialog", { name: "Add FlareSolverr" })
+  await expect(dialog.getByRole("list", { name: "The apps added" })).toContainText(
+    "Opens the sources behind Cloudflare",
+  )
+  await expect(dialog).toContainText("version 1.2.0")
+  await dialog.getByRole("button", { name: "Add and deploy" }).click()
+  await expect(dialog).toBeHidden()
+  expect(stack.upgradeRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/92",
+  )
+  await expect(step.getByRole("button")).toHaveCount(0)
+})
+
+test("an older stack's version is the one it runs, not the one it is offered", async ({ page }) => {
+  await mockStackProject(page, {
+    state: { ...stackState("ready"), version: "1.2.0", upgrade: FLARESOLVERR_UPGRADE },
+  })
+  await page.goto("/deploy/7/stack")
+  await expect(page.locator("[data-slot='stack-upgrade']")).toContainText(
+    "New in the stack: FlareSolverr",
+  )
+  await expect(lead(page)).toContainText("Complete · v1.1.0")
+})
+
+test("new apps saved but not live wait for the deployment under way, else offer Deploy again", async ({
+  page,
+}) => {
+  const saved = { ...stackState("ready"), upgrade: { ...FLARESOLVERR_UPGRADE, saved: true } }
+  const stack = await mockStackProject(page, { state: saved, running: true })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  await expect(step.getByRole("link", { name: "Watch the run" })).toHaveAttribute(
+    "href",
+    "/deploy/7/runs/84",
+  )
+  await expect(step.getByRole("button")).toHaveCount(0)
+  expect(stack.upgradeRequests()).toEqual([])
+
+  const idle = await mockStackProject(page, { state: saved })
+  await page.goto("/deploy/7/stack")
+  await expect(step).toContainText("Start FlareSolverr")
+  await expect(step).toContainText("did not finish. Deploying again starts it.")
+  await step.getByRole("button", { name: "Deploy again" }).click()
+  await page
+    .getByRole("dialog", { name: "Start FlareSolverr" })
+    .getByRole("button", { name: "Deploy again" })
+    .click()
+  expect(idle.upgradeRequests()).toEqual([{}])
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+})
+
+test("once the run adding the apps has failed, the step offers Deploy again", async ({ page }) => {
+  const stack = await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+  })
+  // Run 92 is the one the press starts; the spec ends it.
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 92, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await step.getByRole("button", { name: "Add FlareSolverr" }).click()
+  await page
+    .getByRole("dialog", { name: "Add FlareSolverr" })
+    .getByRole("button", { name: "Add and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  // While it runs the source names 1.2.0 and the live release is older.
+  stack.set({ ...stackState("ready"), upgrade: { ...FLARESOLVERR_UPGRADE, saved: true } })
+  const reads = stack.reads()
+  await expect.poll(() => stack.reads(), { timeout: 20000 }).toBeGreaterThan(reads)
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+
+  // The release failed: the stack is read again and offers Deploy again.
+  started.state = "failed"
+  await expect(step).toContainText("Start FlareSolverr", { timeout: 20000 })
+  await expect(step.getByRole("button", { name: "Deploy again" })).toBeVisible()
+  await expect(step).not.toContainText("A deployment is adding")
+})
+
+test("a run that brought the apps leaves no step behind", async ({ page }) => {
+  const stack = await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+  })
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 92, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await step.getByRole("button", { name: "Add FlareSolverr" }).click()
+  await page
+    .getByRole("dialog", { name: "Add FlareSolverr" })
+    .getByRole("button", { name: "Add and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  stack.set(stackState("ready"))
+  started.state = "succeeded"
+  await expect(step).toHaveCount(0, { timeout: 20000 })
+  await expect(left(page)).toHaveCount(0)
+})
+
+test("once the run giving the addresses has failed, the step offers Deploy again", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  // Run 91 is the one the press starts; the spec ends it.
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 91, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  await page
+    .getByRole("dialog", { name: "Give every app its address" })
+    .getByRole("button", { name: "Add the addresses and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is giving every app its address")
+  // While it runs the names are saved and the live release does not serve them.
+  stack.set(unpublishedState())
+  const reads = stack.reads()
+  await expect.poll(() => stack.reads(), { timeout: 20000 }).toBeGreaterThan(reads)
+  await expect(step).toContainText("A deployment is giving every app its address")
+
+  // The release failed: the stack is read again and offers Deploy again.
+  started.state = "failed"
+  await expect(step).toContainText("Publish the apps' addresses", { timeout: 20000 })
+  await expect(step.getByRole("button", { name: "Deploy again" })).toBeVisible()
+  await expect(step).not.toContainText("A deployment is giving")
+})
+
+test("a run that gave every app its address leaves no step behind", async ({ page }) => {
+  await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 91, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  await page
+    .getByRole("dialog", { name: "Give every app its address" })
+    .getByRole("button", { name: "Add the addresses and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is giving every app its address")
+  started.state = "succeeded"
+  await expect(step).toHaveCount(0, { timeout: 20000 })
+  await expect(left(page)).toHaveCount(0)
+})
+
+test("with changes saved but not deployed, giving the apps their addresses says they go out too", async ({
+  page,
+}) => {
+  const note = "Every change saved to the deployment but not deployed yet goes out with it."
+  await mockStackProject(page, {
+    state: stackState("ready", { addressless: true }),
+    pendingChanges: true,
+  })
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await expect(step).toContainText("have no address yet")
+  await expect(step).toContainText(note)
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  const dialog = page.getByRole("dialog", { name: "Give every app its address" })
+  await expect(dialog).toContainText("The names are added to the deployment's domains")
+  await expect(dialog).toContainText(note)
+
+  await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  await page.goto("/deploy/7/stack")
+  await expect(step).toContainText("have no address yet")
+  await expect(step).not.toContainText(note)
 })

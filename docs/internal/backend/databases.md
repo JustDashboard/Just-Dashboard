@@ -2841,8 +2841,8 @@ was written by (a server since moved to a newer major cannot start the older clu
 An AI client — Claude Code, Cursor, VS Code, anything that speaks the Model Context Protocol over
 Streamable HTTP — reaches the databases, and the deployments if its key was given them, through one
 endpoint, `POST /api/v1/mcp` (`api/handlers_mcp.go`, `handlers_mcp_tools.go`, `handlers_mcp_deploy.go`,
-`handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 123 tools in all: the seven
-database tools, the six hand-written deployment tools, and 110 tools generated from the deployment API,
+`handlers_mcp_operations.go`; the protocol is `internal/mcp`). It offers 124 tools in all: the seven
+database tools, the six hand-written deployment tools, and 111 tools generated from the deployment API,
 the last to a key whose owner turned them on for it. It sits outside the `/databases` tree, as the metrics export does,
 because what admits a request there is different.
 
@@ -2927,10 +2927,10 @@ because what admits a request there is different.
   `read_run_log`, `…/environments/{env}/releases` `list_releases`, `POST …/run` `deploy`,
   `POST …/environments/{env}/rollback` `rollback` — the hand-written one is kept, with its names and
   bounds), the three WebSocket streams, the four routes whose answer is not JSON (the favicon, the
-  preview frame, the CSV export, the YAML description) and the JSON description itself: 110 tools
-  generated, 123 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
+  preview frame, the CSV export, the YAML description) and the JSON description itself: 111 tools
+  generated, 124 tools in all. `TestEveryDeployKeyRouteIsAnMCPTool` walks the router and fails when a
   deploy key route is neither a tool nor left out with a reason, when a route no deploy key reaches is
-  a tool, or when the count differs from `api.MCPGeneratedTools` and the 123 these pages, `docs/features/databases.md` and
+  a tool, or when the count differs from `api.MCPGeneratedTools` and the 124 these pages, `docs/features/databases.md` and
   the deployment implementation notes quote.
   - **Grants.** A `GET` is offered under `read`; any other method under `deploy` to an owner whose role
     holds `service.control`; a route behind `s.destructive` (read off its chain by the `markDestructive`
