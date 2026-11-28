@@ -329,7 +329,7 @@ function StepDetails({ step }: { step: AgentStep }) {
         step.output && (
           <Well
             className="max-h-56 p-2.5 text-hint whitespace-pre-wrap"
-            aria-label={command ? "What it printed" : "What it read"}
+            aria-label={outputWords(step.call, Boolean(command))}
           >
             {step.output}
           </Well>
@@ -337,6 +337,18 @@ function StepDetails({ step }: { step: AgentStep }) {
       )}
     </>
   )
+}
+
+/**
+ * What a call's output is, for its box's name: a command prints, a push is git's
+ * answer and an opened workspace says where it is, rather than all of them reading
+ * as something it read.
+ */
+function outputWords(call: AgentCall, command: boolean) {
+  if (command) return "What it printed"
+  if (call.tool === "push_changes") return "What git answered to the push"
+  if (call.tool === "open_workspace") return "The workspace it opened"
+  return "What it read"
 }
 
 // What each of a file call's texts is, said over its box: an edit's two boxes

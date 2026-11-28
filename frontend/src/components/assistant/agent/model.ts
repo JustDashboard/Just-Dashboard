@@ -664,7 +664,7 @@ export const answering = (turn: AgentTurn | undefined) =>
 export const shownSteps = (turn: AgentTurn) =>
   turn.parts.filter(isStep).filter((step) => step.call.kind !== "free")
 
-/** Everything it changed, newest first, for the rail and the dock. */
+/** Everything it changed, newest first: the dock counts them, and a turn's status names the last. */
 export function changesOf(t: AgentTranscript): AgentStep[] {
   return t.turns
     .flatMap((turn) => turn.parts.filter(isStep))

@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Check } from "@/components/icons"
@@ -10,7 +10,6 @@ import { cn } from "@/lib/utils"
 import { useMemoryState, useSessionState } from "@/lib/view-state"
 import type {
   DeploymentDraft,
-  DeploymentDraftSource,
   DeploymentPreflight,
   DeploymentPreflightFinding,
   WorkloadProfile,
@@ -25,7 +24,6 @@ import { DEPLOYMENT_NAME } from "@/components/deploy/vocabulary"
 import { blockingFindings, warningFindings } from "@/components/deploy/deployment-findings"
 import {
   checksForRuntime,
-  composeSourceForCandidate,
   discoveredEnvironmentRows,
   environmentRowsToSend,
   mergeDiscoveredRows,
@@ -37,10 +35,10 @@ import { PlanRail } from "@/components/deploy/new-project/plan-rail"
 import {
   SetupAssistant,
   SetupAssistantOffer,
-  draftScope,
 } from "@/components/deploy/new-project/setup-assistant"
-import { agentBusy, dismissAgent, useAgentSession } from "@/components/assistant/agent/sessions"
-import { pendingSteps } from "@/components/assistant/agent/model"
+import { useAssistantDraft } from "@/components/deploy/new-project/use-assistant-draft"
+import { useSourceActions } from "@/components/deploy/new-project/use-source-actions"
+import { FormNote } from "@/components/form"
 import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
@@ -62,13 +60,9 @@ import {
   environmentText,
   loadDraft,
   preflightDraft,
-  resumeFlow,
   firstDeployRevision,
-  reinspect,
-  redetectedConfiguration,
   saveConfiguration,
   saveIntent,
-  selectCandidate,
   stepAfter,
   stepBefore,
   fetchHostnameSuggestion,
@@ -341,6 +335,32 @@ export function Configure({
     if (!done) return
     return () => forgetNewProject()
   }, [done])
+  // The assistant working on this draft: its saves read back, and the person's
+  // edits made meanwhile kept and saved once it is done (`use-assistant-draft.ts`).
+  // The steps' fields edit through it.
+  const assistant = useAssistantDraft({
+    flow,
+    text,
+    retainedKeys,
+    onFlowChange,
+    created: done,
+    idle: !busy && !branchBusy,
+    mutatingRef: mutating,
+  })
+  const autoChecked = useRef<string | undefined>(undefined)
+  // What reads the source again waits for the assistant too (`use-source-actions.ts`).
+  const source = useSourceActions({
+    assistant,
+    onFlowChange,
+    mutatingRef: mutating,
+    setFailure,
+    setBusy,
+    setBranchBusy,
+    onInspected: () => {
+      setReview(null)
+      autoChecked.current = undefined
+    },
+  })
 
   // Debounced, because it runs on every keystroke of the name field, and
   // never fatal: an unanswered question leaves the commit to refuse as before.
@@ -381,57 +401,11 @@ export function Configure({
   // the environment lives in memory and the step in the session store, so a
   // reload used to land back on Review reading "3 values" with none to send.
 
-  // A branch or a clone option is part of the saved source, so changing one
-  // saves it again and detects again.
-  const resaveSource = async (nextSource: DeploymentDraftSource) => {
-    if (mutating.current) return
-    mutating.current = true
-    setBranchBusy(true)
-    setFailure(undefined)
-    try {
-      const result = await reinspect(flow.draft, flow.profile, nextSource)
-      const profile =
-        flow.profile === flow.candidate?.profile
-          ? (result.candidate?.profile ?? flow.profile)
-          : flow.profile
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              source: nextSource,
-              profile,
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              configuration: redetectedConfiguration(flow, result, profile),
-            }
-          : current,
-      )
-    } catch (error) {
-      // Saving the source may have succeeded before detection failed.
-      try {
-        const fresh = await loadDraft(draftId)
-        onFlowChange((current) => (current ? { ...current, draft: fresh } : current))
-      } catch {
-        /* The original inspection error is the useful one. */
-      }
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBranchBusy(false)
-    }
-  }
-
-  const changeBranch = async (nextRef: string) => {
+  const changeBranch = (nextRef: string) => {
     const ref = nextRef.trim()
     setBranch(ref)
-    if (!ref || ref === flow.source.ref) return
-    await resaveSource({ ...flow.source, ref })
+    if (ref && ref !== flow.source.ref) source.resaveSource({ ref })
   }
-
-  const changeCloneOptions = (
-    options: Pick<DeploymentDraftSource, "includeSubmodules" | "includeLfs">,
-  ) => void resaveSource({ ...flow.source, ...options })
 
   const changeProfile = (profile: WorkloadProfile) => {
     const internalPort =
@@ -451,7 +425,7 @@ export function Configure({
       internalPort,
       flow.candidate?.readiness,
     )
-    return onFlowChange({
+    return assistant.editFlow({
       ...flow,
       profile,
       configuration: {
@@ -475,67 +449,6 @@ export function Configure({
         },
       },
     })
-  }
-
-  // `detection_ambiguous`'s only remedy — /detect has always accepted a
-  // `selectedId`, but nothing sent one, so the finding blocked every ambiguous
-  // plan with no way to resolve it from this screen.
-  const pickCandidate = async (id: string) => {
-    if (mutating.current) return
-    mutating.current = true
-    setFailure(undefined)
-    setBusy("detect")
-    try {
-      const result = await selectCandidate(flow.draft, flow.profile, flow.source, id)
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              profile: result.candidate?.profile ?? current.profile,
-              configuration: redetectedConfiguration(flow, result),
-            }
-          : current,
-      )
-    } catch (error) {
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBusy("")
-    }
-  }
-
-  // `compose_analysis_missing`'s remedy: the same repository, branch and
-  // files, read as a Compose source so its services are analysed and built.
-  const deployAsCompose = async () => {
-    const nextSource = composeSourceForCandidate(flow.source, flow.candidate)
-    if (!nextSource || mutating.current) return
-    mutating.current = true
-    setFailure(undefined)
-    setBusy("detect")
-    try {
-      const result = await reinspect(flow.draft, "compose", nextSource)
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              source: nextSource,
-              profile: "compose",
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              configuration: result.configuration,
-            }
-          : current,
-      )
-    } catch (error) {
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBusy("")
-    }
   }
 
   const current: ConfigureStepKey = created ? "done" : step === "done" ? "review" : step
@@ -607,7 +520,7 @@ export function Configure({
       return
     const name = fix.field.slice("variables.".length)
     const scope = fix.scope
-    onFlowChange((current) =>
+    assistant.editFlow((current) =>
       current
         ? {
             ...current,
@@ -712,6 +625,7 @@ export function Configure({
     }
 
     mutating.current = true
+    assistant.holdTurns(true)
     setBusy(operation)
     setFailure(undefined)
     try {
@@ -795,6 +709,7 @@ export function Configure({
       setFailure(asError(error))
     } finally {
       mutating.current = false
+      assistant.holdTurns(false)
       setBusy("")
     }
   }
@@ -825,42 +740,13 @@ export function Configure({
    * (a 409): the check, and every press here that saves, waits for it. The
    * check also waits while an answer waits on the person's Allow, since the call
    * waiting holds the revision it read; a press there is the person's to make.
+   * What the person typed meanwhile is saved first (`assistant.working` stays up
+   * until it is), so the check reads the plan with it.
    */
-  const assistantSession = useAgentSession(draftScope(flow))
-  // What it saved, the page reads back, so the fields and the plan say the same:
-  // here rather than in its panel, so a save made with the panel closed is read
-  // too, and until the last one is in, the page is still behind it — a check that
-  // went first would 409 and then save the page's older plan over its save.
-  const [readBack, setReadBack] = useState(assistantSession.changes)
-  const changes = assistantSession.changes
-  useEffect(() => {
-    if (changes === readBack) return
-    let live = true
-    void loadDraft(draftId)
-      .then(resumeFlow)
-      .then((next) => {
-        if (!live) return
-        onFlowChange((current) =>
-          current?.draft.id === draftId
-            ? { ...next, sourceLabel: current.sourceLabel, githubRepo: current.githubRepo }
-            : current,
-        )
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (live) setReadBack(changes)
-      })
-    return () => {
-      live = false
-    }
-  }, [changes, readBack, draftId, onFlowChange])
-  const assistantWorking = agentBusy(assistantSession) || changes !== readBack
-  const assistantWaiting = pendingSteps(assistantSession.transcript).length > 0
-  const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
     const plan = `${draftId}:${planSignature}`
     if (current !== "review" || preflight || busy || created) return
-    if (assistantWorking || assistantWaiting) return
+    if (assistant.working || assistant.waiting) return
     if (autoChecked.current === plan) return
     // Scheduled rather than called: `submit` raises the busy flag as its first
     // act, and a state write in an effect's own body is a cascading render.
@@ -878,51 +764,11 @@ export function Configure({
     preflight,
     busy,
     created,
-    assistantWorking,
-    assistantWaiting,
+    assistant.working,
+    assistant.waiting,
     draftId,
     planSignature,
   ])
-
-  /**
-   * `source_moved`'s remedy: the branch has moved past the commit Review
-   * checked, so detection reads the newer one — keeping the candidate the
-   * reader chose where it still exists — and Review asks again. The plan may
-   * come out the same, so the answer about the old commit is dropped rather
-   * than left standing for an unchanged signature.
-   */
-  const inspectAgain = async () => {
-    if (mutating.current) return
-    mutating.current = true
-    setFailure(undefined)
-    setBusy("detect")
-    try {
-      const selected = flow.detection?.selectedId
-      const result = selected
-        ? await selectCandidate(flow.draft, flow.profile, flow.source, selected).catch(() =>
-            reinspect(flow.draft, flow.profile, flow.source),
-          )
-        : await reinspect(flow.draft, flow.profile, flow.source)
-      onFlowChange((current) =>
-        current
-          ? {
-              ...current,
-              draft: result.draft,
-              candidate: result.candidate,
-              detection: result.detection,
-              configuration: redetectedConfiguration(flow, result),
-            }
-          : current,
-      )
-      setReview(null)
-      autoChecked.current = undefined
-    } catch (error) {
-      setFailure(asError(error))
-    } finally {
-      mutating.current = false
-      setBusy("")
-    }
-  }
 
   const errors = validateConfiguration(configuration, flow.profile)
   const blockers = preflight ? blockingFindings(preflight.findings) : []
@@ -942,37 +788,6 @@ export function Configure({
     automatic: isGitSource ? gitPolicy.automatic : undefined,
   })
   const openRow = (row: PlanRow) => (row.section ? openSection(row.section) : goto(row.step))
-  // Once it is deployed there is no setup to go back to, so the dock lets it go.
-  useEffect(() => {
-    if (created) dismissAgent(assistantSession)
-  }, [created, assistantSession])
-  // It starts from what the person sees, so what the page holds is saved first. A
-  // plan that does not save yet is no reason to refuse: it reads the detection.
-  // It reads the flow as it is when the panel opens, not as it was when the draft
-  // was first loaded: Review's check has moved the revision on by then, and a save
-  // at the first one was refused 409 and saved nothing the person had typed since.
-  const latest = useRef({ flow, text, retainedKeys })
-  useEffect(() => {
-    latest.current = { flow, text, retainedKeys }
-  })
-  const prepareAssistant = useCallback(async () => {
-    const { flow: now, text: dotenvText, retainedKeys: kept } = latest.current
-    try {
-      let working = now.draft
-      if (working.data.intent?.name !== now.name || working.data.intent?.profile !== now.profile) {
-        working = await saveIntent(working, { name: now.name, profile: now.profile })
-      }
-      const saved = await saveConfiguration(
-        working,
-        configurationForSave(now.configuration, now.source),
-        dotenvText,
-        kept,
-      )
-      onFlowChange((current) => (current ? { ...current, draft: saved } : current))
-    } catch {
-      // Told to the assistant by what it reads; the form keeps what was typed.
-    }
-  }, [onFlowChange])
   /* The plan read down, beside the fields from `xl` and after them below it:
      stacked on a phone, the drawing came first and the question's first field
      started two-thirds of the way down every step — the same summary scrolled
@@ -1071,20 +886,25 @@ export function Configure({
             className="animate-rise space-y-6 xl:min-h-0 xl:overflow-y-auto"
           >
             {failure && <ErrorState error={failure} />}
+            {assistant.deferred && (
+              <FormNote>
+                The assistant is working on this draft. Your change is read once it has finished.
+              </FormNote>
+            )}
 
             {current === "project" && (
               <StepProject
                 flow={flow}
-                onFlowChange={onFlowChange}
+                onFlowChange={assistant.editFlow}
                 onChangeProfile={changeProfile}
                 branch={branch}
                 branchBusy={branchBusy}
                 branches={branches.data ?? []}
-                onChangeBranch={(ref) => void changeBranch(ref)}
-                onChangeCloneOptions={changeCloneOptions}
+                onChangeBranch={changeBranch}
+                onChangeCloneOptions={source.resaveSource}
                 onEditBranch={setBranch}
-                onPickCandidate={(id) => void pickCandidate(id)}
-                onDeployAsCompose={() => void deployAsCompose()}
+                onPickCandidate={source.pickCandidate}
+                onDeployAsCompose={source.deployAsCompose}
                 busy={busy}
                 nameTouched={nameTouched}
                 onNameTouched={() => setNameTouched(true)}
@@ -1096,7 +916,7 @@ export function Configure({
             {current === "runtime" && (
               <StepRuntime
                 flow={flow}
-                onFlowChange={onFlowChange}
+                onFlowChange={assistant.editFlow}
                 errors={errors}
                 foldsOpen={initialAdvanced}
               />
@@ -1105,7 +925,7 @@ export function Configure({
             {current === "variables" && (
               <StepVariables
                 flow={flow}
-                onFlowChange={onFlowChange}
+                onFlowChange={assistant.editFlow}
                 rows={envRows}
                 onRowsChange={setEnvRows}
                 dotenv={dotenv}
@@ -1134,7 +954,7 @@ export function Configure({
                 onOpenRemedy={openRemedyField}
                 canOpenRemedy={(finding) => Boolean(sectionForField(finding.fieldId))}
                 onApplyFix={applyFindingFix}
-                onInspectAgain={() => void inspectAgain()}
+                onInspectAgain={source.inspectAgain}
               />
             )}
           </FlowPanelBody>
@@ -1163,7 +983,7 @@ export function Configure({
                     variant="ghost"
                     onClick={() => void submit("save")}
                     pending={busy === "save"}
-                    disabled={Boolean(busy) || assistantWorking}
+                    disabled={Boolean(busy) || assistant.working}
                   >
                     Save only
                   </Button>
@@ -1175,7 +995,7 @@ export function Configure({
               <Button
                 onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
-                disabled={Boolean(busy) || assistantWorking}
+                disabled={Boolean(busy) || assistant.working}
               >
                 <ArrowRight className="size-4" />
                 {blockers.length
@@ -1185,7 +1005,7 @@ export function Configure({
                     : "Deploy"}
               </Button>
             ) : (
-              <Button onClick={advance} disabled={Boolean(busy) || assistantWorking}>
+              <Button onClick={advance} disabled={Boolean(busy) || assistant.working}>
                 <ArrowRight className="size-4" />
                 Continue
               </Button>
@@ -1199,7 +1019,7 @@ export function Configure({
         <SetupAssistant
           flow={flow}
           onClose={() => onAssistChange(false)}
-          onPrepare={prepareAssistant}
+          onPrepare={assistant.prepare}
           onReview={() => goto("review")}
         />
       )}

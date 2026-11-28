@@ -113,7 +113,7 @@ unasked like the rest. Holding those routes alone there would not keep an instru
 leaving access behind: an administrator's shell line or file write can add the same key or sudo rule and runs
 unasked too, and holding those as well is the mode called "Ask before changes". So the mode says what it
 includes in a line where the default is chosen (`MODE_DETAIL` in `components/assistant/settings.ts`, the
-settings page's Default mode: *Does anything you could do, without asking*); the composer's menu is the three
+settings page's Default mode: *Does anything you could do without asking, even what outlasts the chat: an account, a key, a sudo rule*); the composer's menu is the three
 names alone, by the operator's choice (27 Nov 2026), with full access amber. Making full access stop
 at lasting access would change what the mode means (security invariant 13), which is the operator's to decide.
 
@@ -560,13 +560,26 @@ a privileged container, a host path) waits for the person in "ask" and "changes"
 
 `/deploy/new` offers it twice: the switch above the sources, which carries through once a source is chosen,
 and an offer at the head of the plan once one is. It sets up in a column beside the form, the whole screen on
-a phone. What it saves is read back into the form (`Configure`, so a save made with its panel closed is read
-too), and Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
+a phone. What it saves is read back into the form (`useAssistantDraft` in `new-project/use-assistant-draft.ts`,
+which `Configure` holds, so a save made with its panel closed is read too). The form stays editable while it
+works — Back and the step tabs too — and what the person types meanwhile is kept as the fields it touched
+(`new-project/kept-edits.ts`) and laid over every read-back, so a field they touched keeps their value and every
+other field takes the assistant's; once nothing of the assistant's is under way or waiting on an Allow those
+edits are saved once, at the draft's revision, and on a 409 over the draft read again with them laid over it.
+A press that reads the source again — a branch or clone option, a candidate picked, *Deploy as a Compose stack*,
+Review's *Inspect again* (`new-project/use-source-actions.ts`) — cannot be kept as a field, since what it changes
+is the server's answer, so while the assistant works or waits on an Allow it waits (the form says *Your change is
+read once it has finished*) and runs after the edits are saved, at the current revision, on the page as it is by
+then; a 409 reads the draft again and runs over that. From the first kept edit or waiting press until they are
+saved, and through every save of the page's own (Review's check, Save only, Deploy, a read of the source), the
+chat's next turn is held (`holdAgentTurns`): a question sent then, or one waiting in its queue, is asked once that
+write has answered, and a save of the page's starts only while no turn is under way.
+Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
 back, because the page's revision is behind the server's until then: the check used to save and preflight on its
 own the moment the assistant's save was read back, and every call of the assistant's after it was refused as a
 stale revision, and a check or a Deploy that went first was refused 409 and then saved the page's older plan over
 the assistant's. Review's check also waits while an answer waits on the person's Allow, since the waiting call
-holds the revision it read. The prompt says how a revision is carried from one call to
+holds the revision it read, and until the person's kept edits are saved, so it checks the plan with them. The prompt says how a revision is carried from one call to
 the next and what a planned variable is made of, and the draft routes' refusals name the current revision and
 the values a variable's fields take, so a call that was wrong is put right on the next step.
 
