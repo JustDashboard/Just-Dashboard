@@ -256,11 +256,17 @@ export function AgentChat({
         .join("\n\n"),
       back.flatMap((one) => one.images),
     )
+    // What was pressed for it, and what the page sent with it that it still offers
+    // (the error a failed statement's Ask carried), so it goes again as it was.
     const pressed = back.flatMap((one) => one.pressed)
+    const carried = back.flatMap((one) => one.attached.map((attachment) => attachment.label))
     setChosen((held) => [
       ...held,
       ...attachable
-        .filter((one) => pressed.includes(one.id) && !held.includes(one.id))
+        .filter(
+          (one) =>
+            (pressed.includes(one.id) || carried.includes(one.label)) && !held.includes(one.id),
+        )
         .map((one) => one.id),
     ])
   }, [returned, session, attachable])

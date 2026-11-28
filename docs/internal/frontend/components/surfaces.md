@@ -214,7 +214,7 @@ While it answers the box still takes a question: Enter, or a second round arrow 
 `agent/sessions.ts`, the same for every chat: a deployment's, a connection's, the server's and a draft's). Each one
 waits under the answer as a dashed row of one height — *Waiting*, the question cut to the line, what goes with it in
 words (*with 2 images, statement*), and **Edit**, which puts it back in the box with its images and what was pressed
-for it, and **Remove** — and nothing opens under a row. What decides when it goes: an answer that ends as an answer
+for it or sent with it that the page still offers (a failed statement's *Ask the assistant* carries its error), and **Remove** — and nothing opens under a row. What decides when it goes: an answer that ends as an answer
 (done, cut at its length, or declined by the model) asks the first one, and the next after that answer, in order.
 An answer that waits on an Allow keeps them waiting (the box says *What waits is asked once you answer what it is
 waiting on*), and the answer after the Allow or Decline asks the first; with nothing waiting, a question sent then

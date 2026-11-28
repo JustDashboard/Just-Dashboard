@@ -576,6 +576,43 @@ test("an answer that fails, and one the reader stops, say so", async ({ page }) 
   slow.release()
 })
 
+test("asked about a failed statement while it answers, Stop hands it back with the error pressed", async ({
+  page,
+}) => {
+  const slow = hold()
+  const sent = await mockAssistant(page, {
+    settings: ON,
+    answers: [
+      { held: slow.until, lines: COUNT_ANSWER },
+      { lines: [start(), text("There is no table called `nope`."), done()] },
+    ],
+  })
+  await openEditor(page)
+  await openAssistant(page)
+  await ask(pane(page), "How many orders?")
+  await expect(pane(page).getByRole("button", { name: "Stop" })).toBeVisible()
+  await write(page, "select * from nope")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  const failure = results(page).locator("[data-slot=query-refusal]")
+  await expect(failure).toContainText("does not exist")
+  // Pressed while it answers, the question waits with the error it carries.
+  await failure.getByRole("button", { name: "Ask the assistant" }).click()
+  const waiting = pane(page).locator("[data-slot=agent-queued]")
+  await expect(waiting).toContainText("with error")
+  await pane(page).getByRole("button", { name: "Stop" }).click()
+  await expect(waiting).toHaveCount(0)
+  // Back in the box, it still carries the error: sent again, it goes as it was.
+  await expect(question(pane(page))).toHaveValue(/Why did this statement fail/)
+  const error = pane(page).getByRole("button", {
+    name: "Attach the statement that failed and its error",
+  })
+  await expect(error).toHaveAttribute("aria-pressed", "true")
+  await pane(page).getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(() => sent.asked.length).toBe(2)
+  expect((sent.asked[1].attached as { label: string }[]).map((one) => one.label)).toEqual(["error"])
+  slow.release()
+})
+
 /* ------------------------------------------------------ the database's page */
 
 test("the connection's Assistant is beside its Home, and carries on the editor's chat", async ({
