@@ -823,7 +823,11 @@ func (s *Service) RemoveDeploymentRoute(ctx context.Context, name string) error 
 }
 
 func (s *Service) VerifyDeploymentRoute(ctx context.Context, route DeploymentRoute) error {
+	// The route as ApplyDeploymentRoute wrote it: an app name served with
+	// its wildcard renders a server of its own, and a check rendered
+	// without it never matches the file and rolls the release back.
 	route = s.onDashboardName(route)
+	route = s.withAppDomainCertificates(ctx, route)
 	if edge, err := s.dockerCaddy(ctx); err != nil {
 		return err
 	} else if edge != nil {

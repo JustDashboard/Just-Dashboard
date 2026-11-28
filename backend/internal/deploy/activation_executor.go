@@ -805,7 +805,7 @@ func (e *NormalizedStepExecutor) activate(
 		if err := e.proxy.VerifyDeploymentRoute(ctx, *route); err != nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 			evidence.Recovery = &recovery
-			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
+			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified" + proxyRefusal(err), Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 	}
 	address, failure := e.tailnetAddressFor(ctx, release.Release.EnvironmentID, snapshot.Plan)
