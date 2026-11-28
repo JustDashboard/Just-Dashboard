@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -920,7 +921,12 @@ func proxyRefusal(err error) string {
 	}
 	reason := strings.TrimSpace(err.Error())
 	if len(reason) > 400 {
-		reason = reason[:400] + "…"
+		// Cut on a character's edge, so the step's message stays valid UTF-8.
+		cut := 400
+		for cut > 0 && !utf8.RuneStart(reason[cut]) {
+			cut--
+		}
+		reason = reason[:cut] + "…"
 	}
 	return ": " + reason
 }
