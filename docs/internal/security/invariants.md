@@ -448,7 +448,7 @@ A change that weakens any of these has to say so explicitly.
     developer would (`open_workspace`, `read_file`, `edit_file`, `write_file`, `push_changes`): the files through
     the Files routes as the person, the checkout made and pushed by Local Git's service under `JD_GIT_ROOTS` as the
     folder's owner (the terminal's account, whose home holds `jd-workspaces/`), and a credential only in git's
-    environment for one fetch or push, never its arguments or a file: the deployment's own saved token, or for a
+    environment for one fetch or push, with the checkout's hooks off for it, never its arguments or a file: the deployment's own saved token, or for a
     push to GitHub a token of the GitHub page's App narrowed to that one repository and `contents: write`, minted
     only when the person's own connection may push there and revoked after the push. A write that would put a
     masked value (`[REDACTED]`) over the real one is refused. What stays out of its reach is a closed list in

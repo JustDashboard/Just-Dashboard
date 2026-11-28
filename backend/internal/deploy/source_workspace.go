@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net/url"
+	"os"
 	"strings"
 )
 
@@ -115,14 +116,23 @@ func (s *PlanningStore) WorkspaceCredential(ctx context.Context, id int64, remot
 }
 
 // GitHeaderEnvironment is the environment that sends authorization to remote
-// alone, for one git process, with the account's credential helper off.
+// alone, for one git process, with the account's credential helper off. No
+// program the checkout names runs beside it: hooks (.git/hooks, or where
+// core.hooksPath points, which a project's install sets) and a file-system
+// monitor would inherit this environment, and with it the credential, and
+// whoever can write the checkout chooses them. These variables are git's
+// command-line scope, so they win over the checkout's own configuration.
 func GitHeaderEnvironment(remote, authorization string) map[string]string {
 	return map[string]string{
-		"GIT_CONFIG_COUNT":   "2",
+		"GIT_CONFIG_COUNT":   "4",
 		"GIT_CONFIG_KEY_0":   "credential.helper",
 		"GIT_CONFIG_VALUE_0": "",
 		"GIT_CONFIG_KEY_1":   "http." + remote + ".extraHeader",
 		"GIT_CONFIG_VALUE_1": "Authorization: " + authorization,
+		"GIT_CONFIG_KEY_2":   "core.hooksPath",
+		"GIT_CONFIG_VALUE_2": os.DevNull,
+		"GIT_CONFIG_KEY_3":   "core.fsmonitor",
+		"GIT_CONFIG_VALUE_3": "false",
 	}
 }
 

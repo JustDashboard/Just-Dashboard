@@ -406,8 +406,10 @@ says to follow the run a push starts and fix what it finds.
   `contents: write`, minted only when that connection may push there and revoked after the push; with the
   deployment's saved credential when it is a token that can push (the deploy App's is read-only); or with the
   account's own Git credentials. A credential reaches git only in its environment for that one process
-  (`deploy.GitHeaderEnvironment`: the account's credential helper off, the header sent to that exact remote),
-  never its arguments, the checkout's `.git/config` or the model. A clone and a fetch authenticate with the
+  (`deploy.GitHeaderEnvironment`: the account's credential helper off, the header sent to that exact remote,
+  and no hook or file-system monitor of the checkout's run beside it, since those would inherit the
+  environment and whoever can write the checkout chooses them), never its arguments, the checkout's
+  `.git/config` or the model. A commit runs the checkout's hooks as usual; it carries no credential. A clone and a fetch authenticate with the
   deployment's own credential, which is what its deploys fetch with. The answer says whether the deployment
   deploys the push on its own (its Git policy: automatic, not promotion-only, the branch it builds, its path
   filters) or needs a deploy started.
