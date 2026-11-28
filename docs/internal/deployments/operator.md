@@ -625,6 +625,15 @@ are the new deployment's.
   audit entry); a workspace cloned and pushed over HTTPS with the deployment's saved token, nothing of it kept in
   the checkout or told to the model, and opened again fetched with what changed kept; a masked secret never
   written back; an edit that matches twice saying where; the code tools waiting in "changes".
+  `api/handlers_assistant_workspace_relay_test.go`: a proxy, a CA, a URL rewrite in the checkout's and the
+  account's configuration seeing no Authorization while the clone, fetch and push still land; two deployments
+  of one name and remote keeping their own workspaces. `api/handlers_assistant_workspace_credential_test.go`:
+  the deploy App's credential fetching and never pushing. `gitx/relay_test.go`: the relay's clone (default
+  branch, tags, upstream), pruned fetch and push (a new branch's upstream, the remote-tracking ref), every git
+  with the credential running in the relay and none in the checkout, never forced (`+main`, a push behind the
+  remote refused with git's words), a tag's clone pushing to a named branch, HTTPS only, and a clone that
+  fails or is killed leaving no folder. `deploy/source_workspace_test.go`: the deploy App's workspace
+  credential read-only, and a planned variable's errors naming what it may be.
 - `httpx/delegate_test.go`: the assistant admitted as the person by every group, marked for the trail, and a key's
   principal not carried.
 - `api/handlers_assistant_turn_test.go` and `api/handlers_assistant_chats_test.go`, against the fake provider with
