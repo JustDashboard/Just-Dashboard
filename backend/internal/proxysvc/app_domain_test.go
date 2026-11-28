@@ -438,3 +438,40 @@ func TestAStagingWildcardCountsOnlyUnderAStagingDirectory(t *testing.T) {
 		t.Fatalf("under production a test wildcard serves a route: %v", pairs)
 	}
 }
+
+// Activation hands the route over twice: once to write it and once to check
+// what was written. Both must see the app name's wildcard. The check once
+// rendered the route without it, so a release that added an app address to
+// a name with a certificate of its own was written, then refused as "the
+// proxy cutover could not be verified" and rolled back.
+func TestARouteWithAnAppNameVerifiesAsItWasWritten(t *testing.T) {
+	root := t.TempDir()
+	letsencrypt := filepath.Join(root, "letsencrypt")
+	useLetsencryptDir(t, letsencrypt)
+	own, ownKey := writeDeploymentCertificate(t, mkdir(t, letsencrypt, "live", "shop.example.test"), []string{"shop.example.test"})
+	writeDeploymentCertificate(t, mkdir(t, letsencrypt, "live", AppDomainLineagePrefix+"acme"), []string{"*.acme.just-dashboard.com", "acme.just-dashboard.com"})
+	mkdir(t, root, "sites-available")
+	mkdir(t, root, "sites-enabled")
+	bin := mkdir(t, root, "bin")
+	writeExecutable(t, filepath.Join(bin, "nginx"), "#!/bin/sh\nexit 0\n")
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	service := New(root, filepath.Join(root, "Caddyfile"))
+	// As activation builds it: one certificate, resolved for every name.
+	route := DeploymentRoute{
+		Name: "just-dashboard-env-7.conf", Domains: []string{"shop.example.test", "shop.acme.just-dashboard.com"},
+		Upstream: "http://127.0.0.1:32123", TLS: true, ForceHTTPS: true, CertPath: own, KeyPath: ownKey,
+	}
+	ctx := context.Background()
+	result, err := service.ApplyDeploymentRoute(ctx, route)
+	if err != nil || !result.Applied || !result.Verified {
+		t.Fatalf("apply = %+v, %v", result, err)
+	}
+	raw, err := os.ReadFile(filepath.Join(root, "sites-available", route.Name))
+	if err != nil || !strings.Contains(string(raw), "    server_name shop.acme.just-dashboard.com;\n") {
+		t.Fatalf("the app name has no server of its own: %v\n%s", err, raw)
+	}
+	if err := service.VerifyDeploymentRoute(ctx, route); err != nil {
+		t.Fatalf("the route just written does not verify: %v", err)
+	}
+}
