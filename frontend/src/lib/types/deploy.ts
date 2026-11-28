@@ -743,6 +743,38 @@ export type SmartStackAddressesStarted = {
   domains: string[]
 }
 
+/** An app the stack's template gained that the deployment does not run yet. */
+export type SmartStackUpgradeService = {
+  service: string
+  title: string
+  purpose: string
+}
+
+/**
+ * What the stack's template gained since the deployment was made: the apps the
+ * dashboard now ships with it and the live release does not run.
+ */
+export type SmartStackUpgrade = {
+  template: string
+  /** The template version this dashboard ships. */
+  version: string
+  /** The version the deployment runs. */
+  from: string
+  added: SmartStackUpgradeService[]
+  /**
+   * The source already names `version`, but the live release is older: the
+   * release that was to bring the apps failed, has not run or is running.
+   */
+  saved: boolean
+}
+
+/** What `POST /deploy/{id}/stack/upgrade` started: the release that brings the new apps. */
+export type SmartStackUpgradeStarted = {
+  runId: number
+  version: string
+  added: string[]
+}
+
 /** How open a media source is, in Prowlarr's words. */
 export type SmartStackSourcePrivacy = "public" | "semiPrivate" | "private"
 
@@ -821,6 +853,8 @@ export type SmartStackState = {
   login?: SmartStackLogin
   /** The stack's addresses. Absent from a server older than them. */
   addresses?: SmartStackAddresses
+  /** The apps the stack's template gained; absent when there are none. */
+  upgrade?: SmartStackUpgrade
   limitations: string[]
   liveReleaseId?: number
   configuredReleaseId?: number

@@ -19,8 +19,10 @@ type Live struct {
 	// Compose project its containers are labelled with.
 	Kind      string
 	RuntimeID string
-	// TemplateID is the blueprint the release was rendered from.
-	TemplateID string
+	// TemplateID is the blueprint the release was rendered from, and
+	// TemplateVersion the version of it ("" when the release does not say).
+	TemplateID      string
+	TemplateVersion string
 }
 
 // ErrNoLiveRelease is an environment that serves nothing yet.
@@ -51,7 +53,12 @@ type ServiceDeps struct {
 	// by service (Env.PublicURL). Nil, or a service missing, is one served at
 	// no domain.
 	PublicURLs func(ctx context.Context, manifest *Manifest, environmentID, releaseID int64) map[string]string
-	Log        *slog.Logger
+	// ReleaseServices are the services of the preset a live release runs,
+	// when that is fewer than the preset's: a release of an older version of
+	// the template, from before a service was added to it. Nil, or a nil
+	// answer, is every service of the preset.
+	ReleaseServices func(ctx context.Context, preset Preset, live Live) (map[string]bool, error)
+	Log             *slog.Logger
 	// Interval is how often every stack is looked at; Kick looks at once.
 	Interval time.Duration
 	Runner   *Runner
@@ -66,6 +73,10 @@ type Service struct {
 	mu      sync.Mutex
 	running map[int64]*pass
 	slots   chan struct{}
+	// unprepared is, per project, the last reason a pass could not be prepared:
+	// the pass is asked for again at every look, and the same reason is logged
+	// once, not every ten seconds.
+	unprepared sync.Map
 }
 
 type pass struct {
@@ -252,12 +263,18 @@ func (s *Service) runPass(ctx context.Context, manifest *Manifest, preset Preset
 	persist := context.WithoutCancel(ctx)
 	env, err := s.Env(ctx, manifest, preset, record, live)
 	if err != nil {
+		// Nothing ran. The pass is not recorded as configured and is asked
+		// for again, so a read that failed for a moment (the store busy, say)
+		// is tried at the next look, whatever made this one due; it is never
+		// run with a guess at what the release runs.
 		_ = store.FinishPass(persist, record.ProjectID, live.ReleaseID, manifest.Version, StatusFailed, false)
-		if s.deps.Log != nil {
+		_ = store.RequestPass(persist, record.ProjectID)
+		if last, seen := s.unprepared.Swap(record.ProjectID, err.Error()); (!seen || last != err.Error()) && s.deps.Log != nil {
 			s.deps.Log.Warn("a smart stack could not be prepared for configuration", "project", record.ProjectID, "error", err)
 		}
 		return
 	}
+	s.unprepared.Delete(record.ProjectID)
 	result := s.deps.Runner.Run(ctx, manifest, env, func(step StepRecord) {
 		if err := store.PutStep(persist, record.ProjectID, step); err != nil && s.deps.Log != nil {
 			s.deps.Log.Warn("a smart stack step could not be recorded", "project", record.ProjectID, "step", step.StepID, "error", err)
@@ -289,9 +306,19 @@ func (s *Service) Env(ctx context.Context, manifest *Manifest, preset Preset, re
 			options[option.Name] = value
 		}
 	}
+	var released map[string]bool
+	if s.deps.ReleaseServices != nil {
+		if released, err = s.deps.ReleaseServices(ctx, preset, live); err != nil {
+			return nil, fmt.Errorf("could not read the services the release runs: %w", err)
+		}
+	}
 	running := map[string]bool{}
 	for _, service := range preset.Services {
-		running[service] = true
+		// A service the release does not run yet has no step of its own in
+		// this pass: it is the stack's next change, which the page offers.
+		if released == nil || released[service] {
+			running[service] = true
+		}
 	}
 	previous, err := s.deps.Store.Steps(ctx, record.ProjectID)
 	if err != nil {

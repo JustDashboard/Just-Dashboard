@@ -11,6 +11,10 @@ import (
 const (
 	minComposeServices = 2
 	maxComposeServices = 8
+	// maxStackServices is a reviewed stack's cap: its presets are written
+	// with the dashboard's own adapters for every service, and the media
+	// stack's Complete preset runs nine.
+	maxStackServices = 10
 )
 
 var (
@@ -49,9 +53,13 @@ func validateComposeTemplate(blueprint *Blueprint) error {
 	if blueprint.Profile != ProfileCompose {
 		return fmt.Errorf("a blueprint with services is a Compose template and must use profile %q", ProfileCompose)
 	}
-	if len(blueprint.Services) < minComposeServices || len(blueprint.Services) > maxComposeServices {
+	most := maxComposeServices
+	if blueprint.Stack != "" {
+		most = maxStackServices
+	}
+	if len(blueprint.Services) < minComposeServices || len(blueprint.Services) > most {
 		return fmt.Errorf("a Compose template runs %d-%d services; this one declares %d",
-			minComposeServices, maxComposeServices, len(blueprint.Services))
+			minComposeServices, most, len(blueprint.Services))
 	}
 	// The single-image fields have a per-service home here. Accepting both
 	// would leave a reader to guess which one the stack runs.

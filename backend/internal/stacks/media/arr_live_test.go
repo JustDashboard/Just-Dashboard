@@ -37,18 +37,19 @@ const (
 
 // liveArrImages are the references the media-complete template pins.
 var liveArrImages = map[string]string{
-	"radarr":      "lscr.io/linuxserver/radarr:7.0.3.10918-ls328",
-	"sonarr":      "lscr.io/linuxserver/sonarr:4.0.20.3014-ls6",
-	"prowlarr":    "lscr.io/linuxserver/prowlarr:3.1.0.5799-ls170",
-	"bazarr":      "lscr.io/linuxserver/bazarr:v1.6.2-ls374",
-	"qbittorrent": "lscr.io/linuxserver/qbittorrent:5.3.1_v2.1.3-ls490",
-	"recyclarr":   "recyclarr/recyclarr:8.8.1",
+	"radarr":       "lscr.io/linuxserver/radarr:7.0.3.10918-ls328",
+	"sonarr":       "lscr.io/linuxserver/sonarr:4.0.20.3014-ls6",
+	"prowlarr":     "lscr.io/linuxserver/prowlarr:3.1.0.5799-ls170",
+	"bazarr":       "lscr.io/linuxserver/bazarr:v1.6.2-ls374",
+	"qbittorrent":  "lscr.io/linuxserver/qbittorrent:5.3.1_v2.1.3-ls490",
+	"recyclarr":    "recyclarr/recyclarr:8.8.1",
+	"flaresolverr": "ghcr.io/flaresolverr/flaresolverr:v3.5.2",
 }
 
 // liveArrSteps are this file's steps; the manifest gives their order.
 var liveArrSteps = []string{
 	"radarr.auth", "radarr.rootfolder", "sonarr.auth", "sonarr.rootfolder", "prowlarr.auth", "bazarr.auth",
-	"recyclarr.sync", "radarr.downloadclient", "sonarr.downloadclient", "prowlarr.apps", "bazarr.link",
+	"recyclarr.sync", "radarr.downloadclient", "sonarr.downloadclient", "prowlarr.apps", "prowlarr.flaresolverr", "bazarr.link",
 	"bazarr.providers", "downloads.verify", "prowlarr.sources",
 }
 
@@ -94,6 +95,7 @@ func TestLiveServarrBazarrRecyclarrSteps(t *testing.T) {
 	start("prowlarr", append(slices.Clone(linuxserver), "-e", "PROWLARR__AUTH__APIKEY="+variables[VariableProwlarrAPIKey])...)
 	start("bazarr", slices.Concat(linuxserver, media)...)
 	start("qbittorrent", append(slices.Concat(linuxserver, media), "-e", "WEBUI_PORT=8080", "-e", "TORRENTING_PORT=6881")...)
+	start("flaresolverr", "-e", "TZ=Etc/UTC", "-e", "LOG_LEVEL=info")
 	start("recyclarr", "-e", "TZ=Etc/UTC", "-e", "CRON_SCHEDULE=@daily",
 		"-e", "RADARR_API_KEY="+variables[VariableRadarrAPIKey], "-e", "SONARR_API_KEY="+variables[VariableSonarrAPIKey])
 
@@ -111,6 +113,7 @@ func TestLiveServarrBazarrRecyclarrSteps(t *testing.T) {
 	}{
 		"radarr": {PortRadarr, "/ping"}, "sonarr": {PortSonarr, "/ping"}, "prowlarr": {PortProwlarr, "/ping"},
 		"bazarr": {PortBazarr, "/api/system/ping"}, "qbittorrent": {PortQBittorrent, "/"},
+		"flaresolverr": {PortFlareSolver, "/health"},
 	} {
 		liveArrWait(ctx, t, env, service, probe.port, probe.path)
 	}
@@ -561,6 +564,8 @@ func liveArrSnapshot(ctx context.Context, t *testing.T, env *stacks.DockerEnv) m
 	read(arrProwlarr, "config/host")
 	read(arrProwlarr, "applications")
 	read(arrProwlarr, "indexer")
+	read(arrProwlarr, "indexerproxy")
+	read(arrProwlarr, "tag")
 
 	key, found, err := env.LookupCredential(ctx, CredentialBazarrAPIKey)
 	if err != nil || !found {

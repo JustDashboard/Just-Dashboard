@@ -77,6 +77,14 @@ type Step struct {
 	Timeout  time.Duration
 	Attempts int
 	Run      func(ctx context.Context, env Env) (Result, error)
+	// Withdraw, when set, takes back what Run made in another app once the
+	// step's own Service is not part of a pass but every service it Needs
+	// is: a rollback to a release from before the service came with the
+	// template leaves that app pointing at a container that is gone. It runs
+	// in Run's place, with Run's After, Timeout and Attempts, and the step
+	// stays absent all the same: it is not drawn and holds no step after it.
+	// What it did, or why it could not, is kept in the step's record only.
+	Withdraw func(ctx context.Context, env Env) (Result, error)
 }
 
 // Result is what a step reports. Message is a sentence for the page

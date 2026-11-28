@@ -208,10 +208,11 @@ are not in `NAV`: `components/database/shell/nav-scope.tsx` builds the first fro
 are under Deployments: the Stacks tab of `/deploy/new` is
 `components/deploy/new-project/source-stack.tsx`, and a stack project's page
 (`app/deploy/[id]/(project)/stack/`) and its media sources (`stack/sources/`) are
-`components/deploy/stack/` (`stack-page.tsx` with `stack-apps.tsx`, `stack-login.tsx` and
-`stack-addresses.tsx`; `sources-page.tsx` and `source-form.tsx`; their words in the unit-tested
-`stack-model.ts` and `sources-model.ts`), with `deploy-new-stack.spec.ts`, `deploy-stack-page.spec.ts`
-and `deploy-stack-sources.spec.ts` over `deploy-stack-fixture.ts`.
+`components/deploy/stack/` (`stack-page.tsx` with `stack-apps.tsx`, `stack-login.tsx`,
+`stack-addresses.tsx` and `stack-upgrade.tsx`; `sources-page.tsx` and `source-form.tsx`; their words
+in the unit-tested `stack-model.ts` and `sources-model.ts`), with `deploy-new-stack.spec.ts`,
+`deploy-stack-page.spec.ts`, `deploy-stack-upgrade.spec.ts` and `deploy-stack-sources.spec.ts` over
+`deploy-stack-fixture.ts`.
 
 **Packages behind Deployments and Network.** Both sections reach more packages than fit a cell.
 

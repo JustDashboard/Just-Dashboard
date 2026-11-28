@@ -1,11 +1,11 @@
 {
   "id": "media-complete",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Media server (Complete)",
   "stack": "media",
   "category": "http",
   "profile": "compose",
-  "description": "Jellyfin, Seerr, Radarr, Sonarr, Prowlarr, qBittorrent, Bazarr and Recyclarr, set up and connected to each other by the dashboard. It fetches only from sources you add; none is included.",
+  "description": "Jellyfin, Seerr, Radarr, Sonarr, Prowlarr, FlareSolverr, qBittorrent, Bazarr and Recyclarr, set up and connected to each other by the dashboard. It fetches only from sources you add; none is included.",
   "iconId": "globe",
   "docsUrl": "https://jellyfin.org/docs/",
   "access": {
@@ -16,7 +16,7 @@
     "maintainer": "Just Dashboard",
     "license": "GPL-2.0",
     "upstreamUrl": "https://github.com/jellyfin/jellyfin",
-    "reviewedAt": "2026-11-27",
+    "reviewedAt": "2026-11-28",
     "minimumDashboard": "0.9.1"
   },
   "inputs": [
@@ -469,6 +469,55 @@
       "address": "prowlarr"
     },
     {
+      "name": "flaresolverr",
+      "role": "worker",
+      "purpose": "Opens the sources that sit behind Cloudflare's browser check for Prowlarr, in a headless browser",
+      "image": {
+        "reference": "ghcr.io/flaresolverr/flaresolverr:v3.5.2",
+        "tagPolicy": "pinned",
+        "pullPolicy": "missing"
+      },
+      "environment": [
+        {
+          "name": "TZ",
+          "value": "Etc/UTC"
+        },
+        {
+          "name": "LOG_LEVEL",
+          "value": "info"
+        }
+      ],
+      "ports": [
+        {
+          "name": "http",
+          "internal": 8191,
+          "protocol": "tcp",
+          "purpose": "The API Prowlarr sends a source's requests to; never published",
+          "exposure": "internal"
+        }
+      ],
+      "resources": {
+        "memoryMb": 1024,
+        "minMemoryMb": 256
+      },
+      "healthcheck": {
+        "test": [
+          "curl",
+          "-fsS",
+          "--max-time",
+          "3",
+          "-o",
+          "/dev/null",
+          "http://localhost:8191/health"
+        ],
+        "intervalSeconds": 10,
+        "timeoutSeconds": 5,
+        "retries": 30,
+        "startPeriodSeconds": 60
+      },
+      "egress": true
+    },
+    {
       "name": "qbittorrent",
       "role": "app",
       "purpose": "Downloads what Radarr and Sonarr send it into the shared volume",
@@ -702,7 +751,7 @@
       "inputs": {
         "domain": "media.example.com"
       },
-      "digest": "sha256:08d7b80c7860eb56cbbcfe3285b18107a5c9a1d41b8ffd44be08adc4e808cdf4"
+      "digest": "sha256:1e601f056fbe210989273b4d8a862fd90c4146fe82e5a7c256d6c53e54f5dfdc"
     }
   ]
 }

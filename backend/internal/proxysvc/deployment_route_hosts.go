@@ -24,7 +24,7 @@ type HostUpstream struct {
 }
 
 // MaxHostUpstreams is the most servers a route sends some of its names to:
-// a Compose template has at most eight services, and a stack's own file a
+// a Compose template has at most eight services (a stack ten), and a stack's own file a
 // few more.
 const MaxHostUpstreams = 16
 

@@ -2039,7 +2039,7 @@ only renderer/executor/validation authority for their feature.
   its operationId, and made through the router as the MCP key with the deploy key gate and every
   handler's deploy key rule applied (`httpx.WithMCPDelegate`, `Principal.ViaMCP`): reads under `read`,
   changes under `deploy`, the routes behind `s.destructive` only for an owner who may take
-  destructive actions. 110 tools generated, 123 tools in all; previews' approvals, reveals, saved
+  destructive actions. 111 tools generated, 124 tools in all; previews' approvals, reveals, saved
   credentials and every other session-only route stay out. See
   [the MCP server](../backend/databases.md#the-mcp-server).
 - Deployment detail includes a C8 `runtime` observation for the production environment. Docker filters
@@ -2254,7 +2254,7 @@ only renderer/executor/validation authority for their feature.
   sorts before `internal`, so the proxy facing the internet shares a network with the public service
   and nothing behind it. Every service gets `mem_limit` (and `cpus`) from its own resources, a CMD-form
   healthcheck and the capped `json-file` log every dashboard container gets. Validation refuses at
-  catalogue load — that is, at build time — fewer than two or more than eight services, a template
+  catalogue load — that is, at build time — fewer than two or more than eight services (ten for a stack's template), a template
   with no proxy port or two, a public service that is not an `app`, any `direct` or UDP port, the
   Docker socket, a database without a data volume, a shared volume described two ways, a literal for a
   credential-shaped variable (the Compose planner's `secretShapedKey` set and the single-image set

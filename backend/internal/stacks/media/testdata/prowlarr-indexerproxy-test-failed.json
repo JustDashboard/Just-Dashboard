@@ -1,0 +1,8 @@
+[
+  {
+    "isWarning": false,
+    "propertyName": "Host",
+    "errorMessage": "Unable to connect to proxy: Name does not resolve (flaresolverr.invalid:8191). Check the log surrounding this error for details",
+    "severity": "error"
+  }
+]
