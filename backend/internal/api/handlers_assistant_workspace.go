@@ -128,6 +128,8 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 		if _, err := os.Lstat(target); err == nil {
 			folder, err := s.modules.git.Resolve(target)
 			if err == nil && sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) {
+				unlock := s.modules.git.Lock(folder)
+				defer unlock()
 				if _, err := s.modules.git.FetchWith(ctx, folder, env); err != nil {
 					return "", "", fmt.Errorf("The workspace %s is there, but fetching it failed: %v", folder, err)
 				}
@@ -378,6 +380,11 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	if err != nil {
 		return refuse(fmt.Sprintf("%s is not a checkout Local Git can work on: %s", in.Folder, agentMaskText(err.Error(), masker)))
 	}
+	// One mutation of a checkout at a time, as Local Git's own routes take it
+	// (gitActionAt): the page's stage or commit cannot land between this stage,
+	// commit and push.
+	unlock := s.modules.git.Lock(folder)
+	defer unlock()
 	status, err := s.modules.git.Status(ctx, folder)
 	if err != nil {
 		return refuse("Its state could not be read: " + agentMaskText(err.Error(), masker))
@@ -425,7 +432,11 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	}
 	result, err := s.modules.git.PushWith(ctx, folder, in.Branch, env)
 	revoke()
-	pr.git = append(pr.git, "push "+folder+" to "+branch)
+	if err != nil {
+		pr.git = append(pr.git, "push "+folder+" to "+branch+" refused")
+	} else {
+		pr.git = append(pr.git, "push "+folder+" to "+branch)
+	}
 	output := ""
 	if result != nil {
 		output = agentMaskText(result.Output, masker)
