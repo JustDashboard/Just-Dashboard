@@ -68,9 +68,9 @@ test.describe("traffic alerts", () => {
   })
 
   // The Logs page is where a reader finds out that nobody would have been told,
-  // so the first rule is added there, in a sheet over the readings, with the
-  // same form Automation settings uses.
-  test("the logs page adds the first rule from a sheet over its readings", async ({ page }) => {
+  // so the first rule is added there, in a sheet over the page, with the same
+  // form Automation settings uses.
+  test("the logs page adds the first rule from a sheet over its requests", async ({ page }) => {
     await mockProject(page)
     await page.goto("/deploy/7/logs")
     await expect(page.getByText("1 firing")).toBeVisible()
@@ -90,8 +90,10 @@ test.describe("traffic alerts", () => {
 
     await expect(sheet).toHaveCount(0)
     await expect(page.getByText("All quiet", { exact: true })).toBeVisible()
+    // What the rule watches is the word's title: the line under the window
+    // has room for the state and who is told, not for the rule's sentence.
     await expect(
-      page.getByText(/1 of 1 alert watching — more than 2% of requests fail over 5 min/),
+      page.getByTitle(/1 of 1 alert watching — more than 2% of requests fail over 5 min/),
     ).toBeVisible()
   })
 })

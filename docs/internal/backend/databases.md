@@ -133,7 +133,9 @@ is connected by naming the instance found, not by typing its address again.
   never tries a server that needs a password without one: `409 credentials_required` names the
   account, `409 sign_in_failed` carries the engine's own words when what the container states is
   refused, `400 sign_in_failed` when what the operator typed is. The dashboard's own store is marked
-  `self`, refused with `409 self_database`, and refused again in `containDSN` whatever route offers it.
+  `self`, refused with `409 self_database`, and refused again in `containDSN` whatever route offers it;
+  so is the request history beside it, `requests.db` (`Places.OwnFiles`, `dashboardOwnFiles`), which a
+  recorder writes every few seconds and which holds every deployment's visitors.
   A user or database name is joined to a connection string only as a name: `dbx.BuildDSN` builds
   nothing for one holding `?`, `/` or a control character (or `@`, `:` in a user), writes MySQL's
   string with the driver's own `FormatDSN`, and a container whose environment states such a name is

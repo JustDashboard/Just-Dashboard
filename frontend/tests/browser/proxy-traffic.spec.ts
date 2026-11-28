@@ -224,6 +224,16 @@ test("the error log is a view in the address, and ?view=errors still opens it", 
   await expect(page.getByRole("tab", { name: /Errors/ })).toHaveAttribute("aria-selected", "true")
 })
 
+test("the error log offers the windows the server reads it over, and no other", async ({
+  page,
+}) => {
+  await open(page, BUSY, { path: "/proxy/traffic?view=errors" })
+  const errors = page.locator("[data-slot='traffic-errors']")
+  // `/proxy/errors` knows 15m to 7d (`trafficWindows`); anything else is read
+  // as the last hour, which a "30d" choice would then claim to be.
+  await expect(errors.getByRole("radio")).toHaveText(["15 min", "1h", "6h", "24h", "7d"])
+})
+
 test("a site's error log is the Errors view narrowed to it", async ({ page }) => {
   const asked = await open(page, BUSY, {
     path: "/proxy/traffic?site=legacy.example.com&view=errors",

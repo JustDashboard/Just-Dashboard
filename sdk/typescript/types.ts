@@ -734,6 +734,7 @@ export interface Coverage {
   exists?: boolean
   from?: string | null
   held?: number
+  history?: History | null
   refreshedAt?: string
   stale?: boolean
   to?: string | null
@@ -2777,6 +2778,13 @@ export interface Healthcheck {
   startPeriodSeconds?: number
   test?: string[] | null
   timeoutSeconds?: number
+}
+
+/** accesslog.History in the dashboard's source. */
+export interface History {
+  days?: number
+  from?: string | null
+  recording?: boolean
 }
 
 /** api.hostnameSuggestion in the dashboard's source. */

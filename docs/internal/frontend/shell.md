@@ -64,7 +64,7 @@ it and the sheet's own head closes it; Ctrl/Cmd+B still toggles it. A page opene
 puts it away: `SidebarProvider` closes it when the pathname changes, and a page's row closes it on
 the press, so the row of the page you are already on closes it too. A row that only drills into a
 panel (the way back out, a group) leaves it open. Below `md` the sheet's rows, the way back out,
-Search and the close control are 44px, and so are the strip's three controls (sidebar, Ask,
+Search and the close control are 44px, and so are the strip's two controls (sidebar and
 Search) in its 48px. The strip is a `<header>` beside `<main>`, so it is the phone's banner, as
 the rail's head is the desk's. `shell-phone.spec.ts` holds all of it.
 
@@ -552,15 +552,15 @@ scenes are outside this index; URL userinfo, queries and fragments are excluded 
 
 ### Ask about this page
 
-Beside the rail's search field, and in the phone's strip beside its search button, **Ask**
-(`components/assistant/ask-about.tsx`) begins a new chat on `/assistant` about the page it was
-pressed on: `/assistant?about=<path and query>&title=<the page's own h1>`, which the page reads
-once, begins the chat with, and lets go of (`agent/about.ts` bounds both as the server does and
-refuses an address that is not the dashboard's own, since it is drawn as a link back). It is not
-drawn on the assistant's own pages, for a role without `service.control`, or — except to an
-administrator, who is asked there to turn it on — while the assistant is off. The palette offers
-the same as *Ask the assistant about this page* once something is typed. There is no keyboard
-shortcut for it: the shell has no registry of global keys beyond the palette's own.
+The palette's *Ask the assistant about this page* (`command:ask` in `shell/command-palette.tsx`,
+listed once something is typed) begins a new chat on `/assistant` about the page it was run on:
+`/assistant?about=<path and query>&title=<the page's own h1>`, which the page reads once, begins
+the chat with, and lets go of (`agent/about.ts` bounds both as the server does and refuses an
+address that is not the dashboard's own, since it is drawn as a link back). It is not offered on
+the assistant's own pages or to a role without `service.control`. Search stands alone in the
+rail's head and in the phone's strip: the **Ask** button that stood beside it on every page was
+removed in 0.9.1. There is no keyboard shortcut for it: the shell has no registry of global keys
+beyond the palette's own.
 
 `model.ts` supplies scope aliases, AND matching of query terms, accent/punctuation normalization,
 ranking (exact name/address, prefix, substring, one-edit typo), result limits and recent-history

@@ -10,10 +10,13 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/Wayy01/Just-Dashboard/backend/internal/accesslog"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/requesthistory"
 )
 
 func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostResources(t *testing.T) {
@@ -82,6 +85,45 @@ func TestDeploymentPermanentDeletionRequiresArchiveCapabilityAndPreservesHostRes
 	}
 	if res := admin.do(http.MethodDelete, path, "", nil); res.Code != http.StatusNotFound {
 		t.Fatalf("missing: %d %s", res.Code, res.Body.String())
+	}
+}
+
+// A deleted project's request history goes with it, whether or not its routes
+// do: it holds its visitors' addresses, and with the records gone nothing is
+// left to read it. Another project's history is untouched.
+func TestDeploymentPermanentDeletionForgetsItsRequestHistory(t *testing.T) {
+	s := testServer(t)
+	history := s.modules.requestHistory
+	if history == nil {
+		t.Fatal("the test server opened no request history")
+	}
+	id, environmentID, _ := insertDeploymentConfigurationAPI(t, s)
+	route, other := deploy.RouteNameFor(environmentID), deploy.RouteNameFor(environmentID+1000)
+	line := `{"ts":"` + time.Now().UTC().Add(-time.Hour).Format(time.RFC3339Nano) + `","msg":"handled request",` +
+		`"request":{"client_ip":"203.0.113.7","proto":"HTTP/1.1","method":"GET","host":"shop.example.com","uri":"/",` +
+		`"headers":{"User-Agent":["Mozilla/5.0"]}},"status":200,"size":1}`
+	entry, ok := accesslog.Parse(line)
+	if !ok {
+		t.Fatal("the test's line did not parse")
+	}
+	for _, name := range []string{route, other} {
+		if err := history.Append(t.Context(), name, []accesslog.Entry{entry}, requesthistory.Cursor{Generation: "g", Offset: 1}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := s.modules.deployStore.Archive(t.Context(), id); err != nil {
+		t.Fatal(err)
+	}
+	admin := &client{t: t, h: s.Routes(), cookie: signInAs(t, s, "purge-history-admin", auth.RoleAdmin)}
+	res := admin.do(http.MethodDelete, fmt.Sprintf("/api/v1/deploy/%d/permanent", id), "", map[string]string{"X-Confirm": "api-config-app"})
+	if res.Code != http.StatusNoContent {
+		t.Fatalf("purge: %d %s", res.Code, res.Body.String())
+	}
+	if span, err := history.Span(t.Context(), route); err != nil || !span.From.IsZero() {
+		t.Fatalf("the deleted project's history is still kept: %+v (%v)", span, err)
+	}
+	if span, err := history.Span(t.Context(), other); err != nil || span.From.IsZero() {
+		t.Fatalf("another project's history went with it: %+v (%v)", span, err)
 	}
 }
 

@@ -64,6 +64,16 @@ func requestFilterFrom(q url.Values) (accesslog.Filter, error) {
 	if err := query.Err(); err != nil {
 		return accesslog.Filter{}, err
 	}
+	// One side of the audience (accesslog.IsPerson). Refused when it names
+	// neither: "people" spelt another way answered with everyone is the wrong
+	// figure under the right heading.
+	switch who := strings.ToLower(strings.TrimSpace(q.Get("who"))); who {
+	case "", accesslog.WhoPeople, accesslog.WhoBots:
+		filter.Who = who
+	default:
+		return accesslog.Filter{}, &httpx.APIError{Status: http.StatusBadRequest, Code: "bad_request",
+			Message: "who must be people or bots", Field: "who"}
+	}
 	// An unbounded read walks the whole retained record to answer a question
 	// about "now", which on a busy deployment is tens of millions of lines.
 	// A default window keeps the common case instant and is reported back, so

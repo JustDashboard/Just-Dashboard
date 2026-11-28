@@ -132,6 +132,12 @@ for (const width of [1280, 390]) {
       "href",
       "/deploy",
     )
+    // Asking about a page is the palette's since Search stands alone in the
+    // rail (0.9.1): the row names where it is, not a button that is gone.
+    await expect(places.filter({ hasText: "Ask from any page" })).toContainText(
+      "In Search, Ask the assistant about this page",
+    )
+    await expect(places.filter({ hasText: "beside Search" })).toHaveCount(0)
 
     await expect(
       page

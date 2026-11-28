@@ -754,6 +754,14 @@ never into `docs/audits/`.
   drives the container-side script against `caddy:2-alpine`: a roll under the reader, the rolled
   generation found by inode with its tail recovered, the new live file, a vanished inode reading as
   absent. It starts one idle container and removes it.
+- Changes to the request history — `internal/requesthistory`, or the history half of a window in
+  `accesslog/history.go` — also run
+  `JD_DEPLOY_LIVE=1 go test ./internal/proxysvc -run TestLiveRequestHistoryFollowsTheCaddyIngress -count=1 -v`
+  (the recorder through the real container-side script: a backfill, a roll followed by inode, a
+  restart continuing from the kept cursor, every request once; one idle container, removed) and
+  `JD_REQUEST_HISTORY_SCALE=1 go test ./internal/requesthistory -run TestAWeekOfHistoryIsAnsweredQuickly -v`,
+  which writes half a million requests over a week and logs what reading the week back costs, wall
+  and CPU, so a change that slows the page's "Last 7 days" is seen before it ships.
 - Changes to the deployment lifecycle feed — the owner filter, the audit correlation, the kinds,
   either endpoint in `handlers_deploy_requests.go`, or the persisted record in
   `dockerx/events_store.go` — also run
@@ -1035,7 +1043,7 @@ the databases and deployments each reaches), `database-home.spec.ts`, `database-
 `database-query.spec.ts`, `database-query-bodies.spec.ts` (stored programs and script separators in
 the editor), `database-explain.spec.ts` (the Plan tree's measured, estimated and printed plans),
 `database-assistant.spec.ts` (a connection's Assistant page and the same chat beside the SQL
-editor, its answers streamed by the mock, and Ask from another page),
+editor, its answers streamed by the mock, and the palette's Ask about this page),
 `database-schema.spec.ts`, `database-programs.spec.ts` (functions, procedures and triggers), `database-rls.spec.ts` (row-level
 security, the role test, and function and column grants), `database-redis.spec.ts`, `database-mongo.spec.ts`,
 `database-performance.spec.ts` and `database-logos.spec.ts`, and the rest of the areas' own:

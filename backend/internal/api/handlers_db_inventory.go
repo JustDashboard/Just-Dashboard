@@ -21,6 +21,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/files"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/requesthistory"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/go-chi/chi/v5"
 )
@@ -472,6 +473,24 @@ func (s *Server) dashboardStorePath() string {
 	return filepath.Join(filepath.Clean(s.Cfg.DataDir), store.DatabaseFile)
 }
 
+// dashboardOwnFiles are the dashboard's other databases beside the store: the
+// request history, which a recorder writes every few seconds and which holds
+// every deployment's visitors. Listed as the store is, and never connected.
+func (s *Server) dashboardOwnFiles() []string {
+	return []string{filepath.Join(filepath.Clean(s.Cfg.DataDir), requesthistory.File)}
+}
+
+// isDashboardFile reports a path naming the store or one of its own files.
+func (s *Server) isDashboardFile(path string) bool {
+	clean := filepath.Clean(path)
+	for _, own := range append([]string{s.dashboardStorePath()}, s.dashboardOwnFiles()...) {
+		if clean == own || dbx.HostView(clean) == own || sameFile(clean, own) {
+			return true
+		}
+	}
+	return false
+}
+
 // refuseOwnStore keeps the dashboard's own store from being opened as a
 // database connection.
 //
@@ -479,7 +498,9 @@ func (s *Server) dashboardStorePath() string {
 // sessions, the sealed secrets and the audit trail live. Editing it through
 // the table editor is a way to promote an account or delete an audit entry
 // with no route having been asked. It is listed in the inventory, marked as
-// the dashboard's own, and that is as far as it goes.
+// the dashboard's own, and that is as far as it goes. So is the request
+// history beside it (dashboardOwnFiles): a recorder writes it every few
+// seconds, and what it holds is every deployment's visitors.
 func (s *Server) refuseOwnStore(driver dbx.Driver, dsn string) error {
 	if driver != dbx.DriverSQLite {
 		return nil
@@ -488,9 +509,7 @@ func (s *Server) refuseOwnStore(driver dbx.Driver, dsn string) error {
 	if path == "" {
 		return nil
 	}
-	own := s.dashboardStorePath()
-	clean := filepath.Clean(path)
-	if clean == own || dbx.HostView(clean) == own || sameFile(clean, own) {
+	if s.isDashboardFile(path) {
 		return httpx.Err(http.StatusConflict, "self_database",
 			"this file is the dashboard's own store; it is listed, and never connected")
 	}
@@ -652,13 +671,13 @@ func (s *Server) resolveFileInstance(ctx context.Context, path string) (*dbx.Ins
 	}
 	facts := dbx.FileFacts{Path: resolved, Engine: engine, Size: info.Size(), Modified: info.ModTime().UTC()}
 	inv := dbx.Discover(dbx.Facts{Files: []dbx.FileFacts{facts}, Places: dbx.Places{
-		StorePath: s.dashboardStorePath(), DataDir: filepath.Clean(s.Cfg.DataDir),
+		StorePath: s.dashboardStorePath(), OwnFiles: s.dashboardOwnFiles(), DataDir: filepath.Clean(s.Cfg.DataDir),
 	}})
 	inst, ok := inv.Find("file:" + resolved)
 	if !ok {
 		return nil, nil, httpx.Err(http.StatusNotFound, "not_found", path+" is not a database file")
 	}
-	if sameFile(resolved, s.dashboardStorePath()) {
+	if s.isDashboardFile(resolved) {
 		inst.Self, inst.Connectable = true, false
 		inst.Reason = "this is the dashboard's own store — it is listed, and never connected"
 	}

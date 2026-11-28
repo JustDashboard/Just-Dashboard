@@ -244,12 +244,33 @@ export function requestKey(entry: RequestEntry, index: number): string {
   return `${entry.time}:${entry.method}:${entry.status}:${entry.path}:${index}`
 }
 
+/**
+ * One request's identity across reads, for what the page holds on to while
+ * the rows under it change: the request open in the inspector. The record's
+ * sequence where it has one; otherwise what the request was — a row read from
+ * the kept history carries no sequence, and its place in the list moves
+ * every time a newer request lands above it.
+ */
+export function requestIdentity(entry: RequestEntry): string {
+  if (entry.seq) return `s${entry.seq}`
+  return [
+    entry.time,
+    entry.method,
+    entry.status,
+    entry.path,
+    entry.query ?? "",
+    entry.remoteIp ?? "",
+    entry.size,
+  ].join("|")
+}
+
 export const REQUEST_RANGES = [
   { id: "15m", label: "Last 15 minutes", short: "15 min", minutes: 15 },
   { id: "1h", label: "Last hour", short: "1 hour", minutes: 60 },
   { id: "6h", label: "Last 6 hours", short: "6 hours", minutes: 360 },
   { id: "24h", label: "Last 24 hours", short: "24 hours", minutes: 1440 },
   { id: "7d", label: "Last 7 days", short: "7 days", minutes: 10080 },
+  { id: "30d", label: "Last 30 days", short: "30 days", minutes: 43200 },
 ] as const
 
 /**

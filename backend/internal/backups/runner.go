@@ -34,9 +34,12 @@ type Runner struct {
 	restoreMu      sync.Mutex
 	recovery       RecoveryChecker
 	sqliteSnapshot SQLiteSnapshotter
-	databases      DatabaseDumper
-	pauser         ContainerPauser
-	volumes        VolumeProvisioner
+	// liveSQLite names the SQLite files this process writes all the time,
+	// snapshotted whenever a job archives them (WithLiveSQLite).
+	liveSQLite func() []string
+	databases  DatabaseDumper
+	pauser     ContainerPauser
+	volumes    VolumeProvisioner
 	// importMu keeps two imports of one archive from both adopting it.
 	importMu sync.Mutex
 }
