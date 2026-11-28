@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, ArrowUpRight, CrossCircle, Warning } from "@/components/icons"
-import { duration, relativeTime } from "@/lib/format"
+import { duration, timestamp } from "@/lib/format"
 import { cn } from "@/lib/utils"
 import {
   hubHost,
@@ -36,6 +36,15 @@ function writeDismissed(ids: string[]) {
   } catch {
     // Storage can be unavailable; the dismissal then lasts as long as the page.
   }
+}
+
+/**
+ * The level a warning or critical notice's glyph shows, in words for a screen reader: the glyph is
+ * drawn and never read. Said before the hub's title, after who says it (§8.10).
+ */
+const LEVEL_WORD: Partial<Record<RailNoticeTone, string>> = {
+  warning: "Warning",
+  danger: "Critical",
 }
 
 /** A warning or critical notice says its level with its glyph; the rest carry the hub's J. */
@@ -99,6 +108,7 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
   const tone: RailNoticeTone = level === "default" ? "brand" : level
   const href = noticeHref(notice.href, hub.url)
   const when = since(notice.at)
+  const levelWord = LEVEL_WORD[tone]
 
   return (
     <RailNotice
@@ -120,7 +130,7 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
           {when && (
             <time
               dateTime={notice.at}
-              title={relativeTime(notice.at)}
+              title={timestamp(notice.at)}
               className="shrink-0 text-faint tabular-nums"
             >
               {when}
@@ -131,6 +141,7 @@ export function HubNotice({ collapsed }: { collapsed: boolean }) {
     >
       <div className="space-y-1">
         <p className="line-clamp-2 text-body leading-snug font-semibold break-words text-foreground">
+          {levelWord && <span className="sr-only">{levelWord}: </span>}
           {notice.title}
         </p>
         {notice.body && (

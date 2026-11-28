@@ -408,7 +408,8 @@ poll and fetches the notice's code when `updateHasNews` says there is something 
 its progress and its confetti are in no route's chunks until then. The deployment vocabulary it draws
 with still loads with the shell, through the command palette's inventory
 (`command-search/inventory.ts`). It is the account card's container (the same edge and ground, tinted green or red only
-once a run has finished) with the dashboard's J as a 16px glyph in the notice's ink at its first line,
+once a run has finished) with a 16px glyph in the notice's ink at its first line (the dashboard's J while an
+update is available or running, sparkles once it has succeeded, the crossed circle once it has failed),
 an eyebrow in the notice's tone, the installed version wired to the newest with a pulse running
 along the wire, the newest release's title and a band of what the releases bring by kind. An admin on
 an install that updates in place gets *Update now*, which opens the update's own dialog
@@ -479,7 +480,9 @@ offers *Open in Just Hub*.
   line of its own, in a new tab with `noopener noreferrer`, when its link is on the hub's own origin, and
   *N more from Just Hub* leading to Settings → Hub's `#notices`, both as text lines rather than buttons. The
   account card's container, tinted amber or red only for a warning or critical notice, whose glyph is then
-  the warning triangle or the crossed circle; an info notice carries the hub's J. The rail is narrow and a
+  the warning triangle or the crossed circle; an info notice carries the hub's J. The glyph is drawn and
+  never read, so a screen reader hears the level as words, *Warning:* or *Critical:* before the title (after
+  who says it, as §8.10 asks). The rail is narrow and a
   hub's name may be 64 characters, so only the name is ever cut, and only when it does not fit, with the
   whole name as its title: *says* is what marks the words below as the hub's and is never the part that is
   lost. Dismissals are kept in `localStorage` per browser and forgotten once the hub stops
