@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Route } from "@playwright/test"
+import { expect, test, type Page, type Request, type Route } from "@playwright/test"
 import {
   deployment,
   json,
@@ -1646,8 +1646,32 @@ async function holdSetupTurns(page: Page) {
 }
 
 test("the page leaves the draft alone while the assistant saves it", async ({ page }) => {
-  await mockSetup(page, [])
+  const { reads } = await mockSetup(page, [])
   const { turns, send } = await holdSetupTurns(page)
+  // Every save and check of the page's, counted from the start: Review checks the
+  // plan on arrival and again after the first answer's read-back, and a check of
+  // those still on its way when the count began read as the page's own.
+  const all: string[] = []
+  const out = { count: 0, at: Date.now() }
+  const write = (request: Request) => {
+    const path = new URL(request.url()).pathname
+    if (path === "/api/v1/deploy/drafts/setup-draft" && request.method() === "PUT") return "save"
+    if (path.endsWith("/setup-draft/preflight")) return "preflight"
+  }
+  page.on("request", (request) => {
+    const kind = write(request)
+    if (!kind) return
+    all.push(kind)
+    out.count += 1
+    out.at = Date.now()
+  })
+  const settled = (request: Request) => {
+    if (!write(request)) return
+    out.count -= 1
+    out.at = Date.now()
+  }
+  page.on("requestfinished", settled)
+  page.on("requestfailed", settled)
   await page.goto("/deploy/new?draft=setup-draft")
   await page.locator("[data-slot='setup-assistant-offer']").click()
   const panel = page.locator("[data-slot='setup-assistant']")
@@ -1655,6 +1679,13 @@ test("the page leaves the draft alone while the assistant saves it", async ({ pa
   await send(0, configured, true)
   await panel.getByRole("button", { name: "Review and deploy" }).click()
   await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  // The first answer's save is read back, and whatever Review checked has answered.
+  await expect.poll(() => reads.count).toBeGreaterThan(1)
+  await expect
+    .poll(() => out.count === 0 && Date.now() - out.at > 500, { intervals: [100] })
+    .toBe(true)
+  const before = all.length
+  const since = () => all.slice(before)
 
   // From here on what it saves reads back as a different plan, which is what
   // set Review checking again over its draft.
@@ -1663,13 +1694,6 @@ test("the page leaves the draft alone while the assistant saves it", async ({ pa
     const draft = setupDraft(9, "shop")
     draft.data.configuration = { ...planned, runtime: { ...planned.runtime, internalPort: 8080 } }
     return json(route, draft)
-  })
-  const writes: string[] = []
-  page.on("request", (request) => {
-    const path = new URL(request.url()).pathname
-    if (path === "/api/v1/deploy/drafts/setup-draft" && request.method() === "PUT")
-      writes.push("save")
-    if (path.endsWith("/setup-draft/preflight")) writes.push("preflight")
   })
   await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080")
   await panel.getByRole("button", { name: "Ask", exact: true }).click()
@@ -1695,14 +1719,14 @@ test("the page leaves the draft alone while the assistant saves it", async ({ pa
   await reread
   // Still answering: what it saved is read back, and nothing of the page's is sent.
   await page.waitForTimeout(600)
-  expect(writes).toEqual([])
+  expect(since()).toEqual([])
   await expect(page.getByRole("button", { name: "Save only" })).toBeDisabled()
   await expect(page.getByRole("button", { name: /Deploy$/ }).first()).toBeDisabled()
 
   // Once it has finished, Review checks the plan it left, once.
   await send(1, [{ type: "text", text: "Now on 8080." }, done()], true)
   await expect(panel).toContainText("Now on 8080.")
-  await expect.poll(() => writes.filter((write) => write === "preflight").length).toBe(1)
+  await expect.poll(() => since().filter((one) => one === "preflight").length).toBe(1)
   await expect(page.getByRole("button", { name: "Save only" })).toBeEnabled()
 })
 
