@@ -511,22 +511,30 @@ func TestAConversationReachesOneDeployment(t *testing.T) {
 }
 
 // Past a number of steps what it asks next waits for the person whatever the mode,
-// so a loop spends nothing more without somebody looking.
+// so a loop spends nothing more without somebody looking. Full access, where a
+// change to a deployment's code is seen through its build and run, has more.
 func TestALongTurnPausesForThePerson(t *testing.T) {
-	f := operatorRouterAs(t, auth.RoleAdmin)
-	answers := []func(http.ResponseWriter){}
-	for range agentSteps {
-		answers = append(answers, claudeCalls("Reading.", [2]any{assistant.ToolRecentRuns, map[string]any{"limit": 1}}))
-	}
-	f.provider.queue(answers...)
-	f.s.assistant.limit = httpx.NewLimiter(6000, 100)
-	events := f.ask(t, `{"question":"Loop","mode":"full"}`)
-	done := doneOf(t, events)
-	if done["paused"] != true || len(done["pending"].([]any)) != 1 {
-		t.Fatalf("done = %v", done)
-	}
-	if len(f.provider.raw) != agentSteps {
-		t.Fatalf("%d requests reached the model", len(f.provider.raw))
+	for _, c := range []struct {
+		mode  string
+		steps int
+	}{{"changes", agentSteps}, {"full", agentStepsFull}} {
+		t.Run(c.mode, func(t *testing.T) {
+			f := operatorRouterAs(t, auth.RoleAdmin)
+			answers := []func(http.ResponseWriter){}
+			for range c.steps {
+				answers = append(answers, claudeCalls("Reading.", [2]any{assistant.ToolRecentRuns, map[string]any{"limit": 1}}))
+			}
+			f.provider.queue(answers...)
+			f.s.assistant.limit = httpx.NewLimiter(6000, 1000)
+			events := f.ask(t, `{"question":"Loop","mode":"`+c.mode+`"}`)
+			done := doneOf(t, events)
+			if done["paused"] != true || len(done["pending"].([]any)) != 1 {
+				t.Fatalf("done = %v", done)
+			}
+			if len(f.provider.raw) != c.steps {
+				t.Fatalf("%d requests reached the model", len(f.provider.raw))
+			}
+		})
 	}
 }
 

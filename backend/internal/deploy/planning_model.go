@@ -1778,18 +1778,18 @@ func (c PlanConfiguration) Validate() error {
 		}
 		seenVariables[variable.Name] = true
 		if variable.ValueMode != "" && variable.ValueMode != "literal" && variable.ValueMode != "reference" {
-			return invalidField(variable.Name, "invalid variable value mode")
+			return invalidField(variable.Name, "invalid value mode %q for %s: it is literal or reference, or left out", variable.ValueMode, variable.Name)
 		}
 		if variable.Sensitivity != "plain" && variable.Sensitivity != "secret" {
-			return invalidField(variable.Name, "invalid sensitivity for %s", variable.Name)
+			return invalidField(variable.Name, "invalid sensitivity for %s: it is plain or secret", variable.Name)
 		}
 		if len(variable.Scopes) == 0 || len(variable.Scopes) > 3 {
-			return invalidField(variable.Name, "variable %s must have at least one scope", variable.Name)
+			return invalidField(variable.Name, "variable %s must have one to three scopes of build, runtime and release_task", variable.Name)
 		}
 		seenScopes := map[string]bool{}
 		for _, scope := range variable.Scopes {
 			if scope != "build" && scope != "runtime" && scope != "release_task" {
-				return invalidField(variable.Name, "invalid scope %q for %s", scope, variable.Name)
+				return invalidField(variable.Name, "invalid scope %q for %s: a scope is build, runtime or release_task", scope, variable.Name)
 			}
 			if seenScopes[scope] {
 				return invalidField(variable.Name, "duplicate scope %q for %s", scope, variable.Name)

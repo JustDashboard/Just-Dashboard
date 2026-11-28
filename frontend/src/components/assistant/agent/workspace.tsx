@@ -1,33 +1,31 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { AnimatePresence, MotionConfig, motion } from "motion/react"
+import { MotionConfig } from "motion/react"
 import { ChatBubble, Logs, SettingsGear, Sparkles } from "@/components/icons"
 import { cn } from "@/lib/utils"
-import { useArrivals } from "@/hooks/use-arrivals"
 import { PaneBar } from "@/components/phone-panes"
 import { ProductGlyph } from "@/components/product-logo"
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { AssistantMark } from "@/components/assistant/mark"
-import { Shortcut } from "@/components/assistant/agent/step"
 import { stepMark } from "@/components/assistant/agent/marks"
 import {
   agentStatus,
-  changesOf,
   inputTokens,
   shownSteps,
   totalUsage,
   type AgentStep,
+  type AgentTranscript,
+  type AgentUsage,
 } from "@/components/assistant/agent/model"
 import { agentWorking, type AgentSession } from "@/components/assistant/agent/sessions"
-import { EmptyNote } from "@/components/state"
 import { PaneSection } from "@/components/panel"
 
 export type AgentPane = "chat" | "chats" | "activity"
 
 /**
  * A chat as a page: the conversation, and beside it a rail of the person's chats
- * and what this one has done, with a shortcut to each change. Nothing is boxed: the
+ * and what this one has read. Nothing is boxed: the
  * conversation is the page's own ground down to the window's foot, and the rail is a
  * column after a hairline. On a phone they are one full-height pane at a time with a
  * bar to switch (`phone-panes.tsx`, the Git workspace's pattern), never stacked.
@@ -52,8 +50,15 @@ export function AgentWorkspace({
   onSettings?: () => void
   className?: string
 }) {
-  const [pane, setPane] = useState<AgentPane>("chat")
-  const changes = changesOf(session.transcript).length
+  const [picked, setPicked] = useState<AgentPane>("chat")
+  // A chat that has read nothing and cost nothing has nothing for the phone's
+  // "What it read" stop to open, so the bar leaves it out until it has (a fresh
+  // chat's pane was its status line alone); one left on it goes back to the chat.
+  const reads = useMemo(() => readsOf(session.transcript), [session.transcript])
+  const usage = totalUsage(session.transcript)
+  const tokens = inputTokens(usage) + usage.output
+  const hasActivity = reads.length > 0 || tokens > 0
+  const pane: AgentPane = picked === "activity" && !hasActivity ? "chat" : picked
   return (
     <MotionConfig reducedMotion="user">
       <div
@@ -71,7 +76,7 @@ export function AgentWorkspace({
         </section>
         <aside
           data-slot="agent-rail"
-          aria-label="Chats and what it did"
+          aria-label="Chats and what it read"
           className={cn(
             "min-h-0 w-full shrink-0 flex-col gap-6 overflow-y-auto overscroll-contain px-4 pt-5 pb-4 lg:flex lg:w-72 lg:border-l lg:border-hairline lg:pr-0",
             pane === "chat" ? "hidden" : "flex flex-1 lg:flex-none",
@@ -82,7 +87,8 @@ export function AgentWorkspace({
             {chats}
           </div>
           <Activity
-            session={session}
+            reads={reads}
+            usage={usage}
             className={cn("flex-1", pane === "chats" && "max-lg:hidden")}
           />
         </aside>
@@ -91,18 +97,14 @@ export function AgentWorkspace({
         <PaneBar<AgentPane | "settings">
           label="Assistant panes"
           active={pane}
-          onPick={(key) => (key === "settings" ? onSettings?.() : setPane(key))}
+          onPick={(key) => (key === "settings" ? onSettings?.() : setPicked(key))}
           className="-mx-(--page-inset)"
           stops={[
             { key: "chat", label: "Chat", icon: <Sparkles /> },
             { key: "chats", label: "Chats", icon: <ChatBubble /> },
-            {
-              key: "activity",
-              label: "What it did",
-              icon: <Logs />,
-              count: changes,
-              countClassName: "bg-success",
-            },
+            ...(hasActivity
+              ? [{ key: "activity" as const, label: "What it read", icon: <Logs /> }]
+              : []),
             ...(onSettings
               ? [{ key: "settings" as const, label: "Settings", icon: <SettingsGear /> }]
               : []),
@@ -149,57 +151,34 @@ function RailHead({ session, product }: { session: AgentSession; product: string
   )
 }
 
+// The shared pane head, on the rail's own inset: the rail is one column, so its
+// groups are spaced rather than ruled.
 const ACTIVITY_GROUP = "space-y-2 border-b-0 p-0"
 
-/** What this chat has changed, with a press to each, and what it has read. */
-function Activity({ session, className }: { session: AgentSession; className?: string }) {
-  const { transcript } = session
-  const changes = changesOf(transcript)
-  const reads = useMemo(() => {
-    const seen = new Map<string, AgentStep>()
-    for (const turn of transcript.turns)
-      for (const step of shownSteps(turn))
-        if (step.call.kind === "read" && step.state !== "waiting") seen.set(step.call.label, step)
-    return [...seen.values()].reverse()
-  }, [transcript])
-  const arrived = useArrivals(changes.map((step) => step.call.id))
-  const usage = totalUsage(transcript)
+/** What a chat has read, one row a label, newest first. */
+function readsOf(transcript: AgentTranscript): AgentStep[] {
+  const seen = new Map<string, AgentStep>()
+  for (const turn of transcript.turns)
+    for (const step of shownSteps(turn))
+      if (step.call.kind === "read" && step.state !== "waiting") seen.set(step.call.label, step)
+  return [...seen.values()].reverse()
+}
+
+/**
+ * What this chat has read, and what it cost. Its changes are not listed again
+ * here: each one's shortcut stands under its call in the conversation.
+ */
+function Activity({
+  reads,
+  usage,
+  className,
+}: {
+  reads: AgentStep[]
+  usage: AgentUsage
+  className?: string
+}) {
   return (
     <div data-slot="agent-activity" className={cn("flex min-h-0 flex-col gap-6", className)}>
-      {/* The shared pane head, on the rail's own inset: the rail is one
-          column, so its groups are spaced rather than ruled. */}
-      <PaneSection title="Changes" level={2} className={ACTIVITY_GROUP}>
-        {changes.length === 0 ? (
-          // On the heading's edge, as the Chats group's empty line beside
-          // it is: the note's own padding set it in and down from it.
-          <EmptyNote dense className="p-0 text-left">
-            Nothing yet.
-          </EmptyNote>
-        ) : (
-          <ul className="space-y-2">
-            <AnimatePresence initial={false}>
-              {changes.map((step) => (
-                <motion.li
-                  key={step.call.id}
-                  layout="position"
-                  initial={{ opacity: 0, x: 8 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  transition={{ duration: 0.22, ease: [0.16, 1, 0.3, 1] }}
-                  data-slot="agent-rail-change"
-                  className="space-y-1.5 rounded-lg border border-rule-success bg-wash-success p-2.5"
-                >
-                  <p className="text-body">{step.call.label}</p>
-                  <Shortcut
-                    label={step.change!.label}
-                    href={step.change!.href}
-                    lit={arrived.has(step.call.id)}
-                  />
-                </motion.li>
-              ))}
-            </AnimatePresence>
-          </ul>
-        )}
-      </PaneSection>
       {reads.length > 0 && (
         <PaneSection title="What it read" level={2} className={ACTIVITY_GROUP}>
           <ul className="space-y-1.5">

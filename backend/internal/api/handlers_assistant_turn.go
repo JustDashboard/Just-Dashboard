@@ -52,15 +52,26 @@ const (
 	// assistant asks next waits for the person whatever the mode, so a loop spends
 	// nothing more without somebody looking.
 	agentSteps = 32
+	// agentStepsFull is the bound under full access, where the person chose to
+	// let it work without asking: a change to a deployment's code — reading,
+	// editing, building, pushing, following the run and fixing what it found —
+	// takes many more steps than a question does.
+	agentStepsFull = 200
 	// agentTurnDeadline is one press's whole deadline, long enough to see a deploy
-	// through.
-	agentTurnDeadline = 20 * time.Minute
+	// through; agentTurnDeadlineFull is full access's, long enough to see a fix
+	// through several builds.
+	agentTurnDeadline     = 20 * time.Minute
+	agentTurnDeadlineFull = 60 * time.Minute
+	// agentWorkspaceDeadline bounds open_workspace, a large repository's clone.
+	agentWorkspaceDeadline = 10 * time.Minute
 	// agentCallDeadline is one call's, which a route that does its work in the
 	// background answers long before.
 	agentCallDeadline = 2 * time.Minute
 	// agentOutputBytes bounds what of an answer the page is sent to show under its
 	// call. The model gets the whole of it, up to maxOperatorResult.
 	agentOutputBytes = 4000
+	// agentFileTextShown bounds how much of a file's text a waiting call shows.
+	agentFileTextShown = 6000
 	// agentDiffLines bounds how much of a change is spelled out.
 	agentDiffLines = 12
 	// agentBudgetWait bounds how long a press waits for the install's budget of
@@ -299,8 +310,10 @@ type agentPress struct {
 	// one large; the question's line names each by its id.
 	images []chatImage
 	quiet  bool
-	// commands are the lines run_command ran, masked, for the audit entry.
+	// commands are the lines run_command ran, masked, for the audit entry, and
+	// git what the code tools did to a workspace.
 	commands []string
+	git      []string
 	// announced is a chat saved once the page has been sent its first line.
 	announced bool
 }
@@ -598,7 +611,11 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 		detail["allowed"], detail["declined"] = allowed, declined
 	}
 
-	ctx, cancel := context.WithTimeout(pressCtx, agentTurnDeadline)
+	steps, turnDeadline := agentSteps, agentTurnDeadline
+	if mode == assistant.ModeFull {
+		steps, turnDeadline = agentStepsFull, agentTurnDeadlineFull
+	}
+	ctx, cancel := context.WithTimeout(pressCtx, turnDeadline)
 	defer cancel()
 	emit := func(e assistant.Event) {
 		if e.Thinking {
@@ -651,8 +668,8 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 				answers = append(answers, assistant.Block{Type: assistant.BlockToolResult, ToolID: call.ID, Text: call.Problem, IsError: true})
 				continue
 			}
-			if agentHolds(scope, mode, view) || step >= agentSteps {
-				paused = paused || step >= agentSteps
+			if agentHolds(scope, mode, view) || step >= steps {
+				paused = paused || step >= steps
 				held = append(held, call)
 				pending = append(pending, view)
 				continue
@@ -693,6 +710,9 @@ func (s *Server) agentTurn(w http.ResponseWriter, r *http.Request, scope *agentS
 	}
 	if len(press.commands) > 0 {
 		detail["commands"] = press.commands
+	}
+	if len(press.git) > 0 {
+		detail["git"] = press.git
 	}
 	// Carried on somewhere else: this press puts the chat down as it stood after
 	// its last step, and the press that took it goes on from there.
@@ -959,6 +979,44 @@ func (pr *agentPress) view(ctx context.Context, call assistant.ToolCall) agentCa
 		default:
 			view.Label = "Read the terminal"
 		}
+	case assistant.ToolOpenWorkspace:
+		in := call.WorkspaceInput()
+		view.Kind, view.Reason = agentKindChange, in.Reason
+		view.Input = call.Input
+		view.Label = "Open a workspace"
+		if scope.deployment != nil && (in.Deployment == 0 || in.Deployment == scope.deployment.ID) {
+			view.Label = "Open a workspace of " + scope.deployment.Name
+		} else if in.Deployment > 0 {
+			view.Label = fmt.Sprintf("Open a workspace of deployment %d", in.Deployment)
+		}
+	case assistant.ToolPushChanges:
+		in := call.WorkspaceInput()
+		view.Kind, view.Reason = agentKindChange, in.Reason
+		view.Input = call.Input
+		view.Label = "Commit and push " + clipText(in.Folder, 80)
+		if in.Branch != "" {
+			view.Label += " to " + clipText(in.Branch, 60)
+		}
+	case assistant.ToolReadFile, assistant.ToolEditFile, assistant.ToolWriteFile:
+		in := call.FileInput()
+		view.Reason = in.Reason
+		// What the person allows is what will be written, so the text goes with
+		// the path, held to what a card shows; the diff says the rest once it ran.
+		input := map[string]any{"path": in.Path}
+		switch call.Name {
+		case assistant.ToolReadFile:
+			view.Label = "Read " + clipText(in.Path, 100)
+		case assistant.ToolEditFile:
+			view.Kind, view.Label = agentKindChange, "Edit "+clipText(in.Path, 100)
+			input["old_text"], input["new_text"] = clipText(in.OldText, agentFileTextShown), clipText(in.NewText, agentFileTextShown)
+			if in.ReplaceAll {
+				input["replace_all"] = true
+			}
+		default:
+			view.Kind, view.Label = agentKindChange, "Write "+clipText(in.Path, 100)
+			input["content"] = clipText(in.Content, agentFileTextShown)
+		}
+		view.Input, _ = json.Marshal(input)
 	case assistant.ToolAPIRequest:
 		in := call.RequestInput()
 		view.Reason, view.Input = in.Reason, call.Input
@@ -1134,6 +1192,9 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 		deadline = time.Duration(assistant.CommandWaitMax)*time.Second + agentCallDeadline
 	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
 		deadline = time.Duration(call.TerminalInput().Wait)*time.Second + agentCallDeadline
+	case assistant.ToolOpenWorkspace:
+		// A large repository's first clone.
+		deadline = agentWorkspaceDeadline
 	}
 	ctx, cancel := context.WithTimeout(ctx, deadline)
 	defer cancel()
@@ -1158,6 +1219,16 @@ func (pr *agentPress) execute(ctx context.Context, call assistant.ToolCall, view
 		return commandChange(pr.runCommand(ctx, p, call.CommandInput()), view)
 	case assistant.ToolTerminalRun, assistant.ToolTerminalSend, assistant.ToolTerminalRead:
 		return commandChange(pr.terminal(ctx, p, call), view)
+	case assistant.ToolOpenWorkspace:
+		return pr.openWorkspace(ctx, p, call.WorkspaceInput())
+	case assistant.ToolPushChanges:
+		return pr.pushChanges(ctx, p, call.WorkspaceInput())
+	case assistant.ToolReadFile:
+		return pr.readFile(ctx, p, call.FileInput())
+	case assistant.ToolEditFile:
+		return pr.editFile(ctx, p, call.FileInput())
+	case assistant.ToolWriteFile:
+		return pr.writeFile(ctx, p, call.FileInput())
 	case assistant.ToolWaitForRun:
 		if scope.deployment == nil {
 			return refuse("wait_for_run follows a deployment's run, and this conversation is not about one: read the run with api_request")
