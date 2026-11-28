@@ -503,12 +503,15 @@ export function askAgentFirst(session: AgentSession, question: string) {
  * waited to be asked there, and what was handed back to its box, is carried into
  * the new subject's chat, into its box and unsent. Asked of the draft, it would go
  * to a plan that no longer changes anything; asked of the new chat at once, it
- * would go without the conversation it was written in.
+ * would go without the conversation it was written in. A Take over the page was
+ * holding is let go for the same reason.
  */
 export function carryAgentQueue(from: AgentSession, scope: AgentScope) {
   const waiting = [...from.returned, ...from.queue]
   from.queue = []
   from.returned = []
+  // A Take over pressed meanwhile would go to the old subject once the page lets go.
+  from.owed = undefined
   if (waiting.length > 0) {
     const to = currentFor(scope)
     to.returned = [...to.returned, ...waiting]

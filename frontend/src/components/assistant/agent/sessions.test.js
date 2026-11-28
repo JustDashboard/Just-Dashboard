@@ -422,6 +422,29 @@ describe("what the page's hold keeps back besides a question", () => {
     ])
   })
 
+  test("a Take over the page held is not made of a draft deployed meanwhile", async () => {
+    const { calls, refusals } = turnServer()
+    const draft = newAgentChat({ kind: "draft", draftId: "d-owed", name: "shop" })
+    refusals.push("chat_busy")
+    askAgent(draft, "first")
+    await settle()
+    expect(draft.held?.body.question).toBe("first")
+    holdAgentTurns(draft, "draft-save", true)
+    takeOverAgent(draft)
+    expect(draft.owed).toBe("takeOver")
+    carryAgentQueue(draft, {
+      kind: "deployment",
+      projectId: 80,
+      environmentId: 81,
+      name: "shop",
+      environmentName: "production",
+    })
+    holdAgentTurns(draft, "draft-save", false)
+    await settle()
+    // Deploy let go of the hold after the commit: nothing goes to the deployed draft.
+    expect(calls).toHaveLength(1)
+  })
+
   test("Take over pressed while the page holds goes once it lets go", async () => {
     const { calls, refusals } = turnServer()
     const session = freshChat()
