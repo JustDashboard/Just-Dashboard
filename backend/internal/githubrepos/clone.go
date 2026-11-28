@@ -42,6 +42,27 @@ func (s *Service) CloneToken(ctx context.Context, access *RepoAccess) (string, f
 	if !access.Installation.Grants("contents", "read") {
 		return "", func() {}, &NotPermittedError{Reason: fmt.Sprintf("The GitHub App was not granted Contents: read on %s, so it cannot fetch %s. Accept the permission on GitHub, then refresh.", access.Installation.Account.Login, access.Repository.FullName)}
 	}
+	return s.repositoryToken(ctx, access, "read")
+}
+
+// PushToken mints an installation token that can do nothing but write one
+// repository's contents, for one push of the assistant's workspace, and the
+// function that revokes it. It is minted only for a person whose own GitHub
+// account may push to the repository (Repository.Can.Push), so the token never
+// reaches further than they do; the person's own token is never handed to git.
+func (s *Service) PushToken(ctx context.Context, access *RepoAccess) (string, func(), error) {
+	if !access.Repository.Can.Push {
+		return "", func() {}, &NotPermittedError{Reason: fmt.Sprintf("%s cannot push to %s on GitHub.", access.Login, access.Repository.FullName)}
+	}
+	if !access.Installation.Grants("contents", "write") {
+		return "", func() {}, &NotPermittedError{Reason: fmt.Sprintf("The GitHub App was not granted Contents: write on %s, so it cannot push to %s. Accept the permission on GitHub, then refresh.", access.Installation.Account.Login, access.Repository.FullName)}
+	}
+	return s.repositoryToken(ctx, access, "write")
+}
+
+// repositoryToken mints an installation token narrowed to one repository and to
+// contents at level, and the function that revokes it.
+func (s *Service) repositoryToken(ctx context.Context, access *RepoAccess, level string) (string, func(), error) {
 	app, err := s.store.LoadApp(ctx)
 	if err != nil {
 		return "", func() {}, err
@@ -59,6 +80,7 @@ func (s *Service) CloneToken(ctx context.Context, access *RepoAccess) (string, f
 		Token string `json:"token"`
 	}
 	body := DownscopedTokenRequest(access.Repository.ID)
+	body["permissions"] = map[string]string{"contents": level}
 	if _, err := asApp.Do(ctx, http.MethodPost, "/app/installations/"+strconv.FormatInt(access.Installation.ID, 10)+"/access_tokens", body, &minted); err != nil {
 		return "", func() {}, err
 	}

@@ -1,8 +1,8 @@
 "use client"
 
 import Link from "next/link"
-import { ArrowUpRight, ChevronDown } from "@/components/icons"
-import { hubLabel, openable, orderFleet, serverAddress, serverReading } from "@/lib/hub-link"
+import { Check, ChevronDown } from "@/components/icons"
+import { openable, orderFleet, serverAddress, serverReading } from "@/lib/hub-link"
 import { cn } from "@/lib/utils"
 import { VERSION } from "@/lib/version"
 import type { ShellHubValue } from "@/hooks/use-hub-link"
@@ -32,13 +32,17 @@ import { useSidebar } from "@/components/ui/sidebar"
  * wordmark's place is the dashboard's to speak in, so that name is said only in the menu, under
  * whose list it is (hub-link-protocol §8.10).
  *
- * The menu is the hub's last word on each server, cached by this server's backend, and says so
- * under its label ("Listed by Just Hub (hub)"): every name in it is the hub's text
- * (hub-link-protocol §8.10). A dot in the server's state and its name, this one first with the
- * installed version the wordmark used to carry, then the rest by name with an arrow, since pressing
- * one leaves for another origin. The hub sends no version for them (§6.1). Another server, and the
- * hub, open in a new tab with no opener and no referrer: the address is one the hub handed over,
- * so it never takes this tab, and nothing of this dashboard's goes with it (§8.10). While the hub
+ * The menu, headed "Servers", is the hub's last word on each server, cached by this server's
+ * backend. It used to say whose list it was under its head ("Listed by Just Hub (hub)"); the
+ * operator had that line cut (28 Nov 2026), and the menu's last row, Just Hub, says where the list
+ * comes from. The names stay plain text, never a prompt of this dashboard's
+ * (hub-link-protocol §8.10). A dot in the server's state and its name, this one first on the
+ * chosen face with a tick and the installed version the wordmark used to carry, then the rest by
+ * name, with the state in words where it is news (late, offline, updating). The hub sends no
+ * version for them (§6.1). Another server, and the hub, open in this tab as any link does, and in
+ * a new one on a modified or middle click; the operator asked for that over the new tab every
+ * press used to open (Nov 2026). Either way there is no opener and no referrer, so nothing of this
+ * dashboard's goes with the address the hub handed over (§8.10). While the hub
  * cannot be reached the others' dots go grey, because what it said last may be minutes old, and
  * the menu says why; before the first report nothing has failed, so nothing says so. An idle
  * link offers no way to the hub at all: its address may now answer on a machine this server
@@ -109,22 +113,18 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           strip || collapsed ? "w-72" : "w-(--radix-dropdown-menu-trigger-width) min-w-60",
         )}
       >
-        <DropdownMenuLabel className="flex min-w-0 items-center justify-between gap-3">
-          <span className="truncate">Servers</span>
+        <div className="flex min-w-0 items-center justify-between gap-3 px-2 pt-2 pb-1.5">
+          <DropdownMenuLabel className="truncate p-0 text-title font-semibold tracking-normal text-foreground normal-case">
+            Servers
+          </DropdownMenuLabel>
           {troubled && (
             <Status
               tone={hub.idle ? "danger" : "warning"}
               label={trouble}
-              className="text-hint tracking-normal normal-case"
+              className="shrink-0 text-hint"
             />
           )}
-        </DropdownMenuLabel>
-        <p
-          data-slot="hub-attribution"
-          className="truncate px-2 pb-1.5 text-hint text-muted-foreground"
-        >
-          Listed by {hubLabel(hub.name)}
-        </p>
+        </div>
         {servers.length === 0 && (
           <p className="px-2 py-1.5 text-hint text-muted-foreground">
             The hub lists its servers after the first report.
@@ -134,23 +134,35 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           const reading = serverReading(server, hub.reachable, hub.due)
           const address = serverAddress(server)
           const dot = <StatusDot tone={reading.tone} className="mx-0.5" />
+          // The state in words beside the name where it is news: a green dot says online, and
+          // while the hub is unreachable the head already says why every dot is grey. Otherwise
+          // the word is only in the row's accessible name.
+          const word =
+            !server.self && reading.tone !== "running" && reading.tone !== "unknown"
+              ? reading.label
+              : undefined
           const label = (
             <span className="min-w-0 flex-1 truncate">
               {server.name}
-              <span className="sr-only">, {reading.label}</span>
+              {!word && <span className="sr-only">, {reading.label}</span>}
             </span>
           )
           if (server.self) {
             return (
-              <DropdownMenuItem key={server.serverId} asChild className="gap-2.5">
-                <Link href="/" data-self>
+              <DropdownMenuItem
+                key={server.serverId}
+                asChild
+                className="gap-2.5 bg-chosen font-medium text-foreground"
+              >
+                <Link href="/" data-self aria-current="page">
                   {dot}
                   {label}
                   {/* The wordmark carried the installed version; its row here does now. */}
-                  <span className="numeric shrink-0 text-hint text-muted-foreground">
+                  <span className="numeric shrink-0 text-hint font-normal text-faint">
                     {VERSION}
                   </span>
-                  <span className="shrink-0 text-hint text-muted-foreground">this one</span>
+                  <span className="sr-only">, this server</span>
+                  <Check aria-hidden className="text-foreground" />
                 </Link>
               </DropdownMenuItem>
             )
@@ -160,22 +172,35 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
               <DropdownMenuItem key={server.serverId} disabled className="gap-2.5">
                 {dot}
                 {label}
-                <span className="shrink-0 text-hint text-muted-foreground">no address</span>
+                {word && (
+                  <span className="shrink-0 text-hint text-muted-foreground">
+                    <span className="sr-only">, </span>
+                    {word}
+                  </span>
+                )}
+                <span className="shrink-0 text-hint text-muted-foreground">
+                  <span className="sr-only">, </span>No address
+                </span>
               </DropdownMenuItem>
             )
           }
+          // Another server opens in this tab, as any link does; a modified click or a middle
+          // click opens it in a new one. `noreferrer` either way: nothing of this dashboard's goes
+          // with it (§8.10).
           return (
             <DropdownMenuItem key={server.serverId} asChild className="gap-2.5">
-              <a href={address} target="_blank" rel="noopener noreferrer">
+              <a href={address} rel="noopener noreferrer">
                 {dot}
                 {label}
-                {server.version && (
-                  <span className="numeric shrink-0 text-hint text-muted-foreground">
-                    {server.version}
+                {word && (
+                  <span className="shrink-0 text-hint text-muted-foreground">
+                    <span className="sr-only">, </span>
+                    {word}
                   </span>
                 )}
-                <span className="sr-only">, opens in a new tab</span>
-                <ArrowUpRight aria-hidden />
+                {server.version && (
+                  <span className="numeric shrink-0 text-hint text-faint">{server.version}</span>
+                )}
               </a>
             </DropdownMenuItem>
           )
@@ -184,11 +209,9 @@ export function ServerSwitcher({ hub, strip }: { hub: ShellHubValue; strip?: boo
           <>
             <DropdownMenuSeparator className="mx-1 bg-hairline" />
             <DropdownMenuItem asChild className="gap-2.5">
-              <a href={hubUrl} target="_blank" rel="noopener noreferrer">
-                <LogoGlyph small className="h-3.5 w-auto shrink-0 text-brand" />
+              <a href={hubUrl} rel="noopener noreferrer">
+                <LogoGlyph small className="mx-0.5 h-3.5 w-auto shrink-0 text-brand" />
                 <span className="min-w-0 flex-1 truncate">Open Just Hub</span>
-                <span className="sr-only">, opens in a new tab</span>
-                <ArrowUpRight aria-hidden />
               </a>
             </DropdownMenuItem>
           </>

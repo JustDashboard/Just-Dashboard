@@ -621,7 +621,7 @@ func (e *NormalizedStepExecutor) activateWarmRelease(ctx context.Context, execut
 	}
 	if route != nil {
 		if err := e.proxy.VerifyDeploymentRoute(ctx, *route); err != nil {
-			return fail("activation_verification_failed", "The route back could not be verified.", applied)
+			return fail("activation_verification_failed", "The route back could not be verified"+proxyRefusal(err)+".", applied)
 		}
 	}
 	reason := rollbackReasonFor(execution.Run, request)

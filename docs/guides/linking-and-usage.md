@@ -137,8 +137,8 @@ only whether this server can be connected, never its version or name.
 Once connected, the dashboard knows it is one of several:
 
 - the logo at the top of the sidebar becomes this server's own host name, and opens a list of every server on the hub
-  with its state (online, late, offline, updating), under "Listed by Just Hub (name)" — pick one to open it in
-  a new tab — and **Open Just Hub**;
+  with its state (online, late, offline, updating) — pick one to open it in this tab, or Ctrl/Cmd-click for a
+  new one — and **Open Just Hub**;
 - **Ctrl K** gets a **Servers** scope (`server:`) that finds them and opens them the same way, in a new tab;
 - the browser tab's title carries this server's host name, so several dashboard tabs can be told apart (the
   name the hub gives the server appears only in that list, as the hub's);

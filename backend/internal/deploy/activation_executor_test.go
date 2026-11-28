@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
@@ -963,4 +964,20 @@ func mustExecutionPlan(t *testing.T, fixture *releaseStoreFixture, run EngineRun
 		t.Fatal(err)
 	}
 	return plan
+}
+
+// A proxy's reason is carried into a step's message whole when it is short,
+// and cut on a character's edge when it is long.
+func TestAProxyRefusalIsCarriedAndCutOnACharacter(t *testing.T) {
+	if got := proxyRefusal(nil); got != "" {
+		t.Fatalf("no error = %q", got)
+	}
+	if got := proxyRefusal(errors.New("  nginx -t failed  ")); got != ": nginx -t failed" {
+		t.Fatalf("short = %q", got)
+	}
+	long := strings.Repeat("a", 399) + "é" + strings.Repeat("b", 50)
+	got := proxyRefusal(errors.New(long))
+	if !utf8.ValidString(got) || !strings.HasSuffix(got, "…") || len(got) > 2+400+len("…") {
+		t.Fatalf("long = %q (%d bytes, valid %v)", got, len(got), utf8.ValidString(got))
+	}
 }

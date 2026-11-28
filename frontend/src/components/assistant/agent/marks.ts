@@ -3,6 +3,8 @@ import {
   Bell,
   Box,
   Code,
+  FileText,
+  GitBranch,
   Database,
   FirewallCheck,
   Gauge,
@@ -11,6 +13,7 @@ import {
   Key,
   Logs,
   MagnifyingGlass,
+  Pencil,
   Rocket,
   Servers,
   Terminal,
@@ -45,6 +48,14 @@ const TOOLS: Record<string, StepMark> = {
   // A repository may be GitHub's, another forge's or a folder on the host, so it
   // is drawn as code rather than as one of them.
   read_source: { icon: Code },
+  // A working checkout of the deployment's repository on the server, its files
+  // read and written as the terminal's account, and its commits pushed: drawn as
+  // code and git for the same reason, rather than as the forge it pushes to.
+  open_workspace: { icon: Code },
+  read_file: { icon: FileText },
+  write_file: { icon: Pencil },
+  edit_file: { icon: Pencil },
+  push_changes: { icon: GitBranch },
   wait_for_run: { icon: Rocket },
   find_routes: { icon: MagnifyingGlass },
   describe_operation: { icon: MagnifyingGlass },
