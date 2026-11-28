@@ -223,6 +223,30 @@ fi
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertEqual(calls, 'update\ninstall -y --no-install-recommends wtmpdb\n')
 
+    # Where setup added wtmpdb, its PAM module and boot record are turned on too,
+    # or Security's login history would stay empty.
+    def test_an_added_wtmpdb_records_logins_and_boots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = pathlib.Path(directory)
+            fakes = {
+                'wtmpdb': '#!/bin/bash\n',
+                'apt-cache': '#!/bin/bash\n[[ "$2" == libpam-wtmpdb ]]\n',
+                'dpkg': '#!/bin/bash\nexit 1\n',
+                'apt-get': '#!/bin/bash\nprintf "apt-get %s\\n" "$*" >> "$TEST_ROOT/calls"\n',
+                'systemctl': '#!/bin/bash\nprintf "systemctl %s\\n" "$*" >> "$TEST_ROOT/calls"\n',
+            }
+            for name, body in fakes.items():
+                (root / name).write_text(body)
+                (root / name).chmod(0o755)
+            env = {**os.environ, 'PATH': directory, 'TEST_ROOT': directory, 'JD_APT_UPDATED': '1'}
+            result = subprocess.run(['/bin/bash', '-c', 'source "$1"; jd_enable_login_record', 'test', str(SCRIPT)],
+                                    env=env, capture_output=True, text=True)
+            calls = (root / 'calls').read_text()
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(calls, 'apt-get install -y --no-install-recommends libpam-wtmpdb\n'
+                                'systemctl cat wtmpdb-update-boot.service\n'
+                                'systemctl enable --now wtmpdb-update-boot.service\n')
+
     def test_the_red_hat_family_names_its_own_packages(self):
         script = SCRIPT.read_text()
         with tempfile.TemporaryDirectory() as directory:

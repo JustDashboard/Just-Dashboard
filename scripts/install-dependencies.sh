@@ -249,10 +249,29 @@ jd_install_host_tools() {
   printf 'Installing host tool: gh\n'
   jd_install_gh || failed+=(gh)
  fi
+ jd_enable_login_record
  if [ "${#failed[@]}" -gt 0 ]; then
   printf 'Could not install: %s\n' "${failed[*]}" >&2
   return 1
  fi
+}
+
+# jd_enable_login_record makes wtmpdb, where the host has it, keep the record
+# Security's login history reads. A release that ships it (Debian 13, Ubuntu
+# 26.04, openSUSE) already does; where setup has just added it, its PAM module
+# is a recommendation apt was told to skip, and Kali presets its boot service
+# off, so neither a login nor a boot would ever be written. Best effort: the
+# history is a page of the dashboard, not something it runs on.
+jd_enable_login_record() {
+ command -v wtmpdb >/dev/null 2>&1 || return 0
+ if command -v apt-get >/dev/null 2>&1 && apt-cache show libpam-wtmpdb >/dev/null 2>&1 &&
+  ! dpkg -s libpam-wtmpdb >/dev/null 2>&1; then
+  jd_pkg_install libpam-wtmpdb || true
+ fi
+ if command -v systemctl >/dev/null 2>&1 && systemctl cat wtmpdb-update-boot.service >/dev/null 2>&1; then
+  systemctl enable --now wtmpdb-update-boot.service >/dev/null 2>&1 || true
+ fi
+ return 0
 }
 
 # ── Docker ──────────────────────────────────────────────────────────────────
