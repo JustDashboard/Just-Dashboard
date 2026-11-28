@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState } from "react"
+import { useImperativeHandle, useRef, useState } from "react"
 import { AnimatePresence, motion } from "motion/react"
 import { IconAction } from "@/components/icon-action"
 import { ArrowUp, Cross, Image as ImageGlyph } from "@/components/icons"
@@ -34,8 +34,19 @@ import { ImageLightbox } from "@/components/image-lightbox"
  * a frame that is always there only covered the words. The buttons in the toolbar
  * keep their ring for the keyboard. A press anywhere on the frame's own ground puts
  * the caret in the box.
+ *
+ * While it works the box still takes a question: Enter, or the arrow that joins
+ * Stop beside it, sends it to wait its turn (`onAsk` either way; the chat queues
+ * it). Stop keeps its place at the corner the whole time. `ref.put` hands words
+ * and images back into the box, after what is already in it.
  */
+export interface PromptHandle {
+  /** Words and images back into the box, after what it already holds. */
+  put: (question: string, images: PastedImage[]) => void
+}
+
 export function PromptInput({
+  ref,
   busy,
   disabled,
   placeholder,
@@ -50,6 +61,8 @@ export function PromptInput({
   rows = 2,
   className,
 }: {
+  ref?: React.Ref<PromptHandle>
+  /** It is answering: the corner is Stop, and what is sent waits its turn. */
   busy: boolean
   /** Nothing can be asked yet; what is typed waits. */
   disabled?: boolean
@@ -78,7 +91,20 @@ export function PromptInput({
   const [viewing, setViewing] = useState<number>()
   const box = useRef<HTMLTextAreaElement>(null)
   const picker = useRef<HTMLInputElement>(null)
-  const ready = !busy && !disabled && reading === 0 && (question.trim() !== "" || images.length > 0)
+  const ready = !disabled && reading === 0 && (question.trim() !== "" || images.length > 0)
+  useImperativeHandle(
+    ref,
+    () => ({
+      put: (words, back) => {
+        setQuestion((held) => [held.trim(), words].filter(Boolean).join("\n\n"))
+        const all = [...images, ...back]
+        if (all.length > MAX_IMAGES) setProblem(`A question carries at most ${MAX_IMAGES} images.`)
+        setImages(all.slice(0, MAX_IMAGES))
+        box.current?.focus()
+      },
+    }),
+    [images],
+  )
   const send = () => {
     if (!ready) return
     onAsk(question.trim(), images)
@@ -292,6 +318,19 @@ export function PromptInput({
             )}
             {toolbar}
           </div>
+          {/* Sent while it answers, a question waits its turn; Stop stays where it is. */}
+          {busy && ready && (
+            <IconAction
+              type="submit"
+              size="icon-sm"
+              variant="default"
+              data-slot="prompt-queue"
+              label="Ask when it finishes"
+              className="shrink-0 animate-rise rounded-full"
+            >
+              <ArrowUp aria-hidden className="size-4 [&_path]:stroke-[2.5]" />
+            </IconAction>
+          )}
           <AskButton busy={busy} ready={ready} onStop={onStop} />
         </div>
       </div>

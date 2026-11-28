@@ -101,6 +101,10 @@ type Server struct {
 	// App or token: a test hands the handlers a client aimed at a fake GitHub.
 	githubAccessOverride func(r *http.Request) (*githubrepos.RepoAccess, error)
 
+	// workspaceHomeOverride is where the assistant's workspaces are kept in a
+	// test, in place of the terminal account's home.
+	workspaceHomeOverride string
+
 	// What the DNS record routes reach, which a test replaces
 	// (handlers_deploy_dns_record.go).
 	dnsRecords dnsRecordHooks

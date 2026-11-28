@@ -578,15 +578,75 @@ test("an answer that fails, and one the reader stops, say so", async ({ page }) 
   })
   await openEditor(page)
   await openAssistant(page)
+  // The Thinking line fades out once the answer has ended; while it leaves it is no
+  // longer the chat's status, so it is never found beside the answer's end (two of
+  // them, once the next question is asked, made this test fail on CI).
+  await page.evaluate(() => {
+    const seen = window as unknown as { leftThinking?: boolean }
+    seen.leftThinking = false
+    new MutationObserver(() => {
+      const column = document.querySelector("[data-slot=query-assistant]")
+      if (
+        column?.textContent?.includes("No answer") &&
+        column.querySelector("[data-slot=agent-thinking]")
+      )
+        seen.leftThinking = true
+    }).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    })
+  })
   await ask(pane(page), "How many orders?")
   await expect(pane(page)).toContainText("No answer")
   await expect(pane(page)).toContainText("Anthropic is not answering right now (529)")
+  expect(
+    await page.evaluate(() => (window as unknown as { leftThinking?: boolean }).leftThinking),
+  ).toBe(false)
 
   await ask(pane(page), "How many orders, again?")
   await expect(pane(page).locator("[data-slot=agent-thinking]")).toBeVisible()
   await pane(page).getByRole("button", { name: "Stop" }).click()
   await expect(pane(page)).toContainText("Stopped.")
   await expect(pane(page).getByRole("button", { name: "Ask", exact: true })).toBeVisible()
+  slow.release()
+})
+
+test("asked about a failed statement while it answers, Stop hands it back with the error pressed", async ({
+  page,
+}) => {
+  const slow = hold()
+  const sent = await mockAssistant(page, {
+    settings: ON,
+    answers: [
+      { held: slow.until, lines: COUNT_ANSWER },
+      { lines: [start(), text("There is no table called `nope`."), done()] },
+    ],
+  })
+  await openEditor(page)
+  await openAssistant(page)
+  await ask(pane(page), "How many orders?")
+  await expect(pane(page).getByRole("button", { name: "Stop" })).toBeVisible()
+  await write(page, "select * from nope")
+  await page.keyboard.press("ControlOrMeta+Enter")
+  const failure = results(page).locator("[data-slot=query-refusal]")
+  await expect(failure).toContainText("does not exist")
+  // Pressed while it answers, the question waits with the error it carries.
+  await failure.getByRole("button", { name: "Ask the assistant" }).click()
+  const waiting = pane(page).locator("[data-slot=agent-queued]")
+  await expect(waiting).toContainText("with error")
+  await pane(page).getByRole("button", { name: "Stop" }).click()
+  await expect(waiting).toHaveCount(0)
+  // Back in the box, it still carries the error: sent again, it goes as it was.
+  await expect(question(pane(page))).toHaveValue(/Why did this statement fail/)
+  const error = pane(page).getByRole("button", {
+    name: "Attach the statement that failed and its error",
+  })
+  await expect(error).toHaveAttribute("aria-pressed", "true")
+  await pane(page).getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(() => sent.asked.length).toBe(2)
+  expect((sent.asked[1].attached as { label: string }[]).map((one) => one.label)).toEqual(["error"])
   slow.release()
 })
 
@@ -845,14 +905,15 @@ test("on a phone the column lies over the editor, and the page is one pane at a 
   const bar = page.getByRole("navigation", { name: "Assistant panes" })
   await expect(bar).toBeVisible()
   // The shared bar (`phone-panes.tsx`) is the one this page drew by hand:
-  // three stops of one width across it, at the foot of the screen.
+  // stops of one width across it, at the foot of the screen. A fresh chat has
+  // read nothing, so it has no "What it read" stop yet.
+  await expect(bar.getByRole("button")).toHaveText(["Chat", "Chats"])
   const stops = await bar
     .getByRole("button")
     .evaluateAll((tabs) => tabs.map((tab) => Math.round(tab.getBoundingClientRect().width)))
   const foot = await bar.boundingBox()
-  expect(stops).toHaveLength(3)
   expect(new Set(stops).size).toBe(1)
-  expect(Math.abs(stops[0] * 3 - foot!.width)).toBeLessThanOrEqual(2)
+  expect(Math.abs(stops[0] * 2 - foot!.width)).toBeLessThanOrEqual(2)
   expect(Math.round(foot!.y + foot!.height)).toBe(844)
   expect(Math.round(foot!.height)).toBe(57)
   await expect(page.locator("[data-slot=agent-rail]")).toBeHidden()

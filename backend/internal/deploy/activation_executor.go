@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 )
@@ -805,7 +806,7 @@ func (e *NormalizedStepExecutor) activate(
 		if err := e.proxy.VerifyDeploymentRoute(ctx, *route); err != nil {
 			recovery := e.stopCandidateAndRestore(ctx, execution, release.Release, *runtime, snapshot.Plan, appliedRoute)
 			evidence.Recovery = &recovery
-			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified", Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
+			return StepResult{State: StepFailed, ErrorCode: "activation_verification_failed", ErrorMessage: "the proxy cutover could not be verified" + proxyRefusal(err), Evidence: mustJSON(evidence), Recovered: recoveryComplete(recovery, snapshot.Plan, release.Release)}
 		}
 	}
 	address, failure := e.tailnetAddressFor(ctx, release.Release.EnvironmentID, snapshot.Plan)
@@ -920,7 +921,12 @@ func proxyRefusal(err error) string {
 	}
 	reason := strings.TrimSpace(err.Error())
 	if len(reason) > 400 {
-		reason = reason[:400] + "…"
+		// Cut on a character's edge, so the step's message stays valid UTF-8.
+		cut := 400
+		for cut > 0 && !utf8.RuneStart(reason[cut]) {
+			cut--
+		}
+		reason = reason[:cut] + "…"
 	}
 	return ": " + reason
 }

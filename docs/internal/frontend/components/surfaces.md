@@ -208,7 +208,27 @@ suggestions in the column. The composer draws no focus at all — no ring, no li
 page's one place to type and the blinking caret is the whole answer to "is it ready"; a press anywhere on its frame puts
 the caret in it, and the buttons in its toolbar keep the ring for the keyboard. Its send is one round button
 at the box's corner, as the chat apps people know draw it: an arrow up on the command's blue to ask, turning in
-place into a square on the text's own colour to stop while it answers, its name the word since there is none. An image waiting in it, or asked with a
+place into a square on the text's own colour to stop while it answers, its name the word since there is none.
+While it answers the box still takes a question: Enter, or a second round arrow that joins Stop on its left
+(*Ask when it finishes*; Stop keeps its corner), sends it to wait its turn (`AgentSession.queue` in
+`agent/sessions.ts`, the same for every chat: a deployment's, a connection's, the server's and a draft's). Each one
+waits under the answer as a dashed row of one height — *Waiting*, the question cut to the line, what goes with it in
+words (*with 2 images, statement*), and **Edit**, which puts it back in the box with its images and what was pressed
+for it or sent with it that the page still offers (a failed statement's *Ask the assistant* carries its error), and **Remove** — and nothing opens under a row. What decides when it goes: an answer that ends as an answer
+(done, cut at its length, or declined by the model) asks the first one, and the next after that answer, in order.
+An answer that waits on an Allow keeps them waiting (the box says *What waits is asked once you answer what it is
+waiting on*), and the answer after the Allow or Decline asks the first; with nothing waiting, a question sent then
+still declines what waits, as before. A password the chat's terminal asks for holds them too: typing it carries the
+chat on first (*I've typed the password.*), and what waits goes after that answer. Stop, an answer that fails, and
+one carried on in another tab (`taken_over`) send nothing more: every waiting question goes back into the box,
+unsent, to send again or change. A question refused because another tab is answering the chat (`chat_busy`,
+`conversation_busy`) is held for **Take over** as before, and the rest wait behind it; Take over sends the held
+one, and what waits goes after its answer. Each one carries the images and attachments it was sent with. A page
+can hold the next turn while it writes what the chat works on (`holdAgentTurns`; the new-deployment page does while
+it saves the person's edits to the draft): what is sent then waits the same way, and the box says *What waits is
+asked once the page has saved your changes*. **Take over**, and a password typed for the chat's terminal, are held the same way and go
+once the page lets go, ahead of what waits (`AgentSession.owed`); the bar then says *Taking it over once the page has
+saved your changes*. A Take over whose other tab has finished by then is let go, and what waits goes as it would. An image waiting in it, or asked with a
 question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
 and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
 from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a
@@ -220,16 +240,20 @@ lit `signal` dot that breathes while a tab is answering it, and a warning `Tag` 
 Rename turns the row's own line into the field; delete asks first through `useConfirm`; nothing unfolds under a row.
 The deployment's page lists that deployment's chats and a connection's page that connection's; `/assistant` is a
 chat about the whole server and lists every chat under what each is about, and a deployment's or a connection's chat
-opens on its own page (`?chat=`). A server chat begun by **Ask** from another page carries that page
+opens on its own page (`?chat=`). A server chat begun by the palette's *Ask the assistant about this page* carries that page
 (`AgentTranscript.about`): a small square chip at the head of the column, *About shop · Logs*, is the way back to it,
 the empty chat offers questions about the page rather than the server, and the server is told the page with the press
 that begins the chat and never again. A chat opened
 from the history is read back from the server and folded through the same reducer the stream feeds, so it looks
 exactly as it did and can be carried on. One another tab is answering is followed and says so in a calm bar over the
 box — a breathing dot, *This chat is running in another tab*, and **Take over** — and the tab it was taken from says
-*Continued somewhere else* and stops. Below the chats, what it has changed with a shortcut to each, and what it has
-read. On a phone the chat, the chats and what it did are one full-height pane at a time with a bar at the foot
-(`phone-panes.tsx`, shared by every page that shows one pane at a time: `patterns/keyboard-and-place.md` lists them).
+*Continued somewhere else* and stops. Below the chats, what it has read, once it has read something, and the
+tokens it took; a change is not listed again there, since its shortcut stands under its call in the conversation.
+On a phone the chat, the chats and what it read are one full-height pane at a time with a bar at the foot
+(`phone-panes.tsx`, shared by every page that shows one pane at a time: `patterns/keyboard-and-place.md` lists them);
+the bar has no *What it read* stop until the chat has read something or spent a token, since a fresh chat's pane
+would be its status line alone. A step's well is named for what it holds: what a command printed, git's answer to a
+push, the workspace it opened, or what it read.
 
 A shortcut's arrival scrolls to the section and lights it with `data-arrived`, the focus ring's colour as a transition
 on an outline, not a fifth animation. The floating **Back to chat** is the same surface as Remote Desktop's dock, in

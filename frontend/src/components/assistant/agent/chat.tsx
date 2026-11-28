@@ -1,8 +1,8 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
-import { AnimatePresence, MotionConfig, motion } from "motion/react"
+import { AnimatePresence, MotionConfig, motion, useIsPresent } from "motion/react"
 import { useReducedMotion } from "@/components/shell/motion-pause"
 import { ChevronRight, CornerUpLeft, Plus, Sparkles } from "@/components/icons"
 import {
@@ -14,7 +14,7 @@ import {
 import { AssistantMark } from "@/components/assistant/mark"
 import { ModelPicker } from "@/components/assistant/model-picker"
 import { Conversation } from "@/components/assistant/elements/conversation"
-import { PromptInput } from "@/components/assistant/elements/prompt"
+import { PromptInput, type PromptHandle } from "@/components/assistant/elements/prompt"
 import { Suggestion } from "@/components/assistant/elements/suggestion"
 import { ModeMenu } from "@/components/assistant/agent/mode-menu"
 import {
@@ -39,14 +39,20 @@ import {
   agentBusy,
   agentChatId,
   agentModelChanged,
+  agentPasswordTyped,
+  agentQueueHeld,
   agentWorking,
   askAgent,
   decideAgent,
+  editQueued,
   newAgentChat,
   openAgentChat,
+  removeQueued,
   setAgentMode,
   stopAgent,
   takeOverAgent,
+  takeReturned,
+  type AgentQueued,
   type AgentSession,
 } from "@/components/assistant/agent/sessions"
 import { FormNote } from "@/components/form"
@@ -213,6 +219,7 @@ export function AgentChat({
       question,
       images,
       carried.map(({ label, text }) => ({ label, text })),
+      carried.map((one) => one.id),
     )
     // Rows go with the one question they were pressed for; the statement stays on.
     setChosen((held) => held.filter((id) => !attachable.find((one) => one.id === id)?.rows))
@@ -230,11 +237,40 @@ export function AgentChat({
         await post(`/assistant/chats/${encodeURIComponent(agentChatId(session))}/terminal`, {
           text,
         })
-        if (!agentBusy(session)) askAgent(session, "I've typed the password.")
+        agentPasswordTyped(session)
       },
     }),
     [terminalStep, session],
   )
+  // A waiting question taken back, or every one an answer that stopped handed
+  // back, goes into the box with what was pressed for it.
+  const prompt = useRef<PromptHandle>(null)
+  const { returned } = session
+  useEffect(() => {
+    if (returned.length === 0 || !prompt.current) return
+    const back = takeReturned(session)
+    prompt.current.put(
+      back
+        .map((one) => one.question)
+        .filter(Boolean)
+        .join("\n\n"),
+      back.flatMap((one) => one.images),
+    )
+    // What was pressed for it, and what the page sent with it that it still offers
+    // (the error a failed statement's Ask carried), so it goes again as it was.
+    const pressed = back.flatMap((one) => one.pressed)
+    const carried = back.flatMap((one) => one.attached.map((attachment) => attachment.label))
+    setChosen((held) => [
+      ...held,
+      ...attachable
+        .filter(
+          (one) =>
+            (pressed.includes(one.id) || carried.includes(one.label)) && !held.includes(one.id),
+        )
+        .map((one) => one.id),
+    ])
+  }, [returned, session, attachable])
+  const queueHeld = session.queue.length > 0 ? agentQueueHeld(session) : undefined
   const column = cn(!compact && "mx-auto w-full max-w-3xl")
   return (
     <MotionConfig reducedMotion="user">
@@ -284,6 +320,13 @@ export function AgentChat({
                   onDecide={(id, allow) => decideAgent(session, id, allow)}
                 />
               ))}
+              {session.queue.length > 0 && (
+                <QueuedList
+                  queue={session.queue}
+                  onEdit={(id) => editQueued(session, id)}
+                  onRemove={(id) => removeQueued(session, id)}
+                />
+              )}
             </Conversation>
           )}
           <div className={cn("shrink-0", column)}>
@@ -303,7 +346,11 @@ export function AgentChat({
                   <ChatBar
                     slot="agent-elsewhere"
                     live
-                    text="This chat is running in another tab."
+                    text={
+                      session.owed === "takeOver"
+                        ? "Taking it over once the page has saved your changes."
+                        : "This chat is running in another tab."
+                    }
                     action="Take over"
                     onAction={() => takeOverAgent(session)}
                   />
@@ -347,6 +394,7 @@ export function AgentChat({
               </div>
             )}
             <PromptInput
+              ref={prompt}
               busy={busy}
               // A chat still being read back has no conversation to carry on yet.
               disabled={session.loading}
@@ -361,9 +409,17 @@ export function AgentChat({
               }
               rows={compact ? 1 : 2}
               note={
-                waiting.length > 0 &&
-                !session.held && (
-                  <FormNote>Asking something else declines what it is waiting on.</FormNote>
+                queueHeld === "page" ? (
+                  <FormNote>What waits is asked once the page has saved your changes.</FormNote>
+                ) : queueHeld === "allow" ? (
+                  <FormNote>What waits is asked once you answer what it is waiting on.</FormNote>
+                ) : queueHeld === "password" ? (
+                  <FormNote>What waits is asked once you type the password it asks for.</FormNote>
+                ) : (
+                  waiting.length > 0 &&
+                  !session.held && (
+                    <FormNote>Asking something else declines what it is waiting on.</FormNote>
+                  )
                 )
               }
               toolbar={
@@ -404,6 +460,71 @@ export function AgentChat({
         </div>
       </AgentTerminalContext.Provider>
     </MotionConfig>
+  )
+}
+
+/**
+ * The questions sent while it answered, under the answer, each waiting its turn on
+ * one line of one height: the word, the question cut to the line, what goes with
+ * it in words, and Edit (back into the box) or Remove. Nothing opens under a row.
+ */
+function QueuedList({
+  queue,
+  onEdit,
+  onRemove,
+}: {
+  queue: AgentQueued[]
+  onEdit: (id: string) => void
+  onRemove: (id: string) => void
+}) {
+  return (
+    <ol
+      data-slot="agent-queue"
+      aria-label="Waiting to be asked"
+      className="ml-auto flex w-full max-w-[85%] min-w-0 flex-col gap-1.5"
+    >
+      {queue.map((one) => {
+        const withIt = [
+          one.images.length > 0 &&
+            (one.images.length === 1 ? "an image" : `${one.images.length} images`),
+          ...one.attached.map((attachment) => attachment.label),
+        ].filter(Boolean)
+        return (
+          <li
+            key={one.id}
+            data-slot="agent-queued"
+            className="flex h-9 min-w-0 animate-rise items-center gap-2 rounded-xl border border-dashed border-hairline pr-1 pl-3"
+          >
+            <span className="shrink-0 text-hint text-muted-foreground">Waiting</span>
+            <span className="min-w-0 flex-1 truncate text-body">
+              {one.question || "An image"}
+              {withIt.length > 0 && (
+                <span className="text-hint text-muted-foreground"> · with {withIt.join(", ")}</span>
+              )}
+            </span>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              aria-label={`Edit the waiting question: ${one.question || "an image"}`}
+              onClick={() => onEdit(one.id)}
+            >
+              Edit
+            </Button>
+            <Button
+              type="button"
+              size="xs"
+              variant="ghost"
+              className="text-muted-foreground"
+              aria-label={`Remove the waiting question: ${one.question || "an image"}`}
+              onClick={() => onRemove(one.id)}
+            >
+              Remove
+            </Button>
+          </li>
+        )
+      })}
+    </ol>
   )
 }
 
@@ -818,6 +939,9 @@ function StepGroup({
  * lit while it thinks, and how long it has been at it, counted from the first second.
  */
 function Thinking({ label = "Thinking…" }: { label?: string }) {
+  // While it fades out it is no longer the chat's status: a line leaving after an
+  // answer ended is neither announced nor found as the one that is thinking now.
+  const present = useIsPresent()
   const [seconds, setSeconds] = useState(0)
   useEffect(() => {
     const started = Date.now()
@@ -829,8 +953,9 @@ function Thinking({ label = "Thinking…" }: { label?: string }) {
   }, [])
   return (
     <motion.p
-      role="status"
-      data-slot="agent-thinking"
+      role={present ? "status" : undefined}
+      data-slot={present ? "agent-thinking" : undefined}
+      aria-hidden={present ? undefined : true}
       className="flex items-center gap-2 text-body"
       initial={{ opacity: 0 }}
       animate={{ opacity: 1 }}
