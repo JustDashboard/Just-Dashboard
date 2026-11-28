@@ -138,7 +138,9 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 		target := filepath.Join(parent, name)
 		if _, err := os.Lstat(target); err == nil {
 			folder, err := s.modules.git.Resolve(target)
-			if err != nil || !sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) {
+			// Another repository, or this one opened for another deployment
+			// whose name reads the same: each keeps its own.
+			if err != nil || !sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) || !workspaceMarkedFor(folder, ws.summary) {
 				continue
 			}
 			unlock := s.modules.git.Lock(folder)
@@ -237,11 +239,23 @@ func (s *Server) workspaceParent() (string, error) {
 var workspaceUnsafe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
 
 // workspaceNames are the folders a deployment's workspace may be in, in the
-// order they are tried: its name, and with its environment's id when a folder
-// of that name holds another repository.
+// order they are tried: its name; with its environment's id, when a folder of
+// that name holds another repository or was opened for another deployment whose
+// name reads the same; and with both ids, which only it has.
 func workspaceNames(summary *deploy.DeploymentSummary) []string {
 	name := workspaceName(summary)
-	return []string{name, name + "-" + strconv.FormatInt(summary.EnvironmentID, 10)}
+	env := strconv.FormatInt(summary.EnvironmentID, 10)
+	return []string{name, name + "-" + env, name + "-" + strconv.FormatInt(summary.ID, 10) + "-" + env}
+}
+
+// workspaceMarkedFor is whether a workspace may be this deployment's: its marker
+// names it, or it has none.
+func workspaceMarkedFor(folder string, summary *deploy.DeploymentSummary) bool {
+	fields := readWorkspaceMarker(folder)
+	if len(fields) != 2 {
+		return true
+	}
+	return fields[0] == strconv.FormatInt(summary.ID, 10) && fields[1] == strconv.FormatInt(summary.EnvironmentID, 10)
 }
 
 // workspaceName is a deployment's workspace's folder: its name, and its

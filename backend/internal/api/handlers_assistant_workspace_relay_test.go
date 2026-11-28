@@ -175,3 +175,40 @@ func TestAWorkspacesConfigurationNeverSeesTheCredential(t *testing.T) {
 		t.Fatalf("the relays = %v, %v", entries, err)
 	}
 }
+
+// Two deployments whose names read the same as a folder, of one repository, each
+// get a workspace of their own: the second gives way when the folder's marker
+// names the first, rather than taking its checkout, branch and credential.
+func TestTwoDeploymentsOfOneNameAndRemoteKeepTheirOwnWorkspaces(t *testing.T) {
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_SSL_NO_VERIFY", "1")
+	f := operatorRouterAs(t, auth.RoleAdmin)
+	first, _, folder, remote, token := credentialedWorkspace(t, f, "twin")
+	credential, err := f.s.modules.deployPlanning.CreateCredential(context.Background(), deploy.CredentialCreateRequest{
+		Name: "twin-token-two", Kind: deploy.CredentialGitBearer, Target: "127.0.0.1", Secret: token,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, secondEnvironment := seedCommittedDeployment(t, f.s, "Twin",
+		deploy.DraftSourceConfig{Kind: deploy.SourceGit, Mode: deploy.SourceModeGitURL, URL: remote, Ref: "main", CredentialID: credential.ID},
+		deploy.SourceIdentity{Kind: deploy.SourceGit, Revision: strings.Repeat("b", 40), Ref: "main"})
+	for _, project := range []int64{first, second} {
+		f.provider.queue(claudeCalls("Opening it.", [2]any{"open_workspace", map[string]any{"reason": "work"}}), claudeAnswer("Open."))
+		events := lines(t, f.do(http.MethodPost, fmt.Sprintf("/deploy/%d/assistant", project), `{"question":"Open it","mode":"full"}`))
+		if called := calledLines(events); len(called) != 1 || called[0]["ok"] != true {
+			t.Fatalf("open_workspace of %d = %v", project, events)
+		}
+	}
+	own := folder + "-" + fmt.Sprint(secondEnvironment)
+	if got := f.provider.lastToolResults(t); !strings.Contains(got, "Workspace: "+own+"\n") || strings.Contains(got, "already there") {
+		t.Fatalf("the second deployment was told: %s", got)
+	}
+	if fields := readWorkspaceMarker(folder); len(fields) != 2 || fields[0] != fmt.Sprint(first) {
+		t.Fatalf("the first workspace's marker now reads %v", fields)
+	}
+	if fields := readWorkspaceMarker(own); len(fields) != 2 || fields[0] != fmt.Sprint(second) {
+		t.Fatalf("the second workspace's marker reads %v", fields)
+	}
+}

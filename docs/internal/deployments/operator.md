@@ -387,8 +387,10 @@ says to follow the run a push starts and fix what it finds.
   deployment builds unless the call names another. The folder is made and handed to that account the first
   time, so the checkout is the account's, `run_command` builds in it as that account, and Local Git lists it
   with the server's other checkouts. A folder of that name that is already a checkout of the same remote is
-  fetched, keeping what changed in it; one that is something else gives way to
-  `<name>-<environment id>`. With the deployment's saved credential the clone and the fetch go through the
+  fetched, keeping what changed in it; one that is something else, or whose `.git/jd-deployment` names another
+  deployment (two whose names read the same, of one repository), gives way to `<name>-<environment id>`, and
+  that to `<name>-<deployment id>-<environment id>`, so two deployments never share a checkout, a branch or a
+  credential. With the deployment's saved credential the clone and the fetch go through the
   relay (below: `gitx.CloneThrough`, `FetchThrough`); without one they are the account's own
   (`gitx.PrepareClone`, `CloneStreaming`, `FetchOrigin`). A clone that fails, or is killed at the call's
   ten-minute deadline, removes the folder it made (and only that one: one clone into a place at a time, and
