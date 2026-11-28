@@ -23,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/mcp"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 )
 
 // The assistant working on code (assistant/workspace.go): a deployment's
@@ -140,7 +141,9 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 			folder, err := s.modules.git.Resolve(target)
 			// Another repository, or this one opened for another deployment
 			// whose name reads the same: each keeps its own.
-			if err != nil || !sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) || !workspaceMarkedFor(folder, ws.summary) {
+			// A folder that is not the workspaces folder's account's is not
+			// one of its workspaces: git there would run as someone else.
+			if err != nil || !sameOwner(folder, parent) || !sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) || !workspaceMarkedFor(folder, ws.summary) {
 				continue
 			}
 			unlock := s.modules.git.Lock(folder)
@@ -205,11 +208,22 @@ func (s *Server) workspaceRelay(ctx context.Context, remote string) (*gitx.Relay
 // workspaceParent is the folder that holds the workspaces: in the terminal
 // account's home, made and handed to that account when it is not there yet, so
 // the checkouts in it are the account's and run_command works in them.
+//
+// When the dashboard runs as root, a workspace is never root's: git runs as the
+// folder's owner, and git run as root in a checkout runs what its .git/config
+// names (a filter, a file-system monitor, an SSH command, a pager), so a
+// root-owned workspace would make whatever writes that file root. A
+// workspace is refused rather than made then, with where to name an account.
 func (s *Server) workspaceParent() (string, error) {
 	home, uid, gid := s.workspaceHomeOverride, -1, -1
-	if home == "" && s.modules.term != nil {
-		if account, err := s.modules.term.Account(); err == nil && account.Home != "" {
-			home, uid, gid = account.Home, account.UID, account.GID
+	if home == "" {
+		account, accountErr := term.Account{}, errors.New("the terminal is not set up")
+		if s.modules.term != nil {
+			account, accountErr = s.modules.term.Account()
+		}
+		var err error
+		if home, uid, gid, err = workspaceAccount(os.Geteuid(), account, accountErr); err != nil {
+			return "", err
 		}
 	}
 	if home == "" {
@@ -230,11 +244,68 @@ func (s *Server) workspaceParent() (string, error) {
 			_ = os.Lchown(parent, uid, gid)
 		}
 	}
+	if uid >= 0 && os.Geteuid() == 0 {
+		info, err := os.Lstat(parent)
+		if err != nil {
+			return "", err
+		}
+		if err := workspaceParentOwned(parent, info, uid); err != nil {
+			return "", err
+		}
+	}
 	dir, err := s.modules.git.ResolveDir(parent)
 	if err != nil {
 		return "", fmt.Errorf("%s is outside the folders Local Git works in (JD_GIT_ROOTS), so no workspace can be made there", parent)
 	}
 	return dir, nil
+}
+
+// sameOwner is whether two folders belong to one account.
+func sameOwner(a, b string) bool {
+	ia, errA := os.Lstat(a)
+	ib, errB := os.Lstat(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	sa, okA := ia.Sys().(*syscall.Stat_t)
+	sb, okB := ib.Sys().(*syscall.Stat_t)
+	return okA && okB && sa.Uid == sb.Uid
+}
+
+// workspaceAccount is whose home holds the workspaces, for a dashboard running
+// as euid: the terminal's account. A dashboard that is not root makes them as
+// itself, under the first Git root when there is no account ("" home). A root
+// dashboard needs an account that is not root: its workspace would be root's.
+func workspaceAccount(euid int, account term.Account, accountErr error) (string, int, int, error) {
+	usable := accountErr == nil && account.Home != ""
+	switch {
+	case usable && (euid != 0 || !account.IsRoot()):
+		return account.Home, account.UID, account.GID, nil
+	case euid != 0:
+		return "", -1, -1, nil
+	}
+	why := "there is no terminal account"
+	if accountErr != nil {
+		why = "the terminal account could not be read (" + accountErr.Error() + ")"
+	} else if usable {
+		why = "the terminal account is root"
+	}
+	return "", -1, -1, fmt.Errorf("Working on code needs a terminal account that is not root, and %s: a workspace of root's would run git as root on whatever its .git/config names. Set JD_TERMINAL_USER in the dashboard's .env to the server account to work as, and restart the dashboard (the Terminal page says which account it uses)", why)
+}
+
+// workspaceParentOwned refuses a workspaces folder that is not the account's:
+// one made before, as root or by another account, is never handed over (a tree
+// is not chowned in place), so its checkouts would not be the account's.
+func workspaceParentOwned(parent string, info os.FileInfo, uid int) error {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if info.Mode()&os.ModeSymlink == 0 && info.IsDir() && ok && int(st.Uid) == uid {
+		return nil
+	}
+	owner := "another account"
+	if ok {
+		owner = "uid " + strconv.FormatUint(uint64(st.Uid), 10)
+	}
+	return fmt.Errorf("%s belongs to %s, not to the terminal account (uid %d), so a workspace in it would not be that account's: hand it to the account (chown -R) or remove it, then try again", parent, owner, uid)
 }
 
 var workspaceUnsafe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)

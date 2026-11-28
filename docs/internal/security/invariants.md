@@ -447,7 +447,9 @@ A change that weakens any of these has to say so explicitly.
     (`run_command`, invariant 6), which takes the terminal capability. It works on a deployment's code as a
     developer would (`open_workspace`, `read_file`, `edit_file`, `write_file`, `push_changes`): the files through
     the Files routes as the person, the checkout made and pushed by Local Git's service under `JD_GIT_ROOTS` as the
-    folder's owner (the terminal's account, whose home holds `jd-workspaces/`), and a credential of the dashboard's
+    folder's owner (the terminal's account, whose home holds `jd-workspaces/`; a dashboard running as root
+    refuses a workspace when that account is root or missing, so no workspace is root's and its git never runs as
+    root on what its `.git/config` names), and a credential of the dashboard's
     only in git's environment for one fetch or push, never its arguments or a file, and **never in a git process
     of the checkout's account or one that reads the checkout's or that account's configuration**: a credentialed
     clone, fetch and push run as the dashboard in a bare repository of its own (`gitx.Relay`, in the data

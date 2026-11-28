@@ -2,12 +2,16 @@ package api
 
 import (
 	"context"
+	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/Wayy01/Just-Dashboard/backend/internal/auth"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/deploy"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 )
 
 type workspaceMinter struct{ calls int }
@@ -42,5 +46,48 @@ func TestTheDeployAppsCredentialIsNeverUsedToPush(t *testing.T) {
 	revoke()
 	if err != nil || env != nil {
 		t.Fatalf("the push's environment = %v, %v", env, err)
+	}
+}
+
+// A dashboard running as root never makes a workspace of root's: with no
+// terminal account, or root as that account, open_workspace is refused with
+// where to name one, and a workspaces folder that is not the account's is
+// refused rather than used. A dashboard that is not root keeps its fallback.
+func TestAWorkspaceIsNeverRoots(t *testing.T) {
+	regular := term.Account{Name: "dev", UID: 1000, GID: 1000, Home: "/home/dev"}
+	root := term.Account{Name: "root", UID: 0, GID: 0, Home: "/root"}
+	if home, uid, _, err := workspaceAccount(0, regular, nil); err != nil || home != "/home/dev" || uid != 1000 {
+		t.Fatalf("a regular account = %q %d %v", home, uid, err)
+	}
+	for name, c := range map[string]struct {
+		account term.Account
+		err     error
+	}{
+		"root": {root, nil}, "none": {term.Account{}, errors.New("no usable account")},
+	} {
+		if home, _, _, err := workspaceAccount(0, c.account, c.err); err == nil || home != "" || !strings.Contains(err.Error(), "JD_TERMINAL_USER") {
+			t.Fatalf("%s as a root dashboard's account = %q, %v", name, home, err)
+		}
+	}
+	if home, uid, _, err := workspaceAccount(1000, term.Account{}, errors.New("none")); err != nil || home != "" || uid != -1 {
+		t.Fatalf("no account for a dashboard that is not root = %q %d %v", home, uid, err)
+	}
+	dir := t.TempDir()
+	info, err := os.Lstat(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := workspaceParentOwned(dir, info, os.Getuid()); err != nil {
+		t.Fatalf("the account's own folder: %v", err)
+	}
+	if err := workspaceParentOwned(dir, info, os.Getuid()+1); err == nil || !strings.Contains(err.Error(), "belongs to uid") {
+		t.Fatalf("another account's folder: %v", err)
+	}
+	link := filepath.Join(t.TempDir(), "jd-workspaces")
+	if err := os.Symlink(dir, link); err != nil {
+		t.Fatal(err)
+	}
+	if info, err := os.Lstat(link); err != nil || workspaceParentOwned(link, info, os.Getuid()) == nil {
+		t.Fatal("a link was taken for the workspaces folder")
 	}
 }

@@ -398,9 +398,17 @@ says to follow the run a push starts and fix what it finds.
   not take a half-made checkout for one that is there. A deployment built from a folder on the server works in that folder, since it
   builds that folder's committed state. `.git/jd-deployment` records which deployment and environment a
   workspace is for, so a push in a later press knows whose it is. Nothing removes a workspace: deleting or
-  renaming the deployment leaves its folder in place, for the account or Local Git to delete. With no terminal
-  account the folder is made under the first Git root (`JD_GIT_ROOTS`, `/opt` by default) and git runs as the
-  dashboard's own account there.
+  renaming the deployment leaves its folder in place, for the account or Local Git to delete. A workspace is
+  never root's (`workspaceAccount`): git runs as a checkout's owner, and git run as root runs what the
+  checkout's `.git/config` names (a filter, a file-system monitor, `core.sshCommand`, a pager,
+  `gpg.program`), so a root-owned workspace would make whatever can write that file root. With the dashboard
+  running as root and no terminal account, or root as the terminal's account, `open_workspace` is refused with
+  where to name one (`JD_TERMINAL_USER`); a `jd-workspaces` folder that is not the account's (made earlier as
+  root, or a link) is refused rather than handed over, and a folder in it that is not the account's is never
+  taken for a workspace. A dashboard that does not run as root makes its workspaces as itself, under the first
+  Git root (`JD_GIT_ROOTS`, `/opt` by default) when there is no terminal account. A deployment built from a
+  folder on the server is worked on in that folder as its owner, like any checkout Local Git opens; #635 makes
+  no folder for it.
 - **The files.** `read_file`, `edit_file` and `write_file` go through `GET /files/read`, `PUT /files/write`
   (at the revision read, so a file changed since is refused, not overwritten) and `POST /files/mkdir`, as the
   person: their role's `file.read` and `file.write`, the Files page's roots, its kept versions and the audit log
