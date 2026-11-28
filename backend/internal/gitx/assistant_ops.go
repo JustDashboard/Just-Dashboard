@@ -8,23 +8,24 @@ import (
 )
 
 // What the assistant's workspace does with a checkout beyond the page's own
-// operations: a fetch and a push that carry a credential in their environment for
-// that one git process (never in its arguments, never in a file), and a commit
-// recorded under a name the caller gives when the checkout's account has none.
-// Each runs as the checkout's owner, like every other operation here.
+// operations: a fetch and a push with the account's own Git credentials (its
+// credential helper or SSH keys), and a commit recorded under a name the caller
+// gives when the checkout's account has none. Each runs as the checkout's owner,
+// like every other operation here, and none carries a credential of the
+// dashboard's: a fetch or push with one goes through a relay (relay.go).
 
-// FetchWith fetches the checkout's remotes with extra in git's environment.
-func (s *Service) FetchWith(ctx context.Context, path string, extra map[string]string) (*Result, error) {
-	return s.opEnv(ctx, path, 3*time.Minute, extra, "fetch", "--prune", "origin")
+// FetchOrigin fetches the checkout's origin, pruned.
+func (s *Service) FetchOrigin(ctx context.Context, path string) (*Result, error) {
+	return s.opEnv(ctx, path, 3*time.Minute, nil, "fetch", "--prune", "origin")
 }
 
-// PushWith pushes the current branch to origin, as branch on the remote when one
+// PushOrigin pushes the current branch to origin, as branch on the remote when one
 // is named and as itself otherwise, setting the upstream when the branch has
 // none. A checkout on no branch (a deployment that builds a tag) pushes HEAD to
 // the branch named, and needs one. It never forces: a push the remote refuses
 // because it moved is answered with git's own words, and nothing on the remote
 // is lost.
-func (s *Service) PushWith(ctx context.Context, path, branch string, extra map[string]string) (*Result, error) {
+func (s *Service) PushOrigin(ctx context.Context, path, branch string) (*Result, error) {
 	current, err := s.CurrentBranch(ctx, path)
 	if err != nil && branch == "" {
 		return nil, err
@@ -42,7 +43,7 @@ func (s *Service) PushWith(ctx context.Context, path, branch string, extra map[s
 	if target == current && !s.hasUpstream(ctx, path) {
 		args = []string{"push", "--porcelain", "--set-upstream", "origin", "refs/heads/" + current + ":refs/heads/" + current}
 	}
-	return s.opEnv(ctx, path, 3*time.Minute, extra, args...)
+	return s.opEnv(ctx, path, 3*time.Minute, nil, args...)
 }
 
 // CommitAs commits what is staged with message. When the checkout's account has
@@ -72,9 +73,11 @@ func (s *Service) HeadCommit(ctx context.Context, path string) (string, error) {
 	return strings.TrimSpace(out), err
 }
 
-// OriginURL is the address of the checkout's origin, empty when it has none.
+// OriginURL is the address of the checkout's origin as it was set, empty when
+// it has none: not rewritten by a url.<base>.insteadOf of the account's, which
+// changes where the account's own git goes and not which repository it is.
 func (s *Service) OriginURL(ctx context.Context, path string) string {
-	out, err := s.run(ctx, path, "remote", "get-url", "origin")
+	out, err := s.run(ctx, path, "config", "--get", "remote.origin.url")
 	if err != nil {
 		return ""
 	}

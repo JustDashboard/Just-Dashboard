@@ -90,6 +90,25 @@ type Service struct {
 	// languages caches each checkout's language shares by the HEAD they were
 	// measured at (languageCache).
 	languages sync.Map
+	// now is the clock the relays' sweep reads (relay.go); time.Now when nil.
+	now func() time.Time
+}
+
+func (s *Service) clock() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+// tryLock is Lock, refused rather than waited for when the lock is held.
+func (s *Service) tryLock(path string) (func(), bool) {
+	value, _ := s.mutations.LoadOrStore(path, &sync.Mutex{})
+	mu := value.(*sync.Mutex)
+	if !mu.TryLock() {
+		return nil, false
+	}
+	return mu.Unlock, true
 }
 
 // Lock serializes dashboard mutations of one checkout. Git's own index locks

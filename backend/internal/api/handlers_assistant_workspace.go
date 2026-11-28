@@ -23,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/gitx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/mcp"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/term"
 )
 
 // The assistant working on code (assistant/workspace.go): a deployment's
@@ -34,12 +35,15 @@ import (
 // builds and tests in it as that account and nothing in it is left owned by
 // root. The files are read and written through the Files routes as the person
 // (s.assistantDispatch), so their role, the Files page's roots and kept versions,
-// and the audit log apply. A credential reaches git only in its environment for
-// one fetch or push (deploy.GitHeaderEnvironment), never its arguments or a file:
-// for a push, a token of the person's own GitHub connection that can write that
-// one repository, minted for the push and revoked after it; or the deployment's
-// own saved token when it can push; or the account's own Git credentials. What
-// git says, and every file, is masked before the model or the page is sent it.
+// and the audit log apply. A credential of the dashboard's reaches git only in
+// its environment (deploy.GitHeaderEnvironment), never its arguments or a file,
+// and only a git of the dashboard's own, in its relay for that remote
+// (gitx.Relay), never one of the checkout's account or in the checkout, whose
+// configuration that account writes: for a push, a token of the person's own
+// GitHub connection that can write that one repository, minted for the push and
+// revoked after it; or the deployment's own saved token when it can push. With
+// neither, the account's own Git credentials push, as the account. What git
+// says, and every file, is masked before the model or the page is sent it.
 
 // workspaceFolder is the folder in the terminal account's home that holds the
 // assistant's workspaces.
@@ -110,7 +114,10 @@ func (pr *agentPress) openWorkspace(ctx context.Context, p *httpx.Principal, in 
 }
 
 // cloneWorkspace clones the deployment's repository into its workspace, or
-// fetches the one already there.
+// fetches the one already there. With a credential of the dashboard's (the
+// deployment's own), the network is the relay's (gitx.Relay): git runs with it
+// only as the dashboard, in a repository of its own, and the checkout's account
+// takes the objects from there; without one it is the account's own fetch.
 func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws *agentWorkspace, branch string, masker *deploy.DiagnosisMasker) (string, string, error) {
 	s := pr.s
 	parent, err := s.workspaceParent()
@@ -122,36 +129,56 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 		branch = source.Ref
 	}
 	env, _ := s.fetchCredential(ctx, p, source)
-	name := workspaceName(ws.summary)
-	for attempt := 0; attempt < 2; attempt++ {
+	var relay *gitx.Relay
+	if env != nil {
+		if relay, err = s.workspaceRelay(ctx, source.Remote); err != nil {
+			return "", "", fmt.Errorf("The workspace could not be made: %v", err)
+		}
+	}
+	for _, name := range workspaceNames(ws.summary) {
 		target := filepath.Join(parent, name)
 		if _, err := os.Lstat(target); err == nil {
 			folder, err := s.modules.git.Resolve(target)
-			if err == nil && sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) {
-				unlock := s.modules.git.Lock(folder)
-				defer unlock()
-				if _, err := s.modules.git.FetchWith(ctx, folder, env); err != nil {
-					return "", "", fmt.Errorf("The workspace %s is there, but fetching it failed: %v", folder, err)
-				}
-				said := "The workspace was already there; it was fetched again, and what was changed in it is kept."
-				if branch != "" {
-					if current, _ := s.modules.git.CurrentBranch(ctx, folder); current != branch {
-						if _, err := s.modules.git.Checkout(ctx, folder, branch); err != nil {
-							said += fmt.Sprintf(" It stays on %s: checking out %s failed (%v).", current, branch, err)
-						}
+			// Another repository, or this one opened for another deployment
+			// whose name reads the same: each keeps its own.
+			// A folder that is not the workspaces folder's account's is not
+			// one of its workspaces: git there would run as someone else.
+			if err != nil || !sameOwner(folder, parent) || !sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) || !workspaceMarkedFor(folder, ws.summary) {
+				continue
+			}
+			unlock := s.modules.git.Lock(folder)
+			defer unlock()
+			if relay != nil {
+				_, err = s.modules.git.FetchThrough(ctx, relay, folder, env)
+			} else {
+				_, err = s.modules.git.FetchOrigin(ctx, folder)
+			}
+			if err != nil {
+				return "", "", fmt.Errorf("The workspace %s is there, but fetching it failed: %v", folder, err)
+			}
+			said := "The workspace was already there; it was fetched again, and what was changed in it is kept."
+			if branch != "" {
+				if current, _ := s.modules.git.CurrentBranch(ctx, folder); current != branch {
+					if _, err := s.modules.git.Checkout(ctx, folder, branch); err != nil {
+						said += fmt.Sprintf(" It stays on %s: checking out %s failed (%v).", current, branch, err)
 					}
 				}
-				return folder, said, nil
 			}
-			name = workspaceName(ws.summary) + "-" + strconv.FormatInt(ws.summary.EnvironmentID, 10)
-			continue
+			return folder, said, nil
+		}
+		if relay != nil {
+			folder, err := s.modules.git.CloneThrough(ctx, relay, parent, name, gitx.RelayCloneOptions{Branch: branch}, env)
+			if err != nil {
+				return "", "", fmt.Errorf("Cloning %s failed: %v", source.Remote, err)
+			}
+			return folder, "The repository was cloned into a new workspace.", nil
 		}
 		plan, err := s.modules.git.PrepareClone(parent, source.Remote, name, gitx.CloneOptions{Branch: branch})
 		if err != nil {
 			return "", "", fmt.Errorf("The workspace could not be made: %v", err)
 		}
 		var last string
-		if err := s.modules.git.CloneStreaming(ctx, plan, env, func(stream, text string) {
+		if err := s.modules.git.CloneStreaming(ctx, plan, nil, func(stream, text string) {
 			if strings.TrimSpace(text) != "" {
 				last = strings.TrimSpace(text)
 			}
@@ -167,14 +194,36 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 	return "", "", fmt.Errorf("%s holds other folders of that name; there is no free name for a workspace", parent)
 }
 
+// gitRelayFolder, in the dashboard's data folder, holds the relays a
+// credentialed clone, fetch or push goes through (a workspace's, and the GitHub
+// page's clone of a private repository), and gitconfig, the only Git settings
+// they read.
+const gitRelayFolder = "workspace-git"
+
+// workspaceRelay is the dashboard's relay for remote.
+func (s *Server) workspaceRelay(ctx context.Context, remote string) (*gitx.Relay, error) {
+	return s.modules.git.OpenRelay(ctx, filepath.Join(s.Cfg.DataDir, gitRelayFolder), remote)
+}
+
 // workspaceParent is the folder that holds the workspaces: in the terminal
 // account's home, made and handed to that account when it is not there yet, so
 // the checkouts in it are the account's and run_command works in them.
+//
+// When the dashboard runs as root, a workspace is never root's: git runs as the
+// folder's owner, and git run as root in a checkout runs what its .git/config
+// names (a filter, a file-system monitor, an SSH command, a pager), so a
+// root-owned workspace would make whatever writes that file root. A
+// workspace is refused rather than made then, with where to name an account.
 func (s *Server) workspaceParent() (string, error) {
 	home, uid, gid := s.workspaceHomeOverride, -1, -1
-	if home == "" && s.modules.term != nil {
-		if account, err := s.modules.term.Account(); err == nil && account.Home != "" {
-			home, uid, gid = account.Home, account.UID, account.GID
+	if home == "" {
+		account, accountErr := term.Account{}, errors.New("the terminal is not set up")
+		if s.modules.term != nil {
+			account, accountErr = s.modules.term.Account()
+		}
+		var err error
+		if home, uid, gid, err = workspaceAccount(os.Geteuid(), account, accountErr); err != nil {
+			return "", err
 		}
 	}
 	if home == "" {
@@ -195,6 +244,15 @@ func (s *Server) workspaceParent() (string, error) {
 			_ = os.Lchown(parent, uid, gid)
 		}
 	}
+	if uid >= 0 && os.Geteuid() == 0 {
+		info, err := os.Lstat(parent)
+		if err != nil {
+			return "", err
+		}
+		if err := workspaceParentOwned(parent, info, uid); err != nil {
+			return "", err
+		}
+	}
 	dir, err := s.modules.git.ResolveDir(parent)
 	if err != nil {
 		return "", fmt.Errorf("%s is outside the folders Local Git works in (JD_GIT_ROOTS), so no workspace can be made there", parent)
@@ -202,7 +260,75 @@ func (s *Server) workspaceParent() (string, error) {
 	return dir, nil
 }
 
+// sameOwner is whether two folders belong to one account.
+func sameOwner(a, b string) bool {
+	ia, errA := os.Lstat(a)
+	ib, errB := os.Lstat(b)
+	if errA != nil || errB != nil {
+		return false
+	}
+	sa, okA := ia.Sys().(*syscall.Stat_t)
+	sb, okB := ib.Sys().(*syscall.Stat_t)
+	return okA && okB && sa.Uid == sb.Uid
+}
+
+// workspaceAccount is whose home holds the workspaces, for a dashboard running
+// as euid: the terminal's account. A dashboard that is not root makes them as
+// itself, under the first Git root when there is no account ("" home). A root
+// dashboard needs an account that is not root: its workspace would be root's.
+func workspaceAccount(euid int, account term.Account, accountErr error) (string, int, int, error) {
+	usable := accountErr == nil && account.Home != ""
+	switch {
+	case usable && (euid != 0 || !account.IsRoot()):
+		return account.Home, account.UID, account.GID, nil
+	case euid != 0:
+		return "", -1, -1, nil
+	}
+	why := "there is no terminal account"
+	if accountErr != nil {
+		why = "the terminal account could not be read (" + accountErr.Error() + ")"
+	} else if usable {
+		why = "the terminal account is root"
+	}
+	return "", -1, -1, fmt.Errorf("Working on code needs a terminal account that is not root, and %s: a workspace of root's would run git as root on whatever its .git/config names. Set JD_TERMINAL_USER in the dashboard's .env to the server account to work as, and restart the dashboard (the Terminal page says which account it uses)", why)
+}
+
+// workspaceParentOwned refuses a workspaces folder that is not the account's:
+// one made before, as root or by another account, is never handed over (a tree
+// is not chowned in place), so its checkouts would not be the account's.
+func workspaceParentOwned(parent string, info os.FileInfo, uid int) error {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	if info.Mode()&os.ModeSymlink == 0 && info.IsDir() && ok && int(st.Uid) == uid {
+		return nil
+	}
+	owner := "another account"
+	if ok {
+		owner = "uid " + strconv.FormatUint(uint64(st.Uid), 10)
+	}
+	return fmt.Errorf("%s belongs to %s, not to the terminal account (uid %d), so a workspace in it would not be that account's: hand it to the account (chown -R) or remove it, then try again", parent, owner, uid)
+}
+
 var workspaceUnsafe = regexp.MustCompile(`[^a-zA-Z0-9._-]+`)
+
+// workspaceNames are the folders a deployment's workspace may be in, in the
+// order they are tried: its name; with its environment's id, when a folder of
+// that name holds another repository or was opened for another deployment whose
+// name reads the same; and with both ids, which only it has.
+func workspaceNames(summary *deploy.DeploymentSummary) []string {
+	name := workspaceName(summary)
+	env := strconv.FormatInt(summary.EnvironmentID, 10)
+	return []string{name, name + "-" + env, name + "-" + strconv.FormatInt(summary.ID, 10) + "-" + env}
+}
+
+// workspaceMarkedFor is whether a workspace may be this deployment's: its marker
+// names it, or it has none.
+func workspaceMarkedFor(folder string, summary *deploy.DeploymentSummary) bool {
+	fields := readWorkspaceMarker(folder)
+	if len(fields) != 2 {
+		return true
+	}
+	return fields[0] == strconv.FormatInt(summary.ID, 10) && fields[1] == strconv.FormatInt(summary.EnvironmentID, 10)
+}
 
 // workspaceName is a deployment's workspace's folder: its name, and its
 // environment's when that is not production.
@@ -430,7 +556,17 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	if err != nil {
 		return refuse("No credential to push with could be made: " + agentMaskText(err.Error(), masker))
 	}
-	result, err := s.modules.git.PushWith(ctx, folder, in.Branch, env)
+	var result *gitx.Result
+	if env != nil {
+		// A credential of the dashboard's is given to git only in the relay,
+		// never in the checkout or as its account.
+		var relay *gitx.Relay
+		if relay, err = s.workspaceRelay(ctx, auth.remote); err == nil {
+			result, err = s.modules.git.PushThrough(ctx, relay, folder, in.Branch, env)
+		}
+	} else {
+		result, err = s.modules.git.PushOrigin(ctx, folder, in.Branch)
+	}
 	revoke()
 	if err != nil {
 		pr.git = append(pr.git, "push "+folder+" to "+branch+" refused")

@@ -737,6 +737,10 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 			return fmt.Errorf("%w: a sparse clone is not streamed", ErrInvalidRef)
 		}
 	}
+	// One clone into a place at a time, so what is there after a failure is
+	// what this one made.
+	unlock := s.Lock(plan.Target)
+	defer unlock()
 	// The directory may have appeared since the plan was checked.
 	if _, err := os.Lstat(plan.Target); err == nil {
 		return fmt.Errorf("%w: %s already exists", ErrInvalidRef, plan.Target)
@@ -778,6 +782,10 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 	}()
 	wg.Wait()
 	if err := cmd.Wait(); err != nil {
+		// git removes what it made when it fails, but not when it is killed
+		// (the caller's deadline): a half-made checkout would read as one
+		// that is there.
+		removeMade(plan.Target, nil)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
