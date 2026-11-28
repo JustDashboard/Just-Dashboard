@@ -62,6 +62,7 @@ import {
   environmentText,
   loadDraft,
   preflightDraft,
+  resumeFlow,
   firstDeployRevision,
   reinspect,
   redetectedConfiguration,
@@ -826,7 +827,34 @@ export function Configure({
    * waiting holds the revision it read; a press there is the person's to make.
    */
   const assistantSession = useAgentSession(draftScope(flow))
-  const assistantWorking = agentBusy(assistantSession)
+  // What it saved, the page reads back, so the fields and the plan say the same:
+  // here rather than in its panel, so a save made with the panel closed is read
+  // too, and until the last one is in, the page is still behind it — a check that
+  // went first would 409 and then save the page's older plan over its save.
+  const [readBack, setReadBack] = useState(assistantSession.changes)
+  const changes = assistantSession.changes
+  useEffect(() => {
+    if (changes === readBack) return
+    let live = true
+    void loadDraft(draftId)
+      .then(resumeFlow)
+      .then((next) => {
+        if (!live) return
+        onFlowChange((current) =>
+          current?.draft.id === draftId
+            ? { ...next, sourceLabel: current.sourceLabel, githubRepo: current.githubRepo }
+            : current,
+        )
+      })
+      .catch(() => undefined)
+      .finally(() => {
+        if (live) setReadBack(changes)
+      })
+    return () => {
+      live = false
+    }
+  }, [changes, readBack, draftId, onFlowChange])
+  const assistantWorking = agentBusy(assistantSession) || changes !== readBack
   const assistantWaiting = pendingSteps(assistantSession.transcript).length > 0
   const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
@@ -1166,7 +1194,6 @@ export function Configure({
       {assist && (
         <SetupAssistant
           flow={flow}
-          onFlowChange={onFlowChange}
           onClose={() => onAssistChange(false)}
           onPrepare={prepareAssistant}
           onReview={() => goto("review")}

@@ -1665,6 +1665,95 @@ test("an answer waiting on the person's Allow holds Review's check as well", asy
   expect(state.log).not.toContain("assistant 409")
 })
 
+/** On Review with the plan the assistant chose first checked, its turns held open. */
+async function onReviewWithHeldTurns(page: Page) {
+  await mockSetup(page, [])
+  const server = await draftServer(page)
+  const held = await holdSetupTurns(page)
+  await page.goto("/deploy/new?draft=setup-draft")
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  const panel = page.locator("[data-slot='setup-assistant']")
+  await expect.poll(held.turns).toBe(1)
+  server.assistantSaves(3000)
+  await held.send(0, configured, true)
+  await panel.getByRole("button", { name: "Review and deploy" }).click()
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  // Review has checked the plan it chose, and nothing more is on its way.
+  await expect.poll(() => server.state.log).toContain("preflight")
+  await page.waitForTimeout(600)
+  return { ...server, ...held, panel, before: server.state.log.length }
+}
+
+const readBack = (page: Page) =>
+  page.waitForResponse(
+    (response) =>
+      response.request().method() === "GET" &&
+      new URL(response.url()).pathname === "/api/v1/deploy/drafts/setup-draft",
+  )
+
+test("the turn's last save is read back before Review checks, and kept", async ({ page }) => {
+  const { state, assistantSaves, turns, send, panel, before } = await onReviewWithHeldTurns(page)
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080, then 9090")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  // Its first save, read back while it is still answering.
+  assistantSaves(8080)
+  const first = readBack(page)
+  await send(1, [start, { type: "call", call: saveDraft }, savedDraft("s")])
+  await first
+  await page.waitForTimeout(300)
+  // Its second, answered in the same breath as the end of the answer: the page has
+  // not read it back yet when the answer ends.
+  assistantSaves(9090)
+  await send(
+    1,
+    [
+      { type: "call", call: { ...saveDraft, id: "t" } },
+      savedDraft("t"),
+      { type: "text", text: "On 9090." },
+      done(),
+    ],
+    true,
+  )
+  await expect(panel).toContainText("On 9090.")
+  await expect.poll(() => state.log.slice(before)).toContain("preflight")
+  await page.waitForTimeout(600)
+  expect(state.log.slice(before)).not.toContain("save 409")
+  expect(state.configuration.runtime.internalPort).toBe(9090)
+})
+
+test("what it saves with its panel closed is read back, and Deploy keeps it", async ({ page }) => {
+  const { state, assistantSaves, turns, send, panel, before } = await onReviewWithHeldTurns(page)
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 9090")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  // Back to the form while it answers: the answer goes on without its panel.
+  await panel.getByRole("button", { name: "Back to the form" }).click()
+  await expect(panel).toHaveCount(0)
+  assistantSaves(9090)
+  await send(
+    1,
+    [
+      start,
+      { type: "call", call: saveDraft },
+      savedDraft("s"),
+      { type: "text", text: "On 9090." },
+      done(),
+    ],
+    true,
+  )
+  // The plan it left is read back and checked, once.
+  await expect.poll(() => state.log.slice(before)).toEqual(["assistant save", "save", "preflight"])
+  await page
+    .getByRole("button", { name: /Deploy$/ })
+    .first()
+    .click()
+  await expect.poll(() => state.log.slice(before).length).toBeGreaterThan(3)
+  await page.waitForTimeout(600)
+  expect(state.log.slice(before)).not.toContain("save 409")
+  expect(state.configuration.runtime.internalPort).toBe(9090)
+})
+
 test("the chooser offers it before there is anything to configure", async ({ page }) => {
   await mockSetup(page, configured)
   await page.goto("/deploy/new")

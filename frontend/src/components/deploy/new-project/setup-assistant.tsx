@@ -17,12 +17,7 @@ import {
   type AgentScope,
 } from "@/components/assistant/agent/sessions"
 import { assistantProduct, useAssistantSettings } from "@/components/assistant/settings"
-import {
-  loadDraft,
-  resumeFlow,
-  type ConfigureFlow,
-  type FlowUpdate,
-} from "@/components/deploy/new-project/draft"
+import type { ConfigureFlow } from "@/components/deploy/new-project/draft"
 
 /** The conversation about a draft, which the page holds Deploy back for while it works. */
 export function draftScope(flow: ConfigureFlow): AgentScope {
@@ -40,13 +35,11 @@ export function draftScope(flow: ConfigureFlow): AgentScope {
  */
 export function SetupAssistant({
   flow,
-  onFlowChange,
   onClose,
   onPrepare,
   onReview,
 }: {
   flow: ConfigureFlow
-  onFlowChange: (next: FlowUpdate) => void
   onClose: () => void
   /** Saves what the page holds, so the assistant starts from what the person sees. */
   onPrepare: () => Promise<void>
@@ -55,7 +48,6 @@ export function SetupAssistant({
   const router = useRouter()
   const settings = useAssistantSettings(true)
   const view = settings.data
-  const draftId = flow.draft.id
   const scope = useMemo(() => draftScope(flow), [flow])
   const session = useAgentSession(scope)
   const busy = agentBusy(session)
@@ -69,23 +61,6 @@ export function SetupAssistant({
     begun.current = true
     void onPrepare().finally(() => askAgent(session, SETUP_QUESTION))
   }, [view?.configured, session, onPrepare])
-
-  // What it saved, the page reads back, so the fields and the plan say the same.
-  const seen = useRef(session.changes)
-  useEffect(() => {
-    if (session.changes === seen.current) return
-    seen.current = session.changes
-    void loadDraft(draftId)
-      .then(resumeFlow)
-      .then((next) =>
-        onFlowChange((current) =>
-          current?.draft.id === draftId
-            ? { ...next, sourceLabel: current.sourceLabel, githubRepo: current.githubRepo }
-            : current,
-        ),
-      )
-      .catch(() => undefined)
-  }, [session.changes, draftId, onFlowChange])
 
   return (
     <aside

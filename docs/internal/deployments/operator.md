@@ -515,10 +515,13 @@ a privileged container, a host path) waits for the person in "ask" and "changes"
 
 `/deploy/new` offers it twice: the switch above the sources, which carries through once a source is chosen,
 and an offer at the head of the plan once one is. It sets up in a column beside the form, the whole screen on
-a phone. What it saves is read back into the form (`SetupAssistant`), and Deploy, Continue, Save only and
-Review's own check wait while it works, because the page's revision is behind the server's until it stops: the
-check used to save and preflight on its own the moment the assistant's save was read back, and every call of the
-assistant's after it was refused as a stale revision. The prompt says how a revision is carried from one call to
+a phone. What it saves is read back into the form (`Configure`, so a save made with its panel closed is read
+too), and Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
+back, because the page's revision is behind the server's until then: the check used to save and preflight on its
+own the moment the assistant's save was read back, and every call of the assistant's after it was refused as a
+stale revision, and a check or a Deploy that went first was refused 409 and then saved the page's older plan over
+the assistant's. Review's check also waits while an answer waits on the person's Allow, since the waiting call
+holds the revision it read. The prompt says how a revision is carried from one call to
 the next and what a planned variable is made of, and the draft routes' refusals name the current revision and
 the values a variable's fields take, so a call that was wrong is put right on the next step.
 
