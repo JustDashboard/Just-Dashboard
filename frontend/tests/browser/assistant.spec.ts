@@ -1510,6 +1510,161 @@ test("the page leaves the draft alone while the assistant saves it", async ({ pa
   await expect(page.getByRole("button", { name: "Save only" })).toBeEnabled()
 })
 
+/**
+ * The draft as the server keeps it: every save and preflight takes its current
+ * revision and moves it on, one at another revision is refused 409 as the server
+ * refuses it, and the assistant's own saves move it too. `log` is what reached it.
+ */
+async function draftServer(page: Page) {
+  const state = { revision: 2, configuration: structuredClone(planned), log: [] as string[] }
+  const current = () => {
+    const draft = setupDraft(state.revision, "shop")
+    draft.data.configuration = structuredClone(state.configuration)
+    return draft
+  }
+  const refuse = (route: Route) =>
+    route.fulfill({
+      status: 409,
+      contentType: "application/json",
+      body: JSON.stringify({
+        error: {
+          code: "draft_revision_conflict",
+          message: `deployment draft revision conflict: current revision is ${state.revision}`,
+        },
+      }),
+    })
+  await page.route("**/api/v1/deploy/drafts/setup-draft", (route) => {
+    const method = route.request().method()
+    if (method === "GET") return json(route, current())
+    if (method !== "PUT") return route.fallback()
+    const body = route.request().postDataJSON()
+    if (body.revision !== state.revision) {
+      state.log.push("save 409")
+      return refuse(route)
+    }
+    state.revision += 1
+    if (body.configuration) state.configuration = structuredClone(body.configuration)
+    state.log.push("save")
+    return json(route, current())
+  })
+  await page.route("**/api/v1/deploy/drafts/setup-draft/preflight", (route) => {
+    if (route.request().postDataJSON().revision !== state.revision) {
+      state.log.push("preflight 409")
+      return refuse(route)
+    }
+    state.revision += 1
+    state.log.push("preflight")
+    const findings = [
+      { code: "build.ok", severity: "pass", title: "Build plan is valid", owner: "build" },
+    ]
+    return json(route, {
+      draft: current(),
+      preflight: {
+        revision: state.revision,
+        findings,
+        preview: "",
+        digest: `sha256:${"b".repeat(64)}`,
+        plan: { actions: [] },
+      },
+    })
+  })
+  /** A save the assistant makes, at the revision its call holds. */
+  const assistantSaves = (port: number, at = state.revision) => {
+    if (at !== state.revision) {
+      state.log.push("assistant 409")
+      return false
+    }
+    state.revision += 1
+    state.configuration = {
+      ...state.configuration,
+      runtime: { ...state.configuration.runtime, internalPort: port },
+    }
+    state.log.push("assistant save")
+    return true
+  }
+  /** Each of the setup chat's presses, answered in turn. */
+  const turns: ((route: Route) => unknown)[] = []
+  await page.route("**/api/v1/deploy/drafts/setup-draft/assistant", (route) =>
+    turns.shift()!(route),
+  )
+  return { state, assistantSaves, turns }
+}
+
+const savedDraft = (id: string) => ({
+  type: "called",
+  id,
+  tool: "call_operation",
+  ok: true,
+  said: "Done",
+  change: { label: "Review", href: "/deploy/new?step=review" },
+})
+
+test("an answer waiting on the person's Allow holds Review's check as well", async ({ page }) => {
+  await mockSetup(page, [])
+  const { state, assistantSaves, turns } = await draftServer(page)
+  const linked = {
+    ...saveDraft,
+    id: "h",
+    label: "Save the draft's DATABASE_URL at its revision",
+    reason: "It reads the shop database.",
+  }
+  let holds = 0
+  turns.push(
+    (route) => (assistantSaves(3000), stream(route, configured)),
+    (route) => {
+      assistantSaves(8080)
+      // The held call carries the revision it read, as the model sends it.
+      holds = state.revision
+      return stream(route, [
+        start,
+        { type: "call", call: saveDraft },
+        savedDraft("s"),
+        done({ stop: "tool", pending: [linked] }),
+      ])
+    },
+    (route) => {
+      const ok = assistantSaves(8080, holds)
+      return stream(route, [
+        start,
+        ok
+          ? savedDraft("h")
+          : { type: "called", id: "h", tool: "call_operation", ok, said: "Failed" },
+        { type: "text", text: "Linked." },
+        done(),
+      ])
+    },
+  )
+  await page.goto("/deploy/new?draft=setup-draft")
+  await page.locator("[data-slot='setup-assistant-offer']").click()
+  const panel = page.locator("[data-slot='setup-assistant']")
+  await panel.getByRole("button", { name: "Review and deploy" }).click()
+  await expect(page.getByRole("heading", { name: "Ready to deploy?" })).toBeVisible()
+  // Review has checked the plan it chose, and nothing more is on its way.
+  await expect.poll(() => state.log).toContain("preflight")
+  await page.waitForTimeout(600)
+  const before = state.log.length
+
+  const reread = page.waitForRequest(
+    (request) =>
+      request.method() === "GET" &&
+      new URL(request.url()).pathname === "/api/v1/deploy/drafts/setup-draft",
+  )
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080 and link the db")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  const allow = approval(page).getByRole("button", { name: `Allow: ${linked.label}` })
+  await expect(allow).toBeVisible()
+  await reread
+  // What it saved is read back while its next save waits for the person: Review
+  // checks nothing, or its save would take the revision the waiting call holds.
+  await page.waitForTimeout(600)
+  expect(state.log.slice(before)).toEqual(["assistant save"])
+
+  await allow.click()
+  await expect(panel).toContainText("Linked.")
+  await expect.poll(() => state.log.slice(before)).toContain("preflight")
+  expect(state.log).not.toContain("assistant 409")
+})
+
 test("the chooser offers it before there is anything to configure", async ({ page }) => {
   await mockSetup(page, configured)
   await page.goto("/deploy/new")

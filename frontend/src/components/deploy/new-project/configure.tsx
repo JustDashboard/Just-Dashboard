@@ -40,6 +40,7 @@ import {
   draftScope,
 } from "@/components/deploy/new-project/setup-assistant"
 import { agentBusy, dismissAgent, useAgentSession } from "@/components/assistant/agent/sessions"
+import { pendingSteps } from "@/components/assistant/agent/model"
 import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
@@ -820,14 +821,18 @@ export function Configure({
    * a failure Deploy is the retry. While the assistant works, its saves read
    * back move `planSignature` with the page's revision behind the server's, so
    * a check would save over its draft and take the revision its next call holds
-   * (a 409): the check, and every press here that saves, waits for it.
+   * (a 409): the check, and every press here that saves, waits for it. The
+   * check also waits while an answer waits on the person's Allow, since the call
+   * waiting holds the revision it read; a press there is the person's to make.
    */
   const assistantSession = useAgentSession(draftScope(flow))
   const assistantWorking = agentBusy(assistantSession)
+  const assistantWaiting = pendingSteps(assistantSession.transcript).length > 0
   const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
     const plan = `${draftId}:${planSignature}`
-    if (current !== "review" || preflight || busy || created || assistantWorking) return
+    if (current !== "review" || preflight || busy || created) return
+    if (assistantWorking || assistantWaiting) return
     if (autoChecked.current === plan) return
     // Scheduled rather than called: `submit` raises the busy flag as its first
     // act, and a state write in an effect's own body is a cascading render.
@@ -840,7 +845,16 @@ export function Configure({
     // `submit` closes over the whole form; re-running this for each of those
     // is what the `preflight` guard is there to make unnecessary.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [current, preflight, busy, created, assistantWorking, draftId, planSignature])
+  }, [
+    current,
+    preflight,
+    busy,
+    created,
+    assistantWorking,
+    assistantWaiting,
+    draftId,
+    planSignature,
+  ])
 
   /**
    * `source_moved`'s remedy: the branch has moved past the commit Review
