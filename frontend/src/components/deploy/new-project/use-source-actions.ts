@@ -31,6 +31,9 @@ function asError(error: unknown) {
  * until its last save is read back and the person's kept edits are saved, and then
  * runs at the draft's current revision, on the page as it is by then. A 409 then
  * reads the draft again and runs over that, never over the page's older copy.
+ * While one waits the saved branch is not yet the one chosen last, so `Configure`
+ * sends a branch chosen back again as a press of its own, rather than reading it
+ * as no change.
  */
 export function useSourceActions({
   assistant,

@@ -2079,6 +2079,48 @@ test("a branch changed while it works is read once it is done, at the draft's re
   await expect(branch).toHaveText("next")
 })
 
+test("a branch changed and changed back while it works ends on the one chosen last", async ({
+  page,
+}) => {
+  const { state, assistantSaves, turns, send, panel } = await onReviewWithHeldTurns(page, () =>
+    page.route("**/api/v1/git/github/branches?**", (route) =>
+      json(route, [{ name: "main", default: true }, { name: "next" }]),
+    ),
+  )
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  const back = page.getByRole("button", { name: "Back", exact: true })
+  await back.click()
+  await back.click()
+  await back.click()
+  const branch = page.getByRole("combobox", { name: "Branch" })
+  await branch.click()
+  await page.getByRole("option", { name: "next" }).click()
+  await expect(page.getByText("Your change is read once it has finished.")).toBeVisible()
+  await branch.click()
+  await page.getByRole("option", { name: "main" }).click()
+  await expect(branch).toHaveText(/^main/)
+
+  assistantSaves(8080)
+  await send(
+    1,
+    [
+      start,
+      { type: "call", call: saveDraft },
+      savedDraft("s"),
+      { type: "text", text: "Now on 8080." },
+      done(),
+    ],
+    true,
+  )
+  await expect(page.getByText("Your change is read once it has finished.")).toHaveCount(0)
+  await page.waitForTimeout(600)
+  // The draft is on the branch the form shows, not the one passed through.
+  expect(state.ref).toBe("main")
+  await expect(branch).toHaveText(/^main/)
+})
+
 test("a question waiting in the queue goes only once the person's edits are saved", async ({
   page,
 }) => {

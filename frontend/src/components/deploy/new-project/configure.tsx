@@ -404,7 +404,7 @@ export function Configure({
   const changeBranch = (nextRef: string) => {
     const ref = nextRef.trim()
     setBranch(ref)
-    if (ref && ref !== flow.source.ref) source.resaveSource({ ref })
+    if (ref && (ref !== flow.source.ref || assistant.deferred)) source.resaveSource({ ref })
   }
 
   const changeProfile = (profile: WorkloadProfile) => {
