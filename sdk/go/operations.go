@@ -1700,6 +1700,9 @@ type DeploymentRequestExportParams struct {
 	Referer string
 	// 1 to keep page requests only, 0 to leave them out.
 	Pages string
+	// people for the requests a person's browser made, bots for everything else; any other value is
+	// refused.
+	Who string
 	// Only requests that took at least this many milliseconds.
 	MinMs int64
 	// Only requests that took at most this many milliseconds.
@@ -1742,6 +1745,9 @@ func (c *Client) DeploymentRequestExport(ctx context.Context, id int64, params *
 		}
 		if params.Pages != "" {
 			query.Set("pages", params.Pages)
+		}
+		if params.Who != "" {
+			query.Set("who", params.Who)
 		}
 		if params.MinMs != 0 {
 			query.Set("minMs", strconv.FormatInt(params.MinMs, 10))
@@ -1787,6 +1793,9 @@ type DeploymentRequestsParams struct {
 	Referer string
 	// 1 to keep page requests only, 0 to leave them out.
 	Pages string
+	// people for the requests a person's browser made, bots for everything else; any other value is
+	// refused.
+	Who string
 	// Only requests that took at least this many milliseconds.
 	MinMs int64
 	// Only requests that took at most this many milliseconds.
@@ -1829,6 +1838,9 @@ func (c *Client) DeploymentRequests(ctx context.Context, id int64, params *Deplo
 		}
 		if params.Pages != "" {
 			query.Set("pages", params.Pages)
+		}
+		if params.Who != "" {
+			query.Set("who", params.Who)
 		}
 		if params.MinMs != 0 {
 			query.Set("minMs", strconv.FormatInt(params.MinMs, 10))

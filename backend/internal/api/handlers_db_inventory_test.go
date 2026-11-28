@@ -28,6 +28,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/requesthistory"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
 	"github.com/go-chi/chi/v5"
 	mysql "github.com/go-sql-driver/mysql"
@@ -811,6 +812,18 @@ func TestConnectSQLiteFileThroughContainment(t *testing.T) {
 	// And not through the route that takes a host and a password either.
 	if err := s.refuseOwnStore(dbx.DriverSQLite, own); err == nil {
 		t.Error("the own store was not refused as a DSN")
+	}
+	// Nor is the request history beside it, which the recorder is writing.
+	history := filepath.Join(s.Cfg.DataDir, requesthistory.File)
+	if s.modules.requestHistory == nil {
+		inventorySQLiteFile(t, history)
+	}
+	rec = do(t, r, http.MethodPost, "/databases/inventory/connect", `{"key":"file:`+history+`"}`)
+	if rec.Code != http.StatusConflict || inventoryErrorCode(rec) != "self_database" {
+		t.Errorf("the request history = %d %s", rec.Code, rec.Body.String())
+	}
+	if err := s.refuseOwnStore(dbx.DriverSQLite, history); err == nil {
+		t.Error("the request history was not refused as a DSN")
 	}
 
 	outside := filepath.Join(t.TempDir(), "elsewhere.db")

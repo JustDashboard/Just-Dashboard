@@ -92,14 +92,15 @@ Ship from a repository, an image, a Compose file or a template, with releases yo
 
 ## Knowing what happened
 
-- Build logs, runtime, console, request logs and traffic alerts per project
+- Build logs, runtime, console, request logs and traffic alerts per project, with every request kept for 30 days, recorded whether or not anybody has the page open and through restarts
 - A build says where its time went (install, compile, image export and how many steps were cached), and a run in flight how long runs like it usually take
 - A failed run named from its own output, and on request explained by your own model, secrets masked
 - An assistant on your own model, with a page of its own for each project and a chat for the whole server: ask it anything, as you would any assistant, with a screenshot pasted in if that says it better, and it reads your project's code, logs, requests, metrics and your databases, changes settings, domains and variables, runs backups and deploys, and reaches the rest of the dashboard, as you and with your whole role. It asks before changes unless you give it full access, every change is audited as the assistant's, secret values are masked before your model sees them, and each change comes with a shortcut to where it shows
 - Chats are saved: open one again later, from another browser or after a restart, and take over one still running in another tab
 - Hand a new deployment's settings to it: pick a repository, and it configures the rest while you press Deploy
 - Each release's image and the base images it was built on scanned for known vulnerabilities after the build and daily, offline; the overview says only what you can fix (an upgrade, or a rebuild on a newer base, in one click), and the report sorts the rest into your app's packages, development tools shipped with it and the base image
-- Request insights that count real visitors apart from bots, with their devices and pages
+- Request insights that count real visitors apart from bots, with their devices and pages, and every request read as people or bots in one press
+- Request history kept for 30 days whether or not anybody has the page open, so "last 7 days" is seven days
 - Notifications to Discord, Slack, Microsoft Teams, Mattermost, Telegram, ntfy, Gotify, Pushover, e-mail and webhooks
 - Commit statuses and preview comments on GitHub, GitLab, Gitea and Forgejo
 - Log drains: container output and requests to OpenTelemetry, Grafana Loki or any JSON-lines endpoint, and every request as an OpenTelemetry span under the `traceparent` the ingress sends your app

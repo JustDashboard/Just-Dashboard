@@ -240,7 +240,11 @@ Each source has a separate `source-0001`, `source-0002`, etc. archive root, so i
 Docker volume directories restore without overwriting one another. Listing and restore verify the
 artifact digest and use the run's original destination even after job edits. Legacy runs remain readable
 but cannot prove deployment coverage. Jobs may explicitly select SQLite files for native `VACUUM INTO`
-capture, with snapshot digests in the manifest and live sidecars omitted. Jobs may also name saved
+capture, with snapshot digests in the manifest and live sidecars omitted. The SQLite files the
+dashboard itself writes all the time — the request history, `requests.db` — are captured that way
+whenever a job's sources hold them, listed or not (`Runner.WithLiveSQLite`, `Server.liveSQLiteFiles`):
+copied as files under the recorder's commits, the archive's size and time checks failed the run, and a
+"Dashboard data" job saved before the history existed lists only `vpsd.db`. Jobs may also name saved
 database connections (`database_dumps`): each run asks the Databases owner for a native dump of every
 one (`dbx.Dump`: pg_dump, mysqldump, mongodump, or the built-in driver dump, which for Redis is gzipped
 JSON Lines of each key's `DUMP` payload and not an RDB file) into `database-NNNN/`
@@ -304,7 +308,8 @@ protection actions are unavailable while coverage is stale; existing job logs, r
 configuration and recovery controls retain their owner and capability boundaries.
 
 `GET /backups/resources` (`backup_resources.go`) is the coverage report: what the other owners hold that
-a job could protect — the dashboard's data directory (with its SQLite file as a snapshot suggestion),
+a job could protect — the dashboard's data directory (with its SQLite files, `vpsd.db` and the request
+history's `requests.db`, as snapshot suggestions),
 the nginx directory and the Caddyfile's directory when they exist, local Docker volumes with the
 containers mounting them, compose stacks by working directory with their running containers, deployment
 checkouts (by name, with the project's id for its mark), discovered Git repositories, and saved database connections (a SQLite connection also as its

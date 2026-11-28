@@ -74,8 +74,14 @@ import {
 } from "@/components/proxy/site-traffic"
 
 /** The windows the error log is read over: the request record's own presets. */
-type ErrorWindow = (typeof REQUEST_RANGES)[number]["id"]
-const ERROR_WINDOWS = REQUEST_RANGES.map((r) => ({ value: r.id, label: windowWord(r.id) }))
+// The windows `/proxy/errors` reads the error log over (`trafficWindows` in
+// handlers_proxy_traffic.go), which stop at a week. The request record's
+// thirty days is not one of them: the server reads any other word as the last
+// hour, and a "30d" segment would show that hour under its name.
+type ErrorWindow = Exclude<(typeof REQUEST_RANGES)[number]["id"], "30d">
+const ERROR_WINDOWS = REQUEST_RANGES.flatMap((r) =>
+  r.id === "30d" ? [] : [{ value: r.id, label: windowWord(r.id) }],
+)
 
 function windowWord(id: ErrorWindow) {
   return id === "15m" ? "15 min" : id

@@ -53,7 +53,6 @@ const NOT_YET = [
       "src/components/database/redis/keys/stream-editor.tsx",
       "src/components/database/redis/keys/string-editor.tsx",
       "src/components/deploy/new-project.tsx",
-      "src/components/deploy/project-logs.tsx",
       "src/components/docker/network-page.tsx",
       "src/components/files/quick-open.tsx",
       "src/components/git/clone-dialog.tsx",

@@ -94,10 +94,13 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
   // The console is the window under the header from `xl`, the way Logs fills
   // its page: a fixed offset left ground under the terminal at 1440x900.
   const held = pathname.endsWith("/console")
-  // Logs is one pane on a phone, the whole height under this header with its
-  // views on a bar along the foot (`components/phone-panes.tsx`), so below
-  // `md` its page is held to the window too. From `md` it flows like the rest.
-  const phonePane = pathname.endsWith("/logs")
+  // Logs is a workbench: the window's height, the sheet's edges, and no
+  // header over it. The reader came to read requests and lines, and the
+  // header's two rows of facts and verbs were two rows of logs pushed under
+  // the fold on every visit; the page draws one strip of its own instead
+  // (`components/deploy/logs-strip.tsx`) with the way back to everything
+  // this header says.
+  const workbench = pathname.endsWith("/logs")
   const { confirm, dialog } = useConfirm()
   const [versionOpen, setVersionOpen] = useState(false)
   const [testPullOpen, setTestPullOpen] = useState(false)
@@ -180,14 +183,22 @@ export function ProjectShell({ children }: { children: React.ReactNode }) {
 
   const domain = project.operations?.domains.domains.find((route) => route.hostname === hostOf(url))
 
+  if (workbench) {
+    // No `PageContext` here: the page's strip (`WorkbenchHeader`) says the
+    // `h1`, the project's name as every page of the project says it, and a
+    // second one here named the page twice to a screen reader.
+    return (
+      <Page fill="workspace">
+        {children}
+        {dialog}
+      </Page>
+    )
+  }
+
   return (
     <Page
       fill={fill || (held ? "xl" : undefined)}
-      className={cn(
-        "pt-4 md:pt-5",
-        fill && "gap-0 pb-0 md:gap-0 md:pb-0",
-        phonePane && "max-md:h-full max-md:min-h-0 max-md:gap-4 max-md:overflow-hidden max-md:pb-0",
-      )}
+      className={cn("pt-4 md:pt-5", fill && "gap-0 pb-0 md:gap-0 md:pb-0")}
     >
       {/* No back link: the rail leads back to the fleet and the header is
           the page's first line (deploy-header.spec). MOB-14 asks for one;

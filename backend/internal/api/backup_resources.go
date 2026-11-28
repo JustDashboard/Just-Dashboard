@@ -80,6 +80,17 @@ type backupResourceReport struct {
 	Unavailable map[string]string `json:"unavailable"`
 }
 
+// liveSQLiteFiles are the SQLite files this process writes all the time,
+// which a backup snapshots whenever its sources hold them, listed or not
+// (backups.WithLiveSQLite): the request history, which a "Dashboard data" job
+// saved before it existed archives without listing.
+func (s *Server) liveSQLiteFiles() []string {
+	if s.modules.requestHistory == nil {
+		return nil
+	}
+	return []string{s.modules.requestHistory.Path()}
+}
+
 // backupResources asks each owner what it has and folds the job list over
 // the answers. Owners that cannot answer are reported, not treated as empty.
 func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backupResourceReport {
@@ -109,6 +120,12 @@ func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backup
 	// database an update takes before it starts, which would put the store
 	// in every archive three times.
 	dataDir := filepath.Clean(s.Cfg.DataDir)
+	snapshots := []string{filepath.Join(dataDir, store.DatabaseFile)}
+	if s.modules.requestHistory != nil {
+		// The request history too, so an archive holds it as one moment
+		// rather than as a file copied while the recorder wrote to it.
+		snapshots = append(snapshots, s.modules.requestHistory.Path())
+	}
 	add(backupResource{
 		Kind: "dashboard", ID: "dashboard", Name: "Just Dashboard",
 		Detail: "Settings, accounts, saved connections and deployment records",
@@ -120,7 +137,7 @@ func (s *Server) backupResources(ctx context.Context, all []*backups.Job) backup
 			// with an archive of that data.
 			Excludes: []string{filepath.Join(dataDir, "staging"), filepath.Join(dataDir, "deployment-workspaces"),
 				filepath.Join(dataDir, selfupdate.PreUpdateDir), filepath.Join(dataDir, uninstall.KeptEnv)},
-			SQLitePaths: []string{filepath.Join(dataDir, store.DatabaseFile)},
+			SQLitePaths: snapshots,
 		},
 	})
 

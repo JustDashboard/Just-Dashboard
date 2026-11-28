@@ -1,9 +1,9 @@
 "use client"
 
-import { useMemo, useRef, useState } from "react"
+import { useRef, useState } from "react"
 import type { DeploymentEngineRun, DeploymentRunEvent, DeploymentRunSnapshot } from "@/lib/types"
 import { useSocket, type Envelope } from "@/hooks/use-socket"
-import { isActiveRun, latestAttempts } from "@/components/deploy/vocabulary"
+import { isActiveRun } from "@/components/deploy/vocabulary"
 import { applyRunEvent } from "@/components/deploy/run-events"
 import {
   EMPTY_TRANSCRIPT,
@@ -95,22 +95,6 @@ export function useRunStream(
     transcript,
     capped: transcript.events.length >= TRANSCRIPT_CAP,
     socket: socket.state,
-  }
-}
-
-/** One run's transcript, as the Builds view draws it. */
-export function useRunTranscript(projectId: number, runId: number) {
-  const stream = useRunStream(projectId, runId)
-  const steps = useMemo(
-    () => latestAttempts(stream.snapshot?.steps ?? []),
-    [stream.snapshot?.steps],
-  )
-  return {
-    snapshot: stream.snapshot,
-    transcript: stream.transcript,
-    steps,
-    capped: stream.capped,
-    connected: stream.socket === "open",
   }
 }
 

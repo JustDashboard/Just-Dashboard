@@ -12,7 +12,8 @@ holds the feature backends: `sys`, `metrics`, `docker`, `dockerStats`, `dockerEv
 execution, planning, sources, preflight, artifacts, orchestration, automation, scheduling, Git branch
 monitoring and managed database networks. Beside them: `storeHealth`, `selfConfig`, `uninstall`,
 `certKeeper`, `accountLink`, `hubLink`, `usagePing`, `hostFiles`, `diagnostics` (`netdiag`), `blocks`,
-`tunnel` (`cftunnel`), `requests` (`accesslog`), `logDrains`, `secretStores`, the alert evaluators
+`tunnel` (`cftunnel`), `requests` (`accesslog`) with `requestHistory` (`requesthistory`, its 30 days
+in `requests.db`), `logDrains`, `secretStores`, the alert evaluators
 (`trafficAlerts`, `dbAlerts`, `hostAlerts`), `imageScans`, `githubApp` and `gameVersions`. The backup runner delegates native SQLite snapshots to
 Databases and disposable application checks to a Docker adapter; Backups owns their evidence and cleanup.
 
@@ -502,6 +503,10 @@ close of the file anywhere in it — a scan reading its header, a download, an a
 and another SQLite closing its connection afterwards would believe it was the last one and delete the
 `-wal` and `-shm` the store is still writing through, corrupting the database. Inspect a live store
 read-only: `sqlite3 'file:/var/lib/just-dashboard/vpsd.db?mode=ro'`.
+One record has a file of its own: the request history, `requests.db`, written at the rate traffic
+arrives, so it neither queues behind the store's writer nor grows the file every update copies
+(`store.OpenSideDatabase`: the same `0600` modes, WAL and lock guard, a writer of one connection at
+`synchronous=NORMAL` and a read-only pool). Inspect it the same way, `?mode=ro`.
 The store, its `-wal` and its `-shm` are `0600` from the moment each exists (`store/file_modes.go`): the
 log holds the pages written last, so it is as private as the file. SQLite gives the two sidecars the mode
 of the database, whatever the umask, so `Open` creates `vpsd.db` `0600`, or makes an existing one and

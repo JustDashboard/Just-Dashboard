@@ -49,6 +49,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/procs"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/proxysvc"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/remotedesk"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/requesthistory"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/secretstore"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfupdate"
@@ -147,6 +148,11 @@ type moduleSet struct {
 	// and live tail on a project's Logs page and a site's page is answered
 	// from it.
 	requests *accesslog.Store
+	// requestHistory keeps every routed deployment's requests for a month,
+	// past the ingress's files and past this process; requests answers the
+	// part of a window older than it holds from there. Nil when the file
+	// could not be opened, which costs the history and nothing else.
+	requestHistory *requesthistory.Archive
 	// logDrains holds where deployments' output and requests are copied to;
 	// logDrainManager ships them, started with the server.
 	logDrains       *logdrain.Store
@@ -408,6 +414,13 @@ func (s *Server) initModules() {
 	}
 	s.modules.proxy.SetTrustedProxies(trusted)
 	s.modules.requests = accesslog.NewStore(s.openRequestRecord)
+	if history, err := requesthistory.Open(s.Cfg.DataDir); err != nil {
+		s.Log.Warn("the request history could not be opened, so request windows reach only as far back as the ingress's own files",
+			"error", err)
+	} else {
+		s.modules.requestHistory = history
+		s.modules.requests.WithArchive(history)
+	}
 	s.modules.logDrains = logdrain.NewStore(s.Store, s.Sealer)
 	s.modules.dbs = dbx.NewManager()
 	s.modules.linuxUsers = linuxusers.New()
@@ -460,7 +473,8 @@ func (s *Server) initModules() {
 				return "", err
 			}
 			return dump.Path, nil
-		})
+		}).
+		WithLiveSQLite(s.liveSQLiteFiles)
 	s.modules.backupSched = backups.NewScheduler(s.modules.backupStore, s.modules.backupRunner, s.Log)
 
 	s.modules.deployStore = deploy.NewStore(s.Store, s.Sealer, s.Cfg.DeployRoots)

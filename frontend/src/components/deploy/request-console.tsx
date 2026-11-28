@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Fact, FactLine } from "@/components/fact-line"
 import {
@@ -32,6 +32,7 @@ import {
   latencyBracket,
   latencyShare,
   latencyTone,
+  requestIdentity,
   requestKey,
   requestURI,
   statusClass,
@@ -115,6 +116,8 @@ export function RequestConsole({
   outputFor,
   traceLink,
   renderInline,
+  selected,
+  onSelect,
 }: {
   entries: RequestEntry[]
   summary: RequestSummary
@@ -156,6 +159,13 @@ export function RequestConsole({
    * that is open.
    */
   renderInline?: (entry: RequestEntry) => React.ReactNode
+  /**
+   * The request the page's inspector shows. Given `onSelect`, a
+   * row is pressed to inspect it beside the list rather than to open under
+   * itself: the row keeps its height and the next one stays where it was.
+   */
+  selected?: RequestEntry | null
+  onSelect?: (entry: RequestEntry) => void
 }) {
   const scrollRef = useRef<HTMLDivElement>(null)
   const [following, setFollowing] = useState(true)
@@ -166,6 +176,7 @@ export function RequestConsole({
   const keys = entries.map((entry, i) => requestKey(entry, i))
   const arrived = useArrivals(keys)
   const rising = paused === false && following
+  const selectedId = selected ? requestIdentity(selected) : undefined
 
   const toTop = useCallback(() => {
     const el = scrollRef.current
@@ -182,6 +193,16 @@ export function RequestConsole({
     const el = scrollRef.current
     if (el) setFollowing(el.scrollTop < 24)
   }
+
+  // The request the inspector reads stays in the list's view as ↑ and ↓ walk
+  // it, the way a rail keeps its current item (`components/rail.tsx`): walked
+  // past the pane's edge, the row it lights was off its own list.
+  useEffect(() => {
+    if (!selectedId) return
+    scrollRef.current
+      ?.querySelector<HTMLElement>("[aria-pressed='true']")
+      ?.scrollIntoView({ block: "nearest" })
+  }, [selectedId])
 
   const copyAll = () =>
     copyText(
@@ -279,7 +300,8 @@ export function RequestConsole({
                 // caller's, and a scanner's forty refusals washed amber would
                 // bury the one 500 among them.
                 klass === "5xx" && !plain && "bg-wash-danger",
-                open === key && "bg-accent hover:bg-accent",
+                (onSelect ? selectedId === requestIdentity(entry) : open === key) &&
+                  "bg-accent hover:bg-accent",
                 rising && arrived.has(key) && "animate-rise",
               )
               const toggle = () => setOpen((current) => (current === key ? null : key))
@@ -287,11 +309,17 @@ export function RequestConsole({
               // client filter, Copy as curl and Block behind it — is one Tab
               // and Enter away rather than reachable by pointer alone. It
               // holds only text, so nothing interactive nests inside it.
-              const opener = {
-                type: "button" as const,
-                onClick: toggle,
-                "aria-expanded": open === key,
-              }
+              const opener = onSelect
+                ? {
+                    type: "button" as const,
+                    onClick: () => onSelect(entry),
+                    "aria-pressed": selectedId === requestIdentity(entry),
+                  }
+                : {
+                    type: "button" as const,
+                    onClick: toggle,
+                    "aria-expanded": open === key,
+                  }
               return (
                 <div
                   key={key}
@@ -384,7 +412,7 @@ export function RequestConsole({
                     </button>
                   )}
 
-                  {open === key && (
+                  {!onSelect && open === key && (
                     <RequestDetail
                       entry={entry}
                       summary={summary}
@@ -495,7 +523,7 @@ function Took({
  * failure what the proxy said — so "why was this a 502" is answered in the
  * row that asked it rather than on another page.
  */
-function RequestDetail({
+export function RequestDetail({
   entry,
   summary,
   plain,
@@ -508,6 +536,7 @@ function RequestDetail({
   onOutput,
   trace,
   inline,
+  className,
 }: {
   entry: RequestEntry
   summary: RequestSummary
@@ -522,6 +551,8 @@ function RequestDetail({
   /** The request's trace in the drain's own service. */
   trace?: { href: string; label: string }
   inline?: React.ReactNode
+  /** Where it stands: under its row (the default), or as the page's inspector. */
+  className?: string
 }) {
   const ip = entry.remoteIp
   const scanner = ip ? summary.scanners.some((s) => s.value === ip) : false
@@ -691,7 +722,12 @@ function RequestDetail({
     // Its facts are laid out by the width it is given, not the window's: in the
     // logs page's workbench it stands beside the source rail, and three
     // columns chosen by the viewport cut every value there.
-    <div className="@container animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem]">
+    <div
+      className={cn(
+        "@container animate-rise border-y border-hairline bg-background px-4 py-3 pl-[1.125rem]",
+        className,
+      )}
+    >
       <div className="flex items-center gap-x-2 border-b border-hairline pb-2 font-sans text-xs">
         <FactLine className="flex-1">
           <Fact>
@@ -800,7 +836,7 @@ function RequestDetail({
  * answers on the reader's own machine, not the deployment that answered this.
  * A HEAD is `-I`: `-X HEAD` makes curl wait for a body that never comes.
  */
-function curlOf(entry: RequestEntry) {
+export function curlOf(entry: RequestEntry) {
   if (!entry.host) return undefined
   const quote = (value: string) => `'${value.replace(/'/g, `'\\''`)}'`
   const url = `${entry.tls ? "https" : "http"}://${entry.host}${requestURI(entry)}`

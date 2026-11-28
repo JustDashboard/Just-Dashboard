@@ -23,6 +23,7 @@ import (
 	"github.com/Wayy01/Just-Dashboard/backend/internal/dockerx"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/githubrepos"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/httpx"
+	"github.com/Wayy01/Just-Dashboard/backend/internal/requesthistory"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/safego"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/selfcfg"
 	"github.com/Wayy01/Just-Dashboard/backend/internal/store"
@@ -397,6 +398,13 @@ func (s *Server) Start(ctx context.Context) error {
 	}
 	s.modules.deploySchedule.Start(ctx)
 	s.modules.trafficAlerts.Start(ctx)
+	// The request history is recorded from boot for the reason the metrics
+	// are: last Tuesday's traffic exists only if something was reading the
+	// ingress's files on Tuesday, before they rolled away.
+	if s.modules.requestHistory != nil {
+		s.keep(background, "request history", requesthistory.NewRecorder(
+			s.modules.requestHistory, s.openRequestRecord, s.modules.deployRuns.RecordedRoutes, s.Log).Run)
+	}
 	// Drains copy what deployments say while it happens, whether or not
 	// anybody has a page open.
 	s.startLogDrains(ctx)
@@ -614,5 +622,9 @@ func (s *Server) shutdown(budget context.Context) {
 		if s.Log != nil {
 			s.Log.Warn("background work was still running when shutdown ended")
 		}
+	}
+	// After the recorder above has stopped, so its last commit is in.
+	if err := s.modules.requestHistory.Close(); err != nil && s.Log != nil {
+		s.Log.Warn("the request history did not close cleanly", "err", err)
 	}
 }

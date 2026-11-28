@@ -100,6 +100,7 @@ export function RequestChart({
   custom,
   onReset,
   onZoom,
+  counted = true,
 }: {
   buckets: RequestBucket[]
   bucketSeconds: number
@@ -121,6 +122,11 @@ export function RequestChart({
   custom?: boolean
   onReset: () => void
   onZoom: (since: Date, until: Date) => void
+  /**
+   * Whether the header says the window's count and its failures. Not where
+   * the window's sentence stands right over the chart and has said both.
+   */
+  counted?: boolean
 }) {
   const rows = useMemo<ChartRowLike[]>(
     () =>
@@ -170,13 +176,15 @@ export function RequestChart({
   const reading = useMemo(
     () => (
       <span className="flex min-w-0 items-center gap-2">
-        <span className="numeric truncate text-hint text-muted-foreground">
-          {total.toLocaleString()}
-          <span className="text-faint"> · </span>
-          <span className={cn(failed > 0 && "text-destructive")}>
-            {failed.toLocaleString()} failed
+        {counted && (
+          <span className="numeric truncate text-hint text-muted-foreground">
+            {total.toLocaleString()}
+            <span className="text-faint"> · </span>
+            <span className={cn(failed > 0 && "text-destructive")}>
+              {failed.toLocaleString()} failed
+            </span>
           </span>
-        </span>
+        )}
         {custom && (
           <Button size="xs" variant="ghost" onClick={onReset}>
             <RotateCounterClockwise className="size-3" />
@@ -185,7 +193,7 @@ export function RequestChart({
         )}
       </span>
     ),
-    [custom, onReset, total, failed],
+    [counted, custom, onReset, total, failed],
   )
 
   const zoom = (from: number, to: number) => onZoom(new Date(from), new Date(to))

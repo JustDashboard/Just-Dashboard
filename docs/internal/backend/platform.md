@@ -444,7 +444,9 @@ done by hand, and the UI refuses to fold it away.
   rollback (`copyNote`). **It is never restored automatically**: going back to it discards everything
   written since, which after a rollback that worked is an hour of audit log lost for nothing, so that is
   left to a person, with the steps in the administration guide. The suggested "Dashboard data" backup job
-  excludes the directory.
+  excludes the directory. The request history (`requests.db`, a file of its own beside the store) is
+  not copied: it is a record of traffic rather than configuration, and a version rolled back to
+  leaves it as it is.
 - A checkout cloned with sudo has no owner but root for `handBack` to return to, so at every start
   the backend gives the checkout's root-owned entries to the owner of the directory holding it
   (`Service.adoptCheckout`, through `hostexec.Adopt`), when that is not root: whoever owns `/home/ubuntu`
