@@ -223,7 +223,10 @@ chat on first (*I've typed the password.*), and what waits goes after that answe
 one carried on in another tab (`taken_over`) send nothing more: every waiting question goes back into the box,
 unsent, to send again or change. A question refused because another tab is answering the chat (`chat_busy`,
 `conversation_busy`) is held for **Take over** as before, and the rest wait behind it; Take over sends the held
-one, and what waits goes after its answer. Each one carries the images and attachments it was sent with. An image waiting in it, or asked with a
+one, and what waits goes after its answer. Each one carries the images and attachments it was sent with. A page
+can hold the next turn while it writes what the chat works on (`holdAgentTurns`; the new-deployment page does while
+it saves the person's edits to the draft): what is sent then waits the same way, and the box says *What waits is
+asked once the page has saved your changes*. An image waiting in it, or asked with a
 question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
 and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
 from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a

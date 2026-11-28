@@ -625,6 +625,7 @@ export function Configure({
     }
 
     mutating.current = true
+    assistant.holdTurns(true)
     setBusy(operation)
     setFailure(undefined)
     try {
@@ -708,6 +709,7 @@ export function Configure({
       setFailure(asError(error))
     } finally {
       mutating.current = false
+      assistant.holdTurns(false)
       setBusy("")
     }
   }
@@ -741,12 +743,10 @@ export function Configure({
    * What the person typed meanwhile is saved first (`assistant.working` stays up
    * until it is), so the check reads the plan with it.
    */
-  const assistantWorking = assistant.working
-  const assistantWaiting = assistant.waiting
   useEffect(() => {
     const plan = `${draftId}:${planSignature}`
     if (current !== "review" || preflight || busy || created) return
-    if (assistantWorking || assistantWaiting) return
+    if (assistant.working || assistant.waiting) return
     if (autoChecked.current === plan) return
     // Scheduled rather than called: `submit` raises the busy flag as its first
     // act, and a state write in an effect's own body is a cascading render.
@@ -764,8 +764,8 @@ export function Configure({
     preflight,
     busy,
     created,
-    assistantWorking,
-    assistantWaiting,
+    assistant.working,
+    assistant.waiting,
     draftId,
     planSignature,
   ])
@@ -983,7 +983,7 @@ export function Configure({
                     variant="ghost"
                     onClick={() => void submit("save")}
                     pending={busy === "save"}
-                    disabled={Boolean(busy) || assistantWorking}
+                    disabled={Boolean(busy) || assistant.working}
                   >
                     Save only
                   </Button>
@@ -995,7 +995,7 @@ export function Configure({
               <Button
                 onClick={() => void submit("deploy")}
                 pending={busy === "deploy"}
-                disabled={Boolean(busy) || assistantWorking}
+                disabled={Boolean(busy) || assistant.working}
               >
                 <ArrowRight className="size-4" />
                 {blockers.length
@@ -1005,7 +1005,7 @@ export function Configure({
                     : "Deploy"}
               </Button>
             ) : (
-              <Button onClick={advance} disabled={Boolean(busy) || assistantWorking}>
+              <Button onClick={advance} disabled={Boolean(busy) || assistant.working}>
                 <ArrowRight className="size-4" />
                 Continue
               </Button>

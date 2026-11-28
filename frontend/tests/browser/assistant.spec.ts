@@ -2079,6 +2079,59 @@ test("a branch changed while it works is read once it is done, at the draft's re
   await expect(branch).toHaveText("next")
 })
 
+test("a question waiting in the queue goes only once the person's edits are saved", async ({
+  page,
+}) => {
+  const { state, assistantSaves, turns, send, panel, before } = await onReviewWithHeldTurns(page)
+  // The page's save of the person's edits is held, to see what waits for it.
+  let release: () => void = () => {}
+  const gate = new Promise<void>((resolve) => (release = resolve))
+  await page.route("**/api/v1/deploy/drafts/setup-draft", async (route) => {
+    if (route.request().method() === "PUT" && route.request().postDataJSON().intent) await gate
+    return route.fallback()
+  })
+  const box = panel.getByRole("textbox", { name: "Ask the assistant" })
+  await box.fill("Use 8080")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  const back = page.getByRole("button", { name: "Back", exact: true })
+  await back.click()
+  await back.click()
+  await back.click()
+  await page.getByLabel("Project name").fill("shop-two")
+  // Sent while it answers, the next question waits its turn.
+  await box.fill("Then 9090")
+  await box.press("Enter")
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(1)
+
+  assistantSaves(8080)
+  await send(
+    1,
+    [
+      start,
+      { type: "call", call: saveDraft },
+      savedDraft("s"),
+      { type: "text", text: "Now on 8080." },
+      done(),
+    ],
+    true,
+  )
+  await expect(panel).toContainText("Now on 8080.")
+  // The answer has ended: the person's edits are being saved, and the waiting
+  // question is not asked over that save.
+  await expect.poll(() => state.log.slice(before)).toEqual(["assistant save"])
+  await page.waitForTimeout(600)
+  expect(await turns()).toBe(2)
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(1)
+  await expect(panel).toContainText("What waits is asked once the page has saved your changes.")
+
+  release()
+  await expect.poll(turns).toBe(3)
+  expect(state.log.slice(before)).toEqual(["assistant save", "save name", "save"])
+  expect(state.name).toBe("shop-two")
+  await expect(panel.locator("[data-slot='agent-queued']")).toHaveCount(0)
+})
+
 test("handed over on Review, what the page holds is saved at the draft's revision", async ({
   page,
 }) => {

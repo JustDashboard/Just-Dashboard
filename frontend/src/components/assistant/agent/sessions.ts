@@ -111,6 +111,12 @@ export interface AgentSession {
   returned: AgentQueued[]
   /** The terminal call whose password the person has typed, which no longer holds the queue. */
   typedFor?: string
+  /**
+   * Why the page that draws it holds its next question back: it is writing what the
+   * chat works on (the new-deployment page saving the person's edits to the draft),
+   * and a turn begun now would race that write. What is sent meanwhile waits.
+   */
+  holds: string[]
 }
 
 export function agentScopeKey(scope: AgentScope) {
@@ -215,6 +221,7 @@ function blank(scope: AgentScope, mode?: AssistantMode, about?: AgentAbout): Age
     moved: false,
     queue: [],
     returned: [],
+    holds: [],
   }
 }
 
@@ -398,8 +405,9 @@ function awaitsPassword(session: AgentSession) {
  */
 export function agentQueueHeld(
   session: AgentSession,
-): "answering" | "allow" | "password" | "elsewhere" | undefined {
+): "answering" | "page" | "allow" | "password" | "elsewhere" | undefined {
   if (session.flight) return "answering"
+  if (session.holds.length > 0) return "page"
   if (session.elsewhere || session.held) return "elsewhere"
   const last = session.transcript.turns.at(-1)
   if (!last) return undefined
@@ -440,7 +448,20 @@ function afterTurn(session: AgentSession) {
  * answer waits on an Allow it declines what waits, and while another tab has the
  * chat it is held for Take over.
  */
-export const agentQueues = (session: AgentSession) => agentBusy(session) || session.queue.length > 0
+export const agentQueues = (session: AgentSession) =>
+  agentBusy(session) || session.queue.length > 0 || session.holds.length > 0
+
+/**
+ * The page holds the chat's next turn back for a reason of its own, or lets it go;
+ * once nothing holds it, the first waiting question is asked. A turn already under
+ * way is not touched.
+ */
+export function holdAgentTurns(session: AgentSession, reason: string, on: boolean) {
+  if (session.holds.includes(reason) === on) return
+  session.holds = on ? [...session.holds, reason] : session.holds.filter((held) => held !== reason)
+  if (!on) pumpQueue(session)
+  publish()
+}
 
 /**
  * One question, with what goes with it: images pasted into the box, and what the

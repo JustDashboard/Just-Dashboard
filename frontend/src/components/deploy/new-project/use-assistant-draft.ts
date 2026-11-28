@@ -2,7 +2,12 @@
 
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ApiError } from "@/lib/api"
-import { agentBusy, dismissAgent, useAgentSession } from "@/components/assistant/agent/sessions"
+import {
+  agentBusy,
+  dismissAgent,
+  holdAgentTurns,
+  useAgentSession,
+} from "@/components/assistant/agent/sessions"
 import { pendingSteps } from "@/components/assistant/agent/model"
 import { draftScope } from "@/components/deploy/new-project/setup-assistant"
 import {
@@ -30,6 +35,10 @@ import {
  * page as it is when it runs; it answers what the flow became, when it changed it.
  */
 export type SourceAction = (now: ConfigureFlow) => Promise<ConfigureFlow | undefined>
+
+/** Why the page holds the chat's next turn: edits or presses waiting to be saved, or a save under way. */
+const OWED = "draft-edits"
+const SAVING = "draft-save"
 
 /** Saves a flow's name, type and plan at the revision its draft holds. */
 async function savePlan(flow: ConfigureFlow, text: string, retainedKeys: string[]) {
@@ -64,6 +73,11 @@ async function savePlan(flow: ConfigureFlow, text: string, retainedKeys: string[
  *   `use-source-actions.ts`): it cannot be kept as a field, since what it changes is
  *   the server's answer, so it runs once the edits are saved, at the current
  *   revision, and `atRevision` reads the draft again on a 409 and runs over that.
+ * - **No turn starts over the page's own write.** From the first kept edit or
+ *   waiting press until they are saved, and through any save of the page's
+ *   (`holdTurns`), the chat's next turn is held (`holdAgentTurns`): what the person
+ *   sends, and what was waiting in its queue, is asked once the write has answered
+ *   and been folded into the page. A save starts only while no turn is under way.
  * - **It starts from what the person sees**: `prepare` saves the page as it is when
  *   the panel opens, read through a ref, not as it was when the draft was loaded.
  */
@@ -152,13 +166,16 @@ export function useAssistantDraft({
     const paths = editedPaths(flow, next)
     if (paths.length === 0) return
     setKept({ draftId, edits: keepEdits(editsFor(draftId), paths, next) })
+    holdAgentTurns(session, OWED, true)
     onFlowChange((current) => (current ? withPaths(current, paths, next) : current))
   }
 
   // Once it is done, what the person typed meanwhile is saved, once.
   const pending = hasKeptEdits(ownEdits)
   const saveKept = () => {
-    if (mutatingRef.current) return
+    // A turn begun since this was scheduled goes first; this waits for its end.
+    if (mutatingRef.current || agentBusy(session)) return
+    holdAgentTurns(session, SAVING, true)
     mutatingRef.current = true
     setSaving(true)
     const edits = editsFor(draftId)
@@ -199,6 +216,7 @@ export function useAssistantDraft({
         if (keptRef.current.edits === edits) setKept({ draftId, edits: NO_KEPT_EDITS })
         mutatingRef.current = false
         setSaving(false)
+        holdAgentTurns(session, SAVING, false)
       })
   }
 
@@ -216,7 +234,10 @@ export function useAssistantDraft({
   const deferredRef = useRef<SourceAction[]>([])
   const [deferred, setDeferred] = useState(0)
   const [running, setRunning] = useState(false)
+  /** Around a save of the page's own: a turn begun over it would race it for the revision. */
+  const holdTurns = (on: boolean) => holdAgentTurns(session, SAVING, on)
   const run = async (actions: SourceAction[]) => {
+    holdTurns(true)
     setRunning(true)
     try {
       // Each runs on the page as the one before left it.
@@ -224,6 +245,7 @@ export function useAssistantDraft({
       for (const action of actions) now = (await action(now)) ?? now
     } finally {
       setRunning(false)
+      holdTurns(false)
     }
   }
   /** A press that reads the source: now, or once the assistant is done and its edits saved. */
@@ -233,6 +255,7 @@ export function useAssistantDraft({
     if (free && !agentBusy(session)) return void run([action])
     deferredRef.current = [...deferredRef.current, action]
     setDeferred(deferredRef.current.length)
+    holdAgentTurns(session, OWED, true)
   }
   useEffect(() => {
     if (engaged || pending || saving || running || !idle || deferred === 0 || created) return
@@ -264,7 +287,18 @@ export function useAssistantDraft({
     }
   }
 
+  // Nothing owed any more lets the chat's next turn go; neither does a page left.
   const owed = pending || saving || running || deferred > 0
+  useEffect(() => {
+    if (!owed) holdAgentTurns(session, OWED, false)
+  }, [owed, session])
+  useEffect(
+    () => () => {
+      holdAgentTurns(session, OWED, false)
+      holdAgentTurns(session, SAVING, false)
+    },
+    [session],
+  )
 
   // Once it is deployed there is no setup to go back to, so the dock lets it go.
   useEffect(() => {
@@ -298,6 +332,7 @@ export function useAssistantDraft({
     prepare,
     whenFree,
     atRevision,
+    holdTurns,
   }
 }
 

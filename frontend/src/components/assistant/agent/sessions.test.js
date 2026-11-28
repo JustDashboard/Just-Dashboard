@@ -9,6 +9,7 @@ import {
   agentScopeKey,
   askAgent,
   decideAgent,
+  holdAgentTurns,
   editQueued,
   newAgentChat,
   removeQueued,
@@ -286,5 +287,41 @@ describe("a question sent while it answers waits its turn", () => {
     calls[0].answer([start, done()])
     await settle()
     expect(calls).toHaveLength(1)
+  })
+})
+
+describe("a page holds the chat's next turn while it writes what the chat works on", () => {
+  test("a question sent while it holds waits, and goes once it lets go", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    holdAgentTurns(session, "draft-save", true)
+    expect(agentQueueHeld(session)).toBe("page")
+    askAgent(session, "first")
+    expect(calls).toHaveLength(0)
+    expect(agentQueues(session)).toBe(true)
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    expect(calls.map((call) => call.body.question)).toEqual(["first"])
+  })
+
+  test("a question waiting in the queue is not asked at the end of an answer while it holds", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    askAgent(session, "first")
+    await settle()
+    askAgent(session, "second")
+    holdAgentTurns(session, "draft-edits", true)
+    calls[0].answer([start, done()])
+    await settle()
+    expect(calls).toHaveLength(1)
+    expect(agentQueueHeld(session)).toBe("page")
+    // Every reason has to let go.
+    holdAgentTurns(session, "draft-save", true)
+    holdAgentTurns(session, "draft-edits", false)
+    await settle()
+    expect(calls).toHaveLength(1)
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    expect(calls.map((call) => call.body.question)).toEqual(["first", "second"])
   })
 })

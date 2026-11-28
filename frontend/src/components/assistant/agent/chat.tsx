@@ -399,7 +399,9 @@ export function AgentChat({
               }
               rows={compact ? 1 : 2}
               note={
-                queueHeld === "allow" ? (
+                queueHeld === "page" ? (
+                  <FormNote>What waits is asked once the page has saved your changes.</FormNote>
+                ) : queueHeld === "allow" ? (
                   <FormNote>What waits is asked once you answer what it is waiting on.</FormNote>
                 ) : queueHeld === "password" ? (
                   <FormNote>What waits is asked once you type the password it asks for.</FormNote>

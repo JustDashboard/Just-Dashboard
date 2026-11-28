@@ -528,7 +528,10 @@ A press that reads the source again — a branch or clone option, a candidate pi
 Review's *Inspect again* (`new-project/use-source-actions.ts`) — cannot be kept as a field, since what it changes
 is the server's answer, so while the assistant works or waits on an Allow it waits (the form says *Your change is
 read once it has finished*) and runs after the edits are saved, at the current revision, on the page as it is by
-then; a 409 reads the draft again and runs over that.
+then; a 409 reads the draft again and runs over that. From the first kept edit or waiting press until they are
+saved, and through every save of the page's own (Review's check, Save only, Deploy, a read of the source), the
+chat's next turn is held (`holdAgentTurns`): a question sent then, or one waiting in its queue, is asked once that
+write has answered, and a save of the page's starts only while no turn is under way.
 Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
 back, because the page's revision is behind the server's until then: the check used to save and preflight on its
 own the moment the assistant's save was read back, and every call of the assistant's after it was refused as a
