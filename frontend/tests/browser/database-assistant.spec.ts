@@ -578,9 +578,32 @@ test("an answer that fails, and one the reader stops, say so", async ({ page }) 
   })
   await openEditor(page)
   await openAssistant(page)
+  // The Thinking line fades out once the answer has ended; while it leaves it is no
+  // longer the chat's status, so it is never found beside the answer's end (two of
+  // them, once the next question is asked, made this test fail on CI).
+  await page.evaluate(() => {
+    const seen = window as unknown as { leftThinking?: boolean }
+    seen.leftThinking = false
+    new MutationObserver(() => {
+      const column = document.querySelector("[data-slot=query-assistant]")
+      if (
+        column?.textContent?.includes("No answer") &&
+        column.querySelector("[data-slot=agent-thinking]")
+      )
+        seen.leftThinking = true
+    }).observe(document.body, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      characterData: true,
+    })
+  })
   await ask(pane(page), "How many orders?")
   await expect(pane(page)).toContainText("No answer")
   await expect(pane(page)).toContainText("Anthropic is not answering right now (529)")
+  expect(
+    await page.evaluate(() => (window as unknown as { leftThinking?: boolean }).leftThinking),
+  ).toBe(false)
 
   await ask(pane(page), "How many orders, again?")
   await expect(pane(page).locator("[data-slot=agent-thinking]")).toBeVisible()
