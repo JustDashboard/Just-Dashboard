@@ -42,6 +42,9 @@ type sourcesFake struct {
 	// FlareSolverr has the flaresolverr tag and the stack's proxy.
 	tags    []map[string]any
 	proxies []map[string]any
+	// beforeSave runs, under the fake's lock, as a save lands: what a pass
+	// did between the add's look and its save.
+	beforeSave func(f *sourcesFake)
 	// fail answers a request ("DELETE indexer/4") with a status instead.
 	fail     map[string]int
 	calls    []string
@@ -103,7 +106,7 @@ func (f *sourcesFake) serve(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var body map[string]any
-	if r.Method == http.MethodPost {
+	if r.Method == http.MethodPost || r.Method == http.MethodPut {
 		raw, _ := io.ReadAll(r.Body)
 		if err := json.Unmarshal(raw, &body); err != nil {
 			f.answer(w, http.StatusBadRequest, map[string]string{"message": "not JSON"})
@@ -141,6 +144,9 @@ func (f *sourcesFake) serve(w http.ResponseWriter, r *http.Request) {
 				return
 			}
 		}
+		if f.beforeSave != nil {
+			f.beforeSave(f)
+		}
 		body["id"] = f.nextID
 		f.nextID++
 		f.saved = append(f.saved, body)
@@ -164,6 +170,13 @@ func (f *sourcesFake) serve(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
 			f.answer(w, http.StatusOK, f.indexers[index])
+		case http.MethodPut:
+			if r.URL.Query().Get("forceSave") != "true" {
+				f.t.Errorf("a source was saved again without forceSave: %s", r.URL.RawQuery)
+			}
+			body["id"] = id
+			f.indexers[index] = body
+			f.answer(w, http.StatusAccepted, body)
 		case http.MethodDelete:
 			f.indexers = slices.Delete(f.indexers, index, index+1)
 			f.answer(w, http.StatusOK, nil)
@@ -506,7 +519,7 @@ func TestAddSourceTestsSavesAndSyncs(t *testing.T) {
 		outcome.Source.Protocol != "torrent" || !outcome.Source.Enabled {
 		t.Fatalf("outcome = %+v", outcome)
 	}
-	want := []string{"GET indexer", "GET appprofile", "GET tag", "POST indexer/test", "POST indexer", "POST command", "GET command/7"}
+	want := []string{"GET indexer", "GET appprofile", "GET tag", "POST indexer/test", "POST indexer", "GET tag", "POST command", "GET command/7"}
 	if !slices.Equal(fake.calls, want) {
 		t.Fatalf("calls = %q; want %q", fake.calls, want)
 	}
@@ -773,5 +786,35 @@ func TestAddSourceGivesTheFlareSolverrTag(t *testing.T) {
 	}
 	if tags, _ := fake.saved[0]["tags"].([]any); len(tags) != 1 || tags[0] != float64(5) {
 		t.Fatalf("saved tags = %v; want [5]", fake.saved[0]["tags"])
+	}
+}
+
+// A pass's FlareSolverr step that saves the proxy and lists the sources
+// between an add's look and its save never sees the source: the add looks
+// again once it is saved and gives it the tag itself, before the sync.
+func TestAddSourceSavedAsTheProxyIsMadeIsStillTagged(t *testing.T) {
+	fake, env := newSourcesFake(t)
+	fake.beforeSave = func(f *sourcesFake) {
+		f.tags = []map[string]any{{"id": 5, "label": "flaresolverr"}}
+		f.proxies = []map[string]any{{"id": 1, "name": "FlareSolverr (Just Dashboard)", "tags": []int{5}}}
+		f.beforeSave = nil
+	}
+	catalogue := sourcesCatalogue(t, env)
+	prepared, err := catalogue.Prepare("Torznab:Generic Torznab", map[string]any{"baseUrl": "http://torznab:8080", "apiKey": "torznab-key-value"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := AddSource(context.Background(), env, prepared); err != nil {
+		t.Fatal(err)
+	}
+	if tags, _ := fake.saved[0]["tags"].([]any); len(tags) != 0 {
+		t.Fatalf("the save itself carried %v", fake.saved[0]["tags"])
+	}
+	if tags := sourceTags(fake.indexers[0]["tags"]); !slices.Equal(tags, []int{5}) {
+		t.Fatalf("the source after the add has tags %v; want [5]", tags)
+	}
+	put := slices.Index(fake.calls, "PUT indexer/10")
+	if put < 0 || put < slices.Index(fake.calls, "POST indexer") || put > slices.Index(fake.calls, "POST command") {
+		t.Fatalf("calls = %q", fake.calls)
 	}
 }

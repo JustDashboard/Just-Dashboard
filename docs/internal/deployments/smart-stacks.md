@@ -139,7 +139,10 @@ it opens the sites itself in a headless browser.
   and tried again on the next pass, never a failure.
 - **An add** from the Sources page carries the tag in the test and the save when Prowlarr has both
   the tag and the stack's proxy; a stack without FlareSolverr (Essential, or a release from before it)
-  sends none.
+  sends none. One saved without it looks for the proxy again once it is saved and, if the proxy is
+  there now, gives the source the tag before the sync (`tagAddedSource`). That closes the first pass
+  after an upgrade: the step saves the proxy and then lists the sources, so an add that looked before
+  the proxy and saved after the list either finds the proxy on its second look or is in the list.
 
 ## When the template gains an app
 

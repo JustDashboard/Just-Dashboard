@@ -786,11 +786,49 @@ func addSource(ctx context.Context, env stacks.Env, prepared *PreparedSource) (A
 		return AddOutcome{}, fmt.Errorf("Prowlarr saved %q but gave it no id", prepared.Name)
 	}
 	env.Logf("Prowlarr's source %q was added after its own test passed", created.Name)
+	if !through {
+		client.tagAddedSource(ctx, env, created.ID, created.Name)
+	}
 	synced, err := client.prowlarrSync(ctx)
 	if err != nil {
 		env.Logf("Prowlarr did not confirm it shared its sources: %v", err)
 	}
 	return AddOutcome{Source: created.source(), Synced: synced}, nil
+}
+
+// tagAddedSource looks for the stack's FlareSolverr proxy again once a
+// source saved without its tag is saved, and gives it the tag if the proxy is
+// there now. A pass's FlareSolverr step saves the proxy and then lists the
+// sources to tag them; an add that looked before the proxy was saved and
+// saved after the step listed would otherwise stay untagged until the next
+// pass. Looked at after the save, either the proxy is there and the add tags
+// its source here, or it is not, and the step's list, which comes after the
+// proxy, is still to come and holds the source. A failure here is only
+// logged: the source is saved, and the next pass tags it.
+func (c *arrClient) tagAddedSource(ctx context.Context, env stacks.Env, id int, name string) {
+	tag, through, err := c.flareSolverrProxyTag(ctx)
+	if err != nil {
+		env.Logf("Prowlarr's FlareSolverr proxy could not be looked for again after %q was added: %v", name, err)
+		return
+	}
+	if !through {
+		return
+	}
+	var indexer map[string]any
+	if err := c.call(ctx, http.MethodGet, "indexer/"+strconv.Itoa(id), nil, &indexer); err != nil {
+		env.Logf("Prowlarr's source %q could not be read to give it the %s tag: %v", name, flareSolverrTag, err)
+		return
+	}
+	tags := sourceTags(indexer["tags"])
+	if slices.Contains(tags, tag) {
+		return
+	}
+	indexer["tags"] = append(tags, tag)
+	if err := c.call(ctx, http.MethodPut, "indexer/"+strconv.Itoa(id)+"?forceSave=true", indexer, nil); err != nil {
+		env.Logf("Prowlarr did not save the source %q with the %s tag: %v", name, flareSolverrTag, err)
+		return
+	}
+	env.Logf("Prowlarr's source %q was given the %s tag", name, flareSolverrTag)
 }
 
 // testFailure turns Prowlarr's refusal of a test or a save (400, with its
