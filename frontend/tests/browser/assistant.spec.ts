@@ -1,5 +1,14 @@
 import { expect, test, type Page, type Route } from "@playwright/test"
-import { json, mockDraftJourney, mockProject, now, user } from "./deploy-fixture"
+import {
+  deployment,
+  json,
+  mockDraftJourney,
+  mockProject,
+  now,
+  project,
+  run,
+  user,
+} from "./deploy-fixture"
 
 /**
  * The dashboard's assistant: a deployment's own page, the way a change waits or runs
@@ -964,6 +973,27 @@ test("the chat fills the window: only the conversation scrolls", async ({ page }
   await latest.click()
   await expect(chat(page).getByText("Line 60 of a long answer.")).toBeInViewport()
   await expect(latest).toHaveCount(0)
+})
+
+test("it offers to fix the failed deploy only when the last one failed", async ({ page }) => {
+  await mockAssistant(page, [])
+  await page.goto("/deploy/7/assistant")
+  const empty = chat(page).locator("[data-slot='agent-empty']")
+  // The last run is still verifying: there is no failure to fix.
+  await expect(empty.getByRole("button", { name: /What happened lately\?/ })).toBeVisible()
+  await expect(empty.getByRole("button", { name: /Fix the failed deploy/ })).toHaveCount(0)
+
+  await page.route("**/api/v1/deploy/7", (route) =>
+    route.request().method() === "GET"
+      ? json(route, {
+          project,
+          deployment: { ...deployment, activeRun: undefined, lastRun: { ...run, state: "failed" } },
+        })
+      : route.fallback(),
+  )
+  await page.reload()
+  await expect(empty.getByRole("button", { name: /Fix the failed deploy/ })).toBeVisible()
+  await expect(empty.getByRole("button", { name: /What happened lately\?/ })).toHaveCount(0)
 })
 
 /* ---------------------------------------------------------- saved chats */

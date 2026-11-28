@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useMemo } from "react"
-import { Archive, Gauge, Globe, Key, Rocket, Sparkles } from "@/components/icons"
+import { Archive, Gauge, Globe, Key, Logs, Rocket, Sparkles } from "@/components/icons"
 import { Notice } from "@/components/state"
 import { useProject } from "@/components/deploy/project-context"
 import type { AgentSuggestion } from "@/components/assistant/agent/chat"
@@ -11,14 +11,21 @@ import type { AgentScope } from "@/components/assistant/agent/sessions"
 import { SubjectAssistant } from "@/components/assistant/agent/subject-page"
 
 // Eight: three rows under the title on a laptop and six on a phone, where a ninth
-// was a seventh. "What happened lately?" made way, being what Diagnose reads.
+// was a seventh. The eighth is "Fix the failed deploy" when its last run failed,
+// and "What happened lately?" otherwise: a deploy that did not fail is no failure
+// to offer to fix, and its question would tell the model one happened.
+const FIX: AgentSuggestion = {
+  label: "Fix the failed deploy",
+  question:
+    "The last deploy failed. Find out why, and if the fix is in the code, open a workspace, fix it, push it and deploy it again.",
+  icon: Rocket,
+}
+const LATELY: AgentSuggestion = {
+  label: "What happened lately?",
+  question: "Summarise its last few runs and container events.",
+  icon: Logs,
+}
 const SUGGESTIONS: AgentSuggestion[] = [
-  {
-    label: "Fix the failed deploy",
-    question:
-      "The last deploy failed. Find out why, and if the fix is in the code, open a workspace, fix it, push it and deploy it again.",
-    icon: Rocket,
-  },
   { label: "Diagnose it", question: DIAGNOSE_QUESTION, icon: Sparkles },
   {
     label: "Check the logs for errors",
@@ -86,6 +93,11 @@ export function ProjectAssistant() {
     },
     [staging, production, selectEnvironment],
   )
+  const failed = deployment.lastRun?.state === "failed"
+  const suggestions = useMemo(
+    () => (failed ? [FIX, ...SUGGESTIONS] : [...SUGGESTIONS, LATELY]),
+    [failed],
+  )
   const environmentName = (id?: number) =>
     id === staging?.id ? "Staging" : id === production?.id ? "Production" : undefined
   return (
@@ -107,7 +119,7 @@ export function ProjectAssistant() {
       placeholder={`Ask anything about ${record.name}…`}
       sends={`what the overview shows about ${deployment.environmentName} and what it reads to answer`}
       what="it can read this deployment, answer anything about it, and change its settings for you."
-      suggestions={SUGGESTIONS}
+      suggestions={suggestions}
       asks={ASKS}
       onChanged={project.refresh}
       onOtherEnvironment={otherEnvironment}
