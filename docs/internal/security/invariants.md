@@ -467,7 +467,8 @@ A change that weakens any of these has to say so explicitly.
     refused because it outlives whoever made it (an account, a key, a sudo rule, a VPN peer, the dashboard's
     settings): holding those routes alone would not keep one from being made, since the shell and file writes
     run unseen there too, so the mode says so where the install's default is chosen (`MODE_DETAIL` on the
-    assistant's settings page; the chat's own mode menu is one line a mode, at the operator's request on
+    assistant's settings page, "even what outlasts the chat: an account, a key, a sudo rule", which
+    `assistant.spec.ts` reads; the chat's own mode menu is one line a mode, at the operator's request on
     27 November 2026, and full access is amber on it while it is on) and
     `TestWhatOutlivesTheChatWaitsForThePersonOutsideFullAccess` holds that in the other two modes each of them
     that makes or changes something waits; a draft's own saves never wait, but committing it, discarding

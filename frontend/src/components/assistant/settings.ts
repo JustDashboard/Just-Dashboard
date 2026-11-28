@@ -137,11 +137,12 @@ export const MODE_LABEL: Record<AssistantMode, string> = {
 
 /**
  * What each mode lets it do, in one line: the settings page's Default mode cards.
- * The composer's menu is the labels alone. Full access covering what outlasts the
- * chat (an account, a key, a sudo rule) is the "anything you could do".
+ * The composer's menu is the labels alone, so this is where full access says that
+ * it covers what outlasts the chat (security invariant 13 rests on the card
+ * saying so).
  */
 export const MODE_DETAIL: Record<AssistantMode, string> = {
   ask: "Waits for your Allow on every call.",
   changes: "Reads on its own. Changes wait for your Allow.",
-  full: "Does anything you could do, without asking.",
+  full: "Does anything you could do without asking, even what outlasts the chat: an account, a key, a sudo rule.",
 }

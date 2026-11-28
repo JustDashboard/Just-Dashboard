@@ -1336,7 +1336,10 @@ test("the mode menu is a line a mode, and the settings say what each lets it do"
   // What each lets it do is said once, a short line, where the default is chosen.
   await page.goto("/assistant?view=settings")
   const modes = page.getByRole("group", { name: "Default mode" })
-  await expect(modes).toContainText("Does anything you could do, without asking.")
+  // Full access names what outlasts the chat, which security invariant 13 rests on.
+  await expect(modes).toContainText(
+    "Does anything you could do without asking, even what outlasts the chat: an account, a key, a sudo rule.",
+  )
   await expect(modes).toContainText("Reads on its own. Changes wait for your Allow.")
   await expect(modes).toContainText("Waits for your Allow on every call.")
 })

@@ -113,7 +113,7 @@ unasked like the rest. Holding those routes alone there would not keep an instru
 leaving access behind: an administrator's shell line or file write can add the same key or sudo rule and runs
 unasked too, and holding those as well is the mode called "Ask before changes". So the mode says what it
 includes in a line where the default is chosen (`MODE_DETAIL` in `components/assistant/settings.ts`, the
-settings page's Default mode: *Does anything you could do, without asking*); the composer's menu is the three
+settings page's Default mode: *Does anything you could do without asking, even what outlasts the chat: an account, a key, a sudo rule*); the composer's menu is the three
 names alone, by the operator's choice (27 Nov 2026), with full access amber. Making full access stop
 at lasting access would change what the mode means (security invariant 13), which is the operator's to decide.
 
