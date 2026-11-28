@@ -346,7 +346,11 @@ export function AgentChat({
                   <ChatBar
                     slot="agent-elsewhere"
                     live
-                    text="This chat is running in another tab."
+                    text={
+                      session.owed === "takeOver"
+                        ? "Taking it over once the page has saved your changes."
+                        : "This chat is running in another tab."
+                    }
                     action="Take over"
                     onAction={() => takeOverAgent(session)}
                   />

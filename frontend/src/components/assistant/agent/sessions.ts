@@ -117,6 +117,11 @@ export interface AgentSession {
    * and a turn begun now would race that write. What is sent meanwhile waits.
    */
   holds: string[]
+  /**
+   * A press the page's hold kept from going — Take over, or a password typed into
+   * the terminal — made once nothing holds it, ahead of what waits.
+   */
+  owed?: "takeOver" | "password"
 }
 
 export function agentScopeKey(scope: AgentScope) {
@@ -470,7 +475,11 @@ export const agentQueues = (session: AgentSession) =>
 export function holdAgentTurns(session: AgentSession, reason: string, on: boolean) {
   if (session.holds.includes(reason) === on) return
   session.holds = on ? [...session.holds, reason] : session.holds.filter((held) => held !== reason)
-  if (!on) pumpQueue(session)
+  const owed = session.holds.length === 0 ? session.owed : undefined
+  session.owed = owed ? undefined : session.owed
+  if (owed === "takeOver") takeOverAgent(session)
+  else if (owed === "password") agentPasswordTyped(session)
+  else if (!on) pumpQueue(session)
   publish()
 }
 
@@ -572,6 +581,12 @@ function send(
  */
 export function takeOverAgent(session: AgentSession) {
   if (session.flight) return
+  // The page is writing what the chat works on: Take over goes once it has.
+  if (session.holds.length > 0) {
+    session.owed = "takeOver"
+    publish()
+    return
+  }
   const held = session.held
   session.held = undefined
   if (held) {
@@ -653,6 +668,12 @@ export function takeReturned(session: AgentSession): AgentQueued[] {
 export function agentPasswordTyped(session: AgentSession) {
   session.typedFor = latestTerminal(session.transcript)?.call.id
   if (agentBusy(session)) {
+    publish()
+    return
+  }
+  // Held by the page, it carries on once the page lets go, ahead of what waits.
+  if (session.holds.length > 0) {
+    session.owed = "password"
     publish()
     return
   }

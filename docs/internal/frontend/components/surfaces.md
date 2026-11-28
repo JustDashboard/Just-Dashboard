@@ -226,7 +226,9 @@ unsent, to send again or change. A question refused because another tab is answe
 one, and what waits goes after its answer. Each one carries the images and attachments it was sent with. A page
 can hold the next turn while it writes what the chat works on (`holdAgentTurns`; the new-deployment page does while
 it saves the person's edits to the draft): what is sent then waits the same way, and the box says *What waits is
-asked once the page has saved your changes*. An image waiting in it, or asked with a
+asked once the page has saved your changes*. **Take over**, and a password typed for the chat's terminal, are held the same way and go
+once the page lets go, ahead of what waits (`AgentSession.owed`); the bar then says *Taking it over once the page has
+saved your changes*. An image waiting in it, or asked with a
 question, is a thumbnail that opens large on a press (`ImageLightbox`, `components/image-lightbox.tsx`, which README
 and pull request pictures open in too): the picture as large as the window allows over a dark ground, room made for it
 from its size with the thumbnail drawn there until it lands, so nothing jumps; arrows, keys or a swipe for the rest, a

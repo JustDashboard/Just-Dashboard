@@ -420,4 +420,50 @@ describe("what the page's hold keeps back besides a question", () => {
       ["and add a volume", 1],
     ])
   })
+
+  test("Take over pressed while the page holds goes once it lets go", async () => {
+    const { calls, refusals } = turnServer()
+    const session = freshChat()
+    refusals.push("chat_busy")
+    askAgent(session, "first")
+    await settle()
+    expect(session.held?.body.question).toBe("first")
+    holdAgentTurns(session, "draft-save", true)
+    takeOverAgent(session)
+    expect(calls).toHaveLength(1)
+    expect(session.owed).toBe("takeOver")
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    expect(calls[1].body).toMatchObject({ question: "first", takeOver: true })
+  })
+
+  test("a password typed while the page holds carries on once it lets go, ahead of what waits", async () => {
+    const { calls } = turnServer()
+    const session = freshChat()
+    askAgent(session, "update")
+    await settle()
+    calls[0].answer([
+      start,
+      { type: "call", call: { ...change, id: "t", tool: "terminal_run" } },
+      {
+        type: "called",
+        id: "t",
+        tool: "terminal_run",
+        ok: true,
+        terminal: { session: "w", state: "password", prompt: "[sudo] password:" },
+      },
+      done(),
+    ])
+    await settle()
+    holdAgentTurns(session, "draft-save", true)
+    askAgent(session, "then reboot")
+    agentPasswordTyped(session)
+    expect(calls).toHaveLength(1)
+    holdAgentTurns(session, "draft-save", false)
+    await settle()
+    expect(calls[1].body.question).toBe("I've typed the password.")
+    calls[1].answer([start, done()])
+    await settle()
+    expect(calls[2].body.question).toBe("then reboot")
+  })
 })
