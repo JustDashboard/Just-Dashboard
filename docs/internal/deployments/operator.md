@@ -406,8 +406,14 @@ says to follow the run a push starts and fix what it finds.
   where to name one (`JD_TERMINAL_USER`); a `jd-workspaces` folder that is not the account's (made earlier as
   root, or a link) is refused rather than handed over, and a folder in it that is not the account's is never
   taken for a workspace. A dashboard that does not run as root makes its workspaces as itself, under the first
-  Git root (`JD_GIT_ROOTS`, `/opt` by default) when there is no terminal account. A deployment built from a
-  folder on the server is worked on in that folder as its owner, like any checkout Local Git opens; #635 makes
+  Git root (`JD_GIT_ROOTS`, `/opt` by default) when there is no terminal account. The account owns its
+  workspaces and can swap one, or `jd-workspaces`, for a link at any moment, to a folder of root's that holds
+  a repository of its own (one in `/tmp`): so every git the workspace tools run (`gitx.ForAccounts`, and the
+  relay's checkout side, `accountRunner`) runs as root only in a folder of root's that no other account can
+  point elsewhere (every folder from `/` root's, no link, none writable by others without the sticky bit:
+  `rootsAllTheWay`), and is refused anywhere else; a clone's owner is fixed once, and a failed clone removes
+  only a folder of the account its git ran as, through the parent opened once (`removeMade`). A deployment
+  built from a folder on the server is worked on in that folder as its owner under the same rule; #635 makes
   no folder for it.
 - **The files.** `read_file`, `edit_file` and `write_file` go through `GET /files/read`, `PUT /files/write`
   (at the revision read, so a file changed since is refused, not overwritten) and `POST /files/mkdir`, as the

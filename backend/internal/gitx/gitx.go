@@ -85,13 +85,35 @@ func validatePath(file string) error {
 }
 
 type Service struct {
-	roots     []string
+	roots []string
+	*shared
+	// now is the clock the relays' sweep reads (relay.go); time.Now when nil.
+	now func() time.Time
+	// accountsOnly is the view ForAccounts answers: no git as root in a folder
+	// whose path another account could have pointed elsewhere.
+	accountsOnly bool
+}
+
+// shared is what every view of one Service holds in common.
+type shared struct {
 	mutations sync.Map
 	// languages caches each checkout's language shares by the HEAD they were
 	// measured at (languageCache).
 	languages sync.Map
-	// now is the clock the relays' sweep reads (relay.go); time.Now when nil.
-	now func() time.Time
+}
+
+// ForAccounts is this service for checkouts an account owns or could have
+// swapped for a link (the assistant's workspaces, in its home): git runs as a
+// checkout's owner, as everywhere here, and a root dashboard runs git as root
+// only in a folder of root's that no other account can point elsewhere
+// (rootsAllTheWay); any other is refused. A checkout swapped for a link to a
+// folder of root's that holds the account's repository (one in /tmp) would
+// otherwise be judged root's, and git as root runs what that repository's
+// configuration names. It shares the locks and caches of s.
+func (s *Service) ForAccounts() *Service {
+	view := *s
+	view.accountsOnly = true
+	return &view
 }
 
 func (s *Service) clock() time.Time {
@@ -128,7 +150,7 @@ func New(roots []string) *Service {
 			cleaned = append(cleaned, filepath.Clean(r))
 		}
 	}
-	return &Service{roots: cleaned}
+	return &Service{roots: cleaned, shared: &shared{}}
 }
 
 func (s *Service) Available() bool {
@@ -991,10 +1013,22 @@ func (s *Service) executeEnv(ctx context.Context, dir string, timeout time.Durat
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	cmd := gitCommand(ctx, dir, extra, args...)
+	if err := s.refuseRoot(cmd); err != nil {
+		return []byte(err.Error()), err
+	}
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
 	return cmd.CombinedOutput()
+}
+
+// refuseRoot is ForAccounts' refusal of a git that would run as root in a
+// folder whose path is not root's all the way (cmd.Dir, as gitCommand set it).
+func (s *Service) refuseRoot(cmd *exec.Cmd) error {
+	if !s.accountsOnly || os.Geteuid() != 0 || (cmd.SysProcAttr != nil && cmd.SysProcAttr.Credential != nil) || rootsAllTheWay(cmd.Dir) {
+		return nil
+	}
+	return fmt.Errorf("%s is not a folder of one account's: git does not run in it as root", cmd.Dir)
 }
 
 // gitCommand is every git this package runs: the safe environment below, the

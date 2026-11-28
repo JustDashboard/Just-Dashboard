@@ -272,19 +272,57 @@ type gitRunner func(ctx context.Context, args ...string) *exec.Cmd
 // accountRunner runs git in dir as the account that owns ownerDir now, the
 // same account for every command it makes: a checkout swapped for a link
 // between two commands cannot move them to another account. It carries no
-// credential.
-func accountRunner(dir, ownerDir string) gitRunner {
+// credential, and answers the uid it runs as.
+//
+// A root dashboard runs it as root only in a folder of root's that no other
+// account can point elsewhere (rootsAllTheWay): a checkout in an account's home
+// that the account swapped for a link to a folder of root's (/tmp) after it was
+// resolved would otherwise be judged root's, and git as root would run what
+// the account's repository there names (a hook, core.hooksPath).
+func accountRunner(dir, ownerDir string) (gitRunner, uint32, error) {
 	probe := &exec.Cmd{Dir: ownerDir, Env: []string{}}
 	hostexec.AsOwner(probe)
+	uid := uint32(os.Geteuid())
+	var credential *syscall.Credential
+	if probe.SysProcAttr != nil && probe.SysProcAttr.Credential != nil {
+		held := *probe.SysProcAttr.Credential
+		credential, uid = &held, held.Uid
+	} else if uid == 0 && (!rootsAllTheWay(dir) || !rootsAllTheWay(ownerDir)) {
+		return nil, 0, fmt.Errorf("%s is not a folder of one account's: git does not run in it as root", dir)
+	}
 	return func(ctx context.Context, args ...string) *exec.Cmd {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(gitEnvironment(nil, args...), probe.Env...)
-		if probe.SysProcAttr != nil && probe.SysProcAttr.Credential != nil {
-			credential := *probe.SysProcAttr.Credential
-			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &credential}
+		if credential != nil {
+			held := *credential
+			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &held}
 		}
 		return cmd
+	}, uid, nil
+}
+
+// rootsAllTheWay is whether every folder from / to path is root's, none is a
+// link, and none is one another account may rename entries in (writable by
+// group or others without the sticky bit): a path no other account can point
+// anywhere else.
+func rootsAllTheWay(path string) bool {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return false
+	}
+	for at := path; ; at = filepath.Dir(at) {
+		info, err := os.Lstat(at)
+		if err != nil || !info.IsDir() {
+			return false
+		}
+		st, ok := info.Sys().(*syscall.Stat_t)
+		if !ok || st.Uid != 0 || (info.Mode().Perm()&0o022 != 0 && info.Mode()&os.ModeSticky == 0) {
+			return false
+		}
+		if at == filepath.Dir(at) {
+			return true
+		}
 	}
 }
 
@@ -705,7 +743,10 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 	}
 	// The account makes the folder itself, in its own folder, as git clone
 	// would: the dashboard never makes a folder of the account's.
-	inParent := accountRunner(plan.Dir, plan.Dir)
+	inParent, owner, err := accountRunner(plan.Dir, plan.Dir)
+	if err != nil {
+		return "", err
+	}
 	initArgs := []string{"init", "-q"}
 	if kind == "" && branch != "" {
 		initArgs = append(initArgs, "--initial-branch="+branch)
@@ -720,10 +761,16 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 	done := false
 	defer func() {
 		if !done {
-			removeMade(plan.Target, made)
+			removeMade(plan.Dir, plan.Name, made, owner)
 		}
 	}()
-	checkout := accountRunner(plan.Target, plan.Dir)
+	checkout, ran, err := accountRunner(plan.Target, plan.Dir)
+	if err != nil {
+		return "", err
+	}
+	if ran != owner {
+		return "", fmt.Errorf("the checkout %s changed hands while it was made", plan.Target)
+	}
 	remoteArgs := []string{"remote", "add"}
 	if options.Depth > 0 && kind == "branch" {
 		remoteArgs = append(remoteArgs, "-t", branch)
@@ -735,7 +782,7 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 		return "", err
 	}
 	if options.Depth > 0 {
-		if err := r.shallowInto(plan.Target, plan.Dir); err != nil {
+		if err := r.shallowInto(plan.Target, owner); err != nil {
 			return "", err
 		}
 	}
@@ -787,7 +834,7 @@ func (s *Service) onceRelay(ctx context.Context, r *Relay) (*Relay, func(), erro
 // as the marker is written: inside the checkout without following a link out
 // of it, made new (never one that was there), and handed to the folder's owner
 // through its descriptor.
-func (r *Relay) shallowInto(target, ownerDir string) error {
+func (r *Relay) shallowInto(target string, owner uint32) error {
 	raw, err := os.ReadFile(filepath.Join(r.Dir, "shallow"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -806,8 +853,11 @@ func (r *Relay) shallowInto(target, ownerDir string) error {
 		return err
 	}
 	defer root.Close()
-	if info, err := root.Lstat(".git"); err != nil || !info.IsDir() {
-		return fmt.Errorf("the checkout %s has no .git folder", target)
+	if info, err := root.Lstat(".git"); err != nil || !info.IsDir() || !ownedBy(info, owner) {
+		return fmt.Errorf("the checkout %s has no .git folder of its own", target)
+	}
+	if info, err := root.Stat("."); err != nil || !ownedBy(info, owner) {
+		return fmt.Errorf("the checkout %s is not the one this clone made", target)
 	}
 	file, err := root.OpenFile(filepath.Join(".git", "shallow"), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o644)
 	if err != nil {
@@ -817,21 +867,44 @@ func (r *Relay) shallowInto(target, ownerDir string) error {
 	if _, err := file.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
 		return err
 	}
-	if owner, ok := hostexec.OwnerOf(ownerDir); ok {
-		return file.Chown(int(owner.UID), int(owner.GID))
+	if os.Geteuid() == 0 && owner != 0 {
+		if info, err := root.Stat("."); err == nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				return file.Chown(int(owner), int(st.Gid))
+			}
+		}
 	}
 	return nil
 }
 
-// removeMade removes a checkout a clone made and could not finish, and only
-// that one: a folder at its place that is not the one made (made, when known)
-// is left. os.RemoveAll opens nothing through a link.
-func removeMade(target string, made os.FileInfo) {
-	now, err := os.Lstat(target)
+// ownedBy is whether info is uid's.
+func ownedBy(info os.FileInfo, uid uint32) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == uid
+}
+
+// removeMade removes the checkout name in parent that a clone made and could
+// not finish, and only that one: a folder at its place that is not the one
+// made (made, when known), or not of owner's, the account the clone's git ran
+// as, is left. parent is opened once and everything after is done through it,
+// without following a link, so a parent swapped for a link (an account's own
+// folder, in its home) cannot point a removal by root at a folder of root's or
+// of another account's; one of root's is removed only where no other account
+// could have pointed it (rootsAllTheWay).
+func removeMade(parent, name string, made os.FileInfo, owner uint32) {
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	now, err := root.Lstat(name)
 	if err != nil || !now.IsDir() || (made != nil && !os.SameFile(made, now)) {
 		return
 	}
-	_ = os.RemoveAll(target)
+	if os.Geteuid() == 0 && (!ownedBy(now, owner) || (owner == 0 && !rootsAllTheWay(parent))) {
+		return
+	}
+	_ = root.RemoveAll(name)
 }
 
 // setUpstream makes branch track origin's branch of its name, as push
@@ -848,6 +921,7 @@ func setUpstream(ctx context.Context, checkout gitRunner, branch string) error {
 // the relay fetches with extra, and the checkout's account takes its objects
 // and refs from the relay.
 func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra map[string]string) (*Result, error) {
+	s = s.ForAccounts()
 	unlock := s.Lock(r.Dir)
 	defer unlock()
 	if err := r.Fetch(ctx, extra); err != nil {
@@ -857,7 +931,11 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	if err != nil {
 		return nil, err
 	}
-	if err := r.intoCheckout(ctx, accountRunner(path, path), refs); err != nil {
+	checkout, _, err := accountRunner(path, path)
+	if err != nil {
+		return nil, err
+	}
+	if err := r.intoCheckout(ctx, checkout, refs); err != nil {
 		return nil, err
 	}
 	return &Result{Command: "git fetch --prune origin", Output: "Done.", OK: true}, nil
@@ -870,9 +948,13 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 // forces: the refspec is the commit and a whole branch name, so a push the
 // remote refuses because it moved is answered with git's own words.
 func (s *Service) PushThrough(ctx context.Context, r *Relay, path, branch string, extra map[string]string) (*Result, error) {
+	s = s.ForAccounts()
 	unlock := s.Lock(r.Dir)
 	defer unlock()
-	checkout := accountRunner(path, path)
+	checkout, _, err := accountRunner(path, path)
+	if err != nil {
+		return nil, err
+	}
 	current, err := s.CurrentBranch(ctx, path)
 	if err != nil && branch == "" {
 		return nil, err

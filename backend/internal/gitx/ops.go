@@ -747,6 +747,14 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 	}
 	args := append([]string{plan.args[0], "--progress"}, plan.args[1:]...)
 	cmd := gitCommand(ctx, plan.Dir, extra, args...)
+	if err := s.refuseRoot(cmd); err != nil {
+		return err
+	}
+	// The account the clone runs as, which is whose folder a failed one removes.
+	owner := uint32(os.Geteuid())
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Credential != nil {
+		owner = cmd.SysProcAttr.Credential.Uid
+	}
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -785,7 +793,7 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 		// git removes what it made when it fails, but not when it is killed
 		// (the caller's deadline): a half-made checkout would read as one
 		// that is there.
-		removeMade(plan.Target, nil)
+		removeMade(plan.Dir, plan.Name, nil, owner)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
