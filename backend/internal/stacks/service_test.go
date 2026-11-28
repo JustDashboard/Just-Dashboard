@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"log/slog"
 	"strings"
 	"sync"
 	"testing"
@@ -28,6 +29,18 @@ type serviceFixture struct {
 	passes      int
 	project     int64
 	manifest    *stacks.Manifest
+	// warned counts the service's warnings that a pass could not be prepared.
+	warned int
+}
+
+// Write counts the service's log lines that say a pass could not be prepared.
+func (f *serviceFixture) Write(line []byte) (int, error) {
+	if strings.Contains(string(line), "could not be prepared") {
+		f.mu.Lock()
+		f.warned++
+		f.mu.Unlock()
+	}
+	return len(line), nil
 }
 
 func newServiceFixture(t *testing.T) *serviceFixture {
@@ -92,6 +105,7 @@ func newServiceFixture(t *testing.T) *serviceFixture {
 			return fixture.released, fixture.releasedErr
 		},
 		Runner: runner,
+		Log:    slog.New(slog.NewTextHandler(fixture, nil)),
 	})
 	if err := fixture.store.Register(context.Background(), project, 7, "test", "small", "tester"); err != nil {
 		t.Fatal(err)
@@ -315,9 +329,17 @@ func TestServiceRunsNothingWhenWhatTheReleaseRunsCannotBeRead(t *testing.T) {
 		t.Fatalf("a pass whose release could not be read: %d passes, %+v", f.passCount(), record)
 	}
 
+	// It is asked for again at every look while the read fails, and says so once.
+	for range 3 {
+		f.settle(t)
+	}
 	f.mu.Lock()
+	warned := f.warned
 	f.releasedErr = nil
 	f.mu.Unlock()
+	if warned != 1 {
+		t.Fatalf("a reason that stands was logged %d times over four looks", warned)
+	}
 	record = f.settle(t)
 	if f.passCount() != 2 || record.Status != stacks.StatusReady || !record.RequestedAt.IsZero() {
 		t.Fatalf("once it reads: %d passes, %+v", f.passCount(), record)

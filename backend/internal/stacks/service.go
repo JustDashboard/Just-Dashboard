@@ -73,6 +73,10 @@ type Service struct {
 	mu      sync.Mutex
 	running map[int64]*pass
 	slots   chan struct{}
+	// unprepared is, per project, the last reason a pass could not be prepared:
+	// the pass is asked for again at every look, and the same reason is logged
+	// once, not every ten seconds.
+	unprepared sync.Map
 }
 
 type pass struct {
@@ -265,11 +269,12 @@ func (s *Service) runPass(ctx context.Context, manifest *Manifest, preset Preset
 		// run with a guess at what the release runs.
 		_ = store.FinishPass(persist, record.ProjectID, live.ReleaseID, manifest.Version, StatusFailed, false)
 		_ = store.RequestPass(persist, record.ProjectID)
-		if s.deps.Log != nil {
+		if last, seen := s.unprepared.Swap(record.ProjectID, err.Error()); (!seen || last != err.Error()) && s.deps.Log != nil {
 			s.deps.Log.Warn("a smart stack could not be prepared for configuration", "project", record.ProjectID, "error", err)
 		}
 		return
 	}
+	s.unprepared.Delete(record.ProjectID)
 	result := s.deps.Runner.Run(ctx, manifest, env, func(step StepRecord) {
 		if err := store.PutStep(persist, record.ProjectID, step); err != nil && s.deps.Log != nil {
 			s.deps.Log.Warn("a smart stack step could not be recorded", "project", record.ProjectID, "step", step.StepID, "error", err)
