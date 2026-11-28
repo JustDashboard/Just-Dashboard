@@ -958,7 +958,7 @@ test("the outcome of the last request is said once", async ({ page }) => {
   await expect(page.getByText("The request was declined")).toHaveCount(0)
 })
 
-test("linked: the switcher lists the fleet as the hub's, this one first, and another opens in a new tab", async ({
+test("linked: the switcher lists the fleet as the hub's, this one first, and another opens in this tab", async ({
   page,
 }) => {
   await mock(page, linked("maintain"))
@@ -969,36 +969,52 @@ test("linked: the switcher lists the fleet as the hub's, this one first, and ano
   await switcher(page).click()
   const menu = servers(page)
   await expect(menu).toBeVisible()
-  // The names are the hub's words, and the menu says whose (§8.10).
-  await expect(menu.locator("[data-slot=hub-attribution]")).toHaveText("Listed by Just Hub (hub)")
+  // The head is the one word: the line that said whose list it was was cut (28 Nov 2026).
+  await expect(menu.getByText("Servers", { exact: true })).toBeVisible()
+  await expect(menu).not.toContainText("Listed by")
   const items = menu.getByRole("menuitem")
-  // The hub sends no version for another server (§6.1), so none is shown for one.
+  // The hub sends no version for another server (§6.1), so none is shown for one. A state that is
+  // news is said in words beside the name; online is the dot alone.
   await expect(items).toHaveText([
-    /^vps-07749119-vps-ovh-net, Online\s*[\d.]+\s*this one$/,
-    /^atlas, Offline\s*no address$/,
-    /^vmi3690758, Late, opens in a new tab$/,
-    /^Open Just Hub, opens in a new tab$/,
+    /^vps-07749119-vps-ovh-net, Online\s*[\d.]+, this server$/,
+    /^atlas, Offline, No address$/,
+    /^vmi3690758, Late$/,
+    /^Open Just Hub$/,
   ])
   await expect(items.nth(0)).toHaveAttribute("href", "/")
+  await expect(items.nth(0)).toHaveAttribute("aria-current", "page")
   await expect(items.nth(1)).toHaveAttribute("aria-disabled", "true")
-  // An address the hub handed over opens in a tab of its own, with no opener and no referrer.
+  // An address the hub handed over is a plain link, with no opener and no referrer, and no arrow.
   for (const [n, href] of [
     [2, OTHER],
     [3, `${HUB}/`],
   ] as const) {
     await expect(items.nth(n)).toHaveAttribute("href", href)
-    await expect(items.nth(n)).toHaveAttribute("target", "_blank")
+    await expect(items.nth(n)).not.toHaveAttribute("target", /./)
     await expect(items.nth(n)).toHaveAttribute("rel", "noopener noreferrer")
+    // The hub row keeps its logo, a thing and not a glyph (menu-words.test.js KEPT).
+    await expect(items.nth(n).locator("svg")).toHaveCount(n === 3 ? 1 : 0)
   }
   // A state is a dot and a word (§4), never a filled pill.
   expect(await filledPills(page)).toEqual([])
 
-  const tab = await newTab(page, () => items.nth(2).click())
+  // A modified click opens it in a tab of its own, and this one stays on this server.
+  const tab = await newTab(page, () => items.nth(2).click({ modifiers: ["ControlOrMeta"] }))
   await expect(tab).toHaveURL(`${OTHER}/`)
   await expect(tab).toHaveTitle("elsewhere")
   expect(await tab.evaluate(() => window.opener)).toBeNull()
-  // This tab stays on this server.
   await expect(page).toHaveURL(/\/account$/)
+  await tab.close()
+
+  // A plain press goes there in this tab, as any link does.
+  await page.keyboard.press("Escape")
+  await switcher(page).click()
+  await servers(page)
+    .getByRole("menuitem", { name: /^vmi3690758/ })
+    .click()
+  await expect(page).toHaveURL(`${OTHER}/`)
+  await expect(page).toHaveTitle("elsewhere")
+  expect(page.context().pages()).toHaveLength(1)
 })
 
 test("linked: the palette's Servers open another server in a new tab", async ({ page }) => {
@@ -1054,10 +1070,9 @@ test("the server is named by its own host name; the hub's name for it is said as
   await expect(switcher(page)).not.toContainText("Session expired")
   expect(await page.title()).not.toContain("Session expired")
 
-  // The hub's name for it is in the menu, under whose list it is.
+  // The hub's name for it is in the menu, as plain text in a row of the hub's list.
   await switcher(page).click()
   const menu = servers(page)
-  await expect(menu.locator("[data-slot=hub-attribution]")).toHaveText("Listed by Just Hub (hub)")
   await expect(menu.getByRole("menuitem").first()).toContainText(lure)
   await page.keyboard.press("Escape")
 

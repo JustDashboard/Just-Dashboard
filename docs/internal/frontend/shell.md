@@ -417,16 +417,20 @@ offers *Open in Just Hub*.
 
 - **The server switcher** (`components/hub-link/server-switcher.tsx`) takes the logo row's place: the J,
   this server's own host name where the wordmark was (as in the tab's title, never the hub's name for it,
-  which the menu shows under its attribution), and a chevron. Its menu says under its label who named the
-  servers, *Listed by Just Hub (hub)*, since every name in it is the hub's text
-  ([protocol](../backend/hub-link-protocol.md) §8.10), then lists every server the hub holds, this one
-  first with the installed version the wordmark carried and marked *this one* (a link to the Overview),
-  the rest by name with a `StatusDot` in the hub's state (online green, late amber, offline red,
-  updating grey; the word is in the row's accessible name) and an arrow (the hub sends no version for
-  another server, §6.1), then **Open Just Hub**. Another server is a real link to its origin, and it and
-  the hub open **in a new tab** with `noopener noreferrer` (§8.10): the address is one the hub handed
-  over, so it never takes this dashboard's tab and nothing of this dashboard's goes with it. A server
-  with no reported address is listed, disabled, as *no address*. While the hub cannot be reached the
+  which the menu shows as a row of the hub's list), and a chevron. Its menu is headed **Servers** in the
+  title size and the foreground ink; the line under it that said *Listed by Just Hub (hub)* was cut at the
+  operator's word (28 Nov 2026), and the last row, **Open Just Hub**, says where the list comes from. Every
+  name in it is the hub's text, drawn as plain text ([protocol](../backend/hub-link-protocol.md) §8.10).
+  It lists every server the hub holds, this one
+  first on the chosen face (`bg-chosen`) with the installed version the wordmark carried and a tick
+  (a link to the Overview, `aria-current`), the rest by name with a `StatusDot` in the hub's state
+  (online green, late amber, offline red, updating grey; the word is in the row's accessible name, and
+  shown beside the name for any state but online), with no arrow (the hub sends no version for another
+  server, §6.1), then **Open Just Hub**. Another server is a real link to its origin, and it and the hub
+  open **in this tab**, as any link does, and in a new one on a Ctrl/Cmd or middle click (the operator's
+  call, 28 Nov 2026, over the new tab every press used to open); `noopener noreferrer` either way, so
+  nothing of this dashboard's goes with the address the hub handed over (§8.10). A server with no
+  reported address is listed, disabled, as *No address*. While the hub cannot be reached the
   trigger carries an amber dot, the menu says *Hub unreachable*, and the others' dots go grey
   (*Unknown*), since what the hub said last may be minutes old. A link just approved whose first report
   has not gone yet is not unreachable, though the backend's `reachable` is `false` until one has: for an
