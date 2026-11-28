@@ -1,0 +1,46 @@
+# Distributions scripts/verify-distros/run.sh installs the dashboard on.
+#
+#   name | image | package family
+#
+# name is what the result is filed under; image is the release's official
+# container image, which run.sh turns into a booting systemd machine with only
+# what a minimal install of it has (systemd, D-Bus, git to clone with, the
+# certificate store); family says how to add those. prepare/<name>.sh, where
+# there is one, runs after, for an image that is not yet the release it is named
+# for. Images are x86_64.
+
+# Debian and Ubuntu, and the desktops built on them
+ubuntu-22.04        | ubuntu:22.04                                   | apt
+ubuntu-24.04        | ubuntu:24.04                                   | apt
+ubuntu-26.04        | ubuntu:26.04                                   | apt
+debian-12           | debian:12                                      | apt
+debian-13           | debian:13                                      | apt
+linuxmint-22.3      | linuxmintd/mint22.3-amd64                      | apt
+kali-rolling        | kalilinux/kali-rolling                         | apt
+parrot              | parrotsec/core                                 | apt
+deepin-25           | linuxdeepin/deepin                             | apt
+
+# Fedora and Red Hat Enterprise Linux's family
+fedora-44           | fedora:44                                      | dnf
+fedora-45           | fedora:45                                      | dnf
+centos-stream-9     | quay.io/centos/centos:stream9                  | dnf
+centos-stream-10    | quay.io/centos/centos:stream10                 | dnf
+rocky-9             | rockylinux/rockylinux:9                        | dnf
+rocky-10            | rockylinux/rockylinux:10                       | dnf
+almalinux-9         | almalinux:9                                    | dnf
+almalinux-10        | almalinux:10                                   | dnf
+oraclelinux-9       | oraclelinux:9                                  | dnf
+oraclelinux-10      | oraclelinux:10                                 | dnf
+amazonlinux-2023    | amazonlinux:2023                               | dnf
+
+# openSUSE
+opensuse-leap-16.0  | opensuse/leap:16.0                             | zypper
+opensuse-tumbleweed | opensuse/tumbleweed                            | zypper
+
+# Arch and the desktops built on it
+archlinux           | archlinux:latest                               | pacman
+manjaro             | manjarolinux/base                              | pacman
+
+# No systemd: the installer has to stop before it changes anything
+alpine              | alpine:latest                                  | refuse-apk
+devuan              | devuan/devuan:latest                           | refuse-apt
