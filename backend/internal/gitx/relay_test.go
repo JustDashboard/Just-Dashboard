@@ -354,3 +354,65 @@ func TestAWorkspaceCloneThatFailsLeavesNothing(t *testing.T) {
 		t.Fatal("the clone killed at its deadline left its folder")
 	}
 }
+
+// A relay nothing opened for 30 days is removed at the next open of another,
+// never while one is in use; a shallow clone's relay left behind goes after a
+// day.
+func TestARelayUnusedForThirtyDaysIsSwept(t *testing.T) {
+	if _, err := exec.LookPath("git"); err != nil {
+		t.Skip("git is not installed")
+	}
+	t.Setenv("GIT_CONFIG_GLOBAL", os.DevNull)
+	ctx := context.Background()
+	start := time.Unix(1_800_000_000, 0)
+	now := start
+	s := New([]string{t.TempDir()})
+	s.now = func() time.Time { return now }
+	base := filepath.Join(t.TempDir(), "workspace-git")
+	open := func(remote string) *Relay {
+		t.Helper()
+		r, err := s.OpenRelay(ctx, base, remote)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return r
+	}
+	kept := open("https://example.com/acme/kept.git")
+	old := open("https://example.com/acme/old.git")
+	left := filepath.Join(base, "once", "clone-left.git")
+	if err := os.MkdirAll(left, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chtimes(left, start, start); err != nil {
+		t.Fatal(err)
+	}
+	gone := func(path string) bool { _, err := os.Lstat(path); return err != nil }
+
+	now = start.Add(29 * 24 * time.Hour)
+	open(kept.Remote)
+	if gone(old.Dir) {
+		t.Fatal("a relay unused for 29 days was removed")
+	}
+	if !gone(left) {
+		t.Fatal("a shallow clone's relay left for 29 days was kept")
+	}
+	// Thirty-one days on, but in use: kept while its lock is held.
+	now = start.Add(31 * 24 * time.Hour)
+	unlock := s.Lock(old.Dir)
+	open(kept.Remote)
+	if gone(old.Dir) {
+		t.Fatal("a relay in use was removed")
+	}
+	unlock()
+	open(kept.Remote)
+	if !gone(old.Dir) {
+		t.Fatal("a relay unused for 31 days was kept")
+	}
+	if gone(kept.Dir) {
+		t.Fatal("the relay opened was removed")
+	}
+	// It is made again when it is needed again.
+	if again := open(old.Remote); gone(again.Dir) {
+		t.Fatal("the swept relay was not made again")
+	}
+}

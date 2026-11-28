@@ -452,7 +452,12 @@ says to follow the run a push starts and fix what it finds.
   is not read with a credential. A commit runs the checkout's hooks as usual; it carries no credential. The
   workspace's checkout is never the folder git runs in with a credential, and nothing of one is kept in the
   checkout or told to the model. The GitHub page's clone of a private repository goes through the same
-  relays ([clone to server](../backend/github-page.md#clone-to-server)).
+  relays ([clone to server](../backend/github-page.md#clone-to-server)). A relay is the dashboard's own copy
+  of a remote, kept between uses so a fetch or push sends only what is new; each open stamps it
+  (`jd-last-used`), and one nothing opened for 30 days is removed at the next open of any relay
+  (`sweepRelays`), never one in use (an operation holds its lock, and the stamp is read again under it). A
+  shallow clone's relay left in `once/` goes after a day. Nothing tracks a deployment's relay: a deleted
+  deployment's goes when it is unused for 30 days, and one needed again is fetched again.
 - **Audited.** Each route a file tool calls has its own entry as the person with actor `assistant`; what the
   workspace did (opened, pushed and where) is listed under `git` in the press's entry, as `run_command`'s lines
   are under `commands`.
@@ -641,7 +646,10 @@ are the new deployment's.
   branch, tags, upstream), pruned fetch and push (a new branch's upstream, the remote-tracking ref), every git
   with the credential running in the relay and none in the checkout, never forced (`+main`, a push behind the
   remote refused with git's words), a tag's clone pushing to a named branch, HTTPS only, and a clone that
-  fails or is killed leaving no folder. `deploy/source_workspace_test.go`: the deploy App's workspace
+  fails or is killed leaving no folder, and a relay unused for 30 days swept, never one in use (an injected
+  clock). `api/handlers_githubrepos_clone_relay_test.go`: the GitHub page's private clone, whole and shallow,
+  with a proxy in the account's configuration that sees no token. `TestAWorkspaceIsNeverRoots`: a root
+  dashboard refusing a workspace without a regular terminal account, and a workspaces folder not the account's. `deploy/source_workspace_test.go`: the deploy App's workspace
   credential read-only, and a planned variable's errors naming what it may be.
 - `httpx/delegate_test.go`: the assistant admitted as the person by every group, marked for the trail, and a key's
   principal not carried.

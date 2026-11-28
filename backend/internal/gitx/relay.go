@@ -108,7 +108,7 @@ func (s *Service) OpenRelay(ctx context.Context, base, remote string) (*Relay, e
 	sum := sha256.Sum256([]byte(remote))
 	r := &Relay{Dir: filepath.Join(relays, hex.EncodeToString(sum[:12])+".git"), Remote: remote, home: base, config: config}
 	unlock := s.Lock(r.Dir)
-	defer unlock()
+	defer func() { unlock() }()
 	if err := os.Mkdir(r.Dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
 		return nil, err
 	}
@@ -120,7 +120,80 @@ func (s *Service) OpenRelay(ctx context.Context, base, remote string) (*Relay, e
 			return nil, err
 		}
 	}
+	// Used now: stamped under its lock, so the sweep never takes it.
+	if err := os.WriteFile(filepath.Join(r.Dir, relayUsedStamp), []byte(strconv.FormatInt(s.clock().Unix(), 10)+"\n"), 0o600); err != nil {
+		return nil, err
+	}
+	unlock()
+	unlock = func() {}
+	s.sweepRelays(base, r.Dir)
 	return r, nil
+}
+
+// relayUsedStamp, in a relay, is when it was last opened, in Unix seconds.
+const relayUsedStamp = "jd-last-used"
+
+// relayUnusedFor is how long a relay is kept unused, and onceUnusedFor how long
+// a shallow clone's own relay outlives a clone that could not remove it.
+const (
+	relayUnusedFor = 30 * 24 * time.Hour
+	onceUnusedFor  = 24 * time.Hour
+)
+
+// sweepRelays removes the relays under base that nothing opened for
+// relayUnusedFor, and shallow clones' relays left behind: they are the
+// dashboard's own copies of a remote, which the next one that needs it fetches
+// again. A relay in use is never removed: an operation holds its lock, and one
+// opened since its stamp was read is stamped anew under that lock, so it is
+// read again before anything goes. keep is the relay being opened.
+func (s *Service) sweepRelays(base, keep string) {
+	now := s.clock()
+	sweep := func(dir string, unusedFor time.Duration, used func(string) (time.Time, bool)) {
+		entries, err := os.ReadDir(dir)
+		if err != nil {
+			return
+		}
+		for _, entry := range entries {
+			path := filepath.Join(dir, entry.Name())
+			if path == keep || !entry.IsDir() || !strings.HasSuffix(entry.Name(), ".git") {
+				continue
+			}
+			if at, ok := used(path); !ok || now.Sub(at) < unusedFor {
+				continue
+			}
+			unlock, free := s.tryLock(path)
+			if !free {
+				continue
+			}
+			if at, ok := used(path); ok && now.Sub(at) >= unusedFor && ownedDirectory(path) == nil {
+				_ = os.RemoveAll(path)
+			}
+			unlock()
+		}
+	}
+	sweep(filepath.Join(base, "relays"), relayUnusedFor, relayLastUsed)
+	sweep(filepath.Join(base, "once"), onceUnusedFor, func(path string) (time.Time, bool) {
+		info, err := os.Lstat(path)
+		if err != nil {
+			return time.Time{}, false
+		}
+		return info.ModTime(), true
+	})
+}
+
+// relayLastUsed reads a relay's stamp; a relay without one (made before
+// stamps, or cut short) counts from its folder's time.
+func relayLastUsed(path string) (time.Time, bool) {
+	if raw, err := os.ReadFile(filepath.Join(path, relayUsedStamp)); err == nil {
+		if at, err := strconv.ParseInt(strings.TrimSpace(string(raw)), 10, 64); err == nil {
+			return time.Unix(at, 0), true
+		}
+	}
+	info, err := os.Lstat(path)
+	if err != nil {
+		return time.Time{}, false
+	}
+	return info.ModTime(), true
 }
 
 // ownedDirectory refuses a folder that is a link or is not this process's own:
@@ -578,7 +651,11 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 		}
 	}
 	var refspecs []string
-	if options.Depth > 0 {
+	if options.Depth == 0 {
+		// The relay is in use until the clone ends: the sweep leaves it.
+		unlockRelay := s.Lock(r.Dir)
+		defer unlockRelay()
+	} else {
 		once, remove, err := s.onceRelay(ctx, r)
 		if err != nil {
 			return "", err
@@ -771,6 +848,8 @@ func setUpstream(ctx context.Context, checkout gitRunner, branch string) error {
 // the relay fetches with extra, and the checkout's account takes its objects
 // and refs from the relay.
 func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra map[string]string) (*Result, error) {
+	unlock := s.Lock(r.Dir)
+	defer unlock()
 	if err := r.Fetch(ctx, extra); err != nil {
 		return nil, err
 	}
@@ -791,6 +870,8 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 // forces: the refspec is the commit and a whole branch name, so a push the
 // remote refuses because it moved is answered with git's own words.
 func (s *Service) PushThrough(ctx context.Context, r *Relay, path, branch string, extra map[string]string) (*Result, error) {
+	unlock := s.Lock(r.Dir)
+	defer unlock()
 	checkout := accountRunner(path, path)
 	current, err := s.CurrentBranch(ctx, path)
 	if err != nil && branch == "" {
