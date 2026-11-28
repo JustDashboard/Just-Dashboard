@@ -64,6 +64,8 @@ func (r *Runner) Run(ctx context.Context, manifest *Manifest, env RunnerEnv, rec
 	steps := map[string]Step{}
 	status := map[string]StepStatus{}
 	absent := map[string]bool{}
+	// withdrawing are absent steps whose Withdraw runs in this pass.
+	withdrawing := map[string]bool{}
 	records := map[string]*StepRecord{}
 	var mu sync.Mutex
 	save := func(id string, change func(*StepRecord)) {
@@ -86,9 +88,17 @@ func (r *Runner) Run(ctx context.Context, manifest *Manifest, env RunnerEnv, rec
 	for _, step := range manifest.Steps {
 		steps[step.ID] = step
 		records[step.ID] = &StepRecord{StepID: step.ID, Status: StepPending}
-		present := env.Has(step.Service)
+		needed := true
 		for _, service := range step.Needs {
-			present = present && env.Has(service)
+			needed = needed && env.Has(service)
+		}
+		present := needed && env.Has(step.Service)
+		if !present && needed && step.Withdraw != nil {
+			// Its service is gone from an app that stays: what Run made
+			// there is taken back, and the step stays absent.
+			status[step.ID], absent[step.ID], withdrawing[step.ID] = StepPending, true, true
+			save(step.ID, func(current *StepRecord) { current.Status = StepPending })
+			continue
 		}
 		if !present {
 			status[step.ID], absent[step.ID] = StepSkipped, true
@@ -123,6 +133,9 @@ func (r *Runner) Run(ctx context.Context, manifest *Manifest, env RunnerEnv, rec
 					if blocking, why := blockedBy(status[after], absent[after]); blocking {
 						status[step.ID] = StepSkipped
 						reason := fmt.Sprintf("Waits for “%s”, which %s", steps[after].Title, why)
+						if withdrawing[step.ID] {
+							reason = absentPrefix
+						}
 						save(step.ID, func(current *StepRecord) {
 							current.Status, current.Message, current.Error = StepSkipped, reason, ""
 						})
@@ -145,6 +158,9 @@ func (r *Runner) Run(ctx context.Context, manifest *Manifest, env RunnerEnv, rec
 				}
 				status[step.ID] = StepRunning
 				running++
+				if withdrawing[step.ID] {
+					step.Run = step.Withdraw
+				}
 				go func(step Step) {
 					finished <- outcome{step.ID, r.attempt(ctx, step, env, save)}
 				}(step)
@@ -156,6 +172,14 @@ func (r *Runner) Run(ctx context.Context, manifest *Manifest, env RunnerEnv, rec
 		done := <-finished
 		status[done.id] = done.status
 		running--
+		if withdrawing[done.id] && done.status != StepPending {
+			// Taken back or not, the step is absent: not drawn, holding
+			// nothing. What it did, or its error, stays in its record.
+			status[done.id] = StepSkipped
+			save(done.id, func(current *StepRecord) {
+				current.Status, current.Message, current.Action = StepSkipped, absentPrefix, nil
+			})
+		}
 	}
 
 	result := PassResult{Status: StatusReady, Complete: !interrupted}

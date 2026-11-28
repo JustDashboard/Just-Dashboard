@@ -309,6 +309,16 @@ func (f *arrFake) provider(w http.ResponseWriter, method string, parts []string,
 		f.keep(resource, body)
 		f.lists[resource] = append(f.lists[resource], body)
 		f.answer(w, http.StatusCreated, f.masked(resource, body))
+	case method == http.MethodDelete && len(parts) == 2:
+		id, _ := strconv.Atoi(parts[1])
+		index := find(id)
+		if index < 0 {
+			f.answer(w, http.StatusNotFound, map[string]string{"message": "NotFound"})
+			return
+		}
+		f.writes = append(f.writes, call)
+		f.lists[resource] = append(f.lists[resource][:index:index], f.lists[resource][index+1:]...)
+		f.answer(w, http.StatusOK, nil)
 	case method == http.MethodPut && len(parts) == 2:
 		id, _ := strconv.Atoi(parts[1])
 		index := find(id)

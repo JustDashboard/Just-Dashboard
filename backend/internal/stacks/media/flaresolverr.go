@@ -3,6 +3,7 @@ package media
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"slices"
@@ -185,4 +186,43 @@ func sourceTags(raw any) []int {
 		}
 	}
 	return tags
+}
+
+// prowlarrFlareSolverrWithdraw takes the stack's FlareSolverr proxy out of
+// Prowlarr in a pass whose release runs no FlareSolverr but does run
+// Prowlarr: a rollback to a release from before FlareSolverr came with the
+// template. Left, the proxy points Prowlarr at a container that is gone, and
+// Prowlarr warns about it in its health check. Only the proxy under the
+// stack's own name and of FlareSolverr's kind goes; one the person made
+// stays, and so does the tag on the sources, which does nothing without a
+// proxy and which the step gives back as it was when FlareSolverr returns.
+func prowlarrFlareSolverrWithdraw(ctx context.Context, env stacks.Env) (stacks.Result, error) {
+	client, err := newArrClient(ctx, env, arrProwlarr)
+	if err != nil {
+		return stacks.Result{}, err
+	}
+	var proxies []map[string]any
+	if err := client.call(ctx, http.MethodGet, "indexerproxy", nil, &proxies); err != nil {
+		return stacks.Result{}, err
+	}
+	removed := false
+	for _, proxy := range proxies {
+		name, _ := proxy["name"].(string)
+		implementation, _ := proxy["implementation"].(string)
+		id, found := arrID(proxy)
+		if name != flareSolverrProxy || implementation != "FlareSolverr" || !found {
+			continue
+		}
+		err := client.call(ctx, http.MethodDelete, "indexerproxy/"+strconv.Itoa(id), nil, nil)
+		var problem *arrProblem
+		if err != nil && !(errors.As(err, &problem) && problem.Status == http.StatusNotFound) {
+			return stacks.Result{}, err
+		}
+		removed = true
+		env.Logf("Prowlarr's indexer proxy %q was removed: this release runs no FlareSolverr", flareSolverrProxy)
+	}
+	if !removed {
+		return stacks.Result{Message: "Prowlarr has no FlareSolverr proxy of the stack's"}, nil
+	}
+	return stacks.Result{Message: "Prowlarr no longer sends sources through a FlareSolverr this release does not run"}, nil
 }

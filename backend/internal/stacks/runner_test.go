@@ -219,3 +219,56 @@ func TestRunnerCancelledPassIsIncompleteAndLeavesStepsPending(t *testing.T) {
 		t.Fatalf("slow %+v after %+v", j.last["a.slow"], j.last["b.after"])
 	}
 }
+
+// A step whose own service has left the pass while every service it needs
+// stays has its Withdraw run instead (after what it waits for), and is
+// absent all the same: recorded as not part of the preset, holding nothing,
+// failing nothing. Without the services it needs, nothing runs; with its
+// own, Run does.
+func TestRunnerWithdrawsAStepWhoseServiceLeftAnAppThatStays(t *testing.T) {
+	var withdrawn, ran atomic.Int32
+	withdrawing := func(fails bool) stacks.Step {
+		withdraws := step("c.link", "c", []string{"a.auth"}, func(context.Context, stacks.Env) (stacks.Result, error) {
+			ran.Add(1)
+			return stacks.Result{Message: "linked"}, nil
+		})
+		withdraws.Needs = []string{"a"}
+		withdraws.Withdraw = func(_ context.Context, env stacks.Env) (stacks.Result, error) {
+			withdrawn.Add(1)
+			if fails {
+				return stacks.Result{}, stacks.Permanent(errors.New("a would not let go"))
+			}
+			env.Logf("a no longer points at c")
+			return stacks.Result{Message: "taken back"}, nil
+		}
+		return withdraws
+	}
+	for _, fails := range []bool{false, true} {
+		withdrawn.Store(0)
+		m := manifest(step("a.auth", "a", nil, ok("secured")), withdrawing(fails), step("a.after", "a", []string{"c.link"}, ok("runs")))
+		var j journal
+		result := quickRunner().Run(context.Background(), m, fake("a", "b"), j.record)
+		record := j.last["c.link"]
+		if result.Status != stacks.StatusReady || !result.Complete || withdrawn.Load() != 1 || ran.Load() != 0 ||
+			record.Status != stacks.StepSkipped || record.Message != stacks.AbsentMessage || j.last["a.after"].Status != stacks.StepDone {
+			t.Fatalf("withdraw (fails %v): %+v, %d withdrawn, %d ran, %+v", fails, result, withdrawn.Load(), ran.Load(), j.last)
+		}
+		if fails && record.Error != "a would not let go" {
+			t.Fatalf("the failure was not kept: %+v", record)
+		}
+		if !fails && (len(record.Log) != 1 || record.Log[0] != "a no longer points at c") {
+			t.Fatalf("what it did was not kept: %+v", record)
+		}
+	}
+
+	withdrawn.Store(0)
+	var j journal
+	quickRunner().Run(context.Background(), manifest(step("a.auth", "a", nil, ok("secured")), withdrawing(false)), fake("b"), j.record)
+	if withdrawn.Load() != 0 || j.last["c.link"].Status != stacks.StepSkipped {
+		t.Fatalf("without the app it needs: %d withdrawn, %+v", withdrawn.Load(), j.last["c.link"])
+	}
+	quickRunner().Run(context.Background(), manifest(step("a.auth", "a", nil, ok("secured")), withdrawing(false)), fake("a", "c"), j.record)
+	if withdrawn.Load() != 0 || ran.Load() != 1 || j.last["c.link"].Status != stacks.StepDone {
+		t.Fatalf("with its own service: %d withdrawn, %d ran, %+v", withdrawn.Load(), ran.Load(), j.last["c.link"])
+	}
+}

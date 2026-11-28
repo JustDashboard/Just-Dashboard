@@ -137,6 +137,14 @@ it opens the sites itself in a headless browser.
   a secret Prowlarr answers as `********` keeps its stored value when sent back so (checked against
   Prowlarr 3.1.0). One Prowlarr will not save now (its site is down) is named in the step's message
   and tried again on the next pass, never a failure.
+- **A rollback** to a release from before FlareSolverr (from a 1.2.0 release to a 1.1.0 one) is a new
+  live release, so a pass runs over it, and its Compose file runs no FlareSolverr. The step's
+  `Withdraw` (`prowlarrFlareSolverrWithdraw`) then deletes the proxy named **FlareSolverr (Just
+  Dashboard)** of FlareSolverr's kind, which would point Prowlarr at a container that is gone (and
+  show in Prowlarr's health check); a proxy the person made, under any other name, stays. The tag
+  stays on the sources: without a proxy it does nothing, and the step finds it again when FlareSolverr
+  comes back. With the proxy gone an add carries no tag. The state offers the upgrade again
+  (`saved`, **Deploy again**), since the source still names 1.2.0.
 - **An add** from the Sources page carries the tag in the test and the save when Prowlarr has both
   the tag and the stack's proxy; a stack without FlareSolverr (Essential, or a release from before it)
   sends none. One saved without it looks for the proxy again once it is saved and, if the proxy is
@@ -197,6 +205,11 @@ by project; its rows cascade with the project's.
 - A step runs when every step in its `After` is done, or skipped because its service is not in the
   preset (such steps are left out of the page). A step after one that failed, needs the person, or
   was itself held back is skipped with a sentence naming which.
+- A step with a `Withdraw` whose own service has left the pass while every service it `Needs` is
+  still there (a rollback to a release from before the service came with the template) runs
+  `Withdraw` in `Run`'s place, after the same `After` and with the same timeout and attempts, to take
+  back what it made in the apps that stay. It is recorded as absent all the same, whatever came of
+  it: left out of the page and holding nothing; what it did, or its error, stays in its record.
 - Three steps at once. Each attempt is bounded by the step's timeout; up to its attempts with
   5, 10, 20, 40, 60 s between them. `stacks.Permanent` stops retrying; `stacks.NeedsAction` records
   `action_required` with an action the page lists. A panic in an adapter fails that step only.

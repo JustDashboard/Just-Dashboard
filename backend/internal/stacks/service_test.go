@@ -323,3 +323,37 @@ func TestServiceRunsNothingWhenWhatTheReleaseRunsCannotBeRead(t *testing.T) {
 		t.Fatalf("once it reads: %d passes, %+v", f.passCount(), record)
 	}
 }
+
+// A rollback to a release that does not run a service the last one did is a
+// new live release, so a pass runs over it, and the step of that service
+// takes back what it made in the apps that stay.
+func TestServiceWithdrawsAServiceARollbackLeftOut(t *testing.T) {
+	f := newServiceFixture(t)
+	ctx := context.Background()
+	withdrawn := 0
+	f.manifest.Steps[1].Withdraw = func(context.Context, stacks.Env) (stacks.Result, error) {
+		f.mu.Lock()
+		withdrawn++
+		f.mu.Unlock()
+		return stacks.Result{Message: "taken back"}, nil
+	}
+	f.goLive(61, "test-large")
+	f.settle(t)
+	steps, _ := f.store.Steps(ctx, f.project)
+	if steps["b.link"].Status != stacks.StepDone || withdrawn != 0 {
+		t.Fatalf("the release that runs b: %+v, %d withdrawn", steps["b.link"], withdrawn)
+	}
+
+	f.mu.Lock()
+	f.released = map[string]bool{"a": true}
+	f.mu.Unlock()
+	f.goLive(60, "test-large")
+	record := f.settle(t)
+	steps, _ = f.store.Steps(ctx, f.project)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if record.ConfiguredReleaseID != 60 || record.Status != stacks.StatusReady || withdrawn != 1 ||
+		steps["b.link"].Status != stacks.StepSkipped || steps["b.link"].Message != stacks.AbsentMessage {
+		t.Fatalf("after the rollback: %+v %+v, %d withdrawn", record, steps["b.link"], withdrawn)
+	}
+}
