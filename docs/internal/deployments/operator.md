@@ -439,8 +439,11 @@ says to follow the run a push starts and fix what it finds.
   deploys the push on its own (its Git policy: automatic, not promotion-only, the branch it builds, its path
   filters) or needs a deploy started.
 - **The relay.** A credential of the dashboard's (the minted token, the deployment's saved one, which may be a
-  token wider than one repository) never reaches a git process of the checkout's account or one that reads the
-  checkout's configuration: whoever can write `.git/config` or the account's `~/.gitconfig` (the account,
+  token wider than one repository) never reaches a git or git-lfs process of the checkout's account or one that
+  reads the checkout's configuration, in what the assistant and the GitHub page's clone run (the Local Git
+  page's own fetch, pull and push of the same checkout carry none of the dashboard's: they use the account's
+  own credentials, and keep their per-command owner fallback, which runs as root in a folder that resolves to
+  one of root's; that is pre-existing): whoever can write `.git/config` or the account's `~/.gitconfig` (the account,
   anything it runs, a role that can write the folder through the Files page) could otherwise send the header
   through an `http.proxy` with `http.sslVerify` off or an `http.sslCAInfo` of theirs, rewrite the remote with
   `url.<base>.insteadOf`, run a hook or a file-system monitor beside it, or read `/proc/<pid>/environ` of a
@@ -669,8 +672,8 @@ are the new deployment's.
   fails or is killed leaving no folder, and a relay unused for 30 days swept, never one in use (an injected
   clock). `gitx/relay_lfs_test.go`, against an LFS server in the test: a clone's LFS files real in the checkout, a
   fetch's new object in its store, a pushed object on the server, every git and git-lfs with the token in the
-  relay, and pointers said so without git-lfs. `gitx/relay_root_test.go` (as root, in a throwaway container:
-  `checks/635-be2-root-gitx.sh` in the run folder; they skip elsewhere): a checkout swapped for a link never
+  relay, and pointers said so without git-lfs. `gitx/relay_root_test.go` (only as root, such as in a throwaway
+  container of the backend image; they skip elsewhere, CI included): a checkout swapped for a link never
   running the account's hook or SSH command as root, a failed clone never removing what a link points at, the
   account's checkout and LFS files owned by it. `gitx/relay_hang_test.go`: a fetch from a remote that never
   answers ending at its deadline. `api/handlers_githubrepos_clone_relay_test.go`: the GitHub page's private clone, whole and shallow,

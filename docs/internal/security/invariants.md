@@ -448,13 +448,23 @@ A change that weakens any of these has to say so explicitly.
     developer would (`open_workspace`, `read_file`, `edit_file`, `write_file`, `push_changes`): the files through
     the Files routes as the person, the checkout made and pushed by Local Git's service under `JD_GIT_ROOTS` as the
     folder's owner (the terminal's account, whose home holds `jd-workspaces/`; a dashboard running as root
-    refuses a workspace when that account is root or missing, so no workspace is root's and its git never runs as
-    root on what its `.git/config` names), and a credential of the dashboard's
-    only in git's environment for one fetch or push, never its arguments or a file, and **never in a git process
-    of the checkout's account or one that reads the checkout's or that account's configuration**: a credentialed
-    clone, fetch and push run as the dashboard in a bare repository of its own (`gitx.Relay`, in the data
+    refuses a workspace when that account is root or missing, so no workspace #635 makes is root's). **What holds
+    is the assistant's own git and the GitHub page's clone, not every git on the folder:** the workspace tools'
+    git (`gitx.ForAccounts`, and the relay's checkout side, `accountRunner`) runs as the checkout's account and
+    runs as root only in a folder of root's no other account can point elsewhere (`rootsAllTheWay`), so the
+    account swapping a workspace for a link cannot make it run what a `.git/config` names as root. The Local Git
+    page's own operations on the same folder (its fetch, pull, push, commit and the rest) keep the per-command
+    owner fallback they always had (`gitCommand`, `hostexec.AsOwner`): a folder that resolves to one of root's,
+    a link the account swapped in among them, is worked on as root there. That is pre-existing, for every
+    account-writable Git root, and an open question for the operator. A credential of the dashboard's goes
+    only in git's environment for one fetch or push, never its arguments or a file, and **never in a git
+    process of the checkout's account or one that reads the checkout's or that account's configuration** —
+    this for the assistant's clone, fetch and push and the GitHub page's private clone, the git and git-lfs
+    that carry it: they run as the dashboard in a bare repository of its own (`gitx.Relay`, in the data
     folder), with only the dashboard's own Git settings and no hook, and the checkout's account takes or gives
-    objects and ref names through a pipe, with no credential, each side as itself in its own repository. The
+    objects, LFS objects and ref names through a pipe, with no credential, each side as itself in its own
+    repository. The Local Git page's own fetch, pull and push carry no credential of the dashboard's: they
+    use the account's own. The
     credential is the deployment's own saved token, or for a
     push to GitHub a token of the GitHub page's App narrowed to that one repository and `contents: write`, minted
     only when the person's own connection may push there and revoked after the push; without either the
