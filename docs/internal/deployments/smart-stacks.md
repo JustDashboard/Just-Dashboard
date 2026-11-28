@@ -349,6 +349,11 @@ The frontend is `components/deploy/new-project/source-stack.tsx` (the tab) and
     then "Give every app its address" when
     `addresses.missing` or `addresses.unpublished` is not empty, then the optional actions, then
     each failed step with its error. The first one's command wears the brand.
+  - What the upgrade's press started ("A deployment is adding FlareSolverr", its run) is the page's
+    to keep past the read that no longer offers the press, but only until the project's runs show
+    that run ended and the stack has been read since (`useStartedRun` in `stack-page.tsx`, which
+    reads the stack again the moment it sees the end). From then the server's state says the rest:
+    nothing once the apps run, **Deploy again** when the release failed.
   - The `media-source` action links to the source picker.
   - "Give every app its address" names the apps and their hostnames, confirms in a dialog and posts
     `POST …/stack/addresses`. Without a primary domain the dialog asks for one, prefilled with the

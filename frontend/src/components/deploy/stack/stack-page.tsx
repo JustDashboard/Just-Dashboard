@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
 import { ArrowRight, Monorepo, RotateClockwise, Wrench } from "@/components/icons"
 import { ApiError, post } from "@/lib/api"
@@ -25,7 +25,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { TextShimmer } from "@/components/ui/text-shimmer"
 import { WireMark, WireNode } from "@/components/wire/wire"
 import { useProject } from "@/components/deploy/project-context"
-import { StepMark, type ReleaseNodeState } from "@/components/deploy/vocabulary"
+import { StepMark, isActiveRun, type ReleaseNodeState } from "@/components/deploy/vocabulary"
 import { AddressesStarted, AddressesStep } from "@/components/deploy/stack/stack-addresses"
 import { StackApps, StackAppsSkeleton } from "@/components/deploy/stack/stack-apps"
 import { StackLogin } from "@/components/deploy/stack/stack-login"
@@ -87,7 +87,10 @@ export function StackPage() {
   const [addressRun, setAddressRun] = useState<SmartStackAddressesStarted>()
   // The release "Add the new apps" started, with the apps it brings in words,
   // kept past the read that no longer lists them as new.
-  const [upgradeRun, setUpgradeRun] = useState<{ runId: number; titles: string }>()
+  const [upgradeRun, setUpgradeRun] = useStartedRun<{ runId: number; titles: string }>(
+    project.runs,
+    stack,
+  )
   const absent =
     stack.error instanceof ApiError &&
     (stack.error.code === "stack_not_found" || stack.error.status === 404)
@@ -179,6 +182,33 @@ function runHref(base: string, activeRun: number | undefined) {
 }
 
 /** The page's shape while its first read is in flight, so nothing moves when it lands. */
+/**
+ * What a press on the page started (its run, and what it brings), kept past
+ * the read that no longer offers the press, but only until that run has ended
+ * and the stack has been read since. From then the read says the rest:
+ * nothing once the release is live, Deploy again when it failed. The run's
+ * end is read from the project's runs, and the stack is read again the moment
+ * it is seen, so the page does not wait for its next poll to say so.
+ */
+function useStartedRun<T extends { runId: number }>(
+  runs: { id: number; state: string }[],
+  stack: { lastSuccess?: number; refresh: () => void },
+): [T | undefined, (started: T) => void] {
+  const [kept, setKept] = useState<{ started: T; endedAtRead?: number }>()
+  const ended =
+    kept !== undefined &&
+    runs.some((run) => run.id === kept.started.runId && !isActiveRun(run.state))
+  const read = stack.lastSuccess ?? 0
+  if (kept && ended && kept.endedAtRead === undefined) setKept({ ...kept, endedAtRead: read })
+  if (kept?.endedAtRead !== undefined && read > kept.endedAtRead) setKept(undefined)
+  const refresh = stack.refresh
+  useEffect(() => {
+    if (ended) refresh()
+  }, [ended, refresh])
+  const keep = useCallback((started: T) => setKept({ started }), [])
+  return [kept?.started, keep]
+}
+
 function StackSkeleton() {
   return (
     <div role="status" aria-label="Loading the stack" className="contents">

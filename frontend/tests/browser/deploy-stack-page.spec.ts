@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test"
-import { json, mockProject } from "./deploy-fixture"
+import { json, mockProject, run } from "./deploy-fixture"
 import {
   FLARESOLVERR_UPGRADE,
   STACK_PASSWORD,
@@ -932,4 +932,66 @@ test("new apps saved but not live wait for the deployment under way, else offer 
     .click()
   expect(idle.upgradeRequests()).toEqual([{}])
   await expect(step).toContainText("A deployment is adding FlareSolverr")
+})
+
+test("once the run adding the apps has failed, the step offers Deploy again", async ({ page }) => {
+  const stack = await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+  })
+  // Run 92 is the one the press starts; the spec ends it.
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 92, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await step.getByRole("button", { name: "Add FlareSolverr" }).click()
+  await page
+    .getByRole("dialog", { name: "Add FlareSolverr" })
+    .getByRole("button", { name: "Add and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  // While it runs the source names 1.2.0 and the live release is older.
+  stack.set({ ...stackState("ready"), upgrade: { ...FLARESOLVERR_UPGRADE, saved: true } })
+  const reads = stack.reads()
+  await expect.poll(() => stack.reads(), { timeout: 20000 }).toBeGreaterThan(reads)
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+
+  // The release failed: the stack is read again and offers Deploy again.
+  started.state = "failed"
+  await expect(step).toContainText("Start FlareSolverr", { timeout: 20000 })
+  await expect(step.getByRole("button", { name: "Deploy again" })).toBeVisible()
+  await expect(step).not.toContainText("A deployment is adding")
+})
+
+test("a run that brought the apps leaves no step behind", async ({ page }) => {
+  const stack = await mockStackProject(page, {
+    state: { ...stackState("ready"), upgrade: FLARESOLVERR_UPGRADE },
+  })
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 92, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-upgrade']")
+  await step.getByRole("button", { name: "Add FlareSolverr" }).click()
+  await page
+    .getByRole("dialog", { name: "Add FlareSolverr" })
+    .getByRole("button", { name: "Add and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is adding FlareSolverr")
+  stack.set(stackState("ready"))
+  started.state = "succeeded"
+  await expect(step).toHaveCount(0, { timeout: 20000 })
+  await expect(left(page)).toHaveCount(0)
 })
