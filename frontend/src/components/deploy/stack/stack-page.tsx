@@ -84,7 +84,10 @@ export function StackPage() {
   const stack = useStackState(project.projectId, named, pace)
   // The release "Give every app its address" started, kept past the read
   // that no longer lists the apps as missing theirs.
-  const [addressRun, setAddressRun] = useState<SmartStackAddressesStarted>()
+  const [addressRun, setAddressRun] = useStartedRun<SmartStackAddressesStarted>(
+    project.runs,
+    stack,
+  )
   // The release "Add the new apps" started, with the apps it brings in words,
   // kept past the read that no longer lists them as new.
   const [upgradeRun, setUpgradeRun] = useStartedRun<{ runId: number; titles: string }>(

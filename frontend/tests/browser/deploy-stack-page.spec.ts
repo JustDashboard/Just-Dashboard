@@ -1006,3 +1006,62 @@ test("a run that brought the apps leaves no step behind", async ({ page }) => {
   await expect(step).toHaveCount(0, { timeout: 20000 })
   await expect(left(page)).toHaveCount(0)
 })
+
+test("once the run giving the addresses has failed, the step offers Deploy again", async ({
+  page,
+}) => {
+  const stack = await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  // Run 91 is the one the press starts; the spec ends it.
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 91, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  await page
+    .getByRole("dialog", { name: "Give every app its address" })
+    .getByRole("button", { name: "Add the addresses and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is giving every app its address")
+  // While it runs the names are saved and the live release does not serve them.
+  stack.set(unpublishedState())
+  const reads = stack.reads()
+  await expect.poll(() => stack.reads(), { timeout: 20000 }).toBeGreaterThan(reads)
+  await expect(step).toContainText("A deployment is giving every app its address")
+
+  // The release failed: the stack is read again and offers Deploy again.
+  started.state = "failed"
+  await expect(step).toContainText("Publish the apps' addresses", { timeout: 20000 })
+  await expect(step.getByRole("button", { name: "Deploy again" })).toBeVisible()
+  await expect(step).not.toContainText("A deployment is giving")
+})
+
+test("a run that gave every app its address leaves no step behind", async ({ page }) => {
+  await mockStackProject(page, { state: stackState("ready", { addressless: true }) })
+  const started = { state: "queued" }
+  await page.route(
+    (url) => url.pathname === "/api/v1/deploy/7/runs" && url.searchParams.get("view") === "engine",
+    (route) =>
+      json(route, {
+        runs: [{ ...run, id: 91, runNumber: 2, state: started.state }],
+        running: started.state === "queued",
+      }),
+  )
+  await page.goto("/deploy/7/stack")
+  const step = page.locator("[data-slot='stack-addresses']")
+  await step.getByRole("button", { name: "Give every app its address" }).click()
+  await page
+    .getByRole("dialog", { name: "Give every app its address" })
+    .getByRole("button", { name: "Add the addresses and deploy" })
+    .click()
+  await expect(step).toContainText("A deployment is giving every app its address")
+  started.state = "succeeded"
+  await expect(step).toHaveCount(0, { timeout: 20000 })
+  await expect(left(page)).toHaveCount(0)
+})
