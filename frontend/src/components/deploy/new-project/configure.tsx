@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { ArrowRight, Check } from "@/components/icons"
@@ -37,10 +37,8 @@ import { PlanRail } from "@/components/deploy/new-project/plan-rail"
 import {
   SetupAssistant,
   SetupAssistantOffer,
-  draftScope,
 } from "@/components/deploy/new-project/setup-assistant"
-import { agentBusy, dismissAgent, useAgentSession } from "@/components/assistant/agent/sessions"
-import { pendingSteps } from "@/components/assistant/agent/model"
+import { useAssistantDraft } from "@/components/deploy/new-project/use-assistant-draft"
 import { planGroups, type PlanRow } from "@/components/deploy/new-project/plan-reading"
 import { StepProject } from "@/components/deploy/new-project/step-project"
 import { StepRuntime } from "@/components/deploy/new-project/step-runtime"
@@ -62,7 +60,6 @@ import {
   environmentText,
   loadDraft,
   preflightDraft,
-  resumeFlow,
   firstDeployRevision,
   reinspect,
   redetectedConfiguration,
@@ -341,6 +338,18 @@ export function Configure({
     if (!done) return
     return () => forgetNewProject()
   }, [done])
+  // The assistant working on this draft: its saves read back, and the person's
+  // edits made meanwhile kept and saved once it is done (`use-assistant-draft.ts`).
+  // The steps' fields edit through it.
+  const assistant = useAssistantDraft({
+    flow,
+    text,
+    retainedKeys,
+    onFlowChange,
+    created: done,
+    idle: !busy && !branchBusy,
+    mutatingRef: mutating,
+  })
 
   // Debounced, because it runs on every keystroke of the name field, and
   // never fatal: an unanswered question leaves the commit to refuse as before.
@@ -451,7 +460,7 @@ export function Configure({
       internalPort,
       flow.candidate?.readiness,
     )
-    return onFlowChange({
+    return assistant.editFlow({
       ...flow,
       profile,
       configuration: {
@@ -607,7 +616,7 @@ export function Configure({
       return
     const name = fix.field.slice("variables.".length)
     const scope = fix.scope
-    onFlowChange((current) =>
+    assistant.editFlow((current) =>
       current
         ? {
             ...current,
@@ -825,37 +834,11 @@ export function Configure({
    * (a 409): the check, and every press here that saves, waits for it. The
    * check also waits while an answer waits on the person's Allow, since the call
    * waiting holds the revision it read; a press there is the person's to make.
+   * What the person typed meanwhile is saved first (`assistant.working` stays up
+   * until it is), so the check reads the plan with it.
    */
-  const assistantSession = useAgentSession(draftScope(flow))
-  // What it saved, the page reads back, so the fields and the plan say the same:
-  // here rather than in its panel, so a save made with the panel closed is read
-  // too, and until the last one is in, the page is still behind it — a check that
-  // went first would 409 and then save the page's older plan over its save.
-  const [readBack, setReadBack] = useState(assistantSession.changes)
-  const changes = assistantSession.changes
-  useEffect(() => {
-    if (changes === readBack) return
-    let live = true
-    void loadDraft(draftId)
-      .then(resumeFlow)
-      .then((next) => {
-        if (!live) return
-        onFlowChange((current) =>
-          current?.draft.id === draftId
-            ? { ...next, sourceLabel: current.sourceLabel, githubRepo: current.githubRepo }
-            : current,
-        )
-      })
-      .catch(() => undefined)
-      .finally(() => {
-        if (live) setReadBack(changes)
-      })
-    return () => {
-      live = false
-    }
-  }, [changes, readBack, draftId, onFlowChange])
-  const assistantWorking = agentBusy(assistantSession) || changes !== readBack
-  const assistantWaiting = pendingSteps(assistantSession.transcript).length > 0
+  const assistantWorking = assistant.working
+  const assistantWaiting = assistant.waiting
   const autoChecked = useRef<string | undefined>(undefined)
   useEffect(() => {
     const plan = `${draftId}:${planSignature}`
@@ -942,37 +925,6 @@ export function Configure({
     automatic: isGitSource ? gitPolicy.automatic : undefined,
   })
   const openRow = (row: PlanRow) => (row.section ? openSection(row.section) : goto(row.step))
-  // Once it is deployed there is no setup to go back to, so the dock lets it go.
-  useEffect(() => {
-    if (created) dismissAgent(assistantSession)
-  }, [created, assistantSession])
-  // It starts from what the person sees, so what the page holds is saved first. A
-  // plan that does not save yet is no reason to refuse: it reads the detection.
-  // It reads the flow as it is when the panel opens, not as it was when the draft
-  // was first loaded: Review's check has moved the revision on by then, and a save
-  // at the first one was refused 409 and saved nothing the person had typed since.
-  const latest = useRef({ flow, text, retainedKeys })
-  useEffect(() => {
-    latest.current = { flow, text, retainedKeys }
-  })
-  const prepareAssistant = useCallback(async () => {
-    const { flow: now, text: dotenvText, retainedKeys: kept } = latest.current
-    try {
-      let working = now.draft
-      if (working.data.intent?.name !== now.name || working.data.intent?.profile !== now.profile) {
-        working = await saveIntent(working, { name: now.name, profile: now.profile })
-      }
-      const saved = await saveConfiguration(
-        working,
-        configurationForSave(now.configuration, now.source),
-        dotenvText,
-        kept,
-      )
-      onFlowChange((current) => (current ? { ...current, draft: saved } : current))
-    } catch {
-      // Told to the assistant by what it reads; the form keeps what was typed.
-    }
-  }, [onFlowChange])
   /* The plan read down, beside the fields from `xl` and after them below it:
      stacked on a phone, the drawing came first and the question's first field
      started two-thirds of the way down every step — the same summary scrolled
@@ -1075,7 +1027,7 @@ export function Configure({
             {current === "project" && (
               <StepProject
                 flow={flow}
-                onFlowChange={onFlowChange}
+                onFlowChange={assistant.editFlow}
                 onChangeProfile={changeProfile}
                 branch={branch}
                 branchBusy={branchBusy}
@@ -1096,7 +1048,7 @@ export function Configure({
             {current === "runtime" && (
               <StepRuntime
                 flow={flow}
-                onFlowChange={onFlowChange}
+                onFlowChange={assistant.editFlow}
                 errors={errors}
                 foldsOpen={initialAdvanced}
               />
@@ -1105,7 +1057,7 @@ export function Configure({
             {current === "variables" && (
               <StepVariables
                 flow={flow}
-                onFlowChange={onFlowChange}
+                onFlowChange={assistant.editFlow}
                 rows={envRows}
                 onRowsChange={setEnvRows}
                 dotenv={dotenv}
@@ -1199,7 +1151,7 @@ export function Configure({
         <SetupAssistant
           flow={flow}
           onClose={() => onAssistChange(false)}
-          onPrepare={prepareAssistant}
+          onPrepare={assistant.prepare}
           onReview={() => goto("review")}
         />
       )}

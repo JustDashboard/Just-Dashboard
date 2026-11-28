@@ -518,13 +518,18 @@ a privileged container, a host path) waits for the person in "ask" and "changes"
 
 `/deploy/new` offers it twice: the switch above the sources, which carries through once a source is chosen,
 and an offer at the head of the plan once one is. It sets up in a column beside the form, the whole screen on
-a phone. What it saves is read back into the form (`Configure`, so a save made with its panel closed is read
-too), and Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
+a phone. What it saves is read back into the form (`useAssistantDraft` in `new-project/use-assistant-draft.ts`,
+which `Configure` holds, so a save made with its panel closed is read too). The form stays editable while it
+works — Back and the step tabs too — and what the person types meanwhile is kept as the fields it touched
+(`new-project/kept-edits.ts`) and laid over every read-back, so a field they touched keeps their value and every
+other field takes the assistant's; once nothing of the assistant's is under way or waiting on an Allow those
+edits are saved once, at the draft's revision, and on a 409 over the draft read again with them laid over it.
+Deploy, Continue, Save only and Review's own check wait while it works and until its last save is read
 back, because the page's revision is behind the server's until then: the check used to save and preflight on its
 own the moment the assistant's save was read back, and every call of the assistant's after it was refused as a
 stale revision, and a check or a Deploy that went first was refused 409 and then saved the page's older plan over
 the assistant's. Review's check also waits while an answer waits on the person's Allow, since the waiting call
-holds the revision it read. The prompt says how a revision is carried from one call to
+holds the revision it read, and until the person's kept edits are saved, so it checks the plan with them. The prompt says how a revision is carried from one call to
 the next and what a planned variable is made of, and the draft routes' refusals name the current revision and
 the values a variable's fields take, so a call that was wrong is put right on the next step.
 

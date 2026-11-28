@@ -1618,9 +1618,14 @@ test("the page leaves the draft alone while the assistant saves it", async ({ pa
  * refuses it, and the assistant's own saves move it too. `log` is what reached it.
  */
 async function draftServer(page: Page) {
-  const state = { revision: 2, configuration: structuredClone(planned), log: [] as string[] }
+  const state = {
+    revision: 2,
+    name: "shop",
+    configuration: structuredClone(planned),
+    log: [] as string[],
+  }
   const current = () => {
-    const draft = setupDraft(state.revision, "shop")
+    const draft = setupDraft(state.revision, state.name)
     draft.data.configuration = structuredClone(state.configuration)
     return draft
   }
@@ -1646,7 +1651,8 @@ async function draftServer(page: Page) {
     }
     state.revision += 1
     if (body.configuration) state.configuration = structuredClone(body.configuration)
-    state.log.push("save")
+    if (body.intent?.name) state.name = body.intent.name
+    state.log.push(body.intent ? "save name" : "save")
     return json(route, current())
   })
   await page.route("**/api/v1/deploy/drafts/setup-draft/preflight", (route) => {
@@ -1854,6 +1860,41 @@ test("what it saves with its panel closed is read back, and Deploy keeps it", as
   await page.waitForTimeout(600)
   expect(state.log.slice(before)).not.toContain("save 409")
   expect(state.configuration.runtime.internalPort).toBe(9090)
+})
+
+test("what the person types while it saves is kept over its read-back, and saved after", async ({
+  page,
+}) => {
+  const { state, assistantSaves, turns, send, panel, before } = await onReviewWithHeldTurns(page)
+  await panel.getByRole("textbox", { name: "Ask the assistant" }).fill("Use 8080")
+  await panel.getByRole("button", { name: "Ask", exact: true }).click()
+  await expect.poll(turns).toBe(2)
+  // The form is not locked while it works: Back goes to the first step.
+  const back = page.getByRole("button", { name: "Back", exact: true })
+  await back.click()
+  await back.click()
+  await back.click()
+  const name = page.getByLabel("Project name")
+  await name.fill("shop-two")
+  // It saves another field, and the page reads its draft back.
+  assistantSaves(8080)
+  const read = readBack(page)
+  await send(1, [start, { type: "call", call: saveDraft }, savedDraft("s")])
+  await read
+  await page.waitForTimeout(300)
+  // The read-back took its port and left the person's name as they typed it.
+  await expect(name).toHaveValue("shop-two")
+  // Nothing of the page's is saved while it is still answering.
+  expect(state.log.slice(before)).toEqual(["assistant save"])
+
+  await send(1, [{ type: "text", text: "Now on 8080." }, done()], true)
+  await expect(panel).toContainText("Now on 8080.")
+  // Once it is done the person's edit is saved, once, over its save.
+  await expect.poll(() => state.name).toBe("shop-two")
+  await page.waitForTimeout(600)
+  expect(state.log.slice(before)).toEqual(["assistant save", "save name", "save"])
+  expect(state.configuration.runtime.internalPort).toBe(8080)
+  await expect(name).toHaveValue("shop-two")
 })
 
 test("handed over on Review, what the page holds is saved at the draft's revision", async ({
