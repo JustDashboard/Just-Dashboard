@@ -95,7 +95,20 @@ func (s *Service) DiffStat(ctx context.Context, path string) string {
 }
 
 func (s *Service) opEnv(ctx context.Context, path string, timeout time.Duration, extra map[string]string, args ...string) (*Result, error) {
-	out, err := s.executeEnv(ctx, path, timeout, "", extra, args...)
+	// As the checkout's account, never as root in a folder an account could
+	// have pointed elsewhere (accountRunner): the workspace is in its home.
+	run, _, err := accountRunner(path, path)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	cmd := stoppedWhole(run(ctx, args...))
+	for key, value := range extra {
+		cmd.Env = append(cmd.Env, key+"="+value)
+	}
+	out, err := cmd.CombinedOutput()
+	err = stillOK(err)
 	res := &Result{Command: "git " + strings.Join(args, " "), Output: strings.TrimSpace(string(out)), OK: err == nil}
 	if err != nil {
 		return res, fmt.Errorf("git %s: %s", args[0], res.Output)

@@ -406,8 +406,18 @@ says to follow the run a push starts and fix what it finds.
   where to name one (`JD_TERMINAL_USER`); a `jd-workspaces` folder that is not the account's (made earlier as
   root, or a link) is refused rather than handed over, and a folder in it that is not the account's is never
   taken for a workspace. A dashboard that does not run as root makes its workspaces as itself, under the first
-  Git root (`JD_GIT_ROOTS`, `/opt` by default) when there is no terminal account. A deployment built from a
-  folder on the server is worked on in that folder as its owner, like any checkout Local Git opens; #635 makes
+  Git root (`JD_GIT_ROOTS`, `/opt` by default) when there is no terminal account. The account owns its
+  workspaces and can swap one, or `jd-workspaces`, for a link at any moment, to a folder of root's that holds
+  a repository of its own (one in `/tmp`): so every git the workspace tools run (`gitx.ForAccounts`, and the
+  relay's checkout side, `accountRunner`) runs as root only in a folder of root's that no other account can
+  point elsewhere (every folder from `/` root's, no link, none writable by others without the sticky bit, and
+  the folder git runs in writable by root alone, since in a sticky one such as `/tmp` another account can make
+  a bare repository beside an empty `.git`: `rootsAllTheWay`), and is refused anywhere else; a clone's owner is fixed once, and a failed clone removes
+  only a folder of the account its git ran as, through the parent opened once (`removeMade`). A git that
+  reaches its deadline is stopped with everything it started (`stoppedWhole`: its own process group, killed
+  whole, and a five-second `WaitDelay`), so a remote that never answers holds neither the relay's lock nor the
+  workspace's past the call's deadline. A deployment
+  built from a folder on the server is worked on in that folder as its owner under the same rule; #635 makes
   no folder for it.
 - **The files.** `read_file`, `edit_file` and `write_file` go through `GET /files/read`, `PUT /files/write`
   (at the revision read, so a file changed since is refused, not overwritten) and `POST /files/mkdir`, as the
@@ -430,8 +440,11 @@ says to follow the run a push starts and fix what it finds.
   deploys the push on its own (its Git policy: automatic, not promotion-only, the branch it builds, its path
   filters) or needs a deploy started.
 - **The relay.** A credential of the dashboard's (the minted token, the deployment's saved one, which may be a
-  token wider than one repository) never reaches a git process of the checkout's account or one that reads the
-  checkout's configuration: whoever can write `.git/config` or the account's `~/.gitconfig` (the account,
+  token wider than one repository) never reaches a git or git-lfs process of the checkout's account or one that
+  reads the checkout's configuration, in what the assistant and the GitHub page's clone run (the Local Git
+  page's own fetch, pull and push of the same checkout carry none of the dashboard's: they use the account's
+  own credentials, and keep their per-command owner fallback, which runs as root in a folder that resolves to
+  one of root's; that is pre-existing): whoever can write `.git/config` or the account's `~/.gitconfig` (the account,
   anything it runs, a role that can write the folder through the Files page) could otherwise send the header
   through an `http.proxy` with `http.sslVerify` off or an `http.sslCAInfo` of theirs, rewrite the remote with
   `url.<base>.insteadOf`, run a hook or a file-system monitor beside it, or read `/proc/<pid>/environ` of a
@@ -451,7 +464,20 @@ says to follow the run a push starts and fix what it finds.
   or in the backend's trust store, as for deploys; a setting in the account's or the checkout's configuration
   is not read with a credential. A commit runs the checkout's hooks as usual; it carries no credential. The
   workspace's checkout is never the folder git runs in with a credential, and nothing of one is kept in the
-  checkout or told to the model. The GitHub page's clone of a private repository goes through the same
+  checkout or told to the model. Git LFS goes the same way (`relay_lfs.go`): git-lfs fetches and uploads with the credential only as the
+  dashboard, in the relay, its endpoint pinned to the remote's, beside `<remote>.git` as git-lfs finds it (`lfs.url` and
+  `lfs.pushurl` at command scope, which a repository's `.lfsconfig`, read from the relay's `HEAD`, cannot
+  override), and the objects cross as content alone. After a clone's checkout
+  (made with `GIT_LFS_SKIP_SMUDGE=1`) the relay fetches the checked-out commit's LFS files, the account's
+  `git lfs clean` stores each in its own `.git/lfs/objects` from a pipe, and the account sets git-lfs up for
+  that checkout (`git lfs install --local --skip-repo`, with `lfs.skipdownloaderrors`, since its git-lfs has
+  no credential: a branch whose LFS files it was never given checks out with those as pointers rather than
+  failing) and runs `git lfs checkout`, so the files are real and git reads them back as their pointers. A fetch brings the LFS files of every branch it moved into the
+  checkout's store the same way. A push asks git-lfs in the relay which objects the commits carry
+  (`git lfs pre-push --dry-run`), takes those the relay lacks from the account's `git lfs smudge` through a
+  pipe, keeps each only when its content hashes to its id, and uploads them before the commit
+  (`git lfs pre-push`). Without git-lfs on the server those files stay pointers, as they did when the
+  account's own git cloned without it, and the answer says so. The GitHub page's clone of a private repository goes through the same
   relays ([clone to server](../backend/github-page.md#clone-to-server)). A relay is the dashboard's own copy
   of a remote, kept between uses so a fetch or push sends only what is new; each open stamps it
   (`jd-last-used`), and one nothing opened for 30 days is removed at the next open of any relay
@@ -666,7 +692,13 @@ are the new deployment's.
   with the credential running in the relay and none in the checkout, never forced (`+main`, a push behind the
   remote refused with git's words), a tag's clone pushing to a named branch, HTTPS only, and a clone that
   fails or is killed leaving no folder, and a relay unused for 30 days swept, never one in use (an injected
-  clock). `api/handlers_githubrepos_clone_relay_test.go`: the GitHub page's private clone, whole and shallow,
+  clock). `gitx/relay_lfs_test.go`, against an LFS server in the test: a clone's LFS files real in the checkout, a
+  fetch's new object in its store, a pushed object on the server, every git and git-lfs with the token in the
+  relay, and pointers said so without git-lfs. `gitx/relay_root_test.go` (only as root, such as in a throwaway
+  container of the backend image; they skip elsewhere, CI included): a checkout swapped for a link never
+  running the account's hook or SSH command as root, a failed clone never removing what a link points at, the
+  account's checkout and LFS files owned by it. `gitx/relay_hang_test.go`: a fetch from a remote that never
+  answers ending at its deadline. `api/handlers_githubrepos_clone_relay_test.go`: the GitHub page's private clone, whole and shallow,
   with a proxy in the account's configuration that sees no token. `TestAWorkspaceIsNeverRoots`: a root
   dashboard refusing a workspace without a regular terminal account, and a workspaces folder not the account's. `deploy/source_workspace_test.go`: the deploy App's workspace
   credential read-only, and a planned variable's errors naming what it may be.

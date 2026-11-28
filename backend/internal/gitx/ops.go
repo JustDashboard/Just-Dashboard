@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -747,13 +748,13 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 	}
 	args := append([]string{plan.args[0], "--progress"}, plan.args[1:]...)
 	cmd := gitCommand(ctx, plan.Dir, extra, args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
+	if err := s.refuseRoot(cmd); err != nil {
 		return err
 	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
+	// The account the clone runs as, which is whose folder a failed one removes.
+	owner := uint32(os.Geteuid())
+	if cmd.SysProcAttr != nil && cmd.SysProcAttr.Credential != nil {
+		owner = cmd.SysProcAttr.Credential.Uid
 	}
 	var mu sync.Mutex
 	last := ""
@@ -767,25 +768,16 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 			line(stream, text)
 		}
 	}
-	if err := cmd.Start(); err != nil {
+	stoppedWhole(cmd)
+	started, err := streamOutput(cmd, emit)
+	if !started {
 		return fmt.Errorf("git could not be started: %w", err)
 	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
-		collapseProgress(stdout, time.Now, emit("stdout"))
-	}()
-	go func() {
-		defer wg.Done()
-		collapseProgress(stderr, time.Now, emit("stderr"))
-	}()
-	wg.Wait()
-	if err := cmd.Wait(); err != nil {
+	if err != nil {
 		// git removes what it made when it fails, but not when it is killed
 		// (the caller's deadline): a half-made checkout would read as one
 		// that is there.
-		removeMade(plan.Target, nil)
+		removeMade(plan.Dir, plan.Name, nil, owner)
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -795,6 +787,37 @@ func (s *Service) CloneStreaming(ctx context.Context, plan *ClonePlan, extra map
 		return fmt.Errorf("git clone failed: %w", err)
 	}
 	return nil
+}
+
+// streamOutput starts cmd and hands each line of its two streams to emit as
+// it comes, and answers whether it started and how it ended. The streams go
+// through writers exec copies to, not pipes read to their end before Wait, so
+// cmd's WaitDelay holds: a process that left git's group with the output open
+// (a hook's `setsid … &`) stops the reading WaitDelay after git ends, instead
+// of holding it, and past every deadline, until it exits. A git that
+// succeeded is a success even then.
+func streamOutput(cmd *exec.Cmd, emit func(stream string) func(string)) (bool, error) {
+	outR, outW := io.Pipe()
+	errR, errW := io.Pipe()
+	cmd.Stdout, cmd.Stderr = outW, errW
+	if err := cmd.Start(); err != nil {
+		return false, err
+	}
+	var wg sync.WaitGroup
+	wg.Add(2)
+	go func() {
+		defer wg.Done()
+		collapseProgress(outR, time.Now, emit("stdout"))
+	}()
+	go func() {
+		defer wg.Done()
+		collapseProgress(errR, time.Now, emit("stderr"))
+	}()
+	err := cmd.Wait()
+	_ = outW.Close()
+	_ = errW.Close()
+	wg.Wait()
+	return true, stillOK(err)
 }
 
 // collapseProgress reads git's output, splitting it at newlines and carriage

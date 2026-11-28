@@ -272,20 +272,87 @@ type gitRunner func(ctx context.Context, args ...string) *exec.Cmd
 // accountRunner runs git in dir as the account that owns ownerDir now, the
 // same account for every command it makes: a checkout swapped for a link
 // between two commands cannot move them to another account. It carries no
-// credential.
-func accountRunner(dir, ownerDir string) gitRunner {
+// credential, and answers the uid it runs as.
+//
+// A root dashboard runs it as root only in a folder of root's that no other
+// account can point elsewhere (rootsAllTheWay): a checkout in an account's home
+// that the account swapped for a link to a folder of root's (/tmp) after it was
+// resolved would otherwise be judged root's, and git as root would run what
+// the account's repository there names (a hook, core.hooksPath).
+func accountRunner(dir, ownerDir string) (gitRunner, uint32, error) {
 	probe := &exec.Cmd{Dir: ownerDir, Env: []string{}}
 	hostexec.AsOwner(probe)
+	uid := uint32(os.Geteuid())
+	var credential *syscall.Credential
+	if probe.SysProcAttr != nil && probe.SysProcAttr.Credential != nil {
+		held := *probe.SysProcAttr.Credential
+		credential, uid = &held, held.Uid
+	} else if uid == 0 && (!rootsAllTheWay(dir) || !rootsAllTheWay(ownerDir)) {
+		return nil, 0, fmt.Errorf("%s is not a folder of one account's: git does not run in it as root", dir)
+	}
 	return func(ctx context.Context, args ...string) *exec.Cmd {
 		cmd := exec.CommandContext(ctx, "git", args...)
 		cmd.Dir = dir
 		cmd.Env = append(gitEnvironment(nil, args...), probe.Env...)
-		if probe.SysProcAttr != nil && probe.SysProcAttr.Credential != nil {
-			credential := *probe.SysProcAttr.Credential
-			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &credential}
+		if credential != nil {
+			held := *credential
+			cmd.SysProcAttr = &syscall.SysProcAttr{Credential: &held}
 		}
 		return cmd
+	}, uid, nil
+}
+
+// rootsAllTheWay is whether every folder from / to path is root's, none is a
+// link, and none is one another account may rename entries in (writable by
+// group or others without the sticky bit): a path no other account can point
+// anywhere else. path itself is writable by root alone, sticky or not: in a
+// folder anyone may write in (/tmp), another account can make a bare
+// repository of its own beside an empty .git, and git as root takes the
+// folder for that repository.
+func rootsAllTheWay(path string) bool {
+	path = filepath.Clean(path)
+	if !filepath.IsAbs(path) {
+		return false
 	}
+	for at := path; ; at = filepath.Dir(at) {
+		info, err := os.Lstat(at)
+		if err != nil || !info.IsDir() {
+			return false
+		}
+		st, ok := info.Sys().(*syscall.Stat_t)
+		writable := info.Mode().Perm()&0o022 != 0
+		if !ok || st.Uid != 0 || (writable && (at == path || info.Mode()&os.ModeSticky == 0)) {
+			return false
+		}
+		if at == filepath.Dir(at) {
+			return true
+		}
+	}
+}
+
+// stoppedWhole makes cmd's cancellation stop git and every helper it started
+// (git-remote-https, fetch-pack, index-pack): those hold its output, and
+// killing git alone left Wait waiting on them for as long as the remote kept
+// them waiting, past every deadline, with the relay's lock and the checkout's
+// held. WaitDelay is the backstop for one that leaves the group.
+func stoppedWhole(cmd *exec.Cmd) *exec.Cmd {
+	if cmd.SysProcAttr == nil {
+		cmd.SysProcAttr = &syscall.SysProcAttr{}
+	}
+	cmd.SysProcAttr.Setpgid = true
+	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
+	cmd.WaitDelay = 5 * time.Second
+	return cmd
+}
+
+// stillOK is err, except that a git that exited 0 while something it started
+// (a hook's process in the background) kept its output open past WaitDelay is
+// a success: what git did is done, and only the reading was cut short.
+func stillOK(err error) error {
+	if errors.Is(err, exec.ErrWaitDelay) {
+		return nil
+	}
+	return err
 }
 
 // runGit runs one command and answers what it wrote to its output; a failure
@@ -293,13 +360,13 @@ func accountRunner(dir, ownerDir string) gitRunner {
 func runGit(ctx context.Context, run gitRunner, timeout time.Duration, input string, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := run(ctx, args...)
+	cmd := stoppedWhole(run(ctx, args...))
 	if input != "" {
 		cmd.Stdin = strings.NewReader(input)
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	if err := cmd.Run(); err != nil {
+	if err := stillOK(cmd.Run()); err != nil {
 		said := strings.TrimSpace(stderr.String() + "\n" + stdout.String())
 		if said == "" {
 			said = err.Error()
@@ -422,7 +489,7 @@ func pipePack(ctx context.Context, from, to gitRunner, want, exclude []string) e
 	for _, id := range exclude {
 		input.WriteString("^" + id + "\n")
 	}
-	pack, index := from(ctx, packArgs...), to(ctx, indexArgs...)
+	pack, index := stoppedWhole(from(ctx, packArgs...)), stoppedWhole(to(ctx, indexArgs...))
 	pack.Stdin = strings.NewReader(input.String())
 	reader, writer, err := os.Pipe()
 	if err != nil {
@@ -443,8 +510,8 @@ func pipePack(ctx context.Context, from, to gitRunner, want, exclude []string) e
 		return fmt.Errorf("git index-pack could not be started: %w", err)
 	}
 	_ = reader.Close()
-	indexErr := index.Wait()
-	packErr := pack.Wait()
+	indexErr := stillOK(index.Wait())
+	packErr := stillOK(pack.Wait())
 	switch {
 	case packErr != nil:
 		return fmt.Errorf("git pack-objects: %s", orErr(packSaid.String(), packErr))
@@ -481,7 +548,9 @@ func (r *Relay) fetch(ctx context.Context, extra map[string]string, depth int, r
 		args = append(args, "--quiet")
 	}
 	if len(refspecs) == 0 {
-		refspecs = []string{"+refs/heads/*:refs/heads/*", "+refs/tags/*:refs/tags/*"}
+		// The remote's branches twice: as the relay's own, and as origin's,
+		// which is where git-lfs looks for what the remote has.
+		refspecs = []string{"+refs/heads/*:refs/heads/*", "+refs/heads/*:refs/remotes/origin/*", "+refs/tags/*:refs/tags/*"}
 	}
 	args = append(append(args, r.Remote), refspecs...)
 	if line == nil {
@@ -496,15 +565,7 @@ func (r *Relay) fetch(ctx context.Context, extra map[string]string, depth int, r
 func runGitStreaming(ctx context.Context, run gitRunner, timeout time.Duration, line func(stream, text string), args ...string) error {
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
-	cmd := run(ctx, args...)
-	stdout, err := cmd.StdoutPipe()
-	if err != nil {
-		return err
-	}
-	stderr, err := cmd.StderrPipe()
-	if err != nil {
-		return err
-	}
+	cmd := stoppedWhole(run(ctx, args...))
 	var mu sync.Mutex
 	last := ""
 	emit := func(stream string) func(string) {
@@ -517,15 +578,11 @@ func runGitStreaming(ctx context.Context, run gitRunner, timeout time.Duration, 
 			line(stream, text)
 		}
 	}
-	if err := cmd.Start(); err != nil {
+	started, err := streamOutput(cmd, emit)
+	if !started {
 		return fmt.Errorf("git could not be started: %w", err)
 	}
-	var wg sync.WaitGroup
-	wg.Add(2)
-	go func() { defer wg.Done(); collapseProgress(stdout, time.Now, emit("stdout")) }()
-	go func() { defer wg.Done(); collapseProgress(stderr, time.Now, emit("stderr")) }()
-	wg.Wait()
-	if err := cmd.Wait(); err != nil {
+	if err != nil {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
@@ -628,6 +685,18 @@ type RelayCloneOptions struct {
 	Branch string
 	Depth  int
 	Line   func(stream, text string)
+	// Note is handed what the clone says beside git's output (its Git LFS
+	// files); Line is, when there is no Note.
+	Note func(text string)
+}
+
+func (o RelayCloneOptions) say(text string) {
+	switch {
+	case o.Note != nil:
+		o.Note(text)
+	case o.Line != nil:
+		o.Line("stdout", text)
+	}
 }
 
 // CloneThrough makes a checkout of the relay's remote at parent/name, as the
@@ -705,7 +774,10 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 	}
 	// The account makes the folder itself, in its own folder, as git clone
 	// would: the dashboard never makes a folder of the account's.
-	inParent := accountRunner(plan.Dir, plan.Dir)
+	inParent, owner, err := accountRunner(plan.Dir, plan.Dir)
+	if err != nil {
+		return "", err
+	}
 	initArgs := []string{"init", "-q"}
 	if kind == "" && branch != "" {
 		initArgs = append(initArgs, "--initial-branch="+branch)
@@ -720,10 +792,16 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 	done := false
 	defer func() {
 		if !done {
-			removeMade(plan.Target, made)
+			removeMade(plan.Dir, plan.Name, made, owner)
 		}
 	}()
-	checkout := accountRunner(plan.Target, plan.Dir)
+	checkout, ran, err := accountRunner(plan.Target, plan.Dir)
+	if err != nil {
+		return "", err
+	}
+	if ran != owner {
+		return "", fmt.Errorf("the checkout %s changed hands while it was made", plan.Target)
+	}
 	remoteArgs := []string{"remote", "add"}
 	if options.Depth > 0 && kind == "branch" {
 		remoteArgs = append(remoteArgs, "-t", branch)
@@ -735,24 +813,52 @@ func (s *Service) CloneThrough(ctx context.Context, r *Relay, parent, name strin
 		return "", err
 	}
 	if options.Depth > 0 {
-		if err := r.shallowInto(plan.Target, plan.Dir); err != nil {
+		if err := r.shallowInto(plan.Target, owner); err != nil {
 			return "", err
 		}
 	}
 	if defaultBranch != "" && refs["refs/heads/"+defaultBranch] != "" {
 		_, _ = runGit(ctx, checkout, time.Minute, "", "symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/"+defaultBranch)
 	}
+	// The checkout leaves LFS files as pointers: an account's own git-lfs has
+	// no credential to fetch them with. They come through the relay after.
+	plain := withEnv(checkout, "GIT_LFS_SKIP_SMUDGE=1")
+	rev := ""
 	switch kind {
 	case "branch":
-		if _, err := runGit(ctx, checkout, 5*time.Minute, "", "checkout", "-q", "-b", branch, "refs/remotes/origin/"+branch, "--"); err != nil {
+		if _, err := runGit(ctx, plain, 5*time.Minute, "", "checkout", "-q", "-b", branch, "refs/remotes/origin/"+branch, "--"); err != nil {
 			return "", err
 		}
 		if err := setUpstream(ctx, checkout, branch); err != nil {
 			return "", err
 		}
+		rev = "refs/heads/" + branch
 	case "tag":
-		if _, err := runGit(ctx, checkout, 5*time.Minute, "", "checkout", "-q", "--detach", "refs/tags/"+branch, "--"); err != nil {
+		if _, err := runGit(ctx, plain, 5*time.Minute, "", "checkout", "-q", "--detach", "refs/tags/"+branch, "--"); err != nil {
 			return "", err
+		}
+		rev = "refs/tags/" + branch
+	}
+	if rev != "" {
+		switch {
+		case !lfsInstalled():
+			if r.usesLFS(ctx, rev) {
+				options.say(lfsNotInstalled)
+			}
+		default:
+			given, unfetched, err := r.lfsIntoCheckout(ctx, checkout, plan.Target, extra, []string{rev})
+			if err == nil {
+				err = unfetched
+			}
+			if err != nil {
+				return "", fmt.Errorf("its Git LFS files could not be fetched: %w", err)
+			}
+			if given > 0 {
+				if err := lfsCheckout(ctx, checkout); err != nil {
+					return "", fmt.Errorf("its Git LFS files could not be checked out: %w", err)
+				}
+				options.say(plural(given, "Git LFS file was", "Git LFS files were") + " fetched through the relay and checked out.")
+			}
 		}
 	}
 	done = true
@@ -787,7 +893,7 @@ func (s *Service) onceRelay(ctx context.Context, r *Relay) (*Relay, func(), erro
 // as the marker is written: inside the checkout without following a link out
 // of it, made new (never one that was there), and handed to the folder's owner
 // through its descriptor.
-func (r *Relay) shallowInto(target, ownerDir string) error {
+func (r *Relay) shallowInto(target string, owner uint32) error {
 	raw, err := os.ReadFile(filepath.Join(r.Dir, "shallow"))
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -806,8 +912,11 @@ func (r *Relay) shallowInto(target, ownerDir string) error {
 		return err
 	}
 	defer root.Close()
-	if info, err := root.Lstat(".git"); err != nil || !info.IsDir() {
-		return fmt.Errorf("the checkout %s has no .git folder", target)
+	if info, err := root.Lstat(".git"); err != nil || !info.IsDir() || !ownedBy(info, owner) {
+		return fmt.Errorf("the checkout %s has no .git folder of its own", target)
+	}
+	if info, err := root.Stat("."); err != nil || !ownedBy(info, owner) {
+		return fmt.Errorf("the checkout %s is not the one this clone made", target)
 	}
 	file, err := root.OpenFile(filepath.Join(".git", "shallow"), os.O_WRONLY|os.O_CREATE|os.O_EXCL|syscall.O_NOFOLLOW|syscall.O_NONBLOCK, 0o644)
 	if err != nil {
@@ -817,21 +926,44 @@ func (r *Relay) shallowInto(target, ownerDir string) error {
 	if _, err := file.WriteString(strings.Join(lines, "\n") + "\n"); err != nil {
 		return err
 	}
-	if owner, ok := hostexec.OwnerOf(ownerDir); ok {
-		return file.Chown(int(owner.UID), int(owner.GID))
+	if os.Geteuid() == 0 && owner != 0 {
+		if info, err := root.Stat("."); err == nil {
+			if st, ok := info.Sys().(*syscall.Stat_t); ok {
+				return file.Chown(int(owner), int(st.Gid))
+			}
+		}
 	}
 	return nil
 }
 
-// removeMade removes a checkout a clone made and could not finish, and only
-// that one: a folder at its place that is not the one made (made, when known)
-// is left. os.RemoveAll opens nothing through a link.
-func removeMade(target string, made os.FileInfo) {
-	now, err := os.Lstat(target)
+// ownedBy is whether info is uid's.
+func ownedBy(info os.FileInfo, uid uint32) bool {
+	st, ok := info.Sys().(*syscall.Stat_t)
+	return ok && st.Uid == uid
+}
+
+// removeMade removes the checkout name in parent that a clone made and could
+// not finish, and only that one: a folder at its place that is not the one
+// made (made, when known), or not of owner's, the account the clone's git ran
+// as, is left. parent is opened once and everything after is done through it,
+// without following a link, so a parent swapped for a link (an account's own
+// folder, in its home) cannot point a removal by root at a folder of root's or
+// of another account's; one of root's is removed only where no other account
+// could have pointed it (rootsAllTheWay).
+func removeMade(parent, name string, made os.FileInfo, owner uint32) {
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		return
+	}
+	defer root.Close()
+	now, err := root.Lstat(name)
 	if err != nil || !now.IsDir() || (made != nil && !os.SameFile(made, now)) {
 		return
 	}
-	_ = os.RemoveAll(target)
+	if os.Geteuid() == 0 && (!ownedBy(now, owner) || (owner == 0 && !rootsAllTheWay(parent))) {
+		return
+	}
+	_ = root.RemoveAll(name)
 }
 
 // setUpstream makes branch track origin's branch of its name, as push
@@ -848,6 +980,7 @@ func setUpstream(ctx context.Context, checkout gitRunner, branch string) error {
 // the relay fetches with extra, and the checkout's account takes its objects
 // and refs from the relay.
 func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra map[string]string) (*Result, error) {
+	s = s.ForAccounts()
 	unlock := s.Lock(r.Dir)
 	defer unlock()
 	if err := r.Fetch(ctx, extra); err != nil {
@@ -857,10 +990,62 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 	if err != nil {
 		return nil, err
 	}
-	if err := r.intoCheckout(ctx, accountRunner(path, path), refs); err != nil {
+	checkout, _, err := accountRunner(path, path)
+	if err != nil {
 		return nil, err
 	}
-	return &Result{Command: "git fetch --prune origin", Output: "Done.", OK: true}, nil
+	// What the checkout had of origin before this fetch, not what the relay
+	// had: the relay is every checkout's of this remote (another workspace,
+	// the GitHub page's clone, a push's own fetch), and a branch it moved for
+	// one of them is still new to this one.
+	tracked, err := refsOf(ctx, checkout, "refs/remotes/origin")
+	if err != nil {
+		return nil, err
+	}
+	if err := r.intoCheckout(ctx, checkout, refs); err != nil {
+		return nil, err
+	}
+	res := &Result{Command: "git fetch --prune origin", Output: "Done.", OK: true}
+	// The LFS files of each branch the fetch moved, so a checkout or merge of
+	// one finds them in the checkout without a credential.
+	var moved []string
+	for ref, id := range refs {
+		if branch, ok := strings.CutPrefix(ref, "refs/heads/"); ok && tracked["refs/remotes/origin/"+branch] != id {
+			moved = append(moved, ref)
+		}
+	}
+	sort.Strings(moved)
+	switch {
+	case len(moved) == 0:
+	case !lfsInstalled():
+		for _, ref := range moved {
+			if r.usesLFS(ctx, ref) {
+				res.Output = lfsNotInstalled
+				break
+			}
+		}
+	default:
+		// The fetch itself is done: an LFS object the server no longer has, on
+		// any branch it moved, is said, not a failure of the fetch.
+		given, unfetched, err := r.lfsIntoCheckout(ctx, checkout, path, extra, moved)
+		if err != nil {
+			return nil, fmt.Errorf("the fetch's Git LFS files could not be fetched: %w", err)
+		}
+		said := []string{}
+		if given > 0 {
+			if lfsConfigured(ctx, checkout) {
+				_, _ = runGit(ctx, checkout, 10*time.Minute, "", "lfs", "checkout")
+			}
+			said = append(said, plural(given, "Git LFS file was", "Git LFS files were")+" fetched through the relay.")
+		}
+		if unfetched != nil {
+			said = append(said, "Some of its Git LFS files could not be fetched: "+strings.TrimPrefix(unfetched.Error(), "git lfs: "))
+		}
+		if len(said) > 0 {
+			res.Output = strings.Join(said, "\n")
+		}
+	}
+	return res, nil
 }
 
 // PushThrough pushes the checkout at path through the relay, as PushOrigin
@@ -870,9 +1055,13 @@ func (s *Service) FetchThrough(ctx context.Context, r *Relay, path string, extra
 // forces: the refspec is the commit and a whole branch name, so a push the
 // remote refuses because it moved is answered with git's own words.
 func (s *Service) PushThrough(ctx context.Context, r *Relay, path, branch string, extra map[string]string) (*Result, error) {
+	s = s.ForAccounts()
 	unlock := s.Lock(r.Dir)
 	defer unlock()
-	checkout := accountRunner(path, path)
+	checkout, _, err := accountRunner(path, path)
+	if err != nil {
+		return nil, err
+	}
 	current, err := s.CurrentBranch(ctx, path)
 	if err != nil && branch == "" {
 		return nil, err
@@ -896,11 +1085,22 @@ func (s *Service) PushThrough(ctx context.Context, r *Relay, path, branch string
 	if err := transfer(ctx, checkout, r.runner(nil), []string{head}); err != nil {
 		return nil, err
 	}
+	// The LFS objects the commit carries go first, as git-lfs's pre-push hook
+	// sends them, so the remote never holds a pointer it has no object for.
+	uploaded := 0
+	if lfsInstalled() {
+		if uploaded, err = r.lfsUploaded(ctx, checkout, path, head, target, extra); err != nil {
+			return nil, fmt.Errorf("its Git LFS objects could not be uploaded, so nothing was pushed: %w", err)
+		}
+	}
 	refspec := head + ":refs/heads/" + target
 	args := []string{"push", "--porcelain", r.Remote, refspec}
 	res := &Result{Command: "git push --porcelain origin HEAD:refs/heads/" + target}
 	output, err := runGit(ctx, r.runner(extra), 3*time.Minute, "", args...)
 	res.Output = strings.TrimSpace(output)
+	if uploaded > 0 {
+		res.Output = strings.TrimSpace(res.Output + "\n" + plural(uploaded, "Git LFS object was", "Git LFS objects were") + " uploaded through the relay.")
+	}
 	if err != nil {
 		res.Output = strings.TrimPrefix(err.Error(), "git push: ")
 		return res, err

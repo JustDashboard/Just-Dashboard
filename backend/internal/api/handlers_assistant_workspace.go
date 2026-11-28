@@ -95,7 +95,7 @@ func (pr *agentPress) openWorkspace(ctx context.Context, p *httpx.Principal, in 
 	ws := &agentWorkspace{source: source, summary: summary}
 	var opened string
 	if source.LocalPath != "" {
-		folder, err := s.modules.git.Resolve(source.LocalPath)
+		folder, err := s.workspaceGit().Resolve(source.LocalPath)
 		if err != nil {
 			return refuse(fmt.Sprintf("The deployment builds from %s, which Local Git cannot open: %s", source.LocalPath, agentMaskText(err.Error(), masker)))
 		}
@@ -138,28 +138,32 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 	for _, name := range workspaceNames(ws.summary) {
 		target := filepath.Join(parent, name)
 		if _, err := os.Lstat(target); err == nil {
-			folder, err := s.modules.git.Resolve(target)
+			folder, err := s.workspaceGit().Resolve(target)
 			// Another repository, or this one opened for another deployment
 			// whose name reads the same: each keeps its own.
 			// A folder that is not the workspaces folder's account's is not
 			// one of its workspaces: git there would run as someone else.
-			if err != nil || !sameOwner(folder, parent) || !sameRemote(s.modules.git.OriginURL(ctx, folder), source.Remote) || !workspaceMarkedFor(folder, ws.summary) {
+			if err != nil || !sameOwner(folder, parent) || !sameRemote(s.workspaceGit().OriginURL(ctx, folder), source.Remote) || !workspaceMarkedFor(folder, ws.summary) {
 				continue
 			}
-			unlock := s.modules.git.Lock(folder)
+			unlock := s.workspaceGit().Lock(folder)
 			defer unlock()
+			fetched := ""
 			if relay != nil {
-				_, err = s.modules.git.FetchThrough(ctx, relay, folder, env)
+				var res *gitx.Result
+				if res, err = s.workspaceGit().FetchThrough(ctx, relay, folder, env); err == nil && res.Output != "Done." {
+					fetched = " " + res.Output
+				}
 			} else {
-				_, err = s.modules.git.FetchOrigin(ctx, folder)
+				_, err = s.workspaceGit().FetchOrigin(ctx, folder)
 			}
 			if err != nil {
 				return "", "", fmt.Errorf("The workspace %s is there, but fetching it failed: %v", folder, err)
 			}
-			said := "The workspace was already there; it was fetched again, and what was changed in it is kept."
+			said := "The workspace was already there; it was fetched again, and what was changed in it is kept." + fetched
 			if branch != "" {
-				if current, _ := s.modules.git.CurrentBranch(ctx, folder); current != branch {
-					if _, err := s.modules.git.Checkout(ctx, folder, branch); err != nil {
+				if current, _ := s.workspaceGit().CurrentBranch(ctx, folder); current != branch {
+					if _, err := s.workspaceGit().Checkout(ctx, folder, branch); err != nil {
 						said += fmt.Sprintf(" It stays on %s: checking out %s failed (%v).", current, branch, err)
 					}
 				}
@@ -167,18 +171,20 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 			return folder, said, nil
 		}
 		if relay != nil {
-			folder, err := s.modules.git.CloneThrough(ctx, relay, parent, name, gitx.RelayCloneOptions{Branch: branch}, env)
+			said := "The repository was cloned into a new workspace."
+			options := gitx.RelayCloneOptions{Branch: branch, Note: func(text string) { said += " " + text }}
+			folder, err := s.workspaceGit().CloneThrough(ctx, relay, parent, name, options, env)
 			if err != nil {
 				return "", "", fmt.Errorf("Cloning %s failed: %v", source.Remote, err)
 			}
-			return folder, "The repository was cloned into a new workspace.", nil
+			return folder, said, nil
 		}
-		plan, err := s.modules.git.PrepareClone(parent, source.Remote, name, gitx.CloneOptions{Branch: branch})
+		plan, err := s.workspaceGit().PrepareClone(parent, source.Remote, name, gitx.CloneOptions{Branch: branch})
 		if err != nil {
 			return "", "", fmt.Errorf("The workspace could not be made: %v", err)
 		}
 		var last string
-		if err := s.modules.git.CloneStreaming(ctx, plan, nil, func(stream, text string) {
+		if err := s.workspaceGit().CloneStreaming(ctx, plan, nil, func(stream, text string) {
 			if strings.TrimSpace(text) != "" {
 				last = strings.TrimSpace(text)
 			}
@@ -200,9 +206,15 @@ func (pr *agentPress) cloneWorkspace(ctx context.Context, p *httpx.Principal, ws
 // they read.
 const gitRelayFolder = "workspace-git"
 
+// workspaceGit is Local Git's service as the workspaces use it: never git as
+// root in a folder an account could have pointed elsewhere (gitx.ForAccounts),
+// since a workspace is in the terminal account's home, which that account can
+// swap for a link at any moment.
+func (s *Server) workspaceGit() *gitx.Service { return s.modules.git.ForAccounts() }
+
 // workspaceRelay is the dashboard's relay for remote.
 func (s *Server) workspaceRelay(ctx context.Context, remote string) (*gitx.Relay, error) {
-	return s.modules.git.OpenRelay(ctx, filepath.Join(s.Cfg.DataDir, gitRelayFolder), remote)
+	return s.workspaceGit().OpenRelay(ctx, filepath.Join(s.Cfg.DataDir, gitRelayFolder), remote)
 }
 
 // workspaceParent is the folder that holds the workspaces: in the terminal
@@ -227,7 +239,7 @@ func (s *Server) workspaceParent() (string, error) {
 		}
 	}
 	if home == "" {
-		roots := s.modules.git.Roots()
+		roots := s.workspaceGit().Roots()
 		if len(roots) == 0 {
 			return "", errors.New("Local Git has no folder to work in (JD_GIT_ROOTS)")
 		}
@@ -253,7 +265,7 @@ func (s *Server) workspaceParent() (string, error) {
 			return "", err
 		}
 	}
-	dir, err := s.modules.git.ResolveDir(parent)
+	dir, err := s.workspaceGit().ResolveDir(parent)
 	if err != nil {
 		return "", fmt.Errorf("%s is outside the folders Local Git works in (JD_GIT_ROOTS), so no workspace can be made there", parent)
 	}
@@ -425,7 +437,7 @@ func (s *Server) workspaceOf(ctx context.Context, p *httpx.Principal, folder str
 	}
 	if ws.summary != nil && s.modules.deployChecker != nil {
 		if source, err := s.modules.deployChecker.WorkspaceSource(ctx, ws.summary.ID, ws.summary.EnvironmentID); err == nil {
-			origin := s.modules.git.OriginURL(ctx, folder)
+			origin := s.workspaceGit().OriginURL(ctx, folder)
 			if (source.LocalPath != "" && filepath.Clean(source.LocalPath) == folder) || sameRemote(origin, source.Remote) {
 				ws.source = source
 			}
@@ -450,7 +462,7 @@ func (s *Server) describeWorkspace(ctx context.Context, p *httpx.Principal, ws *
 	if ws.source.Subdirectory != "" {
 		fmt.Fprintf(&b, "It builds the folder %s inside it.\n", filepath.Join(ws.folder, ws.source.Subdirectory))
 	}
-	if status, err := s.modules.git.Status(ctx, ws.folder); err == nil && status.Repo != nil {
+	if status, err := s.workspaceGit().Status(ctx, ws.folder); err == nil && status.Repo != nil {
 		repo := status.Repo
 		fmt.Fprintf(&b, "Checked out: %s at %s", repo.Branch, shortCommit(repo.Head))
 		if repo.Subject != "" {
@@ -502,16 +514,16 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	if err != nil {
 		return refuse("The secret values to mask could not be read, so nothing was pushed.")
 	}
-	folder, err := s.modules.git.Resolve(in.Folder)
+	folder, err := s.workspaceGit().Resolve(in.Folder)
 	if err != nil {
 		return refuse(fmt.Sprintf("%s is not a checkout Local Git can work on: %s", in.Folder, agentMaskText(err.Error(), masker)))
 	}
 	// One mutation of a checkout at a time, as Local Git's own routes take it
 	// (gitActionAt): the page's stage or commit cannot land between this stage,
 	// commit and push.
-	unlock := s.modules.git.Lock(folder)
+	unlock := s.workspaceGit().Lock(folder)
 	defer unlock()
-	status, err := s.modules.git.Status(ctx, folder)
+	status, err := s.workspaceGit().Status(ctx, folder)
 	if err != nil {
 		return refuse("Its state could not be read: " + agentMaskText(err.Error(), masker))
 	}
@@ -520,14 +532,14 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 	}
 	branch := in.Branch
 	if branch == "" {
-		if branch, err = s.modules.git.CurrentBranch(ctx, folder); err != nil {
+		if branch, err = s.workspaceGit().CurrentBranch(ctx, folder); err != nil {
 			return refuse(fmt.Sprintf("%s is on no branch (its deployment builds a tag or a commit), so it has nowhere to push as it is: name branch to push it to, a new one if need be.", folder))
 		}
 	}
 	ws := s.workspaceOf(ctx, p, folder, pr.scope)
 	source := ws.source
 	if source == nil {
-		source = &deploy.WorkspaceSource{Remote: s.modules.git.OriginURL(ctx, folder)}
+		source = &deploy.WorkspaceSource{Remote: s.workspaceGit().OriginURL(ctx, folder)}
 	}
 	auth := s.pushAuthFor(ctx, p, source)
 	var b strings.Builder
@@ -535,15 +547,15 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 		if strings.TrimSpace(in.Message) == "" {
 			return refuse("Something is changed in it, and a commit needs a message: say what changed and why in message.")
 		}
-		if _, err := s.modules.git.Stage(ctx, folder, nil); err != nil {
+		if _, err := s.workspaceGit().Stage(ctx, folder, nil); err != nil {
 			return refuse("Staging the changes failed: " + agentMaskText(err.Error(), masker))
 		}
-		stat := s.modules.git.DiffStat(ctx, folder)
+		stat := s.workspaceGit().DiffStat(ctx, folder)
 		name, email := s.commitIdentity(ctx, p, auth)
-		if _, err := s.modules.git.CommitAs(ctx, folder, in.Message, name, email); err != nil {
+		if _, err := s.workspaceGit().CommitAs(ctx, folder, in.Message, name, email); err != nil {
 			return refuse("Committing failed: " + agentMaskText(err.Error(), masker))
 		}
-		head, _ := s.modules.git.HeadCommit(ctx, folder)
+		head, _ := s.workspaceGit().HeadCommit(ctx, folder)
 		fmt.Fprintf(&b, "Committed %s", shortCommit(head))
 		if stat != "" {
 			fmt.Fprintf(&b, " (%s)", stat)
@@ -562,10 +574,10 @@ func (pr *agentPress) pushChanges(ctx context.Context, p *httpx.Principal, in as
 		// never in the checkout or as its account.
 		var relay *gitx.Relay
 		if relay, err = s.workspaceRelay(ctx, auth.remote); err == nil {
-			result, err = s.modules.git.PushThrough(ctx, relay, folder, in.Branch, env)
+			result, err = s.workspaceGit().PushThrough(ctx, relay, folder, in.Branch, env)
 		}
 	} else {
-		result, err = s.modules.git.PushOrigin(ctx, folder, in.Branch)
+		result, err = s.workspaceGit().PushOrigin(ctx, folder, in.Branch)
 	}
 	revoke()
 	if err != nil {
